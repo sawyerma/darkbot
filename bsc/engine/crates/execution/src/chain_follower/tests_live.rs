@@ -42,16 +42,23 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     let (mut blocks, mut reorgs, mut gaps) = (0usize, Vec::new(), Vec::new());
     let mut launches = Vec::new();
     let mut faults = Vec::new();
+    // Wall clock when first held minus the block's millisecond timestamp.
+    let mut lags_ms: Vec<i64> = Vec::new();
     let started = Instant::now();
     let mut sink = |event: CanonicalEvent| match event {
         CanonicalEvent::Block {
             number,
             hash,
             parent_hash,
+            timestamp_s,
+            timestamp_ms,
             observed,
-            ..
+            observed_unix_ms,
         } => {
             assert!(observed >= started);
+            assert_eq!(timestamp_ms / 1000, timestamp_s);
+            let held = observed_unix_ms.expect("the wall clock is readable");
+            lags_ms.push(i64::try_from(held).unwrap() - i64::try_from(timestamp_ms).unwrap());
             if let Some(prev) = last {
                 assert_eq!(number, prev + 1, "blocks follow in order");
             }
@@ -97,6 +104,14 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     let stop_at = timer.join().unwrap();
 
     let (first, last_block) = (chain.keys().next().copied(), chain.keys().last().copied());
+    lags_ms.sort_unstable();
+    println!(
+        "lag observed_unix_ms - timestamp_ms over {} blocks: min={:?} p50={:?} max={:?} ms",
+        lags_ms.len(),
+        lags_ms.first(),
+        lags_ms.get(lags_ms.len() / 2),
+        lags_ms.last()
+    );
     println!(
         "live {:?}: blocks={blocks} linked={linked} first={first:?} last={last_block:?} \
          reorgs={reorgs:?} gaps={gaps:?} faults={} {faults:?} launches={}",
@@ -106,12 +121,15 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     );
     for launch in &launches {
         println!(
-            "  {:?} block {} tx {} token {:?} buys {:?}",
+            "  {:?} block {} tx {} token {:?} buys {:?} sender {} nonce {} c1 {}",
             launch.venue,
             launch.block_number,
             launch.tx_index,
             launch.token.map(alloy_primitives::hex::encode),
-            launch.external_buys_after
+            launch.external_buys_after,
+            alloy_primitives::hex::encode(launch.sender),
+            launch.nonce,
+            launch.c1_scope
         );
     }
     assert!(blocks >= 10, "followed only {blocks} blocks");

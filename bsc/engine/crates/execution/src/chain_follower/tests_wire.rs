@@ -198,6 +198,13 @@ fn request_bodies_are_fixed_templates() {
         request(9, Call::Receipts(0)),
         r#"{"jsonrpc":"2.0","id":9,"method":"eth_getBlockReceipts","params":["0x0"]}"#
     );
+    let mut hash = [0u8; 32];
+    hash[0] = 0xab;
+    hash[31] = 0x01;
+    assert_eq!(
+        request(10, Call::Transaction(hash)),
+        r#"{"jsonrpc":"2.0","id":10,"method":"eth_getTransactionByHash","params":["0xab00000000000000000000000000000000000000000000000000000000000001"]}"#
+    );
 }
 
 #[test]
@@ -269,10 +276,12 @@ fn envelope_id_and_errors() {
 
 const HASH_A: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const HASH_B: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
+/// A `mixHash` of 200 (ms).
+const MIX_200: &str = "0x00000000000000000000000000000000000000000000000000000000000000c8";
 
 fn header_body(number: &str, transactions: &str) -> String {
     format!(
-        r#"{{"jsonrpc":"2.0","id":1,"result":{{"number":"{number}","hash":"{HASH_A}","parentHash":"{HASH_B}","timestamp":"0x6ade7af4","transactions":{transactions}}}}}"#
+        r#"{{"jsonrpc":"2.0","id":1,"result":{{"number":"{number}","hash":"{HASH_A}","parentHash":"{HASH_B}","timestamp":"0x6ade7af4","mixHash":"{MIX_200}","transactions":{transactions}}}}}"#
     )
 }
 
@@ -289,9 +298,10 @@ fn header_shapes() {
         (
             good.header.number,
             good.header.timestamp_s,
+            good.header.block_ms,
             good.transactions.len()
         ),
-        (5, 0x6ade_7af4, 1)
+        (5, 0x6ade_7af4, 0x6ade_7af4 * 1000 + 200, 1)
     );
     assert_eq!(
         parse_header(br#"{"jsonrpc":"2.0","id":1,"result":null}"#, 1, 5),
@@ -310,6 +320,40 @@ fn header_shapes() {
     assert_eq!(
         parse_header(short_hash.as_bytes(), 1, 5),
         Err(RequestError::Shape(Field::Hash))
+    );
+}
+
+/// bsc-geth v1.7.8 `Header.MilliTimestamp()`: a zero `mixHash` adds 0,
+/// otherwise its 256-bit value, which must stay below 1000.
+#[test]
+fn mix_hash_milliseconds() {
+    let with_mix = |mix: &str| header_body("0x5", "[]").replace(MIX_200, mix);
+    let ms = |mix: &str| {
+        parse_header(with_mix(mix).as_bytes(), 1, 5)
+            .map(|b| b.unwrap().header.block_ms - 0x6ade_7af4 * 1000)
+    };
+    let word = |tail: &str| format!("0x{tail:0>64}");
+    assert_eq!(ms(&word("0")), Ok(0));
+    assert_eq!(ms(&word("1")), Ok(1));
+    assert_eq!(ms(&word("3e7")), Ok(999));
+    for bad in [
+        word("3e8"),
+        word("ffff"),
+        format!("0x01{}", "0".repeat(62)),
+        "0xc8".to_owned(),
+        word("3E7"),
+    ] {
+        assert_eq!(ms(&bad), Err(RequestError::Shape(Field::MixHash)), "{bad}");
+    }
+    let missing = header_body("0x5", "[]").replace(&format!(r#""mixHash":"{MIX_200}","#), "");
+    assert_eq!(
+        parse_header(missing.as_bytes(), 1, 5),
+        Err(RequestError::Shape(Field::MixHash))
+    );
+    let overflow = with_mix(&word("1")).replace("0x6ade7af4", "0xffffffffffffffff");
+    assert_eq!(
+        parse_header(overflow.as_bytes(), 1, 5),
+        Err(RequestError::Shape(Field::Timestamp))
     );
 }
 

@@ -54,7 +54,7 @@ export function MonitoringPanel() {
       <Line label="Canonical follower" value={<ValueState state={sources.runtime.canonical?.state ?? "NOT_CONFIGURED"} />}
         hint={sources.runtime.canonical ? `head ${sources.runtime.canonical.head} · age ${sources.runtime.canonical.headAgeMs} ms · ${sources.runtime.canonical.chain}` : "No canonical endpoint in the runtime configuration: no G0.4 denominator"} />
       {sources.runtime.canonical && <Line label="Canonical launches (G0.4 denominator)" value={sources.runtime.canonical.launches} hint="Orphaned launches are taken out; Four token fields only where the event layout is proven" />}
-      {sources.runtime.canonical && <Line label="Pending sighting vs. block (Flap)" value={sources.runtime.canonical.join} hint="Local monotonic time of the first verified sighting vs. the follower's first header; no evaluation before the G0.4 criteria are confirmed" />}
+      {sources.runtime.canonical && <Line label="Pending sighting vs. block time (Flap)" value={sources.runtime.canonical.join} hint="First verified sighting (local wall-clock estimate) vs. the block's own ms time; header fetch lag bounds the clock offset; no evaluation before the G0.4 criteria are confirmed" />}
     </PlacedSection>
     <PlacedSection panel="monitoring" section={7} records={records}>
       <Line label="Producer witness source ready" value={s?.witness?.sourceReady === undefined ? "UNKNOWN" : String(s.witness.sourceReady)} />

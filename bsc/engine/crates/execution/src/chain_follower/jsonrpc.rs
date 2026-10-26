@@ -9,7 +9,7 @@
 use serde_json::{Map, Value};
 
 use super::{Call, Field, RequestError};
-use crate::wss::RateLimitSignal;
+use crate::wss::{BSC_MAINNET_CHAIN_ID, RateLimitSignal, VerifiedTx, verify_tx_map};
 
 /// The JSON-RPC error codes that mean rate limiting: EIP-1474 "limit
 /// exceeded" and the HTTP status some providers reuse (the codes of the
@@ -19,6 +19,10 @@ const RATE_LIMIT_CODES: [i64; 2] = [-32005, 429];
 /// Most topics of one log (`LOG4`).
 const MAX_TOPICS: usize = 4;
 
+/// Milliseconds per second: `timestamp_ms = timestamp * 1000 + ms`, and the
+/// millisecond part of a verified BSC header is below it.
+const MS_PER_S: u64 = 1000;
+
 /// A block header as the follower keeps it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Header {
@@ -26,6 +30,8 @@ pub(super) struct Header {
     pub(super) hash: [u8; 32],
     pub(super) parent_hash: [u8; 32],
     pub(super) timestamp_s: u64,
+    /// bsc-geth `Header.MilliTimestamp()`.
+    pub(super) block_ms: u64,
 }
 
 /// `eth_getBlockByNumber(n, false)`: the header and the block's
@@ -57,6 +63,16 @@ pub(super) struct Log {
     pub(super) log_index: u64,
 }
 
+/// Where a launch transaction must be: its receipt's hash, block and
+/// index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TxPlace {
+    pub(super) hash: [u8; 32],
+    pub(super) block_hash: [u8; 32],
+    pub(super) block_number: u64,
+    pub(super) tx_index: u64,
+}
+
 /// The request body of `call` with `id`.
 pub(super) fn request(id: u64, call: Call) -> String {
     match call {
@@ -69,6 +85,12 @@ pub(super) fn request(id: u64, call: Call) -> String {
         Call::Receipts(n) => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockReceipts","params":["0x{n:x}"]}}"#
         ),
+        Call::Transaction(hash) => {
+            let hash = alloy_primitives::hex::encode_prefixed(hash);
+            format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionByHash","params":["{hash}"]}}"#
+            )
+        }
     }
 }
 
@@ -91,11 +113,18 @@ pub(super) fn parse_header(
         Value::Object(block) => block,
         _ => return Err(RequestError::Shape(Field::Result)),
     };
+    let timestamp_s = quantity(&block, "timestamp", Field::Timestamp)?;
+    let ms = mix_hash_ms(fixed(&block, "mixHash", Field::MixHash)?)
+        .ok_or(RequestError::Shape(Field::MixHash))?;
     let header = Header {
         number: quantity(&block, "number", Field::Number)?,
         hash: fixed(&block, "hash", Field::Hash)?,
         parent_hash: fixed(&block, "parentHash", Field::ParentHash)?,
-        timestamp_s: quantity(&block, "timestamp", Field::Timestamp)?,
+        timestamp_s,
+        block_ms: timestamp_s
+            .checked_mul(MS_PER_S)
+            .and_then(|t| t.checked_add(ms))
+            .ok_or(RequestError::Shape(Field::Timestamp))?,
     };
     if header.number != number {
         return Err(RequestError::Shape(Field::Number));
@@ -112,6 +141,55 @@ pub(super) fn parse_header(
         header,
         transactions,
     }))
+}
+
+/// The millisecond part of a BSC header, as bsc-geth v1.7.8
+/// `Header.MilliTimestamp()` reads it: 0 for a zero `mixHash`, otherwise the
+/// 256-bit big-endian value, which a verified header keeps below 1000.
+/// `None` for 1000 or more.
+fn mix_hash_ms(mix_hash: [u8; 32]) -> Option<u64> {
+    let (high, low) = mix_hash.split_at(30);
+    if high.iter().any(|b| *b != 0) {
+        return None;
+    }
+    let ms = u64::from(u16::from_be_bytes([low[0], low[1]]));
+    (ms < MS_PER_S).then_some(ms)
+}
+
+/// The answer to `eth_getTransactionByHash` for the launch at `place`:
+/// bound to its receipt (hash, block hash and number, index) and verified
+/// by the WSS source's verifier for BSC Mainnet. `None` for `null`.
+pub(super) fn parse_transaction(
+    body: &[u8],
+    id: u64,
+    place: &TxPlace,
+) -> Result<Option<VerifiedTx>, RequestError> {
+    let tx = match envelope(body, id)? {
+        Value::Null => return Ok(None),
+        Value::Object(tx) => tx,
+        _ => return Err(RequestError::Shape(Field::Result)),
+    };
+    // A backend that has not seen the block yet answers the transaction as
+    // pending (`blockHash` null): not there yet, retried like `null`.
+    if tx.get("blockHash") == Some(&Value::Null) {
+        return Ok(None);
+    }
+    let found = TxPlace {
+        hash: fixed(&tx, "hash", Field::TxBinding)?,
+        block_hash: fixed(&tx, "blockHash", Field::TxBinding)?,
+        block_number: quantity(&tx, "blockNumber", Field::TxBinding)?,
+        tx_index: quantity(&tx, "transactionIndex", Field::TxBinding)?,
+    };
+    if found != *place {
+        return Err(RequestError::Shape(Field::TxBinding));
+    }
+    let verified = verify_tx_map(&tx, BSC_MAINNET_CHAIN_ID).map_err(RequestError::Unverifiable)?;
+    // The verifier proved Keccak-256 of the signed bytes is the object's
+    // hash, which is the receipt's.
+    if verified.hash != place.hash {
+        return Err(RequestError::Shape(Field::TxBinding));
+    }
+    Ok(Some(verified))
 }
 
 /// The answer to `eth_getBlockReceipts`; `None` for `null`.

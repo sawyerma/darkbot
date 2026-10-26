@@ -2,32 +2,44 @@
 //! sources delivered before it (the [`IngressCore`](crate::ingress::IngressCore)
 //! sightings): the G0.4 denominator and its visibility classes.
 //!
-//! Both times are readings of the runtime's one monotonic clock: the first
-//! sighting of the launch transaction, and the moment the follower first had
-//! the block's header. No wall-clock time is subtracted from them.
+//! "Before the block" means before the block's own time: the header's
+//! millisecond timestamp (`Header.MilliTimestamp()` of bsc-geth, the
+//! validator's wall clock). A sighting's time is the runtime's wall-clock
+//! estimate of the moment it was ingested (a monotonic reading mapped through
+//! a monotonic/wall pair refreshed at least once per runtime pass). The two
+//! are different clocks: the comparison carries the local clock's offset to
+//! the validators, which the census bounds with the header fetch lag (local
+//! wall clock when the follower first held the header minus the block time;
+//! a negative lag proves the local clock is behind). A sighting without a
+//! wall estimate is `ClockUnknown`, never guessed.
 //!
-//! A launch is joined `delay_ns` after its block was seen, so sightings still
-//! queued behind the block in the runtime's channel are counted. A reorg
-//! takes the launches of every orphaned block out of the counts again (they
-//! stay visible as `orphaned`); the window that can still be orphaned is the
-//! follower's reorg depth.
+//! The monotonic lead before the follower's first header fetch is kept as a
+//! diagnostic only (it includes the follower's own lag).
+//!
+//! A launch is joined `delay_ns` after its block was fetched, so sightings
+//! still queued behind the block in the runtime's channel are counted. A
+//! reorg takes the launches of every orphaned block out of the counts again
+//! (they stay visible as `orphaned`); the window that can still be orphaned
+//! is the follower's reorg depth.
 
 pub use crate::chain_follower::Venue;
-use crate::ingress::Sighting;
+use crate::ingress::{FirstSeen, Sighting};
 use crate::sources::SourceId;
 use std::collections::VecDeque;
 
 /// How a canonical launch was visible before its block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Visibility {
-    /// A verified full (actionable) sighting at or before the block.
-    FullBefore { source: SourceId, lead_ns: u64 },
-    /// Only its hash before the block: not actionable.
-    HashOnlyBefore { source: SourceId, lead_ns: u64 },
-    /// First delivered pending only after the block.
-    After { source: SourceId, lag_ns: u64 },
+    /// A verified full (actionable) sighting at or before the block time.
+    FullBefore { source: SourceId, lead_us: u64 },
+    /// Only its hash before the block time: not actionable.
+    HashOnlyBefore { source: SourceId, lead_us: u64 },
+    /// First delivered pending only after the block time.
+    After { source: SourceId, lag_us: u64 },
     /// No source delivered it while it was remembered.
     Missed,
+    /// A deciding sighting has no wall-clock estimate.
+    ClockUnknown { source: SourceId },
 }
 
 impl Visibility {
@@ -38,43 +50,56 @@ impl Visibility {
             Visibility::HashOnlyBefore { .. } => 2,
             Visibility::After { .. } => 3,
             Visibility::Missed => 4,
+            Visibility::ClockUnknown { .. } => 5,
         }
     }
 
-    /// The source and the time between sighting and block (either way).
+    /// The source and the time between sighting and block (either way, µs).
     pub fn source_and_delta(self) -> Option<(SourceId, u64)> {
         match self {
-            Visibility::FullBefore { source, lead_ns }
-            | Visibility::HashOnlyBefore { source, lead_ns } => Some((source, lead_ns)),
-            Visibility::After { source, lag_ns } => Some((source, lag_ns)),
+            Visibility::FullBefore { source, lead_us }
+            | Visibility::HashOnlyBefore { source, lead_us } => Some((source, lead_us)),
+            Visibility::After { source, lag_us } => Some((source, lag_us)),
+            Visibility::ClockUnknown { source } => Some((source, 0)),
             Visibility::Missed => None,
         }
     }
 }
 
-/// The class of a sighting relative to the block seen at `block_seen_ns`.
-pub fn classify(sighting: Option<Sighting>, block_seen_ns: u64) -> Visibility {
+/// The class of a sighting relative to the block time `block_ms`.
+pub fn classify(sighting: Option<Sighting>, block_ms: u64) -> Visibility {
     let Some(s) = sighting else {
         return Visibility::Missed;
     };
-    if let Some((source, at)) = s.first_full
-        && at <= block_seen_ns
-    {
-        return Visibility::FullBefore {
-            source,
-            lead_ns: block_seen_ns - at,
-        };
+    let block_us = block_ms.saturating_mul(1_000);
+    let before = |seen: FirstSeen| seen.wall_us.map(|w| (w <= block_us, w));
+    if let Some(full) = s.first_full {
+        match before(full) {
+            Some((true, wall)) => {
+                return Visibility::FullBefore {
+                    source: full.source,
+                    lead_us: block_us - wall,
+                };
+            }
+            Some((false, _)) => {}
+            None => {
+                return Visibility::ClockUnknown {
+                    source: full.source,
+                };
+            }
+        }
     }
-    let (source, at) = s.first_any;
-    if at <= block_seen_ns {
-        return Visibility::HashOnlyBefore {
-            source,
-            lead_ns: block_seen_ns - at,
-        };
-    }
-    Visibility::After {
-        source,
-        lag_ns: at - block_seen_ns,
+    let any = s.first_any;
+    match before(any) {
+        Some((true, wall)) => Visibility::HashOnlyBefore {
+            source: any.source,
+            lead_us: block_us - wall,
+        },
+        Some((false, wall)) => Visibility::After {
+            source: any.source,
+            lag_us: wall - block_us,
+        },
+        None => Visibility::ClockUnknown { source: any.source },
     }
 }
 
@@ -90,8 +115,25 @@ pub struct LaunchRef {
     pub token: Option<[u8; 20]>,
     /// Buys of the token after the launch in its block; `None` unknown.
     pub external_buys: Option<u32>,
-    /// When the follower first had the block's header (monotonic ns).
+    /// The launch transaction is a direct call of the C1 scope (Portal
+    /// `newTokenV6`): what the pending path can act on.
+    pub c1_scope: bool,
+    /// The block's time (header milliseconds, validator wall clock).
+    pub block_ms: u64,
+    /// When the follower first held the block's header: monotonic ns of the
+    /// runtime clock (diagnostic) and local wall ms.
     pub block_seen_ns: u64,
+    pub block_seen_unix_ms: Option<u64>,
+}
+
+impl LaunchRef {
+    /// Local wall clock at the header fetch minus the block time (ms); a
+    /// negative value proves the local clock is behind the validator's.
+    pub fn fetch_lag_ms(&self) -> Option<i64> {
+        let seen = i64::try_from(self.block_seen_unix_ms?).ok()?;
+        let block = i64::try_from(self.block_ms).ok()?;
+        seen.checked_sub(block)
+    }
 }
 
 /// A launch whose join is decided.
@@ -111,7 +153,11 @@ pub struct JoinCounters {
     pub seen_hash_only_before: u64,
     pub seen_after: u64,
     pub missed: u64,
-    /// Sum over the launches whose buys are known.
+    pub clock_unknown: u64,
+    /// Flap launches of the C1 scope, and those seen full before the block.
+    pub c1_scope_launches: u64,
+    pub c1_scope_full_before: u64,
+    /// Sum over the Flap launches whose buys are known.
     pub external_buys: u64,
     /// Flap launches whose external buys are unknown (never counted as 0).
     pub buys_unknown: u64,
@@ -136,6 +182,13 @@ impl JoinCounters {
             Visibility::HashOnlyBefore { .. } => step(&mut self.seen_hash_only_before),
             Visibility::After { .. } => step(&mut self.seen_after),
             Visibility::Missed => step(&mut self.missed),
+            Visibility::ClockUnknown { .. } => step(&mut self.clock_unknown),
+        }
+        if j.launch.c1_scope {
+            step(&mut self.c1_scope_launches);
+            if matches!(j.visibility, Visibility::FullBefore { .. }) {
+                step(&mut self.c1_scope_full_before);
+            }
         }
         let Some(buys) = j.launch.external_buys.map(u64::from) else {
             step(&mut self.buys_unknown);
@@ -174,6 +227,11 @@ impl Ledger {
         self.counters
     }
 
+    /// Launches received but not joined yet.
+    pub fn waiting(&self) -> usize {
+        self.waiting.len()
+    }
+
     /// A launch of a canonical block, joined once `delay_ns` passed.
     pub fn push(&mut self, launch: LaunchRef) {
         self.waiting.push_back(launch);
@@ -197,7 +255,7 @@ impl Ledger {
             };
             let joined = Joined {
                 launch,
-                visibility: classify(sighting(&launch.tx_hash), launch.block_seen_ns),
+                visibility: classify(sighting(&launch.tx_hash), launch.block_ms),
             };
             self.counters.apply(&joined, true);
             self.recent.push_back(joined);
@@ -248,7 +306,16 @@ impl Ledger {
 mod tests {
     use super::*;
 
-    fn launch(venue: Venue, block: u64, hash: u8, tx: u8, seen: u64, buys: u32) -> LaunchRef {
+    const BLOCK_MS: u64 = 1_000;
+
+    fn launch(
+        venue: Venue,
+        block: u64,
+        hash: u8,
+        tx: u8,
+        seen: u64,
+        buys: Option<u32>,
+    ) -> LaunchRef {
         LaunchRef {
             venue,
             block_number: block,
@@ -256,12 +323,23 @@ mod tests {
             tx_index: u64::from(tx),
             tx_hash: [tx; 32],
             token: None,
-            external_buys: Some(buys),
+            external_buys: buys,
+            c1_scope: tx % 2 == 1,
+            block_ms: BLOCK_MS,
             block_seen_ns: seen,
+            block_seen_unix_ms: Some(BLOCK_MS + 300),
         }
     }
 
-    fn seen(any: (SourceId, u64), full: Option<(SourceId, u64)>) -> Option<Sighting> {
+    fn at(source: SourceId, at_ns: u64, wall_us: Option<u64>) -> FirstSeen {
+        FirstSeen {
+            source,
+            at_ns,
+            wall_us,
+        }
+    }
+
+    fn seen(any: FirstSeen, full: Option<FirstSeen>) -> Option<Sighting> {
         Some(Sighting {
             first_any: any,
             first_full: full,
@@ -269,72 +347,124 @@ mod tests {
     }
 
     #[test]
-    fn the_class_follows_the_first_sightings_on_one_clock() {
+    fn the_class_is_decided_against_the_block_time_never_the_fetch() {
         let p = SourceId::PublicNode;
         let d = SourceId::Drpc;
-        assert_eq!(classify(None, 100), Visibility::Missed);
+        let block_us = BLOCK_MS * 1_000;
+        assert_eq!(classify(None, BLOCK_MS), Visibility::Missed);
         assert_eq!(
-            classify(seen((d, 10), Some((p, 40))), 100),
+            classify(
+                seen(
+                    at(d, 1, Some(block_us - 90)),
+                    Some(at(p, 2, Some(block_us - 60)))
+                ),
+                BLOCK_MS
+            ),
             Visibility::FullBefore {
                 source: p,
-                lead_ns: 60
+                lead_us: 60
             }
         );
-        // Equal time counts as before (the sighting was there with the block).
+        // Equal time counts as before.
         assert_eq!(
-            classify(seen((p, 100), Some((p, 100))), 100),
+            classify(
+                seen(at(p, 1, Some(block_us)), Some(at(p, 1, Some(block_us)))),
+                BLOCK_MS
+            ),
             Visibility::FullBefore {
                 source: p,
-                lead_ns: 0
+                lead_us: 0
+            }
+        );
+        // Seen after the block existed, although maybe before the follower
+        // fetched it: after (the review's failure case).
+        assert_eq!(
+            classify(
+                seen(
+                    at(p, 9, Some(block_us + 200)),
+                    Some(at(p, 9, Some(block_us + 200)))
+                ),
+                BLOCK_MS
+            ),
+            Visibility::After {
+                source: p,
+                lag_us: 200
             }
         );
         // A hash before, the full transaction only after: not actionable.
         assert_eq!(
-            classify(seen((d, 10), Some((p, 140))), 100),
+            classify(
+                seen(
+                    at(d, 1, Some(block_us - 90)),
+                    Some(at(p, 2, Some(block_us + 40)))
+                ),
+                BLOCK_MS
+            ),
             Visibility::HashOnlyBefore {
                 source: d,
-                lead_ns: 90
+                lead_us: 90
             }
+        );
+        // No wall estimate for the deciding sighting: unknown, never a class.
+        assert_eq!(
+            classify(
+                seen(at(d, 1, Some(block_us - 90)), Some(at(p, 2, None))),
+                BLOCK_MS
+            ),
+            Visibility::ClockUnknown { source: p }
         );
         assert_eq!(
-            classify(seen((d, 130), None), 100),
-            Visibility::After {
-                source: d,
-                lag_ns: 30
-            }
+            classify(seen(at(d, 1, None), None), BLOCK_MS),
+            Visibility::ClockUnknown { source: d }
         );
+    }
+
+    #[test]
+    fn the_fetch_lag_is_signed_and_unknown_without_a_clock() {
+        let mut l = launch(Venue::Flap, 1, 1, 1, 0, Some(0));
+        assert_eq!(l.fetch_lag_ms(), Some(300));
+        l.block_seen_unix_ms = Some(BLOCK_MS - 20);
+        assert_eq!(l.fetch_lag_ms(), Some(-20));
+        l.block_seen_unix_ms = None;
+        assert_eq!(l.fetch_lag_ms(), None);
     }
 
     #[test]
     fn launches_join_after_the_delay_and_a_reorg_takes_them_out_again() {
         let p = SourceId::PublicNode;
+        let block_us = BLOCK_MS * 1_000;
         let mut ledger = Ledger::new(50, 3);
-        ledger.push(launch(Venue::Flap, 10, 0xA, 1, 100, 2));
-        ledger.push(launch(Venue::Four, 10, 0xA, 2, 100, 0));
-        ledger.push(launch(Venue::Flap, 11, 0xB, 3, 200, 1));
+        ledger.push(launch(Venue::Flap, 10, 0xA, 1, 100, Some(2)));
+        ledger.push(launch(Venue::Four, 10, 0xA, 2, 100, None));
+        ledger.push(launch(Venue::Flap, 11, 0xB, 3, 200, Some(1)));
         let sighting = |tx: &[u8; 32]| match tx[0] {
-            1 => seen((p, 60), Some((p, 60))),
-            3 => seen((p, 230), Some((p, 230))),
+            1 => seen(
+                at(p, 60, Some(block_us - 40)),
+                Some(at(p, 60, Some(block_us - 40))),
+            ),
+            3 => seen(
+                at(p, 230, Some(block_us + 30)),
+                Some(at(p, 230, Some(block_us + 30))),
+            ),
             _ => None,
         };
-        // Not yet due.
         assert!(ledger.join_due(120, 11, sighting).is_empty());
+        assert_eq!(ledger.waiting(), 3);
         let first = ledger.join_due(160, 11, sighting);
         assert_eq!(first.len(), 2);
         assert_eq!(
             first[0].visibility,
             Visibility::FullBefore {
                 source: p,
-                lead_ns: 40
+                lead_us: 40
             }
         );
-        // A sighting that arrived before the join (queued) but after the block.
         let second = ledger.join_due(260, 11, sighting);
         assert_eq!(
             second[0].visibility,
             Visibility::After {
                 source: p,
-                lag_ns: 30
+                lag_us: 30
             }
         );
         let c = ledger.counters();
@@ -344,9 +474,11 @@ mod tests {
                 c.four_launches,
                 c.seen_full_before,
                 c.seen_after,
-                c.external_buys
+                c.external_buys,
+                c.c1_scope_launches,
+                c.c1_scope_full_before
             ),
-            (2, 1, 1, 1, 3)
+            (2, 1, 1, 1, 3, 2, 1)
         );
         // Block 11 is orphaned: its launch leaves every count.
         let gone = ledger.orphan(&[[0xB; 32]]);
@@ -357,12 +489,13 @@ mod tests {
                 c.flap_launches,
                 c.seen_after,
                 c.external_buys,
-                c.orphaned_launches
+                c.orphaned_launches,
+                c.c1_scope_launches
             ),
-            (1, 0, 2, 1)
+            (1, 0, 2, 1, 1)
         );
         // A waiting launch of an orphaned block never joins.
-        ledger.push(launch(Venue::Flap, 12, 0xC, 4, 300, 0));
+        ledger.push(launch(Venue::Flap, 12, 0xC, 4, 300, None));
         assert_eq!(ledger.orphan(&[[0xC; 32]]).len(), 1);
         assert!(ledger.join_due(10_000, 12, sighting).is_empty());
         assert_eq!(ledger.counters().orphaned_launches, 2);
@@ -372,11 +505,10 @@ mod tests {
     fn only_the_reorg_window_is_kept() {
         let mut ledger = Ledger::new(0, 2);
         for b in 0..10u64 {
-            ledger.push(launch(Venue::Flap, b, b as u8, b as u8, b, 0));
+            ledger.push(launch(Venue::Flap, b, b as u8, b as u8, b, Some(0)));
             ledger.join_due(b, b, |_| None);
         }
         assert!(ledger.recent.len() <= 3);
-        // Too old to be orphaned by the follower: the count stays.
         assert!(ledger.orphan(&[[0; 32]]).is_empty());
         assert_eq!(ledger.counters().missed, 10);
     }

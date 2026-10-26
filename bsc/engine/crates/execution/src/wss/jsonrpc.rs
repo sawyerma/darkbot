@@ -8,7 +8,7 @@
 use serde_json::{Map, Value};
 
 use super::verify::{AccessItem, TxKind, WireTx};
-use super::{RejectReason, TxField};
+use super::{RejectReason, TxField, VerifiedTx};
 
 /// The JSON-RPC id of the one request this source sends.
 pub(super) const SUBSCRIBE_ID: u64 = 1;
@@ -106,6 +106,16 @@ pub(super) fn parse_tx_json(bytes: &[u8]) -> Result<WireTx, RejectReason> {
         Ok(Value::Object(tx)) => parse_tx(&tx),
         _ => Err(RejectReason::NotATransaction),
     }
+}
+
+/// Verifies one transaction object the caller already parsed (the
+/// canonical follower's `eth_getTransactionByHash` answer): the same
+/// conversion and checks as every full notification.
+pub(crate) fn verify_tx_map(
+    tx: &Map<String, Value>,
+    expected_chain_id: u64,
+) -> Result<VerifiedTx, RejectReason> {
+    super::verify::verify(&parse_tx(tx)?, expected_chain_id)
 }
 
 /// Converts a transaction object into typed fields. Only the fields the

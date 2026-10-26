@@ -76,19 +76,28 @@ pub struct SourceStats {
     pub last_event_ns: Option<u64>,
 }
 
+/// One first sighting: its source, its monotonic time and the runtime's
+/// wall-clock estimate of that moment (µs since the Unix epoch; `None`
+/// when the wall clock could not be read — never 0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FirstSeen {
+    pub source: SourceId,
+    pub at_ns: u64,
+    pub wall_us: Option<u64>,
+}
+
 /// What the sources delivered for one hash while it is remembered: the
-/// first sighting of any kind and the first verified full one, each with
-/// its source and monotonic time.
+/// first sighting of any kind and the first verified full one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sighting {
-    pub first_any: (SourceId, u64),
-    pub first_full: Option<(SourceId, u64)>,
+    pub first_any: FirstSeen,
+    pub first_full: Option<FirstSeen>,
 }
 
 #[derive(Clone, Copy)]
 struct Seen {
-    first_any: (usize, u64),
-    first_full: Option<(usize, u64)>,
+    first_any: (usize, u64, Option<u64>),
+    first_full: Option<(usize, u64, Option<u64>)>,
     /// Bit per source index that delivered this hash.
     sources: u8,
     launch: bool,
@@ -136,7 +145,11 @@ impl IngressCore {
     /// The sighting of `hash`, if it is still remembered (bounded window).
     pub fn sighting(&self, hash: &[u8; 32]) -> Option<Sighting> {
         let seen = self.seen.get(hash)?;
-        let at = |(i, ns): (usize, u64)| (SourceId::ALL[i], ns);
+        let at = |(i, at_ns, wall_us): (usize, u64, Option<u64>)| FirstSeen {
+            source: SourceId::ALL[i],
+            at_ns,
+            wall_us,
+        };
         Some(Sighting {
             first_any: at(seen.first_any),
             first_full: seen.first_full.map(at),
@@ -153,12 +166,14 @@ impl IngressCore {
         self.seen.insert(hash, seen);
     }
 
-    /// One observation of `source` at monotonic `now_ns`.
+    /// One observation of `source` at monotonic `now_ns`, `wall_us` being
+    /// the wall-clock estimate of the same moment.
     pub fn observe(
         &mut self,
         source: SourceId,
         observation: Observation<'_>,
         now_ns: u64,
+        wall_us: Option<u64>,
     ) -> Option<Launch> {
         let i = index(source);
         let bit = 1u8 << i;
@@ -195,7 +210,7 @@ impl IngressCore {
                         self.remember(
                             hash,
                             Seen {
-                                first_any: (i, now_ns),
+                                first_any: (i, now_ns, wall_us),
                                 first_full: None,
                                 sources: bit,
                                 launch: false,
@@ -221,8 +236,8 @@ impl IngressCore {
                     self.remember(
                         hash,
                         Seen {
-                            first_any: (i, now_ns),
-                            first_full: Some((i, now_ns)),
+                            first_any: (i, now_ns, wall_us),
+                            first_full: Some((i, now_ns, wall_us)),
                             sources: bit,
                             launch,
                         },
@@ -237,7 +252,7 @@ impl IngressCore {
                 match seen.first_full {
                     // The first actionable sighting, even after a hash-only one.
                     None => {
-                        seen.first_full = Some((i, now_ns));
+                        seen.first_full = Some((i, now_ns, wall_us));
                         seen.launch = launch;
                         self.stats[i].first_full += 1;
                         if seen.first_any.0 != i {
@@ -253,7 +268,7 @@ impl IngressCore {
                             at_ns: now_ns,
                         })
                     }
-                    Some((first, at)) => {
+                    Some((first, at, _)) => {
                         self.stats[i].duplicates += 1;
                         (launch && first != i).then(|| Launch::Later {
                             hash,
@@ -361,14 +376,20 @@ mod tests {
         let raw = legacy(PORTAL, LAUNCH);
         let h = [9u8; 32];
         assert_eq!(
-            core.observe(SourceId::Drpc, Observation::HashOnly { hash: h }, 100),
+            core.observe(
+                SourceId::Drpc,
+                Observation::HashOnly { hash: h },
+                100,
+                Some(1_000)
+            ),
             None
         );
         assert_eq!(
             core.observe(
                 SourceId::PublicNode,
                 Observation::Full { hash: h, raw: &raw },
-                150
+                150,
+                Some(1_050)
             ),
             Some(Launch::First {
                 hash: h,
@@ -380,7 +401,8 @@ mod tests {
             core.observe(
                 SourceId::BlockReq,
                 Observation::Full { hash: h, raw: &raw },
-                190
+                190,
+                None
             ),
             Some(Launch::Later {
                 hash: h,
@@ -393,7 +415,8 @@ mod tests {
             core.observe(
                 SourceId::PublicNode,
                 Observation::Full { hash: h, raw: &raw },
-                200
+                200,
+                None
             ),
             None
         );
@@ -413,8 +436,16 @@ mod tests {
         assert_eq!(
             core.sighting(&h),
             Some(Sighting {
-                first_any: (SourceId::Drpc, 100),
-                first_full: Some((SourceId::PublicNode, 150)),
+                first_any: FirstSeen {
+                    source: SourceId::Drpc,
+                    at_ns: 100,
+                    wall_us: Some(1_000)
+                },
+                first_full: Some(FirstSeen {
+                    source: SourceId::PublicNode,
+                    at_ns: 150,
+                    wall_us: Some(1_050)
+                }),
             })
         );
         assert_eq!(core.sighting(&[1; 32]), None);
@@ -428,19 +459,26 @@ mod tests {
                 SourceId::Drpc,
                 Observation::HashOnly { hash: [n; 32] },
                 u64::from(n),
+                None,
             );
         }
         assert_eq!(core.seen.len(), 2);
         // A forgotten hash counts as first again (bounded memory, explicit).
-        core.observe(SourceId::Drpc, Observation::HashOnly { hash: [0; 32] }, 9);
+        core.observe(
+            SourceId::Drpc,
+            Observation::HashOnly { hash: [0; 32] },
+            9,
+            None,
+        );
         assert_eq!(core.stats(SourceId::Drpc).first_any, 6);
-        core.observe(SourceId::Drpc, Observation::Rejected, 10);
-        core.observe(SourceId::Drpc, Observation::Dropped, 11);
-        core.observe(SourceId::Drpc, Observation::Connected, 12);
+        core.observe(SourceId::Drpc, Observation::Rejected, 10, None);
+        core.observe(SourceId::Drpc, Observation::Dropped, 11, None);
+        core.observe(SourceId::Drpc, Observation::Connected, 12, None);
         core.observe(
             SourceId::Drpc,
             Observation::Disconnected { rate_limited: true },
             13,
+            None,
         );
         let s = core.stats(SourceId::Drpc);
         assert_eq!(

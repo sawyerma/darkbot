@@ -5,13 +5,13 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::atomic::AtomicBool;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::http::Client;
-use super::jsonrpc::{self, BlockHead, Header, Receipt};
+use super::jsonrpc::{self, BlockHead, Header, Receipt, TxPlace};
 use super::launches;
 use super::{Call, CanonicalEvent, FollowerFault, FollowerLimits, RequestError, stopped};
-use crate::wss::DisconnectReason;
+use crate::wss::{DisconnectReason, VerifiedTx};
 
 /// The typed JSON-RPC calls over one HTTP client.
 pub(super) struct Rpc<S, C> {
@@ -59,6 +59,38 @@ where
         jsonrpc::parse_receipts(&answer, id)
             .map_err(|error| FollowerFault::Request { call, error })?
             .ok_or(FollowerFault::Unavailable(call))
+    }
+
+    fn transaction(
+        &mut self,
+        place: &TxPlace,
+        stop: &AtomicBool,
+    ) -> Result<VerifiedTx, FollowerFault> {
+        let call = Call::Transaction(place.hash);
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_transaction(&answer, id, place)
+            .map_err(|error| FollowerFault::Request { call, error })?
+            .ok_or(FollowerFault::Unavailable(call))
+    }
+}
+
+/// When the follower first held a header: the monotonic clock and, read
+/// right after it, the wall clock in Unix milliseconds (`None` when the
+/// system clock is unreadable or before 1970).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct FirstHeld {
+    at: Instant,
+    unix_ms: Option<u64>,
+}
+
+impl FirstHeld {
+    fn now() -> Self {
+        let at = Instant::now();
+        let unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|d| u64::try_from(d.as_millis()).ok());
+        Self { at, unix_ms }
     }
 }
 
@@ -136,7 +168,7 @@ pub(super) struct Follower {
     next: Option<u64>,
     /// When a header (number, hash) was first held, for blocks not yet
     /// followed; at most `reorg_depth + 2` entries.
-    seen: VecDeque<(u64, [u8; 32], Instant)>,
+    seen: VecDeque<(u64, [u8; 32], FirstHeld)>,
 }
 
 impl Follower {
@@ -243,7 +275,7 @@ impl Follower {
         &mut self,
         rpc: &mut Rpc<S, C>,
         tip: BlockHead,
-        tip_observed: Instant,
+        tip_observed: FirstHeld,
         stop: &AtomicBool,
         sink: &mut dyn FnMut(CanonicalEvent),
     ) -> Result<(), FollowerFault>
@@ -293,13 +325,15 @@ impl Follower {
         Ok(())
     }
 
-    /// Fetches the receipts of `block`, verifies them against it, reports
-    /// the block and its launches and keeps its header.
+    /// Fetches the receipts of `block`, verifies them against it, fetches
+    /// and verifies the transaction of every launch, then reports the block
+    /// and its launches and keeps its header. Nothing is reported unless
+    /// all of it succeeded.
     fn accept<S, C>(
         &mut self,
         rpc: &mut Rpc<S, C>,
         block: BlockHead,
-        observed: Instant,
+        observed: FirstHeld,
         stop: &AtomicBool,
         sink: &mut dyn FnMut(CanonicalEvent),
     ) -> Result<(), FollowerFault>
@@ -312,13 +346,19 @@ impl Follower {
         if !receipts_match(&block, &receipts) {
             return Err(FollowerFault::ReceiptsMismatch(header.number));
         }
-        let launches = launches::detect(&block, &receipts);
+        let mut launches = Vec::new();
+        for launch in launches::detect(&block, &receipts) {
+            let tx = rpc.transaction(&launch.place(), stop)?;
+            launches.push(launch.with_transaction(&tx));
+        }
         sink(CanonicalEvent::Block {
             number: header.number,
             hash: header.hash,
             parent_hash: header.parent_hash,
             timestamp_s: header.timestamp_s,
-            observed,
+            timestamp_ms: header.block_ms,
+            observed: observed.at,
+            observed_unix_ms: observed.unix_ms,
         });
         for launch in launches {
             sink(CanonicalEvent::Launch(launch));
@@ -338,13 +378,13 @@ impl Follower {
         rpc: &mut Rpc<S, C>,
         number: u64,
         stop: &AtomicBool,
-    ) -> Result<(BlockHead, Instant), FollowerFault>
+    ) -> Result<(BlockHead, FirstHeld), FollowerFault>
     where
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
         let block = rpc.header(number, stop)?;
-        let now = Instant::now();
+        let now = FirstHeld::now();
         let id = (block.header.number, block.header.hash);
         let observed = match self.seen.iter().find(|(n, h, _)| (*n, *h) == id) {
             Some((_, _, first)) => *first,

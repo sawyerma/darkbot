@@ -1033,7 +1033,8 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
             .set(rs::JOURNAL_PATH, "bsc-runtime/journal/4.dbjnl")
             .set(rs::JOURNAL_RECORDS, 0u64)
             .set(rs::JOURNAL_LOST, 0u64)
-            .set(rs::MODE, "READ_ONLY");
+            .set(rs::MODE, "READ_ONLY")
+            .set(rs::STATUS_INTERVAL_MS, 1_000u64);
         fs::create_dir_all(run.join("bsc-runtime")).unwrap();
         fs::write(run.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
         let snap = projection::project(&root, &run);

@@ -29,8 +29,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// Review 25.10. (Paket 1): ticketed release gate, durable abort (was 895ced5b…).
 /// C1 runtime WSS dependencies in Cargo.lock (was afe825e3…).
 /// C1 binary evidence: record/geth-ipc lines in Cargo.lock (was 19078cc4…).
+/// Runtime SIGTERM handling: signal-hook in Cargo.lock (was 1207890f…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "1207890ffa3396ea9f5db4e59f84da1dd7199a692567ad4ca1f0d68671dfd432";
+const PINNED_PLAN_SHA256: &str = "3a9dc0da0a1a3b1d5d8dbc6930f3b0f8d9e2ab60e24790781c03fd2e092a2d6e";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

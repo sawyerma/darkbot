@@ -25,15 +25,23 @@
 //!   0x11c4...c06e (neither is the creator), and the same receipt carries
 //!   the token's `Transfer` from the Portal to that buyer. Each launch
 //!   transaction carries the creator's own `TokenBought`, which is not
-//!   counted (re-checked below).
+//!   counted (re-checked below);
+//! - transactions (`tx_<block>_<index>.json`): the answers to
+//!   `eth_getTransactionByHash` for each launch, fetched on 2026-10-26.
+//!   Sender and nonce are the object's `from`/`nonce`; the C1 scope is true
+//!   only for block 129774331 index 1, whose `to` is the Portal and whose
+//!   input starts with `newTokenV6` (`0x8cb5772c`); the others call a
+//!   router (0xa853...3f6b), a launcher (0x8994...6666) or TokenManager2
+//!   `createToken` (`0x519ebb10`) (re-checked below from the JSON).
 
 use alloy_primitives::{hex, keccak256};
 use serde_json::Value;
 
 use super::follow::receipts_match;
-use super::jsonrpc::{BlockHead, Receipt, parse_header, parse_receipts};
-use super::launches::{FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, detect};
-use super::{CanonicalLaunch, Venue};
+use super::jsonrpc::{BlockHead, Receipt, parse_header, parse_receipts, parse_transaction};
+use super::launches::{FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, ReceiptLaunch, detect};
+use super::{CanonicalLaunch, Field, RequestError, Venue};
+use crate::wss::RejectReason;
 
 const FLAP_A_HEADER: &str = include_str!("../../tests/fixtures/chain/block_129774331.header.json");
 const FLAP_A_RECEIPTS: &str =
@@ -45,6 +53,11 @@ const FOUR_HEADER: &str = include_str!("../../tests/fixtures/chain/block_1297811
 const FOUR_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129781119.receipts.json");
 
+const TX_A1: &str = include_str!("../../tests/fixtures/chain/tx_129774331_1.json");
+const TX_A26: &str = include_str!("../../tests/fixtures/chain/tx_129774331_26.json");
+const TX_B32: &str = include_str!("../../tests/fixtures/chain/tx_129781248_32.json");
+const TX_FOUR: &str = include_str!("../../tests/fixtures/chain/tx_129781119_32.json");
+
 const TRANSFER: [u8; 32] = hex!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
 /// The block and its receipts through the follower's own parse and
@@ -54,6 +67,41 @@ fn load(header: &str, receipts: &str, number: u64) -> (BlockHead, Vec<Receipt>) 
     let receipts = parse_receipts(receipts.as_bytes(), 1).unwrap().unwrap();
     assert!(receipts_match(&block, &receipts));
     (block, receipts)
+}
+
+/// Each launch completed from its transaction fixture (in order), through
+/// the follower's own bound and verified parse.
+fn complete(launches: Vec<ReceiptLaunch>, txs: &[&str]) -> Vec<CanonicalLaunch> {
+    assert_eq!(launches.len(), txs.len());
+    launches
+        .into_iter()
+        .zip(txs)
+        .map(|(launch, tx)| {
+            let verified = parse_transaction(tx.as_bytes(), 1, &launch.place())
+                .unwrap()
+                .unwrap();
+            launch.with_transaction(&verified)
+        })
+        .collect()
+}
+
+/// The raw transaction object, read independently of `jsonrpc`.
+fn raw_tx(tx: &str) -> Value {
+    let all: Value = serde_json::from_str(tx).unwrap();
+    all["result"].clone()
+}
+
+/// Independent checks of the transaction facts against the raw object.
+fn check_tx(tx: &str, launch: &CanonicalLaunch) {
+    let raw = raw_tx(tx);
+    assert_eq!(address_of(&raw["from"]), launch.sender);
+    assert_eq!(
+        u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap(),
+        launch.nonce
+    );
+    let direct_v6 = address_of(&raw["to"]) == FLAP_PORTAL
+        && raw["input"].as_str().unwrap().starts_with("0x8cb5772c");
+    assert_eq!(direct_v6, launch.c1_scope);
 }
 
 /// The raw receipt at `index`, read independently of `jsonrpc`.
@@ -145,7 +193,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
     let hash = hex!("b46720d61774811f42474df7f45d98e2967509025fe10a5f67c9eb9f381e12ab");
     assert_eq!(block.header.hash, hash);
     assert_eq!(receipts.len(), 54);
-    let launches = detect(&block, &receipts);
+    let launches = complete(detect(&block, &receipts), &[TX_A1, TX_A26]);
     let expected = vec![
         CanonicalLaunch {
             venue: Venue::Flap,
@@ -157,6 +205,9 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             creator: Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
             external_buys_after: Some(1),
             first_external_buy_index: Some(2),
+            sender: hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"),
+            nonce: 13,
+            c1_scope: true,
         },
         CanonicalLaunch {
             venue: Venue::Flap,
@@ -168,11 +219,15 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             creator: Some(hex!("d3f3fe1f286d13f95f4be5c1bfea5e1a9e6335ea")),
             external_buys_after: Some(0),
             first_external_buy_index: None,
+            sender: hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34"),
+            nonce: 1592,
+            c1_scope: false,
         },
     ];
     assert_eq!(launches, expected);
-    for launch in &launches {
+    for (launch, tx) in launches.iter().zip([TX_A1, TX_A26]) {
         check_launch_receipt(FLAP_A_RECEIPTS, launch);
+        check_tx(tx, launch);
     }
     // Direct Portal call: the creator is the sender.
     let first = raw_receipt(FLAP_A_RECEIPTS, 1);
@@ -201,7 +256,7 @@ fn flap_block_with_one_launch_and_no_external_buy() {
     let (block, receipts) = load(FLAP_B_HEADER, FLAP_B_RECEIPTS, 129_781_248);
     let hash = hex!("f6690df0d75f2c36e6a9822bca1ff8fed6aba47eb176bda1ad801cffd5ff4d51");
     assert_eq!(block.header.hash, hash);
-    let launches = detect(&block, &receipts);
+    let launches = complete(detect(&block, &receipts), &[TX_B32]);
     let expected = CanonicalLaunch {
         venue: Venue::Flap,
         block_number: 129_781_248,
@@ -212,9 +267,13 @@ fn flap_block_with_one_launch_and_no_external_buy() {
         creator: Some(hex!("8994ef9463667ee3bb7268758167c7e9468d6666")),
         external_buys_after: Some(0),
         first_external_buy_index: None,
+        sender: hex!("1b4ebe73585b94578dc055c6ac7e89333fdadcf7"),
+        nonce: 4297,
+        c1_scope: false,
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FLAP_B_RECEIPTS, &expected);
+    check_tx(TX_B32, &expected);
     // Via a launcher contract: the creator is the called contract.
     let raw = raw_receipt(FLAP_B_RECEIPTS, 32);
     assert_eq!(address_of(&raw["to"]), expected.creator.unwrap());
@@ -225,7 +284,7 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
     let (block, receipts) = load(FOUR_HEADER, FOUR_RECEIPTS, 129_781_119);
     let hash = hex!("51d04ca917cbec94c520b6f68fea4e3093f3ee933d57bf35f13a895ff94dfbae");
     assert_eq!(block.header.hash, hash);
-    let launches = detect(&block, &receipts);
+    let launches = complete(detect(&block, &receipts), &[TX_FOUR]);
     let expected = CanonicalLaunch {
         venue: Venue::Four,
         block_number: 129_781_119,
@@ -236,9 +295,19 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         creator: Some(hex!("774352301321637bc2cad74e67d4089f36e15962")),
         external_buys_after: None,
         first_external_buy_index: None,
+        sender: hex!("774352301321637bc2cad74e67d4089f36e15962"),
+        nonce: 262,
+        c1_scope: false,
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FOUR_RECEIPTS, &expected);
+    check_tx(TX_FOUR, &expected);
+    assert!(
+        raw_tx(TX_FOUR)["input"]
+            .as_str()
+            .unwrap()
+            .starts_with("0x519ebb10")
+    );
     let raw = raw_receipt(FOUR_RECEIPTS, 32);
     assert_eq!(address_of(&raw["from"]), expected.creator.unwrap());
     // The archived ABI's head is eight words: `name` and `symbol` start
@@ -310,5 +379,69 @@ fn malformed_words_are_unknown_never_guessed() {
     assert_eq!(
         launches[0].creator,
         Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"))
+    );
+}
+
+/// `timestamp_ms` of block 129774331: `timestamp` 0x6ade6eab = 1792962219 s,
+/// `mixHash` 0x...c8 = 200 ms, so 1792962219 * 1000 + 200 = 1792962219200;
+/// the node's own `milliTimestamp` field (0x1a174e04cc0) says the same for
+/// every fixture header (read independently of `jsonrpc`).
+#[test]
+fn block_ms_of_the_fixture_headers() {
+    let (block, _) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
+    assert_eq!(block.header.timestamp_s, 1_792_962_219);
+    assert_eq!(block.header.block_ms, 1_792_962_219_200);
+    for (header, number) in [
+        (FLAP_A_HEADER, 129_774_331),
+        (FLAP_B_HEADER, 129_781_248),
+        (FOUR_HEADER, 129_781_119),
+    ] {
+        let parsed = parse_header(header.as_bytes(), 1, number).unwrap().unwrap();
+        let raw: Value = serde_json::from_str(header).unwrap();
+        let node_ms =
+            u64::from_str_radix(&raw["result"]["milliTimestamp"].as_str().unwrap()[2..], 16)
+                .unwrap();
+        assert_eq!(parsed.header.block_ms, node_ms, "{number}");
+    }
+}
+
+/// The transaction answer must be the receipt's transaction, mined in that
+/// block at that index, and pass the WSS verifier.
+#[test]
+fn launch_transactions_are_bound_and_verified() {
+    let (block, receipts) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
+    let launch = detect(&block, &receipts).remove(0);
+    let place = launch.place();
+    let with = |edit: &dyn Fn(&mut Value)| {
+        let mut answer: Value = serde_json::from_str(TX_A1).unwrap();
+        edit(&mut answer["result"]);
+        parse_transaction(answer.to_string().as_bytes(), 1, &place)
+    };
+    assert!(with(&|_| {}).unwrap().is_some());
+    assert_eq!(
+        parse_transaction(br#"{"jsonrpc":"2.0","id":1,"result":null}"#, 1, &place),
+        Ok(None)
+    );
+    // Another index or block: not this launch.
+    let mut elsewhere = place;
+    elsewhere.tx_index = 2;
+    assert_eq!(
+        parse_transaction(TX_A1.as_bytes(), 1, &elsewhere),
+        Err(RequestError::Shape(Field::TxBinding))
+    );
+    assert_eq!(
+        with(&|tx| tx["blockNumber"] = Value::from("0x7bc32fc")),
+        Err(RequestError::Shape(Field::TxBinding))
+    );
+    // A lagging backend answering it as pending: not there yet (retried).
+    assert_eq!(with(&|tx| tx["blockHash"] = Value::Null), Ok(None));
+    // A changed signed field breaks the hash; a changed sender the signer.
+    assert_eq!(
+        with(&|tx| tx["nonce"] = Value::from("0xe")),
+        Err(RequestError::Unverifiable(RejectReason::HashMismatch))
+    );
+    assert_eq!(
+        with(&|tx| tx["from"] = Value::from("0x1111111111111111111111111111111111111111")),
+        Err(RequestError::Unverifiable(RejectReason::SignerMismatch))
     );
 }

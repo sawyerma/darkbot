@@ -2386,7 +2386,7 @@
   "command_bindings": [
     {
       "source_path": "ops/bsc-control.sh",
-      "source_sha": "2b103709cb2501ac68c798158f47efe3f154b4767a28c6238b8ce35bd927bd66",
+      "source_sha": "3e4d36657de750a6b8441334c396b733e6b9b8e6c36fa497c7843a4fe6000b15",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
@@ -3675,7 +3675,7 @@
       "status": "IST_CONNECTED",
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
-      "reason": "canonical chain follower: head, reorgs, canonical Flap/Four launches joined with pending sightings (G0.4 denominator)"
+      "reason": "canonical chain follower: head, header fetch lag, reorgs, skipped blocks, canonical Flap/Four launches (C1 scope) joined with pending sightings against the block time (G0.4 denominator)"
     },
     {
       "schemas": [
@@ -3687,7 +3687,7 @@
       "status": "IST_CONNECTED",
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
-      "reason": "G0.4 census replayed from the runtime journals: windows, denominator, visibility classes, outages; no verdict before confirmed criteria"
+      "reason": "G0.4 census replayed from the runtime journals: windows (COMPLETE/UNTERMINATED), denominator, C1 scope, classes against the block time, coverage gaps, unjoined, outages, clock check; no verdict before confirmed criteria"
     },
     {
       "schemas": [
@@ -3704,7 +3704,7 @@
       "status": "IST_CONNECTED",
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
-      "reason": "lead of the first verified full sighting before the block, one monotonic clock"
+      "reason": "lead of the first verified full sighting before the block time (local wall-clock estimate vs. header ms; fetch lag bounds the clock offset)"
     },
     {
       "schemas": [

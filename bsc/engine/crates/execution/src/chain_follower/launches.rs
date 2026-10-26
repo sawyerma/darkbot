@@ -24,7 +24,9 @@
 use alloy_primitives::hex;
 
 use super::CanonicalLaunch;
-use super::jsonrpc::{BlockHead, Log, Receipt};
+use super::jsonrpc::{BlockHead, Log, Receipt, TxPlace};
+use crate::ingress::is_flap_launch;
+use crate::wss::VerifiedTx;
 
 /// The venue of a launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,9 +104,56 @@ pub const LAUNCH_EVENTS: [LaunchEvent; 2] = [
 
 const WORD: usize = 32;
 
+/// A launch as its block's receipts show it; [`CanonicalLaunch`] once its
+/// transaction is verified.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ReceiptLaunch {
+    pub(super) venue: Venue,
+    pub(super) block_number: u64,
+    pub(super) block_hash: [u8; 32],
+    pub(super) tx_index: u64,
+    pub(super) tx_hash: [u8; 32],
+    pub(super) token: Option<[u8; 20]>,
+    pub(super) creator: Option<[u8; 20]>,
+    pub(super) external_buys_after: Option<u32>,
+    pub(super) first_external_buy_index: Option<u64>,
+}
+
+impl ReceiptLaunch {
+    /// Where the launch transaction must be.
+    pub(super) fn place(&self) -> TxPlace {
+        TxPlace {
+            hash: self.tx_hash,
+            block_hash: self.block_hash,
+            block_number: self.block_number,
+            tx_index: self.tx_index,
+        }
+    }
+
+    /// The launch with the facts of its verified transaction: sender,
+    /// nonce, and the C1 scope decision of the pending path
+    /// (`ingress::is_flap_launch` of the signed bytes).
+    pub(super) fn with_transaction(self, tx: &VerifiedTx) -> CanonicalLaunch {
+        CanonicalLaunch {
+            venue: self.venue,
+            block_number: self.block_number,
+            block_hash: self.block_hash,
+            tx_index: self.tx_index,
+            tx_hash: self.tx_hash,
+            token: self.token,
+            creator: self.creator,
+            external_buys_after: self.external_buys_after,
+            first_external_buy_index: self.first_external_buy_index,
+            sender: tx.from,
+            nonce: tx.nonce,
+            c1_scope: is_flap_launch(&tx.raw),
+        }
+    }
+}
+
 /// The launches of one block whose receipts were verified against `block`,
 /// in receipt and log order. Failed receipts are skipped.
-pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalLaunch> {
+pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<ReceiptLaunch> {
     let mut launches = Vec::new();
     for receipt in receipts.iter().filter(|r| r.succeeded) {
         for log in &receipt.logs {
@@ -131,7 +180,7 @@ pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalLa
                 }
                 _ => (None, None),
             };
-            launches.push(CanonicalLaunch {
+            launches.push(ReceiptLaunch {
                 venue: event.venue,
                 block_number: block.header.number,
                 block_hash: block.header.hash,

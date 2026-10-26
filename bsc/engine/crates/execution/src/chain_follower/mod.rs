@@ -30,7 +30,18 @@
 //! skipped silently. Following starts at the head first reported.
 //!
 //! Launches: exactly the venues of [`launches::LAUNCH_EVENTS`], each by
-//! contract address and event topic, in successful receipts only.
+//! contract address and event topic, in successful receipts only. Each
+//! launch's transaction is fetched (`eth_getTransactionByHash`), bound to
+//! its receipt and verified by the WSS source's verifier for chain 56 (the
+//! signed bytes rebuilt, hash and signer checked); its sender, nonce and C1
+//! scope come from those verified bytes. A block is reported only with all
+//! of its launches verified.
+//!
+//! Time: a block's `timestamp_ms` is bsc-geth's `Header.MilliTimestamp()`
+//! (v1.7.8, `core/types/block.go`): `timestamp * 1000` plus the 256-bit
+//! big-endian `mixHash` when it is non-zero, which must be below 1000.
+//! `observed`/`observed_unix_ms` are the monotonic and wall clock readings
+//! taken together when the follower first held the header.
 //!
 //! Bounds: every timeout, size, depth and wait comes from [`FollowerLimits`],
 //! which the caller fills. `stop` is observed at least once per `read_tick`
@@ -43,7 +54,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::wss::endpoint::{Endpoint, connect_tls, tls_config};
-use crate::wss::{DisconnectReason, RateLimitSignal, UrlError, WssLimits};
+use crate::wss::{DisconnectReason, RateLimitSignal, RejectReason, UrlError, WssLimits};
 
 mod follow;
 mod http;
@@ -159,8 +170,13 @@ pub enum CanonicalEvent {
         hash: [u8; 32],
         parent_hash: [u8; 32],
         timestamp_s: u64,
+        /// The header's millisecond timestamp (bsc-geth `MilliTimestamp`).
+        timestamp_ms: u64,
         /// When this follower first held this block's header.
         observed: Instant,
+        /// The wall clock (Unix ms) read next to `observed`; `None` when
+        /// the system clock could not be read.
+        observed_unix_ms: Option<u64>,
     },
     Launch(CanonicalLaunch),
     /// Earlier reported blocks left the canonical chain: `orphaned` in
@@ -208,6 +224,12 @@ pub struct CanonicalLaunch {
     pub external_buys_after: Option<u32>,
     /// The transaction index of the first of those buys.
     pub first_external_buy_index: Option<u64>,
+    /// The verified signer of the launch transaction.
+    pub sender: [u8; 20],
+    pub nonce: u64,
+    /// The launch transaction is in the C1 scope (`ingress::is_flap_launch`
+    /// of its verified signed bytes: a direct Portal `newTokenV6` call).
+    pub c1_scope: bool,
 }
 
 /// Why a step of the follower failed.
@@ -232,6 +254,8 @@ pub enum Call {
     BlockNumber,
     Header(u64),
     Receipts(u64),
+    /// The transaction of a launch, by hash.
+    Transaction([u8; 32]),
 }
 
 /// Why one request failed.
@@ -250,6 +274,8 @@ pub enum RequestError {
     Rpc(i64),
     /// A field of the answer has the wrong shape.
     Shape(Field),
+    /// The transaction object failed the WSS verifier.
+    Unverifiable(RejectReason),
 }
 
 /// A violation of HTTP/1.1 framing by the provider.
@@ -286,6 +312,8 @@ pub enum Field {
     Hash,
     ParentHash,
     Timestamp,
+    /// Not 32 bytes, or a millisecond value of 1000 or more.
+    MixHash,
     Transactions,
     TxHash,
     TxIndex,
@@ -300,6 +328,8 @@ pub enum Field {
     LogRemoved,
     /// A log's block or transaction fields differ from its receipt's.
     LogBinding,
+    /// A transaction's hash, block or index differ from its receipt's.
+    TxBinding,
 }
 
 /// Follows the canonical chain at `endpoint` (`https://host[:port][/path]`;

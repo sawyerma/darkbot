@@ -23,11 +23,12 @@ use crate::chain_follower::{
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::runtime_journal::{
-    RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
-    later_sighting_payload, orphaned_launch_payload, reorg_payload, resync_payload,
-    source_event_payload, window_payload,
+    EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
+    later_sighting_payload, orphaned_launch_payload, pending_launch_payload, reorg_payload,
+    resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{Effective, Generation, SourceId, Store};
+use crate::wss::endpoint::Endpoint;
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
@@ -59,6 +60,12 @@ pub struct RuntimeConfig {
     pub canonical: Option<CanonicalConfig>,
     /// How often the census is replayed from the journals.
     pub census_ms: u64,
+    /// The longest a pass waits for events before it reconciles sources,
+    /// joins launches and checks the stop file.
+    pub reconcile_ms: u64,
+    /// How long the operator waits for a requested stop before it kills the
+    /// process; at least the derived worst-case stop path.
+    pub stop_timeout_ms: u64,
 }
 
 /// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
@@ -102,12 +109,8 @@ impl RuntimeConfig {
         for source in [SourceId::PublicNode, SourceId::Drpc, SourceId::BlockReq] {
             let key = format!("{}_WSS", source.name());
             if let Some(url) = values.remove(key.as_str()) {
-                let rest = url
-                    .strip_prefix("wss://")
-                    .ok_or_else(|| format!("{key} must be wss://"))?;
-                if rest.is_empty() || rest.contains('@') || rest.contains(char::is_whitespace) {
-                    return Err(format!("{key} is not a plain wss:// endpoint"));
-                }
+                // The adapter's own rule, so nothing it would refuse starts.
+                Endpoint::parse(url).map_err(|e| format!("{key} is refused: {e:?}"))?;
                 endpoints.push((source, url.to_string()));
             }
         }
@@ -125,9 +128,9 @@ impl RuntimeConfig {
                 let rest = url
                     .strip_prefix("https://")
                     .ok_or("BSC_CANONICAL_RPC must be https://")?;
-                if rest.is_empty() || rest.contains('@') || rest.contains(char::is_whitespace) {
-                    return Err("BSC_CANONICAL_RPC is not a plain https:// endpoint".into());
-                }
+                // The follower's own rule (the authority and path rules of wss://).
+                Endpoint::parse(&format!("wss://{rest}"))
+                    .map_err(|e| format!("BSC_CANONICAL_RPC is refused: {e:?}"))?;
                 let limits = FollowerLimits {
                     poll: ms(take("BSC_CANONICAL_POLL_MS", 50, 60_000)?),
                     reorg_depth: take("BSC_CANONICAL_REORG_DEPTH", 1, 10_000)?,
@@ -178,15 +181,41 @@ impl RuntimeConfig {
             wss,
             canonical,
             census_ms: take("BSC_RUNTIME_CENSUS_MS", 1_000, 86_400_000)?,
+            reconcile_ms: take("BSC_RUNTIME_RECONCILE_MS", 10, 60_000)?,
+            // Below the launchd ExitTimeOut (330 s) of the runtime job in
+            // ops/bsc-control.sh, so a SIGTERM stop is never cut by SIGKILL.
+            stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
         };
         config
             .wss
             .validate()
             .map_err(|e| format!("WSS bounds: {e:?}"))?;
+        let needed = config.stop_bound_ms();
+        if config.stop_timeout_ms < needed {
+            return Err(format!(
+                "BSC_RUNTIME_STOP_TIMEOUT_MS={} is below the derived stop path of {needed} ms",
+                config.stop_timeout_ms
+            ));
+        }
         if let Some(unknown) = values.keys().next() {
             return Err(format!("unknown key {unknown}"));
         }
         Ok(config)
+    }
+
+    /// The worst-case stop path: one pass, then the adapters and the
+    /// follower in parallel (a TCP connect in flight, then the closing write
+    /// or one more read tick). Name resolution has no bound of its own.
+    pub fn stop_bound_ms(&self) -> u64 {
+        let ms = |d: Duration| u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
+        let w = &self.wss;
+        let adapters = ms(w.connect_timeout)
+            .saturating_add(ms(w.write_timeout))
+            .saturating_add(ms(w.read_tick));
+        let follower = self.canonical.as_ref().map_or(0, |c| {
+            ms(c.limits.connect_timeout).saturating_add(ms(c.limits.read_tick))
+        });
+        self.reconcile_ms.saturating_add(adapters.max(follower))
     }
 
     fn endpoint(&self, source: SourceId) -> Option<&str> {
@@ -223,6 +252,35 @@ impl Clock {
     /// `at` on this clock (an instant before its start reads 0).
     fn ns_at(self, at: Instant) -> u64 {
         u64::try_from(at.saturating_duration_since(self.0).as_nanos()).unwrap_or(u64::MAX)
+    }
+}
+
+/// A monotonic reading and the wall clock (µs since the Unix epoch) read
+/// next to it; refreshed at least once per pass, so mapping a fresh
+/// monotonic time through it carries at most one pass of clock drift.
+/// `None` when the wall clock could not be read (never 0).
+#[derive(Clone, Copy)]
+struct WallPair(Option<(u64, u64)>);
+
+impl WallPair {
+    fn read(clock: Clock) -> Self {
+        let mono = clock.now_ns();
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| u64::try_from(d.as_micros()).ok())
+            .filter(|w| *w > 0);
+        WallPair(wall.map(|w| (mono, w)))
+    }
+
+    /// The wall-clock estimate (µs) of the monotonic time `at_ns`.
+    fn wall_us(self, at_ns: u64) -> Option<u64> {
+        let (mono, wall) = self.0?;
+        if at_ns >= mono {
+            wall.checked_add((at_ns - mono) / 1_000)
+        } else {
+            wall.checked_sub((mono - at_ns) / 1_000)
+        }
     }
 }
 
@@ -266,7 +324,12 @@ struct Canonical {
     state: &'static str,
     head: Option<(u64, [u8; 32])>,
     head_seen_ns: Option<u64>,
+    /// The head block's time (header ms) and the local wall ms when the
+    /// follower first held it.
+    head_block_ms: Option<u64>,
+    head_seen_unix_ms: Option<u64>,
     first_journaled: bool,
+    blocks_skipped: u64,
     blocks: u64,
     reorgs: u64,
     resyncs: u64,
@@ -281,7 +344,10 @@ impl Canonical {
             state: "CONNECTING",
             head: None,
             head_seen_ns: None,
+            head_block_ms: None,
+            head_seen_unix_ms: None,
             first_journaled: false,
+            blocks_skipped: 0,
             blocks: 0,
             reorgs: 0,
             resyncs: 0,
@@ -303,34 +369,51 @@ impl Canonical {
 
     fn event(&mut self, at: u64, event: CanonicalEvent, journal: &mut RuntimeJournal) {
         match event {
-            CanonicalEvent::Block { number, hash, .. } => {
+            CanonicalEvent::Block {
+                number,
+                hash,
+                timestamp_ms,
+                observed_unix_ms,
+                ..
+            } => {
                 if !self.first_journaled {
                     self.first_journaled = true;
                     journal.record(
                         RecordKind::Canonical,
                         at,
-                        &window_payload(true, number, &hash),
+                        &window_payload(b'H', number, &hash),
                     );
                 }
                 self.state = "FOLLOWING";
                 self.head = Some((number, hash));
                 self.head_seen_ns = Some(at);
+                self.head_block_ms = Some(timestamp_ms);
+                self.head_seen_unix_ms = observed_unix_ms;
                 self.blocks += 1;
             }
-            CanonicalEvent::Launch(l) => self.ledger.push(LaunchRef {
-                venue: l.venue,
-                block_number: l.block_number,
-                block_hash: l.block_hash,
-                tx_index: l.tx_index,
-                tx_hash: l.tx_hash,
-                token: l.token,
-                external_buys: l.external_buys_after,
-                // Its block was the last one reported.
-                block_seen_ns: match self.head {
-                    Some((_, h)) if h == l.block_hash => self.head_seen_ns.unwrap_or(at),
-                    _ => at,
-                },
-            }),
+            CanonicalEvent::Launch(l) => {
+                // Its block is the last one reported (launches follow it).
+                let same = self.head.is_some_and(|(_, h)| h == l.block_hash);
+                let launch = LaunchRef {
+                    venue: l.venue,
+                    block_number: l.block_number,
+                    block_hash: l.block_hash,
+                    tx_index: l.tx_index,
+                    tx_hash: l.tx_hash,
+                    token: l.token,
+                    external_buys: l.external_buys_after,
+                    c1_scope: l.c1_scope,
+                    block_ms: match self.head_block_ms {
+                        Some(ms) if same => ms,
+                        // Never reached: the follower reports a block before its launches.
+                        _ => return,
+                    },
+                    block_seen_ns: self.head_seen_ns.filter(|_| same).unwrap_or(at),
+                    block_seen_unix_ms: self.head_seen_unix_ms.filter(|_| same),
+                };
+                journal.record(RecordKind::Canonical, at, &pending_launch_payload(&launch));
+                self.ledger.push(launch);
+            }
             CanonicalEvent::Reorg { orphaned, new_head } => {
                 self.reorgs += 1;
                 let depth = u32::try_from(orphaned.len()).unwrap_or(u32::MAX);
@@ -342,13 +425,21 @@ impl Canonical {
                 self.orphan(&orphaned, at, journal);
             }
             CanonicalEvent::ReorgTooDeep { orphaned, new_head } => {
+                // The new chain below its head is not followed: those heights
+                // are skipped (the orphaned ones are counted as orphaned).
                 self.resyncs += 1;
                 let from = orphaned.first().map_or(new_head.0, |(n, _)| *n);
-                journal.record(RecordKind::Reorg, at, &resync_payload(from, new_head.0));
+                if new_head.0 > from {
+                    self.blocks_skipped += new_head.0 - from;
+                    journal.record(RecordKind::Reorg, at, &resync_payload(from, new_head.0 - 1));
+                }
                 self.orphan(&orphaned, at, journal);
             }
             CanonicalEvent::Gap { from, to } => {
                 self.resyncs += 1;
+                if to >= from {
+                    self.blocks_skipped += to - from + 1;
+                }
                 journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
             }
             CanonicalEvent::Fault(fault) => {
@@ -395,9 +486,26 @@ impl Canonical {
             .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
             .set(e::SEEN_AFTER, c.seen_after)
             .set(e::MISSED, c.missed)
-            .set(e::EXTERNAL_BUYS, c.external_buys);
+            .set(e::EXTERNAL_BUYS, c.external_buys)
+            .set(e::BUYS_UNKNOWN, c.buys_unknown)
+            .set(e::CLOCK_UNKNOWN, c.clock_unknown)
+            .set(e::C1_SCOPE_LAUNCHES, c.c1_scope_launches)
+            .set(e::C1_SCOPE_FULL_BEFORE, c.c1_scope_full_before)
+            .set(e::BLOCKS_SKIPPED, self.blocks_skipped)
+            .set(e::WAITING, self.ledger.waiting() as u64);
         if let Some((n, _)) = self.head {
             d.set(e::HEAD, n);
+        }
+        let lag = self
+            .head_seen_unix_ms
+            .zip(self.head_block_ms)
+            .and_then(|(seen, block)| {
+                i64::try_from(seen)
+                    .ok()?
+                    .checked_sub(i64::try_from(block).ok()?)
+            });
+        if let Some(lag) = lag {
+            d.set(e::HEAD_FETCH_LAG_MS, lag);
         }
         if let Some(at) = self.head_seen_ns {
             d.set(e::HEAD_AGE_MS, now.saturating_sub(at) / 1_000_000);
@@ -493,6 +601,7 @@ fn status_bytes(
     journal_records: u64,
     journal_lost: u64,
     canonical: Option<&Canonical>,
+    status_interval_ms: u64,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
     let mut d = Draft::new(&rs::SCHEMA);
@@ -504,7 +613,8 @@ fn status_bytes(
         .set(rs::JOURNAL_PATH, journal)
         .set(rs::JOURNAL_RECORDS, journal_records)
         .set(rs::JOURNAL_LOST, journal_lost)
-        .set(rs::MODE, "READ_ONLY");
+        .set(rs::MODE, "READ_ONLY")
+        .set(rs::STATUS_INTERVAL_MS, status_interval_ms);
     for (source, s, h) in stats {
         use rs::source as e;
         let mut row = Draft::new(&e::SCHEMA);
@@ -534,6 +644,12 @@ fn status_bytes(
     d.encode().map_err(|e| e.to_string())
 }
 
+/// The stop request of the runtime in `rundir` (written by `darkbotctl` or
+/// by the process's own SIGTERM/SIGINT handler).
+pub fn stop_file(rundir: &Path) -> PathBuf {
+    rundir.join("bsc.runtime.stop")
+}
+
 /// Runs until `rundir/bsc.runtime.stop` exists.
 pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<(), String> {
     let store = Store::open(sources_dir, 64)?;
@@ -545,7 +661,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
         .recursive(true)
         .create(&dir)
         .map_err(|e| format!("{}: {e}", dir.display()))?;
-    let stop_file = rundir.join("bsc.runtime.stop");
+    let stop_file = stop_file(rundir);
     let status_path = dir.join("status.dbrec");
     let mut journal = RuntimeJournal::open(
         &dir.join("journal"),
@@ -582,11 +698,23 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
     let mut next_census = Instant::now() + Duration::from_millis(config.census_ms);
     let mut next_status = Instant::now();
     let mut next_reconcile = Instant::now();
-    let reconcile_every = Duration::from_millis(config.status_ms.min(500));
+    let reconcile_every = Duration::from_millis(config.reconcile_ms);
     let status_every = Duration::from_millis(config.status_ms);
     let index = |s: SourceId| SourceId::ALL.iter().position(|x| *x == s).unwrap_or(0);
     loop {
         let stopping = stop_file.exists();
+        // One fresh monotonic/wall pair per pass for the sightings' wall time.
+        let wall = WallPair::read(clock);
+        if stopping {
+            // Every adapter and the follower stop in parallel; the joins
+            // below then wait for the slowest one only.
+            for a in adapters.values() {
+                a.stop.store(true, Ordering::Release);
+            }
+            if let Some(f) = follower.as_ref() {
+                f.stop.store(true, Ordering::Release);
+            }
+        }
         if Instant::now() >= next_reconcile || stopping {
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
@@ -639,6 +767,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                                 rate_limited: false,
                             },
                             clock.now_ns(),
+                            None,
                         );
                         journal.record(
                             RecordKind::Runtime,
@@ -685,7 +814,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                     }
                 }
             };
-            match core.observe(source, observation, at) {
+            match core.observe(source, observation, at, wall.wall_us(at)) {
                 Some(Launch::First { hash, source, .. }) => {
                     if let Event::Full { raw, .. } = &event {
                         journal.record(
@@ -734,7 +863,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                     journal.record(
                         RecordKind::Canonical,
                         clock.now_ns(),
-                        &window_payload(false, n, &h),
+                        &window_payload(b'E', n, &h),
                     );
                 }
                 c.state = "STOPPED";
@@ -774,11 +903,20 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 journal.appended(),
                 journal.lost(),
                 canonical.as_ref(),
+                config.status_ms,
             )?;
             replace(&status_path, &bytes)?;
         }
         if Instant::now() >= next_census && !stopping {
             next_census = Instant::now() + Duration::from_millis(config.census_ms);
+            // A checkpoint of the head: a killed process's window still ends here.
+            if let Some((n, h)) = canonical.as_ref().and_then(|c| c.head) {
+                journal.record(
+                    RecordKind::Canonical,
+                    clock.now_ns(),
+                    &window_payload(b'K', n, &h),
+                );
+            }
             // A census failure is visible in the log; observation goes on.
             if let Err(e) = write_census(config, rundir) {
                 eprintln!("g04 census: {e}");
@@ -786,6 +924,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
         }
         if stopping && adapters.is_empty() {
             drop(tx);
+            journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
             journal.finish()?;
             if let Err(e) = write_census(config, rundir) {
                 eprintln!("g04 census: {e}");
@@ -814,6 +953,9 @@ mod tests {
             None,
             "no endpoint: UNQUALIFIED"
         );
+        assert_eq!((c.reconcile_ms, c.stop_timeout_ms), (500, 15_000));
+        // 500 + max(5000 + 5000 + 200, 5000 + 200)
+        assert_eq!(c.stop_bound_ms(), 10_700);
         let canonical = c.canonical.as_ref().unwrap();
         assert_eq!(canonical.endpoint, "https://bsc-dataseed.bnbchain.org");
         assert_eq!(canonical.limits.reorg_depth, 64);
@@ -840,6 +982,17 @@ mod tests {
             CONFIG.replace("BSC_CANONICAL_JOIN_DELAY_MS=2000\n", ""),
             CONFIG.replace("BACKOFF_MAX_MS=30000", "BACKOFF_MAX_MS=100"),
             CONFIG.replace("BSC_RUNTIME_CENSUS_MS=60000\n", ""),
+            // What the adapters would refuse is refused here (review LOW-5).
+            CONFIG.replace("wss://bsc.drpc.org", "wss://bsc.drpc.org?key=1"),
+            CONFIG.replace("wss://bsc.drpc.org", "wss://bsc.drpc.org:99999"),
+            CONFIG.replace("wss://bsc.drpc.org", "wss://bsc_rpc.example"),
+            CONFIG.replace(
+                "https://bsc-dataseed.bnbchain.org",
+                "https://bsc-dataseed.bnbchain.org?k=1",
+            ),
+            // A stop wait below the derived stop path.
+            CONFIG.replace("STOP_TIMEOUT_MS=15000", "STOP_TIMEOUT_MS=1000"),
+            CONFIG.replace("BSC_RUNTIME_RECONCILE_MS=500\n", ""),
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
@@ -852,6 +1005,7 @@ mod tests {
     fn canonical_events_join_into_status_journal_and_census() {
         use crate::chain_follower::{CanonicalLaunch, Venue};
         use crate::wss::ProtocolFault;
+        const BLOCK_MS: u64 = 1_792_000_000_000;
         let base = std::env::temp_dir().join(format!("bsc-runtime-canon-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let config = RuntimeConfig::parse(CONFIG).unwrap();
@@ -860,14 +1014,18 @@ mod tests {
         let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
         let mut core = IngressCore::new(64);
         let clock = Clock(Instant::now());
+        let block_ms = |n: u8| BLOCK_MS + u64::from(n) * 450;
         let block = |n: u8| CanonicalEvent::Block {
             number: u64::from(n),
             hash: [n; 32],
             parent_hash: [n - 1; 32],
-            timestamp_s: 0,
+            timestamp_s: block_ms(n) / 1_000,
+            timestamp_ms: block_ms(n),
             observed: clock.0,
+            // The follower held the header 300 ms after the block time.
+            observed_unix_ms: Some(block_ms(n) + 300),
         };
-        let launch = |n: u8, tx: u8, buys| {
+        let launch = |n: u8, tx: u8, buys, c1_scope| {
             CanonicalEvent::Launch(CanonicalLaunch {
                 venue: Venue::Flap,
                 block_number: u64::from(n),
@@ -878,13 +1036,25 @@ mod tests {
                 creator: None,
                 external_buys_after: buys,
                 first_external_buy_index: None,
+                sender: [tx; 20],
+                nonce: u64::from(tx),
+                c1_scope,
             })
         };
-        // A verified sighting of launch 1 before its block; launch 2 unseen.
+        // Launch 1: a hash 50 ms before its block time; launch 2: a full
+        // sighting 100 ms after its block time but before the header fetch
+        // (counted after, never before); launch 3: unseen.
         core.observe(
             SourceId::PublicNode,
             Observation::HashOnly { hash: [1; 32] },
             5,
+            Some((block_ms(10) - 50) * 1_000),
+        );
+        core.observe(
+            SourceId::PublicNode,
+            Observation::HashOnly { hash: [2; 32] },
+            6,
+            Some((block_ms(11) + 100) * 1_000),
         );
         journal.record(
             RecordKind::Runtime,
@@ -892,9 +1062,11 @@ mod tests {
             &source_event_payload(SourceId::PublicNode, SourceEvent::Connected),
         );
         c.event(10, block(10), &mut journal);
-        c.event(10, launch(10, 1, Some(2)), &mut journal);
+        c.event(10, launch(10, 1, Some(2), true), &mut journal);
         c.event(20, block(11), &mut journal);
-        c.event(20, launch(11, 2, None), &mut journal);
+        c.event(20, launch(11, 2, None, false), &mut journal);
+        c.event(20, launch(11, 3, Some(0), true), &mut journal);
+        assert_eq!(c.ledger.waiting(), 3);
         c.event(
             25,
             CanonicalEvent::Fault(FollowerFault::Request {
@@ -916,11 +1088,13 @@ mod tests {
             (
                 k.flap_launches,
                 k.seen_hash_only_before,
+                k.seen_after,
                 k.missed,
                 k.external_buys,
-                k.buys_unknown
+                k.buys_unknown,
+                k.c1_scope_launches
             ),
-            (2, 1, 1, 2, 1)
+            (3, 1, 1, 1, 2, 1, 2)
         );
         c.event(
             40,
@@ -932,10 +1106,25 @@ mod tests {
         );
         c.event(50, CanonicalEvent::Gap { from: 13, to: 99 }, &mut journal);
         let k = c.ledger.counters();
-        assert_eq!((k.flap_launches, k.missed, k.orphaned_launches), (1, 0, 1));
         assert_eq!(
-            (c.state, c.blocks, c.reorgs, c.resyncs, c.rpc_errors),
-            ("FOLLOWING", 3, 1, 1, 1)
+            (
+                k.flap_launches,
+                k.missed,
+                k.orphaned_launches,
+                k.c1_scope_launches
+            ),
+            (1, 0, 2, 1)
+        );
+        assert_eq!(
+            (
+                c.state,
+                c.blocks,
+                c.reorgs,
+                c.resyncs,
+                c.rpc_errors,
+                c.blocks_skipped
+            ),
+            ("FOLLOWING", 3, 1, 1, 1, 87)
         );
         let status = status_bytes(
             &Generation::initial(),
@@ -948,27 +1137,35 @@ mod tests {
             0,
             0,
             Some(&c),
+            config.status_ms,
         )
         .unwrap();
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        assert_eq!(r.u64(rs::STATUS_INTERVAL_MS).unwrap(), config.status_ms);
         let n = r.nested(rs::CANONICAL).unwrap();
         assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 1);
         assert_eq!(n.u64(rs::canonical::HEAD).unwrap(), 12);
+        assert_eq!(n.u64(rs::canonical::BLOCKS_SKIPPED).unwrap(), 87);
+        assert_eq!(n.u64(rs::canonical::C1_SCOPE_LAUNCHES).unwrap(), 1);
+        assert_eq!(n.i64(rs::canonical::HEAD_FETCH_LAG_MS).unwrap(), 300);
         journal.finish().unwrap();
         let census = census(&base, journal_max_payload(&config)).unwrap();
         assert_eq!(
             (
                 census.flap_launches,
                 census.hash_only_before,
-                census.orphaned_launches
+                census.orphaned_launches,
+                census.c1_scope_launches,
+                census.unjoined,
+                census.blocks_skipped
             ),
-            (1, 1, 1)
+            (1, 1, 2, 1, 0, 87)
         );
-        assert_eq!(census.windows[0].first_block, Some(10));
-        assert_eq!(
-            (census.windows[0].reorgs, census.windows[0].resyncs),
-            (1, 1)
-        );
+        let w = &census.windows[0];
+        assert_eq!((w.first_block, w.reorgs, w.resyncs), (Some(10), 1, 1));
+        // No clean end record in this unit test: a killed process's window.
+        assert_eq!(w.state, "UNTERMINATED");
+        assert_eq!(census.fetch_lag_ms_min, Some(300));
         fs::remove_dir_all(&base).unwrap();
     }
 

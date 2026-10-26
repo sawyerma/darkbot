@@ -16,7 +16,7 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
   const { projection: s, status } = useBscStore(selectStatus);
   const job = s?.jobs.find(j => j.job === "readiness");
   const r = s?.readiness;
-  const runtime = runtimeView(useNativeRecords(), Date.now(), 5000).view;
+  const runtime = runtimeView(useNativeRecords(), Date.now()).view;
   return <>
     <Section title={title(1)}>
       <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />

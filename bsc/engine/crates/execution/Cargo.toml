@@ -30,6 +30,9 @@ zeroize = { version = "=1.9.0", optional = true }
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"], optional = true }
 darkbot-bsc-tx-encoding = { path = "../tx_encoding", optional = true }
 darkbot-bsc-geth-ipc = { path = "../geth_ipc", optional = true }
+# SIGTERM/SIGINT of the runtime process become its stop request (a safe
+# signal iterator; the crate forbids unsafe code).
+signal-hook = { version = "=0.3.18", default-features = false, features = ["iterator"], optional = true }
 
 [features]
 default = []
@@ -45,7 +48,7 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 rpc-wire = []
 # The BSC runtime's native configuration owners (C0/C1): binary records only.
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
-runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal"]
+runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 
 [dev-dependencies]
@@ -125,4 +128,8 @@ required-features = ["g07-mainnet"]
 # The BSC runtime (C0/C1): source modes now; ingress, journal and status follow.
 [[bin]]
 name = "bsc_runtime"
+required-features = ["runtime"]
+
+[[test]]
+name = "runtime_signal"
 required-features = ["runtime"]

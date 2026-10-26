@@ -59,10 +59,21 @@ bsc_runtime_up() {
   bsc_plist "$BSC_RUNTIME_LABEL" "$APP_HOME/current/bsc_runtime" "$args" "$LOGDIR/bsc-runtime.log" crash > "$BSC_RUNTIME_PLIST"
   launchctl bootstrap "$DOMAIN" "$BSC_RUNTIME_PLIST"
 }
+# The runtime's own stop bound (validated by it against its derived stop path).
+bsc_runtime_stop_timeout_ms() {
+  local ms
+  ms="$(sed -n 's/^BSC_RUNTIME_STOP_TIMEOUT_MS=\([0-9][0-9]*\)$/\1/p' "$BSC_ROOT/bsc/config/ingress.public.env" 2>/dev/null | tail -n 1)"
+  [ -n "$ms" ] || die "BSC_RUNTIME_STOP_TIMEOUT_MS fehlt in ingress.public.env"
+  printf '%s\n' "$ms"
+}
 bsc_runtime_down() {
   launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1 || return 0
   printf 'stop\n' > "$RUNDIR/bsc.runtime.stop"
-  local i=0; while [ -n "$(bsc_runtime_pid)" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+  # Wait the configured stop bound in 100-ms steps; then bootout (SIGTERM, which
+  # the runtime also answers with its stop path; SIGKILL only after ExitTimeOut).
+  local steps i=0
+  steps=$(( ($(bsc_runtime_stop_timeout_ms) + 99) / 100 ))
+  while [ -n "$(bsc_runtime_pid)" ] && [ "$i" -lt "$steps" ]; do sleep 0.1; i=$((i+1)); done
   launchctl bootout "$DOMAIN/$BSC_RUNTIME_LABEL" >/dev/null 2>&1 || true
   rm -f "$RUNDIR/bsc.runtime.stop"
 }

@@ -172,7 +172,8 @@ pub mod runtime_status {
         pub const FOUR_LAUNCHES: u16 = 10;
         /// Launches of blocks a reorg orphaned (taken out of the counts above).
         pub const ORPHANED_LAUNCHES: u16 = 11;
-        /// Flap launches with a verified full pending sighting before the block.
+        /// Flap launches with a verified full pending sighting before the
+        /// block time (header ms; local wall-clock estimate of the sighting).
         pub const SEEN_FULL_BEFORE: u16 = 12;
         /// Flap launches only seen as a hash (not actionable) before the block.
         pub const SEEN_HASH_ONLY_BEFORE: u16 = 13;
@@ -180,13 +181,29 @@ pub mod runtime_status {
         pub const SEEN_AFTER: u16 = 14;
         /// Flap launches no source delivered.
         pub const MISSED: u16 = 15;
-        /// External buys after the launch in the launch block (all Flap launches).
+        /// External buys after the launch in the launch block, summed over the
+        /// Flap launches whose buys are known (see `buys_unknown`).
         pub const EXTERNAL_BUYS: u16 = 16;
+        /// Flap launches whose external buys are unknown (never counted as 0).
+        pub const BUYS_UNKNOWN: u16 = 17;
+        /// Flap launches whose deciding sighting has no wall-clock estimate.
+        pub const CLOCK_UNKNOWN: u16 = 18;
+        /// Flap launches of the C1 scope (direct Portal `newTokenV6`), and
+        /// those seen as a verified full transaction before the block time.
+        pub const C1_SCOPE_LAUNCHES: u16 = 19;
+        pub const C1_SCOPE_FULL_BEFORE: u16 = 20;
+        /// Canonical blocks not followed (gaps, resyncs).
+        pub const BLOCKS_SKIPPED: u16 = 21;
+        /// Launches received and waiting for their join.
+        pub const WAITING: u16 = 22;
+        /// The head's fetch lag: local wall ms at the header fetch minus the
+        /// block's ms (negative: local clock behind).
+        pub const HEAD_FETCH_LAG_MS: u16 = 23;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -204,6 +221,13 @@ pub mod runtime_status {
                 Field::req(SEEN_AFTER, "seen_after", U64),
                 Field::req(MISSED, "missed", U64),
                 Field::req(EXTERNAL_BUYS, "external_buys", U64),
+                Field::req(BUYS_UNKNOWN, "buys_unknown", U64),
+                Field::req(CLOCK_UNKNOWN, "clock_unknown", U64),
+                Field::req(C1_SCOPE_LAUNCHES, "c1_scope_launches", U64),
+                Field::req(C1_SCOPE_FULL_BEFORE, "c1_scope_full_before", U64),
+                Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
+                Field::req(WAITING, "waiting", U64),
+                Field::opt(HEAD_FETCH_LAG_MS, "head_fetch_lag_ms", I64),
             ],
         };
     }
@@ -214,7 +238,8 @@ pub mod runtime_status {
     pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
     pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
     pub const STARTED_UNIX_MS: u16 = 5;
-    /// Distinct Flap launches seen as verified full transactions.
+    /// Distinct C1-scope Flap launches (direct Portal `newTokenV6`) seen as
+    /// verified full pending transactions.
     pub const LAUNCHES: u16 = 6;
     /// The journal of this process, relative to the run directory.
     pub const JOURNAL_PATH: u16 = 7;
@@ -225,11 +250,13 @@ pub mod runtime_status {
     pub const MODE: u16 = 10;
     /// Absent when no canonical endpoint is configured (then no denominator).
     pub const CANONICAL: u16 = 11;
+    /// How often this record is rewritten; a reader derives staleness from it.
+    pub const STATUS_INTERVAL_MS: u16 = 12;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 1,
+        schema_version: 2,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -251,6 +278,7 @@ pub mod runtime_status {
                 Presence::Optional,
                 &canonical::SCHEMA,
             ),
+            Field::req(STATUS_INTERVAL_MS, "status_interval_ms", U64),
         ],
     };
 }

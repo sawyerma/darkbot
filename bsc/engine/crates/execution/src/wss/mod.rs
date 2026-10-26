@@ -41,6 +41,7 @@ mod tests_session;
 #[cfg(test)]
 mod tests_verify;
 
+pub(crate) use jsonrpc::verify_tx_map;
 pub use verify::verify_tx_object;
 
 /// The chain every full transaction of this source must be signed for.

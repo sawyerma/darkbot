@@ -18,8 +18,10 @@
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
 
-use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime, write_census};
+use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime, stop_file, write_census};
 use darkbot_bsc_execution::sources::{Mode, SourceId, Store};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
 use std::process::ExitCode;
 
 /// Generations kept besides the current one.
@@ -41,11 +43,9 @@ fn run(args: &[String]) -> Result<bool, String> {
             let config_path = flag(rest, "--config")?;
             let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
             let config = RuntimeConfig::parse(&text)?;
-            run_runtime(
-                &config,
-                std::path::Path::new(flag(rest, "--sources")?),
-                std::path::Path::new(flag(rest, "--rundir")?),
-            )?;
+            let rundir = std::path::Path::new(flag(rest, "--rundir")?);
+            stop_on_signals(stop_file(rundir))?;
+            run_runtime(&config, std::path::Path::new(flag(rest, "--sources")?), rundir)?;
             Ok(true)
         }
         [cmd, rest @ ..] if cmd == "census" => {
@@ -94,6 +94,25 @@ fn run(args: &[String]) -> Result<bool, String> {
         }
         _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE".into()),
     }
+}
+
+/// SIGTERM (launchd, logout, shutdown) and SIGINT become the runtime's own
+/// stop request: the journal is committed, the window closed and the final
+/// status and census written within the configured stop bound.
+fn stop_on_signals(stop: std::path::PathBuf) -> Result<(), String> {
+    let mut signals =
+        Signals::new([SIGTERM, SIGINT]).map_err(|e| format!("signal handler: {e}"))?;
+    std::thread::Builder::new()
+        .name("bsc-runtime-signals".into())
+        .spawn(move || {
+            if signals.forever().next().is_some()
+                && let Err(e) = std::fs::write(&stop, b"signal\n")
+            {
+                eprintln!("STOP request on signal failed: {}: {e}", stop.display());
+            }
+        })
+        .map_err(|e| format!("signal thread: {e}"))?;
+    Ok(())
 }
 
 fn main() -> ExitCode {

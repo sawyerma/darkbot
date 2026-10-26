@@ -3,22 +3,32 @@
 //!
 //! Every number comes from verified journal frames. A journal whose frames
 //! end in a partial one (still written, or cut) counts up to its last
-//! verified frame and says `TAIL_INCOMPLETE`; a corrupt frame makes the
-//! whole journal `INVALID` and nothing of it counts. Lost records (gap
-//! spans) are reported per window, never filled in.
+//! verified frame and says `TAIL_INCOMPLETE`; one without the clean end
+//! record (`X`) says `UNTERMINATED` (killed or crashed) and its covered
+//! window ends at its last checkpoint; a corrupt frame makes the whole
+//! journal `INVALID` and nothing of it counts. Lost records (gap spans),
+//! skipped canonical blocks (gap/resync ranges) and launches received but
+//! never joined (`P` without `C`/`O`) are counted per window, never filled
+//! in.
+//!
+//! "Before the block" is the join's: the runtime's wall-clock estimate of
+//! the first sighting against the header's millisecond block time. The
+//! header fetch lag of the launch blocks bounds the local clock's offset; a
+//! negative minimum sets `clock_suspect`.
 //!
 //! A launch counts in `outage_launches` when no source was connected at the
 //! moment the follower had its block (the canonical record's time); it still
-//! counts in the denominator and its class. Lead percentiles use the nearest
-//! rank and are reported only when the sample count reaches `1 / (1 - q)`.
-//! No verdict: `criteria` stays `CRITERIA_UNCONFIRMED` until the user
-//! confirmed versioned criteria (order V2 §8).
+//! counts in the denominator and its class. Percentiles use the nearest rank
+//! and are reported only when the sample count reaches `1 / (1 - q)`. No
+//! verdict: `criteria` stays `CRITERIA_UNCONFIRMED` until the user confirmed
+//! versioned criteria (order V2 §8).
 
+use crate::runtime_journal::CANONICAL_LAUNCH_LEN;
 use crate::sources::SourceId;
 use darkbot_bsc_journal::{JournalError, JournalReader, RecordKind};
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_census::census as cs;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -35,6 +45,8 @@ pub struct Window {
     pub reorgs: u64,
     pub resyncs: u64,
     pub lost_records: u64,
+    pub blocks_skipped: u64,
+    pub unjoined: u64,
     pub state: &'static str,
 }
 
@@ -51,6 +63,9 @@ pub struct Census {
     pub hash_only_before: u64,
     pub after: u64,
     pub missed: u64,
+    pub clock_unknown: u64,
+    pub c1_scope_launches: u64,
+    pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
     pub lead_p50_us: Option<u64>,
     pub lead_p95_us: Option<u64>,
@@ -60,11 +75,17 @@ pub struct Census {
     pub external_buys: u64,
     /// Flap launches whose external buys are unknown (not in the two above).
     pub buys_unknown: u64,
+    pub unjoined: u64,
+    pub blocks_skipped: u64,
+    pub fetch_lag_ms_min: Option<i64>,
+    pub fetch_lag_ms_p50: Option<i64>,
+    pub fetch_lag_ms_max: Option<i64>,
+    pub clock_suspect: bool,
     /// Per source: actionable launches it delivered first.
     pub first_full_before: Vec<(SourceId, u64)>,
 }
 
-/// One canonical launch record (`b'C'`).
+/// One canonical launch record (`b'C'`); class 0 marks an orphaned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LaunchRecord {
     flap: bool,
@@ -73,7 +94,9 @@ struct LaunchRecord {
     external_buys: Option<u32>,
     class: u8,
     source: Option<usize>,
-    delta_ns: u64,
+    delta_us: u64,
+    c1_scope: bool,
+    fetch_lag_ms: Option<i64>,
     seen_ns: u64,
 }
 
@@ -85,12 +108,21 @@ fn hash_at(p: &[u8], at: usize) -> Option<[u8; 32]> {
     p.get(at..at + 32)?.try_into().ok()
 }
 
+fn flag(byte: u8) -> Option<bool> {
+    match byte {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
 fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
-    if p.len() != 118 || p[0] != b'C' || !(1..=2).contains(&p[1]) || p[103] > 1 {
+    if p.len() != CANONICAL_LAUNCH_LEN || p[0] != b'C' || !(1..=2).contains(&p[1]) {
         return None;
     }
+    let buys_known = flag(p[103])?;
     let class = p[108];
-    if !(1..=4).contains(&class) {
+    if !(1..=5).contains(&class) {
         return None;
     }
     let source = match p[109] {
@@ -98,16 +130,25 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         i if usize::from(i) < SourceId::ALL.len() => Some(usize::from(i)),
         _ => return None,
     };
+    let lag_known = flag(p[127])?;
     Some(LaunchRecord {
         flap: p[1] == 1,
         block_hash: hash_at(p, 10)?,
         tx_hash: hash_at(p, 50)?,
-        external_buys: (p[103] == 1)
-            .then(|| p.get(104..108)?.try_into().ok().map(u32::from_le_bytes))
-            .flatten(),
+        external_buys: if buys_known {
+            Some(u32::from_le_bytes(p.get(104..108)?.try_into().ok()?))
+        } else {
+            None
+        },
         class,
         source,
-        delta_ns: u64_at(p, 110)?,
+        delta_us: u64_at(p, 110)?,
+        c1_scope: flag(p[126])?,
+        fetch_lag_ms: if lag_known {
+            Some(i64::from_le_bytes(p.get(128..136)?.try_into().ok()?))
+        } else {
+            None
+        },
         seen_ns,
     })
 }
@@ -148,7 +189,7 @@ impl Connectivity {
     }
 }
 
-/// What one journal contributes; `None` for its launches when it is invalid.
+/// What one journal contributes.
 struct Replay {
     window: Window,
     launches: Vec<LaunchRecord>,
@@ -162,26 +203,23 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
     let mut window = Window {
         journal: name,
         started_unix_ms: started,
-        state: "COMPLETE",
         ..Window::default()
     };
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
+    // Launches received (`P`) and resolved (`C`/`O`), by (block, tx).
+    let mut received: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
+    let mut resolved: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
+    let mut exited = false;
+    let mut checkpoint = None;
     let mut last_ns = 0u64;
-    loop {
+    let state = loop {
         let record = match reader.next_record() {
             Ok(Some(r)) => r,
-            Ok(None) => break,
-            Err(JournalError::Truncated) => {
-                window.state = "TAIL_INCOMPLETE";
-                break;
-            }
-            Err(_) => {
-                window.state = "INVALID";
-                launches.clear();
-                connectivity = Connectivity::default();
-                break;
-            }
+            Ok(None) if exited => break "COMPLETE",
+            Ok(None) => break "UNTERMINATED",
+            Err(JournalError::Truncated) => break "TAIL_INCOMPLETE",
+            Err(_) => break "INVALID",
         };
         last_ns = last_ns.max(record.timestamp_ns);
         let p = &record.payload;
@@ -194,13 +232,21 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
             (RecordKind::Runtime, Some(b'S')) if p.len() == 3 => {
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
+            (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            (RecordKind::Canonical, Some(b'P')) if p.len() == 74 => {
+                if let (Some(block), Some(tx)) = (hash_at(p, 10), hash_at(p, 42)) {
+                    received.insert((block, tx));
+                }
+            }
             (RecordKind::Canonical, Some(b'C')) => {
                 if let Some(l) = launch_record(p, record.timestamp_ns) {
+                    resolved.insert((l.block_hash, l.tx_hash));
                     launches.push(l);
                 }
             }
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
                 if let (Some(block), Some(tx)) = (hash_at(p, 10), hash_at(p, 42)) {
+                    resolved.insert((block, tx));
                     launches.retain(|l| !(l.block_hash == block && l.tx_hash == tx));
                     // Counted as orphaned (class 0), joined or not.
                     launches.push(LaunchRecord {
@@ -210,27 +256,42 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
                         external_buys: None,
                         class: 0,
                         source: None,
-                        delta_ns: 0,
+                        delta_us: 0,
+                        c1_scope: false,
+                        fetch_lag_ms: None,
                         seen_ns: record.timestamp_ns,
                     });
                 }
             }
-            (RecordKind::Canonical, Some(tag @ (b'H' | b'E'))) if p.len() == 41 => {
+            (RecordKind::Canonical, Some(tag @ (b'H' | b'E' | b'K'))) if p.len() == 41 => {
                 let number = u64_at(p, 1);
-                if tag == b'H' {
-                    window.first_block = window.first_block.or(number);
-                } else {
-                    window.last_block = number;
+                match tag {
+                    b'H' => window.first_block = window.first_block.or(number),
+                    b'E' => window.last_block = number,
+                    _ => checkpoint = number,
                 }
             }
             (RecordKind::Reorg, Some(b'R')) => window.reorgs += 1,
-            (RecordKind::Reorg, Some(b'G')) => window.resyncs += 1,
+            (RecordKind::Reorg, Some(b'G')) if p.len() == 17 => {
+                window.resyncs += 1;
+                if let (Some(from), Some(to)) = (u64_at(p, 1), u64_at(p, 9))
+                    && to >= from
+                {
+                    window.blocks_skipped = window.blocks_skipped.saturating_add(to - from + 1);
+                }
+            }
             _ => {}
         }
-    }
-    if window.state == "INVALID" {
+    };
+    window.state = state;
+    if state == "INVALID" {
         window.first_block = None;
         window.last_block = None;
+        launches.clear();
+        connectivity = Connectivity::default();
+    } else {
+        window.last_block = window.last_block.or(checkpoint);
+        window.unjoined = received.difference(&resolved).count() as u64;
     }
     window.duration_ms = last_ns / 1_000_000;
     connectivity.sort();
@@ -242,7 +303,7 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
 }
 
 /// Nearest rank of quantile `q` (per mille) when `n >= 1000 / (1000 - q)`.
-fn percentile(sorted: &[u64], q_per_mille: u64) -> Option<u64> {
+fn percentile<T: Copy>(sorted: &[T], q_per_mille: u64) -> Option<T> {
     let n = sorted.len() as u64;
     if n == 0 || n * (1000 - q_per_mille) < 1000 {
         return None;
@@ -268,10 +329,13 @@ pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
     names.sort();
     let mut out = Census::default();
     let mut leads: Vec<u64> = Vec::new();
+    let mut lags: Vec<i64> = Vec::new();
     let mut firsts: HashMap<usize, u64> = HashMap::new();
     for (started, name) in names {
         let r = replay(&dir.join(&name), name, started, max_payload)?;
         out.covered_ms = out.covered_ms.saturating_add(r.window.duration_ms);
+        out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
+        out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
         for l in &r.launches {
             if l.class == 0 {
                 out.orphaned_launches += 1;
@@ -282,20 +346,30 @@ pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
                 continue;
             }
             out.flap_launches += 1;
+            if l.c1_scope {
+                out.c1_scope_launches += 1;
+            }
+            if let Some(lag) = l.fetch_lag_ms {
+                lags.push(lag);
+            }
             if !r.connectivity.any_connected_at(l.seen_ns) {
                 out.outage_launches += 1;
             }
             match l.class {
                 1 => {
                     out.full_before += 1;
-                    leads.push(l.delta_ns / 1_000);
+                    if l.c1_scope {
+                        out.c1_scope_full_before += 1;
+                    }
+                    leads.push(l.delta_us);
                     if let Some(s) = l.source {
                         *firsts.entry(s).or_default() += 1;
                     }
                 }
                 2 => out.hash_only_before += 1,
                 3 => out.after += 1,
-                _ => out.missed += 1,
+                4 => out.missed += 1,
+                _ => out.clock_unknown += 1,
             }
             match l.external_buys {
                 Some(n) => {
@@ -312,6 +386,11 @@ pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
     out.lead_p95_us = percentile(&leads, 950);
     out.lead_p99_us = percentile(&leads, 990);
     out.lead_max_us = leads.last().copied();
+    lags.sort_unstable();
+    out.fetch_lag_ms_min = lags.first().copied();
+    out.fetch_lag_ms_p50 = percentile(&lags, 500);
+    out.fetch_lag_ms_max = lags.last().copied();
+    out.clock_suspect = out.fetch_lag_ms_min.is_some_and(|m| m < 0);
     out.first_full_before = SourceId::ALL
         .iter()
         .enumerate()
@@ -332,7 +411,9 @@ impl Census {
                 .set(e::REORGS, w.reorgs)
                 .set(e::RESYNCS, w.resyncs)
                 .set(e::LOST_RECORDS, w.lost_records)
-                .set(e::STATE, w.state);
+                .set(e::STATE, w.state)
+                .set(e::BLOCKS_SKIPPED, w.blocks_skipped)
+                .set(e::UNJOINED, w.unjoined);
             if let Some(b) = w.first_block {
                 row.set(e::FIRST_BLOCK, b);
             }
@@ -353,8 +434,7 @@ impl Census {
             .set(cs::AFTER, self.after)
             .set(cs::MISSED, self.missed)
             .set(cs::CONTESTED_LAUNCHES, self.contested_launches)
-            .set(cs::EXTERNAL_BUYS, self.external_buys)
-            .set(cs::BUYS_UNKNOWN, self.buys_unknown);
+            .set(cs::EXTERNAL_BUYS, self.external_buys);
         for (tag, v) in [
             (cs::LEAD_P50_US, self.lead_p50_us),
             (cs::LEAD_P95_US, self.lead_p95_us),
@@ -372,33 +452,60 @@ impl Census {
                 .set(e::FIRST_FULL_BEFORE, *n);
             d.push(cs::SOURCES, row.into_nested());
         }
-        d.set(cs::CRITERIA, CRITERIA_UNCONFIRMED);
+        d.set(cs::CRITERIA, CRITERIA_UNCONFIRMED)
+            .set(cs::BUYS_UNKNOWN, self.buys_unknown)
+            .set(cs::CLOCK_UNKNOWN, self.clock_unknown)
+            .set(cs::C1_SCOPE_LAUNCHES, self.c1_scope_launches)
+            .set(cs::C1_SCOPE_FULL_BEFORE, self.c1_scope_full_before)
+            .set(cs::UNJOINED, self.unjoined)
+            .set(cs::BLOCKS_SKIPPED, self.blocks_skipped);
+        for (tag, v) in [
+            (cs::FETCH_LAG_MS_MIN, self.fetch_lag_ms_min),
+            (cs::FETCH_LAG_MS_P50, self.fetch_lag_ms_p50),
+            (cs::FETCH_LAG_MS_MAX, self.fetch_lag_ms_max),
+        ] {
+            if let Some(v) = v {
+                d.set(tag, v);
+            }
+        }
+        d.set(cs::CLOCK_SUSPECT, self.clock_suspect);
         d.encode().map_err(|e| e.to_string())
     }
 
     /// The text view printed by the CLI.
     pub fn summary(&self) -> String {
         let opt = |v: Option<u64>| v.map_or("n/a".to_string(), |v| v.to_string());
+        let opti = |v: Option<i64>| v.map_or("n/a".to_string(), |v| v.to_string());
         let mut s = format!(
-            "covered_ms={} windows={} flap_launches={} four_launches={} orphaned={} outage={}\n\
-             full_before={} hash_only_before={} after={} missed={}\n\
+            "covered_ms={} windows={} flap_launches={} c1_scope={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={}\n\
+             before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
+             fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
              contested={} external_buys={} buys_unknown={} criteria={}\n",
             self.covered_ms,
             self.windows.len(),
             self.flap_launches,
+            self.c1_scope_launches,
             self.four_launches,
             self.orphaned_launches,
             self.outage_launches,
+            self.unjoined,
+            self.blocks_skipped,
             self.full_before,
+            self.c1_scope_full_before,
             self.hash_only_before,
             self.after,
             self.missed,
+            self.clock_unknown,
             opt(self.lead_p50_us),
             opt(self.lead_p95_us),
             opt(self.lead_p99_us),
             opt(self.lead_max_us),
             self.full_before,
+            opti(self.fetch_lag_ms_min),
+            opti(self.fetch_lag_ms_p50),
+            opti(self.fetch_lag_ms_max),
+            self.clock_suspect,
             self.contested_launches,
             self.external_buys,
             self.buys_unknown,
@@ -406,15 +513,17 @@ impl Census {
         );
         for w in &self.windows {
             s.push_str(&format!(
-                "window {} {} blocks {}..{} duration_ms={} reorgs={} resyncs={} lost={}\n",
+                "window {} {} blocks {}..{} skipped={} duration_ms={} reorgs={} resyncs={} lost={} unjoined={}\n",
                 w.journal,
                 w.state,
                 opt(w.first_block),
                 opt(w.last_block),
+                w.blocks_skipped,
                 w.duration_ms,
                 w.reorgs,
                 w.resyncs,
-                w.lost_records
+                w.lost_records,
+                w.unjoined
             ));
         }
         s
@@ -426,9 +535,12 @@ mod tests {
     use super::*;
     use crate::canonical_join::{Joined, LaunchRef, Venue, Visibility};
     use crate::runtime_journal::{
-        RuntimeJournal, SourceEvent, canonical_launch_payload, orphaned_launch_payload,
-        reorg_payload, resync_payload, source_event_payload, window_payload,
+        EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload,
+        orphaned_launch_payload, pending_launch_payload, reorg_payload, resync_payload,
+        source_event_payload, window_payload,
     };
+
+    const BLOCK_MS: u64 = 1_792_000_000_000;
 
     fn launch(venue: Venue, block: u8, tx: u8, buys: Option<u32>, seen: u64) -> LaunchRef {
         LaunchRef {
@@ -439,7 +551,10 @@ mod tests {
             tx_hash: [tx; 32],
             token: None,
             external_buys: buys,
+            c1_scope: tx != 3,
+            block_ms: BLOCK_MS,
             block_seen_ns: seen,
+            block_seen_unix_ms: Some(BLOCK_MS + u64::from(tx) * 100),
         }
     }
 
@@ -458,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn the_census_replays_classes_orphans_outages_and_windows() {
+    fn the_census_replays_classes_scope_coverage_and_window_states() {
         let dir = std::env::temp_dir().join(format!("bsc-g04-census-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let p = SourceId::PublicNode;
@@ -472,65 +587,91 @@ mod tests {
                 }),
             )
         };
+        let pending = |l: LaunchRef| {
+            (
+                RecordKind::Canonical,
+                l.block_seen_ns,
+                pending_launch_payload(&l),
+            )
+        };
         let full = |lead| Visibility::FullBefore {
             source: p,
-            lead_ns: lead,
+            lead_us: lead,
         };
+        let l1 = launch(Venue::Flap, 10, 1, Some(2), 100);
+        let l2 = launch(Venue::Flap, 11, 2, Some(0), 200);
+        let l3 = launch(Venue::Flap, 11, 3, Some(1), 200);
+        let l4 = launch(Venue::Four, 11, 4, None, 200);
+        let l5 = launch(Venue::Flap, 12, 5, None, 400);
+        let l6 = launch(Venue::Flap, 13, 6, Some(0), 500);
+        let l7 = launch(Venue::Flap, 14, 7, Some(0), 550);
         let mut records = vec![
             (
                 RecordKind::Canonical,
                 1,
-                window_payload(true, 10, &[10; 32]),
+                window_payload(b'H', 10, &[10; 32]),
             ),
             (
                 RecordKind::Runtime,
                 5,
                 source_event_payload(p, SourceEvent::Connected),
             ),
-            joined(launch(Venue::Flap, 10, 1, Some(2), 100), full(3_000_000)),
-            joined(launch(Venue::Flap, 11, 2, Some(0), 200), full(1_000_000)),
+            pending(l1),
+            joined(l1, full(3_000)),
+            pending(l2),
+            pending(l3),
+            pending(l4),
+            joined(l2, full(1_000)),
             joined(
-                launch(Venue::Flap, 11, 3, Some(1), 200),
+                l3,
                 Visibility::HashOnlyBefore {
                     source: p,
-                    lead_ns: 5,
+                    lead_us: 5,
                 },
             ),
-            joined(launch(Venue::Four, 11, 4, None, 200), Visibility::Missed),
+            joined(l4, Visibility::Missed),
             (
                 RecordKind::Runtime,
                 300,
                 source_event_payload(p, SourceEvent::Disconnected),
             ),
-            joined(launch(Venue::Flap, 12, 5, None, 400), Visibility::Missed),
+            pending(l5),
+            joined(l5, Visibility::ClockUnknown { source: p }),
+            pending(l6),
             joined(
-                launch(Venue::Flap, 13, 6, Some(0), 500),
+                l6,
                 Visibility::After {
                     source: p,
-                    lag_ns: 9,
+                    lag_us: 9,
                 },
             ),
             (RecordKind::Reorg, 600, reorg_payload(1, 13, &[99; 32])),
+            (RecordKind::Canonical, 600, orphaned_launch_payload(&l6)),
+            (RecordKind::Reorg, 700, resync_payload(13, 20)),
+            // Received, never joined: the process ends before its join.
+            pending(l7),
             (
                 RecordKind::Canonical,
-                600,
-                orphaned_launch_payload(&launch(Venue::Flap, 13, 6, Some(0), 500)),
+                800,
+                window_payload(b'K', 20, &[20; 32]),
             ),
-            (RecordKind::Reorg, 700, resync_payload(13, 20)),
             (
                 RecordKind::Canonical,
                 2_000_000_000,
-                window_payload(false, 20, &[20; 32]),
+                window_payload(b'E', 21, &[21; 32]),
             ),
+            (RecordKind::Runtime, 2_000_000_001, EXIT_PAYLOAD.to_vec()),
         ];
         write(&dir, 1_000, &records);
-        // A second process window whose tail was cut mid-frame.
-        records.truncate(4);
-        let cut = write(&dir, 2_000, &records);
+        // A killed process: its records up to the checkpoint, no end record.
+        records.truncate(20);
+        write(&dir, 2_000, &records);
+        // A window whose last frame was cut.
+        let cut = write(&dir, 3_000, &records[..4]);
         let bytes = fs::read(&cut).unwrap();
         fs::write(&cut, &bytes[..bytes.len() - 5]).unwrap();
-        // A third whose frame is corrupt: nothing of it counts.
-        let bad = write(&dir, 3_000, &records);
+        // A corrupt frame: nothing of it counts.
+        let bad = write(&dir, 4_000, &records[..4]);
         let mut bytes = fs::read(&bad).unwrap();
         let last = bytes.len() - 1;
         bytes[last] ^= 0xFF;
@@ -539,42 +680,80 @@ mod tests {
 
         let c = census(&dir, 4096).unwrap();
         let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
-        assert_eq!(states, ["COMPLETE", "TAIL_INCOMPLETE", "INVALID"]);
-        let w = &c.windows[0];
+        assert_eq!(
+            states,
+            ["COMPLETE", "UNTERMINATED", "TAIL_INCOMPLETE", "INVALID"]
+        );
+        let (w0, w1) = (&c.windows[0], &c.windows[1]);
         assert_eq!(
             (
-                w.first_block,
-                w.last_block,
-                w.reorgs,
-                w.resyncs,
-                w.duration_ms
+                w0.first_block,
+                w0.last_block,
+                w0.reorgs,
+                w0.resyncs,
+                w0.blocks_skipped,
+                w0.unjoined
             ),
-            (Some(10), Some(20), 1, 1, 2_000)
+            (Some(10), Some(21), 1, 1, 8, 1)
         );
-        // Window 1: four Flap launches remain (one orphaned); window 2: its
-        // first launch, the second one is in the cut frame.
+        // The killed window ends at its checkpoint.
+        assert_eq!((w1.last_block, w1.unjoined), (Some(20), 1));
+        // Flap: w0 l1 l2 l3 l5 (l6 orphaned), w1 the same, w2 nothing (l1's
+        // record is the cut frame).
         assert_eq!(
             (c.flap_launches, c.four_launches, c.orphaned_launches),
-            (5, 1, 1)
+            (8, 2, 2)
         );
         assert_eq!(
-            (c.full_before, c.hash_only_before, c.after, c.missed),
-            (3, 1, 0, 1)
+            (
+                c.full_before,
+                c.hash_only_before,
+                c.after,
+                c.missed,
+                c.clock_unknown
+            ),
+            (4, 2, 0, 0, 2)
         );
-        // Block 12 came while PublicNode was disconnected.
-        assert_eq!(c.outage_launches, 1);
-        // Block 12's buys are unknown: in neither contested nor external_buys.
+        // l3 is not of the C1 scope.
+        assert_eq!((c.c1_scope_launches, c.c1_scope_full_before), (6, 4));
+        // One unjoined launch per window: l7 twice, and l1 of the cut window
+        // (its join is the cut frame).
+        assert_eq!((c.unjoined, c.blocks_skipped), (3, 16));
+        // Block 12 came while PublicNode was disconnected (in both windows).
+        assert_eq!(c.outage_launches, 2);
         assert_eq!(
             (c.contested_launches, c.external_buys, c.buys_unknown),
-            (3, 5, 1)
+            (4, 6, 2)
         );
-        assert_eq!(c.lead_max_us, Some(3_000));
-        assert_eq!(c.lead_p50_us, Some(3_000));
-        assert_eq!(c.lead_p95_us, None, "3 samples cannot carry a p95");
-        assert!(c.first_full_before.contains(&(p, 3)));
+        assert_eq!(
+            (c.lead_max_us, c.lead_p50_us, c.lead_p95_us),
+            (Some(3_000), Some(1_000), None)
+        );
+        assert_eq!(
+            (c.fetch_lag_ms_min, c.fetch_lag_ms_max),
+            (Some(100), Some(500))
+        );
+        assert!(!c.clock_suspect);
+        assert!(c.first_full_before.contains(&(p, 4)));
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.text(cs::CRITERIA).unwrap(), CRITERIA_UNCONFIRMED);
-        assert!(c.summary().contains("flap_launches=5"));
+        assert!(c.summary().contains("c1_scope=6"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_negative_fetch_lag_marks_the_local_clock_suspect() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-skew-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut l = launch(Venue::Flap, 1, 1, Some(0), 1);
+        l.block_seen_unix_ms = Some(BLOCK_MS - 40);
+        let payload = canonical_launch_payload(&Joined {
+            launch: l,
+            visibility: Visibility::Missed,
+        });
+        write(&dir, 1, &[(RecordKind::Canonical, 1, payload)]);
+        let c = census(&dir, 4096).unwrap();
+        assert_eq!((c.fetch_lag_ms_min, c.clock_suspect), (Some(-40), true));
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -585,6 +764,6 @@ mod tests {
         assert_eq!(percentile(&v, 990), Some(99));
         assert_eq!(percentile(&v[..99], 990), None);
         assert_eq!(percentile(&v[..20], 950), Some(19));
-        assert_eq!(percentile(&[], 500), None);
+        assert_eq!(percentile::<u64>(&[], 500), None);
     }
 }

@@ -12,18 +12,28 @@
 //! - `Runtime` `b'S'`: a source transition, `b'S' | source u8 | event u8`
 //!   (see [`SourceEvent`]).
 //!
+//! - `Canonical` `b'P'`: a canonical launch received (not joined yet),
+//!   `b'P' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`; a `P`
+//!   without its `C` or `O` was lost (crash) and is counted as unjoined.
 //! - `Canonical` `b'C'`: a canonical launch joined with the sightings,
 //!   `b'C' | venue u8 | block u64 | block_hash [32] | tx_index u64 | tx_hash
-//!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source u8 |
-//!   delta_ns u64` (integers LE; venue 1 Flap, 2 Four; class per
-//!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF and delta 0 for a miss).
+//!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source
+//!   u8 | delta_us u64 | block_ms u64 | c1_scope u8 | fetch_lag? u8 i64` (integers
+//!   LE; venue 1 Flap, 2 Four; class per
+//!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF
+//!   and delta 0 for a miss; delta = lead or lag against the block time;
+//!   fetch_lag = local wall ms at the header fetch minus block_ms).
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
 //! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
 //! - `Reorg` `b'G'`: a resync (gap or reorg deeper than the window),
 //!   `b'G' | from u64 | to u64`.
-//! - `Canonical` `b'H'` / `b'E'`: the first / last canonical block of this
-//!   process, `b'H'|b'E' | number u64 | hash [32]`: the covered window.
+//! - `Canonical` `b'H'` / `b'E'` / `b'K'`: the first / last canonical block
+//!   of this process and periodic checkpoints of the head,
+//!   `b'H'|b'E'|b'K' | number u64 | hash [32]`: the covered window, also
+//!   after a crash (last `K`).
+//! - `Runtime` `b'X'`: the clean end of this process (journal committed
+//!   after it); its absence marks a killed or crashed process.
 //!
 //! Other pending transactions are only counted (runtime status), not
 //! journaled: the journal stays bounded over long read-only runs.
@@ -101,8 +111,29 @@ pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     };
     out.push(source);
     out.extend_from_slice(&delta.to_le_bytes());
+    out.extend_from_slice(&l.block_ms.to_le_bytes());
+    out.push(u8::from(l.c1_scope));
+    let lag = l.fetch_lag_ms();
+    out.push(u8::from(lag.is_some()));
+    out.extend_from_slice(&lag.unwrap_or(0).to_le_bytes());
     out
 }
+
+/// The length of a `C` record.
+pub const CANONICAL_LAUNCH_LEN: usize = 136;
+
+pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
+    let mut out = Vec::with_capacity(74);
+    out.push(b'P');
+    out.push(venue_byte(l.venue));
+    out.extend_from_slice(&l.block_number.to_le_bytes());
+    out.extend_from_slice(&l.block_hash);
+    out.extend_from_slice(&l.tx_hash);
+    out
+}
+
+/// The clean end of the process (`Runtime` kind).
+pub const EXIT_PAYLOAD: [u8; 1] = [b'X'];
 
 pub fn orphaned_launch_payload(l: &LaunchRef) -> Vec<u8> {
     let mut out = Vec::with_capacity(74);
@@ -131,10 +162,10 @@ pub fn resync_payload(from: u64, to: u64) -> Vec<u8> {
     out
 }
 
-/// `first` true: the first canonical block of this process (`H`), else the last (`E`).
-pub fn window_payload(first: bool, number: u64, hash: &[u8; 32]) -> Vec<u8> {
+/// A window mark: `b'H'` first, `b'E'` last, `b'K'` checkpoint.
+pub fn window_payload(tag: u8, number: u64, hash: &[u8; 32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(41);
-    out.push(if first { b'H' } else { b'E' });
+    out.push(tag);
     out.extend_from_slice(&number.to_le_bytes());
     out.extend_from_slice(hash);
     out
@@ -311,20 +342,20 @@ mod tests {
             tx_hash: [2; 32],
             token: Some([4; 20]),
             external_buys: Some(5),
+            c1_scope: true,
+            block_ms: 1_000,
             block_seen_ns: 0,
+            block_seen_unix_ms: Some(990),
         };
         let joined = Joined {
             launch,
             visibility: Visibility::FullBefore {
                 source: SourceId::PublicNode,
-                lead_ns: 9,
+                lead_us: 9,
             },
         };
         let c = canonical_launch_payload(&joined);
-        assert_eq!(
-            c.len(),
-            1 + 1 + 8 + 32 + 8 + 32 + 1 + 20 + 1 + 4 + 1 + 1 + 8
-        );
+        assert_eq!(c.len(), CANONICAL_LAUNCH_LEN);
         assert_eq!(&c[..2], &[b'C', 1]);
         assert_eq!(&c[2..10], &7u64.to_le_bytes());
         assert_eq!(&c[42..50], &3u64.to_le_bytes());
@@ -333,8 +364,15 @@ mod tests {
             &[&[1u8][..], &[4u8; 20][..], &[1, 5, 0, 0, 0][..]].concat()[..]
         );
         assert_eq!(
-            &c[108..],
+            &c[108..118],
             &[&[1u8, 1][..], &9u64.to_le_bytes()[..]].concat()[..]
+        );
+        assert_eq!(&c[118..126], &1_000u64.to_le_bytes());
+        // C1 scope, then a signed fetch lag: the local clock read 10 ms
+        // before the block time (it is behind).
+        assert_eq!(
+            &c[126..],
+            &[&[1u8, 1][..], &(-10i64).to_le_bytes()[..]].concat()[..]
         );
         let missed = Joined {
             launch,
@@ -342,13 +380,15 @@ mod tests {
         };
         let m = canonical_launch_payload(&missed);
         assert_eq!(
-            &m[m.len() - 10..],
+            &m[108..118],
             &[&[4u8, 0xFF][..], &[0u8; 8][..]].concat()[..]
         );
         assert_eq!(orphaned_launch_payload(&launch).len(), 74);
+        assert_eq!(pending_launch_payload(&launch)[..2], [b'P', 1]);
+        assert_eq!(pending_launch_payload(&launch).len(), 74);
         assert_eq!(reorg_payload(2, 9, &[3; 32])[..5], [b'R', 2, 0, 0, 0]);
         assert_eq!(resync_payload(1, 2).len(), 17);
-        assert_eq!(window_payload(false, 1, &[0; 32])[0], b'E');
+        assert_eq!(window_payload(b'K', 1, &[0; 32])[0], b'K');
     }
 
     #[test]
