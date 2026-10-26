@@ -1,0 +1,13 @@
+# Phase H: live Strategy C SHADOW run 1793049942243 (26.10.2026, 60 min, read-only Mainnet, PAPER valuation)
+
+The run of the H gate fixes (`cec8336a`); it supersedes `live_strategy_1793044575806`. Execution was OFF (no PAPER executor, no signature); "PAPER" below is the strategy's own valuation.
+
+- Run build: `bsc_runtime` debug, built in the main checkout at `cec8336a` (clean) and copied outside the repository before the start, sha256 `ccabb610095080cc6c679e5b80a9b2e7154b8c9df4c857aae745dbe33cc11d32` (`capture-run.dbrec` `build_sha256`; its `checkout-at-start unknown` because it ran outside a checkout). Config: the committed `cec8336a` `bsc/config/ingress.public.env`, sha256 `a84f71475bd1b38691fbea553014e906c1b74c4186b475a7bacf4b7c5a5c46a7` (`config_sha256`), filter profile `buy_count:2:,unique_buyers:2:`, 0.01 BNB per entry, gas price 0.1 gwei.
+- Replays, all 201 of 201 outputs reproduced:
+  - `strategy-replay-run-build.dbrec`: the run build. PASS, config match.
+  - `strategy-replay-cec-build.dbrec`: `git archive cec8336a`, sha256 `392df40d69bd3fa3f74430221a5f07f8d550b1c2faff1b91fd63caaaa45c3720`, from that export's root. PASS, config match.
+  - `strategy-replay-final-build.dbrec`: the final build `bcde0aaf` (Phase I), sha256 `97a84a0de1d894bb6a16e6c60d9367c1056e3e46a8c5475e33fc5a3db27a8ed1`, with its config except the run's strategy gas price (`BSC_STRATEGY_C_GAS_PRICE_WEI`, and since gate L2 the equal `BSC_EXEC_GAS_PRICE_WEI`, `=100000000`; `BSC_EXEC_SESSION_CAP_WEI` raised to fit it). Same outputs and losses; verdict DIFFERS only through `config_match = false` (the config is bound by the file's hash). With the committed 0.05 gwei, the final build values the same 3 positions differently (output 42 on), by design.
+- Reproduce: copy `capture-run.dbrec` and `segment_*.dbjnl` to `<dir>/bsc-runtime/journal/1793049942243/`, then run `bsc_runtime strategy-replay --rundir <dir> --config bsc/config/ingress.public.env --run 1793049942243` from the root of a `cec8336a` checkout or export, with its own build.
+- Result: 192 Flap launches; 3 passed, 125 rejected, 64 not tracked, 0 incomplete. 3 entries, 3 closed: 1 by creator sell and 2 by timeout, 0 open at the stop.
+- All 3 closed positions lost money after every cost: −0.00389005 BNB in total, −12.9 % per position on average (−5.1 %, −32.8 %, −0.7 %). No positive expectancy is shown. A technical Phase H PASS is not an economic strategy PASS.
+- Unlike the superseded run, the tokens were traded after the fill (16, 5 and 21 trades). No exit block had trades, so valuing an exit with its own block's trades (gate fix `cec8336a`) is still proven only by tests and the reviewer's probes, not by this run.
