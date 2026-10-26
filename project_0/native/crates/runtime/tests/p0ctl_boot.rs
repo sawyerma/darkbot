@@ -131,3 +131,164 @@ fn dec07_p0ctl_boot_records_a_flow_and_refuses_unapproved_steps() {
     assert_ne!(token_of("f1h", "1h"), started);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// DEC-07: a raw-capture flow (mode market) takes no operational arguments and audits the
+/// configured capture source; its start hands the desktop launcher exactly the admission of the
+/// flow's record, token, approval time, mode and duration (`darkbotctl capture start SECONDS`),
+/// and a refusal of the launcher is the step's FAILED outcome.
+#[test]
+fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = std::env::temp_dir().join(format!("p0ctl_boot_market_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("data")).unwrap();
+    let run = |args: &[&str], ctl: Option<&std::path::Path>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_p0ctl"));
+        cmd.env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("P0_MARKET_SOURCE", "logs")
+            .arg("--project")
+            .arg(&d)
+            .args(args);
+        if let Some(ctl) = ctl {
+            cmd.env("DARKBOT_CTL", ctl);
+        }
+        let out = cmd.output().unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let (code, err) = run(
+        &[
+            "boot",
+            "offline",
+            "--flow",
+            "m0",
+            "--mode",
+            "market",
+            "--duration",
+            "10m",
+            "--",
+            "--x",
+            "1",
+        ],
+        None,
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("BOOT_MARKET_ARGS"), "{err}");
+    for flow in ["m1", "m2"] {
+        let _ = run(
+            &[
+                "boot",
+                "offline",
+                "--flow",
+                flow,
+                "--mode",
+                "market",
+                "--duration",
+                "10m",
+            ],
+            None,
+        );
+        assert_eq!(boot_control::status(&d, flow).unwrap().flow.mode, "market");
+    }
+    let (code, err) = run(
+        &[
+            "boot",
+            "network",
+            "--flow",
+            "m1",
+            "--approve",
+            "0000000000000000",
+            "--genesis-hash",
+            "unused",
+            "--provider-evidence",
+            "/unused.p0j",
+            "--capture-source",
+            "transactions",
+        ],
+        None,
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("BOOT_CAPTURE_SOURCE_MISMATCH"), "{err}");
+    // The start worker (internal `boot run`) with a recording launcher.
+    let script = |name: &str, body: &str| {
+        let p = d.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    };
+    let calls = d.join("calls.log");
+    let ok = script(
+        "ok-ctl",
+        &format!(
+            "printf '%s|%s|%s|%s|%s|%s\\n' \"$*\" \"$P0_MODE\" \"$P0_MEASUREMENT_DURATION\" \"$P0_NETWORK_AUDIT\" \"$P0_NETWORK_AUDIT_TOKEN\" \"$P0_NETWORK_AUDIT_APPROVED_AT\" >> '{}'",
+            calls.display()
+        ),
+    );
+    let token = "0123456789abcdef";
+    let (code, err) = run(
+        &[
+            "boot",
+            "run",
+            "--flow",
+            "m1",
+            "--step",
+            "START",
+            "--approve",
+            token,
+        ],
+        Some(&ok),
+    );
+    assert_eq!(code, 0, "{err}");
+    let call = std::fs::read_to_string(&calls).unwrap();
+    // p0ctl resolves the project directory canonically.
+    let record = boot_control::network_record_path(&d.canonicalize().unwrap(), "m1").unwrap();
+    let fields: Vec<&str> = call.trim().split('|').collect();
+    assert_eq!(
+        fields[..5],
+        [
+            "capture start 600",
+            "market",
+            "10m",
+            record.display().to_string().as_str(),
+            token
+        ]
+    );
+    assert!(
+        fields[5].parse::<u64>().unwrap() > 0,
+        "approved now: {call}"
+    );
+    assert_eq!(
+        boot_control::status(&d, "m1").unwrap().start.name(),
+        "COMPLETED"
+    );
+    let refusing = script("no-ctl", "echo 'BOOT_AUDIT_REQUIRED: refused' >&2; exit 1");
+    let (code, _) = run(
+        &[
+            "boot",
+            "run",
+            "--flow",
+            "m2",
+            "--step",
+            "START",
+            "--approve",
+            token,
+        ],
+        Some(&refusing),
+    );
+    assert_eq!(code, 2);
+    let s = boot_control::status(&d, "m2").unwrap();
+    match &s.start {
+        boot_control::StepState::Done(o) => assert_eq!(
+            (o.state.as_str(), o.code.as_str()),
+            (
+                "FAILED",
+                "BOOT_RAW_CAPTURE_REFUSED: BOOT_AUDIT_REQUIRED: refused"
+            )
+        ),
+        other => panic!("{other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}

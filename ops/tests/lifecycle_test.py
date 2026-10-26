@@ -1,54 +1,18 @@
 #!/usr/bin/env python3
-"""macOS launchd integration, real capture/gateway, local-only fake Solana.
+"""macOS launchd integration, real capture/gateway, a local-only Solana endpoint that counts connections.
 Every kill/bootout is restricted to this test's unique com.darkbot.test.* jobs.
 No production HOME, labels, sockets, credentials or provider calls are used.
 """
-import base64, hashlib, json, os, pathlib, plistlib, re, select, shutil, socket, socketserver, struct, subprocess, tempfile, threading, time
+import os, pathlib, plistlib, re, shutil, socket, socketserver, subprocess, tempfile, threading, time
 from concurrent.futures import ThreadPoolExecutor
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORK = pathlib.Path(tempfile.mkdtemp(prefix='darkbot-test.', dir='/private/tmp'))
 (WORK/'.isolated').touch()
-RATE_LIMIT = threading.Event()
+CONNECTIONS = []
 class Solana(socketserver.BaseRequestHandler):
+    """The configured Solana endpoint: an unapproved capture never connects to it (DEC-07)."""
     def handle(self):
-        s = self.request; s.settimeout(3)
-        def read(n):
-            out=b''
-            while len(out)<n:
-                part=s.recv(n-len(out))
-                if not part: raise EOFError()
-                out+=part
-            return out
-        def send(obj, opcode=1):
-            data=json.dumps(obj).encode() if opcode==1 else obj
-            s.sendall(bytes([128|opcode])+(bytes([len(data)]) if len(data)<126 else b'\x7e'+struct.pack('!H',len(data)))+data)
-        try:
-            header=b''
-            while not header.endswith(b'\r\n\r\n'): header+=read(1)
-            if RATE_LIMIT.is_set():
-                s.sendall(b'HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'); return
-            key=re.search(br'Sec-WebSocket-Key:\s*(\S+)',header,re.I)[1]
-            accept=base64.b64encode(hashlib.sha1(key+b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest())
-            s.sendall(b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+accept+b'\r\n\r\n')
-            subs={}; slot=100; tick=time.monotonic()
-            while True:
-                if select.select([s],[],[],0.05)[0]:
-                    a,b=read(2); n=b&127
-                    if n==126:n=struct.unpack('!H',read(2))[0]
-                    if n==127:n=struct.unpack('!Q',read(8))[0]
-                    mask=read(4) if b&128 else None; data=read(n)
-                    if mask:data=bytes(c^mask[i%4] for i,c in enumerate(data))
-                    if a&15==8: send(data,8);return
-                    if a&15==9:send(data,10);continue
-                    if a&15!=1:continue
-                    msg=json.loads(data);method=msg.get('method','')
-                    if method.endswith('Subscribe'):
-                        subs[method]=msg['id'];send({'jsonrpc':'2.0','id':msg['id'],'result':msg['id']})
-                if time.monotonic()-tick<0.15:continue
-                tick=time.monotonic();slot+=1
-                if 'slotSubscribe' in subs:send({'jsonrpc':'2.0','method':'slotNotification','params':{'subscription':subs['slotSubscribe'],'result':{'slot':slot,'parent':slot-1,'root':slot-2}}})
-                if 'logsSubscribe' in subs:send({'jsonrpc':'2.0','method':'logsNotification','params':{'subscription':subs['logsSubscribe'],'result':{'context':{'slot':slot},'value':{'signature':('1'*80)+str(slot).replace('0','2'),'err':None,'logs':[]}}}})
-        except (OSError, EOFError, ValueError):pass
+        CONNECTIONS.append(time.time())
 class Server(socketserver.ThreadingTCPServer):
     daemon_threads=True
 server=Server(('127.0.0.1',0),Solana);threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -91,57 +55,41 @@ if __name__ == "__main__":
         (WORK/'app/current').symlink_to(release,target_is_directory=True)
         (WORK/'app.conf').write_text('P0_APP_AUTOSTART_CAPTURE=1\nP0_APP_CAPTURE_SECS=until-stopped\n')
         (WORK/'capture.env').write_text(f'P0_WS_URL=ws://127.0.0.1:{server.server_address[1]}\nP0_PROGRAM_ID=11111111111111111111111111111111\nP0_MARKET_SOURCE=logs\nP0_MARKET_OUT_DIR={WORK}/data\nP0_MARKET_READY_TIMEOUT_SECS=4\nP0_MARKET_DRAIN_TIMEOUT_SECS=3\nP0_MARKET_HEARTBEAT_SECS=1\n')
-        run('app');first=wait(pid);firstlaunch=launch();firstgen=wait(lambda:gen())
-        with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(lambda _:run('capture','start','until-stopped'),range(4)))
-        assert pid()==first and launch()==firstlaunch and gen()==firstgen
+        # DEC-07: the raw capture reads Mainnet only admitted to its approved boot flow (mode
+        # market). The autostart and every unapproved start are refused, and nothing is read; the
+        # admitted start (and with it the run lifecycle: drain, crash attribution, 429 cooldown)
+        # stays offline NOT_RUN.
+        out=run('app');assert 'AUTOSTART_BOOT_REQUIRED' in out.stdout+out.stderr
+        wait(lambda:pid('gateway'));assert pid() is None and not (WORK/'run/capture.launch').exists()
+        with ThreadPoolExecutor(max_workers=4) as pool:refused=list(pool.map(lambda _:run('capture','start','until-stopped',ok=False),range(4)))
+        assert all(r.returncode and 'BOOT_AUDIT_REQUIRED' in r.stdout+r.stderr for r in refused)
+        assert pid() is None and not (WORK/'run/capture.launch').exists()
+        browser('gate')
+        # The capture refuses itself under launchd: a start naming an admission record that does
+        # not exist reaches the binary, which ends before any read with its own code.
+        forged=dict(env,P0_MODE='market',P0_NETWORK_AUDIT=str(WORK/'absent.p0j'),P0_NETWORK_AUDIT_TOKEN='0123456789abcdef',
+                    P0_NETWORK_AUDIT_APPROVED_AT=str(int(time.time())),P0_MEASUREMENT_DURATION='1m',P0_PROJECT_DIR=str(WORK/'app'))
+        p=subprocess.run([str(ROOT/'ops/darkbotctl'),'capture','start','60'],env=forged,text=True,capture_output=True,timeout=60)
+        print('$ darkbotctl capture start 60 (unknown record)\n'+p.stdout+p.stderr,flush=True)
+        assert p.returncode and 'BOOT_NETWORK_EVIDENCE_INVALID' in p.stdout+p.stderr
+        assert result()['code']=='BOOT_NETWORK_EVIDENCE_INVALID' and result()['launch_id']==launch()
+        wait(lambda:pid() is None)
         plist=plistlib.loads((WORK/'run/capture.plist').read_bytes());assert plist['KeepAlive'] is False
+        assert plist['EnvironmentVariables']['P0_NETWORK_AUDIT']==str(WORK/'absent.p0j')
         assert (WORK/'run/capture.plist').stat().st_mode&0o777==0o600
-        browser('live')
-        # Gateway crash/restart cannot change the capture run/generation.
-        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.gateway'],check=True)
-        run('up','--no-open');assert pid()==first and gen()==firstgen
-        browser('live')
-        stop=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'capture','stop'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-        wait(lambda:(WORK/'run/capture.stopping').exists() or stop.poll() is not None)
-        run('capture','start','until-stopped')
-        print(stop.communicate(timeout=35)[0]);assert stop.returncode==0
-        if launch()!=firstlaunch: # If first run already ended, old waiter must not wait on this new run.
-            assert pid();run('capture','stop')
-        assert (WORK/'app/data/market'/('app-'+firstlaunch)/'market_completion.p0j').exists()
-        assert result()['launch_id']==launch()
         assert (WORK/'run/capture.result').stat().st_mode&0o777==0o600
-        # B0: after user stop app must not start; only an explicit start can lift it.
-        marker=WORK/'run/capture.user_stopped'
-        assert marker.is_file(), 'manual stop marker required'
-        stopped_launch=launch()
-        run('app')
-        assert pid() is None and launch()==stopped_launch and marker.is_file()
-        run('capture','start','until-stopped')
-        assert pid() and launch()!=stopped_launch and not marker.exists()
-        crashlaunch=launch();crashgen=gen();wait(pid)
-        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
-        wait(lambda:pid() is None)
-        assert result()['launch_id']!=crashlaunch # Never attribute previous result to crashed run.
-        run('app');wait(lambda:gen()>crashgen);assert launch()!=crashlaunch
-        down=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'down'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-        wait(lambda:(WORK/'run/lifecycle.down').exists())
-        rejected=run('capture','start','until-stopped',ok=False);assert rejected.returncode!=0
-        print(down.communicate(timeout=35)[0]);assert down.returncode==0 and pid() is None and pid('gateway') is None
-        assert marker.is_file(), 'down must suspend autostart'
-        down_launch=launch()
-        run('app');assert pid() is None and launch()==down_launch and marker.is_file()
-        # Fresh explicit start removes the marker, even when Gateway was stopped.
-        run('capture','start','until-stopped')
-        assert pid() and not marker.exists() and launch()!=down_launch
-        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
-        wait(lambda:pid() is None)
-        RATE_LIMIT.set();run('app');limitedlaunch=launch();browser('429');wait(lambda:pid() is None,35)
-        assert result()['launch_id']==limitedlaunch
-        assert result()['code']=='MARKET_OBSERVER_STREAM_NOT_READY'
-        run('app');assert launch()==limitedlaunch and pid() is None
-        run('capture','stop');assert marker.is_file() # no-op stop also suspends next app
-        run('app');assert pid() is None and launch()==limitedlaunch and marker.is_file()
-        print('PASS: concurrent start, gateway crash, manual-stop autostart suppression, fresh explicit start, down/start exclusion, 429 and cooldown',flush=True)
+        # Gateway crash/restart starts no capture.
+        gateway=pid('gateway')
+        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.gateway'],check=True)
+        run('up','--no-open');assert wait(lambda:pid('gateway') not in (None,gateway)) and pid() is None
+        browser('gate')
+        # A stop without a capture is a no-op that still suspends the next autostart.
+        run('capture','stop');marker=WORK/'run/capture.user_stopped';assert marker.is_file()
+        out=run('app');assert pid() is None and marker.is_file()
+        run('down');assert pid() is None and pid('gateway') is None and marker.is_file()
+        refused=run('capture','start','until-stopped',ok=False);assert refused.returncode and 'BOOT_AUDIT_REQUIRED' in refused.stdout+refused.stderr
+        assert CONNECTIONS==[], 'a refused start never reads the network'
+        print('PASS: autostart and every unapproved start refused (BOOT_AUDIT_REQUIRED), the capture refuses an unknown record itself under launchd, gateway crash/restart and down start nothing, no network read; admitted run lifecycle NOT_RUN offline',flush=True)
         (WORK/'PASS').write_text('all lifecycle checks passed\n')
     finally:
         run('down',ok=False)

@@ -30,7 +30,7 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   const live = topicStatus === "LIVE";
   const flow = live ? analytics?.boot ?? null : null;
   const { busy, receipt } = useAnalyticsControl();
-  const [mode, setMode] = useState<"econ4h" | "shadow">("econ4h");
+  const [mode, setMode] = useState<"econ4h" | "shadow" | "market">("econ4h");
   const [ttlInput, setTtl] = useState("");
   const [genesis, setGenesis] = useState("");
   const [evidence, setEvidence] = useState("");
@@ -65,8 +65,9 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   return <Section title="Boot audit and start" aside={<span className="p0-quiet">{flow ? `flow ${flow.flowId.slice(0, 8)} · ${flow.mode}` : "no flow"}</span>}>
     <DetailRow title="TTL · registry" value={ttl ? `${ttl.value} s · ${ttl.minimum}…${ttl.maximum} s · ${ttl.source} · fixed per flow, changes between runs` : "unknown (no system status); the controller checks the bounds"}/>
     <div className="p0-formgrid">
-      <label>Boot mode<select value={mode} onChange={e => setMode(e.target.value as "econ4h" | "shadow")}>
-        <option value="econ4h">Market + Shadow (econ4h)</option><option value="shadow">Shadow only</option></select></label>
+      <label>Boot mode<select value={mode} onChange={e => setMode(e.target.value as "econ4h" | "shadow" | "market")}>
+        <option value="econ4h">Market + Shadow (econ4h)</option><option value="shadow">Shadow only</option>
+        <option value="market">Raw data only (market)</option></select></label>
       <label>TTL · seconds<input type="number" min={ttl ? String(ttl.minimum) : undefined} max={ttl ? String(ttl.maximum) : undefined}
         placeholder={ttl ? `${ttl.value} (registry)` : "registry value"} value={ttlInput} onChange={e => setTtl(e.target.value)}/></label>
       <label>Boot duration<select value={duration} onChange={e => setDuration(e.target.value)}>{DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}</select></label>

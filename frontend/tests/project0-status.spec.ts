@@ -220,9 +220,10 @@ test("schema rejection reloads once and stays blocked without subscribing", asyn
   expect(subscriptions).toBe(0);
 });
 
-test("Check & start drives the one existing capture command; drafts are never sent as parameters", async ({ page }) => {
+test("DEC-07: Check & start is the boot flow's; a running raw capture stops through its command; drafts are never sent", async ({ page }) => {
   await feed(page);
-  let process = { state: "STOPPED", run_id: "", pid: null as number | null, reason: "", observed_unix_ms: Date.now(), controller_available: true };
+  // A raw capture the boot flow started (mode market) is running.
+  let process = { state: "RUNNING", run_id: "run-1", pid: 1 as number | null, reason: "", observed_unix_ms: Date.now(), controller_available: true };
   const sent: CommandRequest[] = [];
   const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
   await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
@@ -250,11 +251,11 @@ test("Check & start drives the one existing capture command; drafts are never se
   await page.getByLabel("Observation").selectOption("market");
   await expect(preview).toContainText("no mode option");
   await page.getByLabel("Observation").selectOption("econ4h");
+  // DEC-07: no unapproved raw capture start exists in the tab; the boot flow (mode market) starts it.
   const start = page.getByRole("button", { name: "Check & start" });
-  await expect(start).toBeEnabled();
-  await start.click();
-  await expect(page.getByTestId("p0-capture-command-receipt")).toContainText("COMPLETED");
-  expect(sent.map((r) => [r.action, r.resourceId, r.params.length, r.expected])).toEqual([["project0.capture.start", "", 0, undefined]]);
+  await expect(start).toBeDisabled();
+  await expect(start).toHaveAttribute("title", /^BOOT_AUDIT_REQUIRED/);
+  await expect(page.getByLabel("Boot mode").locator("option[value=market]")).toHaveText("Raw data only (market)");
   // Stop asks in a separate control: a double-click on Stop never sends. An arm expires with its run.
   const stop = page.getByRole("button", { name: "Stop", exact: true });
   const confirm = page.getByRole("button", { name: "Confirm stop", exact: true });
@@ -267,7 +268,7 @@ test("Check & start drives the one existing capture command; drafts are never se
   await stop.click();
   await confirm.click();
   await expect(page.getByTestId("p0-capture-command-receipt")).toContainText("STOPPED", { timeout: 6000 });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capture.start", "project0.capture.stop"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capture.stop"]);
 });
 
 test("execution authorization and running liquidators are never fixed claims", async ({ page }) => {

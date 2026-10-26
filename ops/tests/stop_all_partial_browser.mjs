@@ -13,15 +13,15 @@ try{
  await p.goto(base+'/');
  await until(async()=>(await text('project-process-project0')).includes('STOPPED'),'P0 initial stopped');
  await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'BSC controller available');
- await p.getByTestId('project-startstop-project0').click();
- await until(async()=>(await text('project-process-project0')).includes('RUNNING'),'P0 running');
+ // DEC-07: the raw capture starts only through its boot flow; Stop All covers what runs.
+ assert.equal(await p.getByTestId('project-startstop-project0').isDisabled(),true);
+ assert((await p.locator('.ov-disabled-action',{has:p.getByTestId('project-startstop-project0')}).getAttribute('title')).startsWith('BOOT_AUDIT_REQUIRED'));
  await p.getByTestId('project-startstop-bsc').click();
  await until(async()=>(await text('project-process-bsc')).includes('RUNNING'),'BSC readiness fixture running');
  const gateway=pid('gateway');assert(gateway);
  await p.getByTestId('overview-stop-all').click();
  await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();
- // Project_0 completes; BSC never confirms its stop. Each target keeps its own result.
- await until(async()=>(await text('capture-command-receipt')).includes('COMPLETED'),'P0 stop completed');
+ // BSC never confirms its stop: the stop stays open and is never shown as complete.
  await until(async()=>(await text('overview-system')).includes('BSC · PENDING'),'BSC stop stays open');
  await new Promise(r=>setTimeout(r,5000));
  const system=await text('overview-system');
@@ -33,5 +33,5 @@ try{
  assert.equal(pid('gateway'),gateway,'the gateway keeps running');
  assert.deepEqual(errors,[]);
  writeFileSync(`${dir}/stop-all-partial.json`,JSON.stringify({passed:true,system},null,2));
- console.log('PASS Stop All partial failure: P0 COMPLETED, BSC PENDING/STOPPING and locked, gateway unchanged');
+ console.log('PASS Stop All with an unconfirmed BSC stop: BSC PENDING/STOPPING and locked, P0 Start gated (BOOT_AUDIT_REQUIRED) and STOPPED, gateway unchanged');
 }finally{await browser.close();}

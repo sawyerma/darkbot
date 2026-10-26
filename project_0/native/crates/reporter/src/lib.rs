@@ -1,6 +1,8 @@
 //! Project_0 read-only status publisher. Engine owns the socket; gateway reads it.
 pub mod analytics;
-pub mod env_file;
+/// The operator env-file loader, shared with `p0ctl boot` (DEC-07: one environment for the
+/// raw capture and its boot audit).
+pub use darkbot_runner::env_file;
 pub mod generation;
 pub mod proto;
 

@@ -8,7 +8,12 @@ describe("supervised capture controls", () => {
   it("exposes all real process states and only allows qualified actions", () => {
     for (const state of ["RUNNING", "STOPPED", "STOPPING", "FAILED", "UNKNOWN"] as const) {
       const indicator = { state, label: state, reason: "launchd" };
-      expect(projectControls("project0", indicator).startStop.enabled).toBe(["RUNNING", "STOPPED", "FAILED"].includes(state));
+      // DEC-07: only the Stop of a running capture; a start is the boot flow's (Capture tab).
+      expect(projectControls("project0", indicator).startStop.enabled).toBe(state === "RUNNING");
+      if (state === "STOPPED" || state === "FAILED") {
+        const c = projectControls("project0", indicator).startStop;
+        expect(c.enabled ? "" : c.reason).toMatch(/^BOOT_AUDIT_REQUIRED/);
+      }
       expect(stopAllControl(indicator).enabled).toBe(state === "RUNNING");
       expect(projectControls("bsc", indicator).startStop.enabled).toBe(["RUNNING", "STOPPED", "FAILED"].includes(state));
       expect(projectControls("bsc", indicator).logs.enabled).toBe(true);

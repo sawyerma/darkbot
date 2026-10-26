@@ -14,6 +14,7 @@ export interface DisabledControl { readonly enabled: false; readonly reason: str
 export interface EnabledControl { readonly enabled: true; readonly label: string; readonly action: CaptureAction | "bsc.readiness.start" | "bsc.readiness.stop"; readonly confirm?: string }
 export type Control = DisabledControl | EnabledControl;
 const NO_OWNER = "No qualified process controller for this project";
+const BOOT_REQUIRED = "BOOT_AUDIT_REQUIRED: the raw capture starts through the boot flow on the Capture tab (mode Raw data only)";
 // darkbotctl capture stop (_capture_stop_request): suspends autostart, signals the capture, and stops BSC readiness.
 const STOP_CONFIRM = "Die laufende Aufzeichnung wird geordnet beendet und das Journal versiegelt; der Autostart bleibt bis zum nächsten Start ausgesetzt. Eine laufende BSC-Readiness-Prüfung wird ebenfalls beendet. Das Cockpit bleibt geöffnet.";
 export function projectControls(key: ProjectKey, process: ProcessIndicator = processIndicator(null)): { startStop: Control; logs: { enabled: boolean; reason: string } } {
@@ -25,7 +26,9 @@ export function projectControls(key: ProjectKey, process: ProcessIndicator = pro
   }
   if (key !== "project0") return { startStop: { enabled: false, reason: NO_OWNER }, logs };
   if (process.state === "RUNNING") return { startStop: { enabled: true, label: "Stop", action: "project0.capture.stop", confirm: STOP_CONFIRM }, logs };
-  if (process.state === "STOPPED" || process.state === "FAILED") return { startStop: { enabled: true, label: "Start", action: "project0.capture.start" }, logs };
+  // DEC-07: a raw capture reads Mainnet, so it starts only through the boot flow (Capture tab);
+  // the controller refuses an unapproved start (BOOT_AUDIT_REQUIRED).
+  if (process.state === "STOPPED" || process.state === "FAILED") return { startStop: { enabled: false, reason: BOOT_REQUIRED }, logs };
   return { startStop: { enabled: false, reason: process.state === "STOPPING" ? "Journal drain and seal in progress" : "Process state unknown" }, logs };
 }
 export function stopAllControl(process: ProcessIndicator): Control {

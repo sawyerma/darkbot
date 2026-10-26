@@ -99,7 +99,7 @@ export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; 
 
 /** DEC-07: a new boot flow's offline preflight; its TTL and the run's duration are fixed here
  *  (empty TTL: the registry's value; the registry checks the bounds). */
-export function bootOfflineCommand(mode: "econ4h" | "shadow", ttlSeconds: string, duration: string): { params: Uint8Array } | { problem: string } {
+export function bootOfflineCommand(mode: "econ4h" | "shadow" | "market", ttlSeconds: string, duration: string): { params: Uint8Array } | { problem: string } {
   const ttl = ttlSeconds.trim() === "" ? undefined : positive(ttlSeconds);
   if (ttl === null) return { problem: "TTL: whole seconds within the registry bounds, or empty for its value." };
   return { params: toBinary(BootOfflineCommandSchema, message(BootOfflineCommandSchema, { mode, ttlSeconds: ttl, duration })) };

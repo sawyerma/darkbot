@@ -232,8 +232,11 @@ plist_env() { printf '    <key>%s</key><string>%s</string>\n' "$1" "$(printf '%s
 # One definition per run: duration, log, result and launch id; never KeepAlive, never at login.
 write_capture_plist() {
   local secs="$1" log="$2" launch="$3" k extra=""
-  # A launchd job does not inherit this shell: forward the few per-run overrides explicitly.
-  for k in P0_WS_URL P0_MARKET_READY_TIMEOUT_SECS P0_REPORT_MIN_INTERVAL_MS; do
+  # A launchd job does not inherit this shell: forward the few per-run overrides explicitly, and
+  # the boot admission of the approved record the capture admits itself to (DEC-07).
+  for k in P0_WS_URL P0_MARKET_READY_TIMEOUT_SECS P0_REPORT_MIN_INTERVAL_MS \
+           P0_MODE P0_MEASUREMENT_DURATION P0_PROJECT_DIR \
+           P0_NETWORK_AUDIT P0_NETWORK_AUDIT_TOKEN P0_NETWORK_AUDIT_APPROVED_AT; do
     if [ -n "${!k:-}" ]; then extra="$extra$(plist_env "$k" "${!k}")"$'\n'; fi
   done
   ( umask 077; cat > "$CAPTURE_PLIST" <<EOF
@@ -426,12 +429,33 @@ _gateway_down() {
 cmd_p0() {
   case "${1:-}" in job|source|capability|boot) ;; *) die "p0 job start|cancel|status … | p0 source set UNIT MODE [--expect-version N] | p0 source status | p0 capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0 capability status | p0 boot offline|network|start|cancel|status …" ;; esac
   [ -x "$P0CTL_BIN" ] || die "p0ctl nicht deployed: darkbotctl build && darkbotctl deploy"
+  if [ "$1" = boot ]; then
+    # DEC-07: a raw-capture flow audits exactly the environment the capture runs with (its
+    # staged env files) and starts it through this controller.
+    capture_env_files
+    export P0_ENV_FILE="$ENV_FILES"
+    DARKBOT_CTL="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    export DARKBOT_CTL
+  fi
   P0_PROJECT_DIR="$APP_HOME" exec "$P0CTL_BIN" "$@"
+}
+
+# The env files of the raw capture: staged from the checkout unless the gateway staged them.
+capture_env_files() {
+  if [ -z "${DARKBOT_TEST_DIR:-}" ]; then
+    # The deployed controller never needs access to the privacy-protected Desktop checkout.
+    if [ "${DARKBOT_STAGED:-}" != 1 ]; then stage_capture_env; fi
+    [ -f "$RUNDIR/capture.public.env" ] && [ -f "$RUNDIR/capture.private.env" ] || die "Capture-Konfiguration nicht bereitgestellt: darkbotctl deploy"
+    ENV_FILES="$RUNDIR/capture.public.env:$RUNDIR/capture.private.env"
+  fi
 }
 
 # ---------------------------------------------------------------- capture
 _capture_start() {
   assert_not_down
+  # DEC-07: a raw capture reads Mainnet only admitted to its approved boot flow (mode market);
+  # the capture refuses itself otherwise (BOOT_AUDIT_REQUIRED) — refused here before launchd.
+  [ -n "${P0_NETWORK_AUDIT:-}" ] || die "BOOT_AUDIT_REQUIRED: die Rohdaten-Capture startet nur über den Boot-Ablauf (darkbotctl p0 boot offline --mode market --duration D …, Netzwerk- und Startfreigabe)"
   local secs="${1:-}" log launch p foreign i=0 previous_generation
   previous_generation="$(cat "$GEN_FILE" 2>/dev/null || echo 0)"
   case "$secs" in until-stopped) ;; ''|*[!0-9]*) die "Dauer in Sekunden angeben, z. B. darkbotctl capture start 600 (keine Standarddauer)";; esac
@@ -446,12 +470,7 @@ _capture_start() {
   foreign="$(foreign_capture)"
   [ -z "$foreign" ] || die "Capture-Prozess $foreign läuft außerhalb von launchd – kein zweiter Start (Stopp: kill -TERM $foreign)"
   [ -x "$CAPTURE_BIN" ] || die "Capture nicht deployed: darkbotctl build && darkbotctl deploy"
-  if [ -z "${DARKBOT_TEST_DIR:-}" ]; then
-    # The deployed controller never needs access to the privacy-protected Desktop checkout.
-    if [ "${DARKBOT_STAGED:-}" != 1 ]; then stage_capture_env; fi
-    [ -f "$RUNDIR/capture.public.env" ] && [ -f "$RUNDIR/capture.private.env" ] || die "Capture-Konfiguration nicht bereitgestellt: darkbotctl deploy"
-    ENV_FILES="$RUNDIR/capture.public.env:$RUNDIR/capture.private.env"
-  fi
+  capture_env_files
   mkdir -p "$APP_HOME/data/market"
   clean_stale_reporter
   # Not running (checked above, under the lock): unloading the finished job cannot hit a live run.
@@ -567,11 +586,12 @@ app_inner() {
     if [ "$auto" != 1 ] || [ -z "$secs" ]; then
       say "AUTOSTART_OFF: keine automatische Beobachtung konfiguriert (P0_APP_AUTOSTART_CAPTURE=1 und P0_APP_CAPTURE_SECS in $APP_CONF)"
     elif [ -f "$USER_STOP_FILE" ]; then
-      say "AUTOSTART_SUSPENDED: Manueller Capture-Stopp aktiv; Neustart nur mit darkbotctl capture start <dauer>"
+      say "AUTOSTART_SUSPENDED: Manueller Capture-Stopp aktiv; Neustart nur über den Boot-Ablauf (Capture-Reiter oder darkbotctl p0 boot …)"
     elif recent_provider_failure; then
       say "PROVIDER_COOLDOWN: letzter Lauf endete ohne Marktstream – kein automatischer Neustart vor Ablauf der Sperre"
     else
-      ( trap - EXIT; _capture_start "$secs" ) || say "CAPTURE_START_FAILED – Cockpit öffnet trotzdem (darkbotctl logs capture)"
+      # DEC-07: an autostart has no approved boot flow; a raw capture never starts unapproved.
+      say "AUTOSTART_BOOT_REQUIRED: die Rohdaten-Capture startet nur über den Boot-Ablauf mit Netzwerk- und Startfreigabe (Capture-Reiter oder darkbotctl p0 boot …)"
     fi
   fi
   say "[3/3] Cockpit"

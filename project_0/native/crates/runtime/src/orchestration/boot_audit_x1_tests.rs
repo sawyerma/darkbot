@@ -615,3 +615,58 @@ fn dec07_an_earlier_network_record_is_readable_and_never_admits() {
         "BOOT_NETWORK_TOKEN"
     );
 }
+
+/// DEC-07: a standalone raw capture is admitted only to its approved network audit of boot mode
+/// market — the record, its token and approval time inside the TTL, its identity, executables
+/// and capture source, and exactly the audited duration; anything missing is
+/// BOOT_AUDIT_REQUIRED (never a read).
+#[test]
+fn dec07_a_raw_capture_is_admitted_only_to_its_market_flow() {
+    let d = temp("market");
+    let n = network_record_fixture(vec![]);
+    let path = d.join("network.p0j");
+    let mut w = journal::Writer::create(&path).unwrap();
+    w.append_typed(journal::Provenance::default(), &n).unwrap();
+    w.seal(true).unwrap();
+    let full: HashMap<&str, String> = [
+        ("P0_MODE", "market".to_string()),
+        (ENV_NETWORK_AUDIT, path.display().to_string()),
+        (
+            ENV_NETWORK_AUDIT_TOKEN,
+            n.audit.readiness_token[..16].to_string(),
+        ),
+        (ENV_NETWORK_AUDIT_APPROVED_AT, "1001".into()),
+        ("P0_MEASUREMENT_DURATION", "1m".into()),
+        ("P0_MARKET_DURATION_SECS", "60".into()),
+    ]
+    .into();
+    let current = || Ok(fixture_identity());
+    let binary = || Ok("binary".to_string());
+    let admit = |env: &HashMap<&str, String>| {
+        market_admission_with(&|k| env.get(k).cloned(), &current, &binary)
+    };
+    assert_eq!(admit(&full), Ok(n.clone()));
+    for missing in ["P0_MODE", ENV_NETWORK_AUDIT, "P0_MEASUREMENT_DURATION"] {
+        let mut env = full.clone();
+        env.remove(missing);
+        assert_eq!(admit(&env), Err(BOOT_AUDIT_REQUIRED), "{missing}");
+    }
+    let mut econ = full.clone();
+    econ.insert("P0_MODE", "econ4h".into());
+    assert_eq!(admit(&econ), Err(BOOT_AUDIT_REQUIRED), "only a market flow");
+    let mut longer = full.clone();
+    longer.insert("P0_MARKET_DURATION_SECS", "120".into());
+    assert_eq!(
+        admit(&longer),
+        Err("BOOT_IDENTITY_DRIFT"),
+        "the audited duration"
+    );
+    let mut late = full.clone();
+    late.insert(ENV_NETWORK_AUDIT_APPROVED_AT, "1060".into());
+    assert_eq!(admit(&late), Err("BOOT_NETWORK_EXPIRED"));
+    let other = || Ok("other-binary".to_string());
+    assert_eq!(
+        market_admission_with(&|k| full.get(k).cloned(), &current, &other),
+        Err("BOOT_IDENTITY_DRIFT")
+    );
+}

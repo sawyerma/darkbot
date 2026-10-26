@@ -64,7 +64,7 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
       <div className="ov-actions" role="group" aria-label={`${reg.label} controls`}>
         {controls.startStop.enabled && owned?.controller_available
           ? <CommandAction control={controls.startStop} testId={`project-startstop-${reg.key}`} />
-          : <DisabledAction label="Start / Stop" control={{ enabled: false, reason: "No available controller or capture is stopping" }} testId={`project-startstop-${reg.key}`} />}
+          : <DisabledAction label="Start / Stop" control={controls.startStop.enabled ? { enabled: false, reason: "No available controller or capture is stopping" } : controls.startStop} testId={`project-startstop-${reg.key}`} />}
         {controls.logs.enabled ? <LogsAction label="Logs" source={reg.key==="bsc"?"bsc":"project0"} testId={`project-logs-${reg.key}`} /> : <DisabledAction label="Logs" control={{ enabled: false, reason: controls.logs.reason }} testId={`project-logs-${reg.key}`} />}
       </div>
       {reg.key === "project0" ? <p className="ov-note">Gateway läuft unabhängig weiter</p> : null}

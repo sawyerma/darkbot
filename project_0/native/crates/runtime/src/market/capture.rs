@@ -326,6 +326,14 @@ pub fn run_from_env_with(
         Ok(clock) => clock,
         Err(code) => return refuse_start(code, status_tap.as_ref()),
     };
+    // DEC-07: a standalone raw capture reads Mainnet only admitted to its approved boot flow
+    // (mode market); every other start (autostart, terminal, an unapproved command) ends here,
+    // before any read.
+    if let Err(code) =
+        crate::orchestration::boot_audit::market_admission(&|k| std::env::var(k).ok())
+    {
+        return refuse_start(code, status_tap.as_ref());
+    }
     let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), clock_unix_s(&clock))?;
     before_start(&cfg.run_id, &cfg.run_dir)?;
     run_embedded_with(cfg, clock, None, status_tap)

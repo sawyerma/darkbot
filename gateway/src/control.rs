@@ -369,7 +369,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         // bounds), every later step names that flow and the token it approves.
         BOOT_OFFLINE if req.resource_id.is_empty() => {
             let c = BootOfflineCommand::decode(req.params.as_ref()).ok()?;
-            if !["econ4h", "shadow"].contains(&c.mode.as_str()) || !duration_ok(&c.duration) {
+            if !["econ4h", "shadow", "market"].contains(&c.mode.as_str())
+                || !duration_ok(&c.duration)
+            {
                 return None;
             }
             let mut args: Vec<String> = [
@@ -424,7 +426,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 .to_vec(),
             )
         }
-        BOOT_START if req.resource_id.is_empty() => {
+        // DEC-07: project0.capture.start (the raw capture) is the start approval of a market
+        // flow, the same native step as project0.boot.start.
+        BOOT_START | START if req.resource_id.is_empty() => {
             let c = BootStartCommand::decode(req.params.as_ref()).ok()?;
             if !valid_job_id(&c.flow_id)
                 || !token_ok(&c.approved_token)
@@ -934,7 +938,13 @@ impl Control {
                 "Online strict verification needs the operator's provider evidence: p0ctl job start post-capture --provider-evidence FILE (terminal); the GUI verifies off or strict from the cache",
             );
         }
-        let job = if JOB_ACTIONS.contains(&req.action.as_str()) {
+        // DEC-07: project0.capture.start with the start approval of a market flow is the boot
+        // controller's start step; a bare one is refused before dispatch (below).
+        let job = if JOB_ACTIONS.contains(&req.action.as_str())
+            || (req.action == START
+                && req.project == ProjectId::Project0 as i32
+                && !req.params.is_empty())
+        {
             match job_args(req) {
                 Some(args) => Some(args),
                 None => {
@@ -944,8 +954,9 @@ impl Control {
                         CommandRejectReason::InvalidParams,
                         if req.action == CAPABILITY_SET {
                             "Capability request invalid (LIVE OFF|LIVE, HOLD_B or JITO_BUNDLE OFF|OBSERVE|ACTIVE, and the configuration version)"
-                        } else if BOOT_ACTIONS.contains(&req.action.as_str()) {
-                            "Boot request invalid (mode econ4h|shadow, flow id, 16-character token, genesis pin, absolute evidence path, capture source, duration, chain verify off|strict)"
+                        } else if BOOT_ACTIONS.contains(&req.action.as_str()) || req.action == START
+                        {
+                            "Boot request invalid (mode econ4h|shadow|market, flow id, 16-character token, genesis pin, provider evidence id, capture source, duration, chain verify off)"
                         } else {
                             "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)"
                         },
@@ -1052,6 +1063,16 @@ impl Control {
         }
         if let Some(source) = source {
             return self.dispatch_source(p, id, encoded, source).await;
+        }
+        // DEC-07: a raw capture reads Mainnet, so it starts only through the boot controller with
+        // the start approval of its READY market flow; without one nothing is called.
+        if req.action == START && req.project == ProjectId::Project0 as i32 {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::GateBlocked,
+                "BOOT_AUDIT_REQUIRED: a raw capture starts only through the boot flow (mode market): offline preflight, network approval, audit, start approval",
+            );
         }
         let before = self.observe_project(req.project).await;
         if req.project == ProjectId::Bsc as i32
@@ -1214,10 +1235,16 @@ impl Control {
                 "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
             );
         }
-        let output = tokio::time::timeout(
-            Duration::from_secs(50),
-            Command::new(&p.ctl).args(&args).kill_on_drop(true).output(),
-        )
+        let output = tokio::time::timeout(Duration::from_secs(50), {
+            let mut ctl = Command::new(&p.ctl);
+            ctl.args(&args).kill_on_drop(true);
+            // DEC-07: the boot controller audits the staged capture environment, as the
+            // capture start does.
+            if BOOT_ACTIONS.contains(&action) || action == START {
+                ctl.env("DARKBOT_STAGED", "1");
+            }
+            ctl.output()
+        })
         .await;
         match output {
             Ok(Ok(out)) if out.status.success() => {
@@ -1234,7 +1261,7 @@ impl Control {
                     "Boot flow recorded with its offline preflight; verdict, token and TTL follow in project0.analytics.jobs (boot)"
                 } else if action == BOOT_NETWORK {
                     "Network audit approved and its worker started; record and TTL window follow in project0.analytics.jobs (boot)"
-                } else if action == BOOT_START {
+                } else if action == BOOT_START || action == START {
                     "Start approved and its worker started; the run follows in project0.analytics.jobs (boot)"
                 } else if action == BOOT_CANCEL {
                     "Stop requested from the boot step's worker; it records CANCELLED in project0.analytics.jobs (boot)"
@@ -1250,7 +1277,7 @@ impl Control {
             _ => {
                 record.detail = if action == CAPABILITY_SET {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
-                } else if BOOT_ACTIONS.contains(&action) {
+                } else if BOOT_ACTIONS.contains(&action) || action == START {
                     "Controller outcome unknown; inspect the boot flow in project0.analytics.jobs before a new approval"
                 } else {
                     "Controller outcome unknown; inspect project0.analytics.jobs before a new action"
@@ -2016,6 +2043,60 @@ mod tests {
             .is_none_or(|x| x != "json")));
     }
     /// BSC-051: a damaged record makes the ledger unreadable; it is never "no record".
+    /// DEC-07: project0.capture.start without the start approval of a READY market boot flow
+    /// is refused before any controller call (no process, no network read); with one it is the
+    /// boot controller's start step (`darkbotctl p0 boot start`), called once.
+    #[tokio::test]
+    async fn dec07_a_raw_capture_start_needs_its_boot_approval() {
+        use crate::proto::project0::v1::BootStartCommand;
+        let env = Env::new("boot-gate");
+        let control = env.restart();
+        let start = |n: usize, params: Vec<u8>| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: uuid(n),
+            action: START.into(),
+            resource_id: String::new(),
+            expected: None,
+            params: params.into(),
+            issued_at_unix_ns: now(),
+        };
+        let bare = control.execute(&start(9_400, vec![])).await;
+        assert!(refused(&bare, CommandRejectReason::GateBlocked));
+        assert!(
+            bare.detail.starts_with("BOOT_AUDIT_REQUIRED"),
+            "{}",
+            bare.detail
+        );
+        assert_eq!(env.executions(), 0, "nothing was called");
+        let approval = BootStartCommand {
+            flow_id: "flow-1".into(),
+            approved_token: "fedcba9876543210".into(),
+            duration: "1h".into(),
+            capture_source: "logs".into(),
+            chain_verify: "off".into(),
+        };
+        let mut wrong = approval.clone();
+        wrong.approved_token = "not-a-token".into();
+        assert!(refused(
+            &control.execute(&start(9_401, wrong.encode_to_vec())).await,
+            CommandRejectReason::InvalidParams
+        ));
+        assert_eq!(env.executions(), 0);
+        let approved = control
+            .execute(&start(9_402, approval.encode_to_vec()))
+            .await;
+        assert_eq!(
+            approved.status,
+            CommandStatus::Accepted as i32,
+            "{}",
+            approved.detail
+        );
+        assert_eq!(
+            env.executions(),
+            1,
+            "the boot controller's start step, once"
+        );
+    }
     #[tokio::test]
     async fn a_damaged_ledger_record_refuses_instead_of_running_again() {
         let env = Env::new("damaged");

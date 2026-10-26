@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Stop All with a partial failure, isolated: the fixture Project_0 capture stops, an isolated
-BSC readiness fixture ignores SIGTERM. Only com.darkbot.test.* labels; no production instance."""
+"""Stop All with an unconfirmed stop, isolated: an isolated BSC readiness fixture ignores SIGTERM;
+the Project_0 raw capture starts only through its boot flow (DEC-07) and stays stopped.
+Only com.darkbot.test.* labels; no production instance."""
 import shutil, subprocess
 import lifecycle_test as h
 try:
@@ -10,6 +11,8 @@ try:
     shutil.copytree(h.ROOT/'frontend/dist',release/'dist')
     source=h.WORK/'app/snapshot';(source/'bsc/tools').mkdir(parents=True)
     shutil.copy2(h.ROOT/'bsc/tools/readiness_job.py',source/'bsc/tools/readiness_job.py')
+    # The job reads its endpoint from the snapshot's public config; the fixture binary never calls it.
+    (source/'bsc/config').mkdir();(source/'bsc/config/readiness.public.env').write_text('BSC_READINESS_RPC_HTTPS=https://readiness.invalid\n')
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     (h.WORK/'app/bsc-source').symlink_to(source,target_is_directory=True)
     (release/'bsc-root').symlink_to(source,target_is_directory=True)

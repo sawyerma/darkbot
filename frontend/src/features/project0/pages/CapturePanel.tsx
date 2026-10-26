@@ -66,15 +66,15 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
       <label>Unit<select value={unit} onChange={e => setUnit(e.target.value)}><option value="s">Seconds</option><option value="m">Minutes</option><option value="h">Hours</option><option value="d">Days</option></select></label></div> : null}
     <div className="p0-formgrid"><label>Source<select value={source} onChange={e => setSource(e.target.value as CaptureSource)}><option value="logs">Logs</option><option value="transactions">Transactions</option></select></label>
       <label>Observation<select value={observation} onChange={e => setObservation(e.target.value as CaptureMode)}><option value="econ4h">Market + Shadow</option><option value="market">Raw data only</option><option value="shadow">Shadow only</option></select></label></div>
-    <div className="p0-actions"><button className="p0-primary" disabled={!buttons.start.enabled} title={buttons.start.reason || undefined}
-        onClick={() => { setArmedFor(null); void captureCommand("project0.capture.start"); }}>Check & start</button>
+    <div className="p0-actions"><button className="p0-primary" disabled
+        title="BOOT_AUDIT_REQUIRED: a raw capture starts only through the boot flow above (mode Raw data only): offline preflight, network approval, audit, start approval">Check & start</button>
       <button className="p0-secondary" disabled={!buttons.stop.enabled} title={buttons.stop.reason || undefined}
         onClick={() => setArmedFor(runKey)}>Stop</button></div>
     {confirmStop ? <><Notice>darkbotctl capture stop: the journal drains and seals, autostart stays suspended until the next start, and a running BSC readiness check is stopped too. The gateway keeps running.</Notice>
       <div className="p0-actions"><button className="p0-secondary" onClick={() => { setArmedFor(null); void captureCommand("project0.capture.stop"); }}>Confirm stop</button>
         <button className="p0-secondary" onClick={() => setArmedFor(null)}>Cancel</button></div></> : null}
     {receipt ? <Notice><span data-testid="p0-capture-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""} · process {process?.state ?? "UNKNOWN"}</span></Notice> : null}
-    <p className="p0-note">Check & start launches the configured desktop market capture (darkbotctl capture start-configured: raw data without Shadow, duration from its configuration, no boot audit or preflight). The selections in this panel are drafts and are not sent.</p>
+    <p className="p0-note">A raw capture reads Mainnet, so it starts only through the boot flow above (mode Raw data only, DEC-07): the desktop capture admits itself to the approved network audit before any read; an unapproved start, the autostart included, is refused (BOOT_AUDIT_REQUIRED). Stop ends the running capture. The selections in this panel are drafts and are not sent.</p>
   </Section>
   <Section title="Chain verification" aside={<span className="p0-quiet">After capture</span>}>
     <TabStrip options={modes.map(x => ({ ...x }))} value={verify} onChange={setVerify} label="Verification mode"/>

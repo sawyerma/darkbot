@@ -696,7 +696,7 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
         &mut io,
         now()?,
         hash(&data),
-        boot_audit::binary_identity()?,
+        boot_audit::binary_identity_for(mode)?,
     )?;
     // DEC-07: an audit that outlasted its own TTL is never sealed as READY (nothing is written).
     if result.audit.verdict == AuditVerdict::Ready && now()? >= result.expires_at {

@@ -946,12 +946,100 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow] --duration D [-- OPERATIONAL_ARGS...]
+const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow|market] --duration D [-- OPERATIONAL_ARGS...]
   | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence FILE.p0j [--capture-source logs|transactions]
   | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence FILE.p0j]
   | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]
 The flow's duration, mode and operational arguments are fixed at its offline step and its capture
-source at the network step: the audited identity is exactly the started one.";
+source at the network step: the audited identity is exactly the started one. Mode market is the
+desktop raw capture (its environment files, no operational arguments), started through its
+launcher with the admission of exactly the approved record.";
+
+/// DEC-07: the modes a boot flow starts — the runtime's (`run start`: econ4h, shadow) and the
+/// desktop raw capture's (market).
+fn boot_mode(options: &[String]) -> Result<&'static str, String> {
+    match given(options, "--mode")?.as_deref() {
+        None | Some("econ4h") => Ok("econ4h"),
+        Some("shadow") => Ok("shadow"),
+        Some("market") => Ok(boot_audit::MARKET_MODE),
+        Some(other) => Err(format!("--mode {other}: econ4h|shadow|market")),
+    }
+}
+
+/// DEC-07: a raw-capture flow audits the environment the desktop capture runs with — the
+/// operator env files of its launcher (`P0_ENV_FILE`), loaded before any resolution.
+fn load_capture_env() -> Result<(), String> {
+    if let Some(spec) = std::env::var("P0_ENV_FILE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        darkbot_runner::env_file::load_list(&spec)?;
+    }
+    Ok(())
+}
+
+/// DEC-07: the capture source a raw-capture flow audits — the configured one
+/// (`P0_MARKET_SOURCE`, the admission's default logs); another one is refused.
+fn raw_capture_source(asked: Option<String>) -> Result<String, String> {
+    let configured = std::env::var("P0_MARKET_SOURCE").unwrap_or_else(|_| "logs".into());
+    match asked {
+        Some(asked) if asked != configured => Err(format!(
+            "BOOT_CAPTURE_SOURCE_MISMATCH: the raw capture is configured for {configured}"
+        )),
+        _ => Ok(configured),
+    }
+}
+
+/// DEC-07: the start of a raw-capture flow — the desktop capture through its launcher
+/// (`darkbotctl capture start SECONDS`, the `DARKBOT_CTL` that started this controller, else
+/// the checkout's) with the admission of exactly this record, approved now: the capture admits
+/// itself before any read (`boot_audit::market_admission`).
+fn start_raw_capture(
+    project: &Path,
+    flow: &darkbot_runner::orchestration::boot_control::BootFlow,
+    record: &str,
+    token: &str,
+) -> Result<Option<String>, String> {
+    let seconds = darkbot_solana::runtime_config::duration_seconds(&flow.duration)?;
+    let ctl = std::env::var_os("DARKBOT_CTL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project.join("ops/darkbotctl"));
+    if !ctl.is_file() {
+        return Err(format!(
+            "BOOT_DESKTOP_CONTROL_MISSING: {} (the raw capture starts through darkbotctl)",
+            ctl.display()
+        ));
+    }
+    let approved_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "BOOT_CLOCK")?
+        .as_secs();
+    let out = Command::new(&ctl)
+        .args(["capture", "start", &seconds.to_string()])
+        .env(boot_audit::ENV_NETWORK_AUDIT, record)
+        .env(boot_audit::ENV_NETWORK_AUDIT_TOKEN, token)
+        .env(
+            boot_audit::ENV_NETWORK_AUDIT_APPROVED_AT,
+            approved_at.to_string(),
+        )
+        .env("P0_MEASUREMENT_DURATION", &flow.duration)
+        .env("P0_MODE", boot_audit::MARKET_MODE)
+        .env("P0_PROJECT_DIR", project)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("BOOT_DESKTOP_CONTROL: {e}"))?;
+    if out.status.success() {
+        Ok(None)
+    } else {
+        let text = String::from_utf8_lossy(&out.stderr);
+        let last = text
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        Err(format!("BOOT_RAW_CAPTURE_REFUSED: {}", last.trim()))
+    }
+}
 
 /// DEC-07 (N7): the boot controller (`orchestration::boot_control`), the terminal's and the
 /// Capture tab's one path: `offline` audits locally and records a new flow with its mode,
@@ -980,15 +1068,20 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 Some(id) => id,
                 None => jobs::new_id()?,
             };
-            let mode = RunMode::of(&options[1..])?;
+            let mode = boot_mode(&options[1..])?;
+            if mode == boot_audit::MARKET_MODE {
+                if !operational.is_empty() {
+                    return Err("BOOT_MARKET_ARGS: the raw capture takes its configuration from its environment files, no operational arguments".into());
+                }
+                load_capture_env()?;
+            }
             // DEC-07: the run's duration is part of the audited configuration: the flow audits
             // and starts exactly `run start`'s resolution (X1 `start_config`).
             let duration = need("--duration")?;
             darkbot_solana::runtime_config::duration_seconds(&duration)
                 .map_err(|e| format!("--duration {duration}: {e}"))?;
-            let resolved = boot_audit::start_config(mode.name(), operational, &duration, &|k| {
-                std::env::var(k).ok()
-            })?;
+            let resolved =
+                boot_audit::start_config(mode, operational, &duration, &|k| std::env::var(k).ok())?;
             // The TTL and its source, as the resolution names it.
             let ttl_source = resolved
                 .sources
@@ -1007,7 +1100,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 project,
                 &bc::BootFlow {
                     flow_id: flow_id.clone(),
-                    mode: mode.name().into(),
+                    mode: mode.into(),
                     operational: operational.to_vec(),
                     duration,
                     offline: audit,
@@ -1028,8 +1121,16 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             let token = need("--approve")?;
             let s = bc::status(project, &flow_id)?;
             let mut worker_args = vec!["--approve".to_string(), token.clone()];
+            let raw = s.flow.mode == boot_audit::MARKET_MODE;
+            if raw {
+                load_capture_env()?;
+            }
             let step = if step == "network" {
-                let source = capture_source()?;
+                let source = if raw {
+                    raw_capture_source(given(options, "--capture-source")?)?
+                } else {
+                    capture_source()?
+                };
                 // A Shadow run captures logs (`run start` passes no source for it).
                 if s.flow.mode == RunMode::Shadow.name() && source != "logs" {
                     return Err("BOOT_CAPTURE_SOURCE_SHADOW: a Shadow run captures logs".into());
@@ -1093,6 +1194,10 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 control::stop_requested,
                 |flow, dir| {
                     let record = dir.join(bc::NETWORK_RECORD).display().to_string();
+                    let raw = flow.mode == boot_audit::MARKET_MODE;
+                    if raw {
+                        load_capture_env()?;
+                    }
                     let mut call: Vec<String> = Vec::new();
                     if step == bc::NETWORK {
                         call.extend([
@@ -1125,6 +1230,9 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             let _ = call;
                             return Err("BOOT_NETWORK_REQUIRES_CRATE_HEALTH".into());
                         }
+                    }
+                    if raw {
+                        return start_raw_capture(project, flow, &record, &token);
                     }
                     let mode = RunMode::of(&["--mode".to_string(), flow.mode.clone()])?;
                     let now = std::time::SystemTime::now()

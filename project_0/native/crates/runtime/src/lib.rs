@@ -16,6 +16,9 @@
 pub mod analytics;
 /// F-16: the process console lives in `darkbot-common` (the solana crate prints through it).
 pub use darkbot_common::console;
+/// Operator env files (`KEY=value` lines; `P0_ENV_FILE`), loaded by the raw capture and by
+/// `p0ctl boot` for the same environment (DEC-07).
+pub mod env_file;
 pub mod execution;
 pub mod market;
 pub mod orchestration;

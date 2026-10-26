@@ -1715,9 +1715,65 @@ pub fn admission_record(
 
 /// Bind both the control executable and the actual runtime it admits.
 pub fn binary_identity() -> Result<String, String> {
+    binary_identity_for("econ4h")
+}
+
+/// The runtime a boot flow of operating mode `mode` admits, beside `p0ctl`: the raw capture
+/// (`p0-market-capture-reported`, DEC-07 boot mode `market`) or the runtime (`p0-longtail`).
+pub fn binary_identity_for(mode: &str) -> Result<String, String> {
     let ctl = std::env::current_exe().map_err(|_| "BOOT_BINARY")?;
-    let runtime = ctl.parent().ok_or("BOOT_BINARY")?.join("p0-longtail");
-    binary_identity_of(&ctl, &runtime)
+    let runtime = if mode == MARKET_MODE {
+        "p0-market-capture-reported"
+    } else {
+        "p0-longtail"
+    };
+    binary_identity_of(&ctl, &ctl.parent().ok_or("BOOT_BINARY")?.join(runtime))
+}
+
+/// DEC-07: the boot mode of a standalone raw capture.
+pub const MARKET_MODE: &str = "market";
+/// DEC-07: a standalone raw capture without its admitted boot flow.
+pub const BOOT_AUDIT_REQUIRED: &str = "BOOT_AUDIT_REQUIRED";
+
+/// DEC-07: the admission of a standalone raw capture — every one reads Mainnet, so it starts
+/// only admitted to its approved network audit of boot mode `market` (`p0ctl boot start`
+/// through the desktop launcher): record, token and approval time inside the record's TTL,
+/// this code, configuration, safety flags, executables and capture source, and exactly the
+/// audited duration. Anything else ends before any read; without a record BOOT_AUDIT_REQUIRED.
+pub fn market_admission(
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<NetworkAudit, &'static str> {
+    market_admission_with(
+        get,
+        &|| {
+            let project = get("P0_PROJECT_DIR")
+                .ok_or_else(|| "BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
+            launched_identity(Path::new(&project), SafetyFlags::from_env(), &[], get)
+        },
+        &runtime_binary_identity,
+    )
+}
+
+/// `market_admission` with the identity and the executables of the running capture.
+pub(crate) fn market_admission_with(
+    get: &dyn Fn(&str) -> Option<String>,
+    current: &dyn Fn() -> Result<AuditedIdentity, String>,
+    binary: &dyn Fn() -> Result<String, String>,
+) -> Result<NetworkAudit, &'static str> {
+    if get("P0_MODE").as_deref() != Some(MARKET_MODE)
+        || get(ENV_NETWORK_AUDIT).is_none_or(|v| v.is_empty())
+    {
+        return Err(BOOT_AUDIT_REQUIRED);
+    }
+    let audited = get("P0_MEASUREMENT_DURATION").ok_or(BOOT_AUDIT_REQUIRED)?;
+    let seconds = darkbot_solana::runtime_config::duration_seconds(&audited)
+        .map_err(|_| BOOT_AUDIT_REQUIRED)?;
+    if get("P0_MARKET_DURATION_SECS").and_then(|v| v.parse::<u64>().ok()) != Some(seconds) {
+        return Err("BOOT_IDENTITY_DRIFT");
+    }
+    admission_record(get, true, current, binary)
+        .map_err(|e| admission_code(&e))?
+        .ok_or(BOOT_AUDIT_REQUIRED)
 }
 
 /// The same identity seen from the runtime (X1): `p0ctl` next to the running executable.
