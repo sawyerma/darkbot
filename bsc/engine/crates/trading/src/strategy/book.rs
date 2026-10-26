@@ -22,10 +22,24 @@ use crate::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
 pub enum Term {
     Version(u8),
     QuoteToken([u8; 20]),
-    Curve { r: U256, h: U256, k: U256 },
+    Curve {
+        r: U256,
+        h: U256,
+        k: U256,
+    },
     DexThreshold(U256),
     Migrator(u8),
-    Tax { buy: U256, sell: U256 },
+    Tax {
+        buy: U256,
+        sell: U256,
+    },
+    /// A BUY needs this NFT (`FlapNFTGated`).
+    NftGate([u8; 20]),
+    /// A per-origin holding cap (`FlapTokenMaxBuyPerOriginSet`).
+    HoldingCap {
+        bps: u16,
+        max_amount: U256,
+    },
 }
 
 /// One Portal curve trade.
@@ -128,6 +142,15 @@ impl TokenBook {
                 }
                 _ => self.untrack(Untracked::Unsupported("tax")),
             },
+            // Who may buy is restricted: outside the priced scope (a PAPER
+            // BUY models neither the NFT nor the origin's quota), for good.
+            Term::NftGate(nft) if nft != [0; 20] => {
+                self.untrack(Untracked::Unsupported("nft gate"))
+            }
+            Term::HoldingCap { bps, max_amount } if bps != 0 || !max_amount.is_zero() => {
+                self.untrack(Untracked::Unsupported("holding cap"))
+            }
+            Term::NftGate(_) | Term::HoldingCap { .. } => {}
         }
         if let Err(why) = self.scope()
             && why != Untracked::TermsIncomplete
@@ -162,8 +185,9 @@ impl TokenBook {
     }
 
     /// The validated quote terms (`PricedToken`): the launch's terms, no
-    /// NFT gate (a version-6 launch cannot set one; a later gate or cap ends
-    /// the tracking), on the curve while tracked.
+    /// NFT gate (a `FlapNFTGated` or holding-cap log of the token, in the
+    /// launch receipt or later, ends the tracking before any quote), on the
+    /// curve while tracked.
     fn ready(&self) -> Result<PricedToken, Untracked> {
         self.status?;
         self.scope()?;
@@ -397,6 +421,24 @@ mod tests {
             sell: U256::ZERO,
         });
         assert_eq!(tax.status, Err(Untracked::Unsupported("tax")));
+        // Who may buy is restricted: an NFT gate or a per-origin cap; a
+        // cleared one (zero) changes nothing.
+        let mut gated = launched(0, 0);
+        gated.term(Term::NftGate([0; 20]));
+        gated.term(Term::HoldingCap {
+            bps: 0,
+            max_amount: U256::ZERO,
+        });
+        assert!(gated.tracking());
+        gated.term(Term::NftGate([7; 20]));
+        assert_eq!(gated.status, Err(Untracked::Unsupported("nft gate")));
+        assert!(gated.buy_inputs(U256::from(1u8)).is_err());
+        let mut capped = launched(0, 0);
+        capped.term(Term::HoldingCap {
+            bps: 200,
+            max_amount: U256::from(20_000_000u64) * U256::from(10u64).pow(U256::from(18u8)),
+        });
+        assert_eq!(capped.status, Err(Untracked::Unsupported("holding cap")));
         let mut m = launched(0, 0);
         m.migrated();
         assert_eq!(m.status, Err(Untracked::Migrated));

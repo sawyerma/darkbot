@@ -330,6 +330,11 @@ pub enum FlapTerm {
     Migrator(u8),
     /// A symmetric tax is both.
     Tax { buy: [u8; 32], sell: [u8; 32] },
+    /// `FlapNFTGated(address token, address nft)`: a BUY needs the NFT.
+    NftGate([u8; 20]),
+    /// `FlapTokenMaxBuyPerOriginSet(address indexed token, uint16 bps,
+    /// uint256 maxBuyAmount)`: a per-origin holding cap.
+    HoldingCap { bps: u16, max_amount: [u8; 32] },
 }
 
 /// One Portal `TokenBought`/`TokenSold` of a successful receipt

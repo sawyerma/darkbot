@@ -316,6 +316,49 @@ fn buys_after(
     Some((count, first))
 }
 
+/// Two events of the live Portal outside the verified v5.27.0 ABI (declared
+/// signatures, as `g02_flap_parity` reads them; topics recomputed in the
+/// tests) that restrict who may buy a token: an NFT gate and a per-origin
+/// holding cap. Both put the token outside Strategy C's priced scope; a
+/// log of either topic with another layout is refused.
+pub(super) const FLAP_NFT_GATED: [u8; 32] =
+    hex!("2179156b3d2ade0f0de96eff28a7c29d924002784e113e69108d91a02cbf9098");
+pub(super) const FLAP_MAX_BUY_PER_ORIGIN_SET: [u8; 32] =
+    hex!("afcebb99a3d0047f96f0d1cc8872781aaeef86f4f5e7e1c6a33e5907d6a3ed82");
+
+/// The restriction term of one log of the two topics above, `None` when its
+/// layout differs: `FlapNFTGated` has its token and NFT as data words,
+/// `FlapTokenMaxBuyPerOriginSet` its token indexed and bps and amount as
+/// data words.
+fn restriction(log: &Log) -> Option<([u8; 20], FlapTerm)> {
+    let address = |w: &[u8]| -> Option<[u8; 20]> {
+        w[..12]
+            .iter()
+            .all(|b| *b == 0)
+            .then(|| w[12..32].try_into().ok())?
+    };
+    match log.topics.first()? {
+        t if *t == FLAP_NFT_GATED && log.topics.len() == 1 && log.data.len() == 64 => Some((
+            address(&log.data[..32])?,
+            FlapTerm::NftGate(address(&log.data[32..])?),
+        )),
+        t if *t == FLAP_MAX_BUY_PER_ORIGIN_SET
+            && log.topics.len() == 2
+            && log.data.len() == 64
+            && log.data[..30].iter().all(|b| *b == 0) =>
+        {
+            Some((
+                address(&log.topics[1])?,
+                FlapTerm::HoldingCap {
+                    bps: u16::from_be_bytes([log.data[30], log.data[31]]),
+                    max_amount: log.data[32..].try_into().ok()?,
+                },
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// The Portal trades, token terms and migrations of the block's successful
 /// receipts, in receipt and log order (Phase H); a log of these kinds the
 /// decoder refuses is reported, not skipped silently.
@@ -336,14 +379,32 @@ pub(super) fn flap_events(block: &BlockHead, receipts: &[Receipt]) -> Vec<Canoni
     let mut out = Vec::new();
     for receipt in receipts.iter().filter(|r| r.succeeded) {
         for log in receipt.logs.iter().filter(|l| l.address == FLAP_PORTAL) {
-            let Some(kind) = log.topics.first().and_then(PortalEventKind::from_topic0) else {
-                continue;
-            };
             let refused = CanonicalEvent::FlapTradeUndecodable {
                 block_number: number,
                 block_hash: hash,
                 tx_index: receipt.tx_index,
                 log_index: log.log_index,
+            };
+            if log
+                .topics
+                .first()
+                .is_some_and(|t| *t == FLAP_NFT_GATED || *t == FLAP_MAX_BUY_PER_ORIGIN_SET)
+            {
+                out.push(match restriction(log) {
+                    Some((token, term)) => CanonicalEvent::FlapTerm(CanonicalTerm {
+                        block_number: number,
+                        block_hash: hash,
+                        tx_index: receipt.tx_index,
+                        log_index: log.log_index,
+                        token,
+                        term,
+                    }),
+                    None => refused,
+                });
+                continue;
+            }
+            let Some(kind) = log.topics.first().and_then(PortalEventKind::from_topic0) else {
+                continue;
             };
             if kind == K::LaunchedToDex {
                 // Unwitnessed, so not decoded by the Phase D decoder: the

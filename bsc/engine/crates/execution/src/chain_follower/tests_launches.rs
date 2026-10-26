@@ -599,3 +599,63 @@ fn a_reverted_launch_call_is_reported_and_no_other_failed_transaction() {
         )]
     );
 }
+
+/// Phase H: the live Portal's NFT gate and per-origin holding cap (outside
+/// the verified ABI) are token terms; their topics are the declared
+/// signatures; another layout is refused, never skipped.
+#[test]
+fn restriction_logs_are_terms_or_refused() {
+    use super::launches::{FLAP_MAX_BUY_PER_ORIGIN_SET, FLAP_NFT_GATED, flap_events};
+    use super::{CanonicalEvent, FlapTerm};
+    assert_eq!(keccak256("FlapNFTGated(address,address)").0, FLAP_NFT_GATED);
+    assert_eq!(
+        keccak256("FlapTokenMaxBuyPerOriginSet(address,uint16,uint256)").0,
+        FLAP_MAX_BUY_PER_ORIGIN_SET
+    );
+    let (block, mut receipts) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129774331);
+    let token = [0xAB; 20];
+    let word = |a: [u8; 20]| {
+        let mut w = [0u8; 32];
+        w[12..].copy_from_slice(&a);
+        w
+    };
+    let mut cap = [0u8; 64];
+    cap[30..32].copy_from_slice(&200u16.to_be_bytes());
+    cap[63] = 9;
+    let log = |topics: Vec<[u8; 32]>, data: Vec<u8>| super::jsonrpc::Log {
+        address: FLAP_PORTAL,
+        topics,
+        data,
+        log_index: 900,
+    };
+    let receipt = receipts.iter_mut().find(|r| r.succeeded).unwrap();
+    receipt.logs = vec![
+        log(
+            vec![FLAP_NFT_GATED],
+            [word(token), word([0xCD; 20])].concat(),
+        ),
+        log(vec![FLAP_MAX_BUY_PER_ORIGIN_SET, word(token)], cap.to_vec()),
+        // Indexed where the data should carry it, and a non-address word.
+        log(
+            vec![FLAP_NFT_GATED, word(token)],
+            [word(token), word([1; 20])].concat(),
+        ),
+        log(vec![FLAP_MAX_BUY_PER_ORIGIN_SET, [0xFF; 32]], cap.to_vec()),
+    ];
+    let only = [receipts.iter().find(|r| r.succeeded).unwrap().clone()];
+    let got: Vec<String> = flap_events(&block, &only)
+        .iter()
+        .map(|e| match e {
+            CanonicalEvent::FlapTerm(t) => match t.term {
+                FlapTerm::NftGate(nft) if t.token == token => format!("gate {}", nft[0]),
+                FlapTerm::HoldingCap { bps, max_amount } if t.token == token => {
+                    format!("cap {bps} {}", max_amount[31])
+                }
+                other => format!("{other:?}"),
+            },
+            CanonicalEvent::FlapTradeUndecodable { .. } => "refused".into(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(got, ["gate 205", "cap 200 9", "refused", "refused"]);
+}

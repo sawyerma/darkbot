@@ -98,6 +98,11 @@ pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
                     buy: word(&buy),
                     sell: word(&sell),
                 },
+                FlapTerm::NftGate(nft) => Term::NftGate(nft),
+                FlapTerm::HoldingCap { bps, max_amount } => Term::HoldingCap {
+                    bps,
+                    max_amount: word(&max_amount),
+                },
             };
             Some(Input::Term {
                 token: t.token,
@@ -829,6 +834,39 @@ mod tests {
     /// Every runtime record decodes to its input; other records are none.
     #[test]
     fn records_decode_to_their_inputs() {
+        for (term, expected) in [
+            (FlapTerm::NftGate([5; 20]), Term::NftGate([5; 20])),
+            (
+                FlapTerm::HoldingCap {
+                    bps: 200,
+                    max_amount: be(U256::from(77u8)),
+                },
+                Term::HoldingCap {
+                    bps: 200,
+                    max_amount: U256::from(77u8),
+                },
+            ),
+        ] {
+            let t = CanonicalTerm {
+                block_number: 5,
+                block_hash: HASH,
+                tx_index: 1,
+                log_index: 2,
+                token: TOKEN,
+                term,
+            };
+            assert_eq!(
+                crate::runtime_journal::flap_term_of(&flap_term_payload(&t)),
+                Some(t)
+            );
+            assert_eq!(
+                input_of_record(RecordKind::Canonical, &flap_term_payload(&t)),
+                Some(Input::Term {
+                    token: TOKEN,
+                    term: expected
+                })
+            );
+        }
         assert_eq!(
             input_of_record(RecordKind::Canonical, &block_payload(5, &HASH, 750)),
             Some(Input::Block {

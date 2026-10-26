@@ -342,7 +342,9 @@ pub fn flap_trade_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTrade> 
 /// block_hash [32] | tx_index u64 | log_index u64 | token [20] |
 /// value [96]` — kind 1 version (last byte of word 0), 2 quote token
 /// (word 0), 3 curve r/h/k (words 0–2), 4 DEX threshold (word 0),
-/// 5 migrator (last byte of word 0), 6 tax buy/sell (words 0–1).
+/// 5 migrator (last byte of word 0), 6 tax buy/sell (words 0–1), 7 NFT
+/// gate (word 0), 8 holding cap bps (last two bytes of word 0) and amount
+/// (word 1).
 pub fn flap_term_payload(t: &crate::chain_follower::CanonicalTerm) -> Vec<u8> {
     use crate::chain_follower::FlapTerm;
     let mut value = [0u8; 96];
@@ -373,6 +375,15 @@ pub fn flap_term_payload(t: &crate::chain_follower::CanonicalTerm) -> Vec<u8> {
             value[..32].copy_from_slice(&buy);
             value[32..64].copy_from_slice(&sell);
             6
+        }
+        FlapTerm::NftGate(a) => {
+            value[12..32].copy_from_slice(&a);
+            7
+        }
+        FlapTerm::HoldingCap { bps, max_amount } => {
+            value[30..32].copy_from_slice(&bps.to_be_bytes());
+            value[32..64].copy_from_slice(&max_amount);
+            8
         }
     };
     let mut out = Vec::with_capacity(FLAP_TERM_LEN);
@@ -414,6 +425,11 @@ pub fn flap_term_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTerm> {
         6 => FlapTerm::Tax {
             buy: w(0)?,
             sell: w(1)?,
+        },
+        7 if w(0)?[..12].iter().all(|b| *b == 0) => FlapTerm::NftGate(w(0)?[12..].try_into().ok()?),
+        8 if w(0)?[..30].iter().all(|b| *b == 0) => FlapTerm::HoldingCap {
+            bps: u16::from_be_bytes([w(0)?[30], w(0)?[31]]),
+            max_amount: w(1)?,
         },
         _ => return None,
     };
