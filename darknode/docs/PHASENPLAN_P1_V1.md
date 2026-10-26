@@ -5,13 +5,13 @@
 | Dokumentfeld | Wert |
 |---|---|
 | Dokument | `darknode/docs/PHASENPLAN_P1_V1.md` |
-| Version | **1.0 – Planungsbaseline** |
-| Stand | **26.10.2026** |
+| Version | **1.1 – konsolidierte Planungsbaseline (Dokumentrevision)** |
+| Stand | **27.10.2026** |
 | Status | **DRAFT · GATE 1 OFFEN · KEINE IMPLEMENTIERUNGSFREIGABE** |
 | Projekt | DarkNode im vorhandenen DarkBot-Monorepo |
 | P1-Instrument | **Bitget USDT-Futures · BTCUSDT** (exakte Produkt-/Account-Konvention in R2 verifizieren) |
 | Sprache | **Rust**, React/TypeScript nur im bestehenden Frontend |
-| Referenzen | `GATE_1.md`, `WS_AI_IDEEN.md`, `ENDPOINT_REGISTRY.md`, `TEIL1_MARKTDATEN.md`, vorhandener DarkBot-Phasenplan |
+| Referenzen | `GATE_1.md`, `WS_AI_IDEEN.md`, `ENDPOINT_REGISTRY.md`, `P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md`, vorhandener DarkBot-Phasenplan; **TEIL1_MARKTDATEN.md ist abgelöst** |
 | Historische Codebasis | [`sawyerma/ws_ai` @ `1f27ed319b70eb94ba6990799f120743819f1534`](https://github.com/sawyerma/ws_ai/tree/1f27ed319b70eb94ba6990799f120743819f1534) |
 | Handelsfreigabe | **Keine**: P1 enthält weder Orders noch Live-Trading |
 
@@ -37,9 +37,9 @@ flowchart LR
     REST["Öffentliches REST · Instrumente / verfügbare Trades"]
     ARCH["Download-Center · Bulk-Historie"]
   end
-  REG[("Endpoint-Registry\nversioniert")]
+  REG[("Endpoint-Registry<br/>versioniert · SQLite")]
   INS["P1.3 Instrument-Katalog"]
-  AD["P1.4 Ein Rust Public-Adapter\nSchema + Clock + Sequence + Dedupe"]
+  AD["P1.4 Ein Rust Public-Adapter<br/>Schema + Clock + Sequence + Dedupe"]
   REG -.-> AD
   SBE --> AD
   JSON --> AD
@@ -127,8 +127,8 @@ flowchart LR
 - Der offizielle öffentliche SBE-WS-Endpunkt ist `wss://ws.bitget.com/v3/ws/public/sbe` (nur **Registry-Seed**, nicht im kompilierten Runtime-Hot-Path).
 - `publicTrade` kann mehrere Trades in **einem** SBE-Frame liefern; jeder davon muss verarbeitet werden.
 - SBE erwartet einen **Text-`ping` alle 30 Sekunden**; Browser-WS-Ping/Pong ist nicht als Ersatz zu unterstellen.
-- `books50` wechselt offiziell am **05.11.2026** vom wiederholten Voll-Snapshot auf **initialen Snapshot + inkrementelle Updates**; in der Demo bereits aktiv. Ab dieser Umstellung **SBE Schema v5**, `depthAction` und `pseq` berücksichtigen. Beide Varianten explizit testen.
-- Die öffentliche UTA-V3-REST-Route `/api/v3/market/fills` beschreibt **aktuelle** Trades (max. 100/Abruf) und bestätigt **keine** freie historische `idLessThan`-Pagination. Diese alte Annahme bleibt gesperrt, bis R2b einen **tatsächlich passenden öffentlichen** Endpoint/Archivweg nachweist.
+- **Produktivvertrag ab 05.11.2026:** Bitget `books50` liefert nach einem initialen Voll-Snapshot inkrementelle Änderungen; SBE-Depth50 läuft dann auf **Schema-Version 5** mit `depthAction` und `pseq`. In der Demo gilt das bereits. **P1.4 baut primär den V5-Live-Decoder samt Buchrekonstruktion, Sequenzbrucherkennung und Snapshot-Resync.** Unbekannte/vorherige Versionen werden im **V5-Live-Profil** kontrolliert abgelehnt und alarmiert; **V4 bleibt ausschließlich für bestehende Originalcaptures in qualifiziertem `dn-cli`-/Offline-Replay lesbar**, ohne produktiven V4-Fallback. Bis zur Live-Umstellung ist ein gesonderter diagnostischer V4-Mitschnitt möglich; dieser ist keine V5-Abnahme.
+- **Zwei getrennte REST-Capabilities:** UTA-V3 `/api/v3/market/fills` lieferte im echten Test **100 aktuelle Trades**, aber keinen belegten Historien-Cursor. Classic-V2 **`GET /api/v2/mix/market/fills-history` ist als öffentliche BTCUSDT-Futures-Historie real verifiziert (`PUBLIC_V2_HISTORY_VERIFIED`)**: 1.000 Records/Seite, `idLessThan` rückwärts, 0 Overlap in getesteten Seiten; erfolgreiche 60-/89-Tage-Fenster; genau 7 Tage erlaubt, 8 Tage mit Bitget `00001` abgelehnt, älter als 90 Tage mit `40934` abgelehnt. **10 Req/s/IP** ist offizieller Dokumentationswert, **nicht unter Last verifiziert**. R2b bleibt für Vollständigkeit, Retry/429, Langzeitverfügbarkeit und Archiv-Abgleich offen. Diese öffentliche Classic-V2-Route ist keine private Konto-Fill-Historie.
 - Die tatsächlich verfügbaren Download-Center-Daten müssen an einem konkreten BTCUSDT-Futures-Export verifiziert werden (Datum, Tiefe, IDs, granularer Typ, Format, Menge).
 
 **Offizielle Referenzen:**
@@ -139,6 +139,8 @@ flowchart LR
 4. [Bitget Books50 Update Preview, angekündigt 05.11.2026](https://www.bitget.com/docs/uta/update-preview)
 5. [Bitget Market Data – Get Recent Public Fills](https://www.bitget.com/docs/catalog/market/market-data)
 6. [Bitget Data Download Center](https://www.bitget.com/legacy-docs/uta/data-download-center)
+7. [Classic-V2 Public Futures Trade-History (`fills-history`)](https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market)
+8. [Gemessene Terminal-Evidenz 26./27.10.2026](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md)
 
 ---
 
@@ -203,12 +205,12 @@ Festes `#[repr(C)]`-In-Memory-Layout ist zulässig, aber **kein implizit sichere
 
 | Spike | Konkrete Frage | Minimale Methode / Evidenz | Blockiert |
 |---|---|---|---|
-| **R2 – Bitget Live-Feed** | SBE Templates und Versionswechsel, Multi-Trade, books1/books50 und `seq/pseq`, `ping`, symbol/category, `execId`, Durchsatz, tatsächliche Ankunftslatenz, VIP-Option | Echter BTCUSDT-Demo-/Public-Capture; Schema-Hash, Decoder-Fixtures, Disconnect-/Snapshot-Versuche | P1.3/1.4, Bücher, Time-/ID-Vertrag |
-| **R2b – historische Beschaffung** | Exporte ab welchem Datum? echte Einzeltrades? IDs? einheitliche Menge? Tiefe? Importtempo? existiert **öffentliche** paginierbare historische Trade-API? | Konkreter Archivexport + selbst aufgezeichneter Überlappungstag; 1:1 IDs/Preis/Menge/Zeit vergleichen; API-Fähigkeiten tabellieren | P1.7 Import-/Repair-Strategie |
+| **R2 – Bitget Live-Feed** | V5-Demo jetzt; V5-Live nach dem 05.11.2026; SBE Templates und Versionswechsel, Multi-Trade, books1/books50 mit `depthAction/seq/pseq`, Text-`ping`, symbol/category, `execId`, Durchsatz, Timestamp-/Latenzqualität, VIP-Option | V4-Transport/Decode aus Terminal-Evidenz bereits teilverifiziert; separate **V5-Demo-/Live-Captures**, Schema-Hash, Decoder-Fixtures, injizierter Sequenzbruch/Resnapshot/Reconnect nötig | P1.3/1.4, Bücher, Time-/ID-Vertrag |
+| **R2b – historische Beschaffung** | **Classic-V2-Public-History mit `idLessThan` bereits beobachtet**: 1.000 Records, 7-Tage-Fenster, 90-Tage-Grenze; was liefern Download-Center/weitere Historienquellen an echten Einzeltrades, IDs, Tiefe und Zeitraum? | Bestehende [Terminal-Evidenz](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md) anerkennen, zusätzlich Download-Export + Überschneidung mit eigenem Live-Capture, Zeitrand, 429/Retry, Komplettheit/Rate und dauerhaften Endpointstatus prüfen | P1.7 Import-/Repair-Strategie |
 | **R2c – Binärspeicher** | A: Journal+Index; B: Journal+Index+Candle-Cache; C: ClickHouse nur Benchmark | Gleicher Datensatz und gleicher Host; Write, warm/cold pages, Backtestscan, Crash/Recovery, SSD/RAM/Kapazität | P1.5/1.6 Formatwahl |
 | **R3 – Zeit/Replay** | Welche Uhr für `receive_ts`, wie deterministisch wird Timer/Karenz aufgezeichnet, was heißt Exact Replay? | Recorded live events + timer decisions → Replay-Vergleich und Hash; REST-Zeit ohne lokale Arrival separat kennzeichnen | P1.4/1.6 Replay-Policy |
 | **R4 – Bar-Semantik** | Leere Sekunden, verspätete Trades, mehrfache gleiche Exchange-Zeit, MTF-Update, Open-vs-Closed-Bars, TradingView-Referenz | Golden-Testvektoren für 1s/5s/10s/30s/1m und Markierungen `LATE/UNKNOWN` | P1.6/1.8 |
-| **R6 – Rust Libraries/Last** | `tokio-tungstenite` vs `fastwebsockets`; `rtrb` vs `crossbeam`; Writer/CRC/Compression und Recovery; Host-Region | Reale Capture-Replays und reproduzierbare Lastmessung; mehrmalig je Kandidat | P1.4/1.5/1.9 |
+| **R6 – Rust Libraries/Last** | `tokio-tungstenite` vs `fastwebsockets`; `rtrb` vs `crossbeam`; Writer/CRC/Compression und Recovery; **Host-Region Tokyo vs Alternativen** | Reale Capture-Replays und reproduzierbare Lastmessung, mehrmals je Host; Tardis dokumentiert eigene Futures-Erfassung in GCP Tokyo und gibt laut Quellenhinweis Bitget AWS `ap-northeast-1` als Serverstandort an (**Drittanbieterangabe, von Bitget unbestätigt; kein Ersatz für R6**) | P1.4/1.5/1.9 |
 | **R2d – kleiner SQLite-State** | WAL+`synchronous=FULL`, durability, Versionierung, Commit-Reihenfolge Datei↔SQLite | echte SSD, kill-/I/O-Failure-Injection, SQLite-Invariant-Checker | P1.2/1.5/1.7 |
 
 **Reihenfolge:** R2 + R6 starten früh; R2 liefert den echten Datenmitschnitt für R2b/R2c/R3/R4. R2b kann Import-Teilfragen parallel beantworten. R2c und R2d müssen vor dauerhafter Storage-Formatfreigabe abgeschlossen sein.
@@ -294,7 +296,7 @@ flowchart TB
 
 **Lieferumfang**
 
-- Eine logische Lane für BTCUSDT: Public SBE `publicTrade`, `books1`, `books50`, soweit fachlich bestätigt; externe JSON-Subscription direkt vor dem WS-Eingang.
+- Eine logische Lane für BTCUSDT: Public SBE `publicTrade`, `books1`, `books50`, soweit fachlich bestätigt; externe JSON-Subscription direkt vor dem WS-Eingang. **Im produktiven V5-Live-Profil kein stiller Rückfall auf V4**; V4-Captures nur versioniert/offline über `dn-cli`. Schema-ID, Template-ID, Blocklänge und Version in jedem Frame validieren.
 - Binärer SBE-Decoder aus versioniertem offiziellen XML-Schema; harte Header-/Length-/Template-/Version-Prüfungen.
 - Text-`ping` nach offiziell bestätigtem Intervall; Echo-/Liveness-/Reconnect-Policy; keine Annahme, WS-Control-Ping allein genüge.
 - Tick-/Lot-Konversion und originale SBE-Mantisse/Exponenten, pro Frame **alle** Trade-Gruppeneinträge, Dedupe nach geprüfter ID-/Scope-Regel.
@@ -302,7 +304,7 @@ flowchart TB
 - Separate, niedriger frequentierte JSON-Exchange-Adapter für Mark/Funding/Ticker, soweit für P1 wirklich erforderlich.
 - Einfache Lane-Statusmaschine; Ingress mit monotonic receive sequence und zwei Zeitquellen; Replay-fähige Decoder-Fixtures.
 
-**Abnahme:** N Trade-Entries im Frame → exakt N Events; Fuzz ohne Panic; falscher Header/Schema → sicherer Fehler; BBO wiederholte Sequence korrekt; `books50` Snapshot/Delta unter absichtlichem Packet-Gap; erzwungener Reconnect und Wiederabonnement; keine credentialabhängige Public-Lane. Optional A/B-Feed mit eigener Abnahme, sonst **nicht als PASS behaupten**.
+**Abnahme:** N Trade-Entries im Frame → exakt N Events; Fuzz ohne Panic; falscher Header/Schema → sicherer Fehler; BBO wiederholte Sequence korrekt; **V5** `books50` Snapshot→Delta unter absichtlichem Sequenzbruch mit validiertem Resnapshot, keine ungeprüfte Buchfortschreibung; **V4-Live-Fallback abgewiesen, V4-Offline-Replay weiterhin korrekt**; erzwungener Reconnect und Wiederabonnement; keine credentialabhängige Public-Lane. Optional A/B-Feed mit eigener Abnahme, sonst **nicht als PASS behaupten**.
 
 **Exit:** echte, gemessene, typisierte Bitget-Public-Events mit dokumentierter Qualität.
 
@@ -346,7 +348,7 @@ flowchart TB
 
 - Coverage-/Gap-Ledger in SQLite: Instrument, Quelle, Zeitbereich, Ereignissequenzen/IDs, Status, Ursache, Validation-Hash, offene Reparaturversuche.
 - Bulk-Importer für **reale** Bitget-Download-Center-Dateien; begrenzte Concurrency, Resume, Hash und Provenance. Archivdaten nicht als eigenes WS-Capture etikettieren.
-- REST-Reparatur ausschließlich dort, wo die **öffentliche** API den benötigten Zeitraum und die Cursor-/Filtersemantik wirklich unterstützt. Kein erfundener `idLessThan`-Parameter für UTA V3.
+- **Verifizierter öffentlicher REST-Reparaturadapter:** Classic V2 `/api/v2/mix/market/fills-history`, `symbol=BTCUSDT`, `productType=usdt-futures`, `limit<=1000`, `idLessThan` über letzte `tradeId`, `startTime`/`endTime` mit **höchstens 7 Tagen**, nur **innerhalb 90 Tagen**; `10 Req/s/IP` als noch zu messendes offizielles Rate-Limit. Eigenständige Capability-Matrix gegenüber UTA V3, wo `idLessThan` für `/api/v3/market/fills` **nicht belegt** ist. Gleiche fachliche Trade-Normalisierung wie Live; ID/Zeitgrenzen, Cursor-Stillstand, HTTP-429/Timeout und Endpunkt-Deprecation fail-closed behandeln.
 - Priorität: echte bekannte Lücken vor optionaler Ausdehnung der Historie; Backoff/Rate-Limiter pro dokumentiertem Endpoint; Memory-/Writer-Druck berücksichtigt.
 - Grob-/Fein-Scan als **Plausibilitätskontrolle**, nicht als Beweis vollständiger Trade-Abdeckung; kein Trade in einer Sekunde kann normal sein.
 - Nach Import Dedupe/Conflict-Report, neue Dataset-Version und gezielter Rebuild der betroffenen L2-Bereiche.
@@ -384,10 +386,12 @@ flowchart TB
 - Readiness **pro Subsystem** (`FEED_READY`, `STORE_READY`, `HISTORY_READY`, `CHART_READY`), nicht ein pauschales „WS verbunden = vollständig“.
 - Per Lane: Frames/s, Events/Frame, fehlende IDs/Sequence, Latency p50/p95/p99, Queue-Fill, Storage-Lag, L0/L1-Watermark, Gap Count, Importstatus, Memory/CPU/Storage.
 - Textlogs und binäre Evidenz; keine JSON-Logs oder erfundenen Dashboard-Werte. Fehler- und Severity-Klassifikation.
+- **Dreistufige Alarmierung ohne Monitoring-Tab:** (1) Im Dienst persistente SQLite-Alarm-Outbox mit Dedup/Severity, begrenzten Retries, Quittierung und Adapter (z. B. Telegram, Kanal noch zu entscheiden) für `STALE`, `GAP`, Writer-Backlog, L0/L1-Fehler und geringe freie SSD; kein Alarm-HTTP im Event-Hot-Path. (2) Ein **lokaler unabhängiger Prozess-/Service-Watchdog** meldet Diensttotstand/Neustartfehler. (3) Ein **außerhalb des Hosts betriebener Heartbeat-Empfänger mit eigener Alarmzustellung** erkennt Host-/VM-/Netzausfall. Überwachung darf nicht vom überwachten Host abhängen; Heartbeat-Identität authentisieren, Transport verschlüsseln, Timeout nach nachgemessener Schwelle, Zustellfehler und Wiederherstellung nachweisen.
+- **Uhr-Qualität während des Betriebs:** Auf Linux-Zielhost `chrony` als synchronisierter Zeitdienst; `chronyc tracking`/Quelle, Offset, Root-Dispersion und letzte Synchronisation metrisch prüfen. Separate Gates `CAPTURE_READY` (Rohframes sichern, bei Uhrausfall markiert als `CLOCK_UNSYNC`) und `TIME_QUALIFIED` (R3-Offset-/Unsicherheitsbudget erfüllt, sonst keine zeitkritischen späteren Strategiefreigaben). Monotone Ingress-Reihenfolge unabhängig von korrigierter Wall-Clock erhalten.
 - Start/Stop, kontrollierter Shutdown, Crash-Recovery-Runbook; Backfill kann im Hintergrund **innerhalb des laufenden Dienstes** passieren, ohne dessen Start zu blockieren.
-- Host-Region ist **Messentscheidung** (Tokyo als Kandidat, nicht festgelegt); Ende-zu-Ende-Ping/WS-Timestamp-Jitter mehrfach vergleichen.
+- Host-Region ist **Messentscheidung** (Tokyo als Kandidat, nicht festgelegt); **Tardis-Angabe: Bitget Futures laut Anbieter in AWS Tokyo `ap-northeast-1`; eigene Tardis-Erfassung in GCP Tokyo `asia-northeast1`**. Weder offizielle Bitget-Standortbestätigung noch gemessener Latenzbeweis; R6 prüft echte Endpunkt-Latenz, Jitter, Routing, Fehler und Stabilität von alternativen Regionen. Quelle: https://docs.tardis.dev/historical-data-details/bitget-futures
 
-**Abnahme:** Store fehlt/ist korrupt → präziser `NOT_READY`, kein stiller Neubeginn; Feed getrennt → eigene Lane `RECOVERING`; Chart/Gateway geschlossen → Recorder läuft weiter; Storage voll → Alarm + kein falsch gesundes Signal; geordneter Shutdown und Reboot.
+**Abnahme:** Store fehlt/ist korrupt → präziser `NOT_READY`, kein stiller Neubeginn; Feed getrennt → eigene Lane `RECOVERING`; Chart/Gateway geschlossen → Recorder läuft weiter; Storage voll → Alarm + kein falsch gesundes Signal; **Alarm-Outbox ohne Verlust bei Neustart, lokaler Watchdog beim Prozesskill, externer Heartbeat-Alarm bei Host-/Netz-Ausfall, einschließlich Recovery-/Testalarm**; chrony-/Uhrfehler markiert `CLOCK_UNSYNC`, `CAPTURE_READY` bleibt soweit möglich unabhängig, `TIME_QUALIFIED` verweigert zeitabhängige Freigaben; geordneter Shutdown und Reboot.
 
 **Exit:** belegbar autonom betriebene Marktdatenkette.
 
@@ -420,7 +424,7 @@ Die Zeitziele sind **vorläufige Gate-1-Ziele**, keine schon gemessenen Resultat
 | **K07** | Rückwärtsseite | **< 50 ms** serverseitig im Benchmark der vereinbarten Seite | 4.096/16.384 Candles und reale Serien vergleichen |
 | **K08** | BTCUSDT-Tag Replay | **< 90 s** pro definiertem vollen Aufzeichnungstag auf Zielhardware | vollständiges L1-Eventvolumen/Dateiversion pinnen |
 | **K09** | Writer unter Live-Last | Keine dauerhaft wachsende Queue; kein unmarkierter Write-Drop | Peak+Stresstest, disk-full Injection |
-| **K10** | Storagegröße | B/Tag und bytes/Event real gemessen, getrennt Trade/BBO/Depth50 und L0/L1/L2 | mindestens 24 h repräsentativer Capture |
+| **K10** | Storagegröße | B/Tag und bytes/Event real gemessen, getrennt Trade/BBO/Depth50 und L0/L1/L2, Snapshots vs Delta, Writer-Overhead, zstd, Indizes und Aufbewahrung | **mindestens 24 h Live-Capture im V5-Depth50-Modus nach 05.11.2026**; frühere V4-Messung nur als explizite Vergleichsbaseline, keine V5-Kapazitätsprognose |
 | **K11** | Bitget-Kerzen-Gegenprobe | Abweichungen vollständig erklärbar, keine stillen OHLC-/Timeframe-Fehler | echter gemeinsamer Vergleichszeitraum |
 | **K12** | Gateway-Integrität | Kein doppeltes Prepend, kein Scrollsprung, keine fremde Request-Antwort, kein neuer Exchange-WS-Owner | 2-Chart-/Reconnect-/Slow-Client-Test |
 | **K13** | 24/7-Betrieb | **7 Tage** autonom, getestete Reconnects, keine manuellen Eingriffe zum Weiterlaufen | Signierte Tagesreports und Manifest-Hashes |
@@ -504,7 +508,7 @@ Vorgesehener Nachweisort: `darknode/docs/P1_EVIDENCE/`, Unterordner je Spike/Pak
 
 - Der globale DarkBot-Phasenplan und die bereits verbindlichen BSC-/Project_0-Verträge werden **nicht** rückwirkend verändert.
 - Eine ADR für Daten-/Indexformat, Zeit-/Bar-Semantik, Schema-Break, Qualitätszustände, Rate-Limits oder Host-Auswahl wird vor produktiver Änderung dokumentiert.
-- `ENDPOINT_REGISTRY.md`/`WS_AI_IDEEN.md`/`TEIL1_MARKTDATEN.md` sind referenzierte Ausgangsquellen. **Falls eine Datei im Repo fehlt, ist das ein Gate-1-Quellenbefund**, kein Grund für stillschweigende Ersatzannahmen.
+- [`ENDPOINT_REGISTRY.md`](ENDPOINT_REGISTRY.md) und [`WS_AI_IDEEN.md`](WS_AI_IDEEN.md) sind im Repo versionierte Quellen. **`TEIL1_MARKTDATEN.md` gilt als inhaltlich überholt und wurde durch diesen P1-Phasenplan ersetzt** (u. a. Parquet/JSON-Vollbuch/Tardis-Pflichtannahmen). Sie wird nicht als verbindliche neue Referenz committed. Terminalbelege stehen unter [`P1_EVIDENCE/`](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md).
 - Keine produktiven Mocks, Fake-Werte oder stillen Legacy-Fallbacks. Test-Fixtures sind im Testbereich zulässig und als solche gekennzeichnet.
 - Kein Deploy, kein ARM, kein SIGN, kein LIVE, keine Bitget-Orders durch P1.
 
@@ -566,7 +570,7 @@ protocol/schemas/darkbot/darknode/v1/
 |---|---|---|---|
 | **O01** | Depth50 und Schema-Version ab Änderung 05.11.2026 | R2 | Snapshot+Delta und Versionsprüfung als zwingende Adapterfähigkeit |
 | **O02** | Trade-ID Scope/Breite/Monotonie | R2 | Opaque typisiert und verlustfrei; keine freie `u64`-Annahme |
-| **O03** | Public-REST-Historiencursor / Reichweite | R2b | Keine Behauptung `idLessThan`/90-Tage-Historie als gesicherter Public-API-Weg |
+| **O03** | **PUBLIC_V2_HISTORY_VERIFIED** / vollständiger öffentlicher Repair | R2b | Classic-V2 `/api/v2/mix/market/fills-history` **real bestätigt**: 1.000/Seite, `idLessThan`, 7-Tage-Fenster, 90-Tage-Grenze; **10 Req/s/IP dokumentiert, nicht lastgetestet**. Weiter offen: Vollständigkeit, 429/Resume, Betrieb/Deprecation, Archiv-Overlap; V3 `/market/fills` ist kein bestätigter Historiencursor |
 | **O04** | Download-Center-Datenqualität und Bulk-Importdauer | R2b | Keine voreilige Tardis-/Kaufentscheidung |
 | **O05** | Speicherformat/Cache-Layout/IO/Index | R2c | L0/L1/L2-Dateien + SQLite Control als Architekturbaseline; Details offen |
 | **O06** | Dateien+SQLite Commit-/Recovery-Policy | R2d | Keine atomare Cross-Store-Transaktion behaupten |
@@ -576,9 +580,18 @@ protocol/schemas/darkbot/darknode/v1/
 | **O10** | Gateway Topics/Schema-Governance | P1.1/P1.8 | Keine Topic-IDs ohne Reservierung |
 | **O11** | Frontend-Position für Registry-Steuerung | UI-Abgleich | Keine neue Registerkarte; Wallet nicht ungeprüft mit Endpoint-Admin überladen |
 | **O12** | Quellrang bei abweichenden Live/Archive/REST-Daten | R2b | Widerspruchsprotokoll, kein stilles Überschreiben |
+| **O13** | **L0-Rohframe-Aufbewahrung und qualifizierte Löschung** | R2c/R2d | Retention-Policy versioniert (30 Tage nur Vorschlag, nicht bestätigt). **Vor Freigabe zur Löschung:** L0-Integrität/Segment-Hash PASS, kontrolliertes L0→L1-Redecode mit **hash-identischem kanonischen L1** und korrekten Events/Zählern/Sequenzen PASS, L1+Manifest dauerhaft committed, Mindestfrist abgelaufen, alle offenen Konflikte/Gaps und Audit-Holds geklärt; Löschung auditierbar und idempotent. Auch bei bestandenem Vergleich können später entdeckte Decoderfehler aus gelöschtem L0 nicht erneut behoben werden. |
+| **O14** | Alarmziel und externer Heartbeat | P1.9/R6 | Persistent Outbox, lokaler Watchdog und externe unabhängig betriebene Heartbeat-Alarmstelle; konkrete Anbieter/Frequenz erst nach Recovery-/Ausfalltests finalisieren |
 
 ### P1-Abnahmeentscheidung
 
 P1 kann **nur dann als PASS** gelten, wenn die Punkte D01–D08 am selben fixierten Commit nachgewiesen, alle obligatorischen K-/T-Prüfungen bestanden und kritische O-Punkte entschieden beziehungsweise als begründeter Scope-Ausschluss dokumentiert sind.
 
-**Daher Stand dieses Dokuments am 26.10.2026: `P1 = NOT_RUN`; `GATE 1 = OPEN`.**
+**Daher Stand dieses Dokuments am 27.10.2026: `P1 = NOT_RUN`; `GATE 1 = OPEN`.** Öffentliche REST-/SBE-V4-Teilnachweise siehe [`P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md`](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md); sie ersetzen keine vollständige P1-Abnahme.
+
+## Dokumenthistorie
+
+| Revision | Datum | Änderung |
+|---|---|---|
+| V1.0 | 26.10.2026 | Erstentwurf P1 Marktdatenkette |
+| **V1.1** | **27.10.2026** | Nachgewiesene Classic-V2-Historien-API/O03, V5-Live- und V4-Offline-Vertrag, R2-/K10-Termin, SQLite-Registry-Referenz, P1.9 Outbox/Watchdog/Externer Heartbeat, chrony/Uhrqualität, O13 L0-Löschung, O14 Alarmziel, Tardis-Host-Hinweis, Dokument-/Mermaid-Konsistenz |
