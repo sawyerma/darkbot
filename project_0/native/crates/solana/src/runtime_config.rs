@@ -808,7 +808,7 @@ impl RuntimeConfig {
         if self.fe_mode == "smoke" && self.fe_targets.len() > 100 {
             return Err("smoke scope exceeds one getMultipleAccounts; use full".into());
         }
-        duration_seconds(&self.duration)?;
+        horizon(&self.duration)?;
         Ok(())
     }
     /// Legacy consumers are populated once, before threads start. Finance/mode/
@@ -830,16 +830,61 @@ impl RuntimeConfig {
             env.insert("P0_WS_URL".into(), url.clone());
         }
         env.insert("P0_MEASUREMENT_DURATION".into(), self.duration.clone());
-        let seconds = duration_seconds(&self.duration)
-            .expect("validated duration")
-            .to_string();
         // DEC-05: the market observer's horizon is its own (`P0_MARKET_DURATION_SECS`, also
-        // `until-stopped`); an econ4h run binds its market to the measurement plan.
-        env.insert("P0_ECON_DURATION_SECS".into(), seconds);
+        // `until-stopped`); an econ4h run binds its market to the measurement plan. DEC-16: an
+        // unbounded run has no duration — its runtime reads the horizon itself.
+        if let Horizon::Fixed { seconds } = horizon(&self.duration).expect("validated horizon") {
+            env.insert("P0_ECON_DURATION_SECS".into(), seconds.to_string());
+        }
         env.insert("P0_INTEGRATION_PROBE".into(), self.diagnostics.to_string());
         env
     }
 }
+/// DEC-16: a run's horizon as the operational config names it — a fixed duration, or an
+/// unbounded run `until-stopped:<checkpoint>:<minimum runway>` (two durations, the rolling
+/// window within the runway). Never a huge duration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Horizon {
+    Fixed {
+        seconds: u64,
+    },
+    UntilStopped {
+        checkpoint_seconds: u64,
+        minimum_runway_seconds: u64,
+    },
+}
+
+/// The prefix of an unbounded run's horizon (`until-stopped:1h:24h`).
+pub const UNTIL_STOPPED: &str = "until-stopped";
+
+/// The horizon `s` names (see [`Horizon`]).
+pub fn horizon(s: &str) -> Result<Horizon, String> {
+    let Some(rest) = s
+        .strip_prefix(UNTIL_STOPPED)
+        .and_then(|r| r.strip_prefix(':'))
+    else {
+        return duration_seconds(s).map(|seconds| Horizon::Fixed { seconds });
+    };
+    let (checkpoint, runway) = rest
+        .split_once(':')
+        .ok_or("RUN_HORIZON_UNTIL_STOPPED_FORM: until-stopped:<checkpoint>:<minimum runway>")?;
+    let (checkpoint_seconds, minimum_runway_seconds) =
+        (duration_seconds(checkpoint)?, duration_seconds(runway)?);
+    if checkpoint_seconds > minimum_runway_seconds {
+        return Err("RUN_HORIZON_CHECKPOINT_EXCEEDS_RUNWAY".into());
+    }
+    Ok(Horizon::UntilStopped {
+        checkpoint_seconds,
+        minimum_runway_seconds,
+    })
+}
+
+/// The canonical horizon of an unbounded run with this window and runway.
+pub fn until_stopped(checkpoint: &str, minimum_runway: &str) -> Result<String, String> {
+    let spec = format!("{UNTIL_STOPPED}:{checkpoint}:{minimum_runway}");
+    horizon(&spec).map(|_| spec)
+}
+
 /// The one duration parser of Project_0 (operational config, MeasurementPlan, `p0ctl`):
 /// a positive integer with `s`, `m`, `h` or `d`, at most what four exact nanosecond snapshot
 /// offsets can represent. Open-ended horizons are not durations: `until-stopped`/`inf` are
@@ -2330,6 +2375,43 @@ mod tests {
         let env = r.config.environment();
         assert!(!env.contains_key("P0_MARKET_DURATION_SECS"));
         assert_eq!(env["P0_ECON_DURATION_SECS"], "14400");
+    }
+
+    /// DEC-16: the horizon is a fixed duration or `until-stopped:<checkpoint>:<runway>` (the
+    /// window within the runway), never a huge duration; an unbounded run resolves and carries
+    /// no fixed seconds into the runtime environment.
+    #[test]
+    fn dec16_the_horizon_is_fixed_or_until_stopped_with_its_window_and_runway() {
+        assert_eq!(horizon("4h"), Ok(Horizon::Fixed { seconds: 14400 }));
+        assert_eq!(
+            horizon("until-stopped:1h:24h"),
+            Ok(Horizon::UntilStopped {
+                checkpoint_seconds: 3600,
+                minimum_runway_seconds: 86400
+            })
+        );
+        assert_eq!(until_stopped("1h", "24h").unwrap(), "until-stopped:1h:24h");
+        for (bad, code) in [
+            (
+                "until-stopped:2h:1h",
+                "RUN_HORIZON_CHECKPOINT_EXCEEDS_RUNWAY",
+            ),
+            ("until-stopped:1h", "RUN_HORIZON_UNTIL_STOPPED_FORM"),
+            ("until-stopped", "RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE"),
+            ("until-stopped:0s:1h", "duration overflow/zero"),
+            (
+                "until-stopped:1h:inf",
+                "RUN_HORIZON_UNTIL_STOPPED_NOT_AVAILABLE",
+            ),
+        ] {
+            assert!(horizon(bad).unwrap_err().starts_with(code), "{bad}");
+        }
+        // A fixed-duration consumer never takes an unbounded horizon for a duration.
+        assert!(duration_seconds("until-stopped:1h:24h").is_err());
+        let r = mode("econ4h", &["--duration", "until-stopped:1h:24h"], &[]).unwrap();
+        let env = r.config.environment();
+        assert_eq!(env["P0_MEASUREMENT_DURATION"], "until-stopped:1h:24h");
+        assert!(!env.contains_key("P0_ECON_DURATION_SECS"));
     }
 
     /// DEC-05/§3: provisional values carry their measurement question; every parameter states

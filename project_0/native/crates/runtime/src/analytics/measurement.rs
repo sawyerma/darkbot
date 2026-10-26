@@ -32,8 +32,8 @@ pub enum SegmentPolicy {
     PerWindow,
 }
 
-/// Why an `UntilStopped` run does not start yet (STARTUP §3/§7.4).
-pub const UNTIL_STOPPED_GATED: &str = "RUN_HORIZON_UNTIL_STOPPED_GATED: rolling SK-07 segments, the rolling runway re-preflight and provider budgets are not qualified";
+/// Why an `UntilStopped` run does not start (STARTUP §3/§7.4, DEC-16); its gaps follow.
+pub const UNTIL_STOPPED_GATED: &str = "RUN_HORIZON_UNTIL_STOPPED_GATED";
 
 impl RunHorizon {
     /// `--until-stopped` with its window and runway (`s/m/h/d`, both > 0, the window within the
@@ -52,11 +52,57 @@ impl RunHorizon {
         })
     }
 
-    /// A run may start under this horizon; `UntilStopped` is refused with its open gates.
-    pub fn admit(&self) -> Result<(), String> {
-        match self {
-            Self::Fixed { .. } => Ok(()),
-            Self::UntilStopped { .. } => Err(UNTIL_STOPPED_GATED.into()),
+    /// The horizon the operational config names.
+    pub fn of(h: darkbot_solana::runtime_config::Horizon) -> Self {
+        use darkbot_solana::runtime_config::Horizon;
+        match h {
+            Horizon::Fixed { seconds } => Self::Fixed {
+                duration_seconds: seconds,
+            },
+            Horizon::UntilStopped {
+                checkpoint_seconds,
+                minimum_runway_seconds,
+            } => Self::UntilStopped {
+                checkpoint_seconds,
+                segment_policy: SegmentPolicy::PerWindow,
+                minimum_runway_seconds,
+            },
+        }
+    }
+
+    /// DEC-16: the central admission of a horizon. A fixed run is admitted; an unbounded run of
+    /// `current` only with its complete qualification — bound to exactly this run (mode,
+    /// identity, executables, window, runway), every part PASS and its provider evidence fresh
+    /// at `now` — otherwise RUN_HORIZON_UNTIL_STOPPED_GATED with every gap. Admission is not
+    /// the only gate: the run still needs its network, start and operation approvals.
+    pub fn admit(
+        &self,
+        qualification: Option<&crate::orchestration::until_stopped::Qualification>,
+        current: &crate::orchestration::until_stopped::Binding,
+        now: u64,
+    ) -> Result<(), String> {
+        let Self::UntilStopped {
+            checkpoint_seconds,
+            minimum_runway_seconds,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        let mut gaps = Vec::new();
+        if (current.checkpoint_seconds, current.minimum_runway_seconds)
+            != (*checkpoint_seconds, *minimum_runway_seconds)
+        {
+            gaps.push("the run names another horizon".to_string());
+        }
+        match qualification {
+            None => gaps.push("no qualification (p0ctl horizon qualify)".into()),
+            Some(q) => gaps.extend(q.gaps(current, now)),
+        }
+        if gaps.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("{UNTIL_STOPPED_GATED}: {}", gaps.join("; ")))
         }
     }
 }
@@ -896,7 +942,20 @@ mod tests {
                 minimum_runway_seconds: 21_600,
             }
         );
-        assert_eq!(h.admit(), Err(UNTIL_STOPPED_GATED.into()));
+        // DEC-16: without its qualification an unbounded run is gated; a fixed run is admitted.
+        let b = crate::orchestration::until_stopped::tests::binding(3_600, 21_600);
+        let gated = h.admit(None, &b, 0).unwrap_err();
+        assert!(
+            gated.starts_with(UNTIL_STOPPED_GATED) && gated.contains("no qualification"),
+            "{gated}"
+        );
+        assert_eq!(
+            RunHorizon::Fixed {
+                duration_seconds: 60
+            }
+            .admit(None, &b, 0),
+            Ok(())
+        );
         for (c, r) in [
             ("6h", "1h"),
             ("0s", "1h"),
@@ -928,7 +987,8 @@ mod tests {
                     duration_seconds: n
                 }
             );
-            assert_eq!(p.horizon().admit(), Ok(()));
+            let b = crate::orchestration::until_stopped::tests::binding(1, 1);
+            assert_eq!(p.horizon().admit(None, &b, 0), Ok(()));
             assert_eq!(p.duration_seconds, n);
             assert_eq!(p.offset_ns(SNAPSHOT_COUNT), n * NS);
             for i in 1..=SNAPSHOT_COUNT {

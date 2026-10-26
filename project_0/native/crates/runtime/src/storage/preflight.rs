@@ -26,6 +26,9 @@ use std::time::Instant;
 pub const CALIBRATION_MAX_S: u64 = 600;
 /// Name of the native report in the capture directory of a run.
 pub const REPORT_JOURNAL: &str = "capacity_preflight.p0j";
+/// Bytes of the write/sync probe of an operator preflight (`p0ctl run preflight`, the DEC-16
+/// qualification; `p0-capacity --probe-mib` defaults to the same).
+pub const PROBE_BYTES: u64 = 64 * MIB;
 /// Burst window over the frames' clock.
 const BURST_WINDOW_NS: u64 = 10_000_000_000;
 /// Nominal Solana slot time: only printed as context, never used for a verdict.
@@ -218,8 +221,21 @@ impl Request {
     /// Budgets from the active operational config; the caller overrides the verifier budget
     /// with the run's measurement config.
     pub fn from_active(duration_s: u64, out_dir: &Path, capture_source: &str) -> Self {
-        let w = WriterConfig::from_active();
-        let l = &darkbot_solana::runtime_config::active().limits;
+        Self::from_limits(
+            &darkbot_solana::runtime_config::active().limits,
+            duration_s,
+            out_dir,
+            capture_source,
+        )
+    }
+    /// Budgets of a run with these limits (DEC-16: an unbounded run's runway).
+    pub fn from_limits(
+        l: &darkbot_solana::runtime_config::Limits,
+        duration_s: u64,
+        out_dir: &Path,
+        capture_source: &str,
+    ) -> Self {
+        let w = WriterConfig::from_limits(l);
         Self {
             duration_s,
             out_dir: out_dir.into(),

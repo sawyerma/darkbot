@@ -869,6 +869,9 @@ macro_rules! typed_kinds {
                 $f::<darkbot_solana::runtime_config::EffectiveConfig>($kind, $schema, $bytes)
             }
             k::RUN_MANIFEST => $f::<super::measurement::RunManifest>($kind, $schema, $bytes),
+            k::UNTIL_STOPPED_QUALIFICATION => {
+                $f::<crate::orchestration::until_stopped::Qualification>($kind, $schema, $bytes)
+            }
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::ECON_SNAPSHOT => $f::<super::econ::SnapshotFrame>($kind, $schema, $bytes),
             k::ECON_FINAL => $f::<super::econ::SnapshotReport>($kind, $schema, $bytes),

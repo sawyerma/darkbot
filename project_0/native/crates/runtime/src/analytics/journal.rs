@@ -117,6 +117,8 @@ pub mod kind {
     pub const OPERATIONAL_CONFIG: u16 = 502;
     /// Pre-capture run manifest; `manifest.json` is its render for the pinned run store.
     pub const RUN_MANIFEST: u16 = 503;
+    /// DEC-16: the qualification of an unbounded run (`RunHorizon::UntilStopped`).
+    pub const UNTIL_STOPPED_QUALIFICATION: u16 = 504;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
@@ -212,6 +214,7 @@ pub mod kind {
         MEASUREMENT_PLAN,
         OPERATIONAL_CONFIG,
         RUN_MANIFEST,
+        UNTIL_STOPPED_QUALIFICATION,
         MT0_SNAPSHOT,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,
@@ -260,6 +263,8 @@ pub mod source {
     pub const CAPABILITY_CONTROL: u32 = 15;
     /// DEC-07 boot controller (`p0ctl boot …`).
     pub const BOOT_CONTROL: u32 = 16;
+    /// DEC-16: the unbounded-run controller (qualifications, rolling windows).
+    pub const UNTIL_STOPPED: u32 = 17;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

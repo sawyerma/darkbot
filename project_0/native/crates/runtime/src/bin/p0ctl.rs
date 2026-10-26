@@ -10,7 +10,9 @@
 //!       [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
 //! p0ctl [--project DIR] run preflight …   (= preflight)
 //! p0ctl [--project DIR] run start --duration D [--profile NAME] [test.sh options…]
-//! p0ctl [--project DIR] run start --until-stopped --checkpoint D --minimum-runway D   (gated)
+//! p0ctl [--project DIR] run start --until-stopped --checkpoint D --minimum-runway D [--qualification ID]   (DEC-16: RunHorizon::admit)
+//! p0ctl [--project DIR] horizon qualify --mode econ4h|market|shadow --checkpoint D --minimum-runway D [--provider-evidence ID|FILE] [-- OPERATIONAL_ARGS...]
+//! p0ctl [--project DIR] horizon status --qualification ID
 //! p0ctl [--project DIR] run status [--run RUN_ID]
 //! p0ctl [--project DIR] run stop [--run RUN_ID]
 //! p0ctl [--project DIR] runs list
@@ -87,6 +89,7 @@ use darkbot_runner::analytics::{backtest, jobs, qualification, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::orchestration::source_control;
+use darkbot_runner::orchestration::until_stopped;
 use darkbot_runner::run_layout::{self, find_run, native_layout, native_run, RunDir, RUN_ROOTS};
 use darkbot_runner::storage::preflight;
 use std::io::{Read, Seek, SeekFrom};
@@ -175,7 +178,7 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
     let basis = preflight::discover_runs(&root, None);
     // Advisory: the binding preflight runs inside the launcher for the actual run directory.
-    let result = preflight::run(req, &basis, 64 * 1024 * 1024);
+    let result = preflight::run(req, &basis, preflight::PROBE_BYTES);
     let _ = std::fs::remove_dir_all(&out);
     let report = result?;
     print!("{}", report.terminal());
@@ -317,14 +320,35 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         return Ok(true);
     }
     let (mode, launcher_args) = launch_plan(args)?;
-    // STARTUP §3: an unbounded run is a typed horizon, never a huge duration; it starts only
-    // once its gates are qualified.
+    // STARTUP §3 / DEC-16: an unbounded run is a typed horizon, never a huge duration; it is
+    // admitted only by `RunHorizon::admit` with its complete qualification bound to exactly this
+    // run (`--qualification ID`, p0ctl horizon qualify), and then still needs its approvals.
     if options.iter().any(|a| a == "--until-stopped") {
         if options.iter().any(|a| a == "--duration") {
             return Err("--until-stopped and --duration are exclusive".into());
         }
         let need = |flag| value(options, flag).ok_or(format!("--until-stopped requires {flag} D"));
-        RunHorizon::until_stopped(&need("--checkpoint")?, &need("--minimum-runway")?)?.admit()?;
+        let spec = darkbot_solana::runtime_config::until_stopped(
+            &need("--checkpoint")?,
+            &need("--minimum-runway")?,
+        )?;
+        let (binding, _) = until_stopped::binding(
+            project,
+            mode.name(),
+            args.split(|a| a == "--").nth(1).unwrap_or(&[]),
+            &spec,
+            &|k| std::env::var(k).ok(),
+            &boot_audit::binary_identity_for,
+        )?;
+        let qualification = value(options, "--qualification")
+            .map(|id| until_stopped::get(project, &id))
+            .transpose()?;
+        RunHorizon::of(darkbot_solana::runtime_config::horizon(&spec)?).admit(
+            qualification.as_ref(),
+            &binding,
+            unix_now()?,
+        )?;
+        return Err("UNTIL_STOPPED_LAUNCHER: the econ4h launcher runs no rolling windows yet (DEC-16 stage 2)".into());
     }
     if options
         .iter()
@@ -696,6 +720,102 @@ fn stop_target(state: &OwnerState, wanted: Option<&str>) -> Result<(), String> {
 }
 
 /// `flag VALUE`; a flag given without its value is an error, never ignored.
+fn unix_now() -> Result<u64, String> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "BOOT_CLOCK")?
+        .as_secs())
+}
+
+const HORIZON_USAGE: &str = "usage: p0ctl horizon qualify --mode econ4h|market|shadow --checkpoint D --minimum-runway D [--provider-evidence RECORD_ID|FILE.p0j] [-- OPERATIONAL_ARGS...]
+  | p0ctl horizon status --qualification ID
+DEC-16: the typed qualification of an unbounded run (RunHorizon::UntilStopped): the mode's
+rolling windows, SK-07 rolling segments and crash recovery on this storage, the rolling capacity
+for the runway, the provider budget of a window and the provider evidence, stored by id.
+p0ctl run start --until-stopped --qualification ID admits only a complete one bound to exactly
+the run, which still needs its network and start approvals; LIVE stays disabled.";
+
+/// DEC-16: `p0ctl horizon` — the qualification of an unbounded run.
+fn horizon_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let options = args.split(|a| a == "--").next().unwrap_or(&[]);
+    let operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]);
+    let need = |flag: &str| -> Result<String, String> {
+        given(options, flag)?.ok_or_else(|| format!("{flag} required\n{HORIZON_USAGE}"))
+    };
+    match options.first().map(String::as_str) {
+        Some("qualify") => {
+            let mode = need("--mode")?;
+            if mode == boot_audit::MARKET_MODE {
+                if !operational.is_empty() {
+                    return Err("BOOT_MARKET_ARGS: the raw capture takes its configuration from its environment files, no operational arguments".into());
+                }
+                load_capture_env()?;
+            }
+            let spec = darkbot_solana::runtime_config::until_stopped(
+                &need("--checkpoint")?,
+                &need("--minimum-runway")?,
+            )?;
+            let env = |k: &str| std::env::var(k).ok();
+            let (binding, resolved) = until_stopped::binding(
+                project,
+                &mode,
+                operational,
+                &spec,
+                &env,
+                &boot_audit::binary_identity_for,
+            )?;
+            let evidence = given(options, "--provider-evidence")?
+                .map(|v| evidence_id(project, &v))
+                .transpose()?;
+            let source = boot_audit::runtime_capture_source(&|k| {
+                if k == "P0_MODE" {
+                    Some(mode.clone())
+                } else {
+                    env(k)
+                }
+            })?;
+            let now = unix_now()?;
+            let q = until_stopped::qualify(
+                binding.clone(),
+                &resolved.config,
+                source,
+                &until_stopped::Inputs {
+                    project,
+                    runs_root: project.join("data/runs"),
+                    evidence_id: evidence,
+                    now,
+                },
+            )?;
+            let id = until_stopped::put(project, &q)?;
+            print!("{}", q.terminal(&id));
+            let horizon = RunHorizon::of(darkbot_solana::runtime_config::horizon(&spec)?);
+            match horizon.admit(Some(&q), &binding, now) {
+                Ok(()) => {
+                    println!("UNTIL_STOPPED_QUALIFICATION {id} ADMISSIBLE: the run still needs its network and start approvals");
+                    Ok(true)
+                }
+                Err(gaps) => {
+                    println!("UNTIL_STOPPED_QUALIFICATION {id} {gaps}");
+                    Ok(false)
+                }
+            }
+        }
+        Some("status") => {
+            let id = need("--qualification")?;
+            let q = until_stopped::get(project, &id)?;
+            print!("{}", q.terminal(&id));
+            println!(
+                "qualified_at_unix_s={} evidence_valid_until_unix_s={}",
+                q.qualified_at_unix_s,
+                q.evidence_valid_until_unix_s
+                    .map_or("NONE".to_string(), |t| t.to_string())
+            );
+            Ok(true)
+        }
+        _ => Err(HORIZON_USAGE.into()),
+    }
+}
+
 fn given(args: &[String], flag: &str) -> Result<Option<String>, String> {
     match args.iter().position(|a| a == flag) {
         None => Ok(None),
@@ -1878,6 +1998,7 @@ fn main() -> ExitCode {
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("capability"), _) => capability_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
+            (Some("horizon"), _) => horizon_cmd(&project, &rest),
             (Some("backtest"), _) => foreground_job(&project, "backtest", &rest),
             (Some("optimize"), _) => foreground_job(&project, "optimize", &rest),
             (Some("job"), _) => job_cmd(&project, &rest),

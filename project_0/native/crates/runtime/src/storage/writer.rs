@@ -52,7 +52,10 @@ pub struct WriterConfig {
 
 impl WriterConfig {
     pub fn from_active() -> Self {
-        let l = &darkbot_solana::runtime_config::active().limits;
+        Self::from_limits(&darkbot_solana::runtime_config::active().limits)
+    }
+    /// The writer of a run with these limits (DEC-16: a qualification resolves its own config).
+    pub fn from_limits(l: &darkbot_solana::runtime_config::Limits) -> Self {
         Self {
             initial_bytes: l.market_capture_initial_mib * MIB,
             max_bytes: l.market_capture_max_mib * MIB,
