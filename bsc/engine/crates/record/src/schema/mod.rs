@@ -9,6 +9,7 @@
 use crate::{Record, RecordError, Schema, decode, header};
 
 pub mod bsc_census;
+pub mod bsc_four_freeze;
 pub mod bsc_runtime;
 pub mod c1_qualification;
 pub mod g06a;
@@ -32,6 +33,7 @@ pub fn all() -> Vec<&'static Schema> {
     g06a::ALL
         .iter()
         .chain(bsc_census::ALL)
+        .chain(bsc_four_freeze::ALL)
         .chain(bsc_runtime::ALL)
         .chain(c1_qualification::ALL)
         .chain(g07::ALL)
