@@ -1,7 +1,7 @@
 # DarkNode – GATE 1: Research, Anforderungen und Architekturentscheidungen
 
 **Stand:** 26.10.2026 · **Status:** OPEN / DISCOVERY · **Scope:** Dokumentation und Plan; keine Code-/Protobuf-/Gateway-Änderung, keine reale Handelsfreigabe.  
-**Leitdokumente:** [README](../README.md), [Phasenplan](PHASENPLAN.md).
+**Leitdokumente:** [README](../README.md), [Gesamtphasenplan](PHASENPLAN.md), [P1-Phasenplan V1.1](PHASENPLAN_P1_V1.md), [Endpoint-Registry](ENDPOINT_REGISTRY.md), [P1-Evidenz](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md).
 
 ## 1. Entscheidungslage
 
@@ -24,6 +24,8 @@
 | DN-D15 | **Leistungsziel:** intern niedrige p99-Latenz messen; keine übertragene BSC/P0-1-ms-End-to-End-Vorgabe | FESTGELEGT |
 | DN-D16 | **Oberfläche:** DarkNode-Tabs exakt Overview / Builder / Backtest / Live / Wallet; kein permanenter Inspector, keine Signalprüfung und kein zusätzlicher Monitor/Gate-Tab | FESTGELEGT |
 | DN-D17 | **Höchste Logik:** Open/Close-Intents + Stop-/BE-/Trailing-Policies an genau einen Rust Position-/Risk-/Execution-Owner; BOTH ist Berechtigung für beide Richtungen, nicht simultane Gegenpositionen | FESTGELEGT |
+| DN-D18 | **No JSON intern:** Bitget-JSON ausschließlich am externen Adapterrand; innerhalb Rust/Protobuf/Binärformate; in L0 dürfen externe Originalbytes opak abgelegt werden | FESTGELEGT; Implementierungsnachweis offen |
+| DN-D19 | **P1-Speicher:** Roh-/Normaldaten/Candle-Cache als L0/L1/L2-Binärdateien; kleine transaktionale Control-/Registry-/Gap-/Manifestdaten in SQLite; keine produktiven Redis/Parquet/ClickHouse-Pfade | FESTGELEGT; R2c/R2d offen |
 
 „FESTGELEGT“ bezeichnet das **Produkt-/Architekturziel**, keinen implementierten und keinen getesteten Sachverhalt. Alle API-/Fremdcode-Behauptungen müssen vor Übernahme gegen exakte Version/Commit und Tests verifiziert werden.
 
