@@ -300,13 +300,13 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             args.extend(["--expect-version".into(), expect_version?.to_string()]);
             Some(args)
         }
-        // DEC-13/DEC-04: the capability and its requested value, with the version the view
-        // showed: LIVE OFF|LIVE, HOLD_B OFF|OBSERVE|ACTIVE.
+        // DEC-13/DEC-04/DEC-11: the capability and its requested value, with the version the
+        // view showed: LIVE OFF|LIVE, HOLD_B and JITO_BUNDLE OFF|OBSERVE|ACTIVE.
         CAPABILITY_SET if req.resource_id.is_empty() => {
             let c = CapabilityControlCommand::decode(req.params.as_ref()).ok()?;
             let values: &[&str] = match c.capability.as_str() {
                 "LIVE" => &["OFF", "LIVE"],
-                "HOLD_B" => &["OFF", "OBSERVE", "ACTIVE"],
+                "HOLD_B" | "JITO_BUNDLE" => &["OFF", "OBSERVE", "ACTIVE"],
                 _ => return None,
             };
             if !values.contains(&c.requested.as_str()) {
@@ -804,7 +804,7 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         if req.action == CAPABILITY_SET {
-                            "Capability request invalid (LIVE OFF|LIVE or HOLD_B OFF|OBSERVE|ACTIVE, and the configuration version)"
+                            "Capability request invalid (LIVE OFF|LIVE, HOLD_B or JITO_BUNDLE OFF|OBSERVE|ACTIVE, and the configuration version)"
                         } else {
                             "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)"
                         },
@@ -2287,8 +2287,8 @@ mod tests {
             job_args(&req(SOURCE_SET, "", source, Some(ProfileVersion(4)))),
             None
         );
-        // DEC-13/DEC-04: a capability request carries its version; only LIVE OFF|LIVE and
-        // HOLD_B OFF|OBSERVE|ACTIVE pass.
+        // DEC-13/DEC-04/DEC-11: a capability request carries its version; only LIVE OFF|LIVE
+        // and HOLD_B/JITO_BUNDLE OFF|OBSERVE|ACTIVE pass.
         let capability = |capability: &str, requested: &str| {
             crate::proto::project0::v1::CapabilityControlCommand {
                 capability: capability.into(),
@@ -2325,12 +2325,24 @@ mod tests {
             .unwrap()[3..5],
             ["HOLD_B", "ACTIVE"]
         );
+        assert_eq!(
+            job_args(&req(
+                CAPABILITY_SET,
+                "",
+                capability("JITO_BUNDLE", "OBSERVE"),
+                Some(ConfigVersion(4)),
+            ))
+            .unwrap()[3..],
+            ["JITO_BUNDLE", "OBSERVE", "--expect-version", "4"]
+        );
         for (c, v, expected) in [
             ("LIVE", "LIVE", None),
             ("JITO", "LIVE", Some(ConfigVersion(2))),
             ("LIVE", "ON", Some(ConfigVersion(2))),
             ("LIVE", "OBSERVE", Some(ConfigVersion(2))),
             ("HOLD_B", "LIVE", Some(ConfigVersion(2))),
+            ("JITO_BUNDLE", "LIVE", Some(ConfigVersion(2))),
+            ("JITO_BUNDLE", "OBSERVE", None),
         ] {
             assert_eq!(
                 job_args(&req(CAPABILITY_SET, "", capability(c, v), expected)),

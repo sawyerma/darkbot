@@ -87,36 +87,42 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     <LiveRequest owner={owner} live={live}/>
-    <HoldModeRequest owner={owner} live={live}/>
+    <ModeRequest owner={owner} live={live} capability="HOLD_B" label="B hold mode" action="Request hold mode"
+      active="Active (needs N and the evidence)"/>
+    <ModeRequest owner={owner} live={live} capability="JITO_BUNDLE" label="Bundle path" action="Request bundle path"
+      active="Active (needs a qualified bundle simulator)"/>
     {params}
   </Section>;
 }
 
-type HoldMode = "OFF" | "OBSERVE" | "ACTIVE";
+type Mode = "OFF" | "OBSERVE" | "ACTIVE";
 
 /**
- * DEC-04 (N-5): the B hold mode through the same controller (`p0ctl capability set HOLD_B …`,
- * CAS on the capability configuration version). ACTIVE is only requested here: the owner makes it
- * effective with the user's N (B-8) and N finalized attempts without an underestimation, else it
- * stays OBSERVE with the reason shown in the capability row.
+ * DEC-04/DEC-11 (N-5): a capability mode through the same controller (`p0ctl capability set
+ * HOLD_B|JITO_BUNDLE …`, CAS on the capability configuration version). ACTIVE is only requested
+ * here: the owner decides what is effective — the B hold with the user's N (B-8) and N finalized
+ * attempts without an underestimation, the bundle path never without a qualified bundle
+ * simulator — and the capability row shows the reason.
  */
-function HoldModeRequest({ owner, live }: { owner: LiquidatorView; live: boolean }) {
+function ModeRequest({ owner, live, capability, label, action, active }: {
+  owner: LiquidatorView; live: boolean; capability: "HOLD_B" | "JITO_BUNDLE"; label: string; action: string; active: string;
+}) {
   const { busy } = useAnalyticsControl();
-  const row = owner.capabilities.find((c) => c.name === "HOLD_B") ?? null;
-  const [mode, setMode] = useState<HoldMode>("OBSERVE");
+  const row = owner.capabilities.find((c) => c.name === capability) ?? null;
+  const [mode, setMode] = useState<Mode>("OBSERVE");
   const version = owner.capabilityConfigVersion;
   const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
     : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";
   if (!row) return null;
   return <>
     <div className="p0-formgrid">
-      <label>B hold mode<select value={mode} onChange={(e) => setMode(e.target.value as HoldMode)}>
-        <option value="OFF">Off</option><option value="OBSERVE">Observe</option><option value="ACTIVE">Active (needs N and the evidence)</option></select></label>
+      <label>{label}<select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+        <option value="OFF">Off</option><option value="OBSERVE">Observe</option><option value="ACTIVE">{active}</option></select></label>
     </div>
     <div className="p0-actions">
       <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
-        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand("HOLD_B", mode).params, configVersion: version ?? undefined })}>
-        Request hold mode
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand(capability, mode).params, configVersion: version ?? undefined })}>
+        {action}
       </button>
     </div>
   </>;

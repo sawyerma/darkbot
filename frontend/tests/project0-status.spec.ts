@@ -343,6 +343,18 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const hb = fromBinary(CapabilityControlCommandSchema, hold.params);
   expect([hb.capability, hb.requested]).toEqual(["HOLD_B", "ACTIVE"]);
   expect(hold.expected?.version).toEqual({ case: "configVersion", value: 1n });
+  // DEC-11: the bundle path likewise; ACTIVE requested stays OBSERVE without a qualified
+  // bundle simulator, and OFF is requested through the same controller.
+  await expect(page.locator(".p0-line", { hasText: /^JITO_BUNDLE/ }).first())
+    .toContainText("OBSERVE (requested ACTIVE) · bundle simulator not qualified");
+  await page.getByRole("combobox", { name: "Bundle path" }).selectOption("OFF");
+  await page.getByRole("button", { name: "Request bundle path" }).click();
+  await expect.poll(() => sent.length).toBe(3);
+  const bundle = sent.at(-1)!;
+  expect(bundle.action).toBe("project0.capability.set");
+  const jb = fromBinary(CapabilityControlCommandSchema, bundle.params);
+  expect([jb.capability, jb.requested]).toEqual(["JITO_BUNDLE", "OFF"]);
+  expect(bundle.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();
@@ -368,6 +380,6 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });

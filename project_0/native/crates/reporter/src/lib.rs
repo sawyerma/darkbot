@@ -1469,6 +1469,14 @@ mod contract_tests {
                     effective: "OBSERVE",
                     block_reason: "B-8: N not decided (hold_b_min_attempts unset)",
                 },
+                // DEC-11: the bundle path requested ACTIVE, OBSERVE without a qualified simulator.
+                OwnerCapability {
+                    name: darkbot_runner::execution::bundle_path::JITO_BUNDLE,
+                    requested: "ACTIVE",
+                    effective: "OBSERVE",
+                    block_reason:
+                        darkbot_runner::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED,
+                },
             ],
             wallets: OwnerWallets {
                 finance_snapshot_id: "golden-run-3".into(),
