@@ -30,8 +30,11 @@
 //! verdict: `criteria` stays `CRITERIA_UNCONFIRMED` until the user confirmed
 //! versioned criteria (order V2 §8).
 
+use crate::canonical_join::FourToken;
 use crate::canonical_join::Venue;
-use crate::runtime_journal::{CANONICAL_LAUNCH_LEN, RUN_MANIFEST, venue_of_byte};
+use crate::runtime_journal::{
+    CANONICAL_LAUNCH_LEN, CANONICAL_LAUNCH_LEN_V1, RUN_MANIFEST, four_token_of_byte, venue_of_byte,
+};
 use crate::sources::SourceId;
 use darkbot_bsc_journal::storage::run::{RunReader, SegmentRead};
 use darkbot_bsc_journal::{CaptureRecord, JournalError, JournalReader, RecordKind};
@@ -82,6 +85,13 @@ pub struct Census {
     /// those whose provider answers were refused every time.
     pub tx_unverifiable: u64,
     pub tx_answer_refused: u64,
+    /// Four.meme launches by the pre-execution verdict; `unrecorded`: a
+    /// record of an older build.
+    pub four_derived: u64,
+    pub four_no_derivation: u64,
+    pub four_mismatch: u64,
+    pub four_not_recognized: u64,
+    pub four_verdict_unrecorded: u64,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -120,6 +130,8 @@ struct LaunchRecord {
     tx_unverifiable: bool,
     tx_answer_refused: bool,
     fetch_lag_ms: Option<i64>,
+    /// `None` in a record of an older build.
+    four: Option<FourToken>,
     seen_ns: u64,
 }
 
@@ -140,9 +152,13 @@ fn flag(byte: u8) -> Option<bool> {
 }
 
 fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
-    if p.len() != CANONICAL_LAUNCH_LEN || p[0] != b'C' {
+    if !(p.len() == CANONICAL_LAUNCH_LEN || p.len() == CANONICAL_LAUNCH_LEN_V1) || p[0] != b'C' {
         return None;
     }
+    let four = match p.get(CANONICAL_LAUNCH_LEN_V1) {
+        Some(b) => Some(four_token_of_byte(*b)?),
+        None => None,
+    };
     // Every venue the writer knows (Phase E: OpenFour is byte 3).
     let venue = venue_of_byte(p[1])?;
     let buys_known = flag(p[103])?;
@@ -180,6 +196,7 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         } else {
             None
         },
+        four,
         seen_ns,
     })
 }
@@ -357,6 +374,7 @@ fn replay(
                         tx_unverifiable: false,
                         tx_answer_refused: false,
                         fetch_lag_ms: None,
+                        four: None,
                         seen_ns: record.timestamp_ns,
                     });
                 }
@@ -489,6 +507,16 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
             out.tx_answer_refused += u64::from(l.tx_answer_refused);
             if !l.flap {
                 out.four_launches += 1;
+                let n = match l.four {
+                    Some(FourToken::Matched) => &mut out.four_derived,
+                    Some(FourToken::Unknown) => &mut out.four_no_derivation,
+                    Some(FourToken::Mismatch) => &mut out.four_mismatch,
+                    Some(FourToken::NotRecognized | FourToken::NotApplicable) => {
+                        &mut out.four_not_recognized
+                    }
+                    None => &mut out.four_verdict_unrecorded,
+                };
+                *n += 1;
                 continue;
             }
             out.flap_launches += 1;
@@ -575,6 +603,11 @@ impl Census {
             .set(cs::COVERED_MS, self.covered_ms)
             .set(cs::FLAP_LAUNCHES, self.flap_launches)
             .set(cs::FOUR_LAUNCHES, self.four_launches)
+            .set(cs::FOUR_DERIVED, self.four_derived)
+            .set(cs::FOUR_NO_DERIVATION, self.four_no_derivation)
+            .set(cs::FOUR_MISMATCH, self.four_mismatch)
+            .set(cs::FOUR_NOT_RECOGNIZED, self.four_not_recognized)
+            .set(cs::FOUR_VERDICT_UNRECORDED, self.four_verdict_unrecorded)
             .set(cs::ORPHANED_LAUNCHES, self.orphaned_launches)
             .set(cs::OUTAGE_LAUNCHES, self.outage_launches)
             .set(cs::FULL_BEFORE, self.full_before)
@@ -630,6 +663,7 @@ impl Census {
         let opti = |v: Option<i64>| v.map_or("n/a".to_string(), |v| v.to_string());
         let mut s = format!(
             "covered_ms={} windows={} flap_launches={} c1_scope={} tx_unverifiable={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={} between_windows={} unparsed={}\n\
+             four pre-execution token: derived={} no_derivation={} mismatch={} not_recognized={} unrecorded={}\n\
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
@@ -646,6 +680,11 @@ impl Census {
             self.blocks_skipped,
             self.blocks_between_windows,
             self.unparsed_records,
+            self.four_derived,
+            self.four_no_derivation,
+            self.four_mismatch,
+            self.four_not_recognized,
+            self.four_verdict_unrecorded,
             self.full_before,
             self.c1_scope_full_before,
             self.hash_only_before,
@@ -808,6 +847,68 @@ mod tests {
             (c.flap_launches, c.four_launches, c.orphaned_launches),
             (0, 0, 0)
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase F §10 (Phase E review L2): the Four verdict rides in the `C`
+    /// record and is counted per verdict; a 136-byte record of an older
+    /// build counts as unrecorded, an unknown verdict byte as unparsed.
+    #[test]
+    fn four_verdicts_replay_from_the_canonical_record() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-verdict-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let with = |venue, tx, four| LaunchRef {
+            four_token: four,
+            ..launch(venue, 10, tx, None, 100)
+        };
+        let c = |l: LaunchRef| {
+            canonical_launch_payload(&Joined {
+                launch: l,
+                visibility: Visibility::Missed,
+            })
+        };
+        let mut old = c(with(Venue::Four, 5, FourToken::Matched));
+        old.pop();
+        let mut bad = c(with(Venue::Four, 6, FourToken::Matched));
+        *bad.last_mut().unwrap() = 9;
+        let mut records = vec![(
+            RecordKind::Canonical,
+            1,
+            window_payload(b'H', 10, &[10; 32]),
+        )];
+        for p in [
+            c(with(Venue::Four, 1, FourToken::Matched)),
+            c(with(Venue::OpenFour, 2, FourToken::Unknown)),
+            c(with(Venue::OpenFour, 3, FourToken::Mismatch)),
+            c(with(Venue::Four, 4, FourToken::NotRecognized)),
+            old,
+            bad,
+        ] {
+            records.push((RecordKind::Canonical, 100, p));
+        }
+        records.push((
+            RecordKind::Canonical,
+            400,
+            window_payload(b'E', 10, &[10; 32]),
+        ));
+        records.push((RecordKind::Runtime, 401, EXIT_PAYLOAD.to_vec()));
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(
+            (
+                c.four_launches,
+                c.four_derived,
+                c.four_no_derivation,
+                c.four_mismatch,
+                c.four_not_recognized,
+                c.four_verdict_unrecorded,
+                c.unparsed_records
+            ),
+            (5, 1, 1, 1, 1, 1, 1)
+        );
+        let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
+        assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 1);
+        assert!(c.summary().contains("derived=1 no_derivation=1 mismatch=1"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -22,7 +22,7 @@
 //! senders. G0.4 counts only blocks mined after this process started; the
 //! blocks a C2 resume backfills are counted apart.
 
-use crate::canonical_join::{LaunchRef, LaunchTx, Ledger};
+use crate::canonical_join::{LaunchRef, LaunchTx, Ledger, Venue};
 use crate::chain_follower::{
     CanonicalEvent, FollowerFault, FollowerLimits, NonceWatch, RequestError, is_unrebuildable,
     run_follower,
@@ -1148,15 +1148,23 @@ pub fn run(
                     hash, from, nonce, ..
                 },
             ) = (owner.as_mut(), &event)
-                && (decided.is_some() || o.watches(from))
+                && (decided.is_some_and(|l| l.venue() == Venue::Flap) || o.watches(from))
             {
                 // Source lanes are indexed as in `SourceId::ALL` (five).
                 o.pending(*hash, *from, *nonce, index(source) as u8, at);
             }
             // C3: the first verified sighting of a C1-scope launch runs the
             // production path to the PAPER sink (when armed).
-            if let (Some(x), Some(o), Some(Launch::First { hash, .. }), Event::Full { raw, .. }) =
-                (exec.as_mut(), owner.as_ref(), decided, &event)
+            if let (
+                Some(x),
+                Some(o),
+                Some(Launch::First {
+                    hash,
+                    venue: Venue::Flap,
+                    ..
+                }),
+                Event::Full { raw, .. },
+            ) = (exec.as_mut(), owner.as_ref(), decided, &event)
                 && let Some(buy) = x.on_launch(
                     hash,
                     raw,
@@ -1188,6 +1196,7 @@ pub fn run(
                     hash,
                     source,
                     lag_ns,
+                    ..
                 }) => {
                     journal.record(
                         RecordKind::Runtime,

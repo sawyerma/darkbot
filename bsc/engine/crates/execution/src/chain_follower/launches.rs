@@ -49,9 +49,10 @@ pub enum Venue {
 
 /// What the production Four decoder makes of a Four.meme launch's verified
 /// signed bytes before execution (Phase E); `NotApplicable` for Flap. The
-/// journal keeps this verdict (the `C` record), not the Four launch's
-/// signed bytes: a replay reproduces the decision, it does not re-decode
-/// (Phase E review L2).
+/// runtime status counts every verdict, the journal's `C` record keeps it
+/// (its last byte) and the census counts it per verdict; the first full
+/// pending sighting of a Four launch is journaled with its signed bytes, so
+/// a replay can decode it again (Phase E review L2, Phase F §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FourToken {
     NotApplicable,

@@ -11,8 +11,9 @@
 //! one file) stay readable by the census.
 //!
 //! What it holds (binary payloads, no JSON):
-//! - `RawSignedTx`: the first verified full sighting of a Flap launch,
-//!   `source u8 | hash [32] | canonical signed bytes`.
+//! - `RawSignedTx`: the first verified full sighting of a launch (Flap C1
+//!   scope or a Four.meme `createToken`, Phase F), `source u8 | hash [32] |
+//!   canonical signed bytes`: a replay decodes them again.
 //! - `Runtime` `b'L'`: a later sighting of a launch from another source,
 //!   `b'L' | source u8 | hash [32] | lag_ns u64 LE`.
 //! - `Runtime` `b'S'`: a source transition, `b'S' | source u8 | event u8`
@@ -24,14 +25,18 @@
 //! - `Canonical` `b'C'`: a canonical launch joined with the sightings,
 //!   `b'C' | venue u8 | block u64 | block_hash [32] | tx_index u64 | tx_hash
 //!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source
-//!   u8 | delta_us u64 | block_ms u64 | tx u8 | fetch_lag? u8 i64` (integers
+//!   u8 | delta_us u64 | block_ms u64 | tx u8 | fetch_lag? u8 i64 | four u8`
+//!   (integers
 //!   LE; venue 1 Flap, 2 Four Classic, 3 OpenFour; class per
 //!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF
 //!   and delta 0 for a miss; delta = lead or lag against the block time;
 //!   fetch_lag = local wall ms at the header fetch minus block_ms; tx 0 verified
 //!   outside the C1 scope, 1 verified in the C1 scope (Four.meme: the pending
 //!   decoder names the launch's token before execution), 2 a type/form the
-//!   verifier does not rebuild, 3 provider answers refused every time).
+//!   verifier does not rebuild, 3 provider answers refused every time; four:
+//!   the Four.meme decoder's pre-execution verdict, 0 Flap, 1 not a decoded
+//!   launch, 2 no proven derivation, 3 derived = canonical, 4 derived ≠
+//!   canonical; absent in the 136-byte records of older builds).
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
 //! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
@@ -47,7 +52,7 @@
 //! Other pending transactions are only counted (runtime status), not
 //! journaled: the journal stays bounded over long read-only runs.
 
-use crate::canonical_join::{Joined, LaunchRef, LaunchTx, Venue};
+use crate::canonical_join::{FourToken, Joined, LaunchRef, LaunchTx, Venue};
 use crate::sources::SourceId;
 use darkbot_bsc_journal::storage::metrics::{MetricsView, StorageMetrics};
 use darkbot_bsc_journal::storage::segments::{SealedSegment, SegmentPolicy, SegmentWriter};
@@ -168,11 +173,36 @@ pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     let lag = l.fetch_lag_ms();
     out.push(u8::from(lag.is_some()));
     out.extend_from_slice(&lag.unwrap_or(0).to_le_bytes());
+    out.push(four_token_byte(l.four_token));
     out
 }
 
-/// The length of a `C` record.
-pub const CANONICAL_LAUNCH_LEN: usize = 136;
+/// The length of a `C` record…
+pub const CANONICAL_LAUNCH_LEN: usize = 137;
+/// …and of one of an older build (without the Four verdict).
+pub const CANONICAL_LAUNCH_LEN_V1: usize = 136;
+
+pub fn four_token_byte(t: FourToken) -> u8 {
+    match t {
+        FourToken::NotApplicable => 0,
+        FourToken::NotRecognized => 1,
+        FourToken::Unknown => 2,
+        FourToken::Matched => 3,
+        FourToken::Mismatch => 4,
+    }
+}
+
+pub fn four_token_of_byte(byte: u8) -> Option<FourToken> {
+    [
+        FourToken::NotApplicable,
+        FourToken::NotRecognized,
+        FourToken::Unknown,
+        FourToken::Matched,
+        FourToken::Mismatch,
+    ]
+    .into_iter()
+    .find(|t| four_token_byte(*t) == byte)
+}
 
 pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
     let mut out = Vec::with_capacity(74);
@@ -523,6 +553,21 @@ fn write_durable(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
 
+    /// Every Four verdict's byte reads back as that verdict; no other does.
+    #[test]
+    fn every_four_verdict_byte_reads_back() {
+        for t in [
+            FourToken::NotApplicable,
+            FourToken::NotRecognized,
+            FourToken::Unknown,
+            FourToken::Matched,
+            FourToken::Mismatch,
+        ] {
+            assert_eq!(four_token_of_byte(four_token_byte(t)), Some(t));
+        }
+        assert_eq!(four_token_of_byte(5), None);
+    }
+
     /// Every venue's byte reads back as that venue; no other byte does.
     #[test]
     fn every_venue_byte_reads_back() {
@@ -631,9 +676,11 @@ mod tests {
         // C1 scope, then a signed fetch lag: the local clock read 10 ms
         // before the block time (it is behind).
         assert_eq!(
-            &c[126..],
+            &c[126..136],
             &[&[1u8, 1][..], &(-10i64).to_le_bytes()[..]].concat()[..]
         );
+        // A Flap launch has no Four verdict.
+        assert_eq!(c[136], 0);
         let missed = Joined {
             launch,
             visibility: Visibility::Missed,

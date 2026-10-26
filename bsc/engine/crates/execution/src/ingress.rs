@@ -5,16 +5,23 @@
 //! never outranks an actionable full one, and duplicates from later sources
 //! never create a second candidate. A full transaction is a Flap launch
 //! candidate when its signed bytes target the C1 Flap scope (the same
-//! `decode_tx_target` + `C14_FLAP_SCOPE` the geth Fast Lane uses).
+//! `decode_tx_target` + `C14_FLAP_SCOPE` the geth Fast Lane uses), and a
+//! Four.meme launch when the production Four decoder (Phase E) decodes a
+//! `createToken` of either family from the same bytes (Phase F contract
+//! §6: one native event object, every promoted decoder). The per-source
+//! launch counters and the C3/C2 launch paths stay the Flap C1 scope.
 //!
 //! Memory is bounded: the oldest hashes are forgotten first (`capacity`).
 //! Times are the caller's monotonic readings; this module reads no clock.
 
+use crate::canonical_join::Venue;
 use crate::sources::SourceId;
 use alloy_primitives::Address;
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
-use darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment;
+use darkbot_bsc_trading::venues::fourmeme::deployment::{
+    FourDeployment, bsc_mainnet_g01_129842711,
+};
 use darkbot_bsc_trading::venues::fourmeme::recognize as four;
 use std::collections::{HashMap, VecDeque};
 
@@ -40,7 +47,7 @@ pub enum Observation<'a> {
     Dropped,
 }
 
-/// A Flap launch sighting decided by this observation.
+/// A launch sighting decided by this observation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Launch {
     /// The first verified full sighting of this launch: its source wins.
@@ -48,13 +55,23 @@ pub enum Launch {
         hash: [u8; 32],
         source: SourceId,
         at_ns: u64,
+        venue: Venue,
     },
     /// A later verified full sighting from another source, `lag_ns` behind.
     Later {
         hash: [u8; 32],
         source: SourceId,
         lag_ns: u64,
+        venue: Venue,
     },
+}
+
+impl Launch {
+    pub fn venue(&self) -> Venue {
+        match self {
+            Launch::First { venue, .. } | Launch::Later { venue, .. } => *venue,
+        }
+    }
 }
 
 /// Counters of one source, as the runtime status reports them.
@@ -104,7 +121,7 @@ struct Seen {
     first_full: Option<(usize, u64, Option<u64>)>,
     /// Bit per source index that delivered this hash.
     sources: u8,
-    launch: bool,
+    launch: Option<Venue>,
 }
 
 pub struct IngressCore {
@@ -115,6 +132,8 @@ pub struct IngressCore {
     launches: u64,
     /// The largest launch calldata the venue decoder accepts.
     max_launch_calldata: usize,
+    /// The frozen Four.meme deployment its decoder recognizes launches of.
+    four: FourDeployment,
 }
 
 fn index(source: SourceId) -> usize {
@@ -126,10 +145,14 @@ fn index(source: SourceId) -> usize {
 /// Flap decoder's verified decode (Phase D). Calldata the decoder refuses
 /// is no launch.
 pub fn is_flap_launch(raw: &[u8], max_calldata: usize) -> bool {
-    let Ok(target) = decode_tx_target(raw) else {
-        return false;
-    };
-    if !C14_FLAP_SCOPE.matches(&target) {
+    decode_tx_target(raw).is_ok_and(|target| flap_launch_target(&target, max_calldata))
+}
+
+fn flap_launch_target(
+    target: &darkbot_bsc_geth_ipc::ingress::TxTargetV2<'_>,
+    max_calldata: usize,
+) -> bool {
+    if !C14_FLAP_SCOPE.matches(target) {
         return false;
     }
     // The prefilter's one address is the Portal; the signed bytes bound
@@ -144,6 +167,26 @@ pub fn is_flap_launch(raw: &[u8], max_calldata: usize) -> bool {
         ),
         Recognized::LaunchV6(_)
     )
+}
+
+/// The venue of canonical signed bytes that are a launch: the Flap C1 scope
+/// first, then a Four.meme `createToken` of either family of `four`. One
+/// envelope decode serves both decoders.
+pub fn launch_venue(four: &FourDeployment, raw: &[u8], max_calldata: usize) -> Option<Venue> {
+    let target = decode_tx_target(raw).ok()?;
+    if flap_launch_target(&target, max_calldata) {
+        return Some(Venue::Flap);
+    }
+    match four::recognize(
+        four,
+        target.to.map(Address::from),
+        target.data,
+        max_calldata,
+    ) {
+        four::Recognized::ClassicLaunch(_) => Some(Venue::Four),
+        four::Recognized::OpenFourLaunch(_) => Some(Venue::OpenFour),
+        _ => None,
+    }
 }
 
 /// The pre-execution token of canonical signed bytes that the production
@@ -181,6 +224,7 @@ impl IngressCore {
             stats: [SourceStats::default(); 5],
             launches: 0,
             max_launch_calldata,
+            four: bsc_mainnet_g01_129842711(),
         }
     }
 
@@ -264,7 +308,7 @@ impl IngressCore {
                                 first_any: (i, now_ns, wall_us),
                                 first_full: None,
                                 sources: bit,
-                                launch: false,
+                                launch: None,
                             },
                         );
                     }
@@ -273,14 +317,16 @@ impl IngressCore {
             }
             Observation::Full { hash, raw } => {
                 self.stats[i].full += 1;
-                let launch = is_flap_launch(raw, self.max_launch_calldata);
-                if launch {
+                let launch = launch_venue(&self.four, raw, self.max_launch_calldata);
+                // The per-source launch counters stay the Flap C1 scope.
+                let flap = launch == Some(Venue::Flap);
+                if flap {
                     self.stats[i].launch_sightings += 1;
                 }
                 let Some(seen) = self.seen.get_mut(&hash) else {
                     self.stats[i].first_any += 1;
                     self.stats[i].first_full += 1;
-                    if launch {
+                    if flap {
                         self.stats[i].launch_first += 1;
                         self.launches += 1;
                     }
@@ -293,10 +339,11 @@ impl IngressCore {
                             launch,
                         },
                     );
-                    return launch.then_some(Launch::First {
+                    return launch.map(|venue| Launch::First {
                         hash,
                         source,
                         at_ns: now_ns,
+                        venue,
                     });
                 };
                 seen.sources |= bit;
@@ -309,22 +356,24 @@ impl IngressCore {
                         if seen.first_any.0 != i {
                             self.stats[i].duplicates += 1;
                         }
-                        if launch {
+                        if flap {
                             self.stats[i].launch_first += 1;
                             self.launches += 1;
                         }
-                        launch.then_some(Launch::First {
+                        launch.map(|venue| Launch::First {
                             hash,
                             source,
                             at_ns: now_ns,
+                            venue,
                         })
                     }
                     Some((first, at, _)) => {
                         self.stats[i].duplicates += 1;
-                        (launch && first != i).then(|| Launch::Later {
+                        launch.filter(|_| first != i).map(|venue| Launch::Later {
                             hash,
                             source,
                             lag_ns: now_ns.saturating_sub(at),
+                            venue,
                         })
                     }
                 }
@@ -457,6 +506,70 @@ mod tests {
         assert!(!is_flap_launch(&legacy(PORTAL, LAUNCH), launch.len() - 1));
     }
 
+    /// Phase F §5/§6: a Four.meme launch of either family is a launch
+    /// sighting of its venue on the same event (its signed bytes are then
+    /// journaled), while the per-source launch counters stay Flap C1.
+    #[test]
+    fn four_launches_are_sightings_of_their_venue() {
+        let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
+        let raw = |prefix: &str| {
+            let row: Vec<&str> = calls
+                .lines()
+                .find(|l| l.starts_with(prefix))
+                .unwrap()
+                .split_whitespace()
+                .collect();
+            (
+                <[u8; 32]>::try_from(alloy_primitives::hex::decode(row[4]).unwrap()).unwrap(),
+                alloy_primitives::hex::decode(row[10]).unwrap(),
+            )
+        };
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
+        for (prefix, venue) in [
+            ("CLASSIC LAUNCH", Venue::Four),
+            ("OPENFOUR LAUNCH", Venue::OpenFour),
+        ] {
+            let (hash, raw) = raw(prefix);
+            assert_eq!(
+                core.observe(
+                    SourceId::Drpc,
+                    Observation::Full { hash, raw: &raw },
+                    5,
+                    None
+                ),
+                Some(Launch::First {
+                    hash,
+                    source: SourceId::Drpc,
+                    at_ns: 5,
+                    venue
+                })
+            );
+            assert_eq!(
+                core.observe(
+                    SourceId::PublicNode,
+                    Observation::Full { hash, raw: &raw },
+                    9,
+                    None
+                )
+                .map(|l| l.venue()),
+                Some(venue)
+            );
+        }
+        // A Four BUY is no launch.
+        let (hash, buy) = raw("OPENFOUR BUY");
+        assert_eq!(
+            core.observe(
+                SourceId::Drpc,
+                Observation::Full { hash, raw: &buy },
+                9,
+                None
+            ),
+            None
+        );
+        assert_eq!(core.launches(), 0);
+        assert_eq!(core.stats(SourceId::Drpc).launch_first, 0);
+    }
+
     /// Phase E review M1: an OpenFour launch of a preset outside the frozen
     /// table decodes, but its token is UNKNOWN before execution.
     #[test]
@@ -522,7 +635,8 @@ mod tests {
             Some(Launch::First {
                 hash: h,
                 source: SourceId::PublicNode,
-                at_ns: 150
+                at_ns: 150,
+                venue: Venue::Flap
             })
         );
         assert_eq!(
@@ -535,7 +649,8 @@ mod tests {
             Some(Launch::Later {
                 hash: h,
                 source: SourceId::BlockReq,
-                lag_ns: 40
+                lag_ns: 40,
+                venue: Venue::Flap
             })
         );
         // The winner again: a duplicate, no second launch.

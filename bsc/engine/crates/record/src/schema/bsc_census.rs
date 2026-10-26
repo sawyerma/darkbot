@@ -138,11 +138,21 @@ pub mod census {
     /// Launches (any venue) whose provider answers were refused every time
     /// they were fetched (malformed, a hash or signer mismatch): unknown.
     pub const TX_ANSWER_REFUSED: u16 = 35;
+    /// Four.meme launches by the decoder's pre-execution verdict (Phase E,
+    /// Phase F contract §10 "actionable pre-execution address"): the token
+    /// derived before execution is the canonical one; no proven
+    /// derivation; derived but another token; not a decoded launch call;
+    /// a record of an older build without the verdict.
+    pub const FOUR_DERIVED: u16 = 36;
+    pub const FOUR_NO_DERIVATION: u16 = 37;
+    pub const FOUR_MISMATCH: u16 = 38;
+    pub const FOUR_NOT_RECOGNIZED: u16 = 39;
+    pub const FOUR_VERDICT_UNRECORDED: u16 = 40;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 4,
+        schema_version: 5,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -182,6 +192,11 @@ pub mod census {
             Field::req(BLOCKS_BETWEEN_WINDOWS, "blocks_between_windows", U64),
             Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
             Field::req(TX_ANSWER_REFUSED, "tx_answer_refused", U64),
+            Field::req(FOUR_DERIVED, "four_derived", U64),
+            Field::req(FOUR_NO_DERIVATION, "four_no_derivation", U64),
+            Field::req(FOUR_MISMATCH, "four_mismatch", U64),
+            Field::req(FOUR_NOT_RECOGNIZED, "four_not_recognized", U64),
+            Field::req(FOUR_VERDICT_UNRECORDED, "four_verdict_unrecorded", U64),
         ],
     };
 }
