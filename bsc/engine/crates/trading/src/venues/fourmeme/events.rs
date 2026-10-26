@@ -1,13 +1,13 @@
 //! Canonical decode of the Four.meme events (Phase E contract §6).
 //!
 //! Decoded are the events with a witnessed live log in the receipts of the
-//! freeze's fixtures: Classic `TokenCreate` and `TokenPurchase`, OpenFour
-//! `TokenCreated`, `TradeExecuted` (its BUY form) and `PhaseTransition`.
-//! The other events of the published ABIs (Classic `TokenSale`,
-//! `LiquidityAdded`, `TradeStop`; OpenFour `MigrateExecuted` and the SELL
-//! form of `TradeExecuted`) have no witnessed log: they are
-//! [`FourLog::Unsupported`], so a SELL, a graduation or a migration is not
-//! observed from events until a witnessed fixture exists.
+//! freezes' fixtures: Classic `TokenCreate`, `TokenPurchase` and
+//! `TokenSale`, OpenFour `TokenCreated`, `TradeExecuted` (BUY and SELL
+//! form) and `PhaseTransition`. The other events of the published ABIs
+//! (Classic `LiquidityAdded`, `TradeStop`; OpenFour `MigrateExecuted`) have
+//! no witnessed log (freeze v2, 20 000 blocks): they are
+//! [`FourLog::Unsupported`], so a graduation or a migration is not observed
+//! from events until a witnessed fixture exists.
 //!
 //! Classic events index nothing (a log carries exactly its `topic0`);
 //! OpenFour events index the parameters the published ABI marks `indexed`,
@@ -141,6 +141,7 @@ impl FourEventKind {
             self,
             Self::TokenCreate
                 | Self::TokenPurchase
+                | Self::TokenSale
                 | Self::TokenCreated
                 | Self::TradeExecuted
                 | Self::PhaseTransition
@@ -169,10 +170,11 @@ pub struct ClassicCreate<'a> {
     pub launch_fee: U256,
 }
 
-/// A Classic `TokenPurchase` (published ABI names; token and account
-/// checked against the BUY, amounts UNKNOWN until Phase G).
+/// A Classic `TokenPurchase` or `TokenSale` (one layout; published ABI
+/// names; token and account checked against the BUY or SELL, amounts
+/// UNKNOWN until Phase G).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ClassicPurchase {
+pub struct ClassicTrade {
     pub token: Address,
     pub account: Address,
     pub price: U256,
@@ -210,11 +212,11 @@ pub struct OpenFourCreated<'a> {
     pub encoded_tags: &'a [u8],
 }
 
-/// The BUY form (`isBuy`) of an OpenFour `TradeExecuted` (published ABI
-/// names; token and trader checked against the BUY, amounts and fees
-/// UNKNOWN until Phase G).
+/// An OpenFour `TradeExecuted`, BUY or SELL form by `isBuy` (published
+/// ABI names; token and trader checked against the BUY or SELL, amounts and
+/// fees UNKNOWN until Phase G).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OpenFourBuy {
+pub struct OpenFourTrade {
     pub token: Address,
     pub trader: Address,
     pub preset_id: U256,
@@ -238,9 +240,11 @@ pub struct OpenFourBuy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FourEvent<'a> {
     TokenCreate(ClassicCreate<'a>),
-    TokenPurchase(ClassicPurchase),
+    TokenPurchase(ClassicTrade),
+    TokenSale(ClassicTrade),
     TokenCreated(OpenFourCreated<'a>),
-    TradeExecutedBuy(OpenFourBuy),
+    TradeExecutedBuy(OpenFourTrade),
+    TradeExecutedSell(OpenFourTrade),
     /// An OpenFour phase change of `token`; the meaning of the phase
     /// numbers is UNKNOWN (no mode is inferred from them).
     PhaseTransition {
@@ -256,8 +260,9 @@ impl FourEvent<'_> {
         match self {
             Self::TokenCreate(_) => FourEventKind::TokenCreate,
             Self::TokenPurchase(_) => FourEventKind::TokenPurchase,
+            Self::TokenSale(_) => FourEventKind::TokenSale,
             Self::TokenCreated(_) => FourEventKind::TokenCreated,
-            Self::TradeExecutedBuy(_) => FourEventKind::TradeExecuted,
+            Self::TradeExecutedBuy(_) | Self::TradeExecutedSell(_) => FourEventKind::TradeExecuted,
             Self::PhaseTransition { .. } => FourEventKind::PhaseTransition,
         }
     }
@@ -286,8 +291,8 @@ pub enum FourLog<'a> {
     Unrecognized(Family, B256),
     /// A known topic with another layout: refused.
     Malformed(FourEventKind, AbiError),
-    /// A topic of a published ABI without a witnessed live log (or the
-    /// unwitnessed SELL form of `TradeExecuted`): recognized, not decoded.
+    /// A topic of a published ABI without a witnessed live log:
+    /// recognized, not decoded.
     Unsupported(FourEventKind),
 }
 
@@ -320,9 +325,9 @@ fn decode_kind<'a>(
                 launch_fee: w.u256(7)?,
             })
         }
-        K::TokenPurchase => {
+        K::TokenPurchase | K::TokenSale => {
             let w = exact(data, 8)?;
-            FourEvent::TokenPurchase(ClassicPurchase {
+            let trade = ClassicTrade {
                 token: w.address(0)?,
                 account: w.address(1)?,
                 price: w.u256(2)?,
@@ -331,7 +336,12 @@ fn decode_kind<'a>(
                 fee: w.u256(5)?,
                 offers: w.u256(6)?,
                 funds: w.u256(7)?,
-            })
+            };
+            if kind == K::TokenSale {
+                FourEvent::TokenSale(trade)
+            } else {
+                FourEvent::TokenPurchase(trade)
+            }
         }
         K::TokenCreated => {
             let [name, symbol, token_meta_uri, encoded_tags] = tails(data, 17, [1, 2, 14, 16])?;
@@ -361,7 +371,7 @@ fn decode_kind<'a>(
         }
         K::TradeExecuted => {
             let w = exact(data, 15)?;
-            let trade = OpenFourBuy {
+            let trade = OpenFourTrade {
                 token: indexed(1)?,
                 trader: indexed(2)?,
                 preset_id: U256::from_be_bytes(topics[3]),
@@ -380,11 +390,11 @@ fn decode_kind<'a>(
                 total_raised: w.u256(13)?,
                 remaining_for_sale: w.u256(14)?,
             };
-            // The SELL form has no witnessed log.
-            if !w.bool(0)? {
-                return Ok(FourLog::Unsupported(kind));
+            if w.bool(0)? {
+                FourEvent::TradeExecutedBuy(trade)
+            } else {
+                FourEvent::TradeExecutedSell(trade)
             }
-            FourEvent::TradeExecutedBuy(trade)
         }
         K::PhaseTransition => {
             let w = exact(data, 3)?;
@@ -397,7 +407,7 @@ fn decode_kind<'a>(
         }
         // Recognized by topic only; `decode_four_log` reports them
         // unsupported before any decode.
-        K::TokenSale | K::LiquidityAdded | K::TradeStop | K::MigrateExecuted => {
+        K::LiquidityAdded | K::TradeStop | K::MigrateExecuted => {
             return Ok(FourLog::Unsupported(kind));
         }
     };

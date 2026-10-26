@@ -54,7 +54,10 @@ pub struct FourDeployment {
     pub classic_token_template: Address,
     pub classic_token_template_runtime_keccak256: B256,
     /// The one Classic `createToken` argument length the fixtures witness
-    /// (bytes of `args`); the salt position is proven for it only.
+    /// (bytes of `args`; 8 launches of both freezes); the salt position is
+    /// proven for it only. It holds name and symbol of at most 32 bytes
+    /// each: a longer name is another length, refused as an unwitnessed
+    /// layout and counted, never guessed (Phase E review L4).
     pub classic_args_len: usize,
     pub openfour_registry: Address,
     /// OpenFour Core (proxy): launch and trade calls, its events.
@@ -69,11 +72,20 @@ pub struct FourDeployment {
     pub openfour_presets: &'static [OpenFourPreset],
 }
 
-/// The presets of the freeze: the one preset of all located launches.
-const MAINNET_PRESETS: &[OpenFourPreset] = &[OpenFourPreset {
-    preset_id: U256::from_limbs([1_778_027_615_733, 0, 0, 0]),
-    token_implementation: address!("e610cc146a94f1b04156f9857d1eb3c8626bcd18"),
-}];
+/// The presets with a witnessed launch whose CREATE2 derivation reproduced:
+/// 1778027615733 (freeze 20261026T053659Z and v2), 1778027615735 (freeze
+/// v2 20261026T131704Z, launch 0xdad88c1e…, `getPresetTokenImpl` at block
+/// 129903949). Any other preset is `PendingToken::Unknown`.
+const MAINNET_PRESETS: &[OpenFourPreset] = &[
+    OpenFourPreset {
+        preset_id: U256::from_limbs([1_778_027_615_733, 0, 0, 0]),
+        token_implementation: address!("e610cc146a94f1b04156f9857d1eb3c8626bcd18"),
+    },
+    OpenFourPreset {
+        preset_id: U256::from_limbs([1_778_027_615_735, 0, 0, 0]),
+        token_implementation: address!("c4a52a520bb379a37e44c31beb1edf7ffdc4a27d"),
+    },
+];
 
 /// BSC mainnet (chain 56) as frozen at block 129842711.
 pub fn bsc_mainnet_g01_129842711() -> FourDeployment {

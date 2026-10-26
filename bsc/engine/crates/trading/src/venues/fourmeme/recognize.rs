@@ -5,9 +5,10 @@
 //!
 //! The table holds every launch, BUY and SELL function of the published
 //! ABIs whose selector the freeze found in the executing dispatcher. Only
-//! calls with a canonical fixture are decoded: `createToken` of both
-//! families, Classic `buyTokenAMAP(address,uint256,uint256)` and OpenFour
-//! `buyByBudget`. Every other known call is [`Recognized::Unsupported`].
+//! calls with a canonical direct fixture are decoded: `createToken` of
+//! both families, Classic `buyTokenAMAP(address,uint256,uint256)` and
+//! `sellToken(address,uint256,uint256)`, OpenFour `buyByBudget` and `sell`.
+//! Every other known call is [`Recognized::Unsupported`].
 
 use alloy_primitives::{Address, B256, U256, hex};
 
@@ -240,6 +241,28 @@ pub struct OpenFourBuyByBudget<'a> {
     pub proof: &'a [u8],
 }
 
+/// A decoded Classic `sellToken(address token, uint256 amount, uint256
+/// minFunds)`. Token and seller positions are checked against the
+/// `TokenSale` event; the amount semantics are UNKNOWN (Phase G).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassicSell {
+    pub token: Address,
+    pub amount: U256,
+    pub min_funds: U256,
+}
+
+/// A decoded OpenFour `sell(address token, uint256 amount, uint256
+/// minReceiveAmount, uint256 options, bytes proof)`. Token checked against
+/// the SELL form of `TradeExecuted`; amount semantics UNKNOWN (Phase G).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourSell<'a> {
+    pub token: Address,
+    pub amount: U256,
+    pub min_receive_amount: U256,
+    pub options: U256,
+    pub proof: &'a [u8],
+}
+
 /// What a pending call is to this decoder.
 // Returned by value on the hot path: boxing would allocate.
 #[allow(clippy::large_enum_variant)]
@@ -254,6 +277,8 @@ pub enum Recognized<'a> {
     OpenFourLaunch(OpenFourLaunch<'a>),
     ClassicBuy(ClassicBuyAmap),
     OpenFourBuy(OpenFourBuyByBudget<'a>),
+    ClassicSell(ClassicSell),
+    OpenFourSell(OpenFourSell<'a>),
     /// A known call this decoder does not decode (no canonical fixture).
     Unsupported(FourCall),
     /// A decoded call whose input is oversized, not canonical or of an
@@ -309,6 +334,10 @@ pub fn recognize<'a>(
         FourCall::OpenFourBuyByBudget => {
             decode_openfour_buy_by_budget(input).map(Recognized::OpenFourBuy)
         }
+        FourCall::ClassicSellTokenMinFunds => {
+            decode_classic_sell_min_funds(input).map(Recognized::ClassicSell)
+        }
+        FourCall::OpenFourSell => decode_openfour_sell(input).map(Recognized::OpenFourSell),
         other => return Recognized::Unsupported(other),
     };
     decoded.unwrap_or_else(|e| Recognized::Malformed(call, e))
@@ -423,6 +452,31 @@ pub fn decode_openfour_buy_by_budget(input: &[u8]) -> Result<OpenFourBuyByBudget
         token: w.address(0)?,
         max_pay_amount: w.u256(1)?,
         min_amount_out: w.u256(2)?,
+        options: w.u256(3)?,
+        proof,
+    })
+}
+
+pub fn decode_classic_sell_min_funds(input: &[u8]) -> Result<ClassicSell, AbiError> {
+    let w = super::abi::exact(
+        body(input, &FourCall::ClassicSellTokenMinFunds.selector())?,
+        3,
+    )?;
+    Ok(ClassicSell {
+        token: w.address(0)?,
+        amount: w.u256(1)?,
+        min_funds: w.u256(2)?,
+    })
+}
+
+pub fn decode_openfour_sell(input: &[u8]) -> Result<OpenFourSell<'_>, AbiError> {
+    let args = body(input, &FourCall::OpenFourSell.selector())?;
+    let [proof] = tails(args, 5, [4])?;
+    let w = Words(args);
+    Ok(OpenFourSell {
+        token: w.address(0)?,
+        amount: w.u256(1)?,
+        min_receive_amount: w.u256(2)?,
         options: w.u256(3)?,
         proof,
     })

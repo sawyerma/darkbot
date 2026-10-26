@@ -1,6 +1,7 @@
 //! Phase E contract §11: the production Four.meme decoder against the
-//! fixtures of the G0.1 Four freeze (block 129842711) and against malformed
-//! input.
+//! fixtures of the G0.1 Four freezes (block 129842711 and the v2 freeze at
+//! block 129903949: SELLs, a second preset, lifecycle) and against
+//! malformed input.
 
 use alloy_primitives::{Address, B256, keccak256};
 
@@ -19,6 +20,9 @@ const CALLS: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026_cal
 /// Every log of their receipts: `<family> <kind> <block> <tx-hash>
 /// <log-index> <emitter> <topics,…|-> <data|->`.
 const LOGS: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026_logs.txt");
+/// The same of the v2 freeze (`four_freeze_20261026T131704Z`).
+const CALLS_V2: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T131704Z_calls.txt");
+const LOGS_V2: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T131704Z_logs.txt");
 /// Flap Portal calls of the D refreeze (shared-input check).
 const FLAP_CALLS: &str = include_str!("../../../fixtures/flap/freeze_v5_27_portal_calls.txt");
 
@@ -47,6 +51,7 @@ struct Call {
 fn calls() -> Vec<Call> {
     rows(CALLS)
         .into_iter()
+        .chain(rows(CALLS_V2))
         .map(|r| Call {
             family: r[0].to_owned(),
             kind: r[1].to_owned(),
@@ -71,6 +76,7 @@ struct Log {
 fn logs() -> Vec<Log> {
     rows(LOGS)
         .into_iter()
+        .chain(rows(LOGS_V2))
         .map(|r| Log {
             tx: B256::from_slice(&unhex(r[3])),
             emitter: address(r[5]),
@@ -156,7 +162,7 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
     let deployment = d();
     let logs = logs();
     let calls = calls();
-    assert_eq!(calls.len(), 9);
+    assert_eq!(calls.len(), 9 + 13);
     for c in &calls {
         let events = events_of(&deployment, &logs, c.tx);
         let r = recognize(&deployment, Some(c.to), &c.input, MAX);
@@ -179,7 +185,7 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                     c.tx
                 );
             }
-            ("OPENFOUR", "LAUNCH", Recognized::OpenFourLaunch(l)) => {
+            ("OPENFOUR", "LAUNCH" | "LIFECYCLE", Recognized::OpenFourLaunch(l)) => {
                 let Some(FourEvent::TokenCreated(e)) = events
                     .iter()
                     .find(|e| e.kind() == FourEventKind::TokenCreated)
@@ -235,6 +241,40 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                 assert_eq!((b.token, e.trader), (e.token, c.from));
                 assert!(b.proof.is_empty());
             }
+            ("CLASSIC", "SELL", Recognized::ClassicSell(s)) => {
+                let Some(FourEvent::TokenSale(e)) = events
+                    .iter()
+                    .find(|e| e.kind() == FourEventKind::TokenSale)
+                    .copied()
+                else {
+                    panic!("no TokenSale in {}", c.tx);
+                };
+                assert_eq!((s.token, e.account), (e.token, c.from));
+                assert_eq!(pending_token(&deployment, &r), PendingToken::Unknown);
+            }
+            ("OPENFOUR", "SELL", Recognized::OpenFourSell(s)) => {
+                let Some(FourEvent::TradeExecutedSell(e)) = events
+                    .iter()
+                    .find(|e| matches!(e, FourEvent::TradeExecutedSell(_)))
+                    .copied()
+                else {
+                    panic!("no SELL TradeExecuted in {}", c.tx);
+                };
+                assert_eq!((s.token, e.trader), (e.token, c.from));
+                assert!(s.proof.is_empty());
+            }
+            // A SELL through another contract: not a Four call, but its
+            // receipt carries the venue's SELL event.
+            ("CLASSIC", "SELL_EVENT", Recognized::NotFour) => {
+                assert!(events.iter().any(|e| matches!(e, FourEvent::TokenSale(_))));
+            }
+            ("OPENFOUR", "SELL_EVENT", Recognized::NotFour) => {
+                assert!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e, FourEvent::TradeExecutedSell(_)))
+                );
+            }
             (family, kind, other) => panic!("{family} {kind} {}: {other:?}", c.tx),
         }
     }
@@ -249,7 +289,9 @@ fn every_fixture_log_is_classified() {
     let (mut events, mut unrecognized, mut not_four) = (Vec::new(), Vec::new(), 0);
     for l in &logs() {
         match decode_four_log(&deployment, l.emitter, &l.topics, &l.data) {
-            FourLog::Event(e) => events.push(e.kind()),
+            FourLog::Event(e) => {
+                events.push((e.kind(), matches!(e, FourEvent::TradeExecutedSell(_))))
+            }
             FourLog::Unrecognized(family, topic) => unrecognized.push((family, topic)),
             FourLog::NotFour => {
                 assert!(deployment.family_of(l.emitter).is_none());
@@ -258,20 +300,19 @@ fn every_fixture_log_is_classified() {
             other => panic!("{}: {other:?}", l.tx),
         }
     }
-    let count = |k| events.iter().filter(|e| **e == k).count();
-    assert_eq!(count(FourEventKind::TokenCreate), 4);
-    assert_eq!(count(FourEventKind::TokenPurchase), 2);
-    assert_eq!(count(FourEventKind::TokenCreated), 3);
-    assert_eq!(count(FourEventKind::TradeExecuted), 1);
-    assert_eq!(count(FourEventKind::PhaseTransition), 3);
-    // `0x48063b12…` (one word) follows each Classic TokenPurchase; it is in
-    // no published ABI and stays unrecognized.
-    assert_eq!(unrecognized.len(), 2);
-    assert!(
-        unrecognized
-            .iter()
-            .all(|(f, t)| *f == Family::Classic && t[..4] == [0x48, 0x06, 0x3b, 0x12])
-    );
+    let count = |k| events.iter().filter(|(e, _)| *e == k).count();
+    assert_eq!(count(FourEventKind::TokenCreate), 8);
+    assert_eq!(count(FourEventKind::TokenPurchase), 6);
+    assert_eq!(count(FourEventKind::TokenSale), 2);
+    assert_eq!(count(FourEventKind::TokenCreated), 6);
+    assert_eq!(count(FourEventKind::TradeExecuted), 6);
+    assert_eq!(events.iter().filter(|(_, sell)| *sell).count(), 2);
+    assert_eq!(count(FourEventKind::PhaseTransition), 6);
+    // `0x48063b12…` follows each Classic TokenPurchase and `0x741ffc46…`
+    // each TokenSale; they are in no published ABI and stay unrecognized.
+    assert_eq!(unrecognized.len(), 8);
+    assert!(unrecognized.iter().all(|(f, t)| *f == Family::Classic
+        && (t[..4] == [0x48, 0x06, 0x3b, 0x12] || t[..4] == [0x74, 0x1f, 0xfc, 0x46])));
     assert!(not_four > 100);
 }
 
@@ -352,14 +393,16 @@ fn destination_and_selector_decide_first() {
             FourCall::ClassicCreateToken
             | FourCall::OpenFourCreateToken
             | FourCall::ClassicBuyTokenAmap
-            | FourCall::OpenFourBuyByBudget => {
+            | FourCall::OpenFourBuyByBudget
+            | FourCall::ClassicSellTokenMinFunds
+            | FourCall::OpenFourSell => {
                 assert!(!matches!(r, Recognized::Unsupported(_)), "{call:?}")
             }
             _ => assert_eq!(r, Recognized::Unsupported(call)),
         }
     }
-    // The loop covered every SELL of both families (no witnessed SELL):
-    // seven Classic `sellToken` overloads and OpenFour `sell`.
+    // The loop covered every SELL of both families: seven Classic
+    // `sellToken` overloads (one witnessed) and OpenFour `sell`.
     assert_eq!(
         FourCall::ALL
             .iter()
@@ -493,8 +536,8 @@ fn pre_execution_token_address_is_proven_or_unknown() {
     );
 }
 
-/// Event layouts: topic count, data length, value ranges; the SELL form of
-/// TradeExecuted and every unwitnessed event are unsupported.
+/// Event layouts: topic count, data length, value ranges; every
+/// unwitnessed event is unsupported.
 #[test]
 fn malformed_and_unwitnessed_events_fail_closed() {
     let deployment = d();
@@ -507,6 +550,7 @@ fn malformed_and_unwitnessed_events_fail_closed() {
     for kind in [
         FourEventKind::TokenCreate,
         FourEventKind::TokenPurchase,
+        FourEventKind::TokenSale,
         FourEventKind::TokenCreated,
         FourEventKind::TradeExecuted,
         FourEventKind::PhaseTransition,
@@ -538,14 +582,14 @@ fn malformed_and_unwitnessed_events_fail_closed() {
             FourLog::NotFour
         );
     }
-    // TradeExecuted: isBuy false is the unwitnessed SELL form; 2 is no bool.
+    // TradeExecuted: isBuy selects the form; 2 is no bool.
     let t = find(FourEventKind::TradeExecuted);
     let mut sell = t.data.clone();
     sell[31] = 0;
-    assert_eq!(
+    assert!(matches!(
         decode_four_log(&deployment, t.emitter, &t.topics, &sell),
-        FourLog::Unsupported(FourEventKind::TradeExecuted)
-    );
+        FourLog::Event(FourEvent::TradeExecutedSell(_))
+    ));
     sell[31] = 2;
     assert_eq!(
         decode_four_log(&deployment, t.emitter, &t.topics, &sell),
@@ -560,7 +604,6 @@ fn malformed_and_unwitnessed_events_fail_closed() {
     );
     // Unwitnessed events of the published ABIs.
     for kind in [
-        FourEventKind::TokenSale,
         FourEventKind::LiquidityAdded,
         FourEventKind::TradeStop,
         FourEventKind::MigrateExecuted,
