@@ -263,11 +263,16 @@ pub mod runtime_status {
         /// outside the observation window, never part of the counts above.
         pub const BACKFILL_BLOCKS: u16 = 26;
         pub const BACKFILL_LAUNCHES: u16 = 27;
+        /// Four.meme launches (Classic and OpenFour, in `four_launches`)
+        /// whose verified signed bytes the production Four decoder
+        /// recognizes as a launch with the canonical token derived before
+        /// execution (Phase E).
+        pub const FOUR_PENDING_DECODED: u16 = 28;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 5,
+            schema_version: 6,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -296,6 +301,7 @@ pub mod runtime_status {
                 Field::req(TX_ANSWER_REFUSED, "tx_answer_refused", U64),
                 Field::req(BACKFILL_BLOCKS, "backfill_blocks", U64),
                 Field::req(BACKFILL_LAUNCHES, "backfill_launches", U64),
+                Field::req(FOUR_PENDING_DECODED, "four_pending_decoded", U64),
             ],
         };
     }
@@ -537,7 +543,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 6,
+        schema_version: 7,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

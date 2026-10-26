@@ -19,11 +19,12 @@
 //!   `b'C' | venue u8 | block u64 | block_hash [32] | tx_index u64 | tx_hash
 //!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source
 //!   u8 | delta_us u64 | block_ms u64 | tx u8 | fetch_lag? u8 i64` (integers
-//!   LE; venue 1 Flap, 2 Four; class per
+//!   LE; venue 1 Flap, 2 Four Classic, 3 OpenFour; class per
 //!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF
 //!   and delta 0 for a miss; delta = lead or lag against the block time;
 //!   fetch_lag = local wall ms at the header fetch minus block_ms; tx 0 verified
-//!   outside the C1 scope, 1 verified in the C1 scope, 2 a type/form the
+//!   outside the C1 scope, 1 verified in the C1 scope (Four.meme: the pending
+//!   decoder names the launch's token before execution), 2 a type/form the
 //!   verifier does not rebuild, 3 provider answers refused every time).
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
@@ -85,7 +86,13 @@ pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
     out.extend_from_slice(&buy.launch_hash);
     out.extend_from_slice(&buy.handoff.tx_hash);
     out.extend_from_slice(&buy.token);
-    for ns in [t.ingress_ns, t.decoded_ns, t.admitted_ns, t.signed_ns, t.sink_ns] {
+    for ns in [
+        t.ingress_ns,
+        t.decoded_ns,
+        t.admitted_ns,
+        t.signed_ns,
+        t.sink_ns,
+    ] {
         out.extend_from_slice(&ns.to_le_bytes());
     }
     out.extend_from_slice(&buy.raw);
@@ -109,6 +116,7 @@ fn venue_byte(venue: Venue) -> u8 {
     match venue {
         Venue::Flap => 1,
         Venue::Four => 2,
+        Venue::OpenFour => 3,
     }
 }
 

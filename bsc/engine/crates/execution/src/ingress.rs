@@ -14,6 +14,8 @@ use crate::sources::SourceId;
 use alloy_primitives::Address;
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
+use darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment;
+use darkbot_bsc_trading::venues::fourmeme::recognize as four;
 use std::collections::{HashMap, VecDeque};
 
 /// What one source delivered.
@@ -142,6 +144,29 @@ pub fn is_flap_launch(raw: &[u8], max_calldata: usize) -> bool {
         ),
         Recognized::LaunchV6(_)
     )
+}
+
+/// The pre-execution token of canonical signed bytes that the production
+/// Four.meme decoder (Phase E) recognizes as a launch (Classic or OpenFour
+/// `createToken` of `deployment`); `None` for anything else, including
+/// calldata the decoder refuses or above `max_calldata`.
+pub fn four_launch_token(
+    deployment: &FourDeployment,
+    raw: &[u8],
+    max_calldata: usize,
+) -> Option<four::PendingToken> {
+    let target = decode_tx_target(raw).ok()?;
+    let recognized = four::recognize(
+        deployment,
+        target.to.map(Address::from),
+        target.data,
+        max_calldata,
+    );
+    matches!(
+        recognized,
+        four::Recognized::ClassicLaunch(_) | four::Recognized::OpenFourLaunch(_)
+    )
+    .then(|| four::pending_token(deployment, &recognized))
 }
 
 impl IngressCore {

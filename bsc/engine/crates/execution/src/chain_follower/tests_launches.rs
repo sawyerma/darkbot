@@ -43,7 +43,8 @@ use serde_json::Value;
 use super::follow::receipts_match;
 use super::jsonrpc::{BlockHead, FullBlock, Receipt, parse_block, parse_receipts};
 use super::launches::{
-    FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, ReceiptLaunch, detect, verify_object,
+    FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, OPENFOUR_CORE, ReceiptLaunch, detect,
+    verify_object,
 };
 use super::{CanonicalLaunch, Field, RequestError, Venue};
 use crate::wss::RejectReason;
@@ -57,6 +58,13 @@ const FLAP_B_RECEIPTS: &str =
 const FOUR_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129781119.full.json");
 const FOUR_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129781119.receipts.json");
+/// An OpenFour launch block of the G0.1 Four freeze (fixture tx
+/// 0xfbc6421c…, index 74), `eth_getBlockByNumber(n, true)` and
+/// `eth_getBlockReceipts(n)` of bsc-dataseed.bnbchain.org, fetched
+/// 2026-10-26; its hash equals the freeze record's.
+const OPENFOUR_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129842141.full.json");
+const OPENFOUR_RECEIPTS: &str =
+    include_str!("../../tests/fixtures/chain/block_129842141.receipts.json");
 
 const TRANSFER: [u8; 32] = hex!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
@@ -102,9 +110,19 @@ fn check_tx(block: &str, launch: &CanonicalLaunch) {
         Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
         launch.nonce
     );
-    let direct_v6 = address_of(&raw["to"]) == FLAP_PORTAL
-        && raw["input"].as_str().unwrap().starts_with("0x8cb5772c");
-    assert_eq!(direct_v6, launch.c1_scope);
+    let input = raw["input"].as_str().unwrap();
+    let pending_scope = match launch.venue {
+        Venue::Flap => address_of(&raw["to"]) == FLAP_PORTAL && input.starts_with("0x8cb5772c"),
+        // Four.meme: a direct `createToken` to the venue's contract (the
+        // decoder then derives the token; compared in the venue tests).
+        Venue::Four => {
+            address_of(&raw["to"]) == FOUR_TOKEN_MANAGER2 && input.starts_with("0x519ebb10")
+        }
+        Venue::OpenFour => {
+            address_of(&raw["to"]) == OPENFOUR_CORE && input.starts_with("0x519ebb10")
+        }
+    };
+    assert_eq!(pending_scope, launch.c1_scope);
 }
 
 /// The raw receipt at `index`, read independently of `jsonrpc`.
@@ -168,8 +186,11 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
         }
     }
     // The values the order names, as written there.
-    let [flap, four] = LAUNCH_EVENTS;
-    assert_eq!((flap.venue, four.venue), (Venue::Flap, Venue::Four));
+    let [flap, four, openfour] = LAUNCH_EVENTS;
+    assert_eq!(
+        (flap.venue, four.venue, openfour.venue),
+        (Venue::Flap, Venue::Four, Venue::OpenFour)
+    );
     assert_eq!(
         flap.contract,
         hex!("e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0")
@@ -188,6 +209,17 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
     );
     assert_eq!(four.contract, FOUR_TOKEN_MANAGER2);
     assert!(four.buy.is_none());
+    assert_eq!(
+        openfour.topic0,
+        hex!("7dae4dcd1b20eb0445e7cc1d02b3e2e7f32fa63081a0e764732c269f2b8f228f")
+    );
+    assert!(openfour.buy.is_none());
+    // The table's Four.meme contracts are the decoder's frozen deployment.
+    let d = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711();
+    assert_eq!(
+        (four.contract, openfour.contract),
+        (d.token_manager2.into_array(), d.openfour_core.into_array())
+    );
 }
 
 #[test]
@@ -303,7 +335,11 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         first_external_buy_index: None,
         sender: Some(hex!("774352301321637bc2cad74e67d4089f36e15962")),
         nonce: Some(262),
-        c1_scope: false,
+        // Phase E: the production Four decoder recognizes the signed bytes
+        // as a Classic launch whose derived token (CREATE2 of the frozen
+        // deployer and template, salt from the calldata) is this token: a
+        // launch outside the freeze's fixtures confirms the derivation.
+        c1_scope: true,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -332,6 +368,48 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
     let data = hex::decode(log["data"].as_str().unwrap()).unwrap();
     assert_eq!(data[3 * 32 + 30..4 * 32], [0x01, 0x00]);
     assert_eq!(data[4 * 32 + 30..5 * 32], [0x01, 0x40]);
+}
+
+/// Phase E: an OpenFour launch (indexed creator and token) through the
+/// production decoder; the pending decoder derives the same token from the
+/// signed bytes (frozen preset, CREATE2 of the create deployer).
+#[test]
+fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
+    let (block, receipts) = load(OPENFOUR_BLOCK, OPENFOUR_RECEIPTS, 129_842_141);
+    let hash = hex!("593001f6a2f88df9e1d9235e2a2e31b58dcc0f5bfc0b2c14903205b3ff8d1a07");
+    assert_eq!(block.header.hash, hash);
+    let launches = complete(OPENFOUR_BLOCK, 129_842_141, detect(&block, &receipts));
+    let raw = raw_tx(OPENFOUR_BLOCK, 74);
+    let expected = CanonicalLaunch {
+        venue: Venue::OpenFour,
+        block_number: 129_842_141,
+        block_hash: hash,
+        tx_index: 74,
+        tx_hash: hex!("fbc6421c2298b7bc253ea426768fdcc38c51bf75555848a5a17dc50235dc3088"),
+        token: Some(hex!("f76ad2f3d84ee09ee10ee1ef8c4d6dbb264effff")),
+        creator: Some(hex!("a26cc5fd86def0050de3ef43dd4796dae89ca25c")),
+        external_buys_after: None,
+        first_external_buy_index: None,
+        sender: Some(hex!("a26cc5fd86def0050de3ef43dd4796dae89ca25c")),
+        nonce: Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
+        c1_scope: true,
+        unverifiable: None,
+    };
+    assert_eq!(launches, vec![expected.clone()]);
+    check_launch_receipt(OPENFOUR_RECEIPTS, &expected);
+    check_tx(OPENFOUR_BLOCK, &expected);
+    // The creator and token are the indexed topics 2 and 3 of the event.
+    let receipt = raw_receipt(OPENFOUR_RECEIPTS, 74);
+    let log = receipt["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| {
+            address_of(&l["address"]) == OPENFOUR_CORE && l["topics"].as_array().unwrap().len() == 4
+        })
+        .unwrap();
+    assert_eq!(topic_address(&log["topics"][2]), expected.creator.unwrap());
+    assert_eq!(topic_address(&log["topics"][3]), expected.token.unwrap());
 }
 
 #[test]

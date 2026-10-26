@@ -162,7 +162,11 @@ pub struct Joined {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct JoinCounters {
     pub flap_launches: u64,
+    /// Four.meme launches (Classic and OpenFour), and those whose verified
+    /// signed bytes the production Four decoder recognizes as a launch with
+    /// the canonical token derived before execution (Phase E).
     pub four_launches: u64,
+    pub four_pending_decoded: u64,
     pub orphaned_launches: u64,
     pub seen_full_before: u64,
     pub seen_hash_only_before: u64,
@@ -196,8 +200,11 @@ impl JoinCounters {
             LaunchTx::Unrebuildable => step(&mut self.tx_unverifiable),
             LaunchTx::AnswerRefused => step(&mut self.tx_answer_refused),
         }
-        if j.launch.venue == Venue::Four {
+        if j.launch.venue != Venue::Flap {
             step(&mut self.four_launches);
+            if j.launch.c1_scope {
+                step(&mut self.four_pending_decoded);
+            }
             return;
         }
         step(&mut self.flap_launches);
@@ -461,6 +468,9 @@ mod tests {
         let mut ledger = Ledger::new(50, 3);
         ledger.push(launch(Venue::Flap, 10, 0xA, 1, 100, Some(2)));
         ledger.push(launch(Venue::Four, 10, 0xA, 2, 100, None));
+        // Phase E: an OpenFour launch whose pending bytes the Four decoder
+        // recognized (odd tx: `c1_scope`) counts with the Four family.
+        ledger.push(launch(Venue::OpenFour, 10, 0xA, 5, 100, None));
         ledger.push(launch(Venue::Flap, 11, 0xB, 3, 200, Some(1)));
         let sighting = |tx: &[u8; 32]| match tx[0] {
             1 => seen(
@@ -474,9 +484,9 @@ mod tests {
             _ => None,
         };
         assert!(ledger.join_due(120, 11, sighting).is_empty());
-        assert_eq!(ledger.waiting(), 3);
+        assert_eq!(ledger.waiting(), 4);
         let first = ledger.join_due(160, 11, sighting);
-        assert_eq!(first.len(), 2);
+        assert_eq!(first.len(), 3);
         assert_eq!(
             first[0].visibility,
             Visibility::FullBefore {
@@ -501,9 +511,10 @@ mod tests {
                 c.seen_after,
                 c.external_buys,
                 c.c1_scope_launches,
-                c.c1_scope_full_before
+                c.c1_scope_full_before,
+                c.four_pending_decoded
             ),
-            (2, 1, 1, 1, 3, 2, 1)
+            (2, 2, 1, 1, 3, 2, 1, 1)
         );
         // Block 11 is orphaned: its launch leaves every count.
         let gone = ledger.orphan(&[[0xB; 32]]);

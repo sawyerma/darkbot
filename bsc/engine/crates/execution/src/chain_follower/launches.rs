@@ -12,12 +12,12 @@
 //!   the frozen IPortal ABI of
 //!   `qualification/src/bin/g08_mainnet_verify.rs::portal_buys` and the
 //!   gate-0 keccak comparison (`.../2026-09-27-g01/keccak_comparison.json`).
-//! - Four.meme TokenManager2 `TokenCreate(address creator, address token,
-//!   uint256 requestId, string name, string symbol, uint256 totalSupply,
-//!   uint256 launchTime, uint256 launchFee)`: the archived ABI
-//!   `.../2026-09-27-g01/sources/TokenManager2.lite.json`. Its buy event is
-//!   not decoded here: whether every Four.meme buy is emitted as
-//!   `TokenPurchase` is not proven (`bsc/tools/br0`, acceptance item 3).
+//! - Four.meme Classic TokenManager2 `TokenCreate` and OpenFour Core
+//!   `TokenCreated` (OpenFour indexes presetId, creator and token): the one
+//!   Four.meme decoder of Phase E (`trading::venues::fourmeme`, G0.1 Four
+//!   freeze). Their buy events are not counted here: whether every
+//!   Four.meme buy is emitted as `TokenPurchase`/`TradeExecuted` is not
+//!   proven.
 //!
 //! Every topic is recomputed from its signature in the tests.
 
@@ -25,10 +25,15 @@ use alloy_primitives::{Address, hex};
 use darkbot_bsc_trading::venues::flap::events::{
     PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
 };
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+use darkbot_bsc_trading::venues::fourmeme::events::{
+    FourEvent, FourEventKind, FourLog, decode_four_log,
+};
+use darkbot_bsc_trading::venues::fourmeme::recognize::PendingToken;
 
 use super::CanonicalLaunch;
 use super::jsonrpc::{BlockHead, Log, Receipt};
-use crate::ingress::is_flap_launch;
+use crate::ingress::{four_launch_token, is_flap_launch};
 use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verify_parsed};
 
 /// The venue of a launch.
@@ -36,8 +41,10 @@ use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verif
 pub enum Venue {
     /// Flap Portal on BSC.
     Flap,
-    /// Four.meme TokenManager2 on BSC.
+    /// Four.meme Classic TokenManager2 on BSC.
     Four,
+    /// Four.meme OpenFour Core on BSC.
+    OpenFour,
 }
 
 /// The event of a venue that announces a new token.
@@ -50,13 +57,7 @@ pub struct LaunchEvent {
     pub signature: &'static str,
     /// Keccak-256 of `signature`.
     pub topic0: [u8; 32],
-    /// The static head of `data`, in 32-byte words.
-    pub head_words: usize,
-    /// The word holding the creator address.
-    pub creator_word: usize,
-    /// The word holding the new token's address.
-    pub token_word: usize,
-    /// The venue's buy event, where its layout is proven.
+    /// The venue's buy event, where its layout and completeness are proven.
     pub buy: Option<BuyEvent>,
 }
 
@@ -65,48 +66,44 @@ pub struct LaunchEvent {
 pub struct BuyEvent {
     pub signature: &'static str,
     pub topic0: [u8; 32],
-    /// The exact length of `data`, in 32-byte words (no dynamic part).
-    pub words: usize,
-    /// The word holding the bought token's address.
-    pub token_word: usize,
 }
 
 /// The Flap Portal (BSC).
 pub const FLAP_PORTAL: [u8; 20] = hex!("e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0");
-/// The Four.meme TokenManager2 (BSC).
+/// The Four.meme Classic TokenManager2 (BSC).
 pub const FOUR_TOKEN_MANAGER2: [u8; 20] = hex!("5c952063c7fc8610ffdb798152d69f0b9550762b");
+/// The Four.meme OpenFour Core (BSC).
+pub const OPENFOUR_CORE: [u8; 20] = hex!("ebe7b6c1089d9f72ad07f34e36d898e44e5e27f3");
 
 /// The venues, in no particular order; a log matches at most one.
-pub const LAUNCH_EVENTS: [LaunchEvent; 2] = [
+pub const LAUNCH_EVENTS: [LaunchEvent; 3] = [
     LaunchEvent {
         venue: Venue::Flap,
         contract: FLAP_PORTAL,
         // The Flap entries come from the one decoder's table.
         signature: PortalEventKind::TokenCreated.signature(),
         topic0: PortalEventKind::TokenCreated.topic0(),
-        head_words: 7,
-        creator_word: 1,
-        token_word: 3,
         buy: Some(BuyEvent {
             signature: PortalEventKind::TokenBought.signature(),
             topic0: PortalEventKind::TokenBought.topic0(),
-            words: 7,
-            token_word: 1,
         }),
     },
+    // The Four.meme entries come from the one Four decoder's table.
     LaunchEvent {
         venue: Venue::Four,
         contract: FOUR_TOKEN_MANAGER2,
-        signature: "TokenCreate(address,address,uint256,string,string,uint256,uint256,uint256)",
-        topic0: hex!("396d5e902b675b032348d3d2e9517ee8f0c4a926603fbc075d3d282ff00cad20"),
-        head_words: 8,
-        creator_word: 0,
-        token_word: 1,
+        signature: FourEventKind::TokenCreate.signature(),
+        topic0: FourEventKind::TokenCreate.topic0(),
+        buy: None,
+    },
+    LaunchEvent {
+        venue: Venue::OpenFour,
+        contract: OPENFOUR_CORE,
+        signature: FourEventKind::TokenCreated.signature(),
+        topic0: FourEventKind::TokenCreated.topic0(),
         buy: None,
     },
 ];
-
-const WORD: usize = 32;
 
 /// A launch as its block's receipts show it; [`CanonicalLaunch`] once its
 /// transaction is verified.
@@ -136,9 +133,10 @@ pub(super) fn verify_object(
 
 impl ReceiptLaunch {
     /// The launch with the facts of its verified transaction: sender,
-    /// nonce, and the C1 scope decision of the pending path
-    /// (`ingress::is_flap_launch` of the signed bytes); or, for a
-    /// transaction the verifier refuses, that reason.
+    /// nonce, and the scope decision of the pending path on the signed
+    /// bytes (Flap: `ingress::is_flap_launch`, the C1 scope; Four.meme:
+    /// `ingress::four_launch_token` names this launch's token before
+    /// execution); or, for a transaction the verifier refuses, that reason.
     pub(super) fn with_transaction(
         self,
         tx: Result<&VerifiedTx, RejectReason>,
@@ -156,7 +154,14 @@ impl ReceiptLaunch {
             first_external_buy_index: self.first_external_buy_index,
             sender: tx.ok().map(|t| t.from),
             nonce: tx.ok().map(|t| t.nonce),
-            c1_scope: tx.is_ok_and(|t| is_flap_launch(&t.raw, max_launch_calldata)),
+            c1_scope: tx.is_ok_and(|t| match self.venue {
+                Venue::Flap => is_flap_launch(&t.raw, max_launch_calldata),
+                Venue::Four | Venue::OpenFour => matches!(
+                    four_launch_token(&bsc_mainnet_g01_129842711(), &t.raw, max_launch_calldata),
+                    Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token))
+                        if Some(token.into_array()) == self.token
+                ),
+            }),
             unverifiable: tx.err(),
         }
     }
@@ -182,20 +187,20 @@ pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<ReceiptLaun
                     }
                     _ => (None, None),
                 },
-                Venue::Four => {
-                    if log.topics.len() == 1 && log.data.len() >= event.head_words * WORD {
-                        (
-                            address_word(&log.data, event.token_word),
-                            address_word(&log.data, event.creator_word),
-                        )
-                    } else {
-                        (None, None)
+                // Phase E: the one Four.meme decoder (strict canonical layout).
+                Venue::Four | Venue::OpenFour => match four_log(log) {
+                    FourLog::Event(FourEvent::TokenCreate(c)) => {
+                        (Some(c.token.into_array()), Some(c.creator.into_array()))
                     }
-                }
+                    FourLog::Event(FourEvent::TokenCreated(c)) => {
+                        (Some(c.token.into_array()), Some(c.creator.into_array()))
+                    }
+                    _ => (None, None),
+                },
             };
             let (external_buys_after, first_external_buy_index) = match (event.buy, token) {
                 (Some(buy), Some(token)) => {
-                    match buys_after(receipts, receipt.tx_index, event.contract, &buy, token) {
+                    match buys_after(receipts, receipt.tx_index, &buy, token) {
                         Some((count, first)) => (Some(count), first),
                         None => (None, None),
                     }
@@ -218,13 +223,13 @@ pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<ReceiptLaun
     launches
 }
 
-/// The buy events of `token` in successful receipts after `launch_index`:
-/// their count and the first one's transaction index. `None` when any buy
-/// event of the venue there is malformed (the count would be a guess).
+/// The Flap Portal buy events of `token` in successful receipts after
+/// `launch_index` (only Flap has a proven buy event): their count and the
+/// first one's transaction index. `None` when any buy event there is
+/// malformed (the count would be a guess).
 fn buys_after(
     receipts: &[Receipt],
     launch_index: u64,
-    contract: [u8; 20],
     buy: &BuyEvent,
     token: [u8; 20],
 ) -> Option<(u32, Option<u64>)> {
@@ -237,19 +242,12 @@ fn buys_after(
         for log in receipt
             .logs
             .iter()
-            .filter(|l| is_event(l, contract, buy.topic0))
+            .filter(|l| is_event(l, FLAP_PORTAL, buy.topic0))
         {
-            let bought = if contract == FLAP_PORTAL {
-                // Phase D: the one Flap decoder; a malformed buy voids the count.
-                match flap_log(log) {
-                    PortalLog::Event(PortalEvent::TokenBought(trade)) => trade.token.into_array(),
-                    _ => return None,
-                }
-            } else {
-                if log.topics.len() != 1 || log.data.len() != buy.words * WORD {
-                    return None;
-                }
-                address_word(&log.data, buy.token_word)?
+            // Phase D: the one Flap decoder; a malformed buy voids the count.
+            let bought = match flap_log(log) {
+                PortalLog::Event(PortalEvent::TokenBought(trade)) => trade.token.into_array(),
+                _ => return None,
             };
             if bought == token {
                 count = count.checked_add(1)?;
@@ -270,16 +268,17 @@ fn flap_log(log: &Log) -> PortalLog<'_> {
     )
 }
 
-fn is_event(log: &Log, contract: [u8; 20], topic0: [u8; 32]) -> bool {
-    log.address == contract && log.topics.first() == Some(&topic0)
+/// One log through the production Four.meme decoder
+/// (`trading::venues::fourmeme`, the frozen deployment).
+fn four_log(log: &Log) -> FourLog<'_> {
+    decode_four_log(
+        &bsc_mainnet_g01_129842711(),
+        Address::from(log.address),
+        &log.topics,
+        &log.data,
+    )
 }
 
-/// Word `index` of `data` as an address: twelve zero bytes, then twenty.
-fn address_word(data: &[u8], index: usize) -> Option<[u8; 20]> {
-    let word = data.get(index * WORD..(index + 1) * WORD)?;
-    let (pad, address) = word.split_at(12);
-    if pad.iter().any(|b| *b != 0) {
-        return None;
-    }
-    address.try_into().ok()
+fn is_event(log: &Log, contract: [u8; 20], topic0: [u8; 32]) -> bool {
+    log.address == contract && log.topics.first() == Some(&topic0)
 }

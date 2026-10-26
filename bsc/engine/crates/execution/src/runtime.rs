@@ -631,6 +631,7 @@ impl Canonical {
             .set(e::RATE_LIMITED, self.rate_limited)
             .set(e::FLAP_LAUNCHES, c.flap_launches)
             .set(e::FOUR_LAUNCHES, c.four_launches)
+            .set(e::FOUR_PENDING_DECODED, c.four_pending_decoded)
             .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)
             .set(e::SEEN_FULL_BEFORE, c.seen_full_before)
             .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
