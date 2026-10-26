@@ -10,7 +10,8 @@
 //! - `ingress_first_sighting`: `IngressCore::observe` of a new full launch
 //!   (dedup window, venue decision, the first-sighting decision);
 //! - `recorder_enqueue`: the runtime journal's enqueue of that sighting
-//!   (byte budget, bounded queue; the writer drains on its own thread).
+//!   (byte budget, bounded queue; the writer drains on its own thread),
+//!   with bounds that hold every sample: only accepted enqueues count.
 //!
 //! Every sample is one event between two clock reads; the clock's own
 //! floor is reported. Quantiles by nearest rank, p99.99 from 10 000
@@ -165,7 +166,11 @@ fn f_ingest_latency() {
         (
             "four_pending_token",
             measure(|_| {
-                black_box(four_launch_token(&four, black_box(&open_launch), MAX_CALLDATA));
+                black_box(four_launch_token(
+                    &four,
+                    black_box(&open_launch),
+                    MAX_CALLDATA,
+                ));
             }),
         ),
     ];
@@ -194,14 +199,13 @@ fn f_ingest_latency() {
     let dir = std::env::temp_dir().join(format!("bsc-f-latency-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let payload = first_sighting_payload(SourceId::PublicNode, &[7; 32], &flap_launch);
+    // Bounds that hold every sample: the loop enqueues far faster than any
+    // writer drains, and a refusal is no enqueue to measure.
     let mut journal = RuntimeJournal::open(
         &dir,
         1,
         1,
-        JournalSetup {
-            budget_bytes: 64 << 20,
-            ..JournalSetup::whole(65_536, MAX_CALLDATA + 64)
-        },
+        JournalSetup::whole(WARMUP + N, payload.len().max(MAX_CALLDATA + 64)),
     )
     .unwrap();
     stages.push((
@@ -211,6 +215,7 @@ fn f_ingest_latency() {
         }),
     ));
     let lost = journal.lost();
+    assert_eq!(lost, 0, "every measured enqueue is an accepted one");
     journal.finish().unwrap();
     fs::remove_dir_all(&dir).unwrap();
 
