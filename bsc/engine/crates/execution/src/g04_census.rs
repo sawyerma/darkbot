@@ -542,6 +542,9 @@ fn replay(
                 window.flap_trades += 1;
             }
             (RecordKind::Canonical, Some(b'W')) if p.len() == 57 => window.trade_gaps += 1,
+            (RecordKind::Canonical, Some(b'F'))
+                if crate::runtime_journal::flap_term_of(p).is_some() => {}
+            (RecordKind::Canonical, Some(b'M')) if p.len() == 77 => {}
             (RecordKind::Canonical, Some(tag @ (b'H' | b'E' | b'K'))) if p.len() == 41 => {
                 let number = u64_at(p, 1);
                 match tag {
@@ -1897,6 +1900,45 @@ mod tests {
         let mut damaged = t.clone();
         damaged[1] = 2;
         assert_eq!(crate::runtime_journal::flap_trade_of(&damaged), None);
+        // Every term kind reads back; a version with a dirty word does not.
+        use crate::chain_follower::{CanonicalTerm, FlapTerm};
+        for term in [
+            FlapTerm::Version(6),
+            FlapTerm::QuoteToken([1; 20]),
+            FlapTerm::Curve {
+                r: [1; 32],
+                h: [2; 32],
+                k: [3; 32],
+            },
+            FlapTerm::DexThreshold([4; 32]),
+            FlapTerm::Migrator(1),
+            FlapTerm::Tax {
+                buy: [5; 32],
+                sell: [6; 32],
+            },
+        ] {
+            let t = CanonicalTerm {
+                block_number: 10,
+                block_hash: [10; 32],
+                tx_index: 1,
+                log_index: 3,
+                token: [4; 20],
+                term,
+            };
+            let p = crate::runtime_journal::flap_term_payload(&t);
+            assert_eq!(p.len(), crate::runtime_journal::FLAP_TERM_LEN);
+            assert_eq!(crate::runtime_journal::flap_term_of(&p), Some(t));
+        }
+        let mut dirty = crate::runtime_journal::flap_term_payload(&CanonicalTerm {
+            block_number: 10,
+            block_hash: [10; 32],
+            tx_index: 1,
+            log_index: 3,
+            token: [4; 20],
+            term: FlapTerm::Version(6),
+        });
+        dirty[78] = 1;
+        assert_eq!(crate::runtime_journal::flap_term_of(&dirty), None);
         write(
             &dir,
             1_000,

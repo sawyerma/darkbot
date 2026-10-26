@@ -33,9 +33,10 @@ use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
     STOP_PAYLOAD, SourceEvent, canonical_launch_payload, first_sighting_payload,
-    flap_trade_payload, ingress_drop_payload, later_sighting_payload, launch_id_payload,
-    orphaned_launch_payload, own_binary_sha256, paper_handoff_payload, pending_launch_payload,
-    reorg_payload, resync_payload, source_event_payload, trade_gap_payload, window_payload,
+    flap_migrated_payload, flap_term_payload, flap_trade_payload, ingress_drop_payload,
+    later_sighting_payload, launch_id_payload, orphaned_launch_payload, own_binary_sha256,
+    paper_handoff_payload, pending_launch_payload, reorg_payload, resync_payload,
+    source_event_payload, trade_gap_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -621,8 +622,27 @@ impl Canonical {
             // Before the window: not part of the G0.4 counts (the C2 owner
             // has applied them already).
             CanonicalEvent::Launch(_) if !self.first_journaled => self.backfill_launches += 1,
-            CanonicalEvent::FlapTrade(_) | CanonicalEvent::FlapTradeUndecodable { .. }
+            CanonicalEvent::FlapTrade(_)
+            | CanonicalEvent::FlapTerm(_)
+            | CanonicalEvent::FlapMigrated { .. }
+            | CanonicalEvent::FlapTradeUndecodable { .. }
                 if !self.first_journaled => {}
+            CanonicalEvent::FlapTerm(t) => {
+                journal.record(RecordKind::Canonical, at, flap_term_payload(&t));
+            }
+            CanonicalEvent::FlapMigrated {
+                block_number,
+                block_hash,
+                tx_index,
+                log_index,
+                token,
+            } => {
+                journal.record(
+                    RecordKind::Canonical,
+                    at,
+                    flap_migrated_payload(block_number, &block_hash, tx_index, log_index, &token),
+                );
+            }
             // Phase H: every Flap curve trade of the window, for the
             // strategy and its replay.
             CanonicalEvent::FlapTrade(t) => {

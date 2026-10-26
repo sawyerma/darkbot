@@ -282,8 +282,20 @@ pub enum CanonicalEvent {
     /// A Flap curve trade of the block just reported (Phase H), in
     /// receipt and log order after its launches.
     FlapTrade(CanonicalTrade),
-    /// A Portal trade log of a successful receipt that the production
-    /// decoder refuses: the trades of that block are not complete.
+    /// A term the Portal set for a token (its launch receipt sets them all),
+    /// in the same order as the trades.
+    FlapTerm(CanonicalTerm),
+    /// The Portal's `LaunchedToDEX` of a token: it left the curve.
+    FlapMigrated {
+        block_number: u64,
+        block_hash: [u8; 32],
+        tx_index: u64,
+        log_index: u64,
+        token: [u8; 20],
+    },
+    /// A Portal trade, term or migration log of a successful receipt that
+    /// the production decoder refuses: that block's Flap events are not
+    /// complete.
     FlapTradeUndecodable {
         block_number: u64,
         block_hash: [u8; 32],
@@ -292,6 +304,32 @@ pub enum CanonicalEvent {
     },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
+}
+
+/// One term the Portal set for a token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalTerm {
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    pub tx_index: u64,
+    pub log_index: u64,
+    pub token: [u8; 20],
+    pub term: FlapTerm,
+}
+
+/// The Portal's per-token terms (`TokenVersionSet`, `TokenQuoteSet`,
+/// `TokenCurveSetV2`, `TokenDexSupplyThreshSet`, `TokenMigratorSet`,
+/// `FlapTokenTaxSet`, `FlapTokenAsymmetricTaxSet`); amounts as big-endian
+/// words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlapTerm {
+    Version(u8),
+    QuoteToken([u8; 20]),
+    Curve { r: [u8; 32], h: [u8; 32], k: [u8; 32] },
+    DexThreshold([u8; 32]),
+    Migrator(u8),
+    /// A symmetric tax is both.
+    Tax { buy: [u8; 32], sell: [u8; 32] },
 }
 
 /// One Portal `TokenBought`/`TokenSold` of a successful receipt

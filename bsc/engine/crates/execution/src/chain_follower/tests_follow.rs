@@ -782,6 +782,10 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
         CanonicalEvent::FlapTradeUndecodable { block_number, .. } => {
             format!("undecodable trade {block_number}")
         }
+        CanonicalEvent::FlapTerm(t) => {
+            format!("term {} {} {:?}", t.block_number, t.log_index, t.term)
+        }
+        CanonicalEvent::FlapMigrated { block_number, .. } => format!("migrated {block_number}"),
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
     }
 }
@@ -1095,11 +1099,15 @@ fn a_real_launch_block_through_the_whole_path() {
     };
     let outcome = follow_script(script, limits(), &[], None);
     // Phase H: the block's trades follow its launches; checked apart.
-    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
-        .events
-        .into_iter()
-        .map(|(e, _)| e)
-        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
+        outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
+            matches!(
+                e,
+                CanonicalEvent::FlapTrade(_)
+                    | CanonicalEvent::FlapTerm(_)
+                    | CanonicalEvent::FlapMigrated { .. }
+            )
+        });
     assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Block {
@@ -1190,11 +1198,15 @@ fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
     };
     let outcome = follow_script(script, limits(), &[], None);
     // Phase H: the block's trades follow its launches; checked apart.
-    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
-        .events
-        .into_iter()
-        .map(|(e, _)| e)
-        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
+        outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
+            matches!(
+                e,
+                CanonicalEvent::FlapTrade(_)
+                    | CanonicalEvent::FlapTerm(_)
+                    | CanonicalEvent::FlapMigrated { .. }
+            )
+        });
     assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Block { number, .. },
@@ -1235,11 +1247,15 @@ fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
     assert_eq!(limits.tx_attempts, 2);
     let outcome = follow_script(script, limits, &[], None);
     // Phase H: the block's trades follow its launches; checked apart.
-    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
-        .events
-        .into_iter()
-        .map(|(e, _)| e)
-        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
+        outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
+            matches!(
+                e,
+                CanonicalEvent::FlapTrade(_)
+                    | CanonicalEvent::FlapTerm(_)
+                    | CanonicalEvent::FlapMigrated { .. }
+            )
+        });
     assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Fault(FollowerFault::Request {
@@ -1520,18 +1536,28 @@ fn a_gap_after_a_failed_reorg_starts_at_the_fork_point() {
     );
 }
 
-/// The Flap trades of the real launch block 129774331: every one of that
-/// block, in receipt and log order, none of a failed receipt.
-fn assert_real_block_trades(trades: &[CanonicalEvent]) {
-    assert!(!trades.is_empty());
+/// The Flap events of the real launch block 129774331: trades and the
+/// launch's terms of that block, in receipt and log order, none of a
+/// failed receipt; the Flap launch sets its version and DEX threshold.
+fn assert_real_block_trades(events: &[CanonicalEvent]) {
+    let (mut trades, mut version, mut threshold) = (0, false, false);
     let mut last = None;
-    for t in trades {
-        let CanonicalEvent::FlapTrade(t) = t else {
-            panic!("{t:?}");
+    for e in events {
+        let (block, at) = match e {
+            CanonicalEvent::FlapTrade(t) => {
+                trades += 1;
+                (t.block_number, (t.tx_index, t.log_index))
+            }
+            CanonicalEvent::FlapTerm(t) => {
+                version |= matches!(t.term, super::FlapTerm::Version(6));
+                threshold |= matches!(t.term, super::FlapTerm::DexThreshold(_));
+                (t.block_number, (t.tx_index, t.log_index))
+            }
+            other => panic!("{other:?}"),
         };
-        assert_eq!(t.block_number, 129_774_331);
-        let at = (t.tx_index, t.log_index);
+        assert_eq!(block, 129_774_331);
         assert!(last.is_none_or(|l| l < at), "{at:?} after {last:?}");
         last = Some(at);
     }
+    assert!(trades > 0 && version && threshold, "{events:?}");
 }

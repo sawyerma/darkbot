@@ -284,6 +284,8 @@ impl StateOwner {
             CanonicalEvent::Launch(_)
             | CanonicalEvent::RevertedLaunch { .. }
             | CanonicalEvent::FlapTrade(_)
+            | CanonicalEvent::FlapTerm(_)
+            | CanonicalEvent::FlapMigrated { .. }
             | CanonicalEvent::FlapTradeUndecodable { .. }
             | CanonicalEvent::Fault(_) => return,
         };

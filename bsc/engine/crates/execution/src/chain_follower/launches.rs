@@ -32,7 +32,7 @@ use darkbot_bsc_trading::venues::fourmeme::events::{
 use darkbot_bsc_trading::venues::fourmeme::recognize::PendingToken;
 
 use super::jsonrpc::{BlockHead, Log, Receipt};
-use super::{CanonicalEvent, CanonicalLaunch, CanonicalTrade};
+use super::{CanonicalEvent, CanonicalLaunch, CanonicalTerm, CanonicalTrade, FlapTerm};
 use crate::ingress::{four_launch_token, is_flap_launch};
 use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verify_parsed};
 
@@ -316,27 +316,78 @@ fn buys_after(
     Some((count, first))
 }
 
-/// The Portal trades of the block's successful receipts, in receipt and
-/// log order (Phase H); a trade log the decoder refuses is reported, not
-/// skipped silently.
-pub(super) fn flap_trades(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalEvent> {
-    let bought = PortalEventKind::TokenBought.topic0();
-    let sold = PortalEventKind::TokenSold.topic0();
+/// The Portal trades, token terms and migrations of the block's successful
+/// receipts, in receipt and log order (Phase H); a log of these kinds the
+/// decoder refuses is reported, not skipped silently.
+pub(super) fn flap_events(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalEvent> {
+    use PortalEventKind as K;
+    let kinds = [
+        K::TokenBought,
+        K::TokenSold,
+        K::TokenVersionSet,
+        K::TokenQuoteSet,
+        K::TokenCurveSetV2,
+        K::TokenDexSupplyThreshSet,
+        K::TokenMigratorSet,
+        K::FlapTokenTaxSet,
+        K::FlapTokenAsymmetricTaxSet,
+    ];
+    let (number, hash) = (block.header.number, block.header.hash);
     let mut out = Vec::new();
     for receipt in receipts.iter().filter(|r| r.succeeded) {
-        for log in receipt.logs.iter().filter(|l| {
-            l.address == FLAP_PORTAL && l.topics.first().is_some_and(|t| *t == bought || *t == sold)
-        }) {
+        for log in receipt.logs.iter().filter(|l| l.address == FLAP_PORTAL) {
+            let Some(kind) = log.topics.first().and_then(PortalEventKind::from_topic0) else {
+                continue;
+            };
+            let refused = CanonicalEvent::FlapTradeUndecodable {
+                block_number: number,
+                block_hash: hash,
+                tx_index: receipt.tx_index,
+                log_index: log.log_index,
+            };
+            if kind == K::LaunchedToDex {
+                // Unwitnessed, so not decoded by the Phase D decoder: the
+                // verified ABI's first data word is the token (no Portal
+                // event has an indexed parameter), checked to be an address.
+                let token = (log.topics.len() == 1 && log.data.len() == 4 * 32)
+                    .then(|| &log.data[..32])
+                    .filter(|w| w[..12].iter().all(|b| *b == 0))
+                    .and_then(|w| <[u8; 20]>::try_from(&w[12..]).ok());
+                out.push(match token {
+                    Some(token) => CanonicalEvent::FlapMigrated {
+                        block_number: number,
+                        block_hash: hash,
+                        tx_index: receipt.tx_index,
+                        log_index: log.log_index,
+                        token,
+                    },
+                    None => refused,
+                });
+                continue;
+            }
+            if !kinds.contains(&kind) {
+                continue;
+            }
+            let term = |token: Address, term| {
+                CanonicalEvent::FlapTerm(CanonicalTerm {
+                    block_number: number,
+                    block_hash: hash,
+                    tx_index: receipt.tx_index,
+                    log_index: log.log_index,
+                    token: token.into_array(),
+                    term,
+                })
+            };
             out.push(match flap_log(log) {
                 PortalLog::Event(PortalEvent::TokenBought(t) | PortalEvent::TokenSold(t)) => {
                     CanonicalEvent::FlapTrade(CanonicalTrade {
-                        block_number: block.header.number,
-                        block_hash: block.header.hash,
+                        block_number: number,
+                        block_hash: hash,
                         tx_index: receipt.tx_index,
                         tx_hash: receipt.tx_hash,
                         log_index: log.log_index,
                         origin: receipt.from,
-                        sell: log.topics.first() == Some(&sold),
+                        sell: kind == K::TokenSold,
                         token: t.token.into_array(),
                         trader: t.trader.into_array(),
                         amount: t.amount.to_be_bytes(),
@@ -345,12 +396,50 @@ pub(super) fn flap_trades(block: &BlockHead, receipts: &[Receipt]) -> Vec<Canoni
                         post_price: t.post_price.to_be_bytes(),
                     })
                 }
-                _ => CanonicalEvent::FlapTradeUndecodable {
-                    block_number: block.header.number,
-                    block_hash: block.header.hash,
-                    tx_index: receipt.tx_index,
-                    log_index: log.log_index,
-                },
+                PortalLog::Event(PortalEvent::TokenVersionSet { token, version }) => {
+                    term(token, FlapTerm::Version(version))
+                }
+                PortalLog::Event(PortalEvent::TokenQuoteSet { token, quote_token }) => {
+                    term(token, FlapTerm::QuoteToken(quote_token.into_array()))
+                }
+                PortalLog::Event(PortalEvent::TokenCurveSetV2 { token, r, h, k }) => term(
+                    token,
+                    FlapTerm::Curve {
+                        r: r.to_be_bytes(),
+                        h: h.to_be_bytes(),
+                        k: k.to_be_bytes(),
+                    },
+                ),
+                PortalLog::Event(PortalEvent::TokenDexSupplyThreshSet {
+                    token,
+                    dex_supply_thresh,
+                }) => term(
+                    token,
+                    FlapTerm::DexThreshold(dex_supply_thresh.to_be_bytes()),
+                ),
+                PortalLog::Event(PortalEvent::TokenMigratorSet {
+                    token,
+                    migrator_type,
+                }) => term(token, FlapTerm::Migrator(migrator_type)),
+                PortalLog::Event(PortalEvent::FlapTokenTaxSet { token, tax }) => term(
+                    token,
+                    FlapTerm::Tax {
+                        buy: tax.to_be_bytes(),
+                        sell: tax.to_be_bytes(),
+                    },
+                ),
+                PortalLog::Event(PortalEvent::FlapTokenAsymmetricTaxSet {
+                    token,
+                    buy_tax,
+                    sell_tax,
+                }) => term(
+                    token,
+                    FlapTerm::Tax {
+                        buy: buy_tax.to_be_bytes(),
+                        sell: sell_tax.to_be_bytes(),
+                    },
+                ),
+                _ => refused,
             });
         }
     }

@@ -338,6 +338,114 @@ pub fn flap_trade_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTrade> 
     })
 }
 
+/// A Portal token term (Phase H): `F | kind u8 | block u64 |
+/// block_hash [32] | tx_index u64 | log_index u64 | token [20] |
+/// value [96]` — kind 1 version (last byte of word 0), 2 quote token
+/// (word 0), 3 curve r/h/k (words 0–2), 4 DEX threshold (word 0),
+/// 5 migrator (last byte of word 0), 6 tax buy/sell (words 0–1).
+pub fn flap_term_payload(t: &crate::chain_follower::CanonicalTerm) -> Vec<u8> {
+    use crate::chain_follower::FlapTerm;
+    let mut value = [0u8; 96];
+    let kind = match t.term {
+        FlapTerm::Version(v) => {
+            value[31] = v;
+            1
+        }
+        FlapTerm::QuoteToken(a) => {
+            value[12..32].copy_from_slice(&a);
+            2
+        }
+        FlapTerm::Curve { r, h, k } => {
+            value[..32].copy_from_slice(&r);
+            value[32..64].copy_from_slice(&h);
+            value[64..].copy_from_slice(&k);
+            3
+        }
+        FlapTerm::DexThreshold(w) => {
+            value[..32].copy_from_slice(&w);
+            4
+        }
+        FlapTerm::Migrator(m) => {
+            value[31] = m;
+            5
+        }
+        FlapTerm::Tax { buy, sell } => {
+            value[..32].copy_from_slice(&buy);
+            value[32..64].copy_from_slice(&sell);
+            6
+        }
+    };
+    let mut out = Vec::with_capacity(FLAP_TERM_LEN);
+    out.push(b'F');
+    out.push(kind);
+    out.extend_from_slice(&t.block_number.to_le_bytes());
+    out.extend_from_slice(&t.block_hash);
+    out.extend_from_slice(&t.tx_index.to_le_bytes());
+    out.extend_from_slice(&t.log_index.to_le_bytes());
+    out.extend_from_slice(&t.token);
+    out.extend_from_slice(&value);
+    out
+}
+
+/// The length of an `F` record.
+pub const FLAP_TERM_LEN: usize = 174;
+
+/// An `F` record back; `None` for any other bytes.
+pub fn flap_term_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTerm> {
+    use crate::chain_follower::FlapTerm;
+    if p.len() != FLAP_TERM_LEN || p[0] != b'F' {
+        return None;
+    }
+    let u64_at = |from: usize| Some(u64::from_le_bytes(p.get(from..from + 8)?.try_into().ok()?));
+    let w = |i: usize| -> Option<[u8; 32]> { p.get(78 + 32 * i..110 + 32 * i)?.try_into().ok() };
+    let zero_but_last = |word: [u8; 32]| word[..31].iter().all(|b| *b == 0);
+    let term = match p[1] {
+        1 if zero_but_last(w(0)?) => FlapTerm::Version(w(0)?[31]),
+        2 if w(0)?[..12].iter().all(|b| *b == 0) => {
+            FlapTerm::QuoteToken(w(0)?[12..].try_into().ok()?)
+        }
+        3 => FlapTerm::Curve {
+            r: w(0)?,
+            h: w(1)?,
+            k: w(2)?,
+        },
+        4 => FlapTerm::DexThreshold(w(0)?),
+        5 if zero_but_last(w(0)?) => FlapTerm::Migrator(w(0)?[31]),
+        6 => FlapTerm::Tax {
+            buy: w(0)?,
+            sell: w(1)?,
+        },
+        _ => return None,
+    };
+    Some(crate::chain_follower::CanonicalTerm {
+        block_number: u64_at(2)?,
+        block_hash: p.get(10..42)?.try_into().ok()?,
+        tx_index: u64_at(42)?,
+        log_index: u64_at(50)?,
+        token: p.get(58..78)?.try_into().ok()?,
+        term,
+    })
+}
+
+/// A token's `LaunchedToDEX` (Phase H): `M | block u64 | block_hash [32] |
+/// tx_index u64 | log_index u64 | token [20]`.
+pub fn flap_migrated_payload(
+    block: u64,
+    block_hash: &[u8; 32],
+    tx_index: u64,
+    log_index: u64,
+    token: &[u8; 20],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(77);
+    out.push(b'M');
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(block_hash);
+    out.extend_from_slice(&tx_index.to_le_bytes());
+    out.extend_from_slice(&log_index.to_le_bytes());
+    out.extend_from_slice(token);
+    out
+}
+
 /// A Portal trade log the decoder refused (Phase H): `W | block u64 |
 /// block_hash [32] | tx_index u64 | log_index u64`; that block's trades
 /// are incomplete.
