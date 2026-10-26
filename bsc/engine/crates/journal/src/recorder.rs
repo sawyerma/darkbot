@@ -228,6 +228,24 @@ impl SpannedDrain {
         Ok(record)
     }
 
+    /// [`Self::recv_spanned`] that waits at most `timeout` for the next
+    /// record: `None` when none came (the writer's idle sync point).
+    pub fn recv_spanned_timeout(&mut self, timeout: std::time::Duration) -> Result<Option<CaptureRecord>, JournalError> {
+        if self.pending.is_none() {
+            match self.receiver.recv_timeout(timeout) {
+                Ok(queued) => self.pending = Some(queued),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // The caller wrote the previous record: its bytes are free.
+                    self.held = None;
+                    return Ok(None);
+                }
+                // Closed: the plain receive reports the trailing span and the end.
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+            }
+        }
+        self.recv_spanned().map(Some)
+    }
+
 }
 
 impl RecorderDrain {

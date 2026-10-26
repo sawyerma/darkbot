@@ -55,6 +55,8 @@ pub fn spawn(
             let mut done = Vec::new();
             let report = |s: SealedSegment, done: &mut Vec<SealedSegment>| {
                 metrics.sealed();
+                // A seal syncs: its records are durable.
+                metrics.synced(s.manifest.last_sequence);
                 if let Some(tx) = &sealed {
                     // A gone receiver only stops the reports.
                     let _ = tx.send(s.clone());
@@ -63,8 +65,19 @@ pub fn spawn(
             };
             let (mut since_sync, mut synced_at) = (0u64, Instant::now());
             loop {
-                let record = match drain.recv_spanned() {
-                    Ok(record) => record,
+                let record = match drain.recv_spanned_timeout(policy.every) {
+                    Ok(Some(record)) => record,
+                    // Idle for a sync interval: what was appended is synced
+                    // now, not at the next record (Phase F gate L6).
+                    Ok(None) => {
+                        if since_sync > 0 {
+                            writer.sync().map_err(fail)?;
+                            metrics.synced(writer.last_sequence());
+                            since_sync = 0;
+                            synced_at = Instant::now();
+                        }
+                        continue;
+                    }
                     Err(JournalError::QueueDisconnected) => break,
                     Err(e) => return Err(fail(e)),
                 };
@@ -162,6 +175,50 @@ mod tests {
         assert_eq!(v.segments_sealed as usize, end.sealed.len());
         assert!(recover(&dir, 1024).unwrap().complete);
         assert_eq!(budget.in_use(), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase F gate L6: an appended record becomes durable within the sync
+    /// interval even when no next record comes, and a seal advances the
+    /// watermark.
+    #[test]
+    fn an_idle_writer_syncs_by_time_and_a_seal_is_durable() {
+        let dir = std::env::temp_dir().join(format!("bsc-worker-idle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mut recorder, drain) = Recorder::bounded_spanned(8, 64).unwrap();
+        let writer = SegmentWriter::create(
+            &dir,
+            SegmentPolicy {
+                max_segment_bytes: u64::MAX,
+                max_segment_ns: u64::MAX,
+            },
+        )
+        .unwrap();
+        let metrics = Arc::new(StorageMetrics::default());
+        let worker = spawn(
+            drain,
+            writer,
+            SyncPolicy {
+                every_records: 1_000,
+                every: Duration::from_millis(20),
+            },
+            Arc::clone(&metrics),
+            None,
+        )
+        .unwrap();
+        recorder
+            .try_record(RecordKind::Runtime, 1, &[1; 8])
+            .unwrap();
+        let started = Instant::now();
+        while metrics.view().durable_sequence != Some(0) {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "never synced while idle"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(recorder);
+        worker.join().unwrap().unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

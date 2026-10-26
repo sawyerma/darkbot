@@ -534,12 +534,23 @@ impl RuntimeJournal {
     }
 
     pub fn healthy(&self) -> bool {
-        !self.metrics.view().failed
+        !self.writer_view().failed
+    }
+
+    /// The writer's metrics; a worker that ended while the recorder is
+    /// open failed (it panicked or returned an error: it only ends when the
+    /// recorder is closed), whatever the metrics say (Phase F gate L1).
+    fn writer_view(&self) -> MetricsView {
+        let mut view = self.metrics.view();
+        if self.recorder.is_some() && self.worker.as_ref().is_some_and(|w| w.is_finished()) {
+            view.failed = true;
+        }
+        view
     }
 
     pub fn capture(&self) -> CaptureStatus {
         CaptureStatus {
-            writer: self.metrics.view(),
+            writer: self.writer_view(),
             budget_max: self.budget.max() as u64,
             budget_in_use: self.budget.in_use() as u64,
             budget_peak: self.budget.peak() as u64,
@@ -551,22 +562,45 @@ impl RuntimeJournal {
     /// the last segment, then writes the run manifest (also after a write
     /// failure, as `INCOMPLETE`). A write failure is returned after that.
     pub fn finish(mut self) -> Result<CaptureRun, String> {
-        // Refusals outside the sequence (oversize): the others are gap spans.
-        let oversize = self
-            .recorder
-            .as_ref()
-            .map_or(0, |r| r.stats().rejected_oversize);
+        // Oversize records take no sequence; every sequence the recorder
+        // handed out lies in a sealed segment (a record or a gap span) or
+        // never reached one (a failed writer's open segment, its dropped
+        // queue, refusals after it ended).
+        let (oversize, next_sequence) = self.recorder.as_ref().map_or((0, 0), |r| {
+            let s = r.stats();
+            (s.rejected_oversize, s.next_sequence)
+        });
         drop(self.recorder.take());
-        let end = self
+        // A failed or panicked writer still gets its manifest (INCOMPLETE).
+        let end: Result<(), String> = match self
             .worker
             .take()
             .ok_or("journal writer already joined")?
             .join()
-            .map_err(|_| "journal writer panicked".to_string())?;
+        {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err("journal writer panicked".to_string()),
+        };
+        let open_segments: Vec<String> = fs::read_dir(&self.dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".dbjnl.open"))
+                    .collect()
+            })
+            .unwrap_or_default();
         let sealed: Vec<SealedSegment> = self.sealed.try_iter().collect();
         let view = self.metrics.view();
         let records: u64 = sealed.iter().map(|s| s.manifest.records).sum();
         let lost_records: u64 = sealed.iter().map(|s| s.manifest.lost_records).sum();
+        let sealed_next = sealed
+            .iter()
+            .filter_map(|s| s.manifest.last_sequence)
+            .max()
+            .map_or(0, |l| l.saturating_add(1));
+        let unsealed = next_sequence.saturating_sub(sealed_next);
         let mut reasons = Vec::new();
         if let Err(e) = &end {
             reasons.push(format!("journal write failed: {e}"));
@@ -576,6 +610,12 @@ impl RuntimeJournal {
         }
         if oversize > 0 {
             reasons.push(format!("{oversize} oversize records refused"));
+        }
+        if unsealed > 0 {
+            reasons.push(format!("{unsealed} records never reached a sealed segment"));
+        }
+        for open in &open_segments {
+            reasons.push(format!("segment {open} left open (not sealed)"));
         }
         if self.ingress_dropped > 0 {
             reasons.push(format!(
@@ -594,6 +634,7 @@ impl RuntimeJournal {
             .set(cr::CLOCK_ID, self.clock_id)
             .set(cr::BUDGET_BYTES, self.setup.budget_bytes as u64)
             .set(cr::QUEUE_RECORDS, self.setup.queue as u64)
+            .set(cr::MAX_PAYLOAD, self.setup.max_payload as u64)
             .set(cr::SEGMENT_BYTES, self.setup.segment.max_segment_bytes)
             .set(cr::SEGMENT_NS, self.setup.segment.max_segment_ns)
             .set(cr::SYNC_RECORDS, self.setup.sync.every_records)
@@ -602,7 +643,12 @@ impl RuntimeJournal {
                 u64::try_from(self.setup.sync.every.as_millis()).unwrap_or(u64::MAX),
             )
             .set(cr::RECORDS, records)
-            .set(cr::LOST_RECORDS, lost_records.saturating_add(oversize))
+            .set(
+                cr::LOST_RECORDS,
+                lost_records
+                    .saturating_add(oversize)
+                    .saturating_add(unsealed),
+            )
             .set(cr::PEAK_BYTES, self.budget.peak() as u64)
             .set(cr::BUDGET_REFUSED, self.budget.refused())
             .set(cr::WRITE_ERRORS, view.write_errors)
@@ -657,6 +703,9 @@ impl RuntimeJournal {
             }
             d.push(cr::SEGMENTS, seg.into_nested());
         }
+        for open in &open_segments {
+            d.push(cr::OPEN_SEGMENTS, open.as_str());
+        }
         let bytes = d.encode().map_err(|e| format!("run manifest: {e}"))?;
         write_durable(&self.dir.join(RUN_MANIFEST), &bytes)?;
         end.map_err(|e| format!("journal write failed: {e}"))?;
@@ -664,7 +713,9 @@ impl RuntimeJournal {
             dir: self.dir.clone(),
             segments: sealed.len(),
             records,
-            lost_records: lost_records.saturating_add(oversize),
+            lost_records: lost_records
+                .saturating_add(oversize)
+                .saturating_add(unsealed),
             complete,
         })
     }
@@ -870,6 +921,67 @@ mod tests {
         assert_eq!(reorg_payload(2, 9, &[3; 32])[..5], [b'R', 2, 0, 0, 0]);
         assert_eq!(resync_payload(1, 2).len(), 17);
         assert_eq!(window_payload(b'K', 1, &[0; 32])[0], b'K');
+    }
+
+    /// Phase F gate L1: a writer that fails (here: it cannot seal a
+    /// segment in a read-only run directory) turns the capture FAILED at
+    /// once, records refused after it count as lost, and the manifest says
+    /// INCOMPLETE with the failure and the segment left open.
+    #[test]
+    fn a_failed_writer_is_reported_and_its_manifest_still_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir =
+            std::env::temp_dir().join(format!("bsc-runtime-journal-f-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let setup = JournalSetup {
+            segment: SegmentPolicy {
+                max_segment_bytes: 100,
+                max_segment_ns: u64::MAX,
+            },
+            ..JournalSetup::whole(64, 256)
+        };
+        let mut j = RuntimeJournal::open(&dir, 1, 1, setup).unwrap();
+        let run = j.path().to_path_buf();
+        assert!(j.record(RecordKind::Runtime, 1, &[1u8; 80]));
+        let started = std::time::Instant::now();
+        while j.appended() < 1 {
+            assert!(started.elapsed() < std::time::Duration::from_secs(5));
+            std::thread::yield_now();
+        }
+        fs::set_permissions(&run, fs::Permissions::from_mode(0o500)).unwrap();
+        // The next record makes the writer rotate: it cannot seal.
+        assert!(j.record(RecordKind::Runtime, 2, &[2u8; 80]));
+        while j.healthy() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(5));
+            std::thread::yield_now();
+        }
+        assert!(j.capture().writer.failed);
+        // Queued into a dead writer or refused: never sealed either way.
+        j.record(RecordKind::Runtime, 3, &[3u8; 8]);
+        fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(j.finish().is_err());
+        let m = cr::decode_run(&fs::read(run.join(RUN_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(m.text(cr::STATE).unwrap(), "INCOMPLETE");
+        let reasons = m.texts(cr::REASONS).unwrap();
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.starts_with("journal write failed")),
+            "{reasons:?}"
+        );
+        // Records 1 (in the open segment), 2 and 3.
+        assert!(
+            reasons
+                .iter()
+                .any(|r| *r == "3 records never reached a sealed segment"),
+            "{reasons:?}"
+        );
+        assert_eq!(
+            m.texts(cr::OPEN_SEGMENTS).unwrap(),
+            ["segment_000000.dbjnl.open"]
+        );
+        assert_eq!(m.u64(cr::LOST_RECORDS).unwrap(), 3);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Phase F gate H1: events the ingress queue dropped before the journal

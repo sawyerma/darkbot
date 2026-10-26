@@ -333,6 +333,14 @@ fn replay(
     active: bool,
 ) -> Result<Replay, String> {
     let mut reader = if path.is_dir() {
+        // A sealed run is read with at least the bound it was written with
+        // (the configuration may have lowered it since).
+        let max_payload = fs::read(path.join(RUN_MANIFEST))
+            .ok()
+            .and_then(|b| cr::decode_run(&b).ok())
+            .and_then(|m| m.opt_u64(cr::MAX_PAYLOAD).ok().flatten())
+            .and_then(|v| usize::try_from(v).ok())
+            .map_or(max_payload, |written| written.max(max_payload));
         // A missing or reordered segment is a corrupt run: nothing counts.
         match RunReader::open(path, max_payload) {
             Ok(r) => Some(Reader::Run(Box::new(r))),
@@ -1699,6 +1707,36 @@ mod tests {
         assert_eq!(c.four_lead_max_us, Some(7));
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_ACTIONABLE).unwrap(), 2);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase F gate L6: a sealed run is read with the payload bound it was
+    /// written with, though the configuration lowered it since.
+    #[test]
+    fn a_sealed_run_reads_with_its_own_payload_bound() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-bound-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write_run(
+            &dir,
+            1_000,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                (RecordKind::Runtime, 2, vec![b'Z'; 3_000]),
+                (
+                    RecordKind::Canonical,
+                    3,
+                    window_payload(b'E', 11, &[11; 32]),
+                ),
+                (RecordKind::Runtime, 4, EXIT_PAYLOAD.to_vec()),
+            ],
+            u64::MAX,
+        );
+        let c = census(&dir, 1_024, None).unwrap();
+        assert_eq!(c.windows[0].state, "COMPLETE");
         fs::remove_dir_all(&dir).unwrap();
     }
 

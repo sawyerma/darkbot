@@ -165,6 +165,11 @@ pub mod capture_run {
     pub const BUILD_DIRTY: u16 = 30;
     /// The pending capture scope (`LAUNCHES`, `VENUES`, `ALL`).
     pub const CAPTURE_PENDING: u16 = 31;
+    /// Segments left open (never sealed) by a failed or panicked writer.
+    pub const OPEN_SEGMENTS: u16 = 32;
+    /// The largest record payload the run was written with: its readers
+    /// read with at least this bound (gate L6).
+    pub const MAX_PAYLOAD: u16 = 33;
 
     pub const V3: Schema = Schema {
         name: "darkbot.bsc.capture-run.v1",
@@ -206,6 +211,8 @@ pub mod capture_run {
             Field::opt(BUILD_SHA256, "build_sha256", B256),
             Field::opt(BUILD_DIRTY, "build_dirty", Bool),
             Field::opt(CAPTURE_PENDING, "capture_pending", Text),
+            Field::rep(OPEN_SEGMENTS, "open_segments", Text),
+            Field::opt(MAX_PAYLOAD, "max_payload", U64),
         ],
     };
 
