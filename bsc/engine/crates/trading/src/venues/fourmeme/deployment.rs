@@ -2,7 +2,10 @@
 //! fingerprints and the inputs of the token-address derivation.
 //!
 //! Witness: the G0.1 Four freeze at block 129842711
-//! (`bsc/native/evidence/g01/four_freeze_20261026T053659Z/{classic,openfour}.dbrec`).
+//! (`bsc/native/evidence/g01/four_freeze_20261026T053659Z/{classic,openfour}.dbrec`),
+//! re-verified by the v3 freeze at block 129907738
+//! (`four_freeze_20261026T134532Z`: the same implementations, deployers and
+//! Classic template; the OpenFour presets in use over 20 000 blocks).
 //! Addresses: the published BSC tables of four-meme-community/fourmeme-docs
 //! (TokenManager2) and openfour-docs (Registry), the other OpenFour
 //! contracts from the Registry's getters at the reference block, the
@@ -12,7 +15,8 @@
 //!
 //! The derivation (`token = CREATE2(deployer, salt, keccak256(EIP-1167
 //! creation code of the template))`, the salt in the pending calldata)
-//! reproduced 4/4 Classic and 3/3 OpenFour canonical launches. It stays
+//! reproduced 4/4 Classic and 3/3 OpenFour canonical launches of the first
+//! freeze and 4/4 Classic and 6/6 OpenFour of the v3 freeze. It stays
 //! valid while the deployer, the template (per OpenFour preset) and the
 //! calldata layout are those frozen here; a canonical launch event that
 //! names another token is a mode outside the freeze.
@@ -72,14 +76,23 @@ pub struct FourDeployment {
     pub openfour_presets: &'static [OpenFourPreset],
 }
 
-/// The presets with a witnessed launch whose CREATE2 derivation reproduced:
-/// 1778027615733 (freeze 20261026T053659Z and v2), 1778027615735 (freeze
-/// v2 20261026T131704Z, launch 0xdad88c1e…, `getPresetTokenImpl` at block
-/// 129903949). Any other preset is `PendingToken::Unknown`.
+/// Every preset in use over the v3 freeze's whole window (OpenFour launch
+/// pass blocks 129886197..=129906196, WINDOW_COMPLETE: 1 + 2 + 2 + 51
+/// launches), each with a direct launch whose CREATE2 derivation
+/// reproduced against `getPresetTokenImpl` at block 129907738. Any other
+/// preset is `PendingToken::Unknown`.
 const MAINNET_PRESETS: &[OpenFourPreset] = &[
+    OpenFourPreset {
+        preset_id: U256::from_limbs([1_778_027_615_723, 0, 0, 0]),
+        token_implementation: address!("12fee093ff5a34ec2f82730d8d9e5443bd2d56fc"),
+    },
     OpenFourPreset {
         preset_id: U256::from_limbs([1_778_027_615_733, 0, 0, 0]),
         token_implementation: address!("e610cc146a94f1b04156f9857d1eb3c8626bcd18"),
+    },
+    OpenFourPreset {
+        preset_id: U256::from_limbs([1_778_027_615_734, 0, 0, 0]),
+        token_implementation: address!("509c46c832bccb0c442a4dc19b3c1bff34219268"),
     },
     OpenFourPreset {
         preset_id: U256::from_limbs([1_778_027_615_735, 0, 0, 0]),
@@ -87,7 +100,8 @@ const MAINNET_PRESETS: &[OpenFourPreset] = &[
     },
 ];
 
-/// BSC mainnet (chain 56) as frozen at block 129842711.
+/// BSC mainnet (chain 56) as frozen at block 129842711, its presets from
+/// the v3 freeze at block 129907738.
 pub fn bsc_mainnet_g01_129842711() -> FourDeployment {
     FourDeployment {
         chain_id: 56,
@@ -205,8 +219,9 @@ mod tests {
             ),
             Some(address!("f76ad2f3d84ee09ee10ee1ef8c4d6dbb264effff"))
         );
-        // An unfrozen preset has no template, so no token.
-        assert_eq!(d.openfour_token(preset + U256::from(1u8), B256::ZERO), None);
+        // A preset outside the frozen table (…732, none in use over the v3
+        // window) has no template, so no token.
+        assert_eq!(d.openfour_token(preset - U256::from(1u8), B256::ZERO), None);
         assert_eq!(d.family_of(d.token_manager2), Some(Family::Classic));
         assert_eq!(d.family_of(d.openfour_core), Some(Family::OpenFour));
         assert_eq!(d.family_of(d.openfour_registry), None);

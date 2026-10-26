@@ -1,22 +1,25 @@
 //! Four.meme, the production decoder (Phase E) of the frozen Four Classic
 //! (TokenManager2) and OpenFour (Core) surfaces on BSC mainnet (G0.1 Four
 //! freeze at block 129842711,
-//! `bsc/native/evidence/g01/four_freeze_20261026T053659Z/`).
+//! `bsc/native/evidence/g01/four_freeze_20261026T053659Z/`, and the v3
+//! freeze at block 129907738, `four_freeze_20261026T134532Z/`: SELLs,
+//! presets, lifecycle).
 //!
 //! What is decoded is what the freeze proves (selectors in the executing
 //! dispatcher, the published ABIs re-hashed, canonical fixtures, the CREATE2
 //! derivation reproduced on every located launch):
 //!
 //! - [`recognize`]: pending calls. Launch (`createToken(bytes,bytes)` of
-//!   both families) and the BUY of each family that has a canonical fixture
-//!   (Classic `buyTokenAMAP(address,uint256,uint256)`, OpenFour
-//!   `buyByBudget`) are decoded; every other launch/BUY/SELL selector of the
+//!   both families), the BUY and the SELL of each family that has a direct
+//!   canonical fixture (Classic `buyTokenAMAP(address,uint256,uint256)` and
+//!   `sellToken(address,uint256,uint256)`, OpenFour `buyByBudget` and
+//!   `sell`) are decoded; every other launch/BUY/SELL selector of the
 //!   published ABIs is explicitly unsupported.
 //! - [`events`]: canonical logs. The events with a witnessed live log are
-//!   decoded (Classic `TokenCreate`, `TokenPurchase`; OpenFour
-//!   `TokenCreated`, the BUY form of `TradeExecuted`, `PhaseTransition`);
-//!   SELL, liquidity/graduation and migration events have no witnessed log
-//!   and are explicitly unsupported.
+//!   decoded (Classic `TokenCreate`, `TokenPurchase`, `TokenSale`; OpenFour
+//!   `TokenCreated`, both forms of `TradeExecuted`, `PhaseTransition`);
+//!   liquidity/graduation and migration events have no witnessed log and
+//!   are explicitly unsupported.
 //! - [`deployment`]: the frozen addresses, fingerprints and derivation
 //!   inputs, and the pre-execution token address where the calldata selects
 //!   proven inputs ([`recognize::PendingToken`]).

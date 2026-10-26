@@ -1,6 +1,7 @@
 //! Phase E contract §11: the production Four.meme decoder against the
-//! fixtures of the G0.1 Four freezes (block 129842711 and the v2 freeze at
-//! block 129903949: SELLs, a second preset, lifecycle) and against
+//! fixtures of the G0.1 Four freezes (block 129842711 and the v3 freeze at
+//! block 129907738: SELLs, every preset in use, lifecycle; distinct
+//! transactions, so every count is one of distinct witnesses) and against
 //! malformed input.
 
 use alloy_primitives::{Address, B256, keccak256};
@@ -20,9 +21,10 @@ const CALLS: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026_cal
 /// Every log of their receipts: `<family> <kind> <block> <tx-hash>
 /// <log-index> <emitter> <topics,…|-> <data|->`.
 const LOGS: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026_logs.txt");
-/// The same of the v2 freeze (`four_freeze_20261026T131704Z`).
-const CALLS_V2: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T131704Z_calls.txt");
-const LOGS_V2: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T131704Z_logs.txt");
+/// The same of the v3 freeze (`four_freeze_20261026T134532Z`), without the
+/// transactions above.
+const CALLS_V3: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T134532Z_calls.txt");
+const LOGS_V3: &str = include_str!("../../../fixtures/fourmeme/freeze_20261026T134532Z_logs.txt");
 /// Flap Portal calls of the D refreeze (shared-input check).
 const FLAP_CALLS: &str = include_str!("../../../fixtures/flap/freeze_v5_27_portal_calls.txt");
 
@@ -51,7 +53,7 @@ struct Call {
 fn calls() -> Vec<Call> {
     rows(CALLS)
         .into_iter()
-        .chain(rows(CALLS_V2))
+        .chain(rows(CALLS_V3))
         .map(|r| Call {
             family: r[0].to_owned(),
             kind: r[1].to_owned(),
@@ -76,7 +78,7 @@ struct Log {
 fn logs() -> Vec<Log> {
     rows(LOGS)
         .into_iter()
-        .chain(rows(LOGS_V2))
+        .chain(rows(LOGS_V3))
         .map(|r| Log {
             tx: B256::from_slice(&unhex(r[3])),
             emitter: address(r[5]),
@@ -162,7 +164,12 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
     let deployment = d();
     let logs = logs();
     let calls = calls();
-    assert_eq!(calls.len(), 9 + 13);
+    assert_eq!(calls.len(), 9 + 14);
+    // Distinct witnesses: no transaction twice.
+    let mut txs: Vec<B256> = calls.iter().map(|c| c.tx).collect();
+    txs.sort();
+    txs.dedup();
+    assert_eq!(txs.len(), calls.len());
     for c in &calls {
         let events = events_of(&deployment, &logs, c.tx);
         let r = recognize(&deployment, Some(c.to), &c.input, MAX);
@@ -301,13 +308,13 @@ fn every_fixture_log_is_classified() {
         }
     }
     let count = |k| events.iter().filter(|(e, _)| *e == k).count();
-    assert_eq!(count(FourEventKind::TokenCreate), 8);
+    assert_eq!(count(FourEventKind::TokenCreate), 7);
     assert_eq!(count(FourEventKind::TokenPurchase), 6);
     assert_eq!(count(FourEventKind::TokenSale), 2);
-    assert_eq!(count(FourEventKind::TokenCreated), 6);
-    assert_eq!(count(FourEventKind::TradeExecuted), 6);
-    assert_eq!(events.iter().filter(|(_, sell)| *sell).count(), 2);
-    assert_eq!(count(FourEventKind::PhaseTransition), 6);
+    assert_eq!(count(FourEventKind::TokenCreated), 9);
+    assert_eq!(count(FourEventKind::TradeExecuted), 7);
+    assert_eq!(events.iter().filter(|(_, sell)| *sell).count(), 1);
+    assert_eq!(count(FourEventKind::PhaseTransition), 9);
     // `0x48063b12…` follows each Classic TokenPurchase and `0x741ffc46…`
     // each TokenSale; they are in no published ABI and stay unrecognized.
     assert_eq!(unrecognized.len(), 8);
