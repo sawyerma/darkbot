@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`b95c53fc`** (2026-10-26) | DEC-11: Bundle-Pfad über JITO_BUNDLE, Fee je Transaktion plus Tip, Multi-TX-Holds, Bundle-Admission bis zur Simulationsgrenze, Befehlsweg (mit `5673aaf9`, `56af6185`, `f4b75213`, `4c813aaf`) | OFFLINE_VERIFIED · CI `40364297181` grün; Simulator/Jito real = Provider-Qualifikation (BUGS §22.5) |
 | **`c6b3b2e7`** (2026-10-26) | DEC-04: A verbindlich, B aus dem signierten Plan, HOLD_B mit Nachweis-Gate (N = B-8), Journal-Schema 7, `HoldFlows`-Record, Wallets-/Liquidator-Anzeige (mit `30d5b823`, `e6cbd319`, `65603ed7`) | OFFLINE_VERIFIED · CI `40327233793` grün; ACTIVE wartet auf B-8 (BUGS §22.5) |
 | **`386c3b39`** (2026-10-26) | DEC-03: Non-Landing nach N-2 (B je Betreiber, lückenlose C-Kette, fünf Klassen, Klasse im Journal, Record/Alarm, Wallets-Abschnitt) | OFFLINE_VERIFIED · CI `40288382331`/`40288382152` grün; echte Provider-Gates NOT_RUN (BUGS §22.5) |
 | **`777748e4`** (2026-10-26) | DEC-13a: LIVE-Anforderung über den Controller; requested/effective, effective BLOCKED bis FE-06 | TEILWEISE · CI `40278646493`/`40278646443` grün; DEC-13b offen (BUGS §22.5) |
@@ -343,7 +344,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P5-05 free route | Jupiter `/swap/v2/build` adapter | R118/R119 | PARTIAL | adapter typing per JFI-02 exception (FIX-07) |
 | P5-06 receivership builder / P5-07 prepared plan | `receivership.rs`, `builder.rs` | simulation path; P5 fee-wallet fix ledger 2026-10-17 | PARTIAL | fee-wallet fallback **fixed fail-closed** (`FEE_STATE_UNAVAILABLE` blocks every plan → Unavailable/Unknown, LOCAL_PASS); full P5 acceptance OPEN |
 | P5-08 staging fixtures | — | `STAGING_MODEL.md` | OPEN | staging build + allowlist (permission for staging reads) |
-| P5-JIT-01 | `route.rs`, `builder.rs`, `inventory.rs` | `a82f1a7`, `26f6194b` | PARTIAL | Holds Liability+Funding (V7), Kauf-Slippage, `P0_JIT_FUNDING_BANK`; FE-04 refused Bundles (`FE04_BUNDLE_FEES_UNQUOTED`); routes/Simulation NOT_RUN |
+| P5-JIT-01 | `route.rs`, `builder.rs`, `inventory.rs` | `a82f1a7`, `26f6194b` | PARTIAL | Holds Liability+Funding (V7), Kauf-Slippage, `P0_JIT_FUNDING_BANK`; Bundle-Admission (DEC-11 `56af6185`), Funding als Asset, Kauf `forJitoBundle` (`b95c53fc`); routes/Bundle-Simulation NOT_RUN |
 | T-01…03 tag TX / state / economics | economics curve only | — | OPEN · BLOCKED | 0.1.12 deployment |
 | P6-01 E2E telemetry | MT0, owner journal | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
 | P6-02 race shadow | — | — | OPEN · DEFERRED_PRIORITY | S1-RACE |
