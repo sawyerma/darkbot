@@ -46,6 +46,7 @@ use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as shared;
 use darkbot_bsc_record::{Draft, Value, decode, sha256};
 use darkbot_bsc_trading::venues::flap::abi as production;
 use darkbot_bsc_trading::venues::flap::deployment::{FlapDeployment, bsc_mainnet_v5_24_0};
+use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -98,7 +99,25 @@ mod defaults {
     /// receipts may be read only to find a reverted Portal call (outside the
     /// census budget).
     pub const REVERT_SEARCH_BLOCKS: u64 = 150;
+    /// `--archive-rpc`: a free public archive endpoint, for the pinned
+    /// historical slot reads only (window start, Gate-0 fixture block);
+    /// `--no-archive-rpc` leaves them UNKNOWN.
+    pub const ARCHIVE_RPC: &str = "https://bsc-mainnet.public.blastapi.io";
+    /// `--block-batch`: full blocks per batch of the recognition pass.
+    pub const BLOCK_BATCH: u64 = 10;
+    /// `--recognition-examples`: example transactions kept per bucket.
+    pub const RECOGNITION_EXAMPLES: usize = 3;
+    /// `--max-refusals`: refused calls recorded with their receipt status.
+    pub const MAX_REFUSALS: usize = 200;
+    /// `--upgrade-receipt-budget`: `Upgraded` bloom candidates whose
+    /// receipts may be read beyond those the scan read.
+    pub const UPGRADE_RECEIPT_BUDGET: u64 = 400;
 }
+
+/// The archived Gate-0 launch (block 124415357): labelled by the EIP-1967
+/// implementation at its block.
+const ARCHIVED_V5_24: &str = "ARCHIVED_2026_09_27_V5_24_ERA_REVERIFIED";
+const ARCHIVED_ERA_UNKNOWN: &str = "ARCHIVED_2026_09_27_REVERIFIED_ERA_UNKNOWN";
 
 /// Levels of address immutables searched for helper code (the
 /// implementation's own, and those of its helpers).
@@ -115,7 +134,9 @@ fn usage() -> &'static str {
      [--dex-fixtures <n>] [--reverted-fixtures <n>] [--revert-search-blocks <n>] [--max-helpers <n>] \
      [--rpc-connect-timeout-s <s>] \
      [--rpc-max-time-s <s>] [--rpc-attempts <n>] [--rpc-retry-pause-ms <ms>] \
-     [--sourcify-base <url> | --no-sourcify] [--sourcify-max-bytes <n>]"
+     [--sourcify-base <url> | --no-sourcify] [--sourcify-max-bytes <n>] \
+     [--archive-rpc <url> | --no-archive-rpc] [--block-batch <n>] [--recognition-examples <n>] \
+     [--max-refusals <n>] [--upgrade-receipt-budget <n>]"
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +156,11 @@ struct Config {
     reverted_fixtures: usize,
     revert_search_blocks: u64,
     max_helpers: usize,
+    archive_rpc: Option<String>,
+    block_batch: u64,
+    recognition_examples: usize,
+    max_refusals: usize,
+    upgrade_budget: u64,
     limits: Limits,
     attempts: u32,
     retry_pause: Duration,
@@ -161,6 +187,12 @@ impl Config {
             "reverted-fixtures",
             "revert-search-blocks",
             "max-helpers",
+            "archive-rpc",
+            "no-archive-rpc",
+            "block-batch",
+            "recognition-examples",
+            "max-refusals",
+            "upgrade-receipt-budget",
             "rpc-connect-timeout-s",
             "rpc-max-time-s",
             "rpc-attempts",
@@ -211,6 +243,25 @@ impl Config {
                 defaults::REVERT_SEARCH_BLOCKS,
             )?,
             max_helpers: number(args, "max-helpers", defaults::MAX_HELPERS)?,
+            archive_rpc: match (args.switch("no-archive-rpc")?, args.opt("archive-rpc")?) {
+                (true, Some(_)) => {
+                    return Err("--no-archive-rpc and --archive-rpc exclude each other".into());
+                }
+                (true, None) => None,
+                (false, url) => Some(url.unwrap_or(defaults::ARCHIVE_RPC).to_string()),
+            },
+            block_batch: number(args, "block-batch", defaults::BLOCK_BATCH)?,
+            recognition_examples: number(
+                args,
+                "recognition-examples",
+                defaults::RECOGNITION_EXAMPLES,
+            )?,
+            max_refusals: number(args, "max-refusals", defaults::MAX_REFUSALS)?,
+            upgrade_budget: number(
+                args,
+                "upgrade-receipt-budget",
+                defaults::UPGRADE_RECEIPT_BUDGET,
+            )?,
             limits: Limits {
                 connect_timeout_s: number(
                     args,
@@ -229,8 +280,8 @@ impl Config {
             sourcify,
             sourcify_max_bytes: number(args, "sourcify-max-bytes", defaults::SOURCIFY_MAX_BYTES)?,
         };
-        if cfg.scan_blocks == 0 || cfg.header_batch == 0 {
-            return Err("--scan-blocks and --header-batch must be positive".into());
+        if cfg.scan_blocks == 0 || cfg.header_batch == 0 || cfg.block_batch == 0 {
+            return Err("--scan-blocks, --header-batch and --block-batch must be positive".into());
         }
         if cfg.sourcify_max_bytes > defaults::SOURCIFY_MAX_BYTES {
             return Err(format!(
@@ -341,6 +392,8 @@ struct ScanOutcome {
     fetched: u64,
     /// Blocks read only for the revert search.
     revert_fetched: u64,
+    /// Every block whose receipts the scan read.
+    fetched_blocks: BTreeSet<u64>,
     census_complete: bool,
     launches: Vec<Hit>,
     /// Direct Portal calls; routed ones wait in `routed` until the end.
@@ -424,6 +477,7 @@ fn scan_into(
         }
         out.candidates += 1;
         let mut receipts = rpc.block_receipts(header)?;
+        out.fetched_blocks.insert(header.number);
         if main {
             out.fetched += 1;
         } else {
@@ -502,6 +556,281 @@ fn scan_into(
         }
     }
     Ok(())
+}
+
+// ---- the production decoder over the window ----------------------------------------
+
+/// (call, selector, outcome, detail) -> (count, example transactions).
+type Buckets = BTreeMap<(String, [u8; 4], &'static str, String), (u64, Vec<B256>)>;
+
+/// A direct Portal call the production decoder refused.
+#[derive(Clone, Debug)]
+struct Refusal {
+    tx: B256,
+    block: u64,
+    call: String,
+    reason: String,
+    status: Option<u64>,
+    input_len: u64,
+}
+
+/// The production `recognize` over every direct Portal call of the window.
+#[derive(Default)]
+struct Recognition {
+    from: u64,
+    to: u64,
+    blocks: u64,
+    transactions: u64,
+    direct: u64,
+    max_input_len: u64,
+    complete: bool,
+    error: Option<String>,
+    buckets: Buckets,
+    refusals: Vec<Refusal>,
+}
+
+impl Recognition {
+    fn count(&self, outcome: &str) -> u64 {
+        self.buckets
+            .iter()
+            .filter(|((_, _, o, _), _)| *o == outcome)
+            .map(|(_, (n, _))| n)
+            .sum()
+    }
+}
+
+/// The function name of a production table entry.
+fn call_name(call: darkbot_bsc_trading::venues::flap::recognize::PortalCall) -> String {
+    call.signature().split('(').next().unwrap_or("").to_string()
+}
+
+/// One call through the production decoder, bounded by its own length (the
+/// runtime bound is configuration): (call, outcome, detail, refused).
+fn classify_call(
+    portal: Address,
+    tx: &Tx,
+    archive: &Archive,
+) -> (String, &'static str, String, bool) {
+    match recognize(portal, tx.to, &tx.input, tx.input.len()) {
+        Recognized::NotPortal => ("NOT_PORTAL".into(), "NotPortal", String::new(), false),
+        Recognized::UnknownSelector(_) => (
+            "UNKNOWN_SELECTOR".into(),
+            "UnknownSelector",
+            "outside the launch/trade table".into(),
+            false,
+        ),
+        Recognized::LaunchV6(p) => (
+            "newTokenV6".into(),
+            "LaunchV6",
+            format!(
+                "tokenVersion {} {}",
+                p.token_version,
+                archive.version_label(Some(u64::from(p.token_version)))
+            ),
+            false,
+        ),
+        Recognized::Swap(x) => (
+            "swapExactInput".into(),
+            "Swap",
+            if x.is_buy() {
+                "BUY"
+            } else if x.is_sell() {
+                "SELL"
+            } else {
+                "OTHER"
+            }
+            .into(),
+            false,
+        ),
+        Recognized::Unsupported(c) => (
+            call_name(c),
+            "Unsupported",
+            "known, not decoded (no witnessed fixture)".into(),
+            false,
+        ),
+        Recognized::Malformed(c, e) => (call_name(c), "Malformed", format!("{e:?}"), true),
+    }
+}
+
+fn recognize_window(
+    rpc: &Endpoint,
+    cfg: &Config,
+    portal: Address,
+    headers: &[Header],
+    archive: &Archive,
+) -> Recognition {
+    let mut out = Recognition {
+        from: headers.first().map_or(0, |h| h.number),
+        to: headers.last().map_or(0, |h| h.number),
+        complete: true,
+        ..Recognition::default()
+    };
+    if let Err(e) = recognize_into(rpc, cfg, portal, headers, archive, &mut out) {
+        out.error = Some(e);
+        out.complete = false;
+    }
+    out
+}
+
+fn recognize_into(
+    rpc: &Endpoint,
+    cfg: &Config,
+    portal: Address,
+    headers: &[Header],
+    archive: &Archive,
+    out: &mut Recognition,
+) -> Result<(), String> {
+    let batch = usize::try_from(cfg.block_batch).map_err(|_| "--block-batch too large")?;
+    for chunk in headers.chunks(batch) {
+        let (Some(first), Some(last)) = (chunk.first(), chunk.last()) else {
+            continue;
+        };
+        let blocks = rpc.full_blocks(first.number, last.number)?;
+        for (block, header) in blocks.iter().zip(chunk) {
+            if block.hash != header.hash {
+                return Err(format!(
+                    "block {} hash {} differs from its linked header",
+                    block.number, block.hash
+                ));
+            }
+            out.blocks += 1;
+            out.transactions += block.transactions.len() as u64;
+            for tx in block.transactions.iter().filter(|t| t.to == Some(portal)) {
+                out.direct += 1;
+                out.max_input_len = out.max_input_len.max(tx.input.len() as u64);
+                let mut selector = [0u8; 4];
+                let n = tx.input.len().min(4);
+                selector[..n].copy_from_slice(&tx.input[..n]);
+                let (call, outcome, detail, refused) = classify_call(portal, tx, archive);
+                let entry = out
+                    .buckets
+                    .entry((call.clone(), selector, outcome, detail.clone()))
+                    .or_default();
+                entry.0 += 1;
+                if entry.1.len() < cfg.recognition_examples {
+                    entry.1.push(tx.hash);
+                }
+                if refused && out.refusals.len() < cfg.max_refusals {
+                    out.refusals.push(Refusal {
+                        tx: tx.hash,
+                        block: block.number,
+                        call,
+                        reason: detail,
+                        status: None,
+                        input_len: tx.input.len() as u64,
+                    });
+                }
+            }
+        }
+    }
+    // The canonical outcome of every refused call.
+    for r in &mut out.refusals {
+        r.status = rpc.receipt(r.tx).ok().map(|x| x.status);
+    }
+    Ok(())
+}
+
+// ---- one implementation over the window --------------------------------------------
+
+#[derive(Clone, Debug, Default)]
+struct UpgradeCheck {
+    from: u64,
+    to: u64,
+    headers: u64,
+    candidates: u64,
+    read: u64,
+    logs: u64,
+    first_hash: B256,
+    first_implementation: Option<Address>,
+    first_source: String,
+    last_hash: B256,
+    last_implementation: Option<Address>,
+    last_source: String,
+    error: Option<String>,
+}
+
+impl UpgradeCheck {
+    fn status(&self) -> &'static str {
+        if self.logs > 0
+            || matches!((self.first_implementation, self.last_implementation), (Some(a), Some(b)) if a != b)
+        {
+            "UPGRADED"
+        } else if self.error.is_none()
+            && self.read == self.candidates
+            && self.first_implementation.is_some()
+            && self.first_implementation == self.last_implementation
+        {
+            "ONE_IMPLEMENTATION"
+        } else {
+            "UNKNOWN"
+        }
+    }
+
+    fn detail(&self) -> String {
+        format!(
+            "Upgraded(address) of the Portal: {} bloom candidates in {} headers {}..={}, {} read, {} logs; EIP-1967 slot {} at block {} ({}), {} at block {} ({}){}",
+            self.candidates,
+            self.headers,
+            self.from,
+            self.to,
+            self.read,
+            self.logs,
+            self.first_implementation.map_or("UNKNOWN".into(), addr),
+            self.from,
+            self.first_source,
+            self.last_implementation.map_or("UNKNOWN".into(), addr),
+            self.to,
+            self.last_source,
+            self.error
+                .as_ref()
+                .map_or(String::new(), |e| format!("; {e}"))
+        )
+    }
+}
+
+/// `Upgraded` logs of the Portal over `headers`: the header blooms decide
+/// which blocks can hold one; the scan's receipts are reused, the others are
+/// read within `--upgrade-receipt-budget`.
+fn upgrade_logs(
+    rpc: &Endpoint,
+    cfg: &Config,
+    portal: Address,
+    headers: &[Header],
+    scanned: &ScanOutcome,
+    check: &mut UpgradeCheck,
+) -> Result<(), String> {
+    let topic = abi::upgraded_topic();
+    check.headers = headers.len() as u64;
+    check.logs = scanned.topics.get(&topic).copied().unwrap_or(0);
+    let mut extra = 0u64;
+    for h in headers.iter().filter(|h| bloom_has(h, portal, topic)) {
+        check.candidates += 1;
+        if scanned.fetched_blocks.contains(&h.number) {
+            check.read += 1;
+            continue;
+        }
+        if extra >= cfg.upgrade_budget {
+            continue;
+        }
+        extra += 1;
+        let receipts = rpc.block_receipts(h)?;
+        check.read += 1;
+        check.logs += receipts
+            .iter()
+            .flat_map(|r| r.logs.iter())
+            .filter(|l| l.address == portal && l.topics.first() == Some(&topic))
+            .count() as u64;
+    }
+    Ok(())
+}
+
+/// The EIP-1967 implementation at `pin` on `endpoint`.
+fn implementation_at(endpoint: &Endpoint, portal: Address, pin: &Pin) -> Result<Address, String> {
+    let word = endpoint.storage(portal, eip1967_implementation_slot(), pin)?;
+    if word[..12] != [0u8; 12] {
+        return Err(format!("implementation slot holds {word}"));
+    }
+    Ok(Address::from_slice(&word[12..]))
 }
 
 // ---- observations at the reference block --------------------------------------------
@@ -786,14 +1115,16 @@ struct FixtureView {
 }
 
 /// Prefix of checks that record evidence without deciding a fixture (the
-/// token-address reproduction has its own property).
+/// token-address reproduction and the implementation era have their own
+/// properties).
 const INFORMATIONAL: &str = "derivation.";
+const ERA: &str = "era.";
 
 impl FixtureView {
     fn passed(&self) -> bool {
         self.checks
             .iter()
-            .filter(|(name, _, _)| !name.starts_with(INFORMATIONAL))
+            .filter(|(name, _, _)| !name.starts_with(INFORMATIONAL) && !name.starts_with(ERA))
             .all(|(_, pass, _)| *pass)
     }
 }
@@ -1364,6 +1695,8 @@ struct Eval<'a> {
     scan: &'a ScanOutcome,
     deployment: FlapDeployment,
     sourcify_enabled: bool,
+    recognition: &'a Recognition,
+    upgrade: &'a UpgradeCheck,
 }
 
 impl Eval<'_> {
@@ -1658,6 +1991,45 @@ impl Eval<'_> {
                     .join("; ")
             ),
         ));
+        let r = self.recognition;
+        let failed: Vec<String> = r
+            .refusals
+            .iter()
+            .filter(|x| x.status == Some(1))
+            .map(|x| format!("{} {} {}", x.tx, x.call, x.reason))
+            .collect();
+        out.push((
+            "strict_decoder_census".into(),
+            proven(r.complete && failed.is_empty() && r.count("LaunchV6") > 0 && r.count("Swap") > 0),
+            format!(
+                "production recognize over {} blocks {}..={} (complete {}): {} direct Portal calls; LaunchV6 {}, Swap {}, Unsupported {}, UnknownSelector {}, Malformed {} (of which successful canonical: {}){}",
+                r.blocks,
+                r.from,
+                r.to,
+                r.complete,
+                r.direct,
+                r.count("LaunchV6"),
+                r.count("Swap"),
+                r.count("Unsupported"),
+                r.count("UnknownSelector"),
+                r.count("Malformed"),
+                failed.len(),
+                if failed.is_empty() {
+                    String::new()
+                } else {
+                    format!("; FINDING refused successful calls: {}", failed.join(", "))
+                }
+            ),
+        ));
+        out.push((
+            "single_implementation_window".into(),
+            if self.upgrade.status() == "ONE_IMPLEMENTATION" {
+                "PROVEN"
+            } else {
+                "UNKNOWN"
+            },
+            format!("{}: {}", self.upgrade.status(), self.upgrade.detail()),
+        ));
         out.push((
             "pending_launch_samples".into(),
             "UNKNOWN",
@@ -1668,9 +2040,9 @@ impl Eval<'_> {
             "PROVEN",
             format!(
                 "this record: {} (type {} v{}); archive inputs SHA-256-bound; Sourcify responses SHA-256-bound; tool SHA-256 {}; git HEAD {}",
-                ff::SCHEMA.name,
-                ff::SCHEMA.record_type,
-                ff::SCHEMA.schema_version,
+                ff::V2.name,
+                ff::V2.record_type,
+                ff::V2.schema_version,
                 B256::from(c.tool_sha256),
                 c.git_head.as_deref().unwrap_or("UNKNOWN")
             ),
@@ -1834,7 +2206,7 @@ fn record(eval: &Eval, archive: &Archive) -> (Draft, Vec<(String, &'static str, 
     let c = eval.common;
     let o = eval.obs;
     let portal = eval.deployment.portal;
-    let mut d = Draft::new(&ff::SCHEMA);
+    let mut d = Draft::new(&ff::V2);
     d.set(ff::CHAIN_ID, c.chain_id)
         .set(ff::PORTAL, address(portal))
         .set(ff::PROVENANCE_TOOL, TOOL)
@@ -2004,6 +2376,28 @@ fn record(eval: &Eval, archive: &Archive) -> (Draft, Vec<(String, &'static str, 
             .set(shared::property::EVIDENCE, bounded_text(evidence));
         d.push(ff::PROPERTIES, p.into_nested());
     }
+    recognition_drafts(&mut d, eval.recognition, &labels_by_selector(o));
+    {
+        use ff::upgrade_check as t;
+        let u = eval.upgrade;
+        let mut e = Draft::new(&t::SCHEMA);
+        e.set(t::TOPIC, b256(abi::upgraded_topic()))
+            .set(t::FROM_BLOCK, u.from)
+            .set(t::TO_BLOCK, u.to)
+            .set(t::HEADERS_CHECKED, u.headers)
+            .set(t::BLOOM_CANDIDATES, u.candidates)
+            .set(t::CANDIDATES_READ, u.read)
+            .set(t::UPGRADED_LOGS, u.logs)
+            .set(t::FIRST_BLOCK_HASH, b256(u.first_hash))
+            .set_opt(t::FIRST_IMPLEMENTATION, u.first_implementation.map(address))
+            .set(t::FIRST_SOURCE, bounded_text(&u.first_source))
+            .set(t::LAST_BLOCK_HASH, b256(u.last_hash))
+            .set_opt(t::LAST_IMPLEMENTATION, u.last_implementation.map(address))
+            .set(t::LAST_SOURCE, u.last_source.as_str())
+            .set(t::STATUS, u.status())
+            .set(t::DETAIL, bounded_text(&u.detail()));
+        d.set(ff::UPGRADE_CHECK, e.into_nested());
+    }
     let complete = properties.iter().all(|(_, s, _)| *s == "PROVEN");
     d.set(
         ff::FREEZE_STATUS,
@@ -2013,6 +2407,74 @@ fn record(eval: &Eval, archive: &Archive) -> (Draft, Vec<(String, &'static str, 
         d.push(ff::NON_CLAIMS, *n);
     }
     (d, properties)
+}
+
+/// Selector -> function name of the verified implementation ABI, for the
+/// calls outside the decoder table.
+fn labels_by_selector(o: &Observed) -> BTreeMap<[u8; 4], String> {
+    let mut out = BTreeMap::new();
+    if let Some(Ok(f)) = o.implementation.sourcify.first().map(|s| &s.facts) {
+        for sig in &f.abi_signatures {
+            let h = keccak256(sig.as_bytes());
+            out.entry([h[0], h[1], h[2], h[3]])
+                .or_insert_with(|| sig.split('(').next().unwrap_or("").to_string());
+        }
+    }
+    out
+}
+
+fn recognition_drafts(d: &mut Draft, r: &Recognition, labels: &BTreeMap<[u8; 4], String>) {
+    {
+        use ff::recognition_scan as t;
+        let mut e = Draft::new(&t::SCHEMA);
+        e.set(t::FROM_BLOCK, r.from)
+            .set(t::TO_BLOCK, r.to)
+            .set(t::BLOCKS_READ, r.blocks)
+            .set(t::TRANSACTIONS, r.transactions)
+            .set(t::DIRECT_PORTAL_CALLS, r.direct)
+            .set(t::MAX_INPUT_LEN, r.max_input_len)
+            .set(
+                t::BOUND,
+                "each call's own length: decode acceptance; the runtime bound is BSC_EXEC_MAX_CALLDATA",
+            )
+            .set(t::COMPLETE, r.complete)
+            .set_opt(t::ERROR, r.error.clone());
+        d.set(ff::RECOGNITION_SCAN, e.into_nested());
+    }
+    for ((call, selector, outcome, detail), (count, examples)) in &r.buckets {
+        use ff::recognition as t;
+        let call = if call == "UNKNOWN_SELECTOR" {
+            format!(
+                "UNKNOWN_SELECTOR ({})",
+                labels
+                    .get(selector)
+                    .map_or("not in the verified ABI", String::as_str)
+            )
+        } else {
+            call.clone()
+        };
+        let mut e = Draft::new(&t::SCHEMA);
+        e.set(t::CALL, call)
+            .set(t::SELECTOR, Value::Bytes(selector.to_vec()))
+            .set(t::OUTCOME, *outcome)
+            .set(t::DETAIL, detail.as_str())
+            .set(t::COUNT, *count);
+        for x in examples {
+            e.push(t::EXAMPLE_TXS, b256(*x));
+        }
+        d.push(ff::RECOGNITION, e.into_nested());
+    }
+    for x in &r.refusals {
+        use ff::refusal as t;
+        let mut e = Draft::new(&t::SCHEMA);
+        e.set(t::TX_HASH, b256(x.tx))
+            .set(t::BLOCK_NUMBER, x.block)
+            .set(t::CALL, x.call.as_str())
+            .set(t::REASON, x.reason.as_str())
+            .set_opt(t::RECEIPT_STATUS, x.status)
+            .set(t::INPUT_LEN, x.input_len);
+        d.push(ff::REFUSALS, e.into_nested());
+    }
 }
 
 /// Topic -> event signature of the verified implementation ABI (and the
@@ -2073,6 +2535,21 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             .map_or(String::new(), |e| format!(", scan stopped: {e}"))
     );
 
+    // The production decoder over every direct Portal call of the window.
+    let recognition = recognize_window(&rpc, cfg, portal, &headers, &archive);
+    eprintln!(
+        "g01_flap_freeze: recognize over {} blocks: {} direct Portal calls, {} LaunchV6, {} Swap, {} refused{}",
+        recognition.blocks,
+        recognition.direct,
+        recognition.count("LaunchV6"),
+        recognition.count("Swap"),
+        recognition.count("Malformed"),
+        recognition
+            .error
+            .as_ref()
+            .map_or(String::new(), |e| format!(", stopped: {e}"))
+    );
+
     let reference = match cfg.block {
         Some(b) => b,
         None => anchor.max(
@@ -2098,7 +2575,20 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         pin.number, pin.hash
     );
 
-    // The Gate-0 launch, re-read live (not part of the census).
+    // A free archive endpoint for the pinned historical slot reads.
+    let archive_rpc = match &cfg.archive_rpc {
+        Some(url) => {
+            let a = Endpoint::new(url, cfg.limits, cfg.attempts, cfg.retry_pause);
+            match a.chain_id().and_then(edge::require_bsc) {
+                Ok(()) => Ok(a),
+                Err(e) => Err(format!("archive endpoint {}: {e}", a.host())),
+            }
+        }
+        None => Err("no archive endpoint (--no-archive-rpc)".to_string()),
+    };
+
+    // The Gate-0 launch, re-read live (not part of the census), and the
+    // implementation at its block.
     let (historical_tx, historical_salt, historical_version) = archive.historical;
     let historical = {
         let receipt = rpc.receipt(historical_tx)?;
@@ -2114,13 +2604,28 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             .find(|l| l.address == portal && l.topics.first() == Some(&abi::token_created_topic()))
             .cloned();
         Hit {
-            source: "ARCHIVED_2026_09_27_REVERIFIED",
+            source: ARCHIVED_ERA_UNKNOWN,
             block_hash: canonical.hash,
             receipt,
             log,
             tx,
         }
     };
+    let historical_era = archive_rpc.as_ref().map_err(Clone::clone).and_then(|a| {
+        implementation_at(
+            a,
+            portal,
+            &Pin {
+                number: historical.receipt.block_number,
+                hash: historical.block_hash,
+            },
+        )
+        .map(|i| (i, a.host()))
+    });
+    let mut historical = historical;
+    if matches!(&historical_era, Ok((i, _)) if *i == deployment.portal_implementation) {
+        historical.source = ARCHIVED_V5_24;
+    }
     scanned
         .launches
         .sort_by_key(|h| std::cmp::Reverse((h.receipt.block_number, h.receipt.transaction_index)));
@@ -2137,6 +2642,45 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         .collect();
     let mut obs = observe(&rpc, cfg, &deployment, &pin, &tokens)?;
     let pin_rechecked = rpc.header(reference)?.hash == pin.hash;
+
+    // One implementation over the window: no Upgraded log of the Portal in
+    // any block from the first scanned one to the reference, and the slot
+    // pinned at both ends.
+    let first = headers.first().cloned().ok_or("no headers")?;
+    let mut upgrade = UpgradeCheck {
+        from: first.number,
+        to: reference,
+        first_hash: first.hash,
+        last_hash: pin.hash,
+        last_implementation: Some(obs.implementation.address),
+        last_source: format!("reference-block state on {} (pinned)", rpc.host()),
+        ..UpgradeCheck::default()
+    };
+    match archive_rpc.as_ref().map_err(Clone::clone).and_then(|a| {
+        implementation_at(
+            a,
+            portal,
+            &Pin {
+                number: first.number,
+                hash: first.hash,
+            },
+        )
+        .map(|i| (i, a.host()))
+    }) {
+        Ok((i, host)) => {
+            upgrade.first_implementation = Some(i);
+            upgrade.first_source = format!("{host} (EIP-1898 pinned)");
+        }
+        Err(e) => upgrade.first_source = format!("UNAVAILABLE: {e}"),
+    }
+    if let Err(e) = upgrade_logs(&rpc, cfg, portal, &headers, &scanned, &mut upgrade) {
+        upgrade.error = Some(e);
+    }
+    eprintln!(
+        "g01_flap_freeze: {} - {}",
+        upgrade.status(),
+        upgrade.detail()
+    );
 
     if let Some(base) = &cfg.sourcify {
         for c in [&mut obs.proxy, &mut obs.implementation, &mut obs.tax_v3] {
@@ -2190,6 +2734,20 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             "archived_token_version_equal",
             h.version == Some(historical_version),
             format!("archived {historical_version} live {:?}", h.version),
+        );
+        check(
+            &mut f.checks,
+            &format!("{ERA}v5_24_0_implementation_at_the_launch_block"),
+            matches!(&historical_era, Ok((i, _)) if *i == deployment.portal_implementation),
+            match &historical_era {
+                Ok((i, host)) => format!(
+                    "EIP-1967 slot at block {} = {} ({host}, pinned); v5.24.0 implementation {}",
+                    h.hit.receipt.block_number,
+                    addr(*i),
+                    addr(deployment.portal_implementation)
+                ),
+                Err(e) => e.clone(),
+            },
         );
         fixtures.push(f);
     }
@@ -2262,10 +2820,12 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         scan: &scanned,
         deployment,
         sourcify_enabled: cfg.sourcify.is_some(),
+        recognition: &recognition,
+        upgrade: &upgrade,
     };
     let (draft, properties) = record(&eval, &archive);
     let bytes = draft.encode().map_err(|e| e.to_string())?;
-    decode(&ff::SCHEMA, &bytes).map_err(|e| e.to_string())?;
+    decode(&ff::V2, &bytes).map_err(|e| e.to_string())?;
 
     let mut summary = format!(
         "Flap freeze at block {} {} (chain {chain_id}, endpoint {}); Portal version {}\n",
@@ -2450,6 +3010,8 @@ mod tests {
             linked_to: 2,
         };
         let scan = ScanOutcome::default();
+        let recognition = Recognition::default();
+        let upgrade = UpgradeCheck::default();
         let eval = Eval {
             common: &common,
             obs: &obs,
@@ -2462,10 +3024,14 @@ mod tests {
             scan: &scan,
             deployment: bsc_mainnet_v5_24_0(),
             sourcify_enabled: false,
+            recognition: &recognition,
+            upgrade: &upgrade,
         };
         let (draft, properties) = record(&eval, &a);
-        for (name, status, _) in &properties {
+        for (name, status, detail) in &properties {
             let expected = if name == "versioned_evidence" {
+                // It names the schema the record is written in.
+                assert!(detail.contains(ff::V2.name), "{detail}");
                 "PROVEN"
             } else {
                 "UNKNOWN"
@@ -2473,9 +3039,105 @@ mod tests {
             assert_eq!(*status, expected, "{name}");
         }
         let bytes = draft.encode().unwrap();
-        let r = decode(&ff::SCHEMA, &bytes).unwrap();
+        let r = decode(&ff::V2, &bytes).unwrap();
         assert_eq!(r.text(ff::FREEZE_STATUS).unwrap(), "PARTIAL");
         assert_eq!(draft.encode().unwrap(), bytes);
+    }
+
+    /// The census runs the production decoder: a canonical V6 launch is
+    /// accepted, a truncated one refused with its reason, a selector outside
+    /// the table is not a refusal of the table.
+    #[test]
+    fn the_census_classifies_calls_with_the_production_decoder() {
+        let a = archive();
+        let d = bsc_mainnet_v5_24_0();
+        let tx = |input: Vec<u8>| Tx {
+            hash: B256::repeat_byte(1),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: Address::ZERO,
+            to: Some(d.portal),
+            input,
+            value: alloy_primitives::U256::ZERO,
+        };
+        let params = production::LaunchParamsV6 {
+            name: b"n",
+            symbol: b"s",
+            uri: b"u",
+            dex_thresh: 1,
+            salt: a.historical.1,
+            migrator_type: 1,
+            quote_token: Address::ZERO,
+            quote_amt: alloy_primitives::U256::ZERO,
+            beneficiary: Address::ZERO,
+            permit: &[],
+            extension_id: B256::ZERO,
+            extension_data: &[],
+            dex_id: 0,
+            lp_fee_profile: 0,
+            buy_tax: 100,
+            sell_tax: 100,
+            tax_duration: 1,
+            anti_farmer_duration: 1,
+            mkt_bps: 10_000,
+            deflation_bps: 0,
+            dividend_bps: 0,
+            lp_bps: 0,
+            minimum_share_balance: alloy_primitives::U256::ZERO,
+            dividend_token: Address::ZERO,
+            commission_receiver: Address::ZERO,
+            token_version: 6,
+        };
+        let mut launch = Vec::new();
+        production::encode_new_token_v6(&params, &mut launch);
+        let (call, outcome, detail, refused) = classify_call(d.portal, &tx(launch.clone()), &a);
+        assert_eq!(
+            (call.as_str(), outcome, refused),
+            ("newTokenV6", "LaunchV6", false)
+        );
+        assert_eq!(detail, "tokenVersion 6 TOKEN_TAXED_V3");
+        let (_, outcome, _, refused) =
+            classify_call(d.portal, &tx(launch[..launch.len() - 1].to_vec()), &a);
+        assert_eq!((outcome, refused), ("Malformed", true));
+        let (_, outcome, _, refused) =
+            classify_call(d.portal, &tx(vec![0xde, 0xad, 0xbe, 0xef]), &a);
+        assert_eq!((outcome, refused), ("UnknownSelector", false));
+    }
+
+    /// One implementation needs no Upgraded log, every bloom candidate read
+    /// and equal slots at both ends.
+    #[test]
+    fn one_implementation_needs_both_slots_and_no_upgrade_log() {
+        let i = Address::repeat_byte(7);
+        let one = UpgradeCheck {
+            candidates: 3,
+            read: 3,
+            first_implementation: Some(i),
+            last_implementation: Some(i),
+            ..UpgradeCheck::default()
+        };
+        assert_eq!(one.status(), "ONE_IMPLEMENTATION");
+        let logged = UpgradeCheck {
+            logs: 1,
+            ..one.clone()
+        };
+        assert_eq!(logged.status(), "UPGRADED");
+        let moved = UpgradeCheck {
+            first_implementation: Some(Address::repeat_byte(8)),
+            ..one.clone()
+        };
+        assert_eq!(moved.status(), "UPGRADED");
+        let unread = UpgradeCheck {
+            read: 2,
+            ..one.clone()
+        };
+        assert_eq!(unread.status(), "UNKNOWN");
+        let no_archive = UpgradeCheck {
+            first_implementation: None,
+            ..one
+        };
+        assert_eq!(no_archive.status(), "UNKNOWN");
     }
 
     #[test]
@@ -2510,7 +3172,7 @@ mod tests {
         let cfg = Config::parse(&args).unwrap();
         let outcome = run(&cfg).unwrap();
         let bytes = std::fs::read(outcome.dir.join("flap.dbrec")).unwrap();
-        let r = decode(&ff::SCHEMA, &bytes).unwrap();
+        let r = decode(&ff::V2, &bytes).unwrap();
         assert_eq!(r.u64(ff::CHAIN_ID).unwrap(), 56);
         assert!(r.bool(ff::PIN_RECHECKED).unwrap());
         std::fs::remove_dir_all(out).unwrap();

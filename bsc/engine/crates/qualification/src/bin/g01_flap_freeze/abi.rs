@@ -109,6 +109,8 @@ mod declarations {
             event FlapTokenAsymmetricTaxSet(address token, uint256 buyTax, uint256 sellTax);
             event VanityTokenCreated(address token, address creator, address beneficiary);
             event FlapTokenStaged(uint256 ts, address creator, address token);
+            /// EIP-1967 `Upgraded` of the Portal proxy.
+            event Upgraded(address indexed implementation);
         }
     }
 }
@@ -209,6 +211,11 @@ pub fn token_sold_topic() -> B256 {
 
 pub fn launched_to_dex_topic() -> B256 {
     P::LaunchedToDEX::SIGNATURE_HASH
+}
+
+/// `Upgraded(address)` of the Portal proxy (EIP-1967).
+pub fn upgraded_topic() -> B256 {
+    P::Upgraded::SIGNATURE_HASH
 }
 
 pub fn version_call() -> Vec<u8> {
@@ -934,6 +941,14 @@ mod tests {
             assert!(seen.insert(s.value.clone()), "{}", s.signature);
         }
         assert_eq!(function_name(&hex!("8cb5772c")), Some("newTokenV6"));
+        // The EIP-1967 upgrade topic of the Phase D gate review.
+        assert_eq!(
+            upgraded_topic(),
+            B256::from(hex!(
+                "bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+            ))
+        );
+        assert_eq!(upgraded_topic(), keccak256("Upgraded(address)"));
     }
 
     #[test]

@@ -366,6 +366,152 @@ pub mod flap_freeze {
         };
     }
 
+    /// The production `recognize` over the direct Portal calls of the
+    /// window: one bucket per call and outcome (schema version 2).
+    pub mod recognition {
+        use super::*;
+
+        /// The Portal function, or `UNKNOWN_SELECTOR`.
+        pub const CALL: u16 = 1;
+        pub const SELECTOR: u16 = 2;
+        /// `LaunchV6`, `Swap`, `Unsupported`, `Malformed` or
+        /// `UnknownSelector`.
+        pub const OUTCOME: u16 = 3;
+        /// Token version (LaunchV6), BUY/SELL/OTHER (Swap), the refusal
+        /// reason (Malformed).
+        pub const DETAIL: u16 = 4;
+        pub const COUNT: u16 = 5;
+        /// Up to the recorded examples, newest first.
+        pub const EXAMPLE_TXS: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g01.flap-freeze.recognition",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(CALL, "call", Text),
+                Field::req(SELECTOR, "selector", Bytes).max(4),
+                Field::req(OUTCOME, "outcome", Text),
+                Field::req(DETAIL, "detail", Text),
+                Field::req(COUNT, "count", U64),
+                Field::rep(EXAMPLE_TXS, "example_txs", B256),
+            ],
+        };
+    }
+
+    /// A direct Portal call the production decoder refused, with its
+    /// canonical receipt status (schema version 2).
+    pub mod refusal {
+        use super::*;
+
+        pub const TX_HASH: u16 = 1;
+        pub const BLOCK_NUMBER: u16 = 2;
+        pub const CALL: u16 = 3;
+        pub const REASON: u16 = 4;
+        /// Absent where the receipt could not be read.
+        pub const RECEIPT_STATUS: u16 = 5;
+        pub const INPUT_LEN: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g01.flap-freeze.refusal",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(TX_HASH, "tx_hash", B256),
+                Field::req(BLOCK_NUMBER, "block_number", U64),
+                Field::req(CALL, "call", Text),
+                Field::req(REASON, "reason", Text),
+                Field::opt(RECEIPT_STATUS, "receipt_status", U64),
+                Field::req(INPUT_LEN, "input_len", U64),
+            ],
+        };
+    }
+
+    /// Coverage of the recognition pass (schema version 2).
+    pub mod recognition_scan {
+        use super::*;
+
+        pub const FROM_BLOCK: u16 = 1;
+        pub const TO_BLOCK: u16 = 2;
+        /// Full blocks read; each matched its parent-linked header hash.
+        pub const BLOCKS_READ: u16 = 3;
+        pub const TRANSACTIONS: u16 = 4;
+        pub const DIRECT_PORTAL_CALLS: u16 = 5;
+        /// Largest direct Portal calldata seen (the runtime bound is
+        /// configuration).
+        pub const MAX_INPUT_LEN: u16 = 6;
+        /// `max_calldata_len` passed to `recognize`.
+        pub const BOUND: u16 = 7;
+        pub const COMPLETE: u16 = 8;
+        pub const ERROR: u16 = 9;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g01.flap-freeze.recognition-scan",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(FROM_BLOCK, "from_block", U64),
+                Field::req(TO_BLOCK, "to_block", U64),
+                Field::req(BLOCKS_READ, "blocks_read", U64),
+                Field::req(TRANSACTIONS, "transactions", U64),
+                Field::req(DIRECT_PORTAL_CALLS, "direct_portal_calls", U64),
+                Field::req(MAX_INPUT_LEN, "max_input_len", U64),
+                Field::req(BOUND, "bound", Text),
+                Field::req(COMPLETE, "complete", Bool),
+                Field::opt(ERROR, "error", Text),
+            ],
+        };
+    }
+
+    /// One implementation over the window (schema version 2).
+    pub mod upgrade_check {
+        use super::*;
+
+        /// `Upgraded(address)` of the Portal proxy (alloy).
+        pub const TOPIC: u16 = 1;
+        pub const FROM_BLOCK: u16 = 2;
+        pub const TO_BLOCK: u16 = 3;
+        /// Headers whose bloom was tested for (Portal, topic).
+        pub const HEADERS_CHECKED: u16 = 4;
+        pub const BLOOM_CANDIDATES: u16 = 5;
+        /// Candidate blocks whose receipts were read (in the scan or here).
+        pub const CANDIDATES_READ: u16 = 6;
+        pub const UPGRADED_LOGS: u16 = 7;
+        pub const FIRST_BLOCK_HASH: u16 = 8;
+        /// EIP-1967 slot pinned to the first block (archive endpoint).
+        pub const FIRST_IMPLEMENTATION: u16 = 9;
+        pub const FIRST_SOURCE: u16 = 10;
+        pub const LAST_BLOCK_HASH: u16 = 11;
+        pub const LAST_IMPLEMENTATION: u16 = 12;
+        pub const LAST_SOURCE: u16 = 13;
+        /// `ONE_IMPLEMENTATION`, `UPGRADED` or `UNKNOWN`.
+        pub const STATUS: u16 = 14;
+        pub const DETAIL: u16 = 15;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.g01.flap-freeze.upgrade-check",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(TOPIC, "topic", B256),
+                Field::req(FROM_BLOCK, "from_block", U64),
+                Field::req(TO_BLOCK, "to_block", U64),
+                Field::req(HEADERS_CHECKED, "headers_checked", U64),
+                Field::req(BLOOM_CANDIDATES, "bloom_candidates", U64),
+                Field::req(CANDIDATES_READ, "candidates_read", U64),
+                Field::req(UPGRADED_LOGS, "upgraded_logs", U64),
+                Field::req(FIRST_BLOCK_HASH, "first_block_hash", B256),
+                Field::opt(FIRST_IMPLEMENTATION, "first_implementation", Address),
+                Field::req(FIRST_SOURCE, "first_source", Text),
+                Field::req(LAST_BLOCK_HASH, "last_block_hash", B256),
+                Field::opt(LAST_IMPLEMENTATION, "last_implementation", Address),
+                Field::req(LAST_SOURCE, "last_source", Text),
+                Field::req(STATUS, "status", Text),
+                Field::req(DETAIL, "detail", Text),
+            ],
+        };
+    }
+
     pub const CHAIN_ID: u16 = 1;
     pub const PORTAL: u16 = 2;
     pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
@@ -398,6 +544,12 @@ pub mod flap_freeze {
     /// `COMPLETE` when every property is `PROVEN`, else `PARTIAL`.
     pub const FREEZE_STATUS: u16 = 26;
     pub const NON_CLAIMS: u16 = 27;
+    /// Schema version 2: the production decoder over every direct Portal
+    /// call of the window, its refusals, and the one-implementation check.
+    pub const RECOGNITION_SCAN: u16 = 28;
+    pub const RECOGNITION: u16 = 29;
+    pub const REFUSALS: u16 = 30;
+    pub const UPGRADE_CHECK: u16 = 31;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.g01.flap-freeze.v1",
@@ -468,9 +620,101 @@ pub mod flap_freeze {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// Version 2 (Phase D gate review): version 1 plus the strict decoder
+    /// census and the one-implementation check. Version 1 stays for the
+    /// records written with it.
+    pub const V2: Schema = Schema {
+        name: "darkbot.g01.flap-freeze.v2",
+        record_type: 52,
+        schema_version: 2,
+        fields: &[
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PORTAL, "portal", Address),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REFERENCE_BLOCK, "reference_block", U64),
+            Field::req(REFERENCE_BLOCK_HASH, "reference_block_hash", B256),
+            Field::req(REFERENCE_TIMESTAMP, "reference_timestamp", U64),
+            Field::req(PIN_RECHECKED, "pin_rechecked", Bool),
+            Field::req(ENDPOINT_HOST, "endpoint_host", Text),
+            Field::opt(SOURCIFY_HOST, "sourcify_host", Text),
+            Field::req(TOOL_SHA256, "tool_sha256", B256),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(ARCHIVE_ROOT, "archive_root", Text),
+            Field::nested(
+                ARCHIVE_INPUTS,
+                "archive_inputs",
+                Presence::Repeated,
+                &shared::archive_input::SCHEMA,
+            ),
+            Field::opt(PORTAL_VERSION, "portal_version", Text),
+            Field::nested(
+                CONSTANTS,
+                "constants",
+                Presence::Repeated,
+                &constant::SCHEMA,
+            ),
+            Field::nested(
+                CONTRACTS,
+                "contracts",
+                Presence::Repeated,
+                &shared::contract::SCHEMA,
+            )
+            .max(8 * 1024 * 1024),
+            Field::nested(
+                SELECTORS,
+                "selectors",
+                Presence::Repeated,
+                &selector::SCHEMA,
+            ),
+            Field::nested(FIXTURES, "fixtures", Presence::Repeated, &fixture::SCHEMA),
+            Field::nested(LAUNCHES, "launches", Presence::Repeated, &launch::SCHEMA),
+            Field::nested(CENSUS, "census", Presence::Repeated, &census_bucket::SCHEMA),
+            Field::nested(
+                DERIVATION,
+                "derivation",
+                Presence::Repeated,
+                &derivation_version::SCHEMA,
+            ),
+            Field::nested(TOPICS, "topics", Presence::Repeated, &topic_count::SCHEMA),
+            Field::nested(SCAN, "scan", Presence::Required, &scan::SCHEMA),
+            Field::nested(
+                PROPERTIES,
+                "properties",
+                Presence::Repeated,
+                &shared::property::SCHEMA,
+            ),
+            Field::req(FREEZE_STATUS, "freeze_status", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::nested(
+                RECOGNITION_SCAN,
+                "recognition_scan",
+                Presence::Required,
+                &recognition_scan::SCHEMA,
+            ),
+            Field::nested(
+                RECOGNITION,
+                "recognition",
+                Presence::Repeated,
+                &recognition::SCHEMA,
+            ),
+            Field::nested(REFUSALS, "refusals", Presence::Repeated, &refusal::SCHEMA),
+            Field::nested(
+                UPGRADE_CHECK,
+                "upgrade_check",
+                Presence::Required,
+                &upgrade_check::SCHEMA,
+            ),
+        ],
+    };
 }
 
-pub const ALL: &[&Schema] = &[&flap_freeze::SCHEMA];
+pub const ALL: &[&Schema] = &[&flap_freeze::SCHEMA, &flap_freeze::V2];
 
 #[cfg(test)]
 mod tests {

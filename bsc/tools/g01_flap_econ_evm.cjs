@@ -13,14 +13,20 @@
 // Independence: encodes its own calldata with ethers (its Keccak-256 is
 // printed); never reads a Rust quote; the BUY minimum output is 1.
 //
+// State: accounts from eth_getProof (balance, nonce; its codeHash must equal
+// the Keccak-256 of eth_getCode), code from eth_getCode, storage from
+// eth_getStorageAt -- every read at {blockHash, requireCanonical: true}.
+//
 // Safety: no key, no signing, no transaction construction, no
 // eth_sendRawTransaction; read-only RPC state, code and header reads only.
 // Caller balances exist only in the local state overlay.
 //
 // Usage: node g01_flap_econ_evm.cjs --block <number> --hash <0x..> --salt <0x..>
 //          --launcher <0x..> --buyer <0x..> --buy-value <wei> --launch-gas <n>
-//          --buy-gas <n> --gas-price <wei> --caller-balance <wei>
-// Environment: BSC_MAINNET_RPC_HTTPS (a read-only endpoint).
+//          --buy-gas <n> --balance-gas <n> --gas-price <wei> --caller-balance <wei>
+//          --rpc-timeout-ms <ms> --rpc-attempts <n> --rpc-retry-pause-ms <ms>
+// Environment: BSC_MAINNET_RPC_HTTPS (a read-only endpoint serving eth_getProof
+// at a recent block; the free public dataseed refuses it).
 // Output: KEY=value lines (no JSON); a non-zero exit on any failure.
 
 'use strict';
@@ -59,23 +65,26 @@ function args() {
     if (!argv[i].startsWith('--') || argv[i + 1] === undefined) throw new Error(`bad argument ${argv[i]}`);
     out[argv[i].slice(2)] = argv[i + 1];
   }
-  for (const k of ['block', 'hash', 'salt', 'launcher', 'buyer', 'buy-value', 'launch-gas', 'buy-gas', 'gas-price', 'caller-balance']) {
+  for (const k of ['block', 'hash', 'salt', 'launcher', 'buyer', 'buy-value', 'launch-gas', 'buy-gas',
+    'balance-gas', 'gas-price', 'caller-balance', 'rpc-timeout-ms', 'rpc-attempts', 'rpc-retry-pause-ms']) {
     if (out[k] === undefined) throw new Error(`--${k} is required`);
   }
   return out;
 }
 
+// The transport bounds (--rpc-timeout-ms, --rpc-attempts, --rpc-retry-pause-ms).
+const transport = { timeoutMs: 0, attempts: 1, pauseMs: 0 };
+
 async function rpc(url, method, params = []) {
-  const delaysMs = [0, 150, 500, 1200];
   let lastError;
-  for (let attempt = 0; attempt < delaysMs.length; attempt++) {
-    if (delaysMs[attempt]) await new Promise(resolve => setTimeout(resolve, delaysMs[attempt]));
+  for (let attempt = 0; attempt < transport.attempts; attempt++) {
+    if (attempt) await new Promise(resolve => setTimeout(resolve, transport.pauseMs * attempt));
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(transport.timeoutMs),
       });
       if (!res.ok) throw new Error(`RPC HTTP ${res.status} for ${method}`);
       const body = await res.json();
@@ -85,7 +94,7 @@ async function rpc(url, method, params = []) {
       lastError = e;
     }
   }
-  throw new Error(`RPC transport failed after 4 attempts for ${method}: ${lastError?.message || lastError}`);
+  throw new Error(`RPC transport failed after ${transport.attempts} attempts for ${method}: ${lastError?.message || lastError}`);
 }
 
 // As g06a_economics_evm_crosscheck.cjs: the next block on top of the pinned one.
@@ -102,22 +111,32 @@ function blockHeaderFromRpc(b) {
   };
 }
 
-// As g06a_economics_evm_crosscheck.cjs: account envelopes from ordinary
-// read-only RPC at the pinned block (the public dataseed's eth_getProof shape
-// does not fit RPCStateManager); storage stays block-exact via eth_getStorageAt.
-function installBasicAccountLoader(state, rpcUrl, blockTag) {
+const EMPTY_CODE_HASH = ethers.keccak256('0x');
+
+// Account envelopes from eth_getProof at the pinned block. RPCStateManager's
+// own loader takes the proof's codeHash as is, but a node reports the zero
+// hash for an absent account; so the code hash is the Keccak-256 of
+// eth_getCode, and the proof's must agree with it (zero only for no code).
+// Storage stays block-exact via eth_getStorageAt (pinState).
+function installProofAccountLoader(state, rpcUrl, blockTag, reads) {
   state.getAccountFromProvider = async function(address) {
     const a = address.toString();
-    const balanceHex = await rpc(rpcUrl, 'eth_getBalance', [a, blockTag]);
-    const nonceHex = await rpc(rpcUrl, 'eth_getTransactionCount', [a, blockTag]);
+    const proof = await rpc(rpcUrl, 'eth_getProof', [a, [], blockTag]);
     const codeHex = await rpc(rpcUrl, 'eth_getCode', [a, blockTag]);
-    if (balanceHex == null || nonceHex == null || codeHex == null) {
-      throw new Error(`incomplete basic account RPC data for ${a}`);
+    if (!proof || proof.balance == null || proof.nonce == null || codeHex == null) {
+      throw new Error(`incomplete eth_getProof/eth_getCode data for ${a}`);
     }
+    const codeHash = ethers.keccak256(codeHex);
+    const proven = String(proof.codeHash || '').toLowerCase();
+    const absent = codeHash === EMPTY_CODE_HASH && proven === ethers.ZeroHash;
+    if (proven !== codeHash && !absent) {
+      throw new Error(`eth_getProof codeHash ${proven} is not keccak256(eth_getCode) ${codeHash} for ${a}`);
+    }
+    reads.accounts += 1;
     return createAccount({
-      balance: BigInt(balanceHex),
-      nonce: BigInt(nonceHex),
-      codeHash: hexToBytes(ethers.keccak256(codeHex)),
+      balance: BigInt(proof.balance),
+      nonce: BigInt(proof.nonce),
+      codeHash: hexToBytes(codeHash),
       storageRoot: KECCAK256_RLP,
     });
   };
@@ -182,6 +201,12 @@ function word(bytes, i) {
 
 async function main() {
   const a = args();
+  transport.timeoutMs = Number(a['rpc-timeout-ms']);
+  transport.attempts = Number(a['rpc-attempts']);
+  transport.pauseMs = Number(a['rpc-retry-pause-ms']);
+  if (!(transport.timeoutMs > 0 && transport.attempts >= 1 && transport.pauseMs >= 0)) {
+    throw new Error('bad RPC transport bounds');
+  }
   const rpcUrl = process.env.BSC_MAINNET_RPC_HTTPS;
   if (!rpcUrl) throw new Error('BSC_MAINNET_RPC_HTTPS is required');
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
@@ -197,7 +222,8 @@ async function main() {
   const common = createCustomCommon({ chainId: Number(CHAIN_ID) }, Mainnet, { hardfork: Hardfork.Osaka });
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: blockNumber });
   pinState(state, parent.hash);
-  installBasicAccountLoader(state, rpcUrl, pin(parent.hash));
+  const reads = { accounts: 0 };
+  installProofAccountLoader(state, rpcUrl, pin(parent.hash), reads);
   const evm = await createEVM({ common, stateManager: state, blockchain: new RPCBlockChain(rpcUrl) });
   const launcherAddr = createAddressFromString(launcher);
   const buyerAddr = createAddressFromString(buyer);
@@ -249,11 +275,12 @@ async function main() {
   }
   const balRes = await evm.runCall({
     caller: buyerAddr, origin: buyerAddr, to: createAddressFromString(token), value: 0n,
-    data: hexToBytes(balanceOfCalldata(buyer)), gasLimit: 500_000n, gasPrice: 0n, block, isStatic: true,
+    data: hexToBytes(balanceOfCalldata(buyer)), gasLimit: BigInt(a['balance-gas']), gasPrice: 0n, block, isStatic: true,
   });
   if (balRes.execResult.exceptionError) throw new Error('local balanceOf failed');
   const balHex = bytesToHex(balRes.execResult.returnValue);
   console.log(`BUYER_BALANCE=${BigInt(balHex === '0x' ? '0x0' : balHex)}`);
+  console.log(`PROVEN_ACCOUNTS=${reads.accounts}`);
   await requireBlock(rpc, rpcUrl, blockNumber, a.hash, 'after the run');
   console.log('STATUS=SUCCESS');
 }

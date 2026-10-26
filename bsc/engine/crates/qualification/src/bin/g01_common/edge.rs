@@ -60,6 +60,43 @@ pub struct Tx {
     pub value: U256,
 }
 
+/// A canonical block with its full transactions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FullBlock {
+    pub number: u64,
+    pub hash: B256,
+    pub transactions: Vec<Tx>,
+}
+
+/// One message of an `eth_simulateV1` block (no signature: the node
+/// executes it as a call from `from`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimCall {
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
+    pub data: Vec<u8>,
+    pub gas: u64,
+}
+
+/// A log of a simulated message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimLog {
+    pub address: Address,
+    pub topics: Vec<B256>,
+    pub data: Vec<u8>,
+}
+
+/// The node's result of one simulated message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimResult {
+    pub status: u64,
+    pub return_data: Vec<u8>,
+    pub gas_used: u64,
+    pub logs: Vec<SimLog>,
+    pub error: Option<String>,
+}
+
 /// The block every state read names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pin {
@@ -178,6 +215,77 @@ fn storage_params(address: Address, slot: B256, pin: &Pin) -> String {
         data(slot.as_slice()),
         pinned(pin)
     )
+}
+
+/// `eth_estimateGas` of a call from `from` at the pin.
+fn estimate_params(from: Address, to: Address, value: U256, input: &[u8], pin: &Pin) -> String {
+    format!(
+        "[{{\"from\":{},\"to\":{},\"value\":\"0x{value:x}\",\"data\":{}}},{}]",
+        data(from.as_slice()),
+        data(to.as_slice()),
+        data(input),
+        pinned(pin)
+    )
+}
+
+/// `eth_simulateV1`: one block of `calls` on top of the pinned block, the
+/// given balances overridden, no signature validation.
+fn simulate_params(pin: &Pin, balances: &[(Address, U256)], calls: &[SimCall]) -> String {
+    let overrides: Vec<String> = balances
+        .iter()
+        .map(|(a, b)| format!("{}:{{\"balance\":\"0x{b:x}\"}}", data(a.as_slice())))
+        .collect();
+    let calls: Vec<String> = calls
+        .iter()
+        .map(|c| {
+            format!(
+                "{{\"from\":{},\"to\":{},\"value\":\"0x{:x}\",\"data\":{},\"gas\":{}}}",
+                data(c.from.as_slice()),
+                data(c.to.as_slice()),
+                c.value,
+                data(&c.data),
+                quantity(c.gas)
+            )
+        })
+        .collect();
+    format!(
+        "[{{\"blockStateCalls\":[{{\"stateOverrides\":{{{}}},\"calls\":[{}]}}],\"validation\":false}},{}]",
+        overrides.join(","),
+        calls.join(","),
+        pinned(pin)
+    )
+}
+
+fn sim_result_of(v: &Json) -> Result<SimResult, String> {
+    let logs = field(v, "logs")?
+        .as_array()
+        .ok_or("simulated logs are not a list")?
+        .iter()
+        .map(|l| {
+            Ok(SimLog {
+                address: req(l, "address", address_of)?,
+                topics: field(l, "topics")?
+                    .as_array()
+                    .ok_or("topics are not a list")?
+                    .iter()
+                    .map(|t| b256_of(t, "topic"))
+                    .collect::<Result<Vec<_>, String>>()?,
+                data: req(l, "data", bytes_of)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(SimResult {
+        status: req(v, "status", u64_of)?,
+        return_data: req(v, "returnData", bytes_of)?,
+        gas_used: req(v, "gasUsed", u64_of)?,
+        logs,
+        error: present(v, "error").map(|e| {
+            bounded(
+                e.get("message").and_then(Json::as_str).unwrap_or("error"),
+                200,
+            )
+        }),
+    })
 }
 
 fn call_params(to: Address, input: &[u8], pin: &Pin) -> String {
@@ -356,6 +464,31 @@ fn tx_of(v: &Json) -> Result<Tx, String> {
     })
 }
 
+fn full_block_of(v: &Json) -> Result<FullBlock, String> {
+    let number = req(v, "number", u64_of)?;
+    let hash = req(v, "hash", b256_of)?;
+    let transactions = field(v, "transactions")?
+        .as_array()
+        .ok_or("transactions are not a list")?
+        .iter()
+        .map(|t| {
+            if !t.is_object() {
+                return Err("a hashes-only block is not a full block".to_string());
+            }
+            let tx = tx_of(t)?;
+            if tx.block_hash != Some(hash) || tx.block_number != Some(number) {
+                return Err(format!("transaction {} is not of this block", tx.hash));
+            }
+            Ok(tx)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(FullBlock {
+        number,
+        hash,
+        transactions,
+    })
+}
+
 /// A batch answer: one result per id `0..n`, whatever order it came in.
 fn batch_results(method: &str, v: &Json, n: usize) -> Result<Vec<Json>, String> {
     let list = v
@@ -479,6 +612,42 @@ impl Endpoint {
             .collect()
     }
 
+    /// The blocks `from..=to` with their full transactions in one batch;
+    /// each must be the answer for its height and carry its transactions.
+    pub fn full_blocks(&self, from: u64, to: u64) -> Result<Vec<FullBlock>, String> {
+        let n = usize::try_from(to - from + 1).map_err(|_| "block range too large")?;
+        let requests: Vec<String> = (0..n as u64)
+            .map(|i| {
+                body(
+                    i,
+                    "eth_getBlockByNumber",
+                    &format!("[{},true]", quantity(from + i)),
+                )
+            })
+            .collect();
+        let bytes = self.post(&format!("[{}]", requests.join(",")))?;
+        let v: Json = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("invalid eth_getBlockByNumber batch: {e}"))?;
+        batch_results("eth_getBlockByNumber", &v, n)?
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let number = from + i as u64;
+                if b.is_null() {
+                    return Err(format!("block {number} unknown to the endpoint"));
+                }
+                let block = full_block_of(b).map_err(|e| format!("block {number}: {e}"))?;
+                if block.number != number {
+                    return Err(format!(
+                        "unpinned answer: asked for block {number}, got {}",
+                        block.number
+                    ));
+                }
+                Ok(block)
+            })
+            .collect()
+    }
+
     /// Every receipt of exactly the block of `header` (by hash).
     pub fn block_receipts(&self, header: &Header) -> Result<Vec<Receipt>, String> {
         let v = self.value(
@@ -556,6 +725,52 @@ impl Endpoint {
 
     pub fn host(&self) -> String {
         host(&self.url)
+    }
+
+    pub fn estimate_gas(
+        &self,
+        from: Address,
+        to: Address,
+        value: U256,
+        input: &[u8],
+        pin: &Pin,
+    ) -> Result<u64, String> {
+        u64_of(
+            &self.value(
+                "eth_estimateGas",
+                &estimate_params(from, to, value, input, pin),
+            )?,
+            "eth_estimateGas",
+        )
+    }
+
+    /// The node's execution of `calls`, in order, in one simulated block on
+    /// top of the pinned block; nothing is signed, sent or persisted.
+    pub fn simulate(
+        &self,
+        pin: &Pin,
+        balances: &[(Address, U256)],
+        calls: &[SimCall],
+    ) -> Result<Vec<SimResult>, String> {
+        let v = self.value("eth_simulateV1", &simulate_params(pin, balances, calls))?;
+        let block = v
+            .as_array()
+            .and_then(|b| b.first())
+            .ok_or("eth_simulateV1 returned no block")?;
+        let results = field(block, "calls")?
+            .as_array()
+            .ok_or("simulated calls are not a list")?
+            .iter()
+            .map(sim_result_of)
+            .collect::<Result<Vec<_>, _>>()?;
+        if results.len() != calls.len() {
+            return Err(format!(
+                "eth_simulateV1 answered {} results for {} calls",
+                results.len(),
+                calls.len()
+            ));
+        }
+        Ok(results)
     }
 }
 
@@ -1020,6 +1235,75 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].signature, "f((address,(uint256,bytes))[],uint8)");
         assert_eq!(entries[0].mutability.as_deref(), Some("view"));
+    }
+
+    #[test]
+    fn a_full_block_carries_only_its_own_transactions() {
+        let block = |tx_block: &str| -> Json {
+            serde_json::from_str(&format!(
+                r#"{{"number":"0x10","hash":"{}","transactions":[{{"hash":"{}","blockHash":"{}","blockNumber":"0x10","transactionIndex":"0x0","from":"{}","to":null,"input":"0x8cb5772c","value":"0x0"}}]}}"#,
+                h("aa"),
+                h("bb"),
+                h(tx_block),
+                format_args!("0x{}", "11".repeat(20))
+            ))
+            .unwrap()
+        };
+        let ok = full_block_of(&block("aa")).unwrap();
+        assert_eq!((ok.number, ok.transactions.len()), (16, 1));
+        assert!(full_block_of(&block("cc")).is_err());
+        let hashes_only: Json = serde_json::from_str(&format!(
+            r#"{{"number":"0x10","hash":"{}","transactions":["{}"]}}"#,
+            h("aa"),
+            h("bb")
+        ))
+        .unwrap();
+        assert!(full_block_of(&hashes_only).is_err());
+    }
+
+    #[test]
+    fn simulation_and_estimates_are_pinned_and_unsigned() {
+        let pin = Pin {
+            number: 5,
+            hash: B256::repeat_byte(0xab),
+        };
+        let call = SimCall {
+            from: Address::repeat_byte(1),
+            to: Address::repeat_byte(2),
+            value: U256::from(1000u64),
+            data: vec![0x8c, 0xb5],
+            gas: 21_000,
+        };
+        let p: Json = serde_json::from_str(&simulate_params(
+            &pin,
+            &[(Address::repeat_byte(1), U256::from(5u8))],
+            std::slice::from_ref(&call),
+        ))
+        .unwrap();
+        assert_eq!(p[1]["blockHash"], h("ab"));
+        assert_eq!(p[0]["validation"], false);
+        let c = &p[0]["blockStateCalls"][0]["calls"][0];
+        assert_eq!(c["value"], "0x3e8");
+        assert_eq!(c["gas"], "0x5208");
+        assert!(c.get("signature").is_none() && c.get("r").is_none());
+        assert_eq!(
+            p[0]["blockStateCalls"][0]["stateOverrides"][format!("0x{}", "01".repeat(20))]["balance"],
+            "0x5"
+        );
+        let e: Json = serde_json::from_str(&estimate_params(
+            call.from, call.to, call.value, &call.data, &pin,
+        ))
+        .unwrap();
+        assert_eq!(e[1]["requireCanonical"], true);
+        let r = sim_result_of(
+            &serde_json::from_str(r#"{"status":"0x0","returnData":"0x","gasUsed":"0x10","logs":[],"error":{"message":"execution reverted"}}"#)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (r.status, r.error.as_deref()),
+            (0, Some("execution reverted"))
+        );
     }
 
     #[test]
