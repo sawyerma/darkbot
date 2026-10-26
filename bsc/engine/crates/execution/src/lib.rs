@@ -76,6 +76,9 @@ pub mod runtime;
 /// The native canonical chain follower: G0.4 launches from canonical receipts.
 #[cfg(feature = "runtime")]
 pub mod chain_follower;
+/// The PAPER identity and sink: the end of the PAPER path (no transport).
+#[cfg(feature = "runtime")]
+pub mod paper;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.
