@@ -5,9 +5,14 @@ Cancellation/crash use a fixture child. Production labels and files are untouche
 """
 import os, pathlib, shutil, subprocess
 import lifecycle_test as h
+# The shipped binaries of one build profile: debug by default, release for the
+# operational acceptance (the artifacts of `darkbotctl build`); dbrec_show is a test helper.
+profile=os.environ.get('DARKBOT_E2E_PROFILE','debug')
+assert profile in ('debug','release'), profile
+runtime=h.ROOT/f'bsc/engine/target/{profile}/bsc_runtime'
 try:
     release=h.WORK/'app/releases/test';release.mkdir(parents=True)
-    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('darkbotctl','ops/darkbotctl'),('bsc-control.sh','ops/bsc-control.sh'),('bsc-status-reporter','bsc/engine/target/debug/bsc-status-reporter'),('g07_pre_live_readiness','bsc/engine/target/debug/g07_pre_live_readiness'),('bsc_runtime','bsc/engine/target/debug/bsc_runtime')]:
+    for name,source in [('darkbot-gateway',f'gateway/target/{profile}/darkbot-gateway'),('darkbotctl','ops/darkbotctl'),('bsc-control.sh','ops/bsc-control.sh'),('bsc-status-reporter',f'bsc/engine/target/{profile}/bsc-status-reporter'),('g07_pre_live_readiness',f'bsc/engine/target/{profile}/g07_pre_live_readiness'),('bsc_runtime',f'bsc/engine/target/{profile}/bsc_runtime')]:
         shutil.copy2(h.ROOT/source,release/name)
     (release/'darkbotctl').chmod(0o755)
     shutil.copytree(h.ROOT/'frontend/dist',release/'dist')
@@ -27,7 +32,7 @@ try:
     # Phase H: Strategy C's frozen gas evidence, as bsc_sync copies it into every snapshot.
     for name in next(l.split('=',1)[1] for l in ingress.splitlines() if l.startswith('BSC_STRATEGY_C_GAS_EVIDENCE=')).split(','):
         (source/name).parent.mkdir(parents=True,exist_ok=True);shutil.copy2(h.ROOT/name,source/name)
-    paper=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/bsc_runtime'),'paper-identity','init','--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout
+    paper=subprocess.run([str(runtime),'paper-identity','init','--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout
     assert paper.startswith('paper_sender=0x') and len(paper.strip())==len('paper_sender=0x')+40, paper
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
@@ -56,7 +61,7 @@ try:
     subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=180,env=h.env)
     # Phase H: the finished run replays through Strategy C to exactly its journaled outputs.
     h.run('down')
-    replay=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/bsc_runtime'),'strategy-replay','--rundir',str(h.WORK/'run'),'--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,timeout=120)
+    replay=subprocess.run([str(runtime),'strategy-replay','--rundir',str(h.WORK/'run'),'--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,timeout=120)
     print(replay.stdout,flush=True)
     assert replay.returncode==0 and ': PASS (' in replay.stdout, replay.stdout+replay.stderr
 finally:
@@ -64,4 +69,4 @@ finally:
     for kind in ('bsc.readiness','bsc.reporter','bsc.runtime','gateway'):
         subprocess.run(['launchctl','bootout',h.domain+'/'+h.label+'.'+kind],capture_output=True)
     h.server.shutdown()
-    print('Isolated BSC evidence:',h.WORK,flush=True)
+    print('Isolated BSC evidence:',h.WORK,'profile',profile,flush=True)
