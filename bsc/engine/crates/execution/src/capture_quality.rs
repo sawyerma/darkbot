@@ -11,9 +11,15 @@
 //! unparsed. Reorgs the follower handled and Four launches without a proven
 //! derivation are reported, not disqualifying (fail-closed knowns).
 //!
-//! `PHASE_F_ACCEPTANCE` is `MET` only for a `CLEAN` run of at least the
-//! planned duration whose pending transactions came from the native geth
-//! source (public WSS evidence is secondary, contract §2).
+//! The capture window runs from the first canonical record to the stop
+//! request (contract §3, continuous capture): a disconnect, rate limit or
+//! stop of the native geth source inside it, or a launch while no source
+//! was connected, is not `CLEAN` either.
+//!
+//! `PHASE_F_ACCEPTANCE` is `MET` only for a `CLEAN` run whose native geth
+//! source delivered its pending transactions and stayed connected for at
+//! least the planned duration inside the window (public WSS evidence is
+//! secondary, contract §2).
 
 use crate::g04_census::census_of_run;
 use crate::replay_proof::{Proof, prove};
@@ -36,9 +42,14 @@ pub struct Quality {
     pub reasons: Vec<String>,
     pub accepted: bool,
     pub acceptance_reasons: Vec<String>,
+    /// The native source's connected time inside the capture window.
     pub duration_s: u64,
+    pub capture_s: u64,
     pub target_s: u64,
     pub native_source: bool,
+    pub native_interruptions: u64,
+    pub outage_launches: u64,
+    pub four_outage_launches: u64,
     pub manifest_state: Option<String>,
     pub census_state: String,
     pub proof: Proof,
@@ -116,9 +127,13 @@ pub fn assess(
         reasons: Vec::new(),
         accepted: false,
         acceptance_reasons: Vec::new(),
-        duration_s: window.duration_ms / 1_000,
+        duration_s: window.native_connected_ms / 1_000,
+        capture_s: window.capture_ms / 1_000,
         target_s,
         native_source,
+        native_interruptions: window.native_interruptions,
+        outage_launches: alone.outage_launches,
+        four_outage_launches: alone.four_outage_launches,
         manifest_state: manifest
             .as_ref()
             .and_then(|m| m.text(cr::STATE).ok().map(str::to_string)),
@@ -168,6 +183,27 @@ pub fn assess(
         q.census_state != "COMPLETE",
         format!("journal {}", q.census_state),
     );
+    why(
+        q.native_interruptions > 0,
+        format!(
+            "native geth source interrupted {} times in the capture window",
+            q.native_interruptions
+        ),
+    );
+    why(
+        q.outage_launches > 0,
+        format!(
+            "{} launches while no source was connected",
+            q.outage_launches
+        ),
+    );
+    why(
+        q.four_outage_launches > 0,
+        format!(
+            "{} Four launches while no source was connected",
+            q.four_outage_launches
+        ),
+    );
     why(q.resyncs > 0, format!("{} canonical resyncs", q.resyncs));
     why(
         q.blocks_skipped > 0,
@@ -216,8 +252,8 @@ pub fn assess(
     }
     if q.duration_s < q.target_s {
         q.acceptance_reasons.push(format!(
-            "{} s shorter than the planned {} s",
-            q.duration_s, q.target_s
+            "native source connected {} s of the {} s capture window, shorter than the planned {} s",
+            q.duration_s, q.capture_s, q.target_s
         ));
     }
     q.accepted = q.acceptance_reasons.is_empty();
@@ -226,7 +262,7 @@ pub fn assess(
 
 impl Quality {
     pub fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
-        let mut d = Draft::new(&cq::SCHEMA);
+        let mut d = Draft::new(&cq::V2);
         d.set(cq::RUN_ID, self.run_id.as_str())
             .set(cq::CHAIN_ID, self.chain_id)
             .set(cq::PROVENANCE_TOOL, "bsc_runtime capture-quality")
@@ -237,8 +273,12 @@ impl Quality {
                 if self.accepted { "MET" } else { "NOT_MET" },
             )
             .set(cq::DURATION_S, self.duration_s)
+            .set(cq::CAPTURE_S, self.capture_s)
             .set(cq::TARGET_S, self.target_s)
             .set(cq::NATIVE_SOURCE, self.native_source)
+            .set(cq::NATIVE_INTERRUPTIONS, self.native_interruptions)
+            .set(cq::OUTAGE_LAUNCHES, self.outage_launches)
+            .set(cq::FOUR_OUTAGE_LAUNCHES, self.four_outage_launches)
             .set(cq::CENSUS_STATE, self.census_state.as_str())
             .set(cq::PROOF_VERDICT, self.proof.verdict)
             .set(cq::LOST_RECORDS, self.lost_records)
@@ -271,11 +311,12 @@ impl Quality {
 
     pub fn summary(&self) -> String {
         format!(
-            "capture quality of run {}: {} (Phase F acceptance {}; {} s of {} s, native source {}, replay {})\n{}{}",
+            "capture quality of run {}: {} (Phase F acceptance {}; native connected {} s of the {} s window, planned {} s, native source {}, replay {})\n{}{}",
             self.run_id,
             if self.clean { "CLEAN" } else { "NOT_CLEAN" },
             if self.accepted { "MET" } else { "NOT_MET" },
             self.duration_s,
+            self.capture_s,
             self.target_s,
             self.native_source,
             self.proof.verdict,
@@ -292,8 +333,8 @@ impl Quality {
 mod tests {
     use super::*;
     use crate::runtime_journal::{
-        EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal, ingress_drop_payload,
-        window_payload,
+        EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal, STOP_PAYLOAD, SourceEvent,
+        ingress_drop_payload, source_event_payload, window_payload,
     };
     use crate::sources::SourceId;
     use darkbot_bsc_journal::RecordKind;
@@ -338,8 +379,11 @@ mod tests {
         d.encode().unwrap()
     }
 
-    /// A clean run of `seconds` of record time, `drops` ingress drops.
-    fn write(dir: &Path, seconds: u64, drops: u64) {
+    /// A run of `seconds` of capture window with `drops` ingress drops; the
+    /// native source connects at its start and, with `lost_at_s`, is lost
+    /// then for good. The stop request precedes the sources' own stops at
+    /// shutdown, as in the runtime.
+    fn write(dir: &Path, seconds: u64, drops: u64, lost_at_s: Option<u64>) {
         let mut j = RuntimeJournal::open(dir, 7, 1, JournalSetup::whole(16, 4096)).unwrap();
         j.set_identity(RunIdentity {
             host: "test".into(),
@@ -349,12 +393,21 @@ mod tests {
             build_dirty: Some(false),
             capture_pending: "LAUNCHES",
         });
-        let end = seconds * 1_000_000_000;
+        let end = seconds * 1_000_000_000 + 1;
         j.record(
             RecordKind::Canonical,
             1,
             window_payload(b'H', 10, &[10; 32]),
         );
+        let geth = |e| source_event_payload(SourceId::Geth, e);
+        j.record(RecordKind::Runtime, 1, geth(SourceEvent::Connected));
+        if let Some(at) = lost_at_s {
+            j.record(
+                RecordKind::Runtime,
+                at * 1_000_000_000,
+                geth(SourceEvent::Disconnected),
+            );
+        }
         if drops > 0 {
             j.record(
                 RecordKind::Runtime,
@@ -363,12 +416,14 @@ mod tests {
             );
             j.set_ingress_dropped(drops);
         }
+        j.record(RecordKind::Runtime, end, STOP_PAYLOAD.to_vec());
+        j.record(RecordKind::Runtime, end + 1_000, geth(SourceEvent::Stopped));
         j.record(
             RecordKind::Canonical,
-            end,
+            end + 2_000,
             window_payload(b'E', 11, &[11; 32]),
         );
-        j.record(RecordKind::Runtime, end, EXIT_PAYLOAD.to_vec());
+        j.record(RecordKind::Runtime, end + 3_000, EXIT_PAYLOAD.to_vec());
         let _ = j.finish();
     }
 
@@ -380,7 +435,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("bsc-quality-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let (a, b, c) = (base.join("a"), base.join("b"), base.join("c"));
-        write(&a, 1_800, 0);
+        write(&a, 1_800, 0, None);
         let q = assess(
             &a,
             "7",
@@ -393,9 +448,14 @@ mod tests {
         )
         .unwrap();
         assert!(q.clean && q.accepted, "{}", q.summary());
-        let r = decode(&cq::SCHEMA, &q.encode(1).unwrap()).unwrap();
+        assert_eq!(
+            (q.duration_s, q.capture_s, q.native_interruptions),
+            (1_800, 1_800, 0)
+        );
+        let r = cq::decode_quality(&q.encode(1).unwrap()).unwrap();
         assert_eq!(r.text(cq::VERDICT).unwrap(), "CLEAN");
         assert_eq!(r.text(cq::PHASE_F_ACCEPTANCE).unwrap(), "MET");
+        assert_eq!(r.u64(cq::NATIVE_INTERRUPTIONS).unwrap(), 0);
         // Public sources only: clean, not accepted.
         let q = assess(
             &a,
@@ -413,7 +473,7 @@ mod tests {
             q.acceptance_reasons,
             ["no pending transaction from the native geth source"]
         );
-        write(&b, 300, 0);
+        write(&b, 300, 0, None);
         let q = assess(
             &b,
             "7",
@@ -428,9 +488,11 @@ mod tests {
         assert!(q.clean && !q.accepted);
         assert_eq!(
             q.acceptance_reasons,
-            ["300 s shorter than the planned 1800 s"]
+            [
+                "native source connected 300 s of the 300 s capture window, shorter than the planned 1800 s"
+            ]
         );
-        write(&c, 1_800, 4);
+        write(&c, 1_800, 4, None);
         let q = assess(
             &c,
             "7",
@@ -450,5 +512,41 @@ mod tests {
         );
         assert!(q.reasons.iter().any(|r| r.starts_with("replay proof FAIL")));
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Phase F gate N1: the native source lost 2 s into an 1800 s window is
+    /// neither CLEAN nor accepted, however long the process ran.
+    #[test]
+    fn a_native_source_lost_inside_the_window_is_not_clean() {
+        let dir = std::env::temp_dir().join(format!("bsc-quality-n1-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write(&dir, 1_800, 0, Some(2));
+        let q = assess(
+            &dir,
+            "7",
+            Some(&status(7, 5)),
+            4096,
+            16_384,
+            CONFIG,
+            BUILD,
+            1_800,
+        )
+        .unwrap();
+        assert!(!q.clean && !q.accepted, "{}", q.summary());
+        assert_eq!(
+            (q.duration_s, q.capture_s, q.native_interruptions),
+            (1, 1_800, 1)
+        );
+        assert!(
+            q.reasons
+                .iter()
+                .any(|r| r == "native geth source interrupted 1 times in the capture window")
+        );
+        assert!(
+            q.acceptance_reasons
+                .iter()
+                .any(|r| r.starts_with("native source connected 1 s of the 1800 s"))
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

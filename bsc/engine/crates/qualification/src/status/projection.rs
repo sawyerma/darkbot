@@ -1028,7 +1028,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     if let Some(quality) = newest("capture-quality-")
         && let Some(bytes) = read(&quality)
     {
-        match record::decode(&schema::bsc_capture::capture_quality::SCHEMA, &bytes) {
+        match schema::bsc_capture::capture_quality::decode_quality(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &quality, &r)),
             Err(_) => warnings.push("CAPTURE_QUALITY_INVALID".into()),
         }

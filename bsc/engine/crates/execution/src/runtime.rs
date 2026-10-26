@@ -32,10 +32,10 @@ use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, heal
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
-    SourceEvent, canonical_launch_payload, first_sighting_payload, ingress_drop_payload,
-    later_sighting_payload, launch_id_payload, orphaned_launch_payload, own_binary_sha256,
-    paper_handoff_payload, pending_launch_payload, reorg_payload, resync_payload,
-    source_event_payload, window_payload,
+    STOP_PAYLOAD, SourceEvent, canonical_launch_payload, first_sighting_payload,
+    ingress_drop_payload, later_sighting_payload, launch_id_payload, orphaned_launch_payload,
+    own_binary_sha256, paper_handoff_payload, pending_launch_payload, reorg_payload,
+    resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -1071,11 +1071,13 @@ pub fn run(
         u64::from(CLOCK_ID_MONOTONIC),
         journal_setup(config),
     )?;
+    // The checkout at start may have moved since the build (a shared
+    // checkout): the label says so; BUILD_SHA256 names the binary itself.
     let (checkout, dirty) = checkout_identity(repo_root);
     journal.set_identity(RunIdentity {
         host: host_label(),
         build: format!(
-            "darkbot-bsc-execution {} checkout {}{}",
+            "darkbot-bsc-execution {} checkout-at-start {}{}",
             env!("CARGO_PKG_VERSION"),
             checkout.as_deref().unwrap_or("unknown"),
             if dirty == Some(true) { "+dirty" } else { "" }
@@ -1161,10 +1163,15 @@ pub fn run(
     let reconcile_every = Duration::from_millis(config.reconcile_ms);
     let status_every = Duration::from_millis(config.status_ms);
     let index = |s: SourceId| SourceId::ALL.iter().position(|x| *x == s).unwrap_or(0);
+    let mut stop_journaled = false;
     loop {
         let stopping = stop_file.exists();
         // One fresh monotonic/wall pair per pass for the sightings' wall time.
         let wall = WallPair::read(clock);
+        if stopping && !stop_journaled {
+            journal.record(RecordKind::Runtime, clock.now_ns(), STOP_PAYLOAD.to_vec());
+            stop_journaled = true;
+        }
         if stopping {
             // Every adapter and the follower stop in parallel; the joins
             // below then wait for the slowest one only.

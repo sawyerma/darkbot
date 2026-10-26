@@ -253,8 +253,9 @@ pub fn prove(
     let window = all.windows.iter().find(|w| w.journal == run_id);
     p.census_deterministic = alone.windows.first() == window;
     p.census_state = window.map_or("ABSENT", |w| w.state).to_string();
-    if let Some(bytes) = status {
-        let s = decode(&rs::SCHEMA, bytes).map_err(|e| format!("runtime status: {e}"))?;
+    // A status of another version (an older build) is not comparable: the
+    // proof stays PARTIAL instead of stopping (Phase F gate N3).
+    if let Some(s) = status.and_then(|bytes| decode(&rs::SCHEMA, bytes).ok()) {
         let of_this_run = s
             .u64(rs::STARTED_UNIX_MS)
             .is_ok_and(|started| started.to_string() == run_id);
@@ -331,7 +332,7 @@ pub fn prove(
         for (known, what) in [
             (
                 p.status_match,
-                "no runtime status of this run: its counters are not compared",
+                "no comparable runtime status of this run (absent, another run's or another version): its counters are not compared",
             ),
             (
                 p.config_match,
@@ -635,6 +636,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!((other.verdict, other.status_launches), ("PARTIAL", None));
+        // A status this build cannot decode (another version): PARTIAL, not
+        // an error.
+        let older = prove(
+            &base,
+            "7",
+            Some(b"a status of another version"),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            BUILD,
+        )
+        .unwrap();
+        assert_eq!((older.verdict, older.status_launches), ("PARTIAL", None));
         fs::remove_dir_all(&base).unwrap();
     }
 

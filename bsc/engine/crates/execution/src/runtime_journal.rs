@@ -91,7 +91,7 @@ pub enum SourceEvent {
     RateLimited = 5,
 }
 
-fn source_byte(source: SourceId) -> u8 {
+pub(crate) fn source_byte(source: SourceId) -> u8 {
     SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0) as u8
 }
 
@@ -237,6 +237,10 @@ pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
 
 /// The clean end of the process (`Runtime` kind).
 pub const EXIT_PAYLOAD: [u8; 1] = [b'X'];
+
+/// The stop request, before any source is stopped (`Runtime` kind): the
+/// capture window ends here, not at the sources' own stops that follow.
+pub const STOP_PAYLOAD: [u8; 1] = [b'Q'];
 
 pub fn orphaned_launch_payload(l: &LaunchRef) -> Vec<u8> {
     launch_id_payload(b'O', l.venue, l.block_number, &l.block_hash, &l.tx_hash)

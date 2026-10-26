@@ -643,6 +643,63 @@ pub mod capture_quality {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// v2 (Phase F gate N1): `duration_s` is the native geth source's
+    /// connected time inside the capture window (first canonical record to
+    /// the stop request), `capture_s` that window; a native interruption or
+    /// a launch while no source was connected is not CLEAN.
+    pub const CAPTURE_S: u16 = 28;
+    pub const NATIVE_INTERRUPTIONS: u16 = 29;
+    pub const OUTAGE_LAUNCHES: u16 = 30;
+    pub const FOUR_OUTAGE_LAUNCHES: u16 = 31;
+
+    pub const V2: Schema = Schema {
+        name: "darkbot.bsc.capture-quality.v1",
+        record_type: 59,
+        schema_version: 2,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(PHASE_F_ACCEPTANCE, "phase_f_acceptance", Text),
+            Field::rep(ACCEPTANCE_REASONS, "acceptance_reasons", Text),
+            Field::req(DURATION_S, "duration_s", U64),
+            Field::req(TARGET_S, "target_s", U64),
+            Field::req(NATIVE_SOURCE, "native_source", Bool),
+            Field::opt(MANIFEST_STATE, "manifest_state", Text),
+            Field::req(CENSUS_STATE, "census_state", Text),
+            Field::req(PROOF_VERDICT, "proof_verdict", Text),
+            Field::req(LOST_RECORDS, "lost_records", U64),
+            Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
+            Field::req(WRITE_ERRORS, "write_errors", U64),
+            Field::req(REORGS, "reorgs", U64),
+            Field::req(RESYNCS, "resyncs", U64),
+            Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
+            Field::req(UNJOINED, "unjoined", U64),
+            Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
+            Field::req(CLOCK_SUSPECT, "clock_suspect", Bool),
+            Field::req(UNDECODABLE, "undecodable", U64),
+            Field::req(FOUR_MISMATCH, "four_mismatch", U64),
+            Field::req(FOUR_NO_DERIVATION, "four_no_derivation", U64),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::req(CAPTURE_S, "capture_s", U64),
+            Field::req(NATIVE_INTERRUPTIONS, "native_interruptions", U64),
+            Field::req(OUTAGE_LAUNCHES, "outage_launches", U64),
+            Field::req(FOUR_OUTAGE_LAUNCHES, "four_outage_launches", U64),
+        ],
+    };
+
+    /// A quality record of either version.
+    pub fn decode_quality(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+    }
 }
 
 pub const ALL: &[&Schema] = &[
@@ -655,6 +712,7 @@ pub const ALL: &[&Schema] = &[
     &capture_preflight::V2,
     &ingest_latency::SCHEMA,
     &capture_quality::SCHEMA,
+    &capture_quality::V2,
 ];
 
 #[cfg(test)]

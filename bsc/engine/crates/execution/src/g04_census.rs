@@ -66,6 +66,13 @@ pub struct Window {
     pub unparsed_records: u64,
     /// Pending events the ingress queue dropped before this journal.
     pub ingress_dropped: u64,
+    /// The capture window: from the first canonical record to the stop
+    /// request (`Q`), or to the last canonical record without one.
+    pub capture_ms: u64,
+    /// The native geth source's connected time inside the capture window.
+    pub native_connected_ms: u64,
+    /// Its disconnects, rate limits and stops inside the capture window.
+    pub native_interruptions: u64,
     pub state: &'static str,
 }
 
@@ -270,6 +277,33 @@ impl Connectivity {
         }
     }
 
+    /// After [`Connectivity::sort`]: the connected time of `source` in
+    /// `[from, to]` and how often it went from connected to disconnected
+    /// inside it.
+    fn continuity(&self, source: usize, from: u64, to: u64) -> (u64, u64) {
+        let Some(events) = self.events.get(source) else {
+            return (0, 0);
+        };
+        let n = events.partition_point(|(t, _)| *t <= from);
+        let mut since = (n > 0 && events[n - 1].1).then_some(from);
+        let (mut connected, mut interruptions) = (0u64, 0u64);
+        for &(t, up) in events[n..].iter().take_while(|(t, _)| *t <= to) {
+            match (since, up) {
+                (None, true) => since = Some(t),
+                (Some(s), false) => {
+                    connected = connected.saturating_add(t - s);
+                    interruptions += 1;
+                    since = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = since {
+            connected = connected.saturating_add(to - s);
+        }
+        (connected, interruptions)
+    }
+
     /// After [`Connectivity::sort`]: was any source connected at `at`?
     fn any_connected_at(&self, at: u64) -> bool {
         self.events.iter().any(|events| {
@@ -374,6 +408,9 @@ fn replay(
     let mut exited = false;
     let mut checkpoint = None;
     let mut last_ns = 0u64;
+    // The capture window's bounds: canonical records and the stop request.
+    let mut canonical_ns: Option<(u64, u64)> = None;
+    let mut stop_ns: Option<u64> = None;
     let mut state = loop {
         let Some(reader) = reader.as_mut() else {
             break "INVALID";
@@ -387,6 +424,10 @@ fn replay(
             Err(_) => break "INVALID",
         };
         last_ns = last_ns.max(record.timestamp_ns);
+        if record.kind == RecordKind::Canonical {
+            let t = record.timestamp_ns;
+            canonical_ns = Some(canonical_ns.map_or((t, t), |(a, b)| (a.min(t), b.max(t))));
+        }
         let p = &record.payload;
         match (record.kind, p.first().copied()) {
             (RecordKind::GapSpan, _) => {
@@ -398,6 +439,9 @@ fn replay(
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            (RecordKind::Runtime, Some(b'Q')) if p.len() == 1 => {
+                stop_ns = stop_ns.or(Some(record.timestamp_ns));
+            }
             (RecordKind::Runtime, Some(b'D')) if p.len() == 10 => match u64_at(p, 2) {
                 Some(total) => {
                     let e = dropped.entry(p[1]).or_default();
@@ -490,7 +534,9 @@ fn replay(
                 }
             }
             // A known runtime tag of another length: damaged, counted (L6).
-            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X')) => window.unparsed_records += 1,
+            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X' | b'Q')) => {
+                window.unparsed_records += 1
+            }
             (RecordKind::Canonical | RecordKind::Reorg, _) => window.unparsed_records += 1,
             _ => {}
         }
@@ -528,6 +574,16 @@ fn replay(
     }
     window.duration_ms = last_ns / 1_000_000;
     connectivity.sort();
+    if state != "INVALID"
+        && let Some((first, last)) = canonical_ns
+    {
+        let end = stop_ns.map_or(last, |s| s.clamp(first, last));
+        let native = usize::from(crate::runtime_journal::source_byte(SourceId::Geth));
+        let (connected, interruptions) = connectivity.continuity(native, first, end);
+        window.capture_ms = (end - first) / 1_000_000;
+        window.native_connected_ms = connected / 1_000_000;
+        window.native_interruptions = interruptions;
+    }
     // A sighting whose transaction no canonical record names by the end of a
     // finished window was never included in it (replaced, dropped, or later).
     let not_included = if state == "INVALID" || state == "RUNNING" {
@@ -962,6 +1018,34 @@ mod tests {
     };
 
     const BLOCK_MS: u64 = 1_792_000_000_000;
+
+    /// Phase F gate N1: a source's connected time and interruptions inside
+    /// a window, from its transitions (repeats and later events ignored).
+    #[test]
+    fn continuity_counts_the_connected_time_inside_the_window() {
+        let mut c = Connectivity::default();
+        // Connected before the window, lost at 30, back at 40 (twice), rate
+        // limited at 70, back at 80; stopped at 120, after the window.
+        for (at, event) in [
+            (5, 3),
+            (30, 4),
+            (40, 3),
+            (45, 3),
+            (70, 5),
+            (80, 3),
+            (120, 2),
+        ] {
+            c.event(0, event, at);
+        }
+        c.sort();
+        assert_eq!(c.continuity(0, 10, 100), (20 + 30 + 20, 2));
+        // Never connected, or another source: nothing.
+        assert_eq!(c.continuity(1, 10, 100), (0, 0));
+        // A window inside one connected span.
+        assert_eq!(c.continuity(0, 41, 69), (28, 0));
+        // An unknown source index.
+        assert_eq!(c.continuity(9, 0, 100), (0, 0));
+    }
 
     fn launch(venue: Venue, block: u8, tx: u8, buys: Option<u32>, seen: u64) -> LaunchRef {
         LaunchRef {

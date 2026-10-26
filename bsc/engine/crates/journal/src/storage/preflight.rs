@@ -133,12 +133,15 @@ pub fn preflight(i: &CapacityInputs) -> Preflight {
 }
 
 /// The largest backlog of a trace of per-second amounts (bytes or records)
-/// drained at `rate` per second: what waits in memory at its worst.
+/// drained at `rate` per second: what waits in memory at its worst. A
+/// second's amount may arrive at once (a burst inside the second, Phase F
+/// gate N5), so each second counts in full before its draining.
 pub fn measured_backlog(per_second: &[u64], rate: u64) -> u64 {
     let (mut backlog, mut worst) = (0u64, 0u64);
     for amount in per_second {
-        backlog = backlog.saturating_add(*amount).saturating_sub(rate);
-        worst = worst.max(backlog);
+        let arrived = backlog.saturating_add(*amount);
+        worst = worst.max(arrived);
+        backlog = arrived.saturating_sub(rate);
     }
     worst
 }
@@ -236,9 +239,10 @@ mod tests {
             }
         ));
         // The backlog of a trace drained at a rate: it grows through the
-        // seconds above the rate and drains in the quiet ones.
-        assert_eq!(measured_backlog(&[5, 5, 30, 30, 0, 0, 30], 10), 40);
-        assert_eq!(measured_backlog(&[10, 10, 10], 10), 0);
+        // seconds above the rate and drains in the quiet ones; a second's
+        // amount counts in full before it drains.
+        assert_eq!(measured_backlog(&[5, 5, 30, 30, 0, 0, 30], 10), 50);
+        assert_eq!(measured_backlog(&[10, 10, 10], 10), 10);
         assert_eq!(measured_backlog(&[u64::MAX, u64::MAX], 0), u64::MAX);
         // 1.05 MB per second fit into 1.05 GB usable: 1000 s, not 1800.
         let full = CapacityInputs {
