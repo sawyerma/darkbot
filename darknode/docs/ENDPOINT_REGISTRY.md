@@ -17,7 +17,8 @@
 | REST | `https://api.bitget.com` | Real getestet |
 | Public SBE | `wss://ws.bitget.com/v3/ws/public/sbe` | Real getestet, Schema 1 / V4 |
 | Public JSON WS | `wss://ws.bitget.com/v3/ws/public` | Real getestet |
-| VIP/Demo | Host und Berechtigung separat verifizieren | Offen |
+| **Demo Public SBE** | **`wss://wspap.bitget.com/v3/ws/public/sbe`** | **OBSERVED:** 25 echte V5-Depth50-Frames im öffentlichen 10-s-Terminaltest (1 Snapshot, 24 Deltas); Demo-SBE-Pfad praktisch ermittelt, nicht aus offiziellem Quickstart garantiert |
+| VIP/Demo Private | Host und Berechtigung separat verifizieren | Offen |
 
 **Parameterformen:** V3 REST: `category=USDT-FUTURES`; Classic V2 REST: `productType=usdt-futures`; Public WS: `instType=usdt-futures`. Symbol im Test `BTCUSDT`.
 
@@ -52,7 +53,7 @@
 
 Alle getesteten Subscriptions erhielten ACK und auf Text-`ping` ein `pong`. **Keine** Langzeit- oder Reconnect-Abnahme.
 
-**SBE V5:** Bitget kündigt für den 05.11.2026 Depth50-Snapshot gefolgt von Deltas mit `depthAction`, `seq/pseq` an (Demo schon umgestellt). V5 als neues **Live-Zielprofil**; vorliegende V4-Frames ausschließlich versioniert offline/CLI replaysicher lesbar. Unbekannte Live-Version nicht still dekodieren; Resnapshot nach Sequenzlücke zwingend. V5/Demo und produktiver V5-Feed noch nicht real getestet.
+**SBE V5:** Bitget kündigt für den 05.11.2026 Depth50-Snapshot gefolgt von Deltas mit `depthAction`, `seq/pseq` an (Demo schon umgestellt). V5 als neues **Live-Zielprofil**; vorliegende V4-Frames ausschließlich versioniert offline/CLI replaysicher lesbar. Unbekannte Live-Version nicht still dekodieren; Resnapshot nach Sequenzlücke zwingend. **V5-Demo real getestet (25/25 V5-Frames, 1 Snapshot + 24 Updates, 0 gemeldete Fehler)** über `wss://wspap.bitget.com/v3/ws/public/sbe`. **V5 Live nach 05.11., absichtlicher Gap, Resubscribe/Resnapshot und vollständige Buchparität noch nicht getestet.** [R2-Messdaten/Hashes](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md#9-r2--demo-sbe-v5-echter-btcusdt-depth50-test-27102026).
 
 ## Betrieb / offen
 
