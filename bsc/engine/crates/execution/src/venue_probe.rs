@@ -75,10 +75,16 @@ const EIP1967_IMPLEMENTATION_SLOT: [u8; 32] =
 
 /// The Portal's storage slot of `_feeExemptedTraders`
 /// (`mapping(address => bool)`, keyed by the BUY's `msg.sender`). The
-/// Sourcify storage layout of the verified v5.27.0 implementation places it
-/// at 177. The G0.2 archive witness saw the v5.24.0 BUY path read the same
-/// mapping (PC `0x2d09`). The Portal ABI has no getter for it.
-const FEE_EXEMPTION_MAPPING_SLOT: u64 = 177;
+/// Portal ABI has no getter for it. Witnessed by
+/// `bsc/native/evidence/g01/flap_econ_v5_27_20261026T115316Z/flap_econ.dbrec`
+/// (`g01_flap_econ`, schema v2): the Sourcify storage layout of the
+/// verified v5.27.0 implementation places the variable here, and on the
+/// live state (block 129892713, then v5.27.2) the node's BUY with
+/// [`fee_exemption_key`] of the buyer set to `true` pays no fee instead of
+/// the 1 % one.
+/// The G0.2 archive witness saw the v5.24.0 BUY path read the same mapping
+/// (PC `0x2d09`).
+pub const FEE_EXEMPTION_MAPPING_SLOT: u64 = 177;
 
 /// The quote token `getQuoteTokenConfiguration` is asked for: native BNB.
 const NATIVE_QUOTE_TOKEN: Address = Address::ZERO;
@@ -412,7 +418,7 @@ fn pinned(hash: &[u8; 32]) -> String {
 
 /// The storage key of `caller` in the fee-exemption mapping:
 /// `keccak256(abi.encode(caller, uint256(FEE_EXEMPTION_MAPPING_SLOT)))`.
-fn fee_exemption_key(caller: Address) -> [u8; 32] {
+pub fn fee_exemption_key(caller: Address) -> [u8; 32] {
     let mut preimage = [0u8; 2 * WORD];
     preimage[..WORD].copy_from_slice(&address_word(caller));
     preimage[WORD..].copy_from_slice(&u64_word(FEE_EXEMPTION_MAPPING_SLOT));

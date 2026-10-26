@@ -206,9 +206,112 @@ pub mod flap_econ {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    // Schema v2 (Phase D gate pass 2 LOW-A): the fee-exemption entry the
+    // startup probe reads, witnessed by the implementation's Sourcify
+    // storage layout and by a node BUY with that entry written.
+    pub const SOURCIFY_HOST: u16 = 36;
+    /// The production slot (`venue_probe::FEE_EXEMPTION_MAPPING_SLOT`).
+    pub const EXEMPTION_SLOT: u16 = 37;
+    /// `venue_probe::fee_exemption_key` of the buyer.
+    pub const EXEMPTION_KEY: u16 = 38;
+    /// The buyer's entry at the pinned block.
+    pub const LIVE_EXEMPTION_WORD: u16 = 39;
+    /// The implementation whose layout was read: the production
+    /// deployment's (the live one may differ; then the record is not
+    /// RECONFIRMED).
+    pub const LAYOUT_IMPLEMENTATION: u16 = 50;
+    /// `EXACT_MATCH`, `MATCH`, `NO_MATCH` or `ERROR: ...`.
+    pub const LAYOUT_STATUS: u16 = 40;
+    pub const LAYOUT_RESPONSE: u16 = 41;
+    pub const LAYOUT_RESPONSE_SHA256: u16 = 42;
+    pub const LAYOUT_LABEL: u16 = 43;
+    pub const LAYOUT_SLOT: u16 = 44;
+    pub const LAYOUT_OFFSET: u16 = 45;
+    pub const LAYOUT_TYPE: u16 = 46;
+    pub const LAYOUT_ENCODING: u16 = 47;
+    /// The qualified BUY by the node with the buyer's entry set to `true`.
+    pub const EXEMPT_CASE: u16 = 48;
+    pub const EXEMPTION_CHECKS: u16 = 49;
+
+    pub const V2: Schema = Schema {
+        name: "darkbot.g01.flap-econ.v2",
+        record_type: 53,
+        schema_version: 2,
+        fields: &[
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PORTAL, "portal", Address),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REFERENCE_BLOCK, "reference_block", U64),
+            Field::req(REFERENCE_BLOCK_HASH, "reference_block_hash", B256),
+            Field::req(PIN_RECHECKED, "pin_rechecked", Bool),
+            Field::req(ENDPOINT_HOST, "endpoint_host", Text),
+            Field::req(LOCAL_EVM_ENDPOINT_HOST, "local_evm_endpoint_host", Text),
+            Field::req(TOOL_SHA256, "tool_sha256", B256),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(SIMULATOR_PATH, "simulator_path", Text),
+            Field::req(SIMULATOR_SHA256, "simulator_sha256", B256),
+            Field::req(PORTAL_VERSION, "portal_version", Text),
+            Field::req(IMPLEMENTATION, "implementation", Address),
+            Field::req(
+                IMPLEMENTATION_RUNTIME_SHA256,
+                "implementation_runtime_sha256",
+                B256,
+            ),
+            Field::req(DEPLOYMENT_VALIDATION, "deployment_validation", Text),
+            Field::req(G06A_RECORD_PATH, "g06a_record_path", Text),
+            Field::req(G06A_RECORD_SHA256, "g06a_record_sha256", B256),
+            Field::req(G06A_RECORD_BLOCK, "g06a_record_block", U64),
+            Field::req(SALT, "salt", B256),
+            Field::req(LAUNCHER, "launcher", Address),
+            Field::req(BUYER, "buyer", Address),
+            Field::opt(PREDICTED_TOKEN, "predicted_token", Address),
+            Field::req(COMMITTED_TOKEN, "committed_token", Address),
+            Field::req(LAUNCH_CALLDATA, "launch_calldata", Bytes),
+            Field::req(LAUNCH_CALLDATA_KECCAK, "launch_calldata_keccak", B256),
+            Field::req(RECOGNIZED, "recognized", Text),
+            Field::req(CLASSIFIED, "classified", Text),
+            Field::opt(NODE_LAUNCH_GAS_ESTIMATE, "node_launch_gas_estimate", U64),
+            Field::req(LAUNCH_GAS_LIMIT, "launch_gas_limit", U64),
+            Field::nested(CASES, "cases", Presence::Repeated, &case::SCHEMA),
+            Field::req(STATUS, "status", Text),
+            Field::req(DETAIL, "detail", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::req(SOURCIFY_HOST, "sourcify_host", Text),
+            Field::req(EXEMPTION_SLOT, "exemption_slot", U64),
+            Field::req(EXEMPTION_KEY, "exemption_key", B256),
+            Field::opt(LIVE_EXEMPTION_WORD, "live_exemption_word", B256),
+            Field::req(LAYOUT_STATUS, "layout_status", Text),
+            Field::opt(LAYOUT_RESPONSE, "layout_response", Bytes).max(1024 * 1024),
+            Field::opt(LAYOUT_RESPONSE_SHA256, "layout_response_sha256", B256),
+            Field::opt(LAYOUT_LABEL, "layout_label", Text),
+            Field::opt(LAYOUT_SLOT, "layout_slot", U64),
+            Field::opt(LAYOUT_OFFSET, "layout_offset", U64),
+            Field::opt(LAYOUT_TYPE, "layout_type", Text),
+            Field::opt(LAYOUT_ENCODING, "layout_encoding", Text),
+            Field::nested(
+                EXEMPT_CASE,
+                "exempt_case",
+                Presence::Optional,
+                &case::SCHEMA,
+            ),
+            Field::nested(
+                EXEMPTION_CHECKS,
+                "exemption_checks",
+                Presence::Repeated,
+                &shared::check::SCHEMA,
+            ),
+            Field::req(LAYOUT_IMPLEMENTATION, "layout_implementation", Address),
+        ],
+    };
 }
 
-pub const ALL: &[&Schema] = &[&flap_econ::SCHEMA];
+pub const ALL: &[&Schema] = &[&flap_econ::SCHEMA, &flap_econ::V2];
 
 #[cfg(test)]
 mod tests {
@@ -265,5 +368,79 @@ mod tests {
         let r = decode(&f::SCHEMA, &bytes).unwrap();
         assert_eq!(r.nested_all(f::CASES).unwrap().len(), 1);
         assert!(crate::schema::decode_any(&bytes).is_ok());
+    }
+
+    /// The committed v1 record still decodes; v2 carries the exemption
+    /// witness and decodes by its header.
+    #[test]
+    fn the_v1_record_decodes_and_v2_round_trips() {
+        let v1 = include_bytes!(
+            "../../../../../native/evidence/g01/flap_econ_v5_27_20261026T075420Z/flap_econ.dbrec"
+        );
+        assert_eq!(
+            crate::schema::decode_any(v1)
+                .unwrap()
+                .text(f::STATUS)
+                .unwrap(),
+            "RECONFIRMED"
+        );
+        let names: Vec<&str> = f::SCHEMA.fields.iter().map(|x| x.name).collect();
+        let v2_names: Vec<&str> = f::V2.fields.iter().map(|x| x.name).collect();
+        assert_eq!(&v2_names[..names.len()], &names[..]);
+        let mut x = Draft::new(&crate::schema::bsc_four_freeze::four_freeze::check::SCHEMA);
+        x.set(
+            crate::schema::bsc_four_freeze::four_freeze::check::NAME,
+            "n",
+        )
+        .set(
+            crate::schema::bsc_four_freeze::four_freeze::check::PASS,
+            true,
+        )
+        .set(
+            crate::schema::bsc_four_freeze::four_freeze::check::DETAIL,
+            "d",
+        );
+        let mut d = Draft::new(&f::V2);
+        d.set(f::CHAIN_ID, 56u64)
+            .set(f::PORTAL, Value::Address([0xe2; 20]))
+            .set(f::PROVENANCE_TOOL, "g01_flap_econ")
+            .set(f::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(f::REFERENCE_BLOCK, 3u64)
+            .set(f::REFERENCE_BLOCK_HASH, Value::B256([3; 32]))
+            .set(f::PIN_RECHECKED, true)
+            .set(f::ENDPOINT_HOST, "h")
+            .set(f::LOCAL_EVM_ENDPOINT_HOST, "h")
+            .set(f::TOOL_SHA256, Value::B256([1; 32]))
+            .set(f::SIMULATOR_PATH, "s")
+            .set(f::SIMULATOR_SHA256, Value::B256([2; 32]))
+            .set(f::PORTAL_VERSION, "v5.27.0")
+            .set(f::IMPLEMENTATION, Value::Address([0x6a; 20]))
+            .set(f::IMPLEMENTATION_RUNTIME_SHA256, Value::B256([4; 32]))
+            .set(f::DEPLOYMENT_VALIDATION, "VALID")
+            .set(f::G06A_RECORD_PATH, "g")
+            .set(f::G06A_RECORD_SHA256, Value::B256([5; 32]))
+            .set(f::G06A_RECORD_BLOCK, 1u64)
+            .set(f::SALT, Value::B256([6; 32]))
+            .set(f::LAUNCHER, Value::Address([0xa1; 20]))
+            .set(f::BUYER, Value::Address([0xb0; 20]))
+            .set(f::COMMITTED_TOKEN, Value::Address([0x77; 20]))
+            .set(f::LAUNCH_CALLDATA, Value::Bytes(vec![0x8c]))
+            .set(f::LAUNCH_CALLDATA_KECCAK, Value::B256([7; 32]))
+            .set(f::RECOGNIZED, "LaunchV6")
+            .set(f::CLASSIFIED, "Ok")
+            .set(f::LAUNCH_GAS_LIMIT, 6_000_000u64)
+            .set(f::STATUS, "RECONFIRMED")
+            .set(f::DETAIL, "test")
+            .set(f::SOURCIFY_HOST, "sourcify.dev")
+            .set(f::EXEMPTION_SLOT, 177u64)
+            .set(f::EXEMPTION_KEY, Value::B256([8; 32]))
+            .set(f::LAYOUT_STATUS, "MATCH")
+            .set(f::LAYOUT_IMPLEMENTATION, Value::Address([0x6a; 20]))
+            .set(f::LAYOUT_SLOT, 177u64)
+            .push(f::EXEMPTION_CHECKS, x.into_nested());
+        let bytes = d.encode().unwrap();
+        let r = crate::schema::decode_any(&bytes).unwrap();
+        assert_eq!(r.u64(f::LAYOUT_SLOT).unwrap(), 177);
+        assert!(decode(&f::SCHEMA, &bytes).is_err());
     }
 }

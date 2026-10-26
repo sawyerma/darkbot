@@ -16,6 +16,14 @@
 //! Both are compared with `quote_native_buy` under the admission's witnessed
 //! terms, for the admission's qualified input and the committed record's.
 //!
+//! The fee-exemption entry the startup probe reads
+//! (`venue_probe::fee_exemption_key`, Phase D gate pass 2 LOW-A) is
+//! witnessed twice: the Sourcify storage layout of the deployment's
+//! implementation must name
+//! `_feeExemptedTraders` (`mapping(address => bool)`) at
+//! `FEE_EXEMPTION_MAPPING_SLOT`, and the node's qualified BUY with the
+//! buyer's entry overridden to `true` must pay a different fee than without.
+//!
 //! Before anything else the live deployment must validate as
 //! `bsc_mainnet_v5_27_0()`. No key is read; nothing is signed, sent or
 //! persisted; caller balances exist only in the simulations. One binary
@@ -31,9 +39,12 @@ mod common;
 use alloy_primitives::{Address, B256, U256, keccak256};
 use alloy_sol_types::{SolCall, sol};
 use common::bytecode::{addr, eip1967_implementation_slot};
-use common::edge::{self, CallOutcome, Endpoint, Pin, SimCall, SimResult};
+use common::edge::{
+    self, CallOutcome, Endpoint, Pin, SimCall, SimResult, SourcifyLayout, StorageOverride,
+};
 use common::util::{bounded_text, number, rpc_from_config, utc_stamp};
 use darkbot_bsc_execution::rpc_wire::Limits;
+use darkbot_bsc_execution::venue_probe::{FEE_EXEMPTION_MAPPING_SLOT, fee_exemption_key};
 use darkbot_bsc_qualification::c1_common::{self, Args};
 use darkbot_bsc_record::schema::bsc_flap_econ::flap_econ as fe;
 use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as shared;
@@ -93,13 +104,18 @@ mod defaults {
     pub const LOCAL_EVM_RPC: &str = "https://bsc-mainnet.public.blastapi.io";
 }
 
+/// The Portal's state variable the probe reads for the caller's exemption.
+const EXEMPTION_VARIABLE: &str = "_feeExemptedTraders";
+/// Its type in the storage layout.
+const EXEMPTION_TYPE_LABEL: &str = "mapping(address => bool)";
+
 fn usage() -> &'static str {
     "usage: g01_flap_econ [--rpc <url> | --rpc-config <file>] [--local-evm-rpc <url>] \
      [--g06a-record <dbrec>] [--simulator <cjs>] [--node <program>] [--out-root <dir>] \
      [--confirmations <n>] [--buy-value-wei <wei>]... [--launch-gas-margin-percent <n>] \
      [--buy-gas <n>] [--gas-price-wei <n>] [--caller-balance-wei <n>] [--balance-gas <n>] \
      [--rpc-connect-timeout-s <s>] [--rpc-max-time-s <s>] [--rpc-attempts <n>] \
-     [--rpc-retry-pause-ms <ms>]"
+     [--rpc-retry-pause-ms <ms>] [--sourcify-base <url>] [--sourcify-max-bytes <n>]"
 }
 
 #[derive(Clone, Debug)]
@@ -121,6 +137,8 @@ struct Config {
     limits: Limits,
     attempts: u32,
     retry_pause: Duration,
+    sourcify_base: String,
+    sourcify_max_bytes: u64,
 }
 
 impl Config {
@@ -144,6 +162,8 @@ impl Config {
             "rpc-max-time-s",
             "rpc-attempts",
             "rpc-retry-pause-ms",
+            "sourcify-base",
+            "sourcify-max-bytes",
         ])?;
         if !args.positional.is_empty() {
             return Err(usage().into());
@@ -205,6 +225,23 @@ impl Config {
                 "rpc-retry-pause-ms",
                 defaults::RETRY_PAUSE_MS,
             )?),
+            sourcify_base: args
+                .opt("sourcify-base")?
+                .unwrap_or(defaults::SOURCIFY_BASE)
+                .to_string(),
+            sourcify_max_bytes: match number(
+                args,
+                "sourcify-max-bytes",
+                defaults::SOURCIFY_MAX_BYTES,
+            )? {
+                n if n > defaults::SOURCIFY_MAX_BYTES => {
+                    return Err(format!(
+                        "--sourcify-max-bytes above the record bound {}",
+                        defaults::SOURCIFY_MAX_BYTES
+                    ));
+                }
+                n => n,
+            },
         })
     }
 }
@@ -477,7 +514,9 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
-    fn node(&self, value: U256, buy: &[u8]) -> Execution {
+    /// The launch and the BUY by the node; `storage` overrides words of the
+    /// pinned state for this simulation only.
+    fn node(&self, value: U256, buy: &[u8], storage: &[StorageOverride]) -> Execution {
         let calls = [
             SimCall {
                 from: self.g06a.launcher,
@@ -508,7 +547,7 @@ impl Run<'_> {
             (self.g06a.launcher, self.cfg.caller_balance),
             (self.g06a.buyer, self.cfg.caller_balance),
         ];
-        match self.rpc.simulate(&self.pin, &balances, &calls) {
+        match self.rpc.simulate(&self.pin, &balances, storage, &calls) {
             Ok(results) => node_execution(&results, self.portal),
             Err(e) => Execution {
                 status: "NODE_UNAVAILABLE".into(),
@@ -665,6 +704,124 @@ impl Case {
     }
 }
 
+// ---- the fee-exemption entry ----------------------------------------------------------
+
+/// The implementation's Sourcify storage layout as fetched.
+struct LayoutObs {
+    /// `EXACT_MATCH`, `MATCH`, `NO_MATCH` or `ERROR: ...`.
+    status: String,
+    response: Option<Vec<u8>>,
+    layout: Option<SourcifyLayout>,
+}
+
+fn layout_of(cfg: &Config, implementation: Address) -> LayoutObs {
+    let url = edge::sourcify_layout_url(&cfg.sourcify_base, edge::BSC_CHAIN_ID, implementation);
+    let limits = Limits {
+        compressed: false,
+        ..cfg.limits
+    };
+    let error = |e: String, response| LayoutObs {
+        status: format!("ERROR: {}", bounded_text(&e)),
+        response,
+        layout: None,
+    };
+    match edge::get(&url, limits, cfg.sourcify_max_bytes) {
+        Err(e) => error(e, None),
+        Ok((_, raw)) if raw.len() as u64 > cfg.sourcify_max_bytes => error(
+            format!(
+                "answer of {} bytes exceeds --sourcify-max-bytes {}",
+                raw.len(),
+                cfg.sourcify_max_bytes
+            ),
+            None,
+        ),
+        // Sourcify answers an unverified contract with 404 and a null match.
+        Ok((200 | 404, raw)) => match edge::sourcify_layout(&raw, EXEMPTION_VARIABLE) {
+            Ok(layout) => LayoutObs {
+                status: layout.status.clone(),
+                response: Some(raw),
+                layout: Some(layout),
+            },
+            Err(e) => error(e, Some(raw)),
+        },
+        Ok((other, raw)) => error(format!("HTTP {other}"), Some(raw)),
+    }
+}
+
+/// The witness of the entry the probe reads: the verified layout names
+/// [`EXEMPTION_VARIABLE`] at the probe's slot, the buyer's live entry is
+/// unset, and the node's BUY with the entry written pays another fee.
+fn exemption_checks(
+    layout: Option<&SourcifyLayout>,
+    live_word: Option<B256>,
+    base: &Execution,
+    exempt: &Execution,
+) -> Checks {
+    let mut checks = Vec::new();
+    check(
+        &mut checks,
+        "layout.implementation_verified",
+        layout.is_some_and(|l| l.status != "NO_MATCH"),
+        layout.map_or_else(
+            || "no layout".to_string(),
+            |l| {
+                format!(
+                    "{} runtime {:?} {:?}",
+                    l.status, l.runtime_match, l.contract_name
+                )
+            },
+        ),
+    );
+    let variable = layout.and_then(|l| l.variable.as_ref());
+    check(
+        &mut checks,
+        "layout.variable_at_the_probe_slot",
+        variable.is_some_and(|v| {
+            v.slot == FEE_EXEMPTION_MAPPING_SLOT
+                && v.offset == 0
+                && v.type_label == EXEMPTION_TYPE_LABEL
+                && v.encoding == "mapping"
+        }),
+        variable.map_or_else(
+            || format!("{EXEMPTION_VARIABLE} absent"),
+            |v| {
+                format!(
+                    "{} slot {} offset {} {} ({}) encoding {}; probe slot {FEE_EXEMPTION_MAPPING_SLOT}",
+                    v.label, v.slot, v.offset, v.type_label, v.type_id, v.encoding
+                )
+            },
+        ),
+    );
+    check(
+        &mut checks,
+        "live.buyer_entry_unset",
+        live_word == Some(B256::ZERO),
+        format!("{live_word:?}"),
+    );
+    for (name, e) in [
+        ("node.buy_without_the_entry_succeeds", base),
+        ("node.buy_with_the_entry_succeeds", exempt),
+    ] {
+        check(
+            &mut checks,
+            name,
+            e.status == "SUCCESS" && e.bought_fee.is_some(),
+            format!("{} fee {}", e.status, show(e.bought_fee)),
+        );
+    }
+    check(
+        &mut checks,
+        "node.the_entry_changes_the_fee",
+        matches!((base.bought_fee, exempt.bought_fee), (Some(a), Some(b)) if a != b),
+        format!(
+            "fee {} without, {} with the entry",
+            show(base.bought_fee),
+            show(exempt.bought_fee)
+        ),
+    );
+    checks
+}
+
 // ---- the run ----------------------------------------------------------------------------
 
 struct Outcome {
@@ -776,7 +933,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             .map_err(|e| format!("{e:?}"))?
             .to_vec();
         let quote = rust_quote(value, params.buy_tax);
-        let node = r.node(value, &buy);
+        let node = r.node(value, &buy, &[]);
         let local = r.local(value);
         let committed = (value == g.buy_value).then_some(g.output);
         let mut checks = Vec::new();
@@ -841,11 +998,61 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             checks,
         });
     }
+    // The fee-exemption entry the probe reads, witnessed on this
+    // implementation (the qualified BUY, the buyer's entry written).
+    // The layout of the implementation the production deployment names
+    // (what the probe's slot is claimed for); the BUY runs on live state.
+    let layout = layout_of(cfg, deployment.portal_implementation);
+    let exemption_key = B256::from(fee_exemption_key(g.buyer));
+    let live_word = rpc.storage(portal, exemption_key, &pin);
+    let qualified_value = U256::from(QUALIFIED_MAINNET_INPUT_WEI);
+    let exempt = cases.iter().find(|c| c.value == qualified_value).map(|c| {
+        let node = r.node(
+            qualified_value,
+            &c.buy,
+            &[(portal, exemption_key, B256::with_last_byte(1))],
+        );
+        Case {
+            value: qualified_value,
+            purpose: "QUALIFIED_MAINNET_INPUT_WEI with the buyer's _feeExemptedTraders entry overridden to true (node only)",
+            buy: c.buy.clone(),
+            quote: Err("NOT_APPLICABLE: quote_native_buy refuses an exempt caller".into()),
+            node,
+            local: Execution {
+                status: "NOT_RUN: the entry witness is the node's".into(),
+                ..Execution::default()
+            },
+            committed: None,
+            checks: Vec::new(),
+        }
+    });
+    let exemption = exemption_checks(
+        layout.layout.as_ref(),
+        live_word.as_ref().ok().copied(),
+        &cases
+            .iter()
+            .find(|c| c.value == qualified_value)
+            .map_or_else(Execution::default, |c| c.node.clone()),
+        &exempt
+            .as_ref()
+            .map_or_else(Execution::default, |c| c.node.clone()),
+    );
+    let exemption_ok = exemption.iter().all(|(_, pass, _)| *pass);
+    eprintln!(
+        "g01_flap_econ: exemption entry: layout {}, fee {} without, {} with the entry: {}",
+        layout.status,
+        show(
+            cases
+                .iter()
+                .find(|c| c.value == qualified_value)
+                .and_then(|c| c.node.bought_fee)
+        ),
+        show(exempt.as_ref().and_then(|c| c.node.bought_fee)),
+        if exemption_ok { "PASS" } else { "FAIL" }
+    );
     let pin_rechecked = rpc.header(reference)?.hash == pin.hash;
 
-    let qualified = cases
-        .iter()
-        .find(|c| c.value == U256::from(QUALIFIED_MAINNET_INPUT_WEI));
+    let qualified = cases.iter().find(|c| c.value == qualified_value);
     let token_ok = predicted == Some(g.token);
     let (status, detail) = match (validated.is_ok(), token_ok, pin_rechecked, qualified) {
         (false, _, _, _) => ("NOT_RECONFIRMED", validation.clone()),
@@ -857,15 +1064,19 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             "NOT_RECONFIRMED",
             "the qualified input was not executed".into(),
         ),
-        (true, ok, true, Some(c)) if ok && c.passed() && cases.iter().all(Case::passed) => (
-            "RECONFIRMED",
-            format!(
-                "on {version} ({}): token {} = predicted = committed; node and local EVM output {} = quote_native_buy; TokenBought.fee = protocol fee, tax event = bonding-curve tax",
-                addr(implementation),
-                addr(token),
-                show(c.node.buy_return)
-            ),
-        ),
+        (true, ok, true, Some(c))
+            if ok && c.passed() && cases.iter().all(Case::passed) && exemption_ok =>
+        {
+            (
+                "RECONFIRMED",
+                format!(
+                    "on {version} ({}): token {} = predicted = committed; node and local EVM output {} = quote_native_buy; TokenBought.fee = protocol fee, tax event = bonding-curve tax; {EXEMPTION_VARIABLE} at slot {FEE_EXEMPTION_MAPPING_SLOT} (Sourcify layout) changes the node BUY's fee",
+                    addr(implementation),
+                    addr(token),
+                    show(c.node.buy_return)
+                ),
+            )
+        }
         (true, _, true, Some(c)) => {
             let failed: Vec<String> = cases
                 .iter()
@@ -875,6 +1086,12 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
                         .filter(|(_, p, _)| !p)
                         .map(move |(n, _, d)| format!("{} {n}: {d}", c.value))
                 })
+                .chain(
+                    exemption
+                        .iter()
+                        .filter(|(_, p, _)| !p)
+                        .map(|(n, _, d)| format!("exemption {n}: {d}")),
+                )
                 .collect();
             let not_run = c.node.status != "SUCCESS" && c.local.status != "SUCCESS";
             (
@@ -892,10 +1109,9 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     };
 
     let observed_ms = darkbot_bsc_record::observed_now()?;
-    let mut d = Draft::new(&fe::SCHEMA);
+    let mut d = Draft::new(&fe::V2);
     let b = |v: B256| Value::B256(v.0);
     let a = |v: Address| Value::Address(v.0.0);
-    let w = |v: U256| Value::U256(v.to_be_bytes());
     d.set(fe::CHAIN_ID, chain_id)
         .set(fe::PORTAL, a(portal))
         .set(fe::PROVENANCE_TOOL, TOOL)
@@ -936,69 +1152,57 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         .set(fe::STATUS, status)
         .set(fe::DETAIL, bounded_text(&detail));
     for c in &cases {
-        use fe::case as t;
-        let mut e = Draft::new(&t::SCHEMA);
-        let q = c.quote.as_ref().ok();
-        e.set(t::BUY_VALUE_WEI, w(c.value))
-            .set(t::PURPOSE, c.purpose)
-            .set(t::BUY_CALLDATA, Value::Bytes(c.buy.clone()))
-            .set_opt(t::RUST_EXPECTED_OUTPUT, q.map(|q| w(q.output_amount)))
-            .set_opt(t::RUST_PROTOCOL_FEE, q.map(|q| w(q.protocol_fee)))
-            .set_opt(t::RUST_BONDING_CURVE_TAX, q.map(|q| w(q.bonding_curve_tax)))
-            .set_opt(t::RUST_COMBINED_FEE, q.map(|q| w(q.combined_fee)))
-            .set_opt(t::RUST_NET_RESERVE_INPUT, q.map(|q| w(q.net_reserve_input)))
-            .set_opt(t::NODE_LAUNCH_STATUS, c.node.launch_status)
-            .set_opt(t::NODE_TOKEN, c.node.token.map(a))
-            .set_opt(t::NODE_LAUNCH_GAS, c.node.launch_gas)
-            .set_opt(t::NODE_BUY_STATUS, c.node.buy_status)
-            .set_opt(t::NODE_BUY_RETURN, c.node.buy_return.map(w))
-            .set_opt(t::NODE_BUYER_BALANCE, c.node.balance.map(w))
-            .set_opt(t::NODE_BOUGHT_AMOUNT, c.node.bought_amount.map(w))
-            .set_opt(t::NODE_BOUGHT_ETH, c.node.bought_eth.map(w))
-            .set_opt(t::NODE_BOUGHT_FEE, c.node.bought_fee.map(w))
-            .set_opt(t::NODE_BOUGHT_POST_PRICE, c.node.bought_post_price.map(w))
-            .set_opt(t::NODE_TAX_PAID, c.node.tax_paid.map(w))
-            .set_opt(t::NODE_BUY_GAS, c.node.buy_gas)
-            .set_opt(t::NODE_ERROR, c.node.error.clone())
-            .set(t::LOCAL_STATUS, bounded_text(&c.local.status))
-            .set_opt(t::LOCAL_TOKEN, c.local.token.map(a))
-            .set_opt(t::LOCAL_LAUNCH_GAS, c.local.launch_gas)
-            .set_opt(t::LOCAL_BUY_RETURN, c.local.buy_return.map(w))
-            .set_opt(t::LOCAL_BUYER_BALANCE, c.local.balance.map(w))
-            .set_opt(t::LOCAL_BOUGHT_AMOUNT, c.local.bought_amount.map(w))
-            .set_opt(t::LOCAL_BOUGHT_ETH, c.local.bought_eth.map(w))
-            .set_opt(t::LOCAL_BOUGHT_FEE, c.local.bought_fee.map(w))
-            .set_opt(t::LOCAL_TAX_PAID, c.local.tax_paid.map(w))
-            .set_opt(t::LOCAL_BUY_GAS, c.local.buy_gas)
-            .set_opt(
-                t::LOCAL_LAUNCH_CALLDATA_KECCAK,
-                c.local.launch_calldata_keccak.map(b),
-            )
-            .set_opt(
-                t::LOCAL_BUY_CALLDATA_KECCAK,
-                c.local.buy_calldata_keccak.map(b),
-            )
-            .set_opt(t::COMMITTED_OUTPUT, c.committed.map(w));
-        for (name, pass, detail) in &c.checks {
-            let mut x = Draft::new(&shared::check::SCHEMA);
-            x.set(shared::check::NAME, name.as_str())
-                .set(shared::check::PASS, *pass)
-                .set(shared::check::DETAIL, bounded_text(detail));
-            e.push(t::CHECKS, x.into_nested());
-        }
-        d.push(fe::CASES, e.into_nested());
+        d.push(fe::CASES, case_draft(c).into_nested());
+    }
+    d.set(fe::SOURCIFY_HOST, edge::host(&cfg.sourcify_base))
+        .set(fe::EXEMPTION_SLOT, FEE_EXEMPTION_MAPPING_SLOT)
+        .set(fe::EXEMPTION_KEY, b(exemption_key))
+        .set_opt(
+            fe::LIVE_EXEMPTION_WORD,
+            live_word.as_ref().ok().map(|v| b(*v)),
+        )
+        .set(
+            fe::LAYOUT_IMPLEMENTATION,
+            a(deployment.portal_implementation),
+        )
+        .set(fe::LAYOUT_STATUS, layout.status.as_str())
+        .set_opt(
+            fe::LAYOUT_RESPONSE,
+            layout.response.clone().map(Value::Bytes),
+        )
+        .set_opt(
+            fe::LAYOUT_RESPONSE_SHA256,
+            layout.response.as_ref().map(|r| Value::B256(sha256(r))),
+        );
+    if let Some(v) = layout.layout.as_ref().and_then(|l| l.variable.as_ref()) {
+        d.set(fe::LAYOUT_LABEL, v.label.as_str())
+            .set(fe::LAYOUT_SLOT, v.slot)
+            .set(fe::LAYOUT_OFFSET, v.offset)
+            .set(fe::LAYOUT_TYPE, format!("{} ({})", v.type_label, v.type_id))
+            .set(fe::LAYOUT_ENCODING, v.encoding.as_str());
+    }
+    if let Some(c) = &exempt {
+        d.set(fe::EXEMPT_CASE, case_draft(c).into_nested());
+    }
+    for (name, pass, detail) in &exemption {
+        let mut x = Draft::new(&shared::check::SCHEMA);
+        x.set(shared::check::NAME, name.as_str())
+            .set(shared::check::PASS, *pass)
+            .set(shared::check::DETAIL, bounded_text(detail));
+        d.push(fe::EXEMPTION_CHECKS, x.into_nested());
     }
     for n in [
         "READ_ONLY: no key read; nothing signed, sent or persisted; caller balances exist only in the simulations",
         "SIMULATED_STATE: one block on top of the pinned block; not consensus or builder inclusion evidence",
-        "NO_ADMISSION_CHANGE: the record is evidence for the decode-only v5.27.0 deployment; the production gate is changed only by the reviewed code",
+        "NO_ADMISSION_CHANGE: evidence only; the production gate is changed only by the reviewed code",
         "ECONOMICS_SCOPE: the fresh native profile directly after its launch only (reserve 0, supply 0)",
-        "ADMIT_NOT_CALLED: admit_native_buy needs a ClassifiedLaunch, which classify_launch refuses on the decode-only v5.27.0 deployment; its quote is quote_native_buy with exactly these inputs (WITNESSED_MAINNET_TERMS, reserve 0, supply 0, the launch's buy tax 100)",
+        "ADMIT_NOT_CALLED: the admission's quote is quote_native_buy with exactly these inputs (WITNESSED_MAINNET_TERMS, reserve 0, supply 0, the launch's buy tax 100)",
+        "EXEMPTION_SCOPE: which storage entry the BUY path reads as the caller's exemption, by the Sourcify layout and one node BUY with the entry overridden; no economics of an exempt caller (quote_native_buy refuses one)",
     ] {
         d.push(fe::NON_CLAIMS, n);
     }
     let bytes = d.encode().map_err(|e| e.to_string())?;
-    decode(&fe::SCHEMA, &bytes).map_err(|e| e.to_string())?;
+    decode(&fe::V2, &bytes).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&cfg.out_root)
         .map_err(|e| format!("{}: {e}", cfg.out_root.display()))?;
     let dir = cfg
@@ -1038,6 +1242,64 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         bytes.len()
     ));
     Ok(Outcome { dir, summary })
+}
+
+/// One case as its nested record.
+fn case_draft(c: &Case) -> Draft {
+    let b = |v: B256| Value::B256(v.0);
+    let a = |v: Address| Value::Address(v.0.0);
+    let w = |v: U256| Value::U256(v.to_be_bytes());
+    use fe::case as t;
+    let mut e = Draft::new(&t::SCHEMA);
+    let q = c.quote.as_ref().ok();
+    e.set(t::BUY_VALUE_WEI, w(c.value))
+        .set(t::PURPOSE, c.purpose)
+        .set(t::BUY_CALLDATA, Value::Bytes(c.buy.clone()))
+        .set_opt(t::RUST_EXPECTED_OUTPUT, q.map(|q| w(q.output_amount)))
+        .set_opt(t::RUST_PROTOCOL_FEE, q.map(|q| w(q.protocol_fee)))
+        .set_opt(t::RUST_BONDING_CURVE_TAX, q.map(|q| w(q.bonding_curve_tax)))
+        .set_opt(t::RUST_COMBINED_FEE, q.map(|q| w(q.combined_fee)))
+        .set_opt(t::RUST_NET_RESERVE_INPUT, q.map(|q| w(q.net_reserve_input)))
+        .set_opt(t::NODE_LAUNCH_STATUS, c.node.launch_status)
+        .set_opt(t::NODE_TOKEN, c.node.token.map(a))
+        .set_opt(t::NODE_LAUNCH_GAS, c.node.launch_gas)
+        .set_opt(t::NODE_BUY_STATUS, c.node.buy_status)
+        .set_opt(t::NODE_BUY_RETURN, c.node.buy_return.map(w))
+        .set_opt(t::NODE_BUYER_BALANCE, c.node.balance.map(w))
+        .set_opt(t::NODE_BOUGHT_AMOUNT, c.node.bought_amount.map(w))
+        .set_opt(t::NODE_BOUGHT_ETH, c.node.bought_eth.map(w))
+        .set_opt(t::NODE_BOUGHT_FEE, c.node.bought_fee.map(w))
+        .set_opt(t::NODE_BOUGHT_POST_PRICE, c.node.bought_post_price.map(w))
+        .set_opt(t::NODE_TAX_PAID, c.node.tax_paid.map(w))
+        .set_opt(t::NODE_BUY_GAS, c.node.buy_gas)
+        .set_opt(t::NODE_ERROR, c.node.error.clone())
+        .set(t::LOCAL_STATUS, bounded_text(&c.local.status))
+        .set_opt(t::LOCAL_TOKEN, c.local.token.map(a))
+        .set_opt(t::LOCAL_LAUNCH_GAS, c.local.launch_gas)
+        .set_opt(t::LOCAL_BUY_RETURN, c.local.buy_return.map(w))
+        .set_opt(t::LOCAL_BUYER_BALANCE, c.local.balance.map(w))
+        .set_opt(t::LOCAL_BOUGHT_AMOUNT, c.local.bought_amount.map(w))
+        .set_opt(t::LOCAL_BOUGHT_ETH, c.local.bought_eth.map(w))
+        .set_opt(t::LOCAL_BOUGHT_FEE, c.local.bought_fee.map(w))
+        .set_opt(t::LOCAL_TAX_PAID, c.local.tax_paid.map(w))
+        .set_opt(t::LOCAL_BUY_GAS, c.local.buy_gas)
+        .set_opt(
+            t::LOCAL_LAUNCH_CALLDATA_KECCAK,
+            c.local.launch_calldata_keccak.map(b),
+        )
+        .set_opt(
+            t::LOCAL_BUY_CALLDATA_KECCAK,
+            c.local.buy_calldata_keccak.map(b),
+        )
+        .set_opt(t::COMMITTED_OUTPUT, c.committed.map(w));
+    for (name, pass, detail) in &c.checks {
+        let mut x = Draft::new(&shared::check::SCHEMA);
+        x.set(shared::check::NAME, name.as_str())
+            .set(shared::check::PASS, *pass)
+            .set(shared::check::DETAIL, bounded_text(detail));
+        e.push(t::CHECKS, x.into_nested());
+    }
+    e
 }
 
 #[cfg(test)]
@@ -1136,6 +1398,84 @@ mod tests {
         assert_eq!(node_execution(&[ok(1)], portal).status, "INCOMPLETE");
     }
 
+    /// The exemption witness passes only when the verified layout names the
+    /// probe's slot, the live entry is unset and writing it changes the fee.
+    #[test]
+    fn the_exemption_witness_needs_the_layout_slot_and_a_changed_fee() {
+        let variable = common::edge::LayoutVariable {
+            label: EXEMPTION_VARIABLE.into(),
+            slot: FEE_EXEMPTION_MAPPING_SLOT,
+            offset: 0,
+            type_id: "t_mapping(t_address,t_bool)".into(),
+            type_label: EXEMPTION_TYPE_LABEL.into(),
+            encoding: "mapping".into(),
+        };
+        let layout = SourcifyLayout {
+            status: "MATCH".into(),
+            runtime_match: Some("match".into()),
+            contract_name: Some("Portal".into()),
+            variable: Some(variable.clone()),
+        };
+        let paid = |fee: u64| Execution {
+            status: "SUCCESS".into(),
+            bought_fee: Some(U256::from(fee)),
+            ..Execution::default()
+        };
+        let passed = |c: &Checks| c.iter().all(|(_, p, _)| *p);
+        let unset = Some(B256::ZERO);
+        assert!(passed(&exemption_checks(
+            Some(&layout),
+            unset,
+            &paid(10),
+            &paid(0)
+        )));
+        // The same fee with the entry written: the slot is not the one read.
+        assert!(!passed(&exemption_checks(
+            Some(&layout),
+            unset,
+            &paid(10),
+            &paid(10)
+        )));
+        // The layout places the variable elsewhere.
+        let moved = SourcifyLayout {
+            variable: Some(common::edge::LayoutVariable {
+                slot: FEE_EXEMPTION_MAPPING_SLOT + 1,
+                ..variable
+            }),
+            ..layout.clone()
+        };
+        assert!(!passed(&exemption_checks(
+            Some(&moved),
+            unset,
+            &paid(10),
+            &paid(0)
+        )));
+        // Unverified, no layout, a live exempt buyer, a failed BUY.
+        let unverified = SourcifyLayout {
+            status: "NO_MATCH".into(),
+            ..layout.clone()
+        };
+        assert!(!passed(&exemption_checks(
+            Some(&unverified),
+            unset,
+            &paid(10),
+            &paid(0)
+        )));
+        assert!(!passed(&exemption_checks(None, unset, &paid(10), &paid(0))));
+        assert!(!passed(&exemption_checks(
+            Some(&layout),
+            Some(B256::with_last_byte(1)),
+            &paid(10),
+            &paid(0)
+        )));
+        assert!(!passed(&exemption_checks(
+            Some(&layout),
+            unset,
+            &paid(10),
+            &Execution::default()
+        )));
+    }
+
     /// The real reconfirmation against the configured free endpoint.
     #[test]
     #[ignore = "live read-only BSC RPC and the local EVM toolset"]
@@ -1155,7 +1495,7 @@ mod tests {
         let cfg = Config::parse(&args).unwrap();
         let outcome = run(&cfg).unwrap();
         let bytes = std::fs::read(outcome.dir.join("flap_econ.dbrec")).unwrap();
-        let r = decode(&fe::SCHEMA, &bytes).unwrap();
+        let r = decode(&fe::V2, &bytes).unwrap();
         assert_eq!(r.u64(fe::CHAIN_ID).unwrap(), 56);
         std::fs::remove_dir_all(out).unwrap();
     }

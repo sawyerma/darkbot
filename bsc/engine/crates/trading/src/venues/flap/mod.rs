@@ -6,7 +6,7 @@
 //! SELL, mode and configuration; migration and the others of the ABI are
 //! explicitly unsupported). Trading admission stays the `TOKEN_TAXED_V3`
 //! profile, and only on a deployment whose economics are witnessed on its
-//! implementation (v5.27.0 is decode-only until G0.6a is reconfirmed).
+//! implementation (v5.27.0: G0.6a reconfirmed, `deployment`).
 //!
 //! This is the single implementation of the Flap ABI, the token-address
 //! derivation, the deployment binding, the launch classification and the

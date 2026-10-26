@@ -13,6 +13,7 @@
 use alloy_primitives::{Address, B256, Bloom, U256};
 use darkbot_bsc_execution::rpc_wire::{self, Limits};
 use serde_json::Value as Json;
+use std::collections::BTreeMap;
 use std::{env, io::Write, process::Command, process::Stdio, thread, time::Duration};
 
 pub const BSC_CHAIN_ID: u64 = 56;
@@ -78,6 +79,10 @@ pub struct SimCall {
     pub data: Vec<u8>,
     pub gas: u64,
 }
+
+/// A storage word a simulation overrides (`stateDiff`): account, slot,
+/// value.
+pub type StorageOverride = (Address, B256, B256);
 
 /// A log of a simulated message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,10 +235,36 @@ fn estimate_params(from: Address, to: Address, value: U256, input: &[u8], pin: &
 
 /// `eth_simulateV1`: one block of `calls` on top of the pinned block, the
 /// given balances overridden, no signature validation.
-fn simulate_params(pin: &Pin, balances: &[(Address, U256)], calls: &[SimCall]) -> String {
-    let overrides: Vec<String> = balances
+fn simulate_params(
+    pin: &Pin,
+    balances: &[(Address, U256)],
+    storage: &[StorageOverride],
+    calls: &[SimCall],
+) -> String {
+    // One override object per account: its balance and its storage words.
+    let mut accounts: BTreeMap<Address, (Option<U256>, Vec<String>)> = BTreeMap::new();
+    for (a, b) in balances {
+        accounts.entry(*a).or_default().0 = Some(*b);
+    }
+    for (a, slot, value) in storage {
+        accounts.entry(*a).or_default().1.push(format!(
+            "{}:{}",
+            data(slot.as_slice()),
+            data(value.as_slice())
+        ));
+    }
+    let overrides: Vec<String> = accounts
         .iter()
-        .map(|(a, b)| format!("{}:{{\"balance\":\"0x{b:x}\"}}", data(a.as_slice())))
+        .map(|(a, (balance, words))| {
+            let mut fields = Vec::new();
+            if let Some(b) = balance {
+                fields.push(format!("\"balance\":\"0x{b:x}\""));
+            }
+            if !words.is_empty() {
+                fields.push(format!("\"stateDiff\":{{{}}}", words.join(",")));
+            }
+            format!("{}:{{{}}}", data(a.as_slice()), fields.join(","))
+        })
         .collect();
     let calls: Vec<String> = calls
         .iter()
@@ -750,9 +781,13 @@ impl Endpoint {
         &self,
         pin: &Pin,
         balances: &[(Address, U256)],
+        storage: &[StorageOverride],
         calls: &[SimCall],
     ) -> Result<Vec<SimResult>, String> {
-        let v = self.value("eth_simulateV1", &simulate_params(pin, balances, calls))?;
+        let v = self.value(
+            "eth_simulateV1",
+            &simulate_params(pin, balances, storage, calls),
+        )?;
         let block = v
             .as_array()
             .and_then(|b| b.first())
@@ -816,6 +851,98 @@ pub fn sourcify_url(base: &str, chain_id: u64, address: Address) -> String {
         base.trim_end_matches('/'),
         hex::encode(address)
     )
+}
+
+/// The fields of a storage-layout lookup (no sources).
+pub const SOURCIFY_LAYOUT_FIELDS: &str = "storageLayout,compilation.name";
+
+pub fn sourcify_layout_url(base: &str, chain_id: u64, address: Address) -> String {
+    format!(
+        "{}/v2/contract/{chain_id}/0x{}?fields={SOURCIFY_LAYOUT_FIELDS}",
+        base.trim_end_matches('/'),
+        hex::encode(address)
+    )
+}
+
+/// One state variable of a Sourcify storage layout, with its type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutVariable {
+    pub label: String,
+    pub slot: u64,
+    pub offset: u64,
+    /// The compiler's type id (`t_mapping(t_address,t_bool)`).
+    pub type_id: String,
+    /// The type's label (`mapping(address => bool)`).
+    pub type_label: String,
+    /// `inplace`, `mapping`, `dynamic_array` or `bytes`.
+    pub encoding: String,
+}
+
+/// The facts of a storage-layout lookup: the match and the variable named
+/// `label` (`None` when the layout has no such variable).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourcifyLayout {
+    /// `EXACT_MATCH`, `MATCH` or `NO_MATCH`.
+    pub status: String,
+    pub runtime_match: Option<String>,
+    pub contract_name: Option<String>,
+    pub variable: Option<LayoutVariable>,
+}
+
+/// The variable `label` of a Sourcify storage-layout answer. A label that
+/// occurs more than once (an inherited shadow) is refused, never chosen.
+pub fn sourcify_layout(raw: &[u8], label: &str) -> Result<SourcifyLayout, String> {
+    let v: Json =
+        serde_json::from_slice(raw).map_err(|e| format!("Sourcify answer is not JSON: {e}"))?;
+    let status = match present(&v, "match").and_then(Json::as_str) {
+        Some("exact_match") => "EXACT_MATCH",
+        Some("match") => "MATCH",
+        None => "NO_MATCH",
+        Some(other) => return Err(format!("unknown Sourcify match {other:?}")),
+    };
+    let mut layout = SourcifyLayout {
+        status: status.into(),
+        runtime_match: text(&v, &["runtimeMatch"]),
+        contract_name: text(&v, &["compilation", "name"]),
+        variable: None,
+    };
+    let Some(storage) = present(&v, "storageLayout") else {
+        return Ok(layout);
+    };
+    let entries = field(storage, "storage")?
+        .as_array()
+        .ok_or("storageLayout.storage is not a list")?;
+    let mut found = entries
+        .iter()
+        .filter(|e| e.get("label").and_then(Json::as_str) == Some(label));
+    let Some(entry) = found.next() else {
+        return Ok(layout);
+    };
+    if found.next().is_some() {
+        return Err(format!("storage layout names {label} more than once"));
+    }
+    let decimal = |name: &str| -> Result<u64, String> {
+        field(entry, name)?
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok())
+            .or_else(|| entry.get(name).and_then(Json::as_u64))
+            .ok_or_else(|| format!("{label}.{name} is not a decimal number"))
+    };
+    let type_id = field(entry, "type")?
+        .as_str()
+        .ok_or_else(|| format!("{label}.type is not text"))?
+        .to_string();
+    let types = field(storage, "types")?;
+    let ty = field(types, &type_id)?;
+    layout.variable = Some(LayoutVariable {
+        label: label.to_string(),
+        slot: decimal("slot")?,
+        offset: decimal("offset")?,
+        type_label: text(ty, &["label"]).ok_or_else(|| format!("{type_id} has no label"))?,
+        encoding: text(ty, &["encoding"]).ok_or_else(|| format!("{type_id} has no encoding"))?,
+        type_id,
+    });
+    Ok(layout)
 }
 
 /// One GET through curl, the URL on stdin (`-K -`), never on argv; at most
@@ -1277,6 +1404,11 @@ mod tests {
         let p: Json = serde_json::from_str(&simulate_params(
             &pin,
             &[(Address::repeat_byte(1), U256::from(5u8))],
+            &[(
+                Address::repeat_byte(2),
+                B256::repeat_byte(0x0c),
+                B256::with_last_byte(1),
+            )],
             std::slice::from_ref(&call),
         ))
         .unwrap();
@@ -1289,6 +1421,12 @@ mod tests {
         assert_eq!(
             p[0]["blockStateCalls"][0]["stateOverrides"][format!("0x{}", "01".repeat(20))]["balance"],
             "0x5"
+        );
+        // A storage override is a stateDiff word of its account.
+        assert_eq!(
+            p[0]["blockStateCalls"][0]["stateOverrides"][format!("0x{}", "02".repeat(20))]["stateDiff"]
+                [format!("0x{}", "0c".repeat(32))],
+            format!("0x{}01", "00".repeat(31))
         );
         let e: Json = serde_json::from_str(&estimate_params(
             call.from, call.to, call.value, &call.data, &pin,
@@ -1304,6 +1442,39 @@ mod tests {
             (r.status, r.error.as_deref()),
             (0, Some("execution reverted"))
         );
+    }
+
+    /// A storage-layout answer gives the named variable with its type;
+    /// a missing variable stays absent, a shadowed one is refused.
+    #[test]
+    fn a_storage_layout_names_its_variable_or_nothing() {
+        let raw = br#"{"match":"match","runtimeMatch":"match","compilation":{"name":"Portal"},
+            "storageLayout":{"storage":[
+                {"label":"_blockedSpammers","slot":"176","offset":0,"type":"t_m1"},
+                {"label":"_feeExemptedTraders","slot":"177","offset":0,"type":"t_mapping(t_address,t_bool)"}],
+             "types":{"t_mapping(t_address,t_bool)":{"label":"mapping(address => bool)","encoding":"mapping","key":"t_address","value":"t_bool","numberOfBytes":"32"},
+                      "t_m1":{"label":"x","encoding":"mapping"}}}}"#;
+        let l = sourcify_layout(raw, "_feeExemptedTraders").unwrap();
+        assert_eq!(
+            (l.status.as_str(), l.contract_name.as_deref()),
+            ("MATCH", Some("Portal"))
+        );
+        let v = l.variable.unwrap();
+        assert_eq!((v.slot, v.offset), (177, 0));
+        assert_eq!(v.type_label, "mapping(address => bool)");
+        assert_eq!(v.encoding, "mapping");
+        assert_eq!(sourcify_layout(raw, "_absent").unwrap().variable, None);
+        let shadowed = String::from_utf8(raw.to_vec())
+            .unwrap()
+            .replace("_blockedSpammers", "_feeExemptedTraders");
+        assert!(sourcify_layout(shadowed.as_bytes(), "_feeExemptedTraders").is_err());
+        let unverified = sourcify_layout(br#"{"match":null}"#, "_feeExemptedTraders").unwrap();
+        assert_eq!(
+            (unverified.status.as_str(), unverified.variable),
+            ("NO_MATCH", None)
+        );
+        assert!(sourcify_layout_url("https://s/", 56, Address::ZERO)
+            .ends_with("/v2/contract/56/0x0000000000000000000000000000000000000000?fields=storageLayout,compilation.name"));
     }
 
     #[test]
