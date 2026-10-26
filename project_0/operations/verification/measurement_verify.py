@@ -44,7 +44,8 @@ def journal_views(run):
     Historical runs without journals are left exactly as they are."""
     if not any(p.suffix=='.p0j' for p in run.rglob('*.p0j') if 'verification' not in p.relative_to(run).parts):return None
     binary=run_store.PROJECT/'native/target/release/p0-journal'
-    if not binary.exists():raise c.ContractError('JOURNAL_TOOL_MISSING: build p0-journal (capture.sh builds it)')
+    # DEC-09: the view check is a historical reader, built only with --features historical.
+    if not binary.exists():raise c.ContractError('JOURNAL_TOOL_MISSING: build p0-journal with --features historical')
     p=subprocess.run([str(binary),'renders',str(run)],capture_output=True,text=True,timeout=3600)
     if p.returncode:raise c.ContractError('JOURNAL_VIEWS_INVALID: '+(p.stderr.strip().splitlines() or ['?'])[-1][:500])
     views=[line[5:].rsplit(' ',1) for line in p.stdout.splitlines() if line.startswith('VIEW ')]

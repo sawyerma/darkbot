@@ -4,9 +4,9 @@
 //! (little-endian, fixed-width integers incl. exact i128/u128, no trailing bytes, bounded by the
 //! frame limit). There is no JSON value model in between. The frame `schema` is the payload
 //! version of that kind (≥ 2); a reader accepts only the version its type declares and fails
-//! closed on any other. Schema 1 (generic value tree) is the historical format: it stays readable
-//! through `Frame::legacy_value` for offline readers and not-yet-migrated kinds, and is never
-//! written for a kind that has a payload type.
+//! closed on any other. Schema 1 (generic value tree) is the historical format: never written for a
+//! kind that has a payload type; its JSON view (`legacy_view`) exists only in the `historical`
+//! build (DEC-09).
 use super::journal;
 use crate::market::observer::rows as market;
 use crate::market::observer::verification as strict;
@@ -929,6 +929,7 @@ pub fn validate(kind: u16, schema: u16, bytes: &[u8]) -> io::Result<()> {
     typed_kinds!(kind, schema, bytes, check)
 }
 
+#[cfg(feature = "historical")]
 /// The historical JSON row of a frame for explicit offline views: the value tree of a schema-1
 /// frame, or the legacy render of a typed market frame. Other typed kinds have no JSON view.
 pub fn legacy_view(frame: &journal::Frame) -> io::Result<serde_json::Value> {

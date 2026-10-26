@@ -347,7 +347,7 @@ impl ObserverCore {
 
     /// Test entry over JSON-RPC wire fixtures: the same `wire_params`/`wire_answer` edge as the
     /// production transport, so the engine is tested on exactly the typed answers it gets live.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "historical"))]
     pub(super) fn reconcile_slots_wire(
         &mut self,
         rpc: &mut dyn FnMut(&str, Value, Duration) -> Result<Value, &'static str>,

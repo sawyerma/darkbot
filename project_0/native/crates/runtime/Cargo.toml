@@ -9,6 +9,15 @@ license = "UNLICENSED"
 default = []
 crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate", "kamino-mocks", "drift-mocks", "juplend-mocks"]
 txv1 = ["darkbot-solana/txv1"]
+# DEC-09: historical JSON readers (schema-1 views, legacy renders, pre-binary imports) for offline
+# tools only; the standard production binary is built without them.
+historical = ["darkbot-solana/historical"]
+
+# DEC-09: the A4 parity differential reads historical raw JSON sources only.
+[[bin]]
+name = "p0-parity"
+path = "src/bin/p0-parity.rs"
+required-features = ["historical"]
 
 [dependencies]
 darkbot-common = { path = "../common" }

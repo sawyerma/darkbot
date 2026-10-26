@@ -217,6 +217,7 @@ fn a2_earlier_schema_frames_stay_readable() {
     assert!(decode::<SnapshotFrame>(SnapshotFrame::KIND, 9, &encode(&frame).unwrap()).is_err());
 }
 
+#[cfg(feature = "historical")]
 /// N1/N5: ECON journals written by the schema-2 (17.10.2026) and schema-3 (18.10.2026) writers
 /// (test runs of that time; sealed, chain-verified fixtures) stay readable through their explicit
 /// layouts. Every snapshot and final frame decodes; the recorded figures are unchanged — the

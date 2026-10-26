@@ -13,6 +13,7 @@ fn path() -> PathBuf {
     fs::create_dir(&dir).unwrap();
     dir.join("events.p0j")
 }
+#[cfg(feature = "historical")]
 #[test]
 fn lossless_integer_decimal_and_nested_value_roundtrip() {
     let value = serde_json::json!({"min":i128::MIN,"max":i128::MAX,"unsigned":u128::MAX,"null":null,"nested":[true,false,"quote\"\n雪"],"decimal":serde_json::from_str::<Value>("1.0000000000000000000000000001").unwrap()});
@@ -46,8 +47,8 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
     let read = r.next_frame().unwrap().unwrap();
     assert_eq!(read.provenance, p);
     assert_eq!(
-        read.legacy_value().unwrap()["amount"].to_string(),
-        i128::MIN.to_string()
+        read.legacy_tree().unwrap().get("amount"),
+        Some(&LegacyNode::Int(i128::MIN))
     );
     r.next_frame().unwrap();
     assert!(r.next_frame().unwrap().is_none());
@@ -115,9 +116,22 @@ fn restart_never_truncates_or_accepts_partial_tail() {
 }
 #[test]
 fn malformed_length_payload_tags_and_depth_are_rejected() {
-    assert!(decode(&[99]).is_err());
-    assert!(decode(&[7, 255, 255, 255, 255]).is_err());
-    assert!(decode(&[0, 0]).is_err());
+    assert!(decode_tree(&[99]).is_err());
+    assert!(decode_tree(&[7, 255, 255, 255, 255]).is_err());
+    assert!(decode_tree(&[0, 0]).is_err());
+    // A decimal number node holds JSON number text only (as the historical reader required).
+    for (text, ok) in [
+        ("1.5e-3", true),
+        ("-0", true),
+        ("01", false),
+        ("1.", false),
+        ("x", false),
+    ] {
+        let mut node = vec![5];
+        node.extend((text.len() as u32).to_le_bytes());
+        node.extend(text.as_bytes());
+        assert_eq!(decode_tree(&node).is_ok(), ok, "{text}");
+    }
     let mut v = Value::Null;
     for _ in 0..66 {
         v = Value::Array(vec![v]);
@@ -134,6 +148,7 @@ fn malformed_length_payload_tags_and_depth_are_rejected() {
     assert!(Reader::open(&path).unwrap().next_frame().is_err());
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+#[cfg(feature = "historical")]
 #[test]
 fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     let path = path();
@@ -168,6 +183,7 @@ fn header_identities_are_fresh_per_writer_and_shared_per_run_and_boot() {
         fs::remove_dir_all(p.parent().unwrap()).unwrap();
     }
 }
+#[cfg(feature = "historical")]
 #[test]
 fn export_of_a_damaged_journal_leaves_no_partial_file() {
     let path = path();
@@ -190,6 +206,7 @@ fn export_of_a_damaged_journal_leaves_no_partial_file() {
     assert_eq!(names, ["events.p0j"]);
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+#[cfg(feature = "historical")]
 #[test]
 fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     let path = path();
@@ -372,7 +389,7 @@ fn typed_frames_fail_closed_on_unknown_kind_version_or_truncation() {
     let mut r = Reader::open(&path).unwrap();
     let f = r.next_frame().unwrap().unwrap();
     assert_eq!(f.typed::<OwnerDiagnostic>().unwrap().line, "x");
-    assert!(f.legacy_value().is_err());
+    assert!(f.legacy_tree().is_err());
     assert!(r.next_frame().unwrap().is_some() && r.sealed && r.complete);
     fs::remove_dir_all(dir).unwrap();
 }
@@ -450,6 +467,11 @@ fn historical_schema_one_frames_of_migrated_kinds_stay_readable() {
     let mut r = Reader::open(&path).unwrap();
     let f = r.next_frame().unwrap().unwrap();
     assert_eq!((f.kind, f.schema), (kind::OWNER_RECORD, 1));
+    assert_eq!(
+        f.legacy_tree().unwrap().get("maint_health_bits"),
+        Some(&LegacyNode::Int(i128::MIN))
+    );
+    #[cfg(feature = "historical")]
     assert_eq!(f.legacy_value().unwrap(), historical);
     assert!(f
         .typed::<crate::analytics::evidence::OwnerRecord>()
@@ -582,4 +604,51 @@ fn chain_break_and_forged_manifest_fail_closed() {
         SealScreen::Undecodable("MANIFEST_MISMATCH")
     ));
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+/// DEC-09: the seal of a historical journal (schema-1 manifest `{frames, root_sha256, status}`)
+/// is decided by the native value tree in every build, so the boot audit's scan of earlier runs
+/// needs no JSON reader; a manifest that does not close the chain stays MANIFEST_MISMATCH.
+#[test]
+fn dec09_historical_manifest_seals_without_a_json_reader() {
+    // An integer as decimal text counts as before (the JSON view's `as_u64`); a fraction does not.
+    assert_eq!(LegacyNode::Number("5".into()).as_u64(), Some(5));
+    assert_eq!(LegacyNode::Number("5.0".into()).as_u64(), None);
+    for (frames, status, sealed) in [
+        (1u64, "COMPLETE", Some(true)),
+        (1, "INCOMPLETE", Some(false)),
+        (2, "COMPLETE", None),
+    ] {
+        let path = path();
+        let mut w = Writer::create(&path).unwrap();
+        let first = w
+            .test_append_historical(kind::OWNER_RECORD, &serde_json::json!({"account": "x"}))
+            .unwrap();
+        let manifest = serde_json::json!({"frames": frames, "root_sha256": hex(&first.hash), "status": status});
+        w.test_append_historical(MANIFEST, &manifest).unwrap();
+        w.sync().unwrap();
+        drop(w);
+        let mut r = Reader::open(&path).unwrap();
+        assert!(r.next_frame().unwrap().is_some());
+        match sealed {
+            Some(complete) => {
+                assert_eq!(r.next_frame().unwrap().map(|f| f.kind), Some(MANIFEST));
+                assert!(r.sealed && r.complete == complete);
+                assert!(
+                    matches!(screen_seal(&path), SealScreen::Sealed { complete: c } if c == complete)
+                );
+            }
+            None => {
+                assert_eq!(
+                    code_of(&r.next_frame().unwrap_err()),
+                    Some("MANIFEST_MISMATCH")
+                );
+                assert!(matches!(
+                    screen_seal(&path),
+                    SealScreen::Undecodable("MANIFEST_MISMATCH")
+                ));
+            }
+        }
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }

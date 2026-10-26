@@ -156,6 +156,7 @@ impl<'de> Deserialize<'de> for Joined {
             .map_err(serde::de::Error::custom)
     }
 }
+#[cfg(feature = "historical")]
 /// Historical `canonical_market_shadow.jsonl` row of a typed `ECON_CANONICAL` frame.
 pub fn canonical_legacy_view(row: &Joined) -> Value {
     joined_value(row)
@@ -1254,6 +1255,7 @@ mod regression {
         );
         let _ = fs::remove_dir_all(run);
     }
+    #[cfg(feature = "historical")]
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
     /// identical historical JSONL row; an identity status outside the closed set is refused.
     #[test]
@@ -1647,6 +1649,7 @@ mod regression {
         assert_eq!(w.canonical_joined.len(), 4);
     }
 
+    #[cfg(feature = "historical")]
     /// JFI-FIX-05 parity: the snapshot and final report documents of a rich analytics state
     /// (live and backfilled markets, unique and ambiguous winners, executable, simulation-failed,
     /// economics-unknown and routing-loss evaluations, capture counters, canonical join, real
@@ -1882,6 +1885,7 @@ mod regression {
     }
 }
 
+#[cfg(feature = "historical")]
 fn joined_value(row: &Joined) -> Value {
     json!({"join":row,"race_class":race_class(row),"local_observed_race_margin_ns":margin(row),"local_slot_race_margin_ns":slot_margin(row),"loss_reason":loss(row),
                     "signed":row.our.as_ref().map(|r|r.timing.t_sign_ns.is_some()),

@@ -262,6 +262,7 @@ impl MarketFinal {
             evidence_journal: None,
         }
     }
+    #[cfg(feature = "historical")]
     /// `summary.json`: the summary keys, plus `measurement_plan`/`capture_window` and
     /// `evidence_journal` only when present (the historical document).
     pub fn legacy_json(&self) -> Result<Value, String> {
@@ -277,15 +278,18 @@ impl MarketFinal {
     }
 }
 
-/// Text formats render the historical document; the binary journal stores the fields.
+/// Text formats render the historical document (DEC-09: `historical` build only); the binary
+/// journal stores the fields.
 impl Serialize for MarketFinal {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
         if s.is_human_readable() {
-            self.legacy_json().map_err(S::Error::custom)?.serialize(s)
-        } else {
-            MarketFinal::serialize(self, s)
+            #[cfg(feature = "historical")]
+            return self.legacy_json().map_err(S::Error::custom)?.serialize(s);
+            #[cfg(not(feature = "historical"))]
+            return Err(S::Error::custom("MARKET_FINAL_TEXT_NOT_SUPPORTED"));
         }
+        MarketFinal::serialize(self, s)
     }
 }
 impl<'de> Deserialize<'de> for MarketFinal {

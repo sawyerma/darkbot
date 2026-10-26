@@ -1,6 +1,7 @@
 // A6 (included in the canonical `regression` tests): the canonical capital report uses the run's
 // configured capital list live and offline.
 
+#[cfg(feature = "historical")]
 /// A6: with a custom capital list the canonical summary, the joined row view and the native
 /// join use exactly that list; the backtest reads the same list (USD-micro); the default stays
 /// the standard list and an invalid list is refused.

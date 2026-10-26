@@ -26,7 +26,9 @@ class OfflineReplay(unittest.TestCase):
             self.assertFalse(output.exists())
             legacy = self.call('--replay', directory, '--legacy-reads', '--output', str(output), '--fe-mode', 'full')
             self.assertEqual(legacy.returncode, 2)
-            self.assertIn('FE_REPLAY_READ_MISSING', legacy.stderr)
+            # DEC-09: the historical build finds no read file; the standard build has no legacy reader.
+            self.assertTrue(any(code in legacy.stderr for code in ('FE_REPLAY_READ_MISSING', 'HISTORICAL_READER_NOT_BUILT')),
+                            legacy.stderr)
             self.assertNotIn('RPC_URL_MISSING', legacy.stderr)
             self.assertFalse(output.exists())
 

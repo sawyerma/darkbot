@@ -497,6 +497,7 @@ const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
 /// A23-07: versions one exit may still write after its reservation (handoff, reopen, observe
 /// per signature and change, finalize or non-landing, settle), with margin for observations.
 const EXIT_LIFECYCLE_VERSIONS: u64 = 16;
+#[cfg(feature = "historical")]
 const LEGACY_MAX_BYTES: u64 = 256 * 1024;
 fn err(s: &str) -> String {
     s.into()
@@ -519,6 +520,7 @@ pub(crate) fn cause(code: &str, e: &std::io::Error) -> String {
     };
     format!("{code}:{class}")
 }
+#[cfg(feature = "historical")]
 /// M6: the class of a JSON decode/encode failure (no serde text, which may quote values).
 fn json_cause(code: &str, e: &serde_json::Error) -> String {
     use serde_json::error::Category as C;
@@ -530,6 +532,7 @@ fn json_cause(code: &str, e: &serde_json::Error) -> String {
     };
     format!("{code}:{class}")
 }
+#[cfg(feature = "historical")]
 fn digest(v: &[u8]) -> String {
     solana_sdk::hash::hash(v).to_string()
 }
@@ -576,6 +579,7 @@ fn replay_checked(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<St
     }
     replay(path, wallet)
 }
+#[cfg(feature = "historical")]
 /// Pre-binary wallet journal (`<wallet>.json`, digest-wrapped). Read only by the explicit
 /// migration (`Journal::migrate_legacy`), never rewritten.
 fn read_legacy(path: &Path, wallet: &str) -> Result<(String, Saved), String> {
@@ -661,12 +665,27 @@ fn decode_frame<P: crate::analytics::payload::Payload>(
     frame: &journal::Frame,
 ) -> Result<P, String> {
     if frame.schema == 1 {
-        let value = frame
-            .legacy_value()
-            .map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
-        return serde_json::from_value(value).map_err(|e| json_cause("JOURNAL_CORRUPT", &e));
+        return historical_frame(frame);
     }
     frame.typed().map_err(|e| cause("JOURNAL_CORRUPT", &e))
+}
+/// A schema-1 FE-04 frame through the historical value reader (DEC-09: `historical` build).
+#[cfg(feature = "historical")]
+fn historical_frame<P: crate::analytics::payload::Payload>(
+    frame: &journal::Frame,
+) -> Result<P, String> {
+    let value = frame
+        .legacy_value()
+        .map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
+    serde_json::from_value(value).map_err(|e| json_cause("JOURNAL_CORRUPT", &e))
+}
+/// The standard build reads no schema-1 FE-04 frame: such a wallet journal is refused before
+/// any admission (fail-closed), never skipped; the `historical` build reads it.
+#[cfg(not(feature = "historical"))]
+fn historical_frame<P: crate::analytics::payload::Payload>(
+    _: &journal::Frame,
+) -> Result<P, String> {
+    Err(err("JOURNAL_HISTORICAL_SCHEMA_REQUIRES_HISTORICAL_BUILD"))
 }
 /// Replays the wallet journal. Any damaged, truncated, foreign or illegal frame is a halt.
 fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), String> {
@@ -790,6 +809,7 @@ impl Journal {
         this.reopen_exit()?;
         Ok(this)
     }
+    #[cfg(feature = "historical")]
     /// F8 explicit migration (`p0ctl fe04 migrate`) of a pre-binary `<wallet>.json` journal,
     /// offline and under the wallet lock: the JSON is decoded once into the typed import frame
     /// (fsynced), then kept unchanged as hash-bound evidence `<wallet>.legacy.json`. A crash after
@@ -1432,7 +1452,7 @@ mod tests {
             (frames[0].kind, frames[0].schema),
             (journal::kind::FE04_TRANSITION, 5)
         );
-        assert!(frames[0].legacy_value().is_err());
+        assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
         assert_eq!(
             (v.transition, v.state.phase),
@@ -1454,19 +1474,33 @@ mod tests {
             .unwrap();
         w.sync().unwrap();
         drop(w);
-        let reopened = Journal::open(&dir, &a.wallet).unwrap();
-        assert_eq!(reopened.holds(), i.holds);
-        assert_eq!(
-            reopened.saved.as_ref().unwrap().phase,
-            Phase::HandoffUnknown
-        );
-        drop(reopened);
-        let frames = frames_of(&file);
-        assert_eq!(
-            frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-            [1, 5],
-            "historical frame kept, the reopen transition is typed"
-        );
+        // DEC-09: the standard build reads no schema-1 frame; the wallet journal is refused before
+        // any admission (fail-closed) and stays unchanged for the historical build.
+        #[cfg(not(feature = "historical"))]
+        {
+            let before = fs::read(&file).unwrap();
+            assert_eq!(
+                Journal::open(&dir, &a.wallet).err().as_deref(),
+                Some("JOURNAL_HISTORICAL_SCHEMA_REQUIRES_HISTORICAL_BUILD")
+            );
+            assert_eq!(fs::read(&file).unwrap(), before);
+        }
+        #[cfg(feature = "historical")]
+        {
+            let reopened = Journal::open(&dir, &a.wallet).unwrap();
+            assert_eq!(reopened.holds(), i.holds);
+            assert_eq!(
+                reopened.saved.as_ref().unwrap().phase,
+                Phase::HandoffUnknown
+            );
+            drop(reopened);
+            let frames = frames_of(&file);
+            assert_eq!(
+                frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
+                [1, 5],
+                "historical frame kept, the reopen transition is typed"
+            );
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2254,6 +2288,7 @@ mod tests {
         assert!(p.simulate(&a, test_deadline()).is_err());
         assert!(a.simulated.borrow().is_empty());
     }
+    #[cfg(feature = "historical")]
     /// A pre-binary `<wallet>.json` journal exactly as the former JSON writer stored it.
     fn write_legacy(dir: &Path, saved: &Saved, without_observations: bool) -> PathBuf {
         fs::create_dir_all(dir).unwrap();
@@ -2279,12 +2314,31 @@ mod tests {
     pub(super) fn path_of(j: &Journal) -> PathBuf {
         j.writer.path.clone()
     }
+    #[cfg(feature = "historical")]
     fn kinds(path: &Path) -> Vec<u16> {
         let mut r = journal::Reader::open(path).unwrap();
         std::iter::from_fn(|| r.next_frame().unwrap())
             .map(|f| f.kind)
             .collect()
     }
+    /// F8/DEC-09: in every build a present pre-binary `<wallet>.json` blocks the open (it is
+    /// never parsed there) and nothing is written.
+    #[test]
+    fn a_present_legacy_json_blocks_the_open_in_every_build() {
+        let (dir, a, _, _) = setup();
+        fs::create_dir_all(&dir).unwrap();
+        let legacy = dir.join(format!("{}.json", a.wallet));
+        fs::write(&legacy, b"{not json").unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_REQUIRES_MIGRATION")
+        );
+        assert!(!dir.join(format!("{}.p0j", a.wallet)).exists());
+        assert_eq!(fs::read(&legacy).unwrap(), b"{not json");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(feature = "historical")]
     /// F8 / P0-PROD-CTRL-02: the productive open never parses a pre-binary `<wallet>.json`; the
     /// import is the explicit migration (`p0ctl fe04 migrate`), crash-safe and idempotent. The
     /// migrated JSON stays as hash-bound evidence (`<wallet>.legacy.json`), checked by its bytes.

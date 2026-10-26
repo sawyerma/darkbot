@@ -1,25 +1,31 @@
 //! Re-evaluate saved FE-01 observations using the same production collector.
 //! No RPC, signer or execution path is constructed by this module.
-use super::fe_qualification::{self as fe, ObservedState, WireMultipleAccounts};
+#[cfg(feature = "historical")]
+use super::fe_qualification::WireMultipleAccounts;
+use super::fe_qualification::{self as fe, ObservedState};
 use crate::analytics::journal::{self, kind, Reader, MANIFEST};
 use crate::analytics::payload::{
     Fe01Read, Fe01ReadOutcome, Fe01Replay, Fe01ReplayRead, Fe01Report, Fe01Scope,
 };
 use darkbot_project0::funding::FundingClass;
 use darkbot_solana::runtime_config::RuntimeConfig;
+#[cfg(feature = "historical")]
 use serde_json::Value;
 use solana_sdk::pubkey::Pubkey;
-use std::{fs, io::Read, path::Path};
+#[cfg(feature = "historical")]
+use std::io::Read;
+use std::{fs, path::Path};
 
 /// Binary journal of one FE-01 observation (PERSIST-01) inside its output directory.
 pub const FE01_JOURNAL: &str = "fe01.p0j";
 /// Binary journal of one offline replay (configuration and report), beside its freeze.
 pub const FE01_REPLAY_JOURNAL: &str = "fe01_replay.p0j";
 
+#[cfg(feature = "historical")]
 /// Historical reader (JFI-03): one read saved before JFI-04 — a schema-1 FE01_READ frame or a
 /// `read_NNNNNN.json` file `{method, params, result|error}` — as the typed read. The request must
 /// be exactly a base64/finalized `getMultipleAccounts`; an error or an undecodable result is a
-/// failed read. Nothing else in this module reads JSON.
+/// failed read. Nothing else in this module reads JSON (DEC-09: the `historical` build only).
 pub fn historical_read(entry: &Value) -> Result<Fe01Read, String> {
     let mismatch = || "FE_REPLAY_REQUEST_OR_ERROR_MISMATCH".to_string();
     let options = &entry["params"][1];
@@ -103,7 +109,7 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
                     return Err("FE_REPLAY_CALL_LIMIT".into());
                 }
                 let read = if historical {
-                    historical_read(&frame.legacy_value().map_err(|e| e.to_string())?)?
+                    historical_frame_read(&frame)?
                 } else {
                     frame.typed::<Fe01Read>().map_err(|e| e.to_string())?
                 };
@@ -116,10 +122,16 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
             }
             kind::FE01_RESULT if configured && !result && !reads.is_empty() => {
                 let (status, logical_reads) = if historical {
-                    let value = frame.legacy_value().map_err(|e| e.to_string())?;
+                    let value = frame.legacy_tree().map_err(|e| e.to_string())?;
                     (
-                        value["status"].as_str().unwrap_or_default().to_string(),
-                        value["logical_reads"].as_u64(),
+                        value
+                            .get("status")
+                            .and_then(journal::LegacyNode::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        value
+                            .get("logical_reads")
+                            .and_then(journal::LegacyNode::as_u64),
                     )
                 } else {
                     let report = frame.typed::<Fe01Report>().map_err(|e| e.to_string())?;
@@ -144,6 +156,64 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
         return Err("FE_REPLAY_INCOMPLETE".into());
     }
     Ok(Some(reads))
+}
+
+/// A schema-1 FE01_READ frame (before JFI-04) as the typed read.
+#[cfg(feature = "historical")]
+fn historical_frame_read(frame: &journal::Frame) -> Result<Fe01Read, String> {
+    historical_read(&frame.legacy_value().map_err(|e| e.to_string())?)
+}
+#[cfg(not(feature = "historical"))]
+fn historical_frame_read(_: &journal::Frame) -> Result<Fe01Read, String> {
+    Err(crate::analytics::renders::HISTORICAL_READER_NOT_BUILT.into())
+}
+
+/// One pre-PERSIST-01 `read_NNNNNN.json` (A14, `--legacy-reads`) with its integrity record,
+/// bounded by the replay's byte budget.
+#[cfg(feature = "historical")]
+fn legacy_file_read(
+    directory: &Path,
+    n: usize,
+    limit: u64,
+    total: &mut u64,
+) -> Result<(Fe01Read, Fe01ReplayRead), String> {
+    let name = format!("read_{n:06}.json");
+    let path = directory.join(&name);
+    if fs::symlink_metadata(&path)
+        .map_err(|_| "FE_REPLAY_READ_MISSING")?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("FE_REPLAY_SYMLINK".into());
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(|_| "FE_REPLAY_READ_MISSING")?
+        .take(limit.saturating_sub(*total).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| "FE_REPLAY_IO")?;
+    *total = total
+        .checked_add(bytes.len() as u64)
+        .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+    if *total > limit {
+        return Err("FE_REPLAY_BYTE_LIMIT".into());
+    }
+    let entry: Value = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
+    let integrity = Fe01ReplayRead {
+        origin: name,
+        sha256: fe::sha(&bytes),
+        bytes: bytes.len() as u64,
+    };
+    Ok((historical_read(&entry)?, integrity))
+}
+#[cfg(not(feature = "historical"))]
+fn legacy_file_read(
+    _: &Path,
+    _: usize,
+    _: u64,
+    _: &mut u64,
+) -> Result<(Fe01Read, Fe01ReplayRead), String> {
+    Err(crate::analytics::renders::HISTORICAL_READER_NOT_BUILT.into())
 }
 
 pub fn first_class(name: &str) -> Result<FundingClass, String> {
@@ -258,34 +328,10 @@ pub fn replay_frozen(
                 reads.push(integrity.clone());
                 return Ok(decoded);
             }
-            let name = format!("read_{:06}.json", reads.len() + 1);
-            let path = directory.join(&name);
-            if fs::symlink_metadata(&path)
-                .map_err(|_| "FE_REPLAY_READ_MISSING")?
-                .file_type()
-                .is_symlink()
-            {
-                return Err("FE_REPLAY_SYMLINK".into());
-            }
-            let mut bytes = Vec::new();
-            fs::File::open(path)
-                .map_err(|_| "FE_REPLAY_READ_MISSING")?
-                .take(limit.saturating_sub(total).saturating_add(1))
-                .read_to_end(&mut bytes)
-                .map_err(|_| "FE_REPLAY_IO")?;
-            total = total
-                .checked_add(bytes.len() as u64)
-                .ok_or("FE_REPLAY_BYTE_LIMIT")?;
-            if total > limit {
-                return Err("FE_REPLAY_BYTE_LIMIT".into());
-            }
-            let entry: Value = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
-            let decoded = decode_saved(&historical_read(&entry)?, keys, floor)?;
-            reads.push(Fe01ReplayRead {
-                origin: name,
-                sha256: fe::sha(&bytes),
-                bytes: bytes.len() as u64,
-            });
+            let (read, integrity) =
+                legacy_file_read(directory, reads.len() + 1, limit, &mut total)?;
+            let decoded = decode_saved(&read, keys, floor)?;
+            reads.push(integrity);
             Ok(decoded)
         },
         class,
@@ -329,11 +375,44 @@ pub fn replay_frozen(
     Ok((report, freeze))
 }
 
+/// DEC-09: the standard build reads no historical FE-01 source: a pre-PERSIST-01 read file (even
+/// with `--legacy-reads`) and a historical run manifest are refused with an explicit code.
+#[cfg(all(test, not(feature = "historical")))]
+mod dec09_tests {
+    use super::*;
+    #[test]
+    fn dec09_standard_build_refuses_historical_fe01_sources() {
+        let dir = std::env::temp_dir().join(format!("p0-dec09-fe01-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("read_000001.json"), b"{}").unwrap();
+        let config = darkbot_solana::runtime_config::RuntimeConfig {
+            fe_mode: "full".into(),
+            ..Default::default()
+        };
+        let class = first_class("ZERO_PREFUND_SAME_TX").unwrap();
+        let err = replay(&config, &dir, class, true).unwrap_err();
+        assert!(
+            err.contains(crate::analytics::renders::HISTORICAL_READER_NOT_BUILT),
+            "{err}"
+        );
+        fs::write(dir.join("manifest.json"), br#"{"layout":"v2"}"#).unwrap();
+        assert_eq!(
+            crate::analytics::renders::detect(&dir).unwrap_err(),
+            crate::analytics::renders::HISTORICAL_READER_NOT_BUILT
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "historical")]
     use base64::Engine;
+    #[cfg(feature = "historical")]
     use serde_json::json;
+    #[cfg(feature = "historical")]
     /// A saved read is bound to its exact request (keys, floor, base64, finalized) and to a
     /// decodable answer, from a historical frame as from a typed one.
     #[test]

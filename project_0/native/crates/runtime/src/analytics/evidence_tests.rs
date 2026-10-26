@@ -528,7 +528,7 @@ fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
     assert_eq!(payload::encode(&opportunity).unwrap(), record_bytes);
     let _: ReconcileRecord = frames[1].typed().unwrap();
     assert_eq!(frames[2].typed::<DaySummary>().unwrap(), summary);
-    assert!(frames[0].legacy_value().is_err());
+    assert!(frames[0].legacy_tree().is_err());
     assert!(reader.complete);
     assert!(!dir.join("recovery.p0j").exists());
     std::fs::remove_dir_all(dir).unwrap();

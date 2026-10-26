@@ -7,8 +7,10 @@
 //! `import-provider-evidence JSON JOURNAL` turns a measured provider evidence JSON into the typed
 //! `PROVIDER_EVIDENCE` record the network boot audit reads (X2);
 //! `renders RUN` checks every existing historical view of a run byte for byte against its
-//! journal (read only; a missing view stays MISSING, nothing is rendered into the run).
+//! journal (read only; a missing view stays MISSING, nothing is rendered into the run; DEC-09:
+//! only in the `historical` build).
 use darkbot_runner::analytics::journal::{self, Reader, MANIFEST};
+#[cfg(feature = "historical")]
 use darkbot_runner::analytics::renders;
 use std::{collections::BTreeMap, path::Path};
 fn verify(path: &Path) -> Result<String, String> {
@@ -123,9 +125,14 @@ fn frames(path: &Path) -> Result<(), String> {
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     while let Some(f) = reader.next_frame().map_err(|e| e.to_string())? {
         let p = &f.provenance;
-        // Typed frames as text; historical value-tree frames as their stored value.
+        // Typed frames as text; historical value-tree frames as their stored value (DEC-09: the
+        // JSON text only in the `historical` build, else the native tree).
         let payload = if f.schema == 1 {
-            f.legacy_value().map(|v| v.to_string())
+            #[cfg(feature = "historical")]
+            let text = f.legacy_value().map(|v| v.to_string());
+            #[cfg(not(feature = "historical"))]
+            let text = f.legacy_tree().map(|v| format!("{v:?}"));
+            text
         } else {
             darkbot_runner::analytics::payload::describe(f.kind, f.schema, &f.payload)
         }
@@ -139,6 +146,7 @@ fn frames(path: &Path) -> Result<(), String> {
     }
     out.flush().map_err(|e| e.to_string())
 }
+#[cfg(feature = "historical")]
 fn views(run: &Path) -> Result<(), String> {
     let paths = renders::detect(run)?;
     for (path, status) in renders::check(&paths)? {
@@ -166,7 +174,10 @@ fn main() {
         ["import-provider-evidence", json, out] => {
             import_provider_evidence(Path::new(json), Path::new(out))
         }
+        #[cfg(feature = "historical")]
         ["renders", run] => views(Path::new(run)),
+        #[cfg(not(feature = "historical"))]
+        ["renders", _] => Err(darkbot_runner::analytics::renders::HISTORICAL_READER_NOT_BUILT.into()),
         _ => Err(
             "usage: p0-journal verify JOURNAL | p0-journal frames JOURNAL | \
                   p0-journal import KIND JOURNAL | p0-journal import-provider-evidence JSON JOURNAL | \

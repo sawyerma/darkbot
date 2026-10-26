@@ -271,6 +271,7 @@ impl From<&darkbot_common::mt0::Snapshot<'_>> for Mt0Telemetry {
 }
 
 impl Mt0Telemetry {
+    #[cfg(feature = "historical")]
     /// The historical object: the MT0 text parsed as JSON (ratios keep their six-decimal text).
     pub fn legacy_json(&self) -> Result<Value, String> {
         let ratio = |(num, den): (u64, u64)| -> Result<Value, String> {
@@ -380,16 +381,19 @@ impl Mt0Telemetry {
     }
 }
 
-/// Text formats render the historical document; the binary journal stores the fields.
+/// Text formats render the historical document (DEC-09: `historical` build only); the binary
+/// journal stores the fields.
 macro_rules! text_render {
     ($t:ty, $name:literal) => {
         impl Serialize for $t {
             fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
                 if s.is_human_readable() {
-                    self.legacy_json().map_err(S::Error::custom)?.serialize(s)
-                } else {
-                    <$t>::serialize(self, s)
+                    #[cfg(feature = "historical")]
+                    return self.legacy_json().map_err(S::Error::custom)?.serialize(s);
+                    #[cfg(not(feature = "historical"))]
+                    return Err(S::Error::custom($name));
                 }
+                <$t>::serialize(self, s)
             }
         }
         impl<'de> Deserialize<'de> for $t {
@@ -515,6 +519,7 @@ pub struct MarketDelta {
     pub counter_attribution: String,
 }
 impl MarketDelta {
+    #[cfg(feature = "historical")]
     pub fn legacy_json(&self) -> Result<Value, String> {
         let mut v = serde_json::to_value(&self.metrics).map_err(|e| e.to_string())?;
         v["c0_mo_counter_delta"] =
@@ -534,6 +539,7 @@ pub struct MarketCumulative {
     pub c0_mo_checkpoint_qualification: String,
 }
 impl MarketCumulative {
+    #[cfg(feature = "historical")]
     pub fn legacy_json(&self) -> Result<Value, String> {
         let mut v = serde_json::to_value(&self.metrics).map_err(|e| e.to_string())?;
         v["c0_mo_r6"] = serde_json::to_value(&self.c0_mo_r6).map_err(|e| e.to_string())?;
@@ -767,6 +773,7 @@ impl crate::analytics::payload::Payload for SnapshotFrame {
     }
 }
 
+#[cfg(feature = "historical")]
 /// Render of a typed report document (`hour_0N.json`, `economics_final.json`).
 pub fn render<T: Serialize>(doc: &T) -> Result<Value, String> {
     serde_json::to_value(doc).map_err(|e| e.to_string())

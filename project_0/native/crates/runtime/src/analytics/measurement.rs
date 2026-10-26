@@ -1,6 +1,7 @@
 //! One time plan for the launcher, capture, attribution and reports. No RPC or trading.
 use darkbot_common::timing::Clock;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "historical")]
 use serde_json::{json, Value};
 use std::{fs, path::Path};
 
@@ -498,6 +499,7 @@ fn manifest_of_revision(revision: u16, bytes: &[u8]) -> std::io::Result<RunManif
     })
 }
 impl RunManifest {
+    #[cfg(feature = "historical")]
     /// `manifest.json` / `measurement_manifest.json` render (V1 has no `layout` key).
     pub fn legacy_json(&self) -> Value {
         let mut v = serde_json::to_value(self).unwrap_or(Value::Null);
@@ -582,6 +584,7 @@ impl super::payload::Payload for PhaseRecord {
     const KIND: u16 = super::journal::kind::MEASUREMENT_PHASE;
 }
 impl PhaseRecord {
+    #[cfg(feature = "historical")]
     /// Historical `measurement_phases.jsonl` row (offline render for the pinned readers).
     pub fn legacy_json(&self) -> Value {
         let details = match &self.phase {
@@ -1116,7 +1119,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "historical"))]
 mod persistence_tests {
     use super::*;
     #[test]

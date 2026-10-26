@@ -247,10 +247,10 @@ class Launchers(unittest.TestCase):
                     self.assertEqual(p.returncode,0,p.stderr)
                     first=next(x for x in p.stdout.splitlines() if ' kind=65535 ' not in x)
                     self.assertIn('Bootstrap',first)
-                    # The read-only historical view check finds no view and renders none into the run.
+                    # DEC-09: the launcher builds the standard binary, which has no historical view check;
+                    # it refuses (no JSON reader) and renders nothing into the run.
                     p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
-                    self.assertEqual(p.returncode,0,p.stderr)
-                    self.assertTrue(all(x.split()[-1] in ('MISSING','NO_FRAME') for x in p.stdout.splitlines()),p.stdout)
+                    self.assertEqual(p.returncode,2,p.stdout);self.assertIn('HISTORICAL_READER_NOT_BUILT',p.stderr)
                     self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
                     log=s.artifact(run,'runtime_log',layout).read_text()
                     self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING',log);self.assertNotIn('C0_E1_WARMUP_FAILED',log)

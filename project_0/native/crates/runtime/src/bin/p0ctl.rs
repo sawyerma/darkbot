@@ -1082,6 +1082,8 @@ fn fe04_cmd(args: &[String]) -> Result<bool, String> {
             println!("archived={}", path.display());
             Ok(true)
         }
+        // DEC-09: the pre-binary JSON import exists only in the `historical` build.
+        #[cfg(feature = "historical")]
         Some("migrate") => {
             use darkbot_runner::execution::one_shot::{migrated_legacy, Journal};
             let sha = Journal::migrate_legacy(dir, &wallet)?;
@@ -1090,6 +1092,10 @@ fn fe04_cmd(args: &[String]) -> Result<bool, String> {
                 migrated_legacy(dir, &wallet).display()
             );
             Ok(true)
+        }
+        #[cfg(not(feature = "historical"))]
+        Some("migrate") => {
+            Err(darkbot_runner::analytics::renders::HISTORICAL_READER_NOT_BUILT.into())
         }
         _ => Err(USAGE.into()),
     }

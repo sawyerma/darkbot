@@ -8,6 +8,7 @@ use crate::market_observer::{utc_compact, MarketConfig, ReceiverEvent};
 use darkbot_common::channel::{bounded, Consumer, Producer, Wakeup};
 use darkbot_common::timing::Clock;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "historical")]
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -20,9 +21,11 @@ use std::time::Duration;
 mod canonical;
 #[path = "econ_docs.rs"]
 mod docs;
+#[cfg(feature = "historical")]
+pub use canonical::canonical_legacy_view;
 pub use canonical::{
-    canonical_legacy_view, executable_costs, join as canonical_join, joined_facts, race_margins,
-    record_digest, CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
+    executable_costs, join as canonical_join, joined_facts, race_margins, record_digest,
+    CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
     Joined as CanonicalJoin, JoinedFacts, RaceMargins, RaceMarginsV3,
     LOSS_ATTRIBUTION_EARLIER_RECORDS, LOSS_ATTRIBUTION_MODEL,
 };
@@ -277,7 +280,7 @@ pub const MAX_RETENTION: usize =
     darkbot_solana::runtime_config::defaults::RETENTION_ROWS_MAX as usize;
 
 /// Test fixture: a handle without a worker thread (evidence goes to the returned consumer).
-#[cfg(test)]
+#[cfg(all(test, any(feature = "historical", feature = "crate_health")))]
 pub(crate) fn test_handle(
     retention: usize,
 ) -> (Handle, darkbot_common::channel::Consumer<Evidence>) {
@@ -679,6 +682,7 @@ impl crate::analytics::payload::Payload for OpportunityRow {
     }
 }
 
+#[cfg(feature = "historical")]
 /// Historical `opportunity_economics.jsonl` row of an opportunity (same function live and
 /// offline, so the render of a typed frame is the row the run produced).
 pub fn opportunity_view(row: &OpportunityRow) -> Value {

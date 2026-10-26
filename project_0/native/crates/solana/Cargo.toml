@@ -13,6 +13,9 @@ license = "UNLICENSED"
 default = []
 # Offline test helpers for dependent crates (loopback gRPC server); never in a release build.
 test-support = []
+# DEC-09: the historical JSON re-encoders of typed chain evidence (offline view checks only); the
+# standard production binary is built without them.
+historical = []
 txv1 = ["dep:solana-pubkey-v1", "dep:solana-hash-v1", "dep:solana-instruction-v1", "dep:solana-message-v1", "dep:solana-short-vec-v1"]
 
 [dependencies]

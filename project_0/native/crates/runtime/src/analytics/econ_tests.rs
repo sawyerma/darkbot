@@ -2,7 +2,11 @@ use super::*;
 use darkbot_solana::submit::{
     MessageFeeQuote, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError,
 };
+#[cfg(feature = "historical")]
+use serde_json::json;
+use serde_json::Value;
 use solana_sdk::transaction::VersionedTransaction;
+#[cfg(feature = "historical")]
 use std::fs;
 
 use crate::analytics::record::{LossReason, TimingEvidence};
@@ -142,6 +146,7 @@ fn worker_in(layout: crate::run_layout::RunLayout) -> Worker {
     )
     .unwrap()
 }
+#[cfg(feature = "historical")]
 /// D6 (market tests): a handle with `worker()`'s plan and window — the same live hours.
 pub(crate) fn window_handle() -> (Handle, darkbot_common::channel::Consumer<Evidence>) {
     let (tx, rx) = bounded("test-econ-window", 1024);
@@ -156,6 +161,7 @@ pub(crate) fn window_handle() -> (Handle, darkbot_common::channel::Consumer<Evid
     h.start(1, 4_000_000_001);
     (h, rx)
 }
+#[cfg(feature = "historical")]
 /// D6 (market tests): the four hourly capture counters a real worker reports for `events`.
 pub(crate) fn hourly_capture_counters(events: Vec<Evidence>) -> Vec<Value> {
     let mut w = worker();
@@ -206,6 +212,7 @@ pub(super) fn shadow_stats() -> ShadowStats {
         remote_projection_queue_depth: 0,
     }
 }
+#[cfg(feature = "historical")]
 /// Typed `ECON_SNAPSHOT` / `ECON_FINAL` frames of a report journal (the journal is the
 /// document; JSON views exist only after an explicit offline export).
 pub(super) fn report_frames(path: &Path) -> (Vec<SnapshotFrame>, Option<SnapshotReport>) {
@@ -220,6 +227,7 @@ pub(super) fn report_frames(path: &Path) -> (Vec<SnapshotFrame>, Option<Snapshot
     }
     (snapshots, last)
 }
+#[cfg(feature = "historical")]
 /// No JSON/JSONL file anywhere under `dir` (JFI-03: a run writes no views).
 pub(super) fn assert_no_json(dir: &Path) {
     let mut stack = vec![dir.to_path_buf()];
@@ -532,6 +540,7 @@ fn all_loss_reasons_are_retained_exactly() {
         assert_eq!(bottleneck(&r), format!("{loss:?}"));
     }
 }
+#[cfg(feature = "historical")]
 #[test]
 fn bounded_queue_and_retention_overflow_fail_qualification() {
     let mut w = worker();
@@ -555,6 +564,7 @@ fn bounded_queue_and_retention_overflow_fail_qualification() {
     assert_eq!(w.slots.len(), 1);
     assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
+#[cfg(feature = "historical")]
 #[test]
 fn early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete() {
     let mut w = worker();
@@ -575,6 +585,7 @@ fn early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete() {
     w.h.shared.writer_errors.store(1, Ordering::Relaxed);
     assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
+#[cfg(feature = "historical")]
 /// PERSIST-05: a real write failure of the report journal (injected at the I/O boundary) is
 /// counted, fails the technical verdict INCOMPLETE and is sticky; the snapshots written before
 /// it stay readable and no later one is written.
@@ -596,6 +607,7 @@ fn report_journal_write_failure_is_counted_sticky_and_incomplete() {
     assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [1]);
     assert!(last.is_none());
 }
+#[cfg(feature = "historical")]
 #[test]
 fn four_boundaries_delta_cumulative_and_final_reconcile() {
     let mut w = worker();
@@ -654,6 +666,7 @@ fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
     );
 }
 
+#[cfg(feature = "historical")]
 /// R17: each hour reports the first/last slot of the transactions observed in that hour, not
 /// the run-global first slot (hour 2 used to repeat hour 1's first slot).
 #[test]
@@ -2367,10 +2380,12 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             .all(|c| c.message_fee_quote.is_some()));
     }
 }
+#[cfg(feature = "historical")]
 #[test]
 fn runtime_worker_writes_four_snapshots_then_identical_final() {
     four_snapshots_then_identical_final(crate::run_layout::RunLayout::V1);
 }
+#[cfg(feature = "historical")]
 #[test]
 fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     let root = four_snapshots_then_identical_final(crate::run_layout::RunLayout::V2);
@@ -2412,6 +2427,7 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     );
     assert_no_json(&root);
 }
+#[cfg(feature = "historical")]
 #[test]
 fn historical_views_are_checked_read_only_against_the_journals() {
     use crate::analytics::renders;
@@ -2475,6 +2491,7 @@ fn historical_views_are_checked_read_only_against_the_journals() {
     assert!(err.starts_with("RENDER_MISMATCH"), "{err}");
     assert_eq!(fs::read(&hour).unwrap(), bytes);
 }
+#[cfg(feature = "historical")]
 fn four_snapshots_then_identical_final(layout: crate::run_layout::RunLayout) -> std::path::PathBuf {
     let mut w = worker_in(layout);
     complete(&mut w);
@@ -2516,6 +2533,7 @@ fn unknown_capital_does_not_remove_market_match() {
     assert_eq!(b.fundable.count, 0);
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
     let r = rec();
@@ -2558,6 +2576,7 @@ fn backfill_preserves_chain_race_but_never_live_rx_or_speedup() {
 }
 
 // Deliberately preserve the pre-fix forward reduction as a differential oracle.
+#[cfg(feature = "historical")]
 fn original_selection(w: &Worker, rows: &[(usize, OpportunityRecord)]) -> Value {
     let mut selected: BTreeMap<String, (usize, &OpportunityRecord)> = BTreeMap::new();
     for (hour, r) in rows {
@@ -2584,6 +2603,7 @@ fn original_selection(w: &Worker, rows: &[(usize, OpportunityRecord)]) -> Value 
     serde_json::to_value(selected.into_values().collect::<Vec<_>>()).unwrap()
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
     let mut w = worker();
@@ -2644,6 +2664,7 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
     fs::remove_dir_all(path).unwrap();
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn late_winners_split_coalesced_groups_exactly_like_original_selection() {
     let mut w = worker();
@@ -2703,6 +2724,7 @@ fn late_winners_split_coalesced_groups_exactly_like_original_selection() {
     assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 0);
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn semantic_overflow_and_corrupt_journal_fail_closed() {
     let mut w = worker();
@@ -2813,6 +2835,7 @@ fn startup_barrier_never_starts_clock_on_timeout_or_failed_shadow() {
     );
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn empty_measurement_or_recovery_after_start_cannot_pass() {
     let mut w = worker();
@@ -2824,6 +2847,7 @@ fn empty_measurement_or_recovery_after_start_cannot_pass() {
     assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
 
+#[cfg(feature = "historical")]
 #[test]
 fn measurement_plan_report_and_attribution_agree_for_all_durations() {
     for seconds in [1, 61, 600, 3600, 18000, 86400] {
@@ -2932,6 +2956,7 @@ fn retention_is_byte_bounded_and_released_exactly() {
     );
 }
 
+#[cfg(feature = "historical")]
 /// A2: under `finalized` (or an unknown commitment) the winner's live receipt is its finalized
 /// notification: no rx margin or rx speedup, the slot margin stays; under `confirmed` both. The
 /// typed opportunity row renders the same rule offline.
@@ -3607,6 +3632,7 @@ fn q5_evaluate_records_the_typed_plan_error() {
     }
 }
 
+#[cfg(feature = "historical")]
 /// R12: the retention byte budget is the configured `econ_retention_mib` and, when tight, refuses
 /// further evidence fail-closed: with room for exactly one more market event the next distinct
 /// one is refused and counted, nothing retained is evicted, the accounted bytes stay within the

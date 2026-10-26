@@ -747,6 +747,7 @@ fn status(err: Field<Option<WireErr>>) -> TxStatus {
 
 // ---- wire re-encoding: offline compatibility renders of typed evidence only ----
 
+#[cfg(feature = "historical")]
 /// Wire `err` of a status: `null`, the error, absent (`None`) for a missing status. An
 /// undecodable error is not reproducible and renders as its non-null UNKNOWN code, so a
 /// reader can never take it for success.
@@ -759,6 +760,7 @@ pub fn encode_status(status: &TxStatus) -> Option<serde_json::Value> {
     }
 }
 
+#[cfg(feature = "historical")]
 fn encode_instruction(ix: &ChainInstruction) -> serde_json::Value {
     let mut v = serde_json::json!({"programIdIndex": ix.program_id_index, "accounts": ix.accounts,
         "data": bs58::encode(&ix.data).into_string()});
@@ -768,6 +770,7 @@ fn encode_instruction(ix: &ChainInstruction) -> serde_json::Value {
     v
 }
 
+#[cfg(feature = "historical")]
 /// `uiAmountString` exactly from atomic units (no float), trailing zeros trimmed.
 fn ui_amount_string(amount: u64, decimals: u8) -> String {
     let digits = amount.to_string();
@@ -785,6 +788,7 @@ fn ui_amount_string(amount: u64, decimals: u8) -> String {
     }
 }
 
+#[cfg(feature = "historical")]
 fn encode_token_balances(list: &[TokenBalance]) -> serde_json::Value {
     list.iter()
         .map(|b| {
@@ -802,6 +806,7 @@ fn encode_token_balances(list: &[TokenBalance]) -> serde_json::Value {
         .collect()
 }
 
+#[cfg(feature = "historical")]
 fn encode_meta(m: &ChainMeta) -> serde_json::Value {
     let mut v = serde_json::Map::new();
     if let Some(err) = encode_status(&m.status) {
@@ -851,6 +856,7 @@ fn encode_meta(m: &ChainMeta) -> serde_json::Value {
     v.into()
 }
 
+#[cfg(feature = "historical")]
 /// `{transaction, meta, version}` in the `json` wire encoding, from the typed model. Fields the
 /// model does not carry (rewards, returnData, `status`, float `uiAmount`) are not rendered.
 pub fn encode_entry(tx: &ChainTx) -> serde_json::Value {
@@ -904,6 +910,7 @@ pub fn encode_entry(tx: &ChainTx) -> serde_json::Value {
     v
 }
 
+#[cfg(feature = "historical")]
 /// `logsNotification` result from the typed logs.
 pub fn encode_logs(l: &ChainLogs) -> serde_json::Value {
     let mut value = serde_json::json!({"signature": l.signature, "logs": l.logs});
@@ -1167,6 +1174,7 @@ mod wire_render_tests {
 
     /// The offline re-encoding of real v1 / v0 (5 LUT) answers decodes back to the same typed
     /// transaction and reproduces every modelled wire field of the original.
+    #[cfg(feature = "historical")]
     #[test]
     fn re_encoded_real_transactions_round_trip_and_match_the_wire() {
         for text in [
@@ -1220,34 +1228,39 @@ mod wire_render_tests {
             (ok.status.clone(), ok.logs.clone()),
             (TxStatus::Success, Some(vec!["a".into()]))
         );
-        assert_eq!(
-            encode_logs(&ok),
-            n(json!({"signature":"s","err":null,"logs":["a"]}))
-        );
         let failed = decode_logs_notification(&n(
             json!({"signature":"s","err":{"InstructionError":[0,{"Custom":1}]},"logs":null}),
         ))
         .unwrap();
         assert!(matches!(failed.status, TxStatus::Failed(_)) && failed.logs.is_none());
-        assert_eq!(
-            encode_logs(&failed)["value"]["err"],
-            json!({"InstructionError":[0,{"Custom":1}]})
-        );
         let absent = decode_logs_notification(&n(json!({"signature":"s","logs":[]}))).unwrap();
         assert_eq!(absent.status, TxStatus::Unknown("TX_META_STATUS_MISSING"));
-        assert!(encode_logs(&absent)["value"].get("err").is_none());
         let odd =
             decode_logs_notification(&n(json!({"signature":"s","err":{"Future":1},"logs":[]})))
                 .unwrap();
-        assert_eq!(encode_logs(&odd)["value"]["err"], "TX_ERROR_UNDECODABLE");
+        assert_eq!(odd.status, TxStatus::Unknown("TX_ERROR_UNDECODABLE"));
+        // DEC-09: the historical re-encoding of the same notifications.
+        #[cfg(feature = "historical")]
+        {
+            assert_eq!(
+                encode_logs(&ok),
+                n(json!({"signature":"s","err":null,"logs":["a"]}))
+            );
+            assert_eq!(
+                encode_logs(&failed)["value"]["err"],
+                json!({"InstructionError":[0,{"Custom":1}]})
+            );
+            assert!(encode_logs(&absent)["value"].get("err").is_none());
+            assert_eq!(encode_logs(&odd)["value"]["err"], "TX_ERROR_UNDECODABLE");
+            assert_eq!(ui_amount_string(135_224_452_408, 9), "135.224452408");
+            assert_eq!(ui_amount_string(1_000_000, 6), "1");
+            assert_eq!(ui_amount_string(5, 3), "0.005");
+            assert_eq!(ui_amount_string(0, 9), "0");
+            assert_eq!(ui_amount_string(42, 0), "42");
+        }
         assert_eq!(
             decode_logs_notification(&n(json!({"signature":"s","err":null,"logs":["a", 1]}))),
             Err(ChainError("LOGS_NOTIFICATION_DECODE"))
         );
-        assert_eq!(ui_amount_string(135_224_452_408, 9), "135.224452408");
-        assert_eq!(ui_amount_string(1_000_000, 6), "1");
-        assert_eq!(ui_amount_string(5, 3), "0.005");
-        assert_eq!(ui_amount_string(0, 9), "0");
-        assert_eq!(ui_amount_string(42, 0), "42");
     }
 }

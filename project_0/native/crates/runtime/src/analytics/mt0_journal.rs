@@ -75,8 +75,8 @@ mod tests {
         let mut reader = journal::Reader::open(&path).unwrap();
         let first = reader.next_frame().unwrap().unwrap();
         assert_eq!((first.kind, first.schema), (journal::kind::MT0_SNAPSHOT, 2));
-        let view = super::super::payload::legacy_view(&first).unwrap();
-        assert_eq!(view["mt0_version"], 2);
+        let telemetry: super::super::econ::Mt0Telemetry = first.typed().unwrap();
+        assert!(telemetry.unix_s > 0);
         assert!(first.provenance.unix_ns.is_some() && first.provenance.rx_ns.is_some());
         assert_eq!(
             reader.next_frame().unwrap().unwrap().kind,
@@ -109,6 +109,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(feature = "historical")]
     /// JFI-04: a typed MT0 frame and the historical schema-1 frame of the same snapshot (the
     /// former writer: the snapshot text as a value tree) give the same offline row — the
     /// registry's `Snapshot::json` text — and the typed frame decodes to the snapshot's telemetry.

@@ -4,7 +4,9 @@
 //! explicit offline export only (pinned readers); no production path calls them.
 use super::*;
 use crate::analytics::{journal, payload::Payload};
-use darkbot_solana::chain::{self, ChainLogs};
+#[cfg(feature = "historical")]
+use darkbot_solana::chain;
+use darkbot_solana::chain::ChainLogs;
 use darkbot_solana::provider::ProviderSnapshot;
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +77,7 @@ impl MarketTransaction {
         }
     }
 
+    #[cfg(feature = "historical")]
     /// Historical `transactions.jsonl` row (offline render).
     pub fn legacy_json(&self) -> Value {
         let block_entry = |tx: &ChainTx, index: u64| {
@@ -143,6 +146,7 @@ impl MarketTransaction {
     }
 }
 
+#[cfg(feature = "historical")]
 /// The historical `tx_version` label (`V0` / `V1` / `Legacy`) of a decoded transaction.
 fn legacy_version_label(tx: &ChainTx) -> &'static str {
     use darkbot_solana::chain::TxWireVersion as V;
@@ -242,6 +246,7 @@ impl MarketLiquidation {
         }
     }
 
+    #[cfg(feature = "historical")]
     /// Historical `liquidations.jsonl` row (offline render).
     pub fn legacy_json(&self) -> Value {
         match self {
@@ -473,6 +478,7 @@ impl MarketCoverage {
         }
     }
 
+    #[cfg(feature = "historical")]
     /// Historical `coverage.jsonl` row (offline render).
     pub fn legacy_json(&self) -> Value {
         match self {
@@ -545,6 +551,7 @@ impl MarketCoverage {
 }
 
 impl WindowEvent {
+    #[cfg(feature = "historical")]
     /// Historical `event` name and `detail` object.
     fn legacy(&self) -> (&'static str, Value) {
         match self {
@@ -640,6 +647,7 @@ impl WindowEvent {
     }
 }
 
+#[cfg(feature = "historical")]
 /// Offline render of one typed market frame to its historical JSONL row.
 pub fn legacy_view(kind: u16, schema: u16, bytes: &[u8]) -> std::io::Result<Value> {
     use crate::analytics::payload::decode;

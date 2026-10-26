@@ -1,10 +1,15 @@
 //! PERSIST-01: one binary append-only contract for runtime and durable financial events.
 //! LE integers, bounded frames, CRC32 + chained SHA256.
 //! JFI-01: frames of schema ≥ 2 carry typed native payloads (`payload::Payload`). Schema 1, the
-//! generic value tree, is historical: readable via `Frame::legacy_value`, never written (JFI-04
-//! migrated the last kinds; the value encoder exists only for test fixtures of old journals).
+//! generic value tree, is historical: never written (JFI-04 migrated the last kinds; the value
+//! encoder exists only for test fixtures of old journals). DEC-09: the standard build decodes it
+//! natively (`Frame::legacy_tree`, the seal checks of historical journals); its JSON view
+//! (`Frame::legacy_value`) exists only in the `historical` build.
 use super::payload::{self, Payload};
-use serde_json::{Map, Number, Value};
+#[cfg(any(test, feature = "historical"))]
+use serde_json::Value;
+#[cfg(feature = "historical")]
+use serde_json::{Map, Number};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
@@ -347,7 +352,7 @@ pub struct Frame {
     pub schema: u16,
     pub journal_seq: u64,
     pub provenance: Provenance,
-    /// Raw payload bytes; decode with `typed` (schema ≥ 2) or `legacy_value` (schema 1).
+    /// Raw payload bytes; decode with `typed` (schema ≥ 2) or `legacy_tree` (schema 1).
     pub payload: Vec<u8>,
     pub offset: u64,
     pub bytes: u64,
@@ -365,12 +370,17 @@ impl Frame {
     pub fn typed<P: Payload>(&self) -> io::Result<P> {
         payload::decode(self.kind, self.schema, &self.payload)
     }
-    /// Historical schema-1 value tree: offline readers and not-yet-migrated kinds only.
-    pub fn legacy_value(&self) -> io::Result<Value> {
+    /// Historical schema-1 value tree, decoded natively (no JSON model).
+    pub fn legacy_tree(&self) -> io::Result<LegacyNode> {
         if self.schema != 1 {
             return Err(bad("TYPED_FRAME_NOT_LEGACY"));
         }
-        decode(&self.payload)
+        decode_tree(&self.payload)
+    }
+    /// Historical schema-1 value tree as JSON: offline readers of the `historical` build only.
+    #[cfg(feature = "historical")]
+    pub fn legacy_value(&self) -> io::Result<Value> {
+        self.legacy_tree()?.into_json()
     }
 }
 #[derive(Clone, Debug)]
@@ -451,7 +461,109 @@ pub(crate) fn encode(value: &Value) -> io::Result<Vec<u8>> {
     node(value, &mut out, 0)?;
     Ok(out)
 }
+/// One node of a historical schema-1 value tree (the tags of `encode`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LegacyNode {
+    Null,
+    Bool(bool),
+    Int(i128),
+    UInt(u128),
+    /// Exact decimal text of a nonintegral or wider number (JSON number grammar).
+    Number(String),
+    Text(String),
+    List(Vec<LegacyNode>),
+    /// Entries in strictly ascending key order.
+    Map(Vec<(String, LegacyNode)>),
+}
+impl LegacyNode {
+    /// The value of `key` of a map node.
+    pub fn get(&self, key: &str) -> Option<&LegacyNode> {
+        match self {
+            LegacyNode::Map(m) => m.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            LegacyNode::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+    /// An unsigned integer, also from decimal text (as the JSON view's `as_u64` read it).
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            LegacyNode::Int(n) => u64::try_from(*n).ok(),
+            LegacyNode::UInt(n) => u64::try_from(*n).ok(),
+            LegacyNode::Number(t) => t.parse().ok(),
+            _ => None,
+        }
+    }
+    /// The JSON value of this tree (the historical view; `historical` build only).
+    #[cfg(feature = "historical")]
+    pub fn into_json(self) -> io::Result<Value> {
+        let number = |text: String, code| text.parse::<Number>().map_err(|_| bad(code));
+        Ok(match self {
+            LegacyNode::Null => Value::Null,
+            LegacyNode::Bool(b) => Value::Bool(b),
+            LegacyNode::Int(n) => Value::Number(number(n.to_string(), "PAYLOAD_INTEGER")?),
+            LegacyNode::UInt(n) => Value::Number(number(n.to_string(), "PAYLOAD_INTEGER")?),
+            LegacyNode::Number(t) => Value::Number(number(t, "PAYLOAD_NUMBER")?),
+            LegacyNode::Text(s) => Value::String(s),
+            LegacyNode::List(a) => Value::Array(
+                a.into_iter()
+                    .map(Self::into_json)
+                    .collect::<io::Result<_>>()?,
+            ),
+            LegacyNode::Map(m) => Value::Object(
+                m.into_iter()
+                    .map(|(k, v)| Ok((k, v.into_json()?)))
+                    .collect::<io::Result<Map<_, _>>>()?,
+            ),
+        })
+    }
+}
+/// RFC 8259 §6 number grammar: the only decimal text a schema-1 number node may hold.
+fn json_number(t: &str) -> bool {
+    let b = t.as_bytes();
+    let digits = |mut i: usize| {
+        while b.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        i
+    };
+    let mut i = usize::from(b.first() == Some(&b'-'));
+    match b.get(i) {
+        Some(b'0') => i += 1,
+        Some(c) if c.is_ascii_digit() => i = digits(i),
+        _ => return false,
+    }
+    if b.get(i) == Some(&b'.') {
+        let start = i + 1;
+        i = digits(start);
+        if i == start {
+            return false;
+        }
+    }
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(b.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let start = i;
+        i = digits(start);
+        if i == start {
+            return false;
+        }
+    }
+    i == b.len()
+}
+/// The JSON view of a schema-1 payload (`historical` build only).
+#[cfg(feature = "historical")]
 pub fn decode(bytes: &[u8]) -> io::Result<Value> {
+    decode_tree(bytes)?.into_json()
+}
+/// A schema-1 payload as its value tree; bounded depth, counts, sizes and key order.
+pub fn decode_tree(bytes: &[u8]) -> io::Result<LegacyNode> {
     struct Cursor<'a> {
         b: &'a [u8],
         p: usize,
@@ -474,32 +586,24 @@ pub fn decode(bytes: &[u8]) -> io::Result<Value> {
             let n = self.size()?;
             String::from_utf8(self.take(n)?.to_vec()).map_err(|_| bad("PAYLOAD_UTF8"))
         }
-        fn value(&mut self, depth: usize) -> io::Result<Value> {
+        fn value(&mut self, depth: usize) -> io::Result<LegacyNode> {
             if depth > 64 {
                 return Err(bad("PAYLOAD_DEPTH"));
             }
             Ok(match self.take(1)?[0] {
-                0 => Value::Null,
-                1 => Value::Bool(false),
-                2 => Value::Bool(true),
-                3 => Value::Number(
-                    i128::from_le_bytes(self.take(16)?.try_into().unwrap())
-                        .to_string()
-                        .parse::<Number>()
-                        .map_err(|_| bad("PAYLOAD_INTEGER"))?,
-                ),
-                4 => Value::Number(
-                    u128::from_le_bytes(self.take(16)?.try_into().unwrap())
-                        .to_string()
-                        .parse::<Number>()
-                        .map_err(|_| bad("PAYLOAD_INTEGER"))?,
-                ),
-                5 => Value::Number(
-                    self.text()?
-                        .parse::<Number>()
-                        .map_err(|_| bad("PAYLOAD_NUMBER"))?,
-                ),
-                6 => Value::String(self.text()?),
+                0 => LegacyNode::Null,
+                1 => LegacyNode::Bool(false),
+                2 => LegacyNode::Bool(true),
+                3 => LegacyNode::Int(i128::from_le_bytes(self.take(16)?.try_into().unwrap())),
+                4 => LegacyNode::UInt(u128::from_le_bytes(self.take(16)?.try_into().unwrap())),
+                5 => {
+                    let text = self.text()?;
+                    if !json_number(&text) {
+                        return Err(bad("PAYLOAD_NUMBER"));
+                    }
+                    LegacyNode::Number(text)
+                }
+                6 => LegacyNode::Text(self.text()?),
                 7 => {
                     let n = self.size()?;
                     if n > self.b.len().saturating_sub(self.p) {
@@ -509,24 +613,23 @@ pub fn decode(bytes: &[u8]) -> io::Result<Value> {
                     for _ in 0..n {
                         a.push(self.value(depth + 1)?);
                     }
-                    Value::Array(a)
+                    LegacyNode::List(a)
                 }
                 8 => {
                     let n = self.size()?;
                     if n > self.b.len().saturating_sub(self.p) / 5 {
                         return Err(bad("PAYLOAD_COUNT"));
                     }
-                    let mut m = Map::new();
-                    let mut previous = None;
+                    let mut m: Vec<(String, LegacyNode)> = Vec::new();
                     for _ in 0..n {
                         let k = self.text()?;
-                        if previous.as_ref().is_some_and(|p: &String| p >= &k) {
+                        if m.last().is_some_and(|(p, _)| p >= &k) {
                             return Err(bad("PAYLOAD_MAP_ORDER"));
                         }
-                        previous = Some(k.clone());
-                        m.insert(k, self.value(depth + 1)?);
+                        let v = self.value(depth + 1)?;
+                        m.push((k, v));
                     }
-                    Value::Object(m)
+                    LegacyNode::Map(m)
                 }
                 _ => return Err(bad("PAYLOAD_TAG")),
             })
@@ -909,15 +1012,8 @@ impl Reader {
         }
         if f.kind == MANIFEST {
             let complete = if f.schema == 1 {
-                // Historical manifest (value tree).
-                let v = f.legacy_value()?;
-                if v["frames"] != self.next
-                    || v["root_sha256"] != hex(&self.last)
-                    || !matches!(v["status"].as_str(), Some("COMPLETE" | "INCOMPLETE"))
-                {
-                    return Err(bad("MANIFEST_MISMATCH"));
-                }
-                v["status"] == "COMPLETE"
+                legacy_manifest(&f, self.next, &self.last)?
+                    .ok_or_else(|| bad("MANIFEST_MISMATCH"))?
             } else {
                 let m: payload::Manifest = f.typed()?;
                 if m.frames != self.next || m.root_sha256 != self.last {
@@ -1017,7 +1113,7 @@ fn read_frame<R: Read>(file: &mut R, offset: u64) -> io::Result<Option<(Frame, [
         payload: {
             let bytes = &b[120..end];
             if schema == 1 {
-                decode(bytes)?;
+                decode_tree(bytes)?;
             } else {
                 payload::validate(kind, schema, bytes)?;
             }
@@ -1090,16 +1186,7 @@ pub fn screen_seal(path: &Path) -> SealScreen {
             return Unsealed;
         }
         let complete = if f.schema == 1 {
-            match f.legacy_value() {
-                Ok(v)
-                    if v["frames"] == f.journal_seq
-                        && v["root_sha256"] == hex(&previous)
-                        && matches!(v["status"].as_str(), Some("COMPLETE" | "INCOMPLETE")) =>
-                {
-                    Some(v["status"] == "COMPLETE")
-                }
-                _ => None,
-            }
+            legacy_manifest(&f, f.journal_seq, &previous).ok().flatten()
         } else {
             match f.typed::<payload::Manifest>() {
                 Ok(m) if m.frames == f.journal_seq && m.root_sha256 == previous => Some(m.complete),
@@ -1112,6 +1199,18 @@ pub fn screen_seal(path: &Path) -> SealScreen {
         };
     }
     Undecodable("TAIL_UNDECODABLE")
+}
+/// A historical schema-1 manifest `{frames, root_sha256, status}` (value tree): `Some(complete)`
+/// when it closes exactly `frames` frames ending at `root`, `None` when it does not.
+fn legacy_manifest(f: &Frame, frames: u64, root: &[u8; 32]) -> io::Result<Option<bool>> {
+    let v = f.legacy_tree()?;
+    let status = v.get("status").and_then(LegacyNode::as_str);
+    Ok(
+        (v.get("frames").and_then(LegacyNode::as_u64) == Some(frames)
+            && v.get("root_sha256").and_then(LegacyNode::as_str) == Some(hex(root).as_str())
+            && matches!(status, Some("COMPLETE" | "INCOMPLETE")))
+        .then(|| status == Some("COMPLETE")),
+    )
 }
 pub fn read_at(file: &mut File, offset: u64) -> io::Result<Frame> {
     file.seek(SeekFrom::Start(offset))?;
@@ -1198,7 +1297,7 @@ pub fn file_sha256(path: &Path) -> io::Result<[u8; 32]> {
 /// read-only historical view check; no production path writes a JSON view (JFI-01/03,
 /// P0-PROD-CTRL-02). The views appear only complete and together; a damaged journal leaves no
 /// file behind. Returns the rows per view.
-#[cfg(test)]
+#[cfg(all(test, feature = "historical"))]
 pub fn export_views(
     path: &Path,
     views: &[(Option<u16>, &Path)],

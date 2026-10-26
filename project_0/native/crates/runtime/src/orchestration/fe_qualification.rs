@@ -1245,6 +1245,7 @@ pub(crate) mod tests {
             "FE_BATCH_SCOPE_MISMATCH"
         );
     }
+    #[cfg(feature = "historical")]
     /// FE-01 replay of one saved observation from each source — legacy `read_NNNNNN.json` files,
     /// a historical schema-1 journal (FE-01 smoke era) and the typed journal (JFI-04) — yields
     /// the identical observation, stays historical, unqualified and bound to its exact reads.

@@ -66,18 +66,25 @@ pub enum NativeEvidence {
     },
 }
 
+/// The binary journal stores the tagged form; text formats (the historical untagged JSON view)
+/// exist only in the `historical` build (DEC-09).
 impl Serialize for NativeEvidence {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
         if !s.is_human_readable() {
             return NativeEvidence::serialize(self, s);
         }
-        let tagged = NativeEvidence::serialize(self, serde_json::value::Serializer)
-            .map_err(S::Error::custom)?;
-        match tagged {
-            Value::Object(m) if m.len() == 1 => m.into_iter().next().unwrap().1.serialize(s),
-            _ => Err(S::Error::custom("NATIVE_EVIDENCE_SHAPE")),
+        #[cfg(feature = "historical")]
+        {
+            let tagged = NativeEvidence::serialize(self, serde_json::value::Serializer)
+                .map_err(S::Error::custom)?;
+            match tagged {
+                Value::Object(m) if m.len() == 1 => m.into_iter().next().unwrap().1.serialize(s),
+                _ => Err(S::Error::custom("NATIVE_EVIDENCE_SHAPE")),
+            }
         }
+        #[cfg(not(feature = "historical"))]
+        Err(S::Error::custom("NATIVE_EVIDENCE_TEXT_NOT_SUPPORTED"))
     }
 }
 impl<'de> Deserialize<'de> for NativeEvidence {
@@ -87,11 +94,16 @@ impl<'de> Deserialize<'de> for NativeEvidence {
             return NativeEvidence::deserialize(d);
         }
         // Untagged: the first variant whose required fields are present, in declaration order.
-        let body = Value::deserialize(d)?;
-        ["Classic", "Bankruptcy", "Flows"]
-            .into_iter()
-            .find_map(|tag| NativeEvidence::deserialize(json!({ tag: body.clone() })).ok())
-            .ok_or_else(|| D::Error::custom("NATIVE_EVIDENCE_NO_VARIANT"))
+        #[cfg(feature = "historical")]
+        {
+            let body = Value::deserialize(d)?;
+            ["Classic", "Bankruptcy", "Flows"]
+                .into_iter()
+                .find_map(|tag| NativeEvidence::deserialize(json!({ tag: body.clone() })).ok())
+                .ok_or_else(|| D::Error::custom("NATIVE_EVIDENCE_NO_VARIANT"))
+        }
+        #[cfg(not(feature = "historical"))]
+        Err(D::Error::custom("NATIVE_EVIDENCE_TEXT_NOT_SUPPORTED"))
     }
 }
 

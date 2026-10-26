@@ -1,8 +1,13 @@
 //! Read-only check of the historical views of a run against its binary journals (PERSIST-04,
 //! JFI-03: an isolated offline decoder). An existing view must be byte-identical to its render;
-//! nothing is ever written (P0-PROD-CTRL-02: no JSON view of a journal is produced).
-use super::journal::{self, kind, MANIFEST};
+//! nothing is ever written (P0-PROD-CTRL-02: no JSON view of a journal is produced). DEC-09: the
+//! renders and the check exist only in the `historical` build; the standard build knows the
+//! layout and the view paths (the strict driver's derived-file exclusion).
+#[cfg(feature = "historical")]
+use super::journal::MANIFEST;
+use super::journal::{self, kind};
 use crate::run_layout::{RunLayout, RunPaths};
+#[cfg(feature = "historical")]
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -51,17 +56,22 @@ pub fn detect(root: &Path) -> Result<RunPaths, String> {
         }
     }
     // Historical runs (before the typed manifest) are recognized like the pinned run store: V2
-    // only with the `layout` tag of their pinned `manifest.json` (read-only, JFI-03).
-    #[derive(serde::Deserialize)]
-    struct HistoricalManifest {
-        layout: Option<String>,
-    }
+    // only with the `layout` tag of their pinned `manifest.json` (read-only, JFI-03; DEC-09: the
+    // `historical` build only).
     let manifest = root.join("manifest.json");
     if !manifest.exists() {
         return Ok(RunPaths::new(root, RunLayout::V1));
     }
+    historical_layout(root, &manifest)
+}
+#[cfg(feature = "historical")]
+fn historical_layout(root: &Path, manifest: &Path) -> Result<RunPaths, String> {
+    #[derive(serde::Deserialize)]
+    struct HistoricalManifest {
+        layout: Option<String>,
+    }
     let historical: HistoricalManifest = serde_json::from_slice(
-        &std::fs::read(&manifest).map_err(|e| format!("RUN_LAYOUT_INVALID: {e}"))?,
+        &std::fs::read(manifest).map_err(|e| format!("RUN_LAYOUT_INVALID: {e}"))?,
     )
     .map_err(|_| "RUN_LAYOUT_INVALID".to_string())?;
     match historical.layout.as_deref() {
@@ -69,6 +79,14 @@ pub fn detect(root: &Path) -> Result<RunPaths, String> {
         _ => Err("RUN_LAYOUT_UNSUPPORTED".into()),
     }
 }
+#[cfg(not(feature = "historical"))]
+fn historical_layout(_: &Path, _: &Path) -> Result<RunPaths, String> {
+    Err(HISTORICAL_READER_NOT_BUILT.into())
+}
+
+/// DEC-09: what the standard build answers where only a historical JSON reader could read on.
+pub const HISTORICAL_READER_NOT_BUILT: &str =
+    "HISTORICAL_READER_NOT_BUILT: a historical JSON source is read only by the build with --features historical";
 
 /// Every view the pinned readers consume, with the journal it is rendered from.
 pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
@@ -178,6 +196,7 @@ pub fn views(paths: &RunPaths) -> Result<Vec<View>, String> {
     Ok(views)
 }
 
+#[cfg(feature = "historical")]
 /// Deterministic bytes of one view; `None` when a pretty view has no frame yet.
 /// `config.json` (V2) or one config part (V1) of the pinned run store, from typed records:
 /// the plan journal, the capacity report and the run manifest beside it. Parts the native
@@ -239,6 +258,7 @@ fn render_config(view: &View, special: Special) -> io::Result<Option<Vec<u8>>> {
     Ok(Some(text))
 }
 
+#[cfg(feature = "historical")]
 pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
     if let Some(special) = view.special {
         return render_config(view, special);
@@ -280,6 +300,7 @@ pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
     })
 }
 
+#[cfg(feature = "historical")]
 /// Outcome per view: `MATCHES`, `MISSING` (no view file) or `NO_FRAME`. Any existing view that
 /// differs from its render is an error; nothing is written.
 pub fn check(paths: &RunPaths) -> Result<Vec<(PathBuf, &'static str)>, String> {
@@ -307,6 +328,7 @@ pub fn check(paths: &RunPaths) -> Result<Vec<(PathBuf, &'static str)>, String> {
     Ok(outcome)
 }
 
+#[cfg(feature = "historical")]
 /// `storage_preflight` part of a historical run configuration view, derived from the native
 /// capacity report (read-only check of historical views only).
 #[derive(serde::Serialize)]
@@ -321,6 +343,7 @@ struct StoragePreflightView<'a> {
     required_bytes: Option<u64>,
 }
 
+#[cfg(feature = "historical")]
 /// The `storage_preflight` part of a sealed capacity report.
 fn storage_preflight_render(report: &Path) -> io::Result<StoragePreflightView<'static>> {
     use crate::storage::preflight::CapacityReport;

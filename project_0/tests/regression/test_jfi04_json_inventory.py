@@ -71,6 +71,40 @@ JSON = re.compile(r'serde_json::|json!\(')
 BARE_VALUE = re.compile(r'(?<![:\w])Value\b')
 TEST_MOD = re.compile(r'^\s*(pub(\(crate\))? )?mod \w+ *\{')
 TEST_DECL = re.compile(r'^\s*(pub(\(crate\))? )?mod (\w+);')
+# Test-only modules: `#[cfg(test)]`, also restricted to a feature (`#[cfg(all(test, …))]`).
+TEST_ATTR = re.compile(r'^#\[cfg\((test|all\(test, .*\))\)\]$')
+# DEC-09: code compiled only with the `historical` feature (never under `not(…)`).
+HISTORICAL_ATTR = re.compile(r'#\[cfg\(.*feature = "historical".*\)\]')
+
+
+def historical_lines(lines):
+    """Indexes of the lines the standard production build does not compile: the item, statement,
+    match arm or block after a `#[cfg(…feature = "historical"…)]` (never under `not(…)`) or a
+    test-only `#[cfg(test)]` attribute, docs/attributes in between."""
+    out, i = set(), 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if not ((HISTORICAL_ATTR.search(s) and 'not(' not in s) or TEST_ATTR.match(s)):
+            i += 1
+            continue
+        k = i + 1
+        while k < len(lines) and lines[k].strip().startswith(('///', '#[', '//')):
+            k += 1
+        first, depth, opened = k, 0, False
+        while k < len(lines):
+            code = lines[k].split('//')[0].rstrip()
+            depth += code.count('{') - code.count('}')
+            opened = opened or '{' in code
+            out.add(k)
+            if opened and depth <= 0:
+                break
+            # A statement ends with `;`, a match arm on its own line with `,`; an item with a
+            # multi-line signature continues to its body.
+            if not opened and (code.endswith(';') or (k == first and code.endswith(','))):
+                break
+            k += 1
+        i = k + 1
+    return out
 
 
 def test_module_files(root):
@@ -83,12 +117,14 @@ def test_module_files(root):
             lines = (Path(d) / f).read_text(encoding='utf-8').split('\n')
             for i in range(1, len(lines)):
                 m = TEST_DECL.match(lines[i])
-                if m and lines[i - 1].strip() == '#[cfg(test)]':
+                if m and TEST_ATTR.match(lines[i - 1].strip()):
                     out.add(Path(d) / (m.group(3) + '.rs'))
     return out
 
 
-def scan(root):
+def scan(root, standard=False):
+    """Production JSON uses per file; `standard`: only those the standard build compiles (DEC-09:
+    without the `historical` feature)."""
     skip = test_module_files(root)
     found = {}
     for d, _, files in os.walk(root):
@@ -101,13 +137,14 @@ def scan(root):
                 continue
             lines = path.read_text(encoding='utf-8').split('\n')
             bare = any(USE_VALUE.match(l) for l in lines)
+            gated = historical_lines(lines) if standard else set()
             n, depth, test_until = 0, 0, None
             for i, line in enumerate(lines):
                 code = '' if line.strip().startswith('//') else line.split('//')[0]
                 if test_until is None and i and TEST_MOD.match(line) \
-                        and lines[i - 1].strip() == '#[cfg(test)]':
+                        and TEST_ATTR.match(lines[i - 1].strip()):
                     test_until = depth
-                if test_until is None and not USE_VALUE.match(line):
+                if test_until is None and i not in gated and not USE_VALUE.match(line):
                     n += len(JSON.findall(code))
                     if bare:
                         n += len(BARE_VALUE.findall(code))

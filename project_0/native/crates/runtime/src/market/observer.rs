@@ -103,7 +103,7 @@ pub mod rows;
 mod sink;
 #[path = "strict_driver.rs"]
 pub mod strict_driver;
-#[cfg(test)]
+#[cfg(all(test, feature = "historical"))]
 pub use sink::JsonlSink;
 pub use sink::{JournalSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};
 
@@ -131,7 +131,9 @@ pub use capture::{
     CaptureOutcome,
 };
 
-#[cfg(test)]
+// DEC-09: these tests assert every row through its historical JSONL render (`VecSink`), so they
+// run in the `historical` build (CI `test_all`); the production code is the same in both builds.
+#[cfg(all(test, feature = "historical"))]
 #[path = "observer_tests.rs"]
 mod tests;
 
