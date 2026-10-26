@@ -479,36 +479,21 @@ pub fn encode_swap_exact_input_native(
 }
 
 /// Decodes a canonical native-input `swapExactInput` call with an empty
-/// permit. Amounts are returned as found, including zero.
+/// permit. Amounts are returned as found, including zero. The one
+/// `swapExactInput` decoder is [`super::recognize::decode_swap_exact_input`];
+/// this is its native-BUY restriction.
 pub fn decode_swap_exact_input_native(calldata: &[u8]) -> Result<SwapExactInputNative, AbiError> {
-    if calldata.len() < SWAP_EXACT_INPUT_NATIVE_LEN {
-        return if calldata.starts_with(&SWAP_EXACT_INPUT_SELECTOR) {
-            Err(AbiError::Truncated)
-        } else {
-            Err(AbiError::WrongSelector)
-        };
-    }
-    let body = calldata
-        .strip_prefix(&SWAP_EXACT_INPUT_SELECTOR)
-        .ok_or(AbiError::WrongSelector)?;
-    if body.len() != 7 * WORD {
-        return Err(AbiError::TrailingBytes);
-    }
-    let word = |index: usize| &body[index * WORD..(index + 1) * WORD];
-    // Tuple offset, `permit` offset inside the tuple, empty `permit`.
-    let canonical = usize_word(word(0))? == WORD
-        && usize_word(word(5))? == 5 * WORD
-        && usize_word(word(6))? == 0;
-    if !canonical {
+    let swap = super::recognize::decode_swap_exact_input(calldata)?;
+    if !swap.permit.is_empty() {
         return Err(AbiError::NonCanonical);
     }
-    if address_word(word(1))? != Address::ZERO {
+    if swap.input_token != Address::ZERO {
         return Err(AbiError::UnsupportedInputToken);
     }
     Ok(SwapExactInputNative {
-        output_token: address_word(word(2))?,
-        input_amount: U256::from_be_slice(word(3)),
-        min_output_amount: U256::from_be_slice(word(4)),
+        output_token: swap.output_token,
+        input_amount: swap.input_amount,
+        min_output_amount: swap.min_output_amount,
     })
 }
 
@@ -844,8 +829,8 @@ mod tests {
             Err(AbiError::WrongSelector)
         );
 
-        // Tuple offset, permit offset, non-empty permit length.
-        for (index, value) in [(0usize, 0x40u8), (5, 0xc0), (6, 0x01)] {
+        // Tuple offset, permit offset: not the canonical layout.
+        for (index, value) in [(0usize, 0x40u8), (5, 0xc0)] {
             let mut other = golden.clone();
             other[word(index) + WORD - 1] = value;
             assert_eq!(
@@ -854,6 +839,22 @@ mod tests {
                 "word {index}"
             );
         }
+        // A permit length announcing bytes that are not there.
+        let mut other = golden.clone();
+        other[word(6) + WORD - 1] = 0x01;
+        assert_eq!(
+            decode_swap_exact_input_native(&other),
+            Err(AbiError::Truncated)
+        );
+        // A present, canonical permit: not the native BUY form.
+        let mut permit = golden.clone();
+        permit[word(6) + WORD - 1] = 0x01;
+        permit.push(0xab);
+        permit.extend_from_slice(&[0u8; WORD - 1]);
+        assert_eq!(
+            decode_swap_exact_input_native(&permit),
+            Err(AbiError::NonCanonical)
+        );
 
         // Token input instead of native input.
         let mut other = golden.clone();

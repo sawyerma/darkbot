@@ -22,7 +22,7 @@ const HTTP_TOO_MANY_REQUESTS: u16 = 429;
 const READ_CHUNK: usize = 16 * 1024;
 
 /// One endpoint's client: its connector and the kept connection.
-pub(super) struct Client<S, C> {
+pub(crate) struct Client<S, C> {
     connect: C,
     conn: Option<S>,
     authority: String,
@@ -69,7 +69,7 @@ where
     C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
 {
     /// `authority` is the `Host` header value, `path` the request target.
-    pub(super) fn new(
+    pub(crate) fn new(
         connect: C,
         authority: String,
         path: String,
@@ -88,7 +88,7 @@ where
     /// POSTs `body` and returns the body of the 200 response. A kept
     /// connection that ends before any byte of the answer (the server
     /// closed it while idle) is replaced once.
-    pub(super) fn post(&mut self, body: &[u8], stop: &AtomicBool) -> Result<Vec<u8>, RequestError> {
+    pub(crate) fn post(&mut self, body: &[u8], stop: &AtomicBool) -> Result<Vec<u8>, RequestError> {
         let reused = self.conn.is_some();
         match self.exchange(body, stop) {
             Err(Failure {

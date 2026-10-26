@@ -22,7 +22,9 @@
 //! Every topic is recomputed from its signature in the tests.
 
 use alloy_primitives::{Address, hex};
-use darkbot_bsc_trading::venues::flap::events::{PortalEvent, PortalLog, decode_portal_log};
+use darkbot_bsc_trading::venues::flap::events::{
+    PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
+};
 
 use super::CanonicalLaunch;
 use super::jsonrpc::{BlockHead, Log, Receipt};
@@ -79,14 +81,15 @@ pub const LAUNCH_EVENTS: [LaunchEvent; 2] = [
     LaunchEvent {
         venue: Venue::Flap,
         contract: FLAP_PORTAL,
-        signature: "TokenCreated(uint256,address,uint256,address,string,string,string)",
-        topic0: hex!("504e7f360b2e5fe33cbaaae4c593bc55305328341bf79009e43e0e3b7f699603"),
+        // The Flap entries come from the one decoder's table.
+        signature: PortalEventKind::TokenCreated.signature(),
+        topic0: PortalEventKind::TokenCreated.topic0(),
         head_words: 7,
         creator_word: 1,
         token_word: 3,
         buy: Some(BuyEvent {
-            signature: "TokenBought(uint256,address,address,uint256,uint256,uint256,uint256)",
-            topic0: hex!("a800a2038683844fac66747f771bfdfae862eb28b16bcfa387afa9fbacce8ff7"),
+            signature: PortalEventKind::TokenBought.signature(),
+            topic0: PortalEventKind::TokenBought.topic0(),
             words: 7,
             token_word: 1,
         }),
@@ -136,7 +139,11 @@ impl ReceiptLaunch {
     /// nonce, and the C1 scope decision of the pending path
     /// (`ingress::is_flap_launch` of the signed bytes); or, for a
     /// transaction the verifier refuses, that reason.
-    pub(super) fn with_transaction(self, tx: Result<&VerifiedTx, RejectReason>) -> CanonicalLaunch {
+    pub(super) fn with_transaction(
+        self,
+        tx: Result<&VerifiedTx, RejectReason>,
+        max_launch_calldata: usize,
+    ) -> CanonicalLaunch {
         CanonicalLaunch {
             venue: self.venue,
             block_number: self.block_number,
@@ -149,7 +156,7 @@ impl ReceiptLaunch {
             first_external_buy_index: self.first_external_buy_index,
             sender: tx.ok().map(|t| t.from),
             nonce: tx.ok().map(|t| t.nonce),
-            c1_scope: tx.is_ok_and(|t| is_flap_launch(&t.raw)),
+            c1_scope: tx.is_ok_and(|t| is_flap_launch(&t.raw, max_launch_calldata)),
             unverifiable: tx.err(),
         }
     }

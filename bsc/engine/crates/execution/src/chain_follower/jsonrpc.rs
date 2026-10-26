@@ -104,7 +104,7 @@ pub(super) fn request(id: u64, call: Call) -> String {
 }
 
 /// The answer to `eth_blockNumber` or `eth_getTransactionCount`: one quantity.
-pub(super) fn parse_quantity(body: &[u8], id: u64) -> Result<u64, RequestError> {
+pub(crate) fn parse_quantity(body: &[u8], id: u64) -> Result<u64, RequestError> {
     match envelope(body, id)? {
         Value::String(s) => quantity_u64(&s).ok_or(RequestError::Shape(Field::Result)),
         _ => Err(RequestError::Shape(Field::Result)),
@@ -259,7 +259,7 @@ fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {
 }
 
 /// The `result` of a JSON-RPC 2.0 answer to request `id`, or its error.
-fn envelope(body: &[u8], id: u64) -> Result<Value, RequestError> {
+pub(crate) fn envelope(body: &[u8], id: u64) -> Result<Value, RequestError> {
     let value: Value = serde_json::from_slice(body).map_err(|_| RequestError::MalformedJson)?;
     let Value::Object(mut msg) = value else {
         return Err(RequestError::Shape(Field::Envelope));
@@ -318,7 +318,7 @@ fn nibble(b: u8) -> Option<u8> {
 }
 
 /// A canonical quantity of at most 64 bits.
-pub(super) fn quantity_u64(s: &str) -> Option<u64> {
+pub(crate) fn quantity_u64(s: &str) -> Option<u64> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     let canonical = match digits {
         [] => false,
@@ -334,7 +334,7 @@ pub(super) fn quantity_u64(s: &str) -> Option<u64> {
 }
 
 /// `0x` and two digits per byte.
-pub(super) fn data_vec(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn data_vec(s: &str) -> Option<Vec<u8>> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     if !digits.len().is_multiple_of(2) {
         return None;
@@ -346,7 +346,7 @@ pub(super) fn data_vec(s: &str) -> Option<Vec<u8>> {
 }
 
 /// `0x` and exactly `2 * N` digits.
-pub(super) fn data_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
+pub(crate) fn data_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     if digits.len() != 2 * N {
         return None;

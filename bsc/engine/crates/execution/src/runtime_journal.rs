@@ -73,6 +73,25 @@ pub fn first_sighting_payload(source: SourceId, hash: &[u8; 32], raw: &[u8]) -> 
     out
 }
 
+/// One PAPER BUY taken by the PAPER sink (C3): `Q`, the sink sequence,
+/// the launch and BUY hashes, the token, the stage times (ingress, decoded,
+/// admitted, signed, sink) and the signed bytes (a local artefact, never
+/// sent).
+pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
+    let t = buy.times;
+    let mut out = Vec::with_capacity(1 + 8 + 32 + 32 + 20 + 5 * 8 + buy.raw.len());
+    out.push(b'Q');
+    out.extend_from_slice(&buy.handoff.sequence.to_le_bytes());
+    out.extend_from_slice(&buy.launch_hash);
+    out.extend_from_slice(&buy.handoff.tx_hash);
+    out.extend_from_slice(&buy.token);
+    for ns in [t.ingress_ns, t.decoded_ns, t.admitted_ns, t.signed_ns, t.sink_ns] {
+        out.extend_from_slice(&ns.to_le_bytes());
+    }
+    out.extend_from_slice(&buy.raw);
+    out
+}
+
 pub fn later_sighting_payload(source: SourceId, hash: &[u8; 32], lag_ns: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(42);
     out.push(b'L');

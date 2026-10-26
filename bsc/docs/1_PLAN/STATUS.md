@@ -11,12 +11,12 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
 | 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | TECHNISCH FERTIG — EXTERNAL_BLOCKED: synchronisierter Mainnet-geth (BSC-023 Mainnet-Messung, BSC-025 Peers; ≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | `aba025e3`; Phase-Gate PASS (Review 4 Durchgänge, alle Funde behoben: `402393a6`, `995a2a27`, `da860a66`, `aba025e3`); C1.10 FROZEN `818525b1` (`e6177bba`) | – | Paket 4 |
 | 4 | C2 State/Nonce/Reorg/Recovery | TECHNISCH FERTIG (SHADOW; operativ LIVE gesperrt bis G0.8 PASS + G0.4) | `f427cfa1`; Phase-Gate PASS (3 Durchgänge, Funde behoben: `2d16ec81`, `f427cfa1`); Basis `c97e767c`, `3be74b41` | C2-Eingaben-Journal/Replay → Phase F/I (Master-Plan-Matrix) | Paket 5 |
-| 5 | C3, D, G0.1-Four-Freeze, E | OFFEN (G0.1 Four PARTIAL `925968a7`: 9/10 PROVEN je Familie, verifizierte ABI UNKNOWN) | – | verifizierte Four-ABI (BscScan-Key = Nutzerentscheidung) | D: Flap-v5.26-Refreeze → Decoder; dann C3 |
+| 5 | C3, D, G0.1-Four-Freeze, E | OFFEN (Flap-Refreeze v5.27.0 `f02678cc`; D-Decoder `3fa5c869` + Review-Fixes; C3 PAPER-Pfad `9babd654`, Laufzeit-Verdrahtung, Messung `74900e8a` (lokal p50 116 µs); G0.1 Four PARTIAL `925968a7`) | – | v5.27.0 decode-only bis G0.6a-Reconfirm; Four-ABI (BscScan-Key = Nutzerentscheidung); C3-Zielhardware (Linux) | D-Re-Review, Reconfirm, dann E |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
 | 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
 | 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
-| P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition final `aba025e3`: vor der Blockzeit, C1-Scope, Abdeckung, Tx-Prüfung) | `aba025e3` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
+| P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition final `aba025e3`: vor der Blockzeit, C1-Scope, Abdeckung, Tx-Prüfung; C1-Scope ab `3fa5c869` = Präfilter + strikter Flap-Decoder, ältere Journale nicht mischen) | `aba025e3` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
 
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 

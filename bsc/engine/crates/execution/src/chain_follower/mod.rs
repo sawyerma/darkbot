@@ -65,8 +65,8 @@ use crate::wss::endpoint::{Endpoint, connect_tls, tls_config};
 use crate::wss::{DisconnectReason, RateLimitSignal, RejectReason, UrlError, WssLimits};
 
 mod follow;
-mod http;
-mod jsonrpc;
+pub(crate) mod http;
+pub(crate) mod jsonrpc;
 pub mod launches;
 
 #[cfg(test)]
@@ -129,6 +129,9 @@ pub struct FollowerLimits {
     /// that is a property of the transaction ([`is_unrebuildable`]) is
     /// accepted at once.
     pub tx_attempts: u32,
+    /// The largest launch calldata the venue decoder accepts (the C1 scope
+    /// of a canonical launch; larger is refused as oversized).
+    pub max_launch_calldata: usize,
 }
 
 /// The verifier refuses this transaction for a property of its own (a type
@@ -170,6 +173,9 @@ impl FollowerLimits {
         }
         if self.tx_attempts == 0 {
             return Err(LimitsError::Zero("tx_attempts"));
+        }
+        if self.max_launch_calldata == 0 {
+            return Err(LimitsError::Zero("max_launch_calldata"));
         }
         if self.backoff_initial > self.backoff_max {
             return Err(LimitsError::BackoffInitialAboveMax);
@@ -459,7 +465,7 @@ pub fn run_follower(
 
 /// `wss://authority/path` (as [`Endpoint::url`] normalizes it) split into
 /// the `Host` header value and the request target.
-fn authority_and_path(url: &str) -> (String, String) {
+pub(crate) fn authority_and_path(url: &str) -> (String, String) {
     let rest = url.strip_prefix("wss://").unwrap_or(url);
     match rest.find('/') {
         Some(at) => (rest[..at].to_owned(), rest[at..].to_owned()),
@@ -470,7 +476,7 @@ fn authority_and_path(url: &str) -> (String, String) {
 /// The bounds [`connect_tls`] applies: it reads `connect_timeout`,
 /// `handshake_timeout`, `read_tick` and `write_timeout`. The other fields
 /// are not read by the connect; they carry the follower's own equivalents.
-fn connect_bounds(limits: &FollowerLimits) -> WssLimits {
+pub(crate) fn connect_bounds(limits: &FollowerLimits) -> WssLimits {
     WssLimits {
         connect_timeout: limits.connect_timeout,
         handshake_timeout: limits.handshake_timeout,

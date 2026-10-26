@@ -471,6 +471,7 @@ fn limits() -> FollowerLimits {
         backoff_initial: Duration::from_millis(250),
         backoff_max: Duration::from_secs(5),
         tx_attempts: 3,
+        max_launch_calldata: 16_384,
     }
 }
 

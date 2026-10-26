@@ -24,6 +24,7 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         backoff_initial: Duration::from_millis(250),
         backoff_max: Duration::from_secs(5),
         tx_attempts: 3,
+        max_launch_calldata: 16_384,
     };
     let run_for = Duration::from_secs(30);
     let stop = Arc::new(AtomicBool::new(false));

@@ -440,6 +440,75 @@ pub mod runtime_status {
         };
     }
 
+    /// The C3 execution path in PAPER mode (component `BSC_EXEC` effective
+    /// SHADOW): from the pending launch to the PAPER sink (`T_shadow_sink`,
+    /// never `T_send`).
+    pub mod exec {
+        use super::*;
+
+        /// `NOT_CONFIGURED`, `IDENTITY_REFUSED`, `WAITING_C2`, `PROBING`,
+        /// `PROBE_FAILED`, `DEPLOYMENT_DRIFT`, `TERMS_DRIFT`,
+        /// `WAITING_NONCE`, `ARM_FAILED`, `ARMED` or `EXHAUSTED`.
+        pub const STATE: u16 = 1;
+        /// Why the state is not `ARMED`.
+        pub const REASON: u16 = 2;
+        /// The PAPER identity's address (never funded, never a production
+        /// account).
+        pub const PAPER_SENDER: u16 = 3;
+        /// The live Portal version and the block the probe pinned.
+        pub const PORTAL_VERSION: u16 = 4;
+        pub const PROBE_BLOCK: u16 = 5;
+        pub const LANES_ARMED: u16 = 6;
+        pub const LANES_LEFT: u16 = 7;
+        /// Pending C1-scope launches handed to the path.
+        pub const LAUNCHES: u16 = 8;
+        /// Signed PAPER BUYs taken by the sink.
+        pub const HANDOFFS: u16 = 9;
+        /// Refusals by stage.
+        pub const REFUSED_NOT_DECODED: u16 = 10;
+        pub const REFUSED_PROFILE: u16 = 11;
+        pub const REFUSED_NO_SNAPSHOT: u16 = 12;
+        pub const REFUSED_ADMISSION: u16 = 13;
+        pub const REFUSED_INTENT: u16 = 14;
+        pub const REFUSED_LANES_EXHAUSTED: u16 = 15;
+        pub const REFUSED_LANE: u16 = 16;
+        pub const REFUSED_BUILD: u16 = 17;
+        /// `T_ingress` → `T_shadow_sink` of the kept samples (ns).
+        pub const LATENCY_SAMPLES: u16 = 18;
+        pub const LATENCY_P50_NS: u16 = 19;
+        pub const LATENCY_P99_NS: u16 = 20;
+        pub const LATENCY_MAX_NS: u16 = 21;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.exec",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(STATE, "state", Text),
+                Field::opt(REASON, "reason", Text),
+                Field::opt(PAPER_SENDER, "paper_sender", Text),
+                Field::opt(PORTAL_VERSION, "portal_version", Text),
+                Field::opt(PROBE_BLOCK, "probe_block", U64),
+                Field::req(LANES_ARMED, "lanes_armed", U64),
+                Field::req(LANES_LEFT, "lanes_left", U64),
+                Field::req(LAUNCHES, "launches", U64),
+                Field::req(HANDOFFS, "handoffs", U64),
+                Field::req(REFUSED_NOT_DECODED, "refused_not_decoded", U64),
+                Field::req(REFUSED_PROFILE, "refused_profile", U64),
+                Field::req(REFUSED_NO_SNAPSHOT, "refused_no_snapshot", U64),
+                Field::req(REFUSED_ADMISSION, "refused_admission", U64),
+                Field::req(REFUSED_INTENT, "refused_intent", U64),
+                Field::req(REFUSED_LANES_EXHAUSTED, "refused_lanes_exhausted", U64),
+                Field::req(REFUSED_LANE, "refused_lane", U64),
+                Field::req(REFUSED_BUILD, "refused_build", U64),
+                Field::req(LATENCY_SAMPLES, "latency_samples", U64),
+                Field::opt(LATENCY_P50_NS, "latency_p50_ns", U64),
+                Field::opt(LATENCY_P99_NS, "latency_p99_ns", U64),
+                Field::opt(LATENCY_MAX_NS, "latency_max_ns", U64),
+            ],
+        };
+    }
+
     /// The source-modes generation the runtime applies.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -462,11 +531,13 @@ pub mod runtime_status {
     pub const STATUS_INTERVAL_MS: u16 = 12;
     /// Present while the C2 chain-state owner runs.
     pub const STATE: u16 = 13;
+    /// Present while a PAPER execution path is configured.
+    pub const EXEC: u16 = 14;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 5,
+        schema_version: 6,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -490,6 +561,7 @@ pub mod runtime_status {
             ),
             Field::req(STATUS_INTERVAL_MS, "status_interval_ms", U64),
             Field::nested(STATE, "state", Presence::Optional, &state::SCHEMA),
+            Field::nested(EXEC, "exec", Presence::Optional, &exec::SCHEMA),
         ],
     };
 }

@@ -2404,7 +2404,7 @@
     },
     {
       "source_path": "gateway/src/control.rs",
-      "source_sha": "f444dddb85efec7e591fd6621e2ade3b2313a56af86946cf709cb8b6cbb16527",
+      "source_sha": "fbc6159142270d572c034ecd7f61a4ced4a4c49241f0c8a648e2b63ccbe95bdb",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     }
@@ -3688,6 +3688,18 @@
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
       "reason": "C2 chain-state owner (BSC_STATE_C2 SHADOW): coherence, retained window, held candidates/uncertain, per-sender confidence, canonical/pending effects, conflicts, overflow, checkpoint restore"
+    },
+    {
+      "schemas": [
+        "darkbot.bsc.runtime-status.v1"
+      ],
+      "match": "prefix:exec[].",
+      "panel": "monitoring",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state",
+      "reason": "C3 PAPER path (BSC_EXEC SHADOW): lifecycle state (identity, probe, decode-only/drift, nonce, lanes), launches, PAPER sink handoffs, refusals per stage, local T_ingress→T_shadow_sink latency (not T_send)"
     },
     {
       "schemas": [

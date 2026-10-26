@@ -64,7 +64,7 @@ fn decision(raw: &[u8], calldata_of: impl Fn(&[u8]) -> Vec<u8>) -> String {
     let calldata = calldata_of(raw);
     format!(
         "{} {:?}",
-        is_flap_launch(raw),
+        is_flap_launch(raw, 16_384),
         recognize(portal, Some(portal), &calldata, raw.len())
     )
 }

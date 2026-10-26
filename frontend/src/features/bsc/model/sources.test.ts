@@ -28,7 +28,11 @@ const withComponents = (base: NativeRecordView, rows: [string, string, string, s
 describe("BSC component control (C2 state)", () => {
   it("shows the owner's component modes; LIVE stays BLOCKED with its reason", () => {
     const v = sourceControlView([withComponents(record("4", all()), [["BSC_STATE_C2", "LIVE", "BLOCKED", "C2_OPERATIONAL_NOT_AUTHORIZED"]])]);
-    expect(v.components).toEqual([{ id: "BSC_STATE_C2", requested: "LIVE", effective: "BLOCKED", blockReason: "C2_OPERATIONAL_NOT_AUTHORIZED", health: "", counters: "" }]);
+    expect(v.components[0]).toEqual({ id: "BSC_STATE_C2", requested: "LIVE", effective: "BLOCKED", blockReason: "C2_OPERATIONAL_NOT_AUTHORIZED", health: "", counters: "" });
+    // A component the record does not name is NOT_RECORDED, never assumed OFF.
+    expect(v.components[1]).toMatchObject({ id: "BSC_EXEC", requested: NOT_RECORDED, effective: NOT_RECORDED });
+    const exec = sourceControlView([withComponents(record("5", all()), [["BSC_STATE_C2", "SHADOW", "SHADOW"], ["BSC_EXEC", "LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"]])]);
+    expect(exec.components[1]).toMatchObject({ id: "BSC_EXEC", requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_NOT_AUTHORIZED" });
   });
   it("a generation from before components is NOT_RECORDED, never assumed", () => {
     expect(sourceControlView([record("1", all())]).components[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
@@ -106,5 +110,21 @@ describe("BSC source control", () => {
     expect(v?.checkpoint).toContain("restore RESTORED");
     expect(runtimeView([status(10_000, true, "false")], 11_000).view.chainState?.coherent).toBe("NOT_COHERENT");
     expect(runtimeView([status(10_000, true)], 20_000).view.chainState?.coherent).toBe("STALE");
+  });
+
+  it("shows the C3 PAPER path only while configured, never claiming a transport", () => {
+    const status = (observed: number, exec: boolean, latency = false): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      ...(exec ? [{ name: "exec[0].state", value: "ECONOMICS_UNQUALIFIED", kind: 7, unit: "" }, { name: "exec[0].reason", value: "Portal v5.27.0 is decode-only", kind: 7, unit: "" },
+        { name: "exec[0].lanes_armed", value: "64", kind: 2, unit: "" }, { name: "exec[0].handoffs", value: "0", kind: 2, unit: "" }] : []),
+      ...(latency ? [{ name: "exec[0].latency_p50_ns", value: "116250", kind: 2, unit: "" }] : [])] });
+    expect(runtimeView([status(10_000, false)], 11_000).view.exec).toBeUndefined();
+    const v = runtimeView([status(10_000, true)], 11_000).view.exec;
+    expect(v?.state).toBe("ECONOMICS_UNQUALIFIED");
+    expect(v?.detail).toContain("decode-only");
+    expect(v?.path).toContain("to the PAPER sink 0");
+    expect(v?.latency).toBe("no PAPER BUY yet");
+    expect(runtimeView([status(10_000, true, true)], 11_000).view.exec?.latency).toContain("not T_send");
+    expect(runtimeView([status(10_000, true)], 20_000).view.exec?.state).toBe("STALE");
   });
 });

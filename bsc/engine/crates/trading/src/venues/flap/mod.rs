@@ -2,8 +2,11 @@
 //! Portal v5.27.0: pending recognition of every launch and trade call of
 //! the verified ABI ([`recognize`]; `newTokenV6` and `swapExactInput`
 //! decoded, the others explicitly unsupported) and canonical decode of the
-//! Portal's events ([`events`]: launch, BUY, SELL, migration, mode and
-//! configuration). Trading admission stays the `TOKEN_TAXED_V3` profile.
+//! Portal's events with a witnessed live log ([`events`]: launch, BUY,
+//! SELL, mode and configuration; migration and the others of the ABI are
+//! explicitly unsupported). Trading admission stays the `TOKEN_TAXED_V3`
+//! profile, and only on a deployment whose economics are witnessed on its
+//! implementation (v5.27.0 is decode-only until G0.6a is reconfirmed).
 //!
 //! This is the single implementation of the Flap ABI, the token-address
 //! derivation, the deployment binding, the launch classification and the
@@ -15,7 +18,9 @@
 //! - [`abi`] decodes facts. It accepts every canonical call, including
 //!   launches of modes that are not supported, so capture keeps them.
 //! - [`recognize`] and [`events`] are the one decoder of capture, replay,
-//!   PAPER and LIVE (the runtime ingress and the canonical follower).
+//!   PAPER and LIVE (the runtime ingress, the canonical follower and the
+//!   PAPER path; FastLane bytes decode identically, the production HOT0
+//!   consumer arrives with the synced geth source).
 //! - [`deployment`] holds the witnessed deployment constants and validates
 //!   the live deployment against them.
 //! - [`profile`] is the fail-closed trading admission: a launch is

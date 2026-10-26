@@ -127,14 +127,17 @@ pub fn effective(source: SourceId, requested: Mode) -> Effective {
 pub enum ComponentId {
     /// The C2 canonical/pending state owner (observes in SHADOW).
     StateC2,
+    /// The C3 execution path: SHADOW runs it to the PAPER sink.
+    ExecC3,
 }
 
 impl ComponentId {
-    pub const ALL: [ComponentId; 1] = [ComponentId::StateC2];
+    pub const ALL: [ComponentId; 2] = [ComponentId::StateC2, ComponentId::ExecC3];
 
     pub fn name(self) -> &'static str {
         match self {
             ComponentId::StateC2 => "BSC_STATE_C2",
+            ComponentId::ExecC3 => "BSC_EXEC",
         }
     }
 
@@ -150,6 +153,9 @@ pub fn component_effective(component: ComponentId, requested: Mode) -> Effective
         (_, Mode::Off) => Effective::Off,
         (_, Mode::Shadow) => Effective::Shadow,
         (ComponentId::StateC2, Mode::Live) => Effective::Blocked(C2_OPERATIONAL_NOT_AUTHORIZED),
+        // LIVE would sign and send economically: never without its own
+        // authorization (G0.7/G0.8, J).
+        (ComponentId::ExecC3, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
     }
 }
 
@@ -215,7 +221,7 @@ pub struct SourceMode {
 pub struct Generation {
     pub generation: u64,
     pub sources: [SourceMode; 5],
-    pub components: [ComponentMode; 1],
+    pub components: [ComponentMode; 2],
     pub request_id: Option<String>,
 }
 
@@ -760,6 +766,45 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// C3: the execution component runs only to the PAPER sink; a
+    /// requested LIVE is recorded and never effective.
+    #[test]
+    fn the_exec_component_is_paper_only_and_never_live() {
+        let (dir, s) = store("exec");
+        let exec = ComponentId::ExecC3;
+        assert_eq!(Entity::parse("BSC_EXEC"), Some(Entity::Component(exec)));
+        let r = s
+            .request("e-1", ComponentId::StateC2, Mode::Shadow, 0, 1)
+            .unwrap();
+        assert!(r.applied());
+        // A C2 request leaves the exec component OFF.
+        assert_eq!(
+            s.current().unwrap().component(exec).effective,
+            Effective::Off
+        );
+        let r = s.request("e-2", exec, Mode::Shadow, 1, 2).unwrap();
+        assert_eq!(r.effective, Effective::Shadow);
+        let r = s.request("e-3", exec, Mode::Live, 2, 3).unwrap();
+        assert!(r.applied());
+        assert_eq!(
+            r.effective,
+            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
+        );
+        assert!(
+            r.line()
+                .contains("source=BSC_EXEC requested=LIVE effective=BLOCKED")
+        );
+        // C2 untouched by the exec request.
+        assert_eq!(
+            s.current()
+                .unwrap()
+                .component(ComponentId::StateC2)
+                .effective,
+            Effective::Shadow
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// A generation written before components existed (schema version 1)
     /// still reads, with every component OFF.
     #[test]
@@ -789,7 +834,10 @@ mod tests {
             .unwrap();
         let (_, r) = current_record(&dir).unwrap().unwrap();
         assert_eq!(r.schema().schema_version, sm::SCHEMA.schema_version);
-        assert_eq!(r.nested_all(sm::COMPONENTS).unwrap().len(), 1);
+        assert_eq!(
+            r.nested_all(sm::COMPONENTS).unwrap().len(),
+            ComponentId::ALL.len()
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

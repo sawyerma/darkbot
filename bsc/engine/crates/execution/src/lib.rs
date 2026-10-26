@@ -82,6 +82,9 @@ pub mod paper;
 /// The C3 production path in PAPER mode, ending at the PAPER sink.
 #[cfg(feature = "runtime")]
 pub mod paper_exec;
+/// The read-only startup probe of the live Flap deployment and venue terms.
+#[cfg(feature = "runtime")]
+pub mod venue_probe;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.

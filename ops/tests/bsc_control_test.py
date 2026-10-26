@@ -19,7 +19,13 @@ try:
     # The runtime's real configuration; only the census interval is shortened for the test.
     ingress=(h.ROOT/'bsc/config/ingress.public.env').read_text()
     assert 'BSC_RUNTIME_CENSUS_MS=60000\n' in ingress
+    # The C3 PAPER identity: a fresh local key of this run, outside the snapshot (never funded).
+    assert 'BSC_EXEC_PAPER_IDENTITY=~/.darkbot/bsc/paper_identity.key\n' in ingress
+    paper_key=h.WORK/'paper/paper_identity.key'
+    ingress=ingress.replace('BSC_EXEC_PAPER_IDENTITY=~/.darkbot/bsc/paper_identity.key\n',f'BSC_EXEC_PAPER_IDENTITY={paper_key}\n')
     (source/'bsc/config/ingress.public.env').write_text(ingress.replace('BSC_RUNTIME_CENSUS_MS=60000\n','BSC_RUNTIME_CENSUS_MS=5000\n'))
+    paper=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/bsc_runtime'),'paper-identity','init','--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout
+    assert paper.startswith('paper_sender=0x') and len(paper.strip())==len('paper_sender=0x')+40, paper
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
     shutil.copy2(h.ROOT/'protocol/golden/bsc/readiness.dbrec',evidence/'readiness.dbrec')

@@ -111,6 +111,8 @@ pub struct IngressCore {
     seen: HashMap<[u8; 32], Seen>,
     stats: [SourceStats; 5],
     launches: u64,
+    /// The largest launch calldata the venue decoder accepts.
+    max_launch_calldata: usize,
 }
 
 fn index(source: SourceId) -> usize {
@@ -121,7 +123,7 @@ fn index(source: SourceId) -> usize {
 /// frozen HOT0 prefilter (Portal, `newTokenV6`) and then the production
 /// Flap decoder's verified decode (Phase D). Calldata the decoder refuses
 /// is no launch.
-pub fn is_flap_launch(raw: &[u8]) -> bool {
+pub fn is_flap_launch(raw: &[u8], max_calldata: usize) -> bool {
     let Ok(target) = decode_tx_target(raw) else {
         return false;
     };
@@ -132,14 +134,20 @@ pub fn is_flap_launch(raw: &[u8]) -> bool {
     // the calldata.
     let portal = Address::from(C14_FLAP_SCOPE.addresses[0]);
     matches!(
-        recognize(portal, target.to.map(Address::from), target.data, raw.len()),
+        recognize(
+            portal,
+            target.to.map(Address::from),
+            target.data,
+            max_calldata
+        ),
         Recognized::LaunchV6(_)
     )
 }
 
 impl IngressCore {
-    /// `capacity` hashes are remembered (at least one).
-    pub fn new(capacity: usize) -> Self {
+    /// `capacity` hashes are remembered (at least one); launch calldata
+    /// above `max_launch_calldata` is refused as oversized.
+    pub fn new(capacity: usize, max_launch_calldata: usize) -> Self {
         let capacity = capacity.max(1);
         IngressCore {
             capacity,
@@ -147,6 +155,7 @@ impl IngressCore {
             seen: HashMap::with_capacity(capacity),
             stats: [SourceStats::default(); 5],
             launches: 0,
+            max_launch_calldata,
         }
     }
 
@@ -239,7 +248,7 @@ impl IngressCore {
             }
             Observation::Full { hash, raw } => {
                 self.stats[i].full += 1;
-                let launch = is_flap_launch(raw);
+                let launch = is_flap_launch(raw, self.max_launch_calldata);
                 if launch {
                     self.stats[i].launch_sightings += 1;
                 }
@@ -394,21 +403,33 @@ mod tests {
         0xb8, 0xe6, 0x5c, 0x9d, 0xe0,
     ];
     const LAUNCH: [u8; 4] = [0x8c, 0xb5, 0x77, 0x2c];
+    const MAX_CALLDATA: usize = 16_384;
 
     #[test]
     fn a_flap_launch_is_the_c1_scope_and_nothing_else() {
-        assert!(is_flap_launch(&legacy(PORTAL, LAUNCH)));
-        assert!(!is_flap_launch(&legacy([7; 20], LAUNCH)));
-        assert!(!is_flap_launch(&legacy(PORTAL, [1, 2, 3, 4])));
-        assert!(!is_flap_launch(b"not a transaction"));
+        assert!(is_flap_launch(&legacy(PORTAL, LAUNCH), MAX_CALLDATA));
+        assert!(!is_flap_launch(&legacy([7; 20], LAUNCH), MAX_CALLDATA));
+        assert!(!is_flap_launch(&legacy(PORTAL, [1, 2, 3, 4]), MAX_CALLDATA));
+        assert!(!is_flap_launch(b"not a transaction", MAX_CALLDATA));
         // Phase D: the launch selector alone is no launch; the production
         // decoder must accept the calldata (before: counted as a launch).
         let mut short = LAUNCH.to_vec();
         short.extend_from_slice(&[0u8; 32]);
-        assert!(!is_flap_launch(&signed(PORTAL, &short)));
+        assert!(!is_flap_launch(&signed(PORTAL, &short), MAX_CALLDATA));
         let mut truncated = launch_calldata();
         truncated.truncate(truncated.len() - 32);
-        assert!(!is_flap_launch(&signed(PORTAL, &truncated)));
+        assert!(!is_flap_launch(&signed(PORTAL, &truncated), MAX_CALLDATA));
+        // Phase D review LOW-1: above the configured bound a canonical
+        // launch is refused as oversized (before: the raw length was the
+        // bound, so nothing was ever oversized).
+        // The frozen prefilter's Portal is the decoder's deployment Portal.
+        assert_eq!(
+            Address::from(C14_FLAP_SCOPE.addresses[0]),
+            darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0().portal
+        );
+        let launch = launch_calldata();
+        assert!(is_flap_launch(&legacy(PORTAL, LAUNCH), launch.len()));
+        assert!(!is_flap_launch(&legacy(PORTAL, LAUNCH), launch.len() - 1));
     }
 
     /// Plan §5a.3: the first verified full sighting wins, even when another
@@ -416,7 +437,7 @@ mod tests {
     /// never create a second launch.
     #[test]
     fn the_first_verified_full_sighting_wins_and_duplicates_never_count_twice() {
-        let mut core = IngressCore::new(16);
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
         let raw = legacy(PORTAL, LAUNCH);
         let h = [9u8; 32];
         assert_eq!(
@@ -497,7 +518,7 @@ mod tests {
 
     #[test]
     fn memory_is_bounded_and_counters_cover_every_event() {
-        let mut core = IngressCore::new(2);
+        let mut core = IngressCore::new(2, MAX_CALLDATA);
         for n in 0..5u8 {
             core.observe(
                 SourceId::Drpc,

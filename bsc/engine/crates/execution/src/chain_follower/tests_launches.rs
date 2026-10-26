@@ -82,7 +82,7 @@ fn complete(block: &str, number: u64, launches: Vec<ReceiptLaunch>) -> Vec<Canon
         .map(|launch| {
             let index = usize::try_from(launch.tx_index).unwrap();
             let verified = verify_object(&objects[index]).unwrap();
-            launch.with_transaction(Ok(&verified))
+            launch.with_transaction(Ok(&verified), 16_384)
         })
         .collect()
 }

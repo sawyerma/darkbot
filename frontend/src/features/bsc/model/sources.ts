@@ -9,7 +9,7 @@ export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
 export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
 export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
 /** Switchable runtime components of the same native owner (C2 state, ...). */
-export const COMPONENT_IDS = ["BSC_STATE_C2"] as const;
+export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC"] as const;
 /** A component the owner's record does not name yet (a generation from before it existed). */
 export const NOT_RECORDED = "NOT_RECORDED";
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
@@ -19,7 +19,9 @@ export interface SourceRow { id: string; requested: string; effective: string; b
 export interface CanonicalView { state: string; head: string; headAgeMs: string; chain: string; launches: string; join: string }
 /** The C2 chain-state owner (component BSC_STATE_C2 effective SHADOW); absent while it does not run. */
 export interface ChainStateView { coherent: string; head: string; held: string; effects: string; faults: string; checkpoint: string }
-export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView }
+/** The C3 PAPER path (component BSC_EXEC effective SHADOW): ends at the PAPER sink, never sends. */
+export interface ExecView { state: string; detail: string; path: string; latency: string }
+export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView }
 export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; runtime: RuntimeView }
 
 /** Rewrites a runtime status may miss before it is STALE. */
@@ -61,7 +63,14 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     faults: `conflicts ${s("conflicts")} (last ${f.get("state[0].last_conflict") ?? "none"}) · refused inputs ${s("refused_inputs")} (last ${f.get("state[0].last_refused") ?? "none"}) · discontinuities (re-anchored) ${s("discontinuities")} · nonces proven consumed: candidates not seen included ${s("consumed_not_seen")}, uncertain unattributed ${s("consumed_unattributed")} (by a later inclusion ${s("resolved_by_later_inclusion")}, undone ${s("resolutions_reverted")}) · overflow txs ${s("overflow_txs")} · overflow candidates ${s("overflow_candidates")} · evicted ${s("evicted")} · unmatched orphaned blocks ${s("unmatched_orphaned_blocks")}`,
     checkpoint: `restore ${s("checkpoint_restore")} (${s("restored_blocks")} blocks) · quarantines ${s("quarantines")} · writes ${s("checkpoint_writes")} · errors ${s("checkpoint_errors")}`,
   } : undefined;
-  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState }, health };
+  const x = (k: string) => f.get(`exec[0].${k}`) ?? "?";
+  const exec: ExecView | undefined = f.has("exec[0].state") ? {
+    state: fresh ? x("state") : "STALE",
+    detail: [f.get("exec[0].reason"), f.get("exec[0].paper_sender") && `PAPER sender ${x("paper_sender")} (never funded)`, f.get("exec[0].portal_version") && `Portal ${x("portal_version")} probed at block ${x("probe_block")}`].filter(Boolean).join(" · ") || "—",
+    path: `lanes ${x("lanes_left")}/${x("lanes_armed")} · launches ${x("launches")} · to the PAPER sink ${x("handoffs")} · refused: not decoded ${x("refused_not_decoded")}, profile ${x("refused_profile")}, no C2 snapshot ${x("refused_no_snapshot")}, admission ${x("refused_admission")}, intent ${x("refused_intent")}, lanes exhausted ${x("refused_lanes_exhausted")}, lane ${x("refused_lane")}, build ${x("refused_build")}`,
+    latency: f.has("exec[0].latency_p50_ns") ? `T_ingress → T_shadow_sink p50 ${x("latency_p50_ns")} ns · p99 ${x("latency_p99_ns")} ns · max ${x("latency_max_ns")} ns (${x("latency_samples")} samples; not T_send)` : "no PAPER BUY yet",
+  } : undefined;
+  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec }, health };
 }
 
 /** The source group from the native record; nothing is inferred locally. */

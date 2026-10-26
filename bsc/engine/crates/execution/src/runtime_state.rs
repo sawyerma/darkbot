@@ -177,6 +177,29 @@ impl StateOwner {
             .collect()
     }
 
+    /// The coherent snapshot for `candidate` under the given generations
+    /// (C2 decides; `None` when it is not coherent or the candidate is not
+    /// an eligible held candidate).
+    pub fn snapshot(
+        &self,
+        candidate: B256,
+        policy_generation: u64,
+        codehash_generation: u64,
+    ) -> Option<darkbot_bsc_trading::chain_state::SnapshotId> {
+        self.state
+            .snapshot_id(candidate, policy_generation, codehash_generation)
+    }
+
+    /// The next canonical nonce of `sender` when C2 knows it exactly.
+    pub fn clean_next_nonce(&self, sender: &[u8; 20]) -> Option<u64> {
+        match self.state.sender(Address::from(*sender)) {
+            darkbot_bsc_trading::chain_state::engine::SenderView::Clean { next_nonce } => {
+                Some(next_nonce)
+            }
+            _ => None,
+        }
+    }
+
     /// Whether `sender` is one of the watched (own) accounts.
     pub fn watches(&self, sender: &[u8; 20]) -> bool {
         self.watched.binary_search(sender).is_ok()

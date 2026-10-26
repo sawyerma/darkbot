@@ -174,6 +174,7 @@ pub(super) struct Follower {
     /// followed; at most `reorg_depth + 2` entries.
     seen: VecDeque<(u64, [u8; 32], FirstHeld)>,
     tx_attempts: u32,
+    max_launch_calldata: usize,
     /// Refused answers per launch transaction of the block being accepted;
     /// cleared when a block is accepted (bounded by one block's launches).
     refusals: Vec<([u8; 32], u32)>,
@@ -212,6 +213,7 @@ impl Follower {
             kept,
             seen: VecDeque::new(),
             tx_attempts: limits.tx_attempts,
+            max_launch_calldata: limits.max_launch_calldata,
             refusals: Vec::new(),
             watch: watch.clone(),
             facts_due: true,
@@ -424,7 +426,9 @@ impl Follower {
                     Err(reason)
                 }
             };
-            launches.push(launch.with_transaction(tx.as_ref().map_err(|r| *r)));
+            launches.push(
+                launch.with_transaction(tx.as_ref().map_err(|r| *r), self.max_launch_calldata),
+            );
         }
         let txs = head
             .txs

@@ -32,6 +32,20 @@ use super::address::{create2_address, minimal_proxy_init_code};
 /// the EVM `EXTCODEHASH`.
 pub type RuntimeSha256 = [u8; 32];
 
+/// What a deployment's trading economics rest on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EconomicsWitness {
+    /// The launch profile, the native quote and the first BUY were
+    /// witnessed by an EVM execution on exactly this implementation
+    /// (G0.6a): classification and admission may use it.
+    Witnessed,
+    /// Recognized and decoded from the verified ABI only; its economics are
+    /// not witnessed on this implementation (Phase D contract §3, "Gate-0
+    /// facts must be reconfirmed if contracts changed"). Nothing is
+    /// admitted on it.
+    DecodeOnly,
+}
+
 /// A witnessed Flap deployment for the `TOKEN_TAXED_V3` launch mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlapDeployment {
@@ -54,6 +68,8 @@ pub struct FlapDeployment {
     /// Keccak-256 of the token creation code (EIP-1167 proxy of the
     /// tax-token implementation).
     pub tax_v3_init_code_hash: B256,
+    /// Whether classification and admission may run on it.
+    pub economics: EconomicsWitness,
 }
 
 /// The live deployment as read by the runner at startup.
@@ -125,6 +141,12 @@ impl ValidatedDeployment {
     #[inline]
     pub fn codehash_generation(&self) -> u64 {
         self.codehash_generation
+    }
+
+    /// Whether its economics are witnessed on this implementation.
+    #[inline]
+    pub fn economics_witnessed(&self) -> bool {
+        self.deployment.economics == EconomicsWitness::Witnessed
     }
 }
 
@@ -212,6 +234,9 @@ pub fn bsc_mainnet_v5_24_0() -> FlapDeployment {
             0x29, 0x58, 0x6e, 0xf5,
         ],
         tax_v3_init_code_hash: keccak256(minimal_proxy_init_code(tax_v3_implementation)),
+        // The G0.6a EVM crosscheck executed the native launch and BUY on
+        // this implementation.
+        economics: EconomicsWitness::Witnessed,
     }
 }
 
@@ -222,7 +247,8 @@ pub fn bsc_mainnet_v5_24_0() -> FlapDeployment {
 /// implementation is Sourcify-verified ("Portal", solc 0.8.26); the proxy,
 /// the tax-token V3 implementation and its clone init code are unchanged
 /// since v5.24.0, the implementation, its fingerprint and the version are
-/// new.
+/// new. Its economics are not witnessed on this implementation yet: it is
+/// decode-only until a reconfirmation of G0.6a on v5.27.0 exists.
 pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
     let v5_24 = bsc_mainnet_v5_24_0();
     FlapDeployment {
@@ -233,6 +259,7 @@ pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
         portal_implementation_runtime_sha256: alloy_primitives::hex!(
             "4a439209fca0a6168a15cf58d19c19975205b6af13e0fb81846f7d78528e8f74"
         ),
+        economics: EconomicsWitness::DecodeOnly,
         ..v5_24
     }
 }

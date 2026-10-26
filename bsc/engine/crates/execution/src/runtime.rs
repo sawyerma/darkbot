@@ -29,10 +29,11 @@ use crate::chain_follower::{
 };
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
+use crate::paper_exec::ExecConfig;
 use crate::runtime_journal::{
     EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
-    later_sighting_payload, orphaned_launch_payload, pending_launch_payload, reorg_payload,
-    resync_payload, source_event_payload, window_payload,
+    later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
+    reorg_payload, resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -54,6 +55,10 @@ use std::time::{Duration, Instant};
 #[path = "runtime_state.rs"]
 pub mod state;
 
+#[path = "runtime_exec.rs"]
+pub mod exec;
+
+use exec::{ExecRuntime, ExecSetup};
 use state::{StateConfig, StateOwner};
 
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
@@ -79,6 +84,11 @@ pub struct RuntimeConfig {
     /// How long the operator waits for a requested stop before it kills the
     /// process; at least the derived worst-case stop path.
     pub stop_timeout_ms: u64,
+    /// The C3 PAPER path (`BSC_EXEC_*`; it needs the canonical follower).
+    pub exec: Option<ExecSetup>,
+    /// The largest launch calldata the venue decoder accepts, at ingress
+    /// and for the follower's C1 scope.
+    pub max_launch_calldata: usize,
 }
 
 /// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
@@ -131,6 +141,8 @@ impl RuntimeConfig {
         }
         let canonical_rpc = values.remove("BSC_CANONICAL_RPC");
         let watched = values.remove("BSC_STATE_WATCHED");
+        let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
+        let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -138,6 +150,7 @@ impl RuntimeConfig {
             bounded(name, v, min, max)
         };
         let ms = Duration::from_millis;
+        let max_launch_calldata = take("BSC_RUNTIME_MAX_LAUNCH_CALLDATA", 1_024, 1 << 20)? as usize;
         let canonical = match canonical_rpc {
             None => None,
             Some(url) => {
@@ -165,6 +178,7 @@ impl RuntimeConfig {
                     backoff_initial: ms(take("BSC_CANONICAL_BACKOFF_INITIAL_MS", 100, 60_000)?),
                     backoff_max: ms(take("BSC_CANONICAL_BACKOFF_MAX_MS", 1_000, 3_600_000)?),
                     tx_attempts: take("BSC_CANONICAL_TX_ATTEMPTS", 1, 100)? as u32,
+                    max_launch_calldata,
                 };
                 limits
                     .validate()
@@ -202,6 +216,35 @@ impl RuntimeConfig {
         if canonical.is_none() && watched.is_some() {
             return Err("BSC_STATE_WATCHED needs BSC_CANONICAL_RPC".into());
         }
+        let exec = match paper_identity {
+            None => {
+                if refused_accounts.is_some() {
+                    return Err("BSC_EXEC_REFUSED_ACCOUNTS needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
+                None
+            }
+            Some(_) if canonical.is_none() => {
+                return Err("BSC_EXEC_PAPER_IDENTITY needs BSC_CANONICAL_RPC (C2)".into());
+            }
+            Some(path) => Some(ExecSetup {
+                identity_path: ExecSetup::expand_home(path)?,
+                refused_accounts: StateConfig::parse_watched(
+                    refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
+                )
+                .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?,
+                exec: ExecConfig {
+                    input_wei: u128::from(take("BSC_EXEC_INPUT_WEI", 1, u64::MAX)?),
+                    slippage_bps: take("BSC_EXEC_SLIPPAGE_BPS", 0, 9_999)? as u16,
+                    gas_price_wei: take("BSC_EXEC_GAS_PRICE_WEI", 1, 1_000_000_000_000)?,
+                    gas_limit: take("BSC_EXEC_GAS_LIMIT", 21_000, 100_000_000)?,
+                    session_cap_wei: u128::from(take("BSC_EXEC_SESSION_CAP_WEI", 1, u64::MAX)?),
+                    lanes: take("BSC_EXEC_LANES", 1, 65_536)? as usize,
+                    max_calldata: take("BSC_EXEC_MAX_CALLDATA", 1_024, 1 << 20)? as usize,
+                    latency_samples: take("BSC_EXEC_LATENCY_SAMPLES", 1, 1 << 20)? as usize,
+                    policy_generation: take("BSC_EXEC_POLICY_GENERATION", 1, u64::from(u32::MAX))?,
+                },
+            }),
+        };
         let wss = WssLimits {
             connect_timeout: ms(take("BSC_RUNTIME_CONNECT_TIMEOUT_MS", 100, 60_000)?),
             handshake_timeout: ms(take("BSC_RUNTIME_HANDSHAKE_TIMEOUT_MS", 100, 120_000)?),
@@ -228,6 +271,8 @@ impl RuntimeConfig {
             // Below the launchd ExitTimeOut (330 s) of the runtime job in
             // ops/bsc-control.sh, so a SIGTERM stop is never cut by SIGKILL.
             stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
+            exec,
+            max_launch_calldata,
         };
         config
             .wss
@@ -718,6 +763,7 @@ fn status_bytes(
     journal_lost: u64,
     canonical: Option<&Canonical>,
     owner: Option<&StateOwner>,
+    exec: Option<&ExecRuntime>,
     status_interval_ms: u64,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
@@ -761,6 +807,9 @@ fn status_bytes(
     if let Some(o) = owner {
         d.set(rs::STATE, o.draft().into_nested());
     }
+    if let Some(x) = exec {
+        d.set(rs::EXEC, x.draft().into_nested());
+    }
     d.encode().map_err(|e| e.to_string())
 }
 
@@ -771,7 +820,12 @@ pub fn stop_file(rundir: &Path) -> PathBuf {
 }
 
 /// Runs until `rundir/bsc.runtime.stop` exists.
-pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<(), String> {
+pub fn run(
+    config: &RuntimeConfig,
+    sources_dir: &Path,
+    rundir: &Path,
+    repo_root: &Path,
+) -> Result<(), String> {
     let store = Store::open(sources_dir, 64)?;
     let clock = Clock(Instant::now());
     let started_ms = observed_now()?;
@@ -801,27 +855,42 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
         .iter()
         .map(|_| Arc::new(AtomicU64::new(0)))
         .collect();
-    let mut core = IngressCore::new(config.dedup_hashes);
+    let mut core = IngressCore::new(config.dedup_hashes, config.max_launch_calldata);
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
     let (canonical_tx, canonical_rx) = sync_channel::<(u64, CanonicalEvent)>(config.queue_events);
     let canonical_rx = Some(canonical_rx);
-    let mut canonical = config
-        .canonical
+    // The C3 PAPER path: its identity is loaded at start, and C2 watches its
+    // sender (the follower reads that account's nonce facts).
+    let mut exec = config
+        .exec
+        .clone()
+        .map(|setup| ExecRuntime::new(setup, repo_root, dir.join("paper")));
+    let mut canonical_config = config.canonical.clone();
+    if let (Some(c), Some(sender)) = (
+        canonical_config.as_mut(),
+        exec.as_ref().and_then(ExecRuntime::sender),
+    ) {
+        if !c.state.watched.contains(&sender) {
+            c.state.watched.push(sender);
+        }
+        c.state.validate()?;
+    }
+    let mut canonical = canonical_config
         .as_ref()
         .map(|c| Canonical::new(c, started_ms));
     let checkpoint_path = dir.join("c2-checkpoint.bin");
     let c2_wanted =
         |g: &Generation| g.component(ComponentId::StateC2).effective == Effective::Shadow;
     // The C2 owner restores its window at start; the follower resumes after it.
-    let mut owner = match &config.canonical {
+    let mut owner = match &canonical_config {
         Some(c) if c2_wanted(&generation) => {
             Some(StateOwner::restore(&c.state, checkpoint_path.clone())?)
         }
         _ => None,
     };
-    let mut follower = match &config.canonical {
+    let mut follower = match &canonical_config {
         Some(c) => {
             let resume = owner
                 .as_ref()
@@ -836,8 +905,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
     };
     let mut next_checkpoint = Instant::now()
         + Duration::from_millis(
-            config
-                .canonical
+            canonical_config
                 .as_ref()
                 .map_or(0, |c| c.state.checkpoint_ms),
         );
@@ -865,7 +933,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
                 generation = store.current()?;
-                if let Some(c) = &config.canonical {
+                if let Some(c) = &canonical_config {
                     StateOwner::switch(
                         &mut owner,
                         c2_wanted(&generation),
@@ -873,6 +941,14 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                         &checkpoint_path,
                         replace,
                     )?;
+                }
+                if let Some(x) = exec.as_mut() {
+                    let wanted =
+                        generation.component(ComponentId::ExecC3).effective == Effective::Shadow;
+                    let follower = canonical_config
+                        .as_ref()
+                        .map(|c| (c.endpoint.as_str(), &c.limits));
+                    x.tick(wanted, owner.as_ref(), follower, started_ms);
                 }
             }
             for source in SourceId::ALL {
@@ -981,6 +1057,18 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 // Source lanes are indexed as in `SourceId::ALL` (five).
                 o.pending(*hash, *from, *nonce, index(source) as u8, at);
             }
+            // C3: the first verified sighting of a C1-scope launch runs the
+            // production path to the PAPER sink (when armed).
+            if let (Some(x), Some(o), Some(Launch::First { hash, .. }), Event::Full { raw, .. }) =
+                (exec.as_mut(), owner.as_ref(), decided, &event)
+                && let Some(buy) = x.on_launch(hash, raw, at, o, || clock.now_ns())
+            {
+                journal.record(
+                    RecordKind::Runtime,
+                    buy.times.sink_ns,
+                    &paper_handoff_payload(&buy),
+                );
+            }
             match decided {
                 Some(Launch::First { hash, source, .. }) => {
                     if let Event::Full { raw, .. } = &event {
@@ -1080,6 +1168,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 journal.lost(),
                 canonical.as_ref(),
                 owner.as_ref(),
+                exec.as_ref(),
                 config.status_ms,
             )?;
             replace(&status_path, &bytes)?;
@@ -1090,8 +1179,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
             // At stop after the follower's last events (processed above).
             next_checkpoint = Instant::now()
                 + Duration::from_millis(
-                    config
-                        .canonical
+                    canonical_config
                         .as_ref()
                         .map_or(0, |c| c.state.checkpoint_ms),
                 );
@@ -1175,10 +1263,42 @@ mod tests {
         assert!(RuntimeConfig::parse(&CONFIG.replace("BSC_CANONICAL_RPC=", "#")).is_err());
         let without: String = CONFIG
             .lines()
-            .filter(|l| !l.starts_with("BSC_CANONICAL_") && !l.starts_with("BSC_STATE_"))
+            .filter(|l| {
+                !l.starts_with("BSC_CANONICAL_")
+                    && !l.starts_with("BSC_STATE_")
+                    && !l.starts_with("BSC_EXEC_")
+            })
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(RuntimeConfig::parse(&without).unwrap().canonical, None);
+        // The PAPER path needs C2: without the follower it is refused.
+        assert!(
+            RuntimeConfig::parse(&format!(
+                "{without}BSC_EXEC_PAPER_IDENTITY=/tmp/x\nBSC_EXEC_REFUSED_ACCOUNTS=\n"
+            ))
+            .is_err()
+        );
+        let exec = c.exec.as_ref().unwrap();
+        assert!(
+            exec.identity_path
+                .ends_with(".darkbot/bsc/paper_identity.key")
+        );
+        assert!(exec.identity_path.is_absolute());
+        assert_eq!(
+            (
+                exec.exec.input_wei,
+                exec.exec.gas_price_wei,
+                exec.exec.gas_limit,
+                exec.exec.slippage_bps
+            ),
+            (1_000_000_000_000_000, 50_000_000, 3_000_000, 100)
+        );
+        let no_exec: String = CONFIG
+            .lines()
+            .filter(|l| !l.starts_with("BSC_EXEC_"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(RuntimeConfig::parse(&no_exec).unwrap().exec, None);
         assert!(RuntimeConfig::parse(&format!("{without}BSC_STATE_WATCHED=\n")).is_err());
         for bad in [
             CONFIG.replace("wss://bsc-rpc", "ws://bsc-rpc"),
@@ -1214,6 +1334,14 @@ mod tests {
                 .replace("BSC_STATE_MAX_TXS=1024", "BSC_STATE_MAX_TXS=1023"),
             CONFIG.replace("BSC_STATE_CHECKPOINT_MS=30000\n", ""),
             CONFIG.replace("NONCE_FACT_BLOCKS=20", "NONCE_FACT_BLOCKS=0"),
+            // C3: every PAPER key required, bounded; refused accounts exact.
+            CONFIG.replace("BSC_EXEC_LANES=64\n", ""),
+            CONFIG.replace("BSC_RUNTIME_MAX_LAUNCH_CALLDATA=16384\n", ""),
+            CONFIG.replace("MAX_LAUNCH_CALLDATA=16384", "MAX_LAUNCH_CALLDATA=1023"),
+            CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", ""),
+            CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", "BSC_EXEC_REFUSED_ACCOUNTS=0x12\n"),
+            CONFIG.replace("BSC_EXEC_SLIPPAGE_BPS=100", "BSC_EXEC_SLIPPAGE_BPS=10000"),
+            CONFIG.replace("BSC_EXEC_GAS_LIMIT=3000000", "BSC_EXEC_GAS_LIMIT=20999"),
             CONFIG.replace("BSC_STATE_WATCHED=\n", ""),
             CONFIG.replace("BSC_STATE_WATCHED=\n", "BSC_STATE_WATCHED=0x12\n"),
             CONFIG.replace(
@@ -1253,7 +1381,7 @@ mod tests {
         // The process started at block 10's time.
         let mut c = Canonical::new(&cc, block_ms(10));
         let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
-        let mut core = IngressCore::new(64);
+        let mut core = IngressCore::new(64, config.max_launch_calldata);
         let clock = Clock(Instant::now());
         let block = |n: u8| CanonicalEvent::Block {
             number: u64::from(n),
@@ -1419,6 +1547,7 @@ mod tests {
             0,
             Some(&c),
             None,
+            None,
             config.status_ms,
         )
         .unwrap();
@@ -1520,14 +1649,19 @@ mod tests {
         let text: String = CONFIG
             .replace("STATUS_MS=1000", "STATUS_MS=100")
             .lines()
-            .filter(|l| !l.starts_with("BSC_CANONICAL_") && !l.starts_with("BSC_STATE_"))
+            .filter(|l| {
+                !l.starts_with("BSC_CANONICAL_")
+                    && !l.starts_with("BSC_STATE_")
+                    && !l.starts_with("BSC_EXEC_")
+            })
             .map(|l| format!("{l}\n"))
             .collect();
         let config = RuntimeConfig::parse(&text).unwrap();
         let sources = base.join("bsc-sources");
         Store::open(&sources, 8).unwrap().init(1).unwrap();
         let rundir = base.clone();
-        let runner = thread::spawn(move || run(&config, &sources, &rundir));
+        let runner =
+            thread::spawn(move || run(&config, &sources, &rundir, Path::new("/nonexistent-repo")));
         let status = base.join("bsc-runtime/status.dbrec");
         let started = Instant::now();
         while !status.exists() {

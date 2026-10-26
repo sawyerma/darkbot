@@ -45,7 +45,21 @@ fn run(args: &[String]) -> Result<bool, String> {
             let config = RuntimeConfig::parse(&text)?;
             let rundir = std::path::Path::new(flag(rest, "--rundir")?);
             stop_on_signals(stop_file(rundir))?;
-            run_runtime(&config, std::path::Path::new(flag(rest, "--sources")?), rundir)?;
+            // The repository holds the configuration at bsc/config/; the
+            // PAPER identity must live outside it.
+            let repo_root = std::path::Path::new(config_path)
+                .canonicalize()
+                .map_err(|e| format!("{config_path}: {e}"))?
+                .ancestors()
+                .nth(3)
+                .ok_or("--config is not under <repo>/bsc/config/")?
+                .to_path_buf();
+            run_runtime(
+                &config,
+                std::path::Path::new(flag(rest, "--sources")?),
+                rundir,
+                &repo_root,
+            )?;
             Ok(true)
         }
         [cmd, rest @ ..] if cmd == "census" => {
@@ -55,6 +69,35 @@ fn run(args: &[String]) -> Result<bool, String> {
             // Offline replay: a journal a runtime still writes reads UNTERMINATED here.
             let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?), None)?;
             print!("{}", census.summary());
+            Ok(true)
+        }
+        [area, cmd, rest @ ..] if area == "paper-identity" && (cmd == "init" || cmd == "show") => {
+            // The C3 PAPER identity: a local key outside the repository,
+            // never funded. Prints its address only.
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let setup = config.exec.ok_or("BSC_EXEC_PAPER_IDENTITY is not configured")?;
+            let repo_root = std::path::Path::new(config_path)
+                .canonicalize()
+                .map_err(|e| format!("{config_path}: {e}"))?
+                .ancestors()
+                .nth(3)
+                .ok_or("--config is not under <repo>/bsc/config/")?
+                .to_path_buf();
+            let address = if cmd == "init" {
+                darkbot_bsc_execution::paper::PaperIdentity::create(&setup.identity_path, &repo_root)
+                    .map_err(|e| e.to_string())?
+            } else {
+                darkbot_bsc_execution::paper::PaperIdentity::load(
+                    &setup.identity_path,
+                    &repo_root,
+                    &setup.refused_accounts,
+                )
+                .map_err(|e| e.to_string())?
+                .address()
+            };
+            println!("paper_sender=0x{}", alloy_primitives::hex::encode(address));
             Ok(true)
         }
         [area, cmd, rest @ ..] if area == "source" && cmd == "init" => {
@@ -102,7 +145,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

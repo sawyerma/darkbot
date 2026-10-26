@@ -5,6 +5,12 @@ import { Notice } from "@/shared/ui/graphite/Notice";
 import { selectMonitoring, selectStatus, useBscStore } from "../store/bscStore";
 import { EvidenceRows, PublicRows, timestamp, ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
+
+/** What each switchable component does (its owner's rule shows in the effective mode). */
+const COMPONENT_HINTS: Record<string, string> = {
+  BSC_STATE_C2: "C2 canonical/pending state owner; SHADOW observes only, LIVE stays BLOCKED until G0.8 PASS and evaluated G0.4",
+  BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink (PAPER identity, never sent), LIVE stays BLOCKED (economic LIVE not authorized)",
+};
 import { useNativeRecords } from "./useNativeRecords";
 import { sourceControlView } from "../model/sources";
 import { SourceActions } from "../SourceActions";
@@ -52,7 +58,7 @@ export function MonitoringPanel() {
     </PlacedSection>
     <PlacedSection panel="monitoring" section={6} records={records}>
       {sources.components.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
-        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · C2 canonical/pending state owner; SHADOW observes only, LIVE stays BLOCKED until G0.8 PASS and evaluated G0.4`} />)}
+        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${COMPONENT_HINTS[row.id] ?? ""}`} />)}
       <SourceActions view={sources} rows={sources.components} testId="bsc-component" />
       <Line label="Canonical follower" value={<ValueState state={sources.runtime.canonical?.state ?? "NOT_CONFIGURED"} />}
         hint={sources.runtime.canonical ? `head ${sources.runtime.canonical.head} · age ${sources.runtime.canonical.headAgeMs} ms · ${sources.runtime.canonical.chain}` : "No canonical endpoint in the runtime configuration: no G0.4 denominator"} />
@@ -63,6 +69,10 @@ export function MonitoringPanel() {
       {sources.runtime.chainState && <Line label="C2 canonical and pending effects" value={sources.runtime.chainState.effects} hint="Applied by the one native owner from the follower's complete blocks and the launch/own-account sightings; proofs only for watched own accounts" />}
       {sources.runtime.chainState && <Line label="C2 refused, overflowed, unknown" value={sources.runtime.chainState.faults} hint="Every refused or overflowed input is counted; unknown never becomes zero" />}
       {sources.runtime.chainState && <Line label="C2 restart" value={sources.runtime.chainState.checkpoint} hint="The retained canonical window is checkpointed in the runtime pass; at start it is restored and own accounts stay quarantined until a nonce fact reconciles them" />}
+      <Line label="C3 PAPER path" value={<ValueState state={sources.runtime.exec?.state ?? "NOT_CONFIGURED"} />}
+        hint={sources.runtime.exec ? sources.runtime.exec.detail : "No BSC_EXEC_PAPER_IDENTITY in the runtime configuration"} />
+      {sources.runtime.exec && <Line label="C3 path to the PAPER sink" value={sources.runtime.exec.path} hint="Production decoder, C2 snapshot, admission, build/sign and lane; the sink has no transport, the signed bytes stay local" />}
+      {sources.runtime.exec && <Line label="C3 local latency" value={sources.runtime.exec.latency} hint="Local production-code cost on this host (T_shadow_sink), never the transport boundary T_send" />}
     </PlacedSection>
     <PlacedSection panel="monitoring" section={7} records={records}>
       <Line label="Producer witness source ready" value={s?.witness?.sourceReady === undefined ? "UNKNOWN" : String(s.witness.sourceReady)} />

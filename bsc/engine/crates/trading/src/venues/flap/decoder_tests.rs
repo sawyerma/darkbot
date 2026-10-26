@@ -251,6 +251,36 @@ fn foreign_unknown_and_malformed_logs_fail_closed() {
     );
 }
 
+/// Phase D review MEDIUM-1 (inverted): ABI events without a witnessed live
+/// log are recognized and unsupported, never decoded as facts (before:
+/// decoded as `Event`).
+#[test]
+fn unwitnessed_events_are_unsupported() {
+    let data = [0u8; 4 * 32];
+    for kind in [
+        PortalEventKind::LaunchedToDex,
+        PortalEventKind::TokenCurveSet,
+        PortalEventKind::VanityTokenCreated,
+        PortalEventKind::FlapTokenStaged,
+    ] {
+        assert!(!kind.witnessed());
+        assert_eq!(
+            decode_portal_log(portal(), portal(), &[kind.topic0()], &data[..3 * 32]),
+            PortalLog::Unsupported(kind)
+        );
+    }
+    let witnessed: Vec<_> = PortalEventKind::ALL
+        .into_iter()
+        .filter(|k| k.witnessed())
+        .collect();
+    assert_eq!(witnessed.len(), 10);
+    // Every witnessed kind has a frozen fixture log.
+    let all = logs();
+    for kind in witnessed {
+        assert!(all.iter().any(|l| l.topic == kind.topic0()), "{kind:?}");
+    }
+}
+
 #[test]
 fn a_reverted_receipt_is_never_decoded() {
     let all = logs();
@@ -417,50 +447,80 @@ fn an_unknown_token_version_is_decoded_as_found_and_refused() {
 
 /// Phase D §9: recognizer and full decode latency on this machine, per call
 /// (run with `cargo test --release -p darkbot-bsc-trading flap_decoder_latency
-/// -- --ignored --nocapture`). A local decoder metric, not a BUY claim.
+/// -- --ignored --nocapture`). Each sample is the mean of a batch of
+/// `BATCH` calls, so a stage below the timer resolution is still measured.
+/// The recognizer stage is destination, selector and table lookup without a
+/// decode (a known, unwitnessed call); the full decode is a `newTokenV6`.
+/// A local decoder metric, not a BUY claim.
 #[test]
 #[ignore = "latency measurement; run in release"]
 fn flap_decoder_latency() {
     use std::time::Instant;
+    const SAMPLES: usize = 2_000;
+    const BATCH: u64 = 1_000;
+    let portal = portal();
     let launch = unhex(rows(CALLS)[0][3]);
+    let mut unwitnessed = PortalCall::Sell.selector().to_vec();
+    unwitnessed.extend_from_slice(&[0; 96]);
     let all = logs();
     let created = all.iter().find(|l| l.index == 283).unwrap();
     let report = |name: &str, mut samples: Vec<u64>| {
         samples.sort_unstable();
         let q = |p: f64| samples[((samples.len() as f64 - 1.0) * p) as usize];
         println!(
-            "{name}: n={} p50={} p95={} p99={} p99.9={} p99.99={} max={} ns",
+            "{name}: {} batches of {BATCH}, per call p50={} p95={} p99={} p99.9={} max={} ns",
             samples.len(),
             q(0.5),
             q(0.95),
             q(0.99),
             q(0.999),
-            q(0.9999),
             samples[samples.len() - 1]
         );
     };
-    let portal = portal();
-    const N: usize = 200_000;
-    let mut recognizer = Vec::with_capacity(N);
-    let mut full = Vec::with_capacity(N);
-    let mut event = Vec::with_capacity(N);
-    for _ in 0..N {
-        let t = Instant::now();
-        let hit = super::recognize::PortalCall::from_selector(launch[..4].try_into().unwrap());
-        std::hint::black_box(hit);
-        recognizer.push(t.elapsed().as_nanos() as u64);
-        let t = Instant::now();
-        let r = recognize(portal, Some(portal), std::hint::black_box(&launch), MAX);
-        std::hint::black_box(&r);
-        full.push(t.elapsed().as_nanos() as u64);
-        let t = Instant::now();
-        let e = decode_portal_log(portal, portal, &[created.topic], &created.data);
-        std::hint::black_box(&e);
-        event.push(t.elapsed().as_nanos() as u64);
-    }
-    report("selector lookup", recognizer);
-    report("newTokenV6 recognize+decode", full);
-    report("TokenCreated decode", event);
+    let measure = |f: &dyn Fn()| -> Vec<u64> {
+        (0..SAMPLES)
+            .map(|_| {
+                let t = Instant::now();
+                for _ in 0..BATCH {
+                    f();
+                }
+                t.elapsed().as_nanos() as u64 / BATCH
+            })
+            .collect()
+    };
+    report(
+        "recognizer (no decode)",
+        measure(&|| {
+            std::hint::black_box(recognize(
+                portal,
+                Some(portal),
+                std::hint::black_box(&unwitnessed),
+                MAX,
+            ));
+        }),
+    );
+    report(
+        "newTokenV6 recognize+decode",
+        measure(&|| {
+            std::hint::black_box(recognize(
+                portal,
+                Some(portal),
+                std::hint::black_box(&launch),
+                MAX,
+            ));
+        }),
+    );
+    report(
+        "TokenCreated decode",
+        measure(&|| {
+            std::hint::black_box(decode_portal_log(
+                portal,
+                portal,
+                &[created.topic],
+                std::hint::black_box(&created.data),
+            ));
+        }),
+    );
 }
 
 /// Phase D §6: the predicted token only where the derivation is proven;
@@ -484,4 +544,39 @@ fn the_predicted_token_is_the_canonical_one_and_only_for_taxed_v3() {
         panic!("not decoded");
     };
     assert_eq!(predicted_token(&deployment, &other), None);
+}
+
+/// Phase D review HIGH-1 (inverted): a validated v5.27.0 deployment is
+/// decode-only: the witnessed profile is not admitted on it, because its
+/// economics were witnessed on the v5.24.0 implementation only (contract
+/// §3: Gate-0 facts reconfirmed when contracts changed). Before: `Ok`.
+#[test]
+fn a_decode_only_deployment_admits_nothing() {
+    use super::deployment::{EconomicsWitness, ObservedDeployment};
+    use super::profile::{UnsupportedLaunch, classify_launch};
+    let current = bsc_mainnet_v5_27_0();
+    assert_eq!(current.economics, EconomicsWitness::DecodeOnly);
+    let validated = current
+        .validate(
+            &ObservedDeployment {
+                chain_id: current.chain_id,
+                portal_version: current.portal_version,
+                portal_runtime_sha256: current.portal_runtime_sha256,
+                portal_implementation: current.portal_implementation,
+                portal_implementation_runtime_sha256: current.portal_implementation_runtime_sha256,
+                tax_v3_implementation_runtime_sha256: current.tax_v3_implementation_runtime_sha256,
+            },
+            1,
+        )
+        .unwrap();
+    assert!(!validated.economics_witnessed());
+    let launch = super::profile::testkit::witnessed_native_launch();
+    assert_eq!(
+        classify_launch(&validated, alloy_primitives::B256::ZERO, &launch),
+        Err(UnsupportedLaunch::EconomicsNotWitnessed)
+    );
+    // On the witnessed implementation the same launch is admitted.
+    let witnessed = super::deployment::testkit::validated_mainnet(1);
+    assert!(witnessed.economics_witnessed());
+    assert!(classify_launch(&witnessed, alloy_primitives::B256::ZERO, &launch).is_ok());
 }

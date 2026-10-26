@@ -1,5 +1,12 @@
 //! Canonical decode of the Flap Portal's events (Phase D contract §7).
 //!
+//! Decoded are the ten events with a witnessed live log in the refreeze
+//! (launch, BUY, SELL and the launch's mode/configuration events). The
+//! migration event `LaunchedToDEX`, `TokenCurveSet`, `VanityTokenCreated`
+//! and `FlapTokenStaged` are in the verified ABI but have no witnessed log:
+//! they are [`PortalLog::Unsupported`], so a migration is not observed
+//! from events until a witnessed fixture exists.
+//!
 //! Every signature below is in the Sourcify-verified ABI of the Portal
 //! implementation `0x6a0e41d0…` (v5.27.0) and in both archived IPortal
 //! sources (G0.1 Flap refreeze, `bsc/native/evidence/g01/flap_freeze_*`).
@@ -131,6 +138,19 @@ impl PortalEventKind {
         }
     }
 
+    /// Whether a live Portal log of this event is among the refreeze's
+    /// fixtures (its layout is then witnessed, not only declared). The
+    /// others are recognized by topic and reported unsupported.
+    pub const fn witnessed(self) -> bool {
+        !matches!(
+            self,
+            Self::LaunchedToDex
+                | Self::TokenCurveSet
+                | Self::VanityTokenCreated
+                | Self::FlapTokenStaged
+        )
+    }
+
     pub fn from_topic0(topic0: &[u8; 32]) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.topic0() == *topic0)
     }
@@ -165,13 +185,6 @@ pub enum PortalEvent<'a> {
     },
     TokenBought(CurveTrade),
     TokenSold(CurveTrade),
-    /// Migration (graduation) of the token to a DEX pool.
-    LaunchedToDex {
-        token: Address,
-        pool: Address,
-        amount: U256,
-        eth: U256,
-    },
     TokenVersionSet {
         token: Address,
         version: u8,
@@ -179,11 +192,6 @@ pub enum PortalEvent<'a> {
     TokenQuoteSet {
         token: Address,
         quote_token: Address,
-    },
-    TokenCurveSet {
-        token: Address,
-        curve: Address,
-        parameter: U256,
     },
     TokenCurveSetV2 {
         token: Address,
@@ -208,16 +216,6 @@ pub enum PortalEvent<'a> {
         buy_tax: U256,
         sell_tax: U256,
     },
-    VanityTokenCreated {
-        token: Address,
-        creator: Address,
-        beneficiary: Address,
-    },
-    FlapTokenStaged {
-        ts: U256,
-        creator: Address,
-        token: Address,
-    },
 }
 
 impl PortalEvent<'_> {
@@ -226,17 +224,13 @@ impl PortalEvent<'_> {
             Self::TokenCreated { .. } => PortalEventKind::TokenCreated,
             Self::TokenBought(_) => PortalEventKind::TokenBought,
             Self::TokenSold(_) => PortalEventKind::TokenSold,
-            Self::LaunchedToDex { .. } => PortalEventKind::LaunchedToDex,
             Self::TokenVersionSet { .. } => PortalEventKind::TokenVersionSet,
             Self::TokenQuoteSet { .. } => PortalEventKind::TokenQuoteSet,
-            Self::TokenCurveSet { .. } => PortalEventKind::TokenCurveSet,
             Self::TokenCurveSetV2 { .. } => PortalEventKind::TokenCurveSetV2,
             Self::TokenDexSupplyThreshSet { .. } => PortalEventKind::TokenDexSupplyThreshSet,
             Self::TokenMigratorSet { .. } => PortalEventKind::TokenMigratorSet,
             Self::FlapTokenTaxSet { .. } => PortalEventKind::FlapTokenTaxSet,
             Self::FlapTokenAsymmetricTaxSet { .. } => PortalEventKind::FlapTokenAsymmetricTaxSet,
-            Self::VanityTokenCreated { .. } => PortalEventKind::VanityTokenCreated,
-            Self::FlapTokenStaged { .. } => PortalEventKind::FlapTokenStaged,
         }
     }
 }
@@ -251,6 +245,9 @@ pub enum PortalLog<'a> {
     Unrecognized(B256),
     /// A known topic with another layout: refused.
     Malformed(PortalEventKind, AbiError),
+    /// A topic of the verified ABI without a witnessed live log: recognized,
+    /// not decoded (never a guessed fact).
+    Unsupported(PortalEventKind),
 }
 
 /// Why a receipt's logs were not decoded.
@@ -375,15 +372,6 @@ fn decode_kind(kind: PortalEventKind, data: &[u8]) -> Result<PortalEvent<'_>, Ab
         }
         K::TokenBought => PortalEvent::TokenBought(trade(&exact(data, 7)?)?),
         K::TokenSold => PortalEvent::TokenSold(trade(&exact(data, 7)?)?),
-        K::LaunchedToDex => {
-            let w = exact(data, 4)?;
-            PortalEvent::LaunchedToDex {
-                token: w.address(0)?,
-                pool: w.address(1)?,
-                amount: w.u256(2),
-                eth: w.u256(3),
-            }
-        }
         K::TokenVersionSet => {
             let w = exact(data, 2)?;
             PortalEvent::TokenVersionSet {
@@ -396,14 +384,6 @@ fn decode_kind(kind: PortalEventKind, data: &[u8]) -> Result<PortalEvent<'_>, Ab
             PortalEvent::TokenQuoteSet {
                 token: w.address(0)?,
                 quote_token: w.address(1)?,
-            }
-        }
-        K::TokenCurveSet => {
-            let w = exact(data, 3)?;
-            PortalEvent::TokenCurveSet {
-                token: w.address(0)?,
-                curve: w.address(1)?,
-                parameter: w.u256(2),
             }
         }
         K::TokenCurveSetV2 => {
@@ -444,21 +424,10 @@ fn decode_kind(kind: PortalEventKind, data: &[u8]) -> Result<PortalEvent<'_>, Ab
                 sell_tax: w.u256(2),
             }
         }
-        K::VanityTokenCreated => {
-            let w = exact(data, 3)?;
-            PortalEvent::VanityTokenCreated {
-                token: w.address(0)?,
-                creator: w.address(1)?,
-                beneficiary: w.address(2)?,
-            }
-        }
-        K::FlapTokenStaged => {
-            let w = exact(data, 3)?;
-            PortalEvent::FlapTokenStaged {
-                ts: w.u256(0),
-                creator: w.address(1)?,
-                token: w.address(2)?,
-            }
+        // Recognized by topic only; `decode_portal_log` reports them
+        // unsupported before any decode.
+        K::LaunchedToDex | K::TokenCurveSet | K::VanityTokenCreated | K::FlapTokenStaged => {
+            return Err(AbiError::NonCanonical);
         }
     })
 }
@@ -480,6 +449,9 @@ pub fn decode_portal_log<'a>(
     let Some(kind) = PortalEventKind::from_topic0(topic0) else {
         return PortalLog::Unrecognized(B256::from(*topic0));
     };
+    if !kind.witnessed() {
+        return PortalLog::Unsupported(kind);
+    }
     if topics.len() != 1 {
         // No Portal event has an indexed parameter.
         return PortalLog::Malformed(kind, AbiError::NonCanonical);

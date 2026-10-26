@@ -139,6 +139,9 @@ pub enum UnsupportedLaunch {
     Beneficiary,
     /// `name`, `symbol` or `uri` is not the one of a witnessed launch.
     Metadata,
+    /// The deployment is decode-only: its economics are not witnessed on
+    /// its implementation.
+    EconomicsNotWitnessed,
 }
 
 impl core::fmt::Display for UnsupportedLaunch {
@@ -164,6 +167,9 @@ impl core::fmt::Display for UnsupportedLaunch {
             Self::CommissionReceiver => "launch profile: commission receiver",
             Self::Beneficiary => "launch profile: beneficiary is not witnessed",
             Self::Metadata => "launch profile: name, symbol or uri is not witnessed",
+            Self::EconomicsNotWitnessed => {
+                "launch profile: the deployment's economics are not witnessed"
+            }
         })
     }
 }
@@ -222,6 +228,9 @@ pub fn classify_launch(
     candidate: B256,
     launch: &LaunchParamsV6<'_>,
 ) -> Result<ClassifiedLaunch, UnsupportedLaunch> {
+    if !deployment.economics_witnessed() {
+        return Err(UnsupportedLaunch::EconomicsNotWitnessed);
+    }
     if launch.token_version != TOKEN_VERSION_TAXED_V3 {
         return Err(UnsupportedLaunch::TokenVersion);
     }
