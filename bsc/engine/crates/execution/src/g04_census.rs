@@ -25,7 +25,8 @@
 //! verdict: `criteria` stays `CRITERIA_UNCONFIRMED` until the user confirmed
 //! versioned criteria (order V2 §8).
 
-use crate::runtime_journal::CANONICAL_LAUNCH_LEN;
+use crate::canonical_join::Venue;
+use crate::runtime_journal::{CANONICAL_LAUNCH_LEN, venue_of_byte};
 use crate::sources::SourceId;
 use darkbot_bsc_journal::{JournalError, JournalReader, RecordKind};
 use darkbot_bsc_record::Draft;
@@ -132,9 +133,8 @@ fn flag(byte: u8) -> Option<bool> {
 }
 
 fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
-    if p.len() != CANONICAL_LAUNCH_LEN || p[0] != b'C' || !(1..=2).contains(&p[1]) {
-        return None;
-    }
+    // Every venue the writer knows (Phase E: OpenFour is byte 3).
+    let venue = venue_of_byte(p[1]).filter(|_| p.len() == CANONICAL_LAUNCH_LEN && p[0] == b'C')?;
     let buys_known = flag(p[103])?;
     let class = p[108];
     if !(1..=5).contains(&class) {
@@ -151,7 +151,7 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         return None;
     }
     Some(LaunchRecord {
-        flap: p[1] == 1,
+        flap: venue == Venue::Flap,
         block_hash: hash_at(p, 10)?,
         tx_hash: hash_at(p, 50)?,
         external_buys: if buys_known {
@@ -262,7 +262,9 @@ fn replay(
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
             (RecordKind::Canonical, Some(b'P')) if p.len() == 74 => {
-                if let (Some(block), Some(tx)) = (hash_at(p, 10), hash_at(p, 42)) {
+                if let (Some(block), Some(tx), Some(_)) =
+                    (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
+                {
                     received.insert((block, tx));
                 }
             }
@@ -274,12 +276,14 @@ fn replay(
                 None => window.unparsed_records += 1,
             },
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
-                if let (Some(block), Some(tx)) = (hash_at(p, 10), hash_at(p, 42)) {
+                if let (Some(block), Some(tx), Some(venue)) =
+                    (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
+                {
                     resolved.insert((block, tx));
                     launches.retain(|l| !(l.block_hash == block && l.tx_hash == tx));
                     // Counted as orphaned (class 0), joined or not.
                     launches.push(LaunchRecord {
-                        flap: p[1] == 1,
+                        flap: venue == Venue::Flap,
                         block_hash: block,
                         tx_hash: tx,
                         external_buys: None,
@@ -595,7 +599,7 @@ impl Census {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canonical_join::{Joined, LaunchRef, Venue, Visibility};
+    use crate::canonical_join::{Joined, LaunchRef, Visibility};
     use crate::runtime_journal::{
         EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload,
         orphaned_launch_payload, pending_launch_payload, reorg_payload, resync_payload,
@@ -634,6 +638,66 @@ mod tests {
         let path = j.path().to_path_buf();
         j.finish().unwrap();
         path
+    }
+
+    /// Phase E: OpenFour launches (journal venue byte 3) replay with the
+    /// Four family, never as Flap; an orphaned one leaves the count.
+    #[test]
+    fn openfour_launches_replay_with_the_four_family() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-openfour-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let classic = launch(Venue::Four, 10, 1, None, 100);
+        let open = launch(Venue::OpenFour, 10, 2, None, 100);
+        let orphan = launch(Venue::OpenFour, 11, 4, None, 200);
+        let joined = |l: LaunchRef| {
+            (
+                RecordKind::Canonical,
+                l.block_seen_ns,
+                canonical_launch_payload(&Joined {
+                    launch: l,
+                    visibility: Visibility::Missed,
+                }),
+            )
+        };
+        let mut records = vec![(
+            RecordKind::Canonical,
+            1,
+            window_payload(b'H', 10, &[10; 32]),
+        )];
+        for l in [classic, open, orphan] {
+            records.push((
+                RecordKind::Canonical,
+                l.block_seen_ns,
+                pending_launch_payload(&l),
+            ));
+            records.push(joined(l));
+        }
+        records.push((RecordKind::Canonical, 300, orphaned_launch_payload(&orphan)));
+        records.push((
+            RecordKind::Canonical,
+            400,
+            window_payload(b'E', 11, &[11; 32]),
+        ));
+        records.push((RecordKind::Runtime, 401, EXIT_PAYLOAD.to_vec()));
+        assert_eq!(
+            canonical_launch_payload(&Joined {
+                launch: open,
+                visibility: Visibility::Missed
+            })[1],
+            3
+        );
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(
+            (
+                c.flap_launches,
+                c.four_launches,
+                c.orphaned_launches,
+                c.c1_scope_launches
+            ),
+            (0, 2, 1, 0)
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -120,6 +120,13 @@ fn venue_byte(venue: Venue) -> u8 {
     }
 }
 
+/// The venue of a launch record's venue byte (the inverse of the writer's).
+pub fn venue_of_byte(byte: u8) -> Option<Venue> {
+    [Venue::Flap, Venue::Four, Venue::OpenFour]
+        .into_iter()
+        .find(|v| venue_byte(*v) == byte)
+}
+
 pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     let l = &j.launch;
     let mut out = Vec::with_capacity(152);
@@ -319,6 +326,17 @@ impl RuntimeJournal {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every venue's byte reads back as that venue; no other byte does.
+    #[test]
+    fn every_venue_byte_reads_back() {
+        for v in [Venue::Flap, Venue::Four, Venue::OpenFour] {
+            assert_eq!(venue_of_byte(venue_byte(v)), Some(v));
+        }
+        assert_eq!(venue_of_byte(0), None);
+        assert_eq!(venue_of_byte(4), None);
+    }
+
     use super::*;
     use darkbot_bsc_journal::JournalReader;
 
