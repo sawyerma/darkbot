@@ -37,6 +37,8 @@ interface Project0Store {
   applyOwner: (topic: OwnerTopic, value: OwnerValue, meta: StateMeta, receivedAtMs: number) => void;
   setOwnerTopic: (topic: OwnerTopic, topicStatus: TopicStatus, reason: string) => void;
   applyCapture: (value: CaptureView, meta: StateMeta, receivedAtMs: number) => void;
+  /** P0-012: every received capture state's frame counter, before any render batching. */
+  observeStream: (frames: bigint | null, identity: string, receivedAtMs: number) => void;
   setSystemTopic: (topicStatus: TopicStatus, reason: string) => void;
   setCaptureTopic: (topicStatus: TopicStatus, reason: string) => void;
 }
@@ -56,10 +58,12 @@ export const useProject0Store = create<Project0Store>()((set) => ({
   applySystem: (value, meta, receivedAtMs) =>
     set((s) => ({ system: { ...s.system, value, meta, receivedAtMs } })),
   applyCapture: (value, meta, receivedAtMs) =>
-    set((s) => ({ capture: { ...s.capture, value, meta, receivedAtMs },
-      streamProgress: nextStreamProgress(s.streamProgress, value.transport?.applicationFrames ?? null,
-        receivedAtMs, JSON.stringify([value.run?.runId ?? "", meta.sourceId, String(meta.generation)])),
-    })),
+    set((s) => ({ capture: { ...s.capture, value, meta, receivedAtMs } })),
+  observeStream: (frames, identity, receivedAtMs) =>
+    set((s) => {
+      const next = nextStreamProgress(s.streamProgress, frames, receivedAtMs, identity);
+      return next === s.streamProgress ? s : { streamProgress: next };
+    }),
   setSystemTopic: (topicStatus, reason) => set((s) => ({ system: { ...s.system, topicStatus, reason } })),
   setCaptureTopic: (topicStatus, reason) => set((s) => ({ capture: { ...s.capture, topicStatus, reason } })),
 }));

@@ -26,6 +26,11 @@ export function nextStreamProgress(prev: StreamProgressState, frames: bigint | n
   return { ...prev, frames, progressAtMs: nowMs };
 }
 
+/** The counter's identity: a new run, source or generation restarts it. */
+export function streamIdentity(runId: string, sourceId: string, generation: bigint): string {
+  return JSON.stringify([runId, sourceId, String(generation)]);
+}
+
 export type StreamFreshness = "CHECKING" | "FRESH" | "STALE";
 
 export function streamFreshness(clock: StreamClock): StreamFreshness {

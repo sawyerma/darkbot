@@ -3,6 +3,7 @@ import { TopicId, topics, type StateMeta } from "@/core/realtime";
 import { project0Registration } from "@/app/projectRegistry";
 import type { Project0Tab } from "../model/contracts";
 import { useProject0Store, type OwnerTopic } from "../store/project0Store";
+import { streamIdentity } from "../model/streamFreshness";
 import {
   decodeFinanceSummary,
   decodeLiquidatorState,
@@ -72,7 +73,12 @@ export function ensureProject0Adapter(): void {
   });
   topics.onState(TopicId.PROJECT0_CAPTURE_STATE, (bytes: Uint8Array, meta: StateMeta) => {
     const message = decodeCaptureState(bytes);
-    applyCapture({ value: message, meta, receivedAtMs: Date.now() });
+    const receivedAtMs = Date.now();
+    // P0-012: the view is batched per frame (newest wins), the stream's progress never is — a
+    // baseline and its successor within one frame are both observed.
+    store().observeStream(message.transport?.applicationFrames ?? null,
+      streamIdentity(message.run?.runId ?? "", meta.sourceId, meta.generation), receivedAtMs);
+    applyCapture({ value: message, meta, receivedAtMs });
   });
   // P0-PROD-CTRL-04: the state owner's projection (Liquidator, Wallets, Overview finance) and
   // the analytics job store.

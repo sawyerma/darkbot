@@ -1008,10 +1008,12 @@ fn retired_generation_controls_are_classified_by_provenance() {
 /// hanging WebSocket handshake and the wait for WSS admission in the shared provider budget —
 /// twice in a row like two resubscribes, without failure flags.
 /// A session that does not end is reported at its budget (`ingress_session_stop_and_join_is_bounded`).
+/// P0-014: each stop is requested once the session is observably in its phase (its DEGRADED
+/// transport event, the listener's accept), never after a fixed sleep.
 #[test]
 fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
     use darkbot_solana::ingress::ws_rpc::{WsRpcConfig, WsRpcControlSource};
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     let budget = Duration::from_secs(
         darkbot_solana::runtime_config::RuntimeConfig::default()
@@ -1021,19 +1023,30 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
     assert_eq!(budget, Duration::from_secs(180));
     let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let hang_url = format!("ws://{}", hang.local_addr().unwrap());
-    // Holds every accepted connection without answering the handshake; bounded lifetime.
+    // Holds every accepted connection without answering the handshake until the test ends
+    // (bounded by the budget), counting the accepts.
     hang.set_nonblocking(true).unwrap();
-    let holder = std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let until = std::time::Instant::now() + Duration::from_secs(6);
-        while std::time::Instant::now() < until {
-            match hang.accept() {
-                Ok((s, _)) => kept.push(s),
-                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+    let (accepted, done) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let holder = {
+        let (accepted, done) = (accepted.clone(), done.clone());
+        std::thread::spawn(move || {
+            let mut kept = Vec::new();
+            let until = std::time::Instant::now() + budget;
+            while !done.load(Ordering::Acquire) && std::time::Instant::now() < until {
+                match hang.accept() {
+                    Ok((s, _)) => {
+                        kept.push(s);
+                        accepted.fetch_add(1, Ordering::AcqRel);
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
             }
-        }
-        kept.len()
-    });
+            kept.len()
+        })
+    };
     let closed = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("ws://{}", l.local_addr().unwrap());
@@ -1069,7 +1082,32 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
             });
             generation += 1;
             let mut session = IngressSession::new(stop, thread, generation);
-            std::thread::sleep(Duration::from_millis(200));
+            // The session is in its phase: the backoff after its DEGRADED event, the hanging
+            // handshake after the listener's accept; with admission either one (its permit was
+            // granted and it connected, or its admission ended).
+            let before = accepted.load(Ordering::Acquire);
+            let until = std::time::Instant::now() + budget;
+            let mut degraded = false;
+            let reached = loop {
+                let connected = accepted.load(Ordering::Acquire) > before;
+                match phase {
+                    "reconnect_backoff" if degraded => break true,
+                    "ws_handshake" if connected => break true,
+                    "wss_admission_or_later" if connected || degraded => break true,
+                    _ if std::time::Instant::now() >= until => break false,
+                    _ => {}
+                }
+                if let Some(IngressEvent::Transport {
+                    state: "DEGRADED", ..
+                }) = rx.pop_timeout(Duration::from_millis(5))
+                {
+                    degraded = true;
+                }
+            };
+            assert!(
+                reached,
+                "{phase} round {round}: the session reached its phase"
+            );
             let started = std::time::Instant::now();
             assert!(session.stop_and_join(budget), "{phase} round {round}");
             let joined = started.elapsed();
@@ -1086,6 +1124,7 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
             drop(rx);
         }
     }
+    done.store(true, Ordering::Release);
     assert!(
         holder.join().unwrap() >= 2,
         "both handshake rounds reached the listener"
