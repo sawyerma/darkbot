@@ -16,9 +16,9 @@
 //! A source without a configured endpoint, or without an adapter in this
 //! build (the local geth Fast Lane needs a synced node), is `UNQUALIFIED`.
 
-use crate::canonical_join::{LaunchRef, Ledger};
+use crate::canonical_join::{LaunchRef, LaunchTx, Ledger};
 use crate::chain_follower::{
-    CanonicalEvent, FollowerFault, FollowerLimits, RequestError, run_follower,
+    CanonicalEvent, FollowerFault, FollowerLimits, RequestError, is_unrebuildable, run_follower,
 };
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
@@ -148,6 +148,7 @@ impl RuntimeConfig {
                         as usize,
                     backoff_initial: ms(take("BSC_CANONICAL_BACKOFF_INITIAL_MS", 100, 60_000)?),
                     backoff_max: ms(take("BSC_CANONICAL_BACKOFF_MAX_MS", 1_000, 3_600_000)?),
+                    tx_attempts: take("BSC_CANONICAL_TX_ATTEMPTS", 1, 100)? as u32,
                 };
                 limits
                     .validate()
@@ -403,7 +404,11 @@ impl Canonical {
                     token: l.token,
                     external_buys: l.external_buys_after,
                     c1_scope: l.c1_scope,
-                    tx_unverifiable: l.unverifiable.is_some(),
+                    tx: match l.unverifiable {
+                        None => LaunchTx::Verified,
+                        Some(r) if is_unrebuildable(r) => LaunchTx::Unrebuildable,
+                        Some(_) => LaunchTx::AnswerRefused,
+                    },
                     block_ms: match self.head_block_ms {
                         Some(ms) if same => ms,
                         // Never reached: the follower reports a block before its launches.
@@ -491,6 +496,7 @@ impl Canonical {
             .set(e::BUYS_UNKNOWN, c.buys_unknown)
             .set(e::CLOCK_UNKNOWN, c.clock_unknown)
             .set(e::TX_UNVERIFIABLE, c.tx_unverifiable)
+            .set(e::TX_ANSWER_REFUSED, c.tx_answer_refused)
             .set(e::C1_SCOPE_LAUNCHES, c.c1_scope_launches)
             .set(e::C1_SCOPE_FULL_BEFORE, c.c1_scope_full_before)
             .set(e::BLOCKS_SKIPPED, self.blocks_skipped)
@@ -1080,10 +1086,20 @@ mod tests {
         refused.nonce = None;
         refused.unverifiable = Some(crate::wss::RejectReason::UnsupportedType(4));
         c.event(10, CanonicalEvent::Launch(refused), &mut journal);
+        // A Four launch whose provider answers were refused every time:
+        // counted for every venue.
+        let CanonicalEvent::Launch(mut four) = launch(10, 5, None, false) else {
+            unreachable!()
+        };
+        four.venue = Venue::Four;
+        four.sender = None;
+        four.nonce = None;
+        four.unverifiable = Some(crate::wss::RejectReason::HashMismatch);
+        c.event(10, CanonicalEvent::Launch(four), &mut journal);
         c.event(20, block(11), &mut journal);
         c.event(20, launch(11, 2, None, false), &mut journal);
         c.event(20, launch(11, 3, Some(0), true), &mut journal);
-        assert_eq!(c.ledger.waiting(), 4);
+        assert_eq!(c.ledger.waiting(), 5);
         c.event(
             25,
             CanonicalEvent::Fault(FollowerFault::Request {
@@ -1110,9 +1126,11 @@ mod tests {
                 k.external_buys,
                 k.buys_unknown,
                 k.c1_scope_launches,
-                k.tx_unverifiable
+                k.tx_unverifiable,
+                k.tx_answer_refused,
+                k.four_launches
             ),
-            (4, 1, 1, 2, 2, 1, 2, 1)
+            (4, 1, 1, 2, 2, 1, 2, 1, 1, 1)
         );
         c.event(
             40,
@@ -1164,6 +1182,7 @@ mod tests {
         let n = r.nested(rs::CANONICAL).unwrap();
         assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 2);
         assert_eq!(n.u64(rs::canonical::TX_UNVERIFIABLE).unwrap(), 1);
+        assert_eq!(n.u64(rs::canonical::TX_ANSWER_REFUSED).unwrap(), 1);
         assert_eq!(n.u64(rs::canonical::HEAD).unwrap(), 12);
         assert_eq!(n.u64(rs::canonical::BLOCKS_SKIPPED).unwrap(), 87);
         assert_eq!(n.u64(rs::canonical::C1_SCOPE_LAUNCHES).unwrap(), 1);
@@ -1178,9 +1197,11 @@ mod tests {
                 census.c1_scope_launches,
                 census.unjoined,
                 census.blocks_skipped,
-                census.tx_unverifiable
+                census.tx_unverifiable,
+                census.tx_answer_refused,
+                census.four_launches
             ),
-            (2, 1, 2, 1, 0, 87, 1)
+            (2, 1, 2, 1, 0, 87, 1, 1, 1)
         );
         let w = &census.windows[0];
         assert_eq!((w.first_block, w.reorgs, w.resyncs), (Some(10), 1, 1));

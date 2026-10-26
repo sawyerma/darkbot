@@ -128,18 +128,21 @@ pub mod census {
     pub const FETCH_LAG_MS_MAX: u16 = 30;
     /// A negative fetch lag: the local clock is behind the block time.
     pub const CLOCK_SUSPECT: u16 = 31;
-    /// Flap launches whose transaction the verifier refuses (an unsupported
-    /// type, pre-EIP-155, a mismatch): counted, not actionable.
+    /// Launches (any venue) whose transaction is a type/form the verifier
+    /// does not rebuild (EIP-4844/7702, pre-EIP-155): never actionable.
     pub const TX_UNVERIFIABLE: u16 = 32;
     /// Canonical heights no process window followed (between two windows).
     pub const BLOCKS_BETWEEN_WINDOWS: u16 = 33;
     /// Canonical/reorg records that do not parse, in all windows.
     pub const UNPARSED_RECORDS: u16 = 34;
+    /// Launches (any venue) whose provider answers were refused every time
+    /// they were fetched (malformed, a hash or signer mismatch): unknown.
+    pub const TX_ANSWER_REFUSED: u16 = 35;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 3,
+        schema_version: 4,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -178,6 +181,7 @@ pub mod census {
             Field::req(TX_UNVERIFIABLE, "tx_unverifiable", U64),
             Field::req(BLOCKS_BETWEEN_WINDOWS, "blocks_between_windows", U64),
             Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
+            Field::req(TX_ANSWER_REFUSED, "tx_answer_refused", U64),
         ],
     };
 }

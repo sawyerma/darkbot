@@ -10,7 +10,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use super::http::Client;
 use super::jsonrpc::{self, BlockHead, Header, Receipt, TxPlace};
 use super::launches;
-use super::{Call, CanonicalEvent, FollowerFault, FollowerLimits, RequestError, stopped};
+use super::{
+    Call, CanonicalEvent, FollowerFault, FollowerLimits, RequestError, is_unrebuildable, stopped,
+};
 use crate::wss::{DisconnectReason, VerifiedTx};
 
 /// The typed JSON-RPC calls over one HTTP client.
@@ -169,6 +171,10 @@ pub(super) struct Follower {
     /// When a header (number, hash) was first held, for blocks not yet
     /// followed; at most `reorg_depth + 2` entries.
     seen: VecDeque<(u64, [u8; 32], FirstHeld)>,
+    tx_attempts: u32,
+    /// Refused answers per launch transaction of the block being accepted;
+    /// cleared when a block is accepted (bounded by one block's launches).
+    refusals: Vec<([u8; 32], u32)>,
 }
 
 impl Follower {
@@ -179,6 +185,8 @@ impl Follower {
             kept: VecDeque::new(),
             next: None,
             seen: VecDeque::new(),
+            tx_attempts: limits.tx_attempts,
+            refusals: Vec::new(),
         }
     }
 
@@ -355,8 +363,29 @@ impl Follower {
                 Ok(tx) => Ok(tx),
                 Err(FollowerFault::Request {
                     error: RequestError::Unverifiable(reason),
-                    ..
-                }) => Err(reason),
+                    call,
+                }) => {
+                    // A provider-side refusal is fetched again (the block is
+                    // retried) up to `tx_attempts` times, then accepted with it.
+                    let hash = launch.place().hash;
+                    let tried = match self.refusals.iter_mut().find(|(h, _)| *h == hash) {
+                        Some((_, n)) => {
+                            *n += 1;
+                            *n
+                        }
+                        None => {
+                            self.refusals.push((hash, 1));
+                            1
+                        }
+                    };
+                    if !is_unrebuildable(reason) && tried < self.tx_attempts {
+                        return Err(FollowerFault::Request {
+                            error: RequestError::Unverifiable(reason),
+                            call,
+                        });
+                    }
+                    Err(reason)
+                }
                 Err(fault) => return Err(fault),
             };
             launches.push(launch.with_transaction(tx.as_ref().map_err(|r| *r)));
@@ -379,6 +408,7 @@ impl Follower {
         }
         self.next = Some(header.number.saturating_add(1));
         self.seen.retain(|(number, _, _)| *number > header.number);
+        self.refusals.clear();
         Ok(())
     }
 

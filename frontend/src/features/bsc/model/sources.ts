@@ -43,7 +43,7 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     head: f.get("canonical[0].head") ?? "UNKNOWN",
     headAgeMs: f.get("canonical[0].head_age_ms") ?? "UNKNOWN",
     chain: `blocks ${c("blocks")} · skipped ${c("blocks_skipped")} · reorgs ${c("reorgs")} · resyncs ${c("resyncs")} · rpc errors ${c("rpc_errors")} · rate limited ${c("rate_limited")} · header fetch lag ${f.get("canonical[0].head_fetch_lag_ms") ?? "UNKNOWN"} ms`,
-    launches: `Flap ${c("flap_launches")} (C1 scope ${c("c1_scope_launches")}, tx unverifiable ${c("tx_unverifiable")}) · Four ${c("four_launches")} · orphaned ${c("orphaned_launches")} · waiting ${c("waiting")} · external buys ${c("external_buys")} (unknown ${c("buys_unknown")})`,
+    launches: `Flap ${c("flap_launches")} (C1 scope ${c("c1_scope_launches")}) · Four ${c("four_launches")} · orphaned ${c("orphaned_launches")} · waiting ${c("waiting")} · tx not rebuildable ${c("tx_unverifiable")} · tx answers refused ${c("tx_answer_refused")} · external buys ${c("external_buys")} (unknown ${c("buys_unknown")})`,
     join: `full before block time ${c("seen_full_before")} (C1 scope ${c("c1_scope_full_before")}) · hash only before ${c("seen_hash_only_before")} · after ${c("seen_after")} · missed ${c("missed")} · clock unknown ${c("clock_unknown")}`,
   } : undefined;
   return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical }, health };

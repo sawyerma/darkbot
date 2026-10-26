@@ -103,6 +103,22 @@ pub struct FollowerLimits {
     pub backoff_initial: Duration,
     /// Cap of the wait; also the wait after any rate-limit signal.
     pub backoff_max: Duration,
+    /// How often a launch transaction answer the verifier refuses for a
+    /// provider-side reason (malformed, a hash or signer mismatch, ...) is
+    /// fetched before the launch is accepted with that refusal. A refusal
+    /// that is a property of the transaction ([`is_unrebuildable`]) is
+    /// accepted at once.
+    pub tx_attempts: u32,
+}
+
+/// The verifier refuses this transaction for a property of its own (a type
+/// or form the WSS verifier does not rebuild), never for its provider: no
+/// answer would ever verify.
+pub fn is_unrebuildable(reason: RejectReason) -> bool {
+    matches!(
+        reason,
+        RejectReason::UnsupportedType(_) | RejectReason::PreEip155
+    )
 }
 
 impl FollowerLimits {
@@ -131,6 +147,9 @@ impl FollowerLimits {
         }
         if self.max_response_bytes == 0 {
             return Err(LimitsError::Zero("max_response_bytes"));
+        }
+        if self.tx_attempts == 0 {
+            return Err(LimitsError::Zero("tx_attempts"));
         }
         if self.backoff_initial > self.backoff_max {
             return Err(LimitsError::BackoffInitialAboveMax);

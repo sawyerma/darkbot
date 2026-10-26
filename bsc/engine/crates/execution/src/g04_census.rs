@@ -70,7 +70,10 @@ pub struct Census {
     pub after: u64,
     pub missed: u64,
     pub clock_unknown: u64,
+    /// Launches (any venue) whose transaction type/form is not rebuilt, and
+    /// those whose provider answers were refused every time.
     pub tx_unverifiable: u64,
+    pub tx_answer_refused: u64,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -107,6 +110,7 @@ struct LaunchRecord {
     delta_us: u64,
     c1_scope: bool,
     tx_unverifiable: bool,
+    tx_answer_refused: bool,
     fetch_lag_ms: Option<i64>,
     seen_ns: u64,
 }
@@ -143,7 +147,7 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     };
     let lag_known = flag(p[127])?;
     let tx = p[126];
-    if tx > 2 {
+    if tx > 3 {
         return None;
     }
     Some(LaunchRecord {
@@ -160,6 +164,7 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         delta_us: u64_at(p, 110)?,
         c1_scope: tx == 1,
         tx_unverifiable: tx == 2,
+        tx_answer_refused: tx == 3,
         fetch_lag_ms: if lag_known {
             Some(i64::from_le_bytes(p.get(128..136)?.try_into().ok()?))
         } else {
@@ -283,6 +288,7 @@ fn replay(
                         delta_us: 0,
                         c1_scope: false,
                         tx_unverifiable: false,
+                        tx_answer_refused: false,
                         fetch_lag_ms: None,
                         seen_ns: record.timestamp_ns,
                     });
@@ -386,6 +392,8 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
                 out.orphaned_launches += 1;
                 continue;
             }
+            out.tx_unverifiable += u64::from(l.tx_unverifiable);
+            out.tx_answer_refused += u64::from(l.tx_answer_refused);
             if !l.flap {
                 out.four_launches += 1;
                 continue;
@@ -393,9 +401,6 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
             out.flap_launches += 1;
             if l.c1_scope {
                 out.c1_scope_launches += 1;
-            }
-            if l.tx_unverifiable {
-                out.tx_unverifiable += 1;
             }
             if let Some(lag) = l.fetch_lag_ms {
                 lags.push(lag);
@@ -520,6 +525,7 @@ impl Census {
         }
         d.set(cs::CLOCK_SUSPECT, self.clock_suspect)
             .set(cs::TX_UNVERIFIABLE, self.tx_unverifiable)
+            .set(cs::TX_ANSWER_REFUSED, self.tx_answer_refused)
             .set(cs::BLOCKS_BETWEEN_WINDOWS, self.blocks_between_windows)
             .set(cs::UNPARSED_RECORDS, self.unparsed_records);
         d.encode().map_err(|e| e.to_string())
@@ -609,7 +615,7 @@ mod tests {
             external_buys: buys,
             c1_scope: tx != 3,
             // Unverifiable launches: covered by the runtime test's census.
-            tx_unverifiable: false,
+            tx: crate::canonical_join::LaunchTx::Verified,
             block_ms: BLOCK_MS,
             block_seen_ns: seen,
             block_seen_unix_ms: Some(BLOCK_MS + u64::from(tx) * 100),

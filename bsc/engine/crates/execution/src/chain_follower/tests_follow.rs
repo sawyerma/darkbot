@@ -366,6 +366,7 @@ fn limits() -> FollowerLimits {
         max_response_bytes: 1 << 20,
         backoff_initial: Duration::from_millis(10),
         backoff_max: Duration::from_millis(40),
+        tx_attempts: 2,
     }
 }
 
@@ -1083,4 +1084,64 @@ fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
         ),
         (None, None, false, Some(RejectReason::UnsupportedType(4)))
     );
+}
+
+/// Review Paket 3 (third pass), LOW: a refusal that may be the provider's
+/// (here a hash mismatch from a changed nonce) is fetched again up to
+/// `tx_attempts` times, then accepted with its reason; it never stalls and
+/// never silently passes as verified.
+#[test]
+fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
+    let header: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/chain/block_129774331.header.json"
+    ))
+    .unwrap();
+    let receipts: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/chain/block_129774331.receipts.json"
+    ))
+    .unwrap();
+    let mut broken = tx_object(TX_ROUTER);
+    broken["nonce"] = Value::from("0x1");
+    // The same block in two phases: a phase ends with its head's receipts,
+    // so the second one serves the retry.
+    let phase = || Phase {
+        head: 129_774_331,
+        blocks: BTreeMap::from([(
+            129_774_331,
+            Served {
+                header: header["result"].clone(),
+                receipts: receipts["result"].clone(),
+                txs: vec![tx_object(TX_DIRECT), broken.clone()],
+            },
+        )]),
+    };
+    let script = Script {
+        phases: vec![phase(), phase()],
+        inject: vec![],
+        chunk: 4096,
+    };
+    let limits = limits();
+    assert_eq!(limits.tx_attempts, 2);
+    let outcome = follow_script(script, limits, None);
+    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    let [
+        CanonicalEvent::Fault(FollowerFault::Request {
+            error: RequestError::Unverifiable(RejectReason::HashMismatch),
+            ..
+        }),
+        CanonicalEvent::Block { number, .. },
+        CanonicalEvent::Launch(first),
+        CanonicalEvent::Launch(second),
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(*number, 129_774_331);
+    assert_eq!(first.unverifiable, None);
+    assert_eq!(
+        (second.sender, second.c1_scope, second.unverifiable),
+        (None, false, Some(RejectReason::HashMismatch))
+    );
+    assert!(!is_unrebuildable(RejectReason::HashMismatch));
+    assert!(is_unrebuildable(RejectReason::UnsupportedType(4)));
 }

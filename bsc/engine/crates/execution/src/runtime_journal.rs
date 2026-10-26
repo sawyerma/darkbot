@@ -23,7 +23,8 @@
 //!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF
 //!   and delta 0 for a miss; delta = lead or lag against the block time;
 //!   fetch_lag = local wall ms at the header fetch minus block_ms; tx 0 verified
-//!   outside the C1 scope, 1 verified in the C1 scope, 2 unverifiable).
+//!   outside the C1 scope, 1 verified in the C1 scope, 2 a type/form the
+//!   verifier does not rebuild, 3 provider answers refused every time).
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
 //! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
@@ -39,7 +40,7 @@
 //! Other pending transactions are only counted (runtime status), not
 //! journaled: the journal stays bounded over long read-only runs.
 
-use crate::canonical_join::{Joined, LaunchRef, Venue};
+use crate::canonical_join::{Joined, LaunchRef, LaunchTx, Venue};
 use crate::sources::SourceId;
 use darkbot_bsc_journal::{JournalError, JournalManifest, JournalWriter, RecordKind, Recorder};
 use std::fs;
@@ -113,10 +114,10 @@ pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     out.push(source);
     out.extend_from_slice(&delta.to_le_bytes());
     out.extend_from_slice(&l.block_ms.to_le_bytes());
-    out.push(if l.tx_unverifiable {
-        2
-    } else {
-        u8::from(l.c1_scope)
+    out.push(match l.tx {
+        LaunchTx::Verified => u8::from(l.c1_scope),
+        LaunchTx::Unrebuildable => 2,
+        LaunchTx::AnswerRefused => 3,
     });
     let lag = l.fetch_lag_ms();
     out.push(u8::from(lag.is_some()));
@@ -348,7 +349,7 @@ mod tests {
             token: Some([4; 20]),
             external_buys: Some(5),
             c1_scope: true,
-            tx_unverifiable: false,
+            tx: LaunchTx::Verified,
             block_ms: 1_000,
             block_seen_ns: 0,
             block_seen_unix_ms: Some(990),

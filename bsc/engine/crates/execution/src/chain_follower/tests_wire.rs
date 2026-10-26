@@ -414,6 +414,7 @@ fn limits() -> FollowerLimits {
         max_response_bytes: 8 << 20,
         backoff_initial: Duration::from_millis(250),
         backoff_max: Duration::from_secs(5),
+        tx_attempts: 3,
     }
 }
 
