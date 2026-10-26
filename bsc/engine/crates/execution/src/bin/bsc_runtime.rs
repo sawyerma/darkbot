@@ -10,7 +10,14 @@
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! bsc_runtime capture-preflight --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime capture-quality --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
+//! bsc_runtime strategy-replay --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! ```
+//!
+//! `strategy-replay` replays one finished run (the newest without `--run`)
+//! through Strategy C with the configured terms and frozen gas evidence:
+//! every journaled `Y` output must be reproduced, nothing else (Phase H).
+//! Writes `bsc-runtime/strategy-replay-<run>.dbrec`, prints it; exit 0
+//! only on PASS.
 //!
 //! `capture-quality` writes the Phase F quality verdict of one finished run
 //! (the newest without `--run`; contract §11/§13) into
@@ -148,6 +155,39 @@ fn run(args: &[String]) -> Result<bool, String> {
             )?;
             println!("{}", q.summary());
             Ok(q.clean)
+        }
+        [cmd, rest @ ..] if cmd == "strategy-replay" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let repo_root = std::path::Path::new(config_path)
+                .canonicalize()
+                .map_err(|e| format!("{config_path}: {e}"))?
+                .ancestors()
+                .nth(3)
+                .ok_or("--config is not under <repo>/bsc/config/")?
+                .to_path_buf();
+            let gas = config.strategy.gas(&repo_root)?;
+            let dir = std::path::Path::new(flag(rest, "--rundir")?).join("bsc-runtime");
+            let journal = dir.join("journal");
+            let run = match rest.iter().any(|a| a == "--run") {
+                true => flag(rest, "--run")?.to_string(),
+                false => replay_proof::latest_run(&journal)?,
+            };
+            let replay = darkbot_bsc_execution::runtime_strategy::replay(
+                &journal,
+                &run,
+                journal_max_payload(&config),
+                &config.strategy.engine,
+                &gas,
+                Some(config.source_sha256),
+            )?;
+            replay_proof::write(
+                &dir.join(format!("strategy-replay-{run}.dbrec")),
+                &replay.encode(darkbot_bsc_record::observed_now()?)?,
+            )?;
+            println!("{}", replay.summary());
+            Ok(replay.verdict() == "PASS")
         }
         [cmd, rest @ ..] if cmd == "capture-preflight" => {
             let config_path = flag(rest, "--config")?;

@@ -545,6 +545,12 @@ fn replay(
             (RecordKind::Canonical, Some(b'F'))
                 if crate::runtime_journal::flap_term_of(p).is_some() => {}
             (RecordKind::Canonical, Some(b'M')) if p.len() == 77 => {}
+            // Phase H: the strategy's blocks, Flap launches and resyncs.
+            (RecordKind::Canonical, Some(b'B'))
+                if p.len() == crate::runtime_strategy::BLOCK_LEN => {}
+            (RecordKind::Canonical, Some(b'N'))
+                if p.len() == crate::runtime_strategy::LAUNCH_LEN => {}
+            (RecordKind::Canonical, Some(b'I')) if p.len() == 9 => {}
             (RecordKind::Canonical, Some(tag @ (b'H' | b'E' | b'K'))) if p.len() == 41 => {
                 let number = u64_at(p, 1);
                 match tag {

@@ -33,6 +33,10 @@ describe("BSC component control (C2 state)", () => {
     expect(v.components[1]).toMatchObject({ id: "BSC_EXEC", requested: NOT_RECORDED, effective: NOT_RECORDED });
     const exec = sourceControlView([withComponents(record("5", all()), [["BSC_STATE_C2", "SHADOW", "SHADOW"], ["BSC_EXEC", "LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"]])]);
     expect(exec.components[1]).toMatchObject({ id: "BSC_EXEC", requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_NOT_AUTHORIZED" });
+    // A generation from before Strategy C does not name it: NOT_RECORDED.
+    expect(exec.components[2]).toMatchObject({ id: "BSC_STRATEGY_C", requested: NOT_RECORDED, effective: NOT_RECORDED });
+    const strategy = sourceControlView([withComponents(record("6", all()), [["BSC_STATE_C2", "SHADOW", "SHADOW"], ["BSC_EXEC", "OFF", "OFF"], ["BSC_STRATEGY_C", "LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"]])]);
+    expect(strategy.components[2]).toMatchObject({ id: "BSC_STRATEGY_C", requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_NOT_AUTHORIZED" });
   });
   it("a generation from before components is NOT_RECORDED, never assumed", () => {
     expect(sourceControlView([record("1", all())]).components[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
@@ -126,6 +130,25 @@ describe("BSC source control", () => {
     expect(v?.latency).toBe("no PAPER BUY yet");
     expect(runtimeView([status(10_000, true, true)], 11_000).view.exec?.latency).toContain("not T_send");
     expect(runtimeView([status(10_000, true)], 20_000).view.exec?.state).toBe("STALE");
+  });
+
+  it("shows Strategy C's decisions and PAPER ledger only while it runs, a refusal with its reason", () => {
+    const status = (observed: number, state?: string, reason?: string): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      ...(state ? [{ name: "strategy[0].state", value: state, kind: 7, unit: "" }, { name: "strategy[0].launches", value: "3", kind: 2, unit: "" },
+        { name: "strategy[0].passed", value: "1", kind: 2, unit: "" }, { name: "strategy[0].entered", value: "1", kind: 2, unit: "" },
+        { name: "strategy[0].loss_wei", value: "120000000000000", kind: 9, unit: "" }] : []),
+      ...(reason ? [{ name: "strategy[0].reason", value: reason, kind: 7, unit: "" }] : [])] });
+    expect(runtimeView([status(10_000)], 11_000).view.strategy).toBeUndefined();
+    const v = runtimeView([status(10_000, "SHADOW")], 11_000).view.strategy;
+    expect(v?.state).toBe("SHADOW");
+    expect(v?.decisions).toContain("launches 3 · passed 1");
+    expect(v?.paper).toContain("entered 1");
+    expect(v?.paper).toContain("(120000000000000 wei)");
+    expect(v?.detail).not.toContain("undefined");
+    const refused = runtimeView([status(10_000, "GAS_EVIDENCE_REFUSED", "flap_gas_20261026.txt: missing")], 11_000).view.strategy;
+    expect(refused?.detail).toContain("flap_gas_20261026.txt: missing");
+    expect(runtimeView([status(10_000, "SHADOW")], 20_000).view.strategy?.state).toBe("STALE");
   });
 
   it("shows the segmented capture's storage health from the runtime, a durable sequence only once synced", () => {

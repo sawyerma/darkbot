@@ -39,7 +39,7 @@ const BSC_CANDIDATE: &str = "bsc.candidate.select";
 const BSC_SOURCE: &str = "bsc.source.mode.set";
 /// The five signal sources and the switchable runtime components of the
 /// native BSC mode owner (`bsc_runtime source request`).
-const BSC_SOURCE_IDS: [&str; 7] = [
+const BSC_SOURCE_IDS: [&str; 8] = [
     "BSC_INGRESS_GETH",
     "BSC_INGRESS_PUBLICNODE",
     "BSC_INGRESS_DRPC",
@@ -47,6 +47,7 @@ const BSC_SOURCE_IDS: [&str; 7] = [
     "BSC_INGRESS_48CLUB",
     "BSC_STATE_C2",
     "BSC_EXEC",
+    "BSC_STRATEGY_C",
 ];
 const BSC_SOURCE_MODES: [&str; 3] = ["OFF", "SHADOW", "LIVE"];
 /// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
@@ -2810,6 +2811,10 @@ mod tests {
         assert_eq!(
             source_request(&request("x", "BSC_EXEC:LIVE", config(5))),
             Some(("BSC_EXEC", "LIVE", 5))
+        );
+        assert_eq!(
+            source_request(&request("x", "BSC_STRATEGY_C:SHADOW", config(6))),
+            Some(("BSC_STRATEGY_C", "SHADOW", 6))
         );
         assert_eq!(
             source_request(&request("x", "BSC_STATE_C3:SHADOW", config(4))),

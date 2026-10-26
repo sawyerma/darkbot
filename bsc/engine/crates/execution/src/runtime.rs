@@ -67,6 +67,32 @@ pub mod exec;
 use exec::{ExecRuntime, ExecSetup};
 use state::{StateConfig, StateOwner};
 
+/// Strategy C's configuration (`BSC_STRATEGY_C_*`): the engine's policy
+/// and the frozen gas evidence files (repository-relative) its costs use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StrategyConfig {
+    pub engine: darkbot_bsc_trading::strategy::engine::Config,
+    pub gas_evidence: Vec<String>,
+}
+
+impl StrategyConfig {
+    /// The gas evidence of the configured files under `repo_root`.
+    pub fn gas(
+        &self,
+        repo_root: &Path,
+    ) -> Result<darkbot_bsc_trading::economics::network::GasEvidence, String> {
+        let mut text = String::new();
+        for p in &self.gas_evidence {
+            let path = repo_root.join(p);
+            text.push_str(
+                &std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
+            );
+            text.push('\n');
+        }
+        darkbot_bsc_trading::economics::network::GasEvidence::parse(&text)
+    }
+}
+
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -111,6 +137,8 @@ pub struct RuntimeConfig {
     /// The largest launch calldata the venue decoder accepts, at ingress
     /// and for the follower's C1 scope.
     pub max_launch_calldata: usize,
+    /// Phase H: Strategy C (component `BSC_STRATEGY_C`).
+    pub strategy: StrategyConfig,
     /// SHA-256 of the configuration text this was parsed from.
     pub source_sha256: [u8; 32],
 }
@@ -172,6 +200,17 @@ impl RuntimeConfig {
                 .remove("BSC_RUNTIME_CAPTURE_PENDING")
                 .ok_or("BSC_RUNTIME_CAPTURE_PENDING is required")?,
         )?;
+        let mut text_of = |name: &str| -> Result<String, String> {
+            values
+                .remove(name)
+                .map(str::to_string)
+                .ok_or_else(|| format!("{name} is required"))
+        };
+        let strategy_filters = text_of("BSC_STRATEGY_C_FILTERS")?;
+        let strategy_target = text_of("BSC_STRATEGY_C_TARGET_NET_MULTIPLE")?;
+        let strategy_stop = text_of("BSC_STRATEGY_C_STOP_NET_MULTIPLE")?;
+        let strategy_creator = text_of("BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL")?;
+        let strategy_gas = text_of("BSC_STRATEGY_C_GAS_EVIDENCE")?;
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -342,6 +381,55 @@ impl RuntimeConfig {
             stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
             exec,
             max_launch_calldata,
+            strategy: {
+                use darkbot_bsc_trading::strategy::{filters::parse_rules, fixed};
+                let places = take("BSC_STRATEGY_C_RATIO_PLACES", 0, 18)? as u32;
+                let multiple = |key: &str, text: &str| {
+                    fixed::parse(text, places)
+                        .filter(|m| *m >= 0)
+                        .ok_or_else(|| {
+                            format!("{key}={text} is no non-negative decimal at {places} places")
+                        })
+                };
+                StrategyConfig {
+                    engine: darkbot_bsc_trading::strategy::engine::Config {
+                        observation_ms: take("BSC_STRATEGY_C_OBSERVATION_MS", 0, 3_600_000)?,
+                        ratio_places: places,
+                        first_buyer_window: take("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", 1, 100)?
+                            as usize,
+                        rules: parse_rules(&strategy_filters, places)?,
+                        target_net_multiple: multiple(
+                            "BSC_STRATEGY_C_TARGET_NET_MULTIPLE",
+                            &strategy_target,
+                        )?,
+                        stop_net_multiple: multiple(
+                            "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
+                            &strategy_stop,
+                        )?,
+                        hold_ms: take("BSC_STRATEGY_C_HOLD_MS", 1, 86_400_000)?,
+                        max_open: take("BSC_STRATEGY_C_MAX_OPEN", 1, 1_000)? as usize,
+                        input_wei: alloy_primitives::U256::from(take(
+                            "BSC_STRATEGY_C_INPUT_WEI",
+                            1,
+                            u64::MAX,
+                        )?),
+                        fill_delay_blocks: take("BSC_STRATEGY_C_FILL_DELAY_BLOCKS", 1, 100)?,
+                        creator_sold_before_fill: crate::runtime_strategy::creator_sold_policy(
+                            &strategy_creator,
+                        )?,
+                        gas_price_wei: alloy_primitives::U256::from(take(
+                            "BSC_STRATEGY_C_GAS_PRICE_WEI",
+                            1,
+                            1_000_000_000_000,
+                        )?),
+                    },
+                    gas_evidence: strategy_gas
+                        .split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect(),
+                }
+            },
             source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),
         };
         config
@@ -531,6 +619,13 @@ struct Canonical {
     reverted_recent: Vec<(u64, [u8; 32], [u8; 32], crate::canonical_join::Venue)>,
     /// The deepest reorg the follower reports (`BSC_CANONICAL_REORG_DEPTH`).
     reorg_window: u64,
+    /// Phase H: Strategy C, fed from these records while `BSC_STRATEGY_C`
+    /// runs (SHADOW).
+    strategy: Option<crate::runtime_strategy::StrategyRuntime>,
+    /// The strategy's configuration while its component is on, and why it
+    /// cannot run (a refused gas evidence).
+    strategy_config: Option<darkbot_bsc_trading::strategy::engine::Config>,
+    strategy_refused: Option<String>,
     blocks_skipped: u64,
     blocks: u64,
     reorgs: u64,
@@ -558,6 +653,9 @@ impl Canonical {
             flap_trades_undecodable: 0,
             reverted_recent: Vec::new(),
             reorg_window: config.limits.reorg_depth,
+            strategy: None,
+            strategy_config: None,
+            strategy_refused: None,
             blocks_skipped: 0,
             blocks: 0,
             reorgs: 0,
@@ -568,6 +666,21 @@ impl Canonical {
                 config.join_delay_ms.saturating_mul(1_000_000),
                 config.limits.reorg_depth,
             ),
+        }
+    }
+
+    /// Journals a canonical record and feeds the same bytes to the
+    /// strategy (its replay reads them back the same way).
+    fn put(&mut self, kind: RecordKind, at: u64, payload: Vec<u8>, journal: &mut RuntimeJournal) {
+        match self.strategy.as_mut() {
+            Some(s) => {
+                // The record precedes its outputs in the journal.
+                journal.record(kind, at, payload.clone());
+                s.record(kind, &payload, at, Some(journal));
+            }
+            None => {
+                journal.record(kind, at, payload);
+            }
         }
     }
 
@@ -618,6 +731,12 @@ impl Canonical {
                     );
                 }
                 self.blocks += 1;
+                self.put(
+                    RecordKind::Canonical,
+                    at,
+                    crate::runtime_strategy::block_payload(number, &hash, timestamp_ms),
+                    journal,
+                );
             }
             // Before the window: not part of the G0.4 counts (the C2 owner
             // has applied them already).
@@ -628,7 +747,7 @@ impl Canonical {
             | CanonicalEvent::FlapTradeUndecodable { .. }
                 if !self.first_journaled => {}
             CanonicalEvent::FlapTerm(t) => {
-                journal.record(RecordKind::Canonical, at, flap_term_payload(&t));
+                self.put(RecordKind::Canonical, at, flap_term_payload(&t), journal);
             }
             CanonicalEvent::FlapMigrated {
                 block_number,
@@ -637,17 +756,18 @@ impl Canonical {
                 log_index,
                 token,
             } => {
-                journal.record(
+                self.put(
                     RecordKind::Canonical,
                     at,
                     flap_migrated_payload(block_number, &block_hash, tx_index, log_index, &token),
+                    journal,
                 );
             }
             // Phase H: every Flap curve trade of the window, for the
             // strategy and its replay.
             CanonicalEvent::FlapTrade(t) => {
                 self.flap_trades += 1;
-                journal.record(RecordKind::Canonical, at, flap_trade_payload(&t));
+                self.put(RecordKind::Canonical, at, flap_trade_payload(&t), journal);
             }
             CanonicalEvent::FlapTradeUndecodable {
                 block_number,
@@ -656,10 +776,11 @@ impl Canonical {
                 log_index,
             } => {
                 self.flap_trades_undecodable += 1;
-                journal.record(
+                self.put(
                     RecordKind::Canonical,
                     at,
                     trade_gap_payload(block_number, &block_hash, tx_index, log_index),
+                    journal,
                 );
             }
             CanonicalEvent::RevertedLaunch { .. } if !self.first_journaled => {}
@@ -713,16 +834,32 @@ impl Canonical {
                     block_seen_ns: self.head_seen_ns.filter(|_| same).unwrap_or(at),
                     block_seen_unix_ms: self.head_seen_unix_ms.filter(|_| same),
                 };
+                if let (crate::canonical_join::Venue::Flap, Some(token), Some(creator)) =
+                    (l.venue, l.token, l.creator)
+                {
+                    self.put(
+                        RecordKind::Canonical,
+                        at,
+                        crate::runtime_strategy::flap_launch_payload(
+                            l.block_number,
+                            l.tx_index,
+                            &token,
+                            &creator,
+                        ),
+                        journal,
+                    );
+                }
                 journal.record(RecordKind::Canonical, at, pending_launch_payload(&launch));
                 self.ledger.push(launch);
             }
             CanonicalEvent::Reorg { orphaned, new_head } => {
                 self.reorgs += 1;
                 let depth = u32::try_from(orphaned.len()).unwrap_or(u32::MAX);
-                journal.record(
+                self.put(
                     RecordKind::Reorg,
                     at,
                     reorg_payload(depth, new_head.0, &new_head.1),
+                    journal,
                 );
                 self.orphan(&orphaned, at, journal);
             }
@@ -734,9 +871,23 @@ impl Canonical {
                     .first()
                     .map_or(new_head.0, |(n, _)| *n)
                     .max(self.window_first_block);
+                // Whatever was skipped, no curve the strategy holds is
+                // exact: the resync tells it, or (nothing skipped) `I`.
                 if new_head.0 > from {
                     self.blocks_skipped += new_head.0 - from;
-                    journal.record(RecordKind::Reorg, at, resync_payload(from, new_head.0 - 1));
+                    self.put(
+                        RecordKind::Reorg,
+                        at,
+                        resync_payload(from, new_head.0 - 1),
+                        journal,
+                    );
+                } else {
+                    self.put(
+                        RecordKind::Canonical,
+                        at,
+                        crate::runtime_strategy::incomplete_payload(new_head.0),
+                        journal,
+                    );
                 }
                 self.orphan(&orphaned, at, journal);
             }
@@ -746,7 +897,7 @@ impl Canonical {
                 let from = from.max(self.window_first_block);
                 if to >= from {
                     self.blocks_skipped += to - from + 1;
-                    journal.record(RecordKind::Reorg, at, resync_payload(from, to));
+                    self.put(RecordKind::Reorg, at, resync_payload(from, to), journal);
                 }
             }
             // The C2 owner's reconciliation input; no G0.4 count.
@@ -1089,6 +1240,17 @@ fn status_bytes(
     if let Some(x) = exec {
         d.set(rs::EXEC, x.draft().into_nested());
     }
+    if let Some((c, cfg)) = canonical.and_then(|c| c.strategy_config.as_ref().map(|k| (c, k))) {
+        d.set(
+            rs::STRATEGY,
+            crate::runtime_strategy::status_draft(
+                c.strategy.as_ref(),
+                c.strategy_refused.as_deref(),
+                cfg,
+            )
+            .into_nested(),
+        );
+    }
     d.encode().map_err(|e| e.to_string())
 }
 
@@ -1158,6 +1320,9 @@ pub fn run(
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
+    // Strategy C's frozen gas evidence; refused, the strategy cannot run
+    // (its status says why).
+    let strategy_gas = config.strategy.gas(repo_root);
     let (canonical_tx, canonical_rx) = sync_channel::<(u64, CanonicalEvent)>(config.queue_events);
     let canonical_rx = Some(canonical_rx);
     // The C3 PAPER path: its identity is loaded at start, and C2 watches its
@@ -1237,6 +1402,42 @@ pub fn run(
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
                 generation = store.current()?;
+                // Phase H: BSC_STRATEGY_C runs (SHADOW) or not; switched off,
+                // its PAPER ledger ends.
+                let strategy_on =
+                    generation.component(ComponentId::StrategyC).effective == Effective::Shadow;
+                if let Some(c) = canonical.as_mut() {
+                    // Each switch is journaled: a replay starts and ends its
+                    // engine at the same record.
+                    match (strategy_on, c.strategy.is_some(), &strategy_gas) {
+                        (true, false, Ok(gas)) => {
+                            journal.record(
+                                RecordKind::Runtime,
+                                clock.now_ns(),
+                                crate::runtime_strategy::switch_payload(true),
+                            );
+                            c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
+                                config.strategy.engine.clone(),
+                                gas.clone(),
+                            ));
+                            c.strategy_refused = None;
+                        }
+                        (true, false, Err(why)) => c.strategy_refused = Some(why.clone()),
+                        (false, running, _) => {
+                            if running {
+                                journal.record(
+                                    RecordKind::Runtime,
+                                    clock.now_ns(),
+                                    crate::runtime_strategy::switch_payload(false),
+                                );
+                            }
+                            c.strategy = None;
+                            c.strategy_refused = None;
+                        }
+                        _ => {}
+                    }
+                    c.strategy_config = strategy_on.then(|| config.strategy.engine.clone());
+                }
                 if let Some(c) = &canonical_config {
                     StateOwner::switch(
                         &mut owner,

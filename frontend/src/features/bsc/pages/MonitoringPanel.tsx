@@ -10,6 +10,7 @@ import { PlacedSection } from "./PlacedSection";
 const COMPONENT_HINTS: Record<string, string> = {
   BSC_STATE_C2: "C2 canonical/pending state owner; SHADOW observes only, LIVE stays BLOCKED until G0.8 PASS and evaluated G0.4",
   BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink (PAPER identity, never sent), LIVE stays BLOCKED (economic LIVE not authorized)",
+  BSC_STRATEGY_C: "Strategy C on canonical Flap events; SHADOW keeps a PAPER ledger (nothing signed or sent), LIVE stays BLOCKED (economic LIVE not authorized)",
 };
 import { useNativeRecords } from "./useNativeRecords";
 import { sourceControlView } from "../model/sources";
@@ -74,6 +75,10 @@ export function MonitoringPanel() {
         hint={sources.runtime.exec ? sources.runtime.exec.detail : "No BSC_EXEC_PAPER_IDENTITY in the runtime configuration"} />
       {sources.runtime.exec && <Line label="C3 path to the PAPER sink" value={sources.runtime.exec.path} hint="Production decoder, C2 snapshot, admission, build/sign and lane; the sink has no transport, the signed bytes stay local" />}
       {sources.runtime.exec && <Line label="C3 local latency" value={sources.runtime.exec.latency} hint="Local production-code cost on this host (T_shadow_sink), never the transport boundary T_send" />}
+      <Line label="Strategy C" value={<ValueState state={sources.runtime.strategy?.state ?? "NOT_RUNNING"} />}
+        hint={sources.runtime.strategy ? sources.runtime.strategy.detail : "BSC_STRATEGY_C is not effective SHADOW (or no canonical endpoint): no strategy runs"} />
+      {sources.runtime.strategy && <Line label="Strategy C decisions" value={sources.runtime.strategy.decisions} hint="Typed filters over the observation window of each canonical Flap launch; a gap is DATA_INCOMPLETE, never a pass" />}
+      {sources.runtime.strategy && <Line label="Strategy C PAPER ledger" value={sources.runtime.strategy.paper} hint="Entries and exits valued by the exact Portal curve with the frozen gas evidence, after every cost; an open position whose curve stopped being exact stays unresolved, never valued. Not a proven outcome" />}
     </PlacedSection>
     <PlacedSection panel="monitoring" section={7} records={records}>
       <Line label="Producer witness source ready" value={s?.witness?.sourceReady === undefined ? "UNKNOWN" : String(s.witness.sourceReady)} />

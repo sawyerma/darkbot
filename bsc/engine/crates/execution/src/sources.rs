@@ -129,15 +129,23 @@ pub enum ComponentId {
     StateC2,
     /// The C3 execution path: SHADOW runs it to the PAPER sink.
     ExecC3,
+    /// Phase H: Strategy C on canonical Flap events; SHADOW runs it as a
+    /// PAPER ledger (no signature, no send).
+    StrategyC,
 }
 
 impl ComponentId {
-    pub const ALL: [ComponentId; 2] = [ComponentId::StateC2, ComponentId::ExecC3];
+    pub const ALL: [ComponentId; 3] = [
+        ComponentId::StateC2,
+        ComponentId::ExecC3,
+        ComponentId::StrategyC,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             ComponentId::StateC2 => "BSC_STATE_C2",
             ComponentId::ExecC3 => "BSC_EXEC",
+            ComponentId::StrategyC => "BSC_STRATEGY_C",
         }
     }
 
@@ -156,6 +164,8 @@ pub fn component_effective(component: ComponentId, requested: Mode) -> Effective
         // LIVE would sign and send economically: never without its own
         // authorization (G0.7/G0.8, J).
         (ComponentId::ExecC3, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
+        // LIVE would trade on the strategy's decisions: the same block.
+        (ComponentId::StrategyC, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
     }
 }
 
@@ -221,7 +231,7 @@ pub struct SourceMode {
 pub struct Generation {
     pub generation: u64,
     pub sources: [SourceMode; 5],
-    pub components: [ComponentMode; 2],
+    pub components: [ComponentMode; 3],
     pub request_id: Option<String>,
 }
 
@@ -799,6 +809,89 @@ mod tests {
             s.current()
                 .unwrap()
                 .component(ComponentId::StateC2)
+                .effective,
+            Effective::Shadow
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase H: Strategy C runs as a PAPER ledger in SHADOW; LIVE is
+    /// recorded and blocked; a generation written before it reads it OFF.
+    #[test]
+    fn the_strategy_component_is_paper_only_and_never_live() {
+        let (dir, s) = store("strategy");
+        let strategy = ComponentId::StrategyC;
+        assert_eq!(
+            Entity::parse("BSC_STRATEGY_C"),
+            Some(Entity::Component(strategy))
+        );
+        let r = s
+            .request("s-1", ComponentId::ExecC3, Mode::Shadow, 0, 1)
+            .unwrap();
+        assert!(r.applied());
+        assert_eq!(
+            s.current().unwrap().component(strategy).effective,
+            Effective::Off
+        );
+        // A generation of the two earlier components: the strategy reads OFF.
+        let (_, two) = current_record(&dir).unwrap().unwrap();
+        let mut d = Draft::new(&sm::SCHEMA);
+        d.set(sm::GENERATION, 2u64)
+            .set(sm::PROVENANCE_TOOL, "bsc_runtime")
+            .set(sm::PROVENANCE_OBSERVED_UNIX_MS, 2u64);
+        for row in two.nested_all(sm::SOURCES).unwrap() {
+            let mut e = Draft::new(&sm::entry::SCHEMA);
+            for tag in [
+                sm::entry::SOURCE_ID,
+                sm::entry::REQUESTED,
+                sm::entry::EFFECTIVE,
+            ] {
+                e.set(tag, row.text(tag).unwrap());
+            }
+            d.push(sm::SOURCES, e.into_nested());
+        }
+        for row in two.nested_all(sm::COMPONENTS).unwrap() {
+            if row.text(sm::component::COMPONENT_ID).unwrap() == "BSC_STRATEGY_C" {
+                continue;
+            }
+            let mut e = Draft::new(&sm::component::SCHEMA);
+            for tag in [
+                sm::component::COMPONENT_ID,
+                sm::component::REQUESTED,
+                sm::component::EFFECTIVE,
+            ] {
+                e.set(tag, row.text(tag).unwrap());
+            }
+            d.push(sm::COMPONENTS, e.into_nested());
+        }
+        fs::write(
+            dir.join("generations").join(format!("{:020}.dbrec", 2)),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        let g = s.current().unwrap();
+        assert_eq!(g.generation, 2);
+        assert_eq!(
+            g.component(ComponentId::ExecC3).effective,
+            Effective::Shadow
+        );
+        assert_eq!(g.component(strategy).effective, Effective::Off);
+        let r = s.request("s-2", strategy, Mode::Shadow, 2, 3).unwrap();
+        assert_eq!(r.effective, Effective::Shadow);
+        let r = s.request("s-3", strategy, Mode::Live, 3, 4).unwrap();
+        assert!(r.applied());
+        assert_eq!(
+            r.effective,
+            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
+        );
+        assert!(
+            r.line()
+                .contains("source=BSC_STRATEGY_C requested=LIVE effective=BLOCKED")
+        );
+        assert_eq!(
+            s.current()
+                .unwrap()
+                .component(ComponentId::ExecC3)
                 .effective,
             Effective::Shadow
         );

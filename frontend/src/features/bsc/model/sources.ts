@@ -9,7 +9,7 @@ export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
 export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
 export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
 /** Switchable runtime components of the same native owner (C2 state, ...). */
-export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC"] as const;
+export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC", "BSC_STRATEGY_C"] as const;
 /** A component the owner's record does not name yet (a generation from before it existed). */
 export const NOT_RECORDED = "NOT_RECORDED";
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
@@ -22,7 +22,9 @@ export interface ChainStateView { coherent: string; head: string; held: string; 
 /** The C3 PAPER path (component BSC_EXEC effective SHADOW): ends at the PAPER sink, never sends. */
 export interface ExecView { state: string; detail: string; path: string; latency: string }
 export interface CaptureView { state: string; detail: string }
-export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView; capture?: CaptureView }
+/** Strategy C (component BSC_STRATEGY_C effective SHADOW): a PAPER ledger on canonical Flap events, never signed or sent. */
+export interface StrategyView { state: string; detail: string; decisions: string; paper: string }
+export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView; capture?: CaptureView; strategy?: StrategyView }
 export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; runtime: RuntimeView }
 
 /** Rewrites a runtime status may miss before it is STALE. */
@@ -77,7 +79,15 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     state: fresh ? k("state") : "STALE",
     detail: `records ${k("records")} (${k("bytes")} bytes) · sealed segments ${k("segments_sealed")} · durable to sequence ${f.get("capture[0].durable_sequence") ?? "none yet"} (syncs ${k("syncs")}) · lost ${f.get("journal_lost") ?? "?"} at the recorder, ${k("lost_records")} in gap spans · budget ${k("budget_in_use_bytes")}/${k("budget_max_bytes")} bytes (peak ${k("budget_peak_bytes")}, refused ${k("budget_refused")}) · write errors ${k("write_errors")}`,
   } : undefined;
-  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec, capture }, health };
+  // Phase H: Strategy C's decisions and PAPER ledger (refused without its frozen gas evidence).
+  const y = (n: string) => f.get(`strategy[0].${n}`) ?? "?";
+  const strategy: StrategyView | undefined = f.has("strategy[0].state") ? {
+    state: fresh ? y("state") : "STALE",
+    detail: [f.get("strategy[0].reason"), `following ${y("followed")} · observation ${y("observation_ms")} ms · open at most ${y("max_open")} · PAPER input ${y("input_wei")} wei`].filter(Boolean).join(" · "),
+    decisions: `launches ${y("launches")} · passed ${y("passed")} · rejected ${y("rejected")} · data incomplete ${y("data_incomplete")} · not tracked ${y("not_tracked")} · slot limit ${y("slot_limit")} · creator sold before the entry ${y("creator_sold")}`,
+    paper: `entered ${y("entered")} · cancelled ${y("cancelled")} · exits creator sell ${y("exits_creator_sell")}, target ${y("exits_target")}, stop ${y("exits_stop")}, timeout ${y("exits_timeout")} · gains ${y("gains")} (${y("gain_wei")} wei) · losses ${y("losses")} (${y("loss_wei")} wei) · unresolved ${y("unresolved")}`,
+  } : undefined;
+  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec, capture, strategy }, health };
 }
 
 /** The source group from the native record; nothing is inferred locally. */

@@ -82,6 +82,9 @@ pub mod capture_quality;
 /// The read-only runtime process: sources, ingress, journal, status.
 #[cfg(feature = "runtime")]
 pub mod runtime;
+/// Phase H: Strategy C on the journaled canonical records (PAPER).
+#[cfg(feature = "runtime")]
+pub mod runtime_strategy;
 /// The native canonical chain follower: G0.4 launches from canonical receipts.
 #[cfg(feature = "runtime")]
 pub mod chain_follower;

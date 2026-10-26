@@ -508,6 +508,77 @@ pub mod runtime_status {
     /// The C3 execution path in PAPER mode (component `BSC_EXEC` effective
     /// SHADOW): from the pending launch to the PAPER sink (`T_shadow_sink`,
     /// never `T_send`).
+    /// Phase H: Strategy C (component `BSC_STRATEGY_C`, SHADOW: a PAPER
+    /// ledger) on the journaled canonical records.
+    pub mod strategy {
+        use super::*;
+
+        /// `SHADOW`, or `GAS_EVIDENCE_REFUSED` with its reason.
+        pub const STATE: u16 = 1;
+        pub const REASON: u16 = 2;
+        /// Tokens followed now (observing, entering, open or exiting).
+        pub const FOLLOWED: u16 = 3;
+        pub const LAUNCHES: u16 = 4;
+        /// Decisions by verdict.
+        pub const PASSED: u16 = 5;
+        pub const REJECTED: u16 = 6;
+        pub const DATA_INCOMPLETE: u16 = 7;
+        pub const NOT_TRACKED: u16 = 8;
+        pub const SLOT_LIMIT: u16 = 9;
+        pub const CREATOR_SOLD: u16 = 10;
+        /// PAPER entries and cancels, exits by reason.
+        pub const ENTERED: u16 = 11;
+        pub const CANCELLED: u16 = 12;
+        pub const EXITS_CREATOR_SELL: u16 = 13;
+        pub const EXITS_TARGET: u16 = 14;
+        pub const EXITS_STOP: u16 = 15;
+        pub const EXITS_TIMEOUT: u16 = 16;
+        /// Closed PAPER positions with a gain or a loss after every cost,
+        /// and their sums (wei).
+        pub const GAINS: u16 = 17;
+        pub const LOSSES: u16 = 18;
+        pub const GAIN_WEI: u16 = 19;
+        pub const LOSS_WEI: u16 = 20;
+        /// Open positions whose curve stopped being exact: never valued.
+        pub const UNRESOLVED: u16 = 21;
+        /// The configured limits.
+        pub const OBSERVATION_MS: u16 = 22;
+        pub const MAX_OPEN: u16 = 23;
+        pub const INPUT_WEI: u16 = 24;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.strategy",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(STATE, "state", Text),
+                Field::opt(REASON, "reason", Text),
+                Field::req(FOLLOWED, "followed", U64),
+                Field::req(LAUNCHES, "launches", U64),
+                Field::req(PASSED, "passed", U64),
+                Field::req(REJECTED, "rejected", U64),
+                Field::req(DATA_INCOMPLETE, "data_incomplete", U64),
+                Field::req(NOT_TRACKED, "not_tracked", U64),
+                Field::req(SLOT_LIMIT, "slot_limit", U64),
+                Field::req(CREATOR_SOLD, "creator_sold", U64),
+                Field::req(ENTERED, "entered", U64),
+                Field::req(CANCELLED, "cancelled", U64),
+                Field::req(EXITS_CREATOR_SELL, "exits_creator_sell", U64),
+                Field::req(EXITS_TARGET, "exits_target", U64),
+                Field::req(EXITS_STOP, "exits_stop", U64),
+                Field::req(EXITS_TIMEOUT, "exits_timeout", U64),
+                Field::req(GAINS, "gains", U64),
+                Field::req(LOSSES, "losses", U64),
+                Field::req(GAIN_WEI, "gain_wei", U256),
+                Field::req(LOSS_WEI, "loss_wei", U256),
+                Field::req(UNRESOLVED, "unresolved", U64),
+                Field::req(OBSERVATION_MS, "observation_ms", U64),
+                Field::req(MAX_OPEN, "max_open", U64),
+                Field::req(INPUT_WEI, "input_wei", U256),
+            ],
+        };
+    }
+
     pub mod exec {
         use super::*;
 
@@ -626,11 +697,13 @@ pub mod runtime_status {
     pub const EXEC: u16 = 14;
     /// The capture's storage health (Phase F).
     pub const CAPTURE: u16 = 15;
+    /// Present while `BSC_STRATEGY_C` runs or is refused (Phase H).
+    pub const STRATEGY: u16 = 16;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 11,
+        schema_version: 12,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -656,6 +729,94 @@ pub mod runtime_status {
             Field::nested(STATE, "state", Presence::Optional, &state::SCHEMA),
             Field::nested(EXEC, "exec", Presence::Optional, &exec::SCHEMA),
             Field::nested(CAPTURE, "capture", Presence::Optional, &capture::SCHEMA),
+            Field::nested(STRATEGY, "strategy", Presence::Optional, &strategy::SCHEMA),
+        ],
+    };
+}
+
+/// Phase H: the replay of one run's journal through Strategy C
+/// (`bsc_runtime strategy-replay`): the outputs it reproduces against the
+/// `Y` records the runtime journaled, and the PAPER result (EV) of the
+/// replay.
+pub mod strategy_replay {
+    use super::*;
+
+    pub const RUN_ID: u16 = 1;
+    pub const CHAIN_ID: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = 3;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = 4;
+    /// `PASS` (every journaled output reproduced, nothing else),
+    /// `DIFFERS`, `INCOMPLETE` (the journal does not read to its end) or
+    /// `NOT_RUN` (the strategy never ran in this run).
+    pub const VERDICT: u16 = 5;
+    pub const REASONS: u16 = 6;
+    pub const RECORDS: u16 = 7;
+    /// How often the strategy was switched on in the run.
+    pub const STARTS: u16 = 8;
+    pub const JOURNALED: u16 = 9;
+    pub const REPLAYED: u16 = 10;
+    /// The index of the first output that differs.
+    pub const FIRST_DIFFERENCE: u16 = 11;
+    /// The run's configuration is the one replayed with.
+    pub const CONFIG_MATCH: u16 = 12;
+    pub const LAUNCHES: u16 = 13;
+    pub const PASSED: u16 = 14;
+    pub const REJECTED: u16 = 15;
+    pub const DATA_INCOMPLETE: u16 = 16;
+    pub const NOT_TRACKED: u16 = 17;
+    pub const SLOT_LIMIT: u16 = 18;
+    pub const CREATOR_SOLD: u16 = 19;
+    pub const ENTERED: u16 = 20;
+    pub const CANCELLED: u16 = 21;
+    pub const EXITS_CREATOR_SELL: u16 = 22;
+    pub const EXITS_TARGET: u16 = 23;
+    pub const EXITS_STOP: u16 = 24;
+    pub const EXITS_TIMEOUT: u16 = 25;
+    pub const GAINS: u16 = 26;
+    pub const LOSSES: u16 = 27;
+    pub const GAIN_WEI: u16 = 28;
+    pub const LOSS_WEI: u16 = 29;
+    pub const UNRESOLVED: u16 = 30;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-replay.v1",
+        record_type: 62,
+        schema_version: 1,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(RECORDS, "records", U64),
+            Field::req(STARTS, "starts", U64),
+            Field::req(JOURNALED, "journaled", U64),
+            Field::req(REPLAYED, "replayed", U64),
+            Field::opt(FIRST_DIFFERENCE, "first_difference", U64),
+            Field::opt(CONFIG_MATCH, "config_match", Bool),
+            Field::req(LAUNCHES, "launches", U64),
+            Field::req(PASSED, "passed", U64),
+            Field::req(REJECTED, "rejected", U64),
+            Field::req(DATA_INCOMPLETE, "data_incomplete", U64),
+            Field::req(NOT_TRACKED, "not_tracked", U64),
+            Field::req(SLOT_LIMIT, "slot_limit", U64),
+            Field::req(CREATOR_SOLD, "creator_sold", U64),
+            Field::req(ENTERED, "entered", U64),
+            Field::req(CANCELLED, "cancelled", U64),
+            Field::req(EXITS_CREATOR_SELL, "exits_creator_sell", U64),
+            Field::req(EXITS_TARGET, "exits_target", U64),
+            Field::req(EXITS_STOP, "exits_stop", U64),
+            Field::req(EXITS_TIMEOUT, "exits_timeout", U64),
+            Field::req(GAINS, "gains", U64),
+            Field::req(LOSSES, "losses", U64),
+            Field::req(GAIN_WEI, "gain_wei", U256),
+            Field::req(LOSS_WEI, "loss_wei", U256),
+            Field::req(UNRESOLVED, "unresolved", U64),
         ],
     };
 }
@@ -665,4 +826,5 @@ pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
     &runtime_status::SCHEMA,
+    &strategy_replay::SCHEMA,
 ];
