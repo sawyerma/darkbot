@@ -2860,7 +2860,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         let bytes = draft
             .encode()
             .map_err(|e| format!("{}: {e}", family.label()))?;
-        decode(&ff::SCHEMA, &bytes).map_err(|e| format!("{}: {e}", family.label()))?;
+        decode(&ff::V2, &bytes).map_err(|e| format!("{}: {e}", family.label()))?;
         encoded.push((family.label().to_lowercase(), bytes));
     }
     std::fs::create_dir_all(&cfg.out_root)
@@ -3139,7 +3139,7 @@ mod tests {
         let outcome = run(&cfg).unwrap();
         for name in ["classic", "openfour"] {
             let bytes = std::fs::read(outcome.dir.join(format!("{name}.dbrec"))).unwrap();
-            let record = decode(&ff::SCHEMA, &bytes).unwrap();
+            let record = decode(&ff::V2, &bytes).unwrap();
             assert_eq!(record.u64(ff::CHAIN_ID).unwrap(), 56);
             assert!(record.bool(ff::PIN_RECHECKED).unwrap());
         }
