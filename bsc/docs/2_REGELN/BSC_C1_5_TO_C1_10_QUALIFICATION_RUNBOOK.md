@@ -87,7 +87,7 @@ plus the ownership check printed by the overlay tool (`C1_8_CHAIN_OWNERSHIP_VERI
 
 ```bash
 cargo test -p darkbot-bsc-qualification --locked --offline --lib c1_   # report, hook/path and freeze logic
-bsc/tools/c19_native_latency.sh
+bsc/tools/c19_native_latency.sh   # builds with the reproducible flags of C1.10
 ```
 
 The window is fixed by `DARKBOT_C19_PEERS`, `DARKBOT_C19_WARMUP_PER_PEER`, `DARKBOT_C19_SAMPLES_PER_PEER` and `DARKBOT_C19_OUTBOUND_WORKERS` before the run (defaults 4, 32, 2500, 2: 10,000 qualification samples, enough for p99.99). The script writes `c1-9-native-latency-<stamp>-*` to `bsc/native/evidence/c1/`: raw tables `raw_ingress.dbtab`/`raw_outbound.dbtab`, `rust_summary.dbrec`, `host_profile.dbrec`, `go_snapshot.bin`, `manifest.txt`, the logs, the report `<stamp>.dbrec` (`darkbot.c1.native-latency.v1`, written by `c19_report`) and its derived view `report.txt`. No JSON. It reports integrity and measurements and decides no gate. `DARKBOT_C19_GETH_SOURCE` names the bsc-geth Git checkout to clone (default `bsc/vendor/bsc-geth`); it must be its own repository and contain the pin. The default outbound mode is `production_devp2p_selected_peer_handoff`: two selected
@@ -105,7 +105,7 @@ C1.9b cannot substitute for the outbound measurement.
 
 ## C1.9b — hook/path early qualification (Testnet only)
 
-1. Start the overlay geth on BSC Testnet with the Fast Lane enabled.
+1. Build geth, `c19b_capture` and `c19b_report` with the C1.10 build commands; start the overlay geth on BSC Testnet with the Fast Lane enabled.
 2. Start the capture on the same host: `c19b_capture` (see its header for the environment). `DARKBOT_C19B_OUT=<obs>.dbtab` receives the observation table, `<obs>.dbtab.capture.dbrec` the capture record.
 3. Record the controlled launches with `CLOCK_MONOTONIC` handoff times of the same host and boot (`R=bsc/engine/target/release`):
 
@@ -123,6 +123,17 @@ $R/c19b_report --launches <launches>.dbrec --observations <obs>.dbtab --capture 
 The tool refuses Mainnet chain ids, incomparable clocks or boots, and an incomplete or unbound capture. No value-bearing Mainnet action is part of this gate. `MAINNET_INGRESS_COVERAGE = NOT_PROVEN` stays.
 
 ## C1.10 — freeze
+
+Bound binaries are built reproducibly: the same commit gives the same SHA-256 from any clone path and `CARGO_TARGET_DIR` on this host (Go 1.25.0 with `GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-mod=mod`; rustc 1.93.1):
+
+```bash
+go build -trimpath -buildvcs=false -o <geth binary> ./cmd/geth      # in the overlaid disposable geth clone
+export RUSTFLAGS="--remap-path-prefix=$(pwd -P)=bsc/engine -C link-arg=-Wl,-S"   # in bsc/engine
+cargo build --release --locked --offline -p darkbot-bsc-geth-ipc --example c19_consumer --example c16_host_profile --example c19b_capture
+cargo build --release --locked --offline -p darkbot-bsc-qualification --bin c19_report --bin c19b_report --bin c1_freeze
+```
+
+`-trimpath -buildvcs=false`: no checkout path or VCS state in geth. `--remap-path-prefix`: no absolute workspace path (cross-crate panic locations). `-Wl,-S`: no linker debug map (it names ring's assembly objects in the target directory and enters `LC_UUID` before the release strip).
 
 The inputs are a `darkbot.c1.freeze-inputs.v1` record built only by `c1_freeze inputs` (`R=bsc/engine/target/release`, paths relative to the repository root; keep `<inputs>`/`<record>` outside the repository or ignored):
 

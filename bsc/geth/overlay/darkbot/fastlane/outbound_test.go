@@ -97,12 +97,17 @@ func c17Wait(t *testing.T, what string, done func() bool) {
 	}
 }
 
-// c17Evidence drains one evidence lane: index 0 is the coordinator's lane,
-// index i+1 worker i's.
+// c17EvidenceLane opens one evidence lane as the consumer: index 0 is the
+// coordinator's lane, index i+1 worker i's.
+func c17EvidenceLane(t *testing.T, cfg ingressConfigV2, index int) *laneV2 {
+	t.Helper()
+	return c14Consumer(t, cfg, outboundLanePlanV2(cfg.OutboundWorkers)[1+index])
+}
+
+// c17Evidence drains one evidence lane (see c17EvidenceLane).
 func c17Evidence(t *testing.T, cfg ingressConfigV2, index int) []*recordV2 {
 	t.Helper()
-	lane := outboundLanePlanV2(cfg.OutboundWorkers)[1+index]
-	return c17Drain(t, c14Consumer(t, cfg, lane))
+	return c17Drain(t, c17EvidenceLane(t, cfg, index))
 }
 
 func c17Drain(t *testing.T, lane *laneV2) []*recordV2 {
@@ -263,19 +268,34 @@ func TestC17SlowPeerDoesNotDelayTheOtherPeer(t *testing.T) {
 	}
 	// More BUYs than the slow worker's queue holds: the fast peer still gets
 	// every one, the slow worker's overflow is reported, nothing waits.
+	// The fast worker's queue is c17WorkerQueueDepth deep too. A burst never
+	// exceeds it and the next burst waits for the fast peer, so a fast worker
+	// the host does not schedule during a burst cannot overflow: that would be
+	// a correct QUEUE_FULL of the fast worker, not a delay by the slow one.
+	// The first burst fills the slow worker's queue, the second overflows it.
 	const more = c17WorkerQueueDepth + 4
-	for nonce := uint64(2); nonce < 2+more; nonce++ {
-		c17Egress(t, r, nonce)
+	published := uint64(1)
+	for published < 1+more {
+		for burst := 0; burst < c17WorkerQueueDepth && published < 1+more; burst++ {
+			published++
+			c17Egress(t, r, published)
+		}
+		c17Wait(t, "fast peer got every BUY so far", func() bool { return fast.sent.Load() == published })
 	}
-	c17Wait(t, "fast peer got every BUY", func() bool { return fast.sent.Load() == 1+more })
 	c17Wait(t, "all dispatched", func() bool { return c17Snapshot(r).Dispatched == 1+more })
 	snapshot := c17Snapshot(r)
 	if snapshot.QueueFull != 4 || slow.sent.Load() != 0 {
 		t.Fatalf("queue_full=%d slow_sent=%d", snapshot.QueueFull, slow.sent.Load())
 	}
-	// The fast worker's first handoff was recorded while the slow peer was
-	// still held.
-	fastEvidence := c17Evidence(t, cfg, 2)
+	// Every fast handoff was recorded while the slow peer was still held. A
+	// worker publishes its record after the peer send returned, so the
+	// records are awaited, not read once.
+	fastLane := c17EvidenceLane(t, cfg, 2)
+	var fastEvidence []*recordV2
+	c17Wait(t, "fast worker evidence", func() bool {
+		fastEvidence = append(fastEvidence, c17Drain(t, fastLane)...)
+		return len(fastEvidence) >= 1+more
+	})
 	if len(fastEvidence) != 1+more || fastEvidence[0].Hash != first.Hash() {
 		t.Fatalf("%d fast evidence records", len(fastEvidence))
 	}

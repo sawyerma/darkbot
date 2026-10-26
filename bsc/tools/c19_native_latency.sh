@@ -62,6 +62,14 @@ case "$DARKBOT_C19_PURPOSE" in
   *) echo "C19_FAIL unknown measurement purpose" >&2; exit 2 ;;
 esac
 GO_PACKAGE=./darkbot/fastlane
+# Reproducible builds (C1.10): no checkout or target path, VCS state or linker
+# debug map (it changes LC_UUID) in a binary; same commit, same bytes.
+GO_REPRO_FLAGS=(-trimpath -buildvcs=false)
+ENGINE_REAL="$(cd "$ENGINE" && pwd -P)"
+case "$ENGINE_REAL" in
+  *[[:space:]]*) echo "C19_FAIL reason=engine-path-has-whitespace" >&2; exit 2 ;;
+esac
+RUST_REPRO_FLAGS="--remap-path-prefix=$ENGINE_REAL=bsc/engine -C link-arg=-Wl,-S"
 
 cleanup() {
   rm -rf "$RUN_DIR"
@@ -501,12 +509,12 @@ if [ "$DARKBOT_C19_OUTBOUND_MODE" = production_devp2p_selected_peer_handoff ]; t
   python3 "$ROOT/bsc/tools/c19_prepare_production.py" "$GETH"
   GO_PACKAGE=./eth/protocols/eth
 fi
-(cd "$GETH" && go test -c -o "$GO_BIN" "$GO_PACKAGE")
+(cd "$GETH" && go test -c "${GO_REPRO_FLAGS[@]}" -o "$GO_BIN" "$GO_PACKAGE")
 
 echo "=== C1.9 BUILD RUST RELEASE CONSUMER, HOST PROFILE AND REPORT ==="
-(cd "$ENGINE" && cargo build -p darkbot-bsc-geth-ipc --release --locked --offline \
+(cd "$ENGINE" && RUSTFLAGS="$RUST_REPRO_FLAGS" cargo build -p darkbot-bsc-geth-ipc --release --locked --offline \
   --example c19_consumer --example c16_host_profile)
-(cd "$ENGINE" && cargo build -p darkbot-bsc-qualification --release --locked --offline \
+(cd "$ENGINE" && RUSTFLAGS="$RUST_REPRO_FLAGS" cargo build -p darkbot-bsc-qualification --release --locked --offline \
   --bin c19_report)
 
 echo "=== C1.9 HOST PROFILE ==="
