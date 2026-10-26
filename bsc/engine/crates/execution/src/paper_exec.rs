@@ -449,9 +449,7 @@ mod tests {
     use darkbot_bsc_trading::venues::flap::abi::{
         LaunchParamsV6, decode_swap_exact_input_native, encode_new_token_v6,
     };
-    use darkbot_bsc_trading::venues::flap::deployment::{
-        ObservedDeployment, bsc_mainnet_v5_24_0, bsc_mainnet_v5_27_0,
-    };
+    use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_0};
     use std::cell::Cell;
     use std::path::PathBuf;
 
@@ -464,10 +462,9 @@ mod tests {
         d
     }
 
-    /// The deployment whose economics G0.6a witnessed (the live v5.27.0 is
-    /// decode-only until reconfirmed; the decode path is the same Portal).
+    /// The current deployment (economics reconfirmed on it).
     fn validated() -> ValidatedDeployment {
-        let d = bsc_mainnet_v5_24_0();
+        let d = bsc_mainnet_v5_27_0();
         d.validate(
             &ObservedDeployment {
                 chain_id: d.chain_id,

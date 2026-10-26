@@ -247,8 +247,11 @@ pub fn bsc_mainnet_v5_24_0() -> FlapDeployment {
 /// implementation is Sourcify-verified ("Portal", solc 0.8.26); the proxy,
 /// the tax-token V3 implementation and its clone init code are unchanged
 /// since v5.24.0, the implementation, its fingerprint and the version are
-/// new. Its economics are not witnessed on this implementation yet: it is
-/// decode-only until a reconfirmation of G0.6a on v5.27.0 exists.
+/// new. Its economics are witnessed on this implementation: the G0.6a
+/// launch and 0.001 BNB BUY reconfirmed at block 129860945 by the node's
+/// `eth_simulateV1` and a local EVM on pinned state, output and fee equal
+/// to `quote_native_buy`
+/// (`bsc/native/evidence/g01/flap_econ_v5_27_20261026T075420Z/flap_econ.dbrec`).
 pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
     let v5_24 = bsc_mainnet_v5_24_0();
     FlapDeployment {
@@ -259,7 +262,7 @@ pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
         portal_implementation_runtime_sha256: alloy_primitives::hex!(
             "4a439209fca0a6168a15cf58d19c19975205b6af13e0fb81846f7d78528e8f74"
         ),
-        economics: EconomicsWitness::DecodeOnly,
+        economics: EconomicsWitness::Witnessed,
         ..v5_24
     }
 }

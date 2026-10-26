@@ -546,37 +546,39 @@ fn the_predicted_token_is_the_canonical_one_and_only_for_taxed_v3() {
     assert_eq!(predicted_token(&deployment, &other), None);
 }
 
-/// Phase D review HIGH-1 (inverted): a validated v5.27.0 deployment is
-/// decode-only: the witnessed profile is not admitted on it, because its
-/// economics were witnessed on the v5.24.0 implementation only (contract
-/// §3: Gate-0 facts reconfirmed when contracts changed). Before: `Ok`.
+/// Phase D review HIGH-1 (inverted): a decode-only deployment admits
+/// nothing, because its economics are not witnessed on its implementation
+/// (contract §3: Gate-0 facts reconfirmed when contracts changed; before the
+/// fix a changed implementation was admitted). v5.27.0 is witnessed since
+/// the reconfirmation of G0.6a on it (flap_econ_v5_27 evidence).
 #[test]
 fn a_decode_only_deployment_admits_nothing() {
     use super::deployment::{EconomicsWitness, ObservedDeployment};
     use super::profile::{UnsupportedLaunch, classify_launch};
     let current = bsc_mainnet_v5_27_0();
-    assert_eq!(current.economics, EconomicsWitness::DecodeOnly);
-    let validated = current
-        .validate(
-            &ObservedDeployment {
-                chain_id: current.chain_id,
-                portal_version: current.portal_version,
-                portal_runtime_sha256: current.portal_runtime_sha256,
-                portal_implementation: current.portal_implementation,
-                portal_implementation_runtime_sha256: current.portal_implementation_runtime_sha256,
-                tax_v3_implementation_runtime_sha256: current.tax_v3_implementation_runtime_sha256,
-            },
-            1,
-        )
-        .unwrap();
-    assert!(!validated.economics_witnessed());
+    assert_eq!(current.economics, EconomicsWitness::Witnessed);
+    let observed = ObservedDeployment {
+        chain_id: current.chain_id,
+        portal_version: current.portal_version,
+        portal_runtime_sha256: current.portal_runtime_sha256,
+        portal_implementation: current.portal_implementation,
+        portal_implementation_runtime_sha256: current.portal_implementation_runtime_sha256,
+        tax_v3_implementation_runtime_sha256: current.tax_v3_implementation_runtime_sha256,
+    };
     let launch = super::profile::testkit::witnessed_native_launch();
+    let decode_only = super::deployment::FlapDeployment {
+        economics: EconomicsWitness::DecodeOnly,
+        ..current
+    }
+    .validate(&observed, 1)
+    .unwrap();
+    assert!(!decode_only.economics_witnessed());
     assert_eq!(
-        classify_launch(&validated, alloy_primitives::B256::ZERO, &launch),
+        classify_launch(&decode_only, alloy_primitives::B256::ZERO, &launch),
         Err(UnsupportedLaunch::EconomicsNotWitnessed)
     );
-    // On the witnessed implementation the same launch is admitted.
-    let witnessed = super::deployment::testkit::validated_mainnet(1);
+    // The reconfirmed current deployment classifies the witnessed launch.
+    let witnessed = current.validate(&observed, 1).unwrap();
     assert!(witnessed.economics_witnessed());
     assert!(classify_launch(&witnessed, alloy_primitives::B256::ZERO, &launch).is_ok());
 }

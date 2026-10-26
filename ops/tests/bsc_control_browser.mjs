@@ -130,13 +130,15 @@ try{
  const stateLine=()=>p.locator('.g-line',{hasText:'C2 chain state'}).first();
  await until(async()=> {const t=await stateLine().innerText();return t.includes('COHERENT')&&!t.includes('NOT_COHERENT')&&/head \d+/.test(t)&&/retained blocks [1-9]/.test(t);},'C2 owner SHADOW: coherent on real canonical blocks');
  await until(async()=> /blocks [1-9]/.test(await p.locator('.g-line',{hasText:'C2 canonical and pending effects'}).first().innerText()),'C2 effects counted');
- // C3 (PHASENPLAN §11): BSC_EXEC SHADOW probes the live Flap deployment read-only and refuses to arm on
- // v5.27.0, whose economics are not witnessed on its implementation (decode-only; nothing is admitted).
+ // C3 (PHASENPLAN §11): BSC_EXEC SHADOW probes the live Flap deployment read-only (v5.27.0, economics
+ // reconfirmed), waits for C2's nonce fact of the PAPER sender (every 20 blocks) and arms its fenced lanes.
  const execLine=()=>p.locator('.g-line',{hasText:'C3 PAPER path'}).first();
  const execComp=()=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:/^BSC_EXEC$/})}).first();
  await requestSource('BSC_EXEC','SHADOW','source=BSC_EXEC requested=SHADOW effective=SHADOW','bsc-component-receipt');
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('5')&&(await execComp().innerText()).includes('requested SHADOW'),'BSC_EXEC SHADOW pushed (generation 5)');
- await until(async()=> {const t=await execLine().innerText();return t.includes('ECONOMICS_UNQUALIFIED')&&t.includes('v5.27.0')&&t.includes('PAPER sender 0x');},'C3 live probe: Portal v5.27.0 decode-only, PAPER path not armed');
+ for(let i=0;;i++){const t=await execLine().innerText();if(t.includes('ARMED')&&t.includes('v5.27.0')&&t.includes('PAPER sender 0x'))break;
+  if(/IDENTITY_REFUSED|PROBE_FAILED|DRIFT|ECONOMICS_UNQUALIFIED|FUNDED|ARM_FAILED/.test(t)||i>=450)throw Error('C3 PAPER path not ARMED: '+t);await new Promise(r=>setTimeout(r,200));}
+ await until(async()=> (await p.locator('.g-line',{hasText:'C3 path to the PAPER sink'}).first().innerText()).includes('lanes 64/64'),'C3 lanes armed (64/64), nothing sent');
  await requestSource('BSC_EXEC','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED','bsc-component-receipt');
  await until(async()=> {const t=await execComp().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'BSC_EXEC LIVE stays BLOCKED');
  await until(async()=> (await execLine().innerText()).includes('OFF'),'C3 path off on LIVE→BLOCKED');
@@ -211,5 +213,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: v5.27.0 decode-only, not armed)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe v5.27.0, C2 nonce fact, 64 fenced PAPER lanes ARMED)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

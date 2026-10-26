@@ -30,9 +30,7 @@ use darkbot_bsc_trading::chain_state::input::{
 };
 use darkbot_bsc_trading::economics::flap::native_curve20::WITNESSED_MAINNET_TERMS;
 use darkbot_bsc_trading::venues::flap::abi::{LaunchParamsV6, encode_new_token_v6};
-use darkbot_bsc_trading::venues::flap::deployment::{
-    ObservedDeployment, bsc_mainnet_v5_24_0, bsc_mainnet_v5_27_0,
-};
+use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_0};
 use darkbot_bsc_tx_encoding::rlp::{encode_bytes, encode_list, encode_u64};
 use std::fs;
 use std::path::Path;
@@ -132,9 +130,8 @@ fn c3_paper_path_latency() {
     PaperIdentity::create(&key, Path::new("/nonexistent-repo")).unwrap();
     let identity = PaperIdentity::load(&key, Path::new("/nonexistent-repo"), &[]).unwrap();
     let sender = Address::from(identity.address());
-    // The deployment whose economics G0.6a witnessed: the live v5.27.0 is
-    // decode-only until reconfirmed (the decode path is the same Portal).
-    let d = bsc_mainnet_v5_24_0();
+    // The current deployment (economics reconfirmed on it).
+    let d = bsc_mainnet_v5_27_0();
     let validated = d
         .validate(
             &ObservedDeployment {
