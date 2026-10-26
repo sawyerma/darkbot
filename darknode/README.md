@@ -2,7 +2,7 @@
 
 > **Status: GATE 1 – KONZEPT / RECHERCHE / PHASENPLAN (OPEN)** · Stand: 26.10.2026  
 > **Eigenständiges DarkBot-Projekt** neben `bsc/` und `project_0/`. Kein produktiver Connector, keine Handelsfreigabe, kein deployter Bot.  
-> **Verbindliche Planung:** [docs/GATE_1.md](docs/GATE_1.md) · [docs/PHASENPLAN.md](docs/PHASENPLAN.md)
+> **Verbindliche Planung:** [docs/GATE_1.md](docs/GATE_1.md) · [docs/PHASENPLAN.md](docs/PHASENPLAN.md) · [P1-Phasenplan V1.1](docs/PHASENPLAN_P1_V1.md) · [Endpoint-Registry](docs/ENDPOINT_REGISTRY.md)
 
 ## 1. Produktziel – was DarkNode tun soll
 
@@ -80,7 +80,7 @@ flowchart TB
     class NOENTRY,NOORDER stop
 ```
 
-**Datenweg:** externes Bitget-JSON nur im Bitget-Adapter; danach typisierte Rust-Daten, deterministische Strategieevaluation und persistente Orderereignisse. **Frontend-Datenweg:** bestehender Reporter → vorhandenes Gateway → Protobuf-WebSocket → Graphite-React. Browser, React Flow und Charts sind **nie** Order-Authority.
+**Datenweg:** **DN-D18: kein internes JSON** – externes Bitget-JSON nur im Bitget-Adapter (opake Originalframes zulässig in L0); danach typisierte Rust-/Protobuf-/Binärdaten. **DN-D19:** SQLite als kleiner Control-/Registry-Store, Marktvolumen in eigenen L0/L1/L2-Dateien; deterministische Strategieevaluation und persistente Orderereignisse. **Frontend-Datenweg:** bestehender Reporter → vorhandenes Gateway → Protobuf-WebSocket → Graphite-React. Browser, React Flow und Charts sind **nie** Order-Authority.
 
 ## 3. Trading-Zyklus: immer dasselbe Paar
 
@@ -235,7 +235,7 @@ Bereitgestelltes Referenzscript: `DarkMa MTF Pressure Scalp v1.0` (Pine v6, derz
 |---|---|
 | Exchange | Bitget; **zunächst USDT-M Futures**; UTA-V3-/Kontomodus-Kompatibilität in G1 prüfen |
 | Realtime | Ein Rust Bitget Public/Private Adapter; benötigte REST-Aufrufe isoliert |
-| Historie | Backfill, Dedupe, Qualität, zeitkausales Replay, Arrow/Parquet als Kandidat |
+| Historie | Eigene L0/L1/L2-Binärdateien mit Zeitindex, Backfill/Dedupe/Quality und zeitkausalem Replay; SQLite nur für kleine Control-/Registry-/Gap-/Manifestdaten; ClickHouse ausschließlich Benchmarkreferenz R2c |
 | Indikatoren / Graph | Rust, ein deterministischer Evaluator; Graphversionen immutable |
 | Stops / Execution | Zentraler Rust Order-/Risk-/Reconcile-Owner |
 | Backtest | Gleicher Rust Strategie-/Event-Kern, realistische Gebühren/Fills; NautilusTrader vs eigener Kern und HftBacktest evaluieren |
