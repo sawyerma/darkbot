@@ -305,7 +305,11 @@ pub(super) struct ShadowOwner {
     #[cfg(feature = "crate_health")]
     dependency_gaps: HashMap<Pubkey, darkbot_project0::health::DependencyGap>,
     global_allowed: Vec<Pubkey>,
-    submitter: crate::execution::observe_only::ObserveOnly<RpcSubmitter>,
+    submitter:
+        crate::execution::observe_only::ObserveOnly<crate::execution::bundle_path::OwnerSubmitter>,
+    /// DEC-11: the configured bundle path (block engine, simulator, tip account); `None`:
+    /// unconfigured, JITO_BUNDLE stays OFF.
+    bundle_config: Option<crate::execution::bundle_path::BundleConfig>,
     failed_costs: FailedCostMatrix,
     routes: JupiterV2RouteProvider,
     resources: Resources,

@@ -22,6 +22,10 @@ impl<S> ObserveOnly<S> {
             attempts: Arc::new(AtomicU64::new(0)),
         }
     }
+    /// The wrapped adapter, to reconfigure (DEC-11: the bundle path); submissions stay refused.
+    pub fn inner_mut(&mut self) -> &mut S {
+        &mut self.inner
+    }
 }
 impl<S: SubmissionAdapter> SubmissionAdapter for ObserveOnly<S> {
     fn path(&self) -> SubmissionPath {

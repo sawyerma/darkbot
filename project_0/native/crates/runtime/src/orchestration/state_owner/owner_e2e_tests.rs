@@ -226,10 +226,13 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         #[cfg(feature = "crate_health")]
         dependency_gaps: HashMap::new(),
         global_allowed: vec![],
-        submitter: crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::new(
-            unused_rpc.clone(),
-            true,
-        )),
+        submitter: crate::execution::observe_only::ObserveOnly::new(
+            crate::execution::bundle_path::OwnerSubmitter::new(RpcSubmitter::new(
+                unused_rpc.clone(),
+                true,
+            )),
+        ),
+        bundle_config: None,
         failed_costs: FailedCostMatrix::default(),
         routes: JupiterV2RouteProvider::new(liquidator, None, 0, 64, true, false).unwrap(),
         resources: Resources {
@@ -2398,6 +2401,68 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     .unwrap();
     assert!(again.book.is_empty() && again.settle_due.is_none());
     assert_eq!((again.unbooked, safety.capital_in_use()), (None, 0));
+    cleanup(f);
+}
+
+/// DEC-11 in the running owner: JITO_BUNDLE starts OFF (no Jito adapter); a request without a
+/// configured bundle path stays OFF; configured, OBSERVE builds the adapter (bundle plans,
+/// the tip account) and ACTIVE stays OBSERVE without a qualified bundle simulator; OFF removes
+/// it. The capability row shows requested, effective and why.
+#[test]
+fn dec11_owner_builds_the_bundle_path_through_the_capability() {
+    use darkbot_solana::submit::SubmissionAdapter;
+    let mut f = fixture_with("dec11_owner", None);
+    let request = |requested: &str, seq| crate::analytics::payload::CapabilityControlRequest {
+        seq,
+        capability: crate::execution::bundle_path::JITO_BUNDLE.into(),
+        requested: requested.into(),
+        requested_unix_s: 1,
+    };
+    let row = |f: &Fixture| {
+        let r = f
+            .owner
+            .owner_snapshot(0)
+            .capabilities
+            .into_iter()
+            .find(|c| c.name == crate::execution::bundle_path::JITO_BUNDLE)
+            .unwrap();
+        (r.requested, r.effective, r.block_reason)
+    };
+    assert_eq!(row(&f), ("OFF", "OFF", ""));
+    assert!(!f.owner.submitter.supports_bundle());
+    f.owner
+        .apply_capability_control(1, Ok(request("OBSERVE", 1)));
+    assert_eq!(
+        row(&f),
+        (
+            "OBSERVE",
+            "OFF",
+            crate::execution::bundle_path::JITO_UNCONFIGURED
+        )
+    );
+    assert!(!f.owner.submitter.supports_bundle());
+    f.owner.bundle_config = Some(crate::execution::bundle_path::BundleConfig {
+        block_engine_url: "https://jito.invalid".into(),
+        bundle_sim_rpc_url: None,
+        tip_account: Pubkey::new_unique(),
+    });
+    f.owner
+        .apply_capability_control(2, Ok(request("OBSERVE", 2)));
+    assert_eq!(row(&f), ("OBSERVE", "OBSERVE", ""));
+    assert!(f.owner.submitter.supports_bundle());
+    f.owner
+        .apply_capability_control(3, Ok(request("ACTIVE", 3)));
+    assert_eq!(
+        row(&f),
+        (
+            "ACTIVE",
+            "OBSERVE",
+            crate::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED
+        )
+    );
+    f.owner.apply_capability_control(4, Ok(request("OFF", 4)));
+    assert_eq!(row(&f), ("OFF", "OFF", ""));
+    assert!(!f.owner.submitter.supports_bundle());
     cleanup(f);
 }
 

@@ -35,19 +35,26 @@ fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
         .map_err(|e| e.replace("SOURCE_CONTROL_IO", "CAPABILITY_CONTROL_IO"))
 }
 
-/// The controllable capabilities and their values: LIVE (DEC-13), the B hold mode (DEC-04).
-pub const CAPABILITIES: [(&str, &[&str]); 2] = [
+/// The controllable capabilities and their values: LIVE (DEC-13), the B hold mode (DEC-04), the
+/// bundle path (DEC-11).
+pub const CAPABILITIES: [(&str, &[&str]); 3] = [
     (LIVE, &LIVE_VALUES),
     (
         crate::execution::hold_b::HOLD_B,
         &crate::execution::hold_b::HOLD_B_VALUES,
+    ),
+    (
+        crate::execution::bundle_path::JITO_BUNDLE,
+        &crate::execution::bundle_path::JITO_BUNDLE_VALUES,
     ),
 ];
 
 /// A request names a known capability and one of its values.
 pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
     let Some((_, values)) = CAPABILITIES.iter().find(|(c, _)| *c == capability) else {
-        return Err(format!("CAPABILITY_UNKNOWN: {capability} (LIVE|HOLD_B)"));
+        return Err(format!(
+            "CAPABILITY_UNKNOWN: {capability} (LIVE|HOLD_B|JITO_BUNDLE)"
+        ));
     };
     if !values.contains(&requested) {
         return Err(format!(
@@ -203,6 +210,16 @@ mod tests {
             .unwrap_err()
             .starts_with("CAPABILITY_UNKNOWN"));
         assert!(validate(LIVE, "ON")
+            .unwrap_err()
+            .starts_with("CAPABILITY_VALUE_INVALID"));
+        // DEC-11: the bundle path is a capability of its own values.
+        for v in crate::execution::bundle_path::JITO_BUNDLE_VALUES {
+            assert_eq!(
+                validate(crate::execution::bundle_path::JITO_BUNDLE, v),
+                Ok(())
+            );
+        }
+        assert!(validate(crate::execution::bundle_path::JITO_BUNDLE, "LIVE")
             .unwrap_err()
             .starts_with("CAPABILITY_VALUE_INVALID"));
         // DEC-04: the B hold mode is a capability of its own values.

@@ -567,7 +567,15 @@ impl ShadowOwner {
             blockhash_max_age_ns: self.blockhash_max_age_ns,
             p7_passed: false,
             freshness: self.freshness,
-            tip_account: None,
+            // DEC-11: the bundle path's tip account, only while it is effective.
+            tip_account: self
+                .bundle_config
+                .as_ref()
+                .filter(|_| {
+                    use darkbot_solana::submit::SubmissionAdapter;
+                    self.submitter.supports_bundle()
+                })
+                .map(|c| c.tip_account),
             global_allowed: &self.global_allowed,
             prereq_allowed: &self.prereq_allowed,
             slot_watch: &self.slot_watch,

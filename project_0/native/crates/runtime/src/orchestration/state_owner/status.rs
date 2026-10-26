@@ -196,11 +196,13 @@ impl ShadowOwner {
                 "NOT_AUTHORIZED",
                 "observe-only adapter: no value-bearing approval",
             ),
+            // DEC-11: the bundle path, requested and effective (never ACTIVE without a qualified
+            // bundle simulator).
             cap(
-                "JITO_BUNDLE",
-                "OFF",
-                "BLOCKED",
-                "no qualified Jito adapter and bundle simulation (B02/B05/F-20)",
+                crate::execution::bundle_path::JITO_BUNDLE,
+                self.sources.capabilities.jito_requested,
+                self.sources.capabilities.jito_effective,
+                self.sources.capabilities.jito_block,
             ),
             if cfg!(feature = "txv1") {
                 cap("V1_MESSAGES", "ACTIVE", "ACTIVE", "")

@@ -82,6 +82,11 @@ pub(super) struct OwnerCapabilities {
     pub(super) hold_b_requested: crate::execution::hold_b::HoldMode,
     /// Why the effective B hold mode is not the requested one ("" when it is).
     pub(super) hold_b_block: &'static str,
+    /// DEC-11: the requested bundle path: OFF at every start.
+    pub(super) jito_requested: &'static str,
+    /// The effective bundle path and why it is not the requested one.
+    pub(super) jito_effective: &'static str,
+    pub(super) jito_block: &'static str,
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
     pub(super) applied: u64,
     pub(super) refused: u64,
@@ -95,6 +100,9 @@ impl Default for OwnerCapabilities {
             live_requested: crate::orchestration::capability_control::LIVE_OFF,
             hold_b_requested: crate::execution::hold_b::HoldMode::Observe,
             hold_b_block: "",
+            jito_requested: "OFF",
+            jito_effective: "OFF",
+            jito_block: "",
             last_decision: None,
             applied: 0,
             refused: 0,
@@ -326,6 +334,32 @@ impl ShadowOwner {
         Ok(())
     }
 
+    /// DEC-11: the effective bundle path of the requested one (`bundle_path::effective`); the
+    /// submitter holds a `JitoAdapter` exactly while it is not OFF (constructing it calls
+    /// nothing).
+    pub(super) fn apply_bundle_path(&mut self) {
+        let requested = self.sources.capabilities.jito_requested;
+        let (mut effective, mut block) =
+            crate::execution::bundle_path::effective(requested, self.bundle_config.is_some());
+        let timeout = std::time::Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .rpc_timeout_ms,
+        );
+        let config = self.bundle_config.clone().filter(|_| effective != "OFF");
+        if let Err(e) = self
+            .submitter
+            .inner_mut()
+            .set_bundle_path(config.as_ref(), timeout)
+        {
+            owner_log!(self, "capability_control: JITO_BUNDLE not built: {e}");
+            let _ = self.submitter.inner_mut().set_bundle_path(None, timeout);
+            (effective, block) = ("OFF", "JITO_ADAPTER_CONSTRUCTION_FAILED");
+        }
+        let c = &mut self.sources.capabilities;
+        (c.jito_effective, c.jito_block) = (effective, block);
+    }
+
     /// DEC-04: the effective B hold mode of the requested one (`hold_b::effective`: ACTIVE only
     /// with the user's N and the evidence), and why it is not the requested one. Only a request
     /// decides (`promote`, its decision recorded); a refresh keeps the decision or takes ACTIVE
@@ -371,10 +405,19 @@ impl ShadowOwner {
         };
         let hold_b =
             matches!(&request_capability, Some(c) if c == crate::execution::hold_b::HOLD_B);
+        let jito = matches!(
+            &request_capability,
+            Some(c) if c == crate::execution::bundle_path::JITO_BUNDLE
+        );
         let c = &mut self.sources.capabilities;
         let applied = valid.is_ok();
         if let Ok(requested) = &valid {
-            if hold_b {
+            if jito {
+                c.jito_requested = crate::execution::bundle_path::JITO_BUNDLE_VALUES
+                    .into_iter()
+                    .find(|v| v == requested)
+                    .unwrap_or("OFF");
+            } else if hold_b {
                 c.hold_b_requested =
                     crate::execution::hold_b::HoldMode::parse(requested).unwrap_or_default();
             } else {
@@ -387,7 +430,11 @@ impl ShadowOwner {
         } else {
             c.refused = c.refused.saturating_add(1);
         }
-        let (requested, effective, block_reason) = if hold_b {
+        let (requested, effective, block_reason) = if jito {
+            self.apply_bundle_path();
+            let c = &self.sources.capabilities;
+            (c.jito_requested, c.jito_effective, c.jito_block)
+        } else if hold_b {
             self.refresh_hold_gate(true);
             let c = &self.sources.capabilities;
             (

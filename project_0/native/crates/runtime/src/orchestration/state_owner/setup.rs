@@ -531,10 +531,12 @@ pub(super) fn prepare(
     .map(|s| Pubkey::from_str(s))
     .collect::<Result<_, _>>()?;
     // N2: the owner's candidate path quotes and simulates through the deadline-bound transport.
-    let submitter = crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::for_candidates(
-        rpc_url.clone(),
-        true,
-    )?);
+    let submitter = crate::execution::observe_only::ObserveOnly::new(
+        crate::execution::bundle_path::OwnerSubmitter::new(RpcSubmitter::for_candidates(
+            rpc_url.clone(),
+            true,
+        )?),
+    );
     let failed_costs = FailedCostMatrix::default(); // alle None → Unknown → nicht handelbar, bis gemessen
     #[cfg(feature = "crate_health")]
     let routes = JupiterV2RouteProvider::new(
@@ -1107,6 +1109,9 @@ pub(super) fn prepare(
         dependency_gaps,
         global_allowed,
         submitter,
+        bundle_config: crate::execution::bundle_path::BundleConfig::of(
+            darkbot_solana::runtime_config::active(),
+        ),
         failed_costs,
         routes,
         resources,

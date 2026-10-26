@@ -2,6 +2,7 @@
 
 pub mod accounting;
 pub mod builder;
+pub mod bundle_path;
 pub mod hold_b;
 pub mod identity;
 pub mod inventory;

@@ -432,6 +432,14 @@ pub struct RuntimeConfig {
     /// may be ACTIVE (`P0_HOLD_B_MIN_ATTEMPTS`). The user's decision, no default: unset keeps B
     /// in OBSERVE.
     pub hold_b_min_attempts: Option<u64>,
+    /// DEC-11: the Jito block engine of the bundle path (`P0_JITO_BLOCK_ENGINE_URL`, redacted);
+    /// unset: no Jito adapter is built. This build never sends (no FE-06 authorization).
+    pub jito_block_engine_url: Option<String>,
+    /// DEC-11: the bundle simulator (`P0_BUNDLE_SIM_RPC_URL`, redacted): a Jito-Solana RPC with
+    /// `simulateBundle`; used only once qualified — this build holds no qualification.
+    pub bundle_sim_rpc_url: Option<String>,
+    /// DEC-11: the tip account of the bundle's tip transaction (`P0_JITO_TIP_ACCOUNT`, base58).
+    pub jito_tip_account: Option<String>,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -442,6 +450,9 @@ impl Default for RuntimeConfig {
             wss_endpoints: vec![],
             non_landing_sources: vec![],
             hold_b_min_attempts: None,
+            jito_block_engine_url: None,
+            bundle_sim_rpc_url: None,
+            jito_tip_account: None,
             fallback: false,
             adaptive: true,
             duration: "4h".into(),
@@ -636,6 +647,15 @@ impl RuntimeConfig {
             .or_else(|| env("P0_AUDIT_RPC_URL"))
             .or_else(|| env("P0_RPC_URL"))
     }
+    /// DEC-11: a bundle-path setting by its field name.
+    fn bundle_field(&mut self, field: &str) -> &mut Option<String> {
+        match field {
+            "jito_block_engine_url" => &mut self.jito_block_engine_url,
+            "bundle_sim_rpc_url" => &mut self.bundle_sim_rpc_url,
+            "jito_tip_account" => &mut self.jito_tip_account,
+            _ => unreachable!("no bundle setting {field}"),
+        }
+    }
     /// DEC-03: the configured non-landing B sources as `(operator, URL)` — an operator label of
     /// 1–32 lowercase letters, digits or `-`, an `http(s)` URL with a host. Independence is by
     /// operator, so one URL is configured once and one host belongs to one operator.
@@ -727,6 +747,21 @@ impl RuntimeConfig {
         self.non_landing_source_list()?;
         if self.hold_b_min_attempts == Some(0) {
             return Err("hold_b_min_attempts must be at least 1 (B-8)".into());
+        }
+        for (name, url) in [
+            ("jito_block_engine_url", &self.jito_block_engine_url),
+            ("bundle_sim_rpc_url", &self.bundle_sim_rpc_url),
+        ] {
+            if let Some(url) = url {
+                let u = reqwest::Url::parse(url).map_err(|_| format!("{name} invalid"))?;
+                if !["http", "https"].contains(&u.scheme()) || u.host_str().is_none() {
+                    return Err(format!("{name} invalid"));
+                }
+            }
+        }
+        if let Some(tip) = &self.jito_tip_account {
+            tip.parse::<solana_sdk::pubkey::Pubkey>()
+                .map_err(|_| "jito_tip_account invalid".to_string())?;
         }
         if !["off", "index", "strict", "crosscheck"].contains(&self.verification.as_str()) {
             return Err("invalid verification mode".into());
@@ -847,6 +882,9 @@ struct ConfigFile {
     wss_endpoints: Option<Vec<String>>,
     non_landing_sources: Option<Vec<String>>,
     hold_b_min_attempts: Option<u64>,
+    jito_block_engine_url: Option<String>,
+    bundle_sim_rpc_url: Option<String>,
+    jito_tip_account: Option<String>,
     fallback: Option<bool>,
     adaptive: Option<bool>,
     duration: Option<String>,
@@ -899,6 +937,9 @@ impl ConfigFile {
                 "hold_b_min_attempts" => {
                     f.hold_b_min_attempts = Some(number("hold_b_min_attempts", &value)?)
                 }
+                "jito_block_engine_url" => f.jito_block_engine_url = Some(value),
+                "bundle_sim_rpc_url" => f.bundle_sim_rpc_url = Some(value),
+                "jito_tip_account" => f.jito_tip_account = Some(value),
                 "fe_targets" => f.fe_targets = Some(list(&value)),
                 field if Limits::default().get(field).is_some() => {
                     f.limits
@@ -1066,6 +1107,17 @@ impl Resolved {
             );
             sources.insert("hold_b_min_attempts".into(), "environment".into());
         }
+        // DEC-11: the bundle path's endpoints and tip account.
+        for (field, key) in [
+            ("jito_block_engine_url", "P0_JITO_BLOCK_ENGINE_URL"),
+            ("bundle_sim_rpc_url", "P0_BUNDLE_SIM_RPC_URL"),
+            ("jito_tip_account", "P0_JITO_TIP_ACCOUNT"),
+        ] {
+            if let Some(v) = env(key).filter(|v| !v.trim().is_empty()) {
+                *c.bundle_field(field) = Some(v.trim().to_string());
+                sources.insert(field.into(), "environment".into());
+            }
+        }
         if let Some(url) = env("P0_WS_URL") {
             c.wss_endpoints = vec![url];
             sources.insert("wss_endpoints".into(), "environment".into());
@@ -1124,6 +1176,16 @@ impl Resolved {
             c.hold_b_min_attempts = Some(n);
             sources.insert("hold_b_min_attempts".into(), "config_file".into());
         }
+        for (field, v) in [
+            ("jito_block_engine_url", file.jito_block_engine_url),
+            ("bundle_sim_rpc_url", file.bundle_sim_rpc_url),
+            ("jito_tip_account", file.jito_tip_account),
+        ] {
+            if let Some(v) = v {
+                *c.bundle_field(field) = Some(v);
+                sources.insert(field.into(), "config_file".into());
+            }
+        }
         if let Some(v) = file.wss_endpoints.filter(|v| !v.is_empty()) {
             c.wss_endpoints = v;
             sources.insert("wss_endpoints".into(), "config_file".into());
@@ -1172,6 +1234,9 @@ impl Resolved {
                     "hold_b_min_attempts" => {
                         c.hold_b_min_attempts =
                             Some(val.parse().map_err(|_| "configuration type mismatch")?)
+                    }
+                    "jito_block_engine_url" | "bundle_sim_rpc_url" | "jito_tip_account" => {
+                        *c.bundle_field(&k) = Some(val.clone())
                     }
                     "wss_endpoints" => c.wss_endpoints = list(&val),
                     "fe_targets" => c.fe_targets = list(&val),
@@ -1237,7 +1302,7 @@ impl Resolved {
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1287,6 +1352,31 @@ impl Resolved {
                 src("hold_b_min_attempts")
             ),
             None => "hold-b-min-attempts = undecided (B-8: B ACTIVE blocked)\n".to_string(),
+        };
+        for (name, field, set) in [
+            (
+                "jito-block-engine-url",
+                "jito_block_engine_url",
+                self.config.jito_block_engine_url.is_some(),
+            ),
+            (
+                "bundle-sim-rpc-url",
+                "bundle_sim_rpc_url",
+                self.config.bundle_sim_rpc_url.is_some(),
+            ),
+        ] {
+            s += &if set {
+                format!("{name} = configured (redacted) [source {}]\n", src(field))
+            } else {
+                format!("{name} = unset\n")
+            };
+        }
+        s += &match &self.config.jito_tip_account {
+            Some(tip) => format!(
+                "jito-tip-account = {tip} [source {}]\n",
+                src("jito_tip_account")
+            ),
+            None => "jito-tip-account = unset\n".to_string(),
         };
         for (name, value) in [
             ("fallback", e.fallback.to_string()),
@@ -1495,6 +1585,51 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, 2);
+    }
+    /// DEC-11: the bundle path's settings from environment and CLI, validated (http(s) URLs with a
+    /// host, a base58 tip account) and printed redacted (the tip account is public).
+    #[test]
+    fn dec11_bundle_settings_parse_validate_and_redact() {
+        let env = |k: &str| match k {
+            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_JITO_BLOCK_ENGINE_URL" => Some("https://jito.invalid/SECRET".to_string()),
+            "P0_BUNDLE_SIM_RPC_URL" => Some("https://sim.invalid/KEY".to_string()),
+            _ => None,
+        };
+        let tip = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        let r = Resolved::parse(&["--jito-tip-account".into(), tip.clone()], &env).unwrap();
+        assert_eq!(
+            r.config.jito_block_engine_url.as_deref(),
+            Some("https://jito.invalid/SECRET")
+        );
+        assert_eq!(
+            r.config.bundle_sim_rpc_url.as_deref(),
+            Some("https://sim.invalid/KEY")
+        );
+        assert_eq!(r.config.jito_tip_account.as_deref(), Some(tip.as_str()));
+        assert_eq!(r.sources["jito_tip_account"], "cli");
+        let printed = r.text();
+        assert!(
+            !printed.contains("SECRET") && !printed.contains("KEY"),
+            "{printed}"
+        );
+        assert!(
+            printed.contains("jito-block-engine-url = configured (redacted) [source environment]")
+        );
+        assert!(printed.contains(&format!("jito-tip-account = {tip} [source cli]")));
+        let unset = Resolved::parse(&[], &|k: &str| {
+            (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string())
+        })
+        .unwrap();
+        assert!(unset.text().contains("bundle-sim-rpc-url = unset"));
+        for bad in [
+            ["--jito-block-engine-url", "ftp://jito.invalid"],
+            ["--bundle-sim-rpc-url", "not a url"],
+            ["--jito-tip-account", "not-a-key"],
+        ] {
+            assert!(parse(&bad).is_err(), "{bad:?}");
+        }
+        assert!(parse(&["--jito-tip-account", &tip]).is_ok());
     }
     /// DEC-04 (B-8): N has no default (undecided keeps B in OBSERVE), comes from environment,
     /// file or CLI, is at least 1 and is printed with its source.
