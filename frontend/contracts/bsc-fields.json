@@ -3938,7 +3938,7 @@
       "status": "IST_CONNECTED",
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
-      "reason": "Phase H replay of the newest finished run through Strategy C (bsc_runtime strategy-replay): journaled vs. reproduced outputs, first difference, config match, PASS/DIFFERS/INCOMPLETE/NOT_RUN, and the replay's PAPER result; not a proven outcome"
+      "reason": "Phase H replay of the newest finished run through Strategy C (bsc_runtime strategy-replay): journaled vs. reproduced outputs, first difference, config match, PASS/DIFFERS/INCOMPLETE/NOT_RUN, and the replay's PAPER result; v3 (Phase I, PHASENPLAN §17 J input): each entry's position against the foreign BUYs of its token (earliest block after the decision by header time, foreign BUYs ahead and in that block, gap to the first); not a proven outcome, nothing sent"
     }
   ]
 }

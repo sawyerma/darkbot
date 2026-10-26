@@ -665,6 +665,92 @@ pub struct Replay {
     pub counters: Counters,
     /// PAPER positions still open when the strategy's periods ended.
     pub open_at_end: u64,
+    /// Each entry's position against the foreign BUYs of its token.
+    pub positions: Vec<Position>,
+}
+
+/// Phase I (PHASENPLAN §17 J input): one entry, a strategy entry (SHADOW)
+/// or a BUY at the PAPER sink, against the foreign BUYs of its token. The
+/// decision's time is a wall-clock estimate (the run's start plus the
+/// deciding record's monotonic time), compared with the headers'
+/// millisecond block times: nothing is sent, no inclusion is shown, and a
+/// header's time is not the producer's cut-off.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Position {
+    pub paper: bool,
+    pub token: [u8; 20],
+    /// The block whose complete state the entry is priced on.
+    pub decided_block: u64,
+    pub decided_unix_us: Option<u64>,
+    /// The first block whose header time is after the decision: the
+    /// earliest a BUY decided then could be in.
+    pub eligible_block: Option<u64>,
+    /// The header time of the block after the decided one minus the
+    /// decision (negative: that block's time had passed).
+    pub lead_us: Option<i64>,
+    /// Foreign BUYs of the token after the decided block, before the
+    /// eligible one: ahead of any BUY of the entry.
+    pub buys_before: u64,
+    /// Foreign BUYs of the token in the eligible block (their order
+    /// against the entry's is not known).
+    pub buys_in_eligible: u64,
+    /// Blocks from the decided block to the first foreign BUY after it.
+    pub first_buy_gap_blocks: Option<u64>,
+}
+
+/// The positions of `entries` (paper, token, decided block, deciding
+/// record's time) in a run started at `started_ms`, against the journaled
+/// block times and the foreign BUYs (token, block): none of the run's own
+/// transactions is ever on chain.
+fn positions(
+    entries: &[(bool, [u8; 20], u64, u64)],
+    started_ms: Option<u64>,
+    blocks: &std::collections::BTreeMap<u64, u64>,
+    buys: &[([u8; 20], u64)],
+) -> Vec<Position> {
+    entries
+        .iter()
+        .map(|&(paper, token, decided_block, at_ns)| {
+            let decided_unix_us =
+                started_ms.and_then(|ms| ms.checked_mul(1_000)?.checked_add(at_ns / 1_000));
+            let eligible_block = decided_unix_us.and_then(|t| {
+                blocks
+                    .range(decided_block + 1..)
+                    .find(|(_, ms)| ms.saturating_mul(1_000) > t)
+                    .map(|(n, _)| *n)
+            });
+            let lead_us = decided_unix_us
+                .zip(blocks.get(&(decided_block + 1)))
+                .and_then(|(t, ms)| {
+                    let us = i128::from(*ms) * 1_000 - i128::from(t);
+                    i64::try_from(us).ok()
+                });
+            let foreign = buys
+                .iter()
+                .filter(|(t, b)| *t == token && *b > decided_block);
+            let (before, within) = match eligible_block {
+                Some(e) => foreign
+                    .clone()
+                    .fold((0, 0), |(a, w), (_, b)| match b.cmp(&e) {
+                        std::cmp::Ordering::Less => (a + 1, w),
+                        std::cmp::Ordering::Equal => (a, w + 1),
+                        std::cmp::Ordering::Greater => (a, w),
+                    }),
+                None => (0, 0),
+            };
+            Position {
+                paper,
+                token,
+                decided_block,
+                decided_unix_us,
+                eligible_block,
+                lead_us,
+                buys_before: before,
+                buys_in_eligible: within,
+                first_buy_gap_blocks: foreign.map(|(_, b)| b - decided_block).min(),
+            }
+        })
+        .collect()
 }
 
 /// Replays the run `run_id` under `journal_dir`; `config_sha256` is the
@@ -701,6 +787,10 @@ pub fn replay(
     let mut strategy: Option<StrategyRuntime> = None;
     let mut journaled: Vec<Vec<u8>> = Vec::new();
     let mut replayed: Vec<Vec<u8>> = Vec::new();
+    // Phase I positioning: block times, foreign BUYs, entries.
+    let mut blocks = std::collections::BTreeMap::new();
+    let mut buys = Vec::new();
+    let mut entries = Vec::new();
     loop {
         let r = match reader.next_record() {
             Ok(Some(r)) => r,
@@ -724,13 +814,42 @@ pub fn replay(
                 }
             }
             (RecordKind::Runtime, p) if p.first() == Some(&b'Y') => journaled.push(p.to_vec()),
+            (RecordKind::Runtime, p) if paper_intent_kind(p) == Some(IntentKind::Buy) => {
+                if let (Some(token), Some(block)) = (
+                    p.get(42..62).and_then(|t| <[u8; 20]>::try_from(t).ok()),
+                    u64_at(p, 62),
+                ) {
+                    entries.push((true, token, block, r.timestamp_ns));
+                }
+            }
             (kind, p) => {
+                match input_of_record(kind, p) {
+                    Some(Input::Block { number, time_ms }) => {
+                        blocks.insert(number, time_ms);
+                    }
+                    Some(Input::Trade { token, trade }) if !trade.sell => {
+                        buys.push((token, trade.block_number));
+                    }
+                    _ => {}
+                }
                 if let Some(s) = strategy.as_mut() {
-                    replayed.extend(s.record(kind, p, r.timestamp_ns, None));
+                    let outputs = s.record(kind, p, r.timestamp_ns, None);
+                    for o in &outputs {
+                        if o.get(1) == Some(&ENTERED)
+                            && let (Some(block), Some(token)) = (
+                                u64_at(o, 2),
+                                o.get(10..30).and_then(|t| <[u8; 20]>::try_from(t).ok()),
+                            )
+                        {
+                            entries.push((false, token, block, r.timestamp_ns));
+                        }
+                    }
+                    replayed.extend(outputs);
                 }
             }
         }
     }
+    out.positions = positions(&entries, run_id.parse().ok(), &blocks, &buys);
     if let Some(s) = strategy {
         add(&mut out.counters, &s.counters);
         out.open_at_end += s.engine.open_positions() as u64;
@@ -820,7 +939,7 @@ impl Replay {
         use darkbot_bsc_record::Value;
         use darkbot_bsc_record::schema::bsc_runtime::strategy_replay as sr;
         let c = &self.counters;
-        let mut d = darkbot_bsc_record::Draft::new(&sr::V2);
+        let mut d = darkbot_bsc_record::Draft::new(&sr::V3);
         d.set(sr::RUN_ID, self.run_id.as_str())
             .set(sr::CHAIN_ID, 56u64)
             .set(sr::PROVENANCE_TOOL, "bsc_runtime strategy-replay")
@@ -853,6 +972,32 @@ impl Replay {
             .set(sr::MIGRATIONS, c.migrations)
             .set(sr::INCOMPLETE, c.incomplete)
             .set(sr::OPEN_AT_END, self.open_at_end);
+        let (next, contested, unknown) = self.position_totals();
+        d.set(sr::POSITIONS_NEXT_BLOCK, next)
+            .set(sr::POSITIONS_CONTESTED, contested)
+            .set(sr::POSITIONS_UNKNOWN, unknown);
+        for p in &self.positions {
+            use sr::position as sp;
+            let mut e = darkbot_bsc_record::Draft::new(&sp::SCHEMA);
+            e.set(sp::SOURCE, if p.paper { "PAPER" } else { "SHADOW" })
+                .set(sp::TOKEN, Value::Address(p.token))
+                .set(sp::DECIDED_BLOCK, p.decided_block)
+                .set(sp::BUYS_BEFORE, p.buys_before)
+                .set(sp::BUYS_IN_ELIGIBLE, p.buys_in_eligible);
+            if let Some(v) = p.decided_unix_us {
+                e.set(sp::DECIDED_UNIX_US, v);
+            }
+            if let Some(v) = p.eligible_block {
+                e.set(sp::ELIGIBLE_BLOCK, v);
+            }
+            if let Some(v) = p.lead_us {
+                e.set(sp::LEAD_US, Value::I64(v));
+            }
+            if let Some(v) = p.first_buy_gap_blocks {
+                e.set(sp::FIRST_BUY_GAP_BLOCKS, v);
+            }
+            d.push(sr::POSITIONS, e.into_nested());
+        }
         if let Some(i) = self.first_difference {
             d.set(sr::FIRST_DIFFERENCE, i);
         }
@@ -865,10 +1010,24 @@ impl Replay {
         d.encode().map_err(|e| format!("strategy replay: {e}"))
     }
 
+    /// Entries eligible for the block after the decided one, entries with
+    /// a foreign BUY before or in their eligible block, entries without an
+    /// eligible block.
+    pub fn position_totals(&self) -> (u64, u64, u64) {
+        let p = &self.positions;
+        let count = |f: &dyn Fn(&Position) -> bool| p.iter().filter(|x| f(x)).count() as u64;
+        (
+            count(&|x| x.eligible_block == Some(x.decided_block + 1)),
+            count(&|x| x.eligible_block.is_some() && x.buys_before + x.buys_in_eligible > 0),
+            count(&|x| x.eligible_block.is_none()),
+        )
+    }
+
     pub fn summary(&self) -> String {
         let c = &self.counters;
+        let (next, contested, unknown) = self.position_totals();
         format!(
-            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; inputs: trades {}, terms {}, migrations {}, incomplete {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {}, open at the end {} (not valued))\n{}",
+            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; inputs: trades {}, terms {}, migrations {}, incomplete {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {}, open at the end {} (not valued); positions {} (eligible for the next block {}, a foreign BUY before or in the eligible block {}, no eligible block {}))\n{}",
             self.run_id,
             self.verdict(),
             self.records,
@@ -898,6 +1057,10 @@ impl Replay {
             c.loss_wei,
             c.unresolved,
             self.open_at_end,
+            self.positions.len(),
+            next,
+            contested,
+            unknown,
             self.reasons().join("\n"),
         )
     }
@@ -1354,6 +1517,21 @@ mod tests {
         // H gate L10: the position entered at 106 was still open at the
         // switch.
         assert_eq!(r.open_at_end, 1);
+        // Phase I: its position, decided at 7 ms after the run's start
+        // (run 7, record at 3 ns) on block 106, eligible for 107 (5.25 s).
+        assert_eq!(
+            r.positions,
+            [Position {
+                paper: false,
+                token: TOKEN,
+                decided_block: 106,
+                decided_unix_us: Some(7_000),
+                eligible_block: Some(107),
+                lead_us: Some(5_243_000),
+                ..Position::default()
+            }]
+        );
+        assert_eq!(r.position_totals(), (1, 0, 0));
         let rec = darkbot_bsc_record::schema::bsc_runtime::strategy_replay::decode_replay(
             &r.encode(1).unwrap(),
         )
@@ -1365,6 +1543,10 @@ mod tests {
         assert_eq!(
             rec.get(darkbot_bsc_record::schema::bsc_runtime::strategy_replay::VERDICT),
             Some(&darkbot_bsc_record::Value::Text("PASS".into()))
+        );
+        assert_eq!(
+            rec.get(darkbot_bsc_record::schema::bsc_runtime::strategy_replay::POSITIONS_NEXT_BLOCK),
+            Some(&darkbot_bsc_record::Value::U64(1))
         );
 
         let mut other = config();
@@ -1385,6 +1567,77 @@ mod tests {
         let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
         assert_eq!((r.verdict(), r.config_match), ("INCOMPLETE", None));
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Phase I (PHASENPLAN §17 J input): an entry's position against the
+    /// foreign BUYs of its token. Blocks every 450 ms from 1 s; a decision
+    /// on block 100 at 1.5 s is after the header time of 101 (1.45 s), so
+    /// its earliest block is 102; a foreign BUY in 101 is ahead of it, one
+    /// in 102 competes there; BUYs of another token, in the decided block
+    /// or SELLs (not passed in) do not count. A decision at 1.1 s is
+    /// eligible for 101. Without the run's start time nothing is placed.
+    #[test]
+    fn an_entry_is_placed_against_the_foreign_buys() {
+        let blocks: std::collections::BTreeMap<u64, u64> =
+            (100..=104).map(|n| (n, 1_000 + (n - 100) * 450)).collect();
+        let other = [0x77; 20];
+        let buys = [
+            (TOKEN, 100),
+            (TOKEN, 101),
+            (other, 101),
+            (TOKEN, 102),
+            (TOKEN, 104),
+        ];
+        let entries = [
+            (false, TOKEN, 100, 1_500_000_000),
+            (true, TOKEN, 100, 1_100_000_000),
+            (false, other, 103, 3_000_000_000),
+        ];
+        let p = positions(&entries, Some(0), &blocks, &buys);
+        assert_eq!(
+            p[0],
+            Position {
+                paper: false,
+                token: TOKEN,
+                decided_block: 100,
+                decided_unix_us: Some(1_500_000),
+                eligible_block: Some(102),
+                lead_us: Some(-50_000),
+                buys_before: 1,
+                buys_in_eligible: 1,
+                first_buy_gap_blocks: Some(1),
+            }
+        );
+        assert_eq!(
+            (
+                p[1].paper,
+                p[1].eligible_block,
+                p[1].lead_us,
+                p[1].buys_before,
+                p[1].buys_in_eligible
+            ),
+            (true, Some(101), Some(350_000), 0, 1)
+        );
+        // No journaled block after 3 s: no eligible block.
+        assert_eq!(
+            (p[2].eligible_block, p[2].first_buy_gap_blocks),
+            (None, None)
+        );
+        let r = Replay {
+            positions: p,
+            ..Replay::default()
+        };
+        assert_eq!(r.position_totals(), (1, 2, 1));
+        let unplaced = positions(&entries[..1], None, &blocks, &buys);
+        assert_eq!(
+            (
+                unplaced[0].decided_unix_us,
+                unplaced[0].eligible_block,
+                unplaced[0].lead_us
+            ),
+            (None, None, None)
+        );
+        assert_eq!(unplaced[0].first_buy_gap_blocks, Some(1));
     }
 
     /// H gate L7: a token outside the scope keeps which term put it there.

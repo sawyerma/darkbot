@@ -833,6 +833,60 @@ pub mod strategy_replay {
     /// v2 (H gate L10): PAPER positions still open when the strategy's
     /// periods ended (not valued). v2 decisions carry their features.
     pub const OPEN_AT_END: u16 = 35;
+    /// v3 (Phase I gate, PHASENPLAN §17 J input): each entry's position
+    /// against the foreign BUYs of its token, and the totals: entries
+    /// eligible for the block after the decided one, entries with a
+    /// foreign BUY before or in their eligible block, entries without a
+    /// journaled eligible block.
+    pub const POSITIONS: u16 = 36;
+    pub const POSITIONS_NEXT_BLOCK: u16 = 37;
+    pub const POSITIONS_CONTESTED: u16 = 38;
+    pub const POSITIONS_UNKNOWN: u16 = 39;
+
+    /// One entry's position. Times are wall-clock estimates (the run's
+    /// start plus the deciding record's monotonic time) against the
+    /// headers' millisecond block times: nothing is sent, no inclusion is
+    /// shown; the header time is not the producer's cut-off.
+    pub mod position {
+        use super::*;
+
+        /// `SHADOW` (a strategy entry) or `PAPER` (a BUY at the sink).
+        pub const SOURCE: u16 = 1;
+        pub const TOKEN: u16 = 2;
+        /// The block whose complete state the entry is priced on.
+        pub const DECIDED_BLOCK: u16 = 3;
+        pub const DECIDED_UNIX_US: u16 = 4;
+        /// The first block whose header time is after the decision.
+        pub const ELIGIBLE_BLOCK: u16 = 5;
+        /// The header time of the block after the decided one minus the
+        /// decision (negative: that block's time had passed).
+        pub const LEAD_US: u16 = 6;
+        /// Foreign BUYs of the token after the decided block, before the
+        /// eligible one (ahead of any BUY of the entry).
+        pub const BUYS_BEFORE: u16 = 7;
+        /// Foreign BUYs of the token in the eligible block (the order
+        /// against the entry's is not known).
+        pub const BUYS_IN_ELIGIBLE: u16 = 8;
+        /// Blocks from the decided block to the first foreign BUY after it.
+        pub const FIRST_BUY_GAP_BLOCKS: u16 = 9;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.strategy-position",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(SOURCE, "source", Text),
+                Field::req(TOKEN, "token", Address),
+                Field::req(DECIDED_BLOCK, "decided_block", U64),
+                Field::opt(DECIDED_UNIX_US, "decided_unix_us", U64),
+                Field::opt(ELIGIBLE_BLOCK, "eligible_block", U64),
+                Field::opt(LEAD_US, "lead_us", I64),
+                Field::req(BUYS_BEFORE, "buys_before", U64),
+                Field::req(BUYS_IN_ELIGIBLE, "buys_in_eligible", U64),
+                Field::opt(FIRST_BUY_GAP_BLOCKS, "first_buy_gap_blocks", U64),
+            ],
+        };
+    }
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.strategy-replay.v1",
@@ -927,9 +981,67 @@ pub mod strategy_replay {
         ],
     };
 
+    pub const V3: Schema = Schema {
+        name: "darkbot.bsc.strategy-replay.v1",
+        record_type: 62,
+        schema_version: 3,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(RECORDS, "records", U64),
+            Field::req(STARTS, "starts", U64),
+            Field::req(JOURNALED, "journaled", U64),
+            Field::req(REPLAYED, "replayed", U64),
+            Field::opt(FIRST_DIFFERENCE, "first_difference", U64),
+            Field::opt(CONFIG_MATCH, "config_match", Bool),
+            Field::req(LAUNCHES, "launches", U64),
+            Field::req(PASSED, "passed", U64),
+            Field::req(REJECTED, "rejected", U64),
+            Field::req(DATA_INCOMPLETE, "data_incomplete", U64),
+            Field::req(NOT_TRACKED, "not_tracked", U64),
+            Field::req(SLOT_LIMIT, "slot_limit", U64),
+            Field::req(CREATOR_SOLD, "creator_sold", U64),
+            Field::req(ENTERED, "entered", U64),
+            Field::req(CANCELLED, "cancelled", U64),
+            Field::req(EXITS_CREATOR_SELL, "exits_creator_sell", U64),
+            Field::req(EXITS_TARGET, "exits_target", U64),
+            Field::req(EXITS_STOP, "exits_stop", U64),
+            Field::req(EXITS_TIMEOUT, "exits_timeout", U64),
+            Field::req(GAINS, "gains", U64),
+            Field::req(LOSSES, "losses", U64),
+            Field::req(GAIN_WEI, "gain_wei", U256),
+            Field::req(LOSS_WEI, "loss_wei", U256),
+            Field::req(UNRESOLVED, "unresolved", U64),
+            Field::req(TRADES, "trades", U64),
+            Field::req(TERMS, "terms", U64),
+            Field::req(MIGRATIONS, "migrations", U64),
+            Field::req(INCOMPLETE, "incomplete", U64),
+            Field::req(OPEN_AT_END, "open_at_end", U64),
+            Field::nested(
+                POSITIONS,
+                "positions",
+                Presence::Repeated,
+                &position::SCHEMA,
+            ),
+            Field::req(POSITIONS_NEXT_BLOCK, "positions_next_block", U64),
+            Field::req(POSITIONS_CONTESTED, "positions_contested", U64),
+            Field::req(POSITIONS_UNKNOWN, "positions_unknown", U64),
+        ],
+    };
+
     /// A replay record of either version.
     pub fn decode_replay(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
-        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+        crate::decode(&V3, bytes)
+            .or_else(|_| crate::decode(&V2, bytes))
+            .or_else(|_| crate::decode(&SCHEMA, bytes))
     }
 }
 
@@ -940,4 +1052,5 @@ pub const ALL: &[&Schema] = &[
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,
+    &strategy_replay::V3,
 ];
