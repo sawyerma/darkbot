@@ -11,7 +11,9 @@
 //! strict verifications. Missing measurements are CAPACITY_UNVERIFIED or NOT_RUN, never PASS.
 //! A capture longer than `CALIBRATION_MAX_S` starts only when QUALIFIED; a short calibration
 //! capture may start UNVERIFIED (it produces the basis). The result is kept as a typed journal.
-use super::budget::{free_disk_bytes, physical_memory_bytes, MemorySample, MIB, PRESSURE_WARN};
+use super::budget::{
+    free_disk_bytes, physical_memory_bytes, MemorySample, MIB, PRESSURE_CRITICAL, PRESSURE_WARN,
+};
 use super::writer::WriterConfig;
 use crate::analytics::journal::{self, kind, source, Provenance};
 use crate::analytics::payload::{self, Payload};
@@ -829,6 +831,19 @@ fn verification_check(
 }
 
 /// The capacity decision from measured inputs (pure).
+/// Bytes a run of `req` needs on its volume at `avg_bytes_per_s`: all journal lanes for its
+/// duration (with safety) plus the disk reserve and the verifier's disk (DEC-16: the runway of
+/// an unbounded run, re-checked every window).
+pub fn disk_need_bytes(req: &Request, avg_bytes_per_s: f64) -> u64 {
+    let safety = 1.0 + req.safety_percent as f64 / 100.0;
+    let verify_disk = if req.verify.mode == VerifyMode::Off {
+        0
+    } else {
+        req.verify.disk_bytes
+    };
+    (avg_bytes_per_s * req.duration_s as f64 * safety) as u64 + req.disk_reserve_bytes + verify_disk
+}
+
 pub fn evaluate(
     req: Request,
     basis: RateBasis,
@@ -871,17 +886,7 @@ pub fn evaluate(
             ),
         );
     }
-    // Disk: all journal lanes for the duration (with safety) + disk reserve + verifier disk.
-    let verify_disk = if req.verify.mode == VerifyMode::Off {
-        0
-    } else {
-        req.verify.disk_bytes
-    };
-    let disk_need = measured.then(|| {
-        (basis.avg_bytes_per_s * req.duration_s as f64 * safety) as u64
-            + req.disk_reserve_bytes
-            + verify_disk
-    });
+    let disk_need = measured.then(|| disk_need_bytes(&req, basis.avg_bytes_per_s));
     match (disk_need, env.free_disk_bytes) {
         (_, None) => check("disk", Blocked, "free disk space unknown".into()),
         (None, Some(free)) => check(
@@ -1013,7 +1018,9 @@ pub fn evaluate(
         None => check("physical_memory", Blocked, "physical memory unknown".into()),
     }
     match env.memory_pressure {
-        Some(l) if l >= 4 => check("memory_pressure", Blocked, format!("level {l} (critical)")),
+        Some(l) if l >= PRESSURE_CRITICAL => {
+            check("memory_pressure", Blocked, format!("level {l} (critical)"))
+        }
         Some(l) if l >= PRESSURE_WARN => check(
             "memory_pressure",
             CapacityUnverified,

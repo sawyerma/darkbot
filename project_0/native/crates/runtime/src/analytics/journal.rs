@@ -119,6 +119,8 @@ pub mod kind {
     pub const RUN_MANIFEST: u16 = 503;
     /// DEC-16: the qualification of an unbounded run (`RunHorizon::UntilStopped`).
     pub const UNTIL_STOPPED_QUALIFICATION: u16 = 504;
+    /// DEC-16: the gates one window of an unbounded run re-checked, and its verdict.
+    pub const UNTIL_STOPPED_WINDOW: u16 = 505;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
@@ -215,6 +217,7 @@ pub mod kind {
         OPERATIONAL_CONFIG,
         RUN_MANIFEST,
         UNTIL_STOPPED_QUALIFICATION,
+        UNTIL_STOPPED_WINDOW,
         MT0_SNAPSHOT,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,

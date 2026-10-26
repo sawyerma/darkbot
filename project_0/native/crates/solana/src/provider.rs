@@ -66,6 +66,10 @@ struct State {
     cooldown: Instant,
     rate_limits: u32,
     requests: u64,
+    /// DEC-16: the counters at the start of the current window of an unbounded run; the byte
+    /// and call caps bound each window (`roll_window`). A fixed run never rolls (both 0).
+    window_bytes_base: u64,
+    window_requests_base: u64,
     retry_after_overflow: bool,
     /// A23-06: what set the current `cooldown`, the latest 429's header, the longest server wait.
     cooldown_cause: CooldownCause,
@@ -126,6 +130,20 @@ pub struct CooldownStatus {
     pub max_retry_after_secs: u64,
     pub http_429_count: u64,
 }
+/// DEC-16: the provider use of one window of an unbounded run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WindowUsage {
+    pub requests: u64,
+    pub bytes: u64,
+}
+
+fn window_bytes(s: &State) -> u64 {
+    s.bytes.saturating_sub(s.window_bytes_base)
+}
+fn window_requests(s: &State) -> u64 {
+    s.requests.saturating_sub(s.window_requests_base)
+}
+
 pub struct Budget {
     limits: crate::runtime_config::Limits,
     adaptive: bool,
@@ -239,6 +257,8 @@ impl Budget {
                 cooldown: now,
                 rate_limits: 0,
                 requests: 0,
+                window_bytes_base: 0,
+                window_requests_base: 0,
                 retry_after_overflow: false,
                 cooldown_cause: CooldownCause::None,
                 last_retry_after: RetryAfterHeader::Absent,
@@ -358,8 +378,8 @@ impl Budget {
             && s.next_workload[work.index()] <= now
             && s.cooldown <= now
             && (s.active as u64) < self.limits.rpc_concurrency
-            && s.bytes < self.limits.max_total_mib * 1024 * 1024
-            && s.requests < self.limits.max_requests;
+            && window_bytes(&s) < self.limits.max_total_mib * 1024 * 1024
+            && window_requests(&s) < self.limits.max_requests;
         free.then(|| self.grant(&mut s, work, now))
     }
     /// N2: the admission with a typed refusal — `deadline_bound` when the permit cannot be
@@ -419,12 +439,12 @@ impl Budget {
                     deadline_bound: !cancelled && !s.retry_after_overflow,
                 });
             }
-            if s.bytes >= self.limits.max_total_mib * 1024 * 1024 {
+            if window_bytes(&s) >= self.limits.max_total_mib * 1024 * 1024 {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
                 return Err(refused("RPC_BYTE_BUDGET"));
             }
-            if s.requests >= self.limits.max_requests {
+            if window_requests(&s) >= self.limits.max_requests {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
                 return Err(refused("RPC_CALL_BUDGET"));
@@ -573,13 +593,27 @@ impl Budget {
             http_429_count: u64::from(s.rate_limits),
         }
     }
+    /// DEC-16: ends the current window of an unbounded run and opens the next — returns the
+    /// window's provider use; the byte and call caps bound each window while the totals stay
+    /// cumulative. A sticky halt (config drift, poisoned state) stays.
+    pub fn roll_window(&self) -> WindowUsage {
+        let mut s = self.lock_state();
+        let usage = WindowUsage {
+            requests: window_requests(&s),
+            bytes: window_bytes(&s),
+        };
+        s.window_bytes_base = s.bytes;
+        s.window_requests_base = s.requests;
+        self.changed.notify_all();
+        usage
+    }
     pub fn account_bytes(&self, bytes: usize) -> Result<(), &'static str> {
         let mut s = self.lock_state();
         if let Some(code) = halted(&s) {
             return Err(code);
         }
         s.bytes = s.bytes.checked_add(bytes as u64).ok_or("RPC_BYTE_BUDGET")?;
-        if s.bytes > self.limits.max_total_mib * 1024 * 1024 {
+        if window_bytes(&s) > self.limits.max_total_mib * 1024 * 1024 {
             return Err("RPC_BYTE_BUDGET");
         }
         Ok(())
@@ -1129,6 +1163,47 @@ impl DeadlineRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// DEC-16: the byte and call caps bound each window of an unbounded run: an exhausted
+    /// window refuses, the next one admits again; the totals stay cumulative.
+    #[test]
+    fn dec16_the_caps_bound_each_window_and_the_totals_stay_cumulative() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_rps = 100;
+        c.limits.rpc_burst = 4;
+        c.limits.rpc_concurrency = 4;
+        c.limits.max_requests = 2;
+        let b = Arc::new(Budget::configured(&c));
+        let deadline = || Instant::now() + Duration::from_secs(1);
+        for _ in 0..2 {
+            drop(b.acquire(Workload::LiveRead, deadline()).unwrap());
+        }
+        assert!(matches!(
+            b.acquire(Workload::LiveRead, deadline()),
+            Err("RPC_CALL_BUDGET")
+        ));
+        b.account_bytes(10).unwrap();
+        assert_eq!(
+            b.roll_window(),
+            WindowUsage {
+                requests: 2,
+                bytes: 10
+            }
+        );
+        drop(b.acquire(Workload::LiveRead, deadline()).unwrap());
+        let cap = (c.limits.max_total_mib * 1024 * 1024) as usize;
+        b.account_bytes(cap).unwrap();
+        assert_eq!(b.account_bytes(1), Err("RPC_BYTE_BUDGET"));
+        assert_eq!(
+            b.roll_window(),
+            WindowUsage {
+                requests: 1,
+                bytes: cap as u64 + 1
+            }
+        );
+        b.account_bytes(1).unwrap();
+        let snap = b.snapshot();
+        assert_eq!((snap.requests, snap.bytes), (3, 10 + cap as u64 + 2));
+    }
     #[test]
     fn configured_capacity_and_exhaustion_release_all_tickets() {
         let mut c = crate::runtime_config::RuntimeConfig::default();

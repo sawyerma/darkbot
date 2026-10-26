@@ -81,8 +81,8 @@ pub struct Qualification {
     pub provider_budget: Part,
     pub provider_evidence: Part,
     pub evidence_id: Option<String>,
-    /// Until when the provider evidence stays fresh: its oldest measurement plus the
-    /// qualification age of the configuration.
+    /// The last second the provider evidence stays fresh: its oldest measurement plus the
+    /// qualification age of the configuration (`validate_provider_evidence`).
     pub evidence_valid_until_unix_s: Option<u64>,
     pub qualified_at_unix_s: u64,
 }
@@ -150,7 +150,7 @@ impl Qualification {
         if self.provider_evidence.state == PartState::Pass
             && self
                 .evidence_valid_until_unix_s
-                .is_none_or(|until| now >= until)
+                .is_none_or(|until| now > until)
         {
             gaps.push("provider evidence expired".into());
         }
@@ -518,6 +518,213 @@ pub fn get(project: &Path, id: &str) -> Result<Qualification, String> {
     journal::read_typed_value(&path).map_err(|_| "UNTIL_STOPPED_QUALIFICATION_FORMAT".into())
 }
 
+/// The verdict of a window whose gates all held.
+pub const CONTINUE: &str = "CONTINUE";
+
+/// The segment a window sealed, as its writer sealed it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SealedSegment {
+    pub file: String,
+    pub root_sha256: [u8; 32],
+}
+
+/// DEC-16: the gates one window of an unbounded run re-checked (STARTUP §3: the periodic
+/// re-preflight) and its verdict: `CONTINUE` or the HALT code of the first violated gate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowCheck {
+    pub window: u64,
+    pub started_unix_s: u64,
+    pub ended_unix_s: u64,
+    /// Bytes the run's journals grew by in the window (its measured data rate).
+    pub bytes_written: u64,
+    pub free_bytes: Option<u64>,
+    /// Bytes the minimum runway needs at that rate (the preflight's disk need).
+    pub runway_need_bytes: u64,
+    pub memory_pressure: Option<i32>,
+    pub provider: darkbot_solana::provider::WindowUsage,
+    pub evidence_id: Option<String>,
+    pub evidence_valid_until_unix_s: Option<u64>,
+    pub sealed: Option<SealedSegment>,
+    pub verdict: String,
+    pub detail: String,
+}
+impl Payload for WindowCheck {
+    const KIND: u16 = kind::UNTIL_STOPPED_WINDOW;
+}
+
+/// What a window measured, handed to [`check_window`].
+pub struct WindowInputs<'a> {
+    pub window: u64,
+    pub started_unix_s: u64,
+    pub ended_unix_s: u64,
+    pub bytes_written: u64,
+    pub run_volume: &'a Path,
+    pub environment: preflight::Environment,
+    pub provider: darkbot_solana::provider::WindowUsage,
+    /// The newest provider evidence valid at the window's end ([`newest_evidence`]).
+    pub evidence: Option<(String, provider_evidence::ProviderEvidence)>,
+    /// The segment this window's boundary sealed (path, sealed chain root).
+    pub sealed: Option<(&'a Path, [u8; 32])>,
+}
+
+/// DEC-16: the gates every window of an unbounded run re-checks, mode-neutral, in order: the
+/// integrity of the segment the window sealed (re-read from disk, its sealed root); the rolling
+/// runway on the run volume at the window's measured data rate; the host's memory pressure;
+/// the window's provider budget (an exhausted window lost reads); the provider evidence still
+/// valid at the window's end. The first violation is the run's safe HALT with its code.
+pub fn check_window(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    binding: &Binding,
+    capture_source: &str,
+    inputs: WindowInputs,
+) -> WindowCheck {
+    let span = inputs
+        .ended_unix_s
+        .saturating_sub(inputs.started_unix_s)
+        .max(1);
+    let request = preflight::Request::from_limits(
+        &config.limits,
+        binding.minimum_runway_seconds,
+        inputs.run_volume,
+        capture_source,
+    );
+    let runway_need_bytes =
+        preflight::disk_need_bytes(&request, inputs.bytes_written as f64 / span as f64);
+    let env = &inputs.environment;
+    let l = &config.limits;
+    let sealed = inputs.sealed.map(|(path, root)| SealedSegment {
+        file: path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        root_sha256: root,
+    });
+    let halt = (|| -> Result<String, (&'static str, String)> {
+        if let Some((path, root)) = inputs.sealed {
+            let intact = (|| -> std::io::Result<bool> {
+                let mut r = journal::Reader::open(path)?;
+                while r.next_frame()?.is_some() {}
+                Ok(r.sealed && r.root() == root)
+            })();
+            if !matches!(intact, Ok(true)) {
+                return Err((
+                    "UNTIL_STOPPED_SEGMENT_INTEGRITY",
+                    format!("{}: {intact:?}", path.display()),
+                ));
+            }
+        }
+        match env.free_disk_bytes {
+            None => return Err(("UNTIL_STOPPED_RUNWAY_UNKNOWN", "free disk unknown".into())),
+            Some(free) if free < runway_need_bytes => {
+                return Err((
+                    "UNTIL_STOPPED_RUNWAY_EXHAUSTED",
+                    format!(
+                        "{free} bytes free < {runway_need_bytes} for {} s",
+                        binding.minimum_runway_seconds
+                    ),
+                ))
+            }
+            Some(_) => {}
+        }
+        if let Some(level) = env
+            .memory_pressure
+            .filter(|l| *l >= crate::storage::budget::PRESSURE_CRITICAL)
+        {
+            return Err((
+                "UNTIL_STOPPED_MEMORY_CRITICAL",
+                format!("memory pressure level {level}"),
+            ));
+        }
+        if inputs.provider.requests >= l.max_requests
+            || inputs.provider.bytes >= l.max_total_mib * 1024 * 1024
+        {
+            return Err((
+                "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED",
+                format!(
+                    "{} calls / {} bytes in the window (caps {} / {} MiB)",
+                    inputs.provider.requests,
+                    inputs.provider.bytes,
+                    l.max_requests,
+                    l.max_total_mib
+                ),
+            ));
+        }
+        let Some((id, evidence)) = &inputs.evidence else {
+            return Err((
+                "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING",
+                "no valid provider evidence".into(),
+            ));
+        };
+        let (part, _, _) = provider(config, Some(evidence), inputs.ended_unix_s);
+        if part.state != PartState::Pass {
+            return Err((
+                "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED",
+                format!("{id}: {}", part.reason),
+            ));
+        }
+        Ok(format!(
+            "runway {runway_need_bytes} of {} bytes; evidence {id}",
+            env.free_disk_bytes.unwrap_or_default()
+        ))
+    })();
+    let (_, _, evidence_valid_until_unix_s) = provider(
+        config,
+        inputs.evidence.as_ref().map(|(_, e)| e),
+        inputs.ended_unix_s,
+    );
+    let (verdict, detail) = match halt {
+        Ok(detail) => (CONTINUE.to_string(), detail),
+        Err((code, detail)) => (code.to_string(), detail),
+    };
+    WindowCheck {
+        window: inputs.window,
+        started_unix_s: inputs.started_unix_s,
+        ended_unix_s: inputs.ended_unix_s,
+        bytes_written: inputs.bytes_written,
+        free_bytes: env.free_disk_bytes,
+        runway_need_bytes,
+        memory_pressure: env.memory_pressure,
+        provider: inputs.provider,
+        evidence_id: inputs.evidence.as_ref().map(|(id, _)| id.clone()),
+        evidence_valid_until_unix_s,
+        sealed,
+        verdict,
+        detail,
+    }
+}
+
+/// The newest provider evidence in the controller's store that is valid at `now` for this
+/// configuration (an operator imports fresh evidence while an unbounded run goes on).
+pub fn newest_evidence(
+    project: &Path,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    now: u64,
+) -> Option<(String, provider_evidence::ProviderEvidence)> {
+    let dir = std::fs::read_dir(project.join(provider_evidence::STORE)).ok()?;
+    let mut best: Option<(u64, String, provider_evidence::ProviderEvidence)> = None;
+    for entry in dir.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".p0j")) else {
+            continue;
+        };
+        let Ok(path) = provider_evidence::resolve(project, id) else {
+            continue;
+        };
+        let Ok(evidence) = journal::read_typed_value::<provider_evidence::ProviderEvidence>(&path)
+        else {
+            continue;
+        };
+        let (part, _, until) = provider(config, Some(&evidence), now);
+        if let (PartState::Pass, Some(until)) = (part.state, until) {
+            if best.as_ref().is_none_or(|(b, _, _)| until > *b) {
+                best = Some((until, id.to_string(), evidence));
+            }
+        }
+    }
+    best.map(|(_, id, e)| (id, e))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -632,7 +839,12 @@ pub(crate) mod tests {
             .admit(Some(&q), &current, 1_500)
             .unwrap_err()
             .contains("another horizon"));
-        assert!(gated(&q, &b, 2_000).contains("provider evidence expired"));
+        assert_eq!(
+            h.admit(Some(&q), &b, 2_000),
+            Ok(()),
+            "fresh through its last second"
+        );
+        assert!(gated(&q, &b, 2_001).contains("provider evidence expired"));
         let mut old = q.clone();
         old.schema = 0;
         assert!(gated(&old, &b, 1_500).contains("qualification schema 0"));
@@ -815,6 +1027,196 @@ pub(crate) mod tests {
             .join(STORE)
             .join(format!(".work.{}", std::process::id()))
             .exists());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    fn evidence_for(
+        c: &darkbot_solana::runtime_config::RuntimeConfig,
+        measured: f64,
+    ) -> ProviderEvidence {
+        let binding =
+            journal::hex(&solana_sdk::hash::hash(c.rpc_endpoints[0].as_bytes()).to_bytes());
+        ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: binding,
+                measured_at_unix_s: measured,
+                evidence_sha256: Some("a".repeat(64)),
+                allowed_rps: c.limits.rpc_rps as f64,
+                available_calls: c.limits.max_requests,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: true,
+            archive_qualified: false,
+            source_sha256: "s".into(),
+        }
+    }
+
+    /// DEC-16: every window re-checks its gates, mode-neutral: the sealed segment's integrity,
+    /// the runway at the window's data rate, memory pressure, the window's provider budget and
+    /// the provider evidence. All held: CONTINUE; the first violation: its HALT code.
+    #[test]
+    fn dec16_a_window_continues_only_while_every_gate_holds() {
+        use crate::market::observer::rows::MarketCoverage;
+        let d = temp("window");
+        let c = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec!["https://rpc.invalid".into()],
+            ..Default::default()
+        };
+        let b = binding(3_600, 86_400);
+        // A real window boundary: one sealed segment and its root.
+        let first = d.join("market.p0j");
+        let mut w = segments::SegmentedWriter::create(&first, 0).unwrap();
+        w.append_typed(
+            Provenance::default(),
+            &MarketCoverage::SlotFailed {
+                slot: 1,
+                error: String::new(),
+            },
+        )
+        .unwrap();
+        let sealed = w.rotate_now().unwrap();
+        let sealed_path = segments::segment_path(&first, sealed.index);
+        let env = preflight::Environment {
+            free_disk_bytes: Some(u64::MAX / 4),
+            memory_pressure: Some(1),
+            ..Default::default()
+        };
+        let inputs = |env: preflight::Environment,
+                      provider: darkbot_solana::provider::WindowUsage,
+                      evidence: Option<ProviderEvidence>,
+                      root: [u8; 32]| WindowInputs {
+            window: 3,
+            started_unix_s: 1_000,
+            ended_unix_s: 4_600,
+            bytes_written: 3_600 * 1_000,
+            run_volume: &d,
+            environment: env,
+            provider,
+            evidence: evidence.map(|e| ("0123456789abcdef".to_string(), e)),
+            sealed: Some((&sealed_path, root)),
+        };
+        let used = darkbot_solana::provider::WindowUsage {
+            requests: 5,
+            bytes: 50,
+        };
+        let ok = evidence_for(&c, 4_000.0);
+        let check = |i| check_window(&c, &b, "logs", i);
+        let w0 = check(inputs(
+            env.clone(),
+            used,
+            Some(ok.clone()),
+            sealed.root_sha256,
+        ));
+        assert_eq!(w0.verdict, CONTINUE, "{}", w0.detail);
+        assert_eq!(
+            w0.runway_need_bytes,
+            preflight::disk_need_bytes(
+                &preflight::Request::from_limits(&c.limits, 86_400, &d, "logs"),
+                1_000.0
+            )
+        );
+        assert_eq!(
+            w0.evidence_valid_until_unix_s,
+            Some(4_000 + c.limits.fe_qualification_age_seconds)
+        );
+        let halt = |i| check(i).verdict;
+        assert_eq!(
+            halt(inputs(env.clone(), used, Some(ok.clone()), [7; 32])),
+            "UNTIL_STOPPED_SEGMENT_INTEGRITY"
+        );
+        let low = preflight::Environment {
+            free_disk_bytes: Some(w0.runway_need_bytes - 1),
+            ..env.clone()
+        };
+        assert_eq!(
+            halt(inputs(low, used, Some(ok.clone()), sealed.root_sha256)),
+            "UNTIL_STOPPED_RUNWAY_EXHAUSTED"
+        );
+        let unknown = preflight::Environment {
+            free_disk_bytes: None,
+            ..env.clone()
+        };
+        assert_eq!(
+            halt(inputs(unknown, used, Some(ok.clone()), sealed.root_sha256)),
+            "UNTIL_STOPPED_RUNWAY_UNKNOWN"
+        );
+        let pressed = preflight::Environment {
+            memory_pressure: Some(crate::storage::budget::PRESSURE_CRITICAL),
+            ..env.clone()
+        };
+        assert_eq!(
+            halt(inputs(pressed, used, Some(ok.clone()), sealed.root_sha256)),
+            "UNTIL_STOPPED_MEMORY_CRITICAL"
+        );
+        let spent = darkbot_solana::provider::WindowUsage {
+            requests: c.limits.max_requests,
+            bytes: 0,
+        };
+        assert_eq!(
+            halt(inputs(
+                env.clone(),
+                spent,
+                Some(ok.clone()),
+                sealed.root_sha256
+            )),
+            "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED"
+        );
+        assert_eq!(
+            halt(inputs(env.clone(), used, None, sealed.root_sha256)),
+            "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING"
+        );
+        let stale = evidence_for(
+            &c,
+            4_600.0 - c.limits.fe_qualification_age_seconds as f64 - 1.0,
+        );
+        assert_eq!(
+            halt(inputs(env.clone(), used, Some(stale), sealed.root_sha256)),
+            "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED"
+        );
+        // A changed sealed segment on disk.
+        let mut bytes = std::fs::read(&sealed_path).unwrap();
+        let at = bytes.len() / 2;
+        bytes[at] ^= 0xff;
+        std::fs::write(&sealed_path, bytes).unwrap();
+        assert_eq!(
+            halt(inputs(env.clone(), used, Some(ok), sealed.root_sha256)),
+            "UNTIL_STOPPED_SEGMENT_INTEGRITY"
+        );
+        drop(w);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a running window takes the newest provider evidence the operator imported that
+    /// is valid at its end; an expired or unreadable record is never taken.
+    #[test]
+    fn dec16_a_window_takes_the_newest_valid_provider_evidence() {
+        let d = temp("newest");
+        let c = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec!["https://rpc.invalid".into()],
+            ..Default::default()
+        };
+        assert!(newest_evidence(&d, &c, 5_000).is_none());
+        let import = |measured: f64| {
+            let file = d.join(format!("e{measured}.p0j"));
+            journal::write_typed_value(&file, 0, &evidence_for(&c, measured)).unwrap();
+            provider_evidence::import(&d, &file).unwrap()
+        };
+        let older = import(1_000.0);
+        let newer = import(3_000.0);
+        let (id, _) = newest_evidence(&d, &c, 5_000).unwrap();
+        assert_eq!(id, newer);
+        let expired = 1_001 + c.limits.fe_qualification_age_seconds;
+        assert_eq!(newest_evidence(&d, &c, expired).unwrap().0, newer);
+        assert!(newest_evidence(&d, &c, 3_001 + c.limits.fe_qualification_age_seconds).is_none());
+        std::fs::write(
+            d.join(provider_evidence::STORE)
+                .join(format!("{newer}.p0j")),
+            b"x",
+        )
+        .unwrap();
+        assert_eq!(newest_evidence(&d, &c, 5_000).unwrap().0, older);
         std::fs::remove_dir_all(d).unwrap();
     }
 }

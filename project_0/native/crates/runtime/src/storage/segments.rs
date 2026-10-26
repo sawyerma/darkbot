@@ -269,8 +269,9 @@ impl SegmentedWriter {
     pub fn sync(&mut self) -> io::Result<journal::Durable> {
         self.writer.sync()
     }
-    /// DEC-16: rotates now (a rolling window's boundary; between batches only).
-    pub fn rotate_now(&mut self) -> io::Result<()> {
+    /// DEC-16: rotates now (a rolling window's boundary; between batches only); returns the
+    /// sealed segment as its successor binds it.
+    pub fn rotate_now(&mut self) -> io::Result<SegmentRef> {
         self.rotate()
     }
     /// Rotates when the current segment reached the size limit (between batches only).
@@ -281,7 +282,7 @@ impl SegmentedWriter {
         self.rotate()?;
         Ok(true)
     }
-    fn rotate(&mut self) -> io::Result<()> {
+    fn rotate(&mut self) -> io::Result<SegmentRef> {
         let next_index = self.index + 1;
         let next_path = segment_path(&self.first, next_index);
         let control = Provenance {
@@ -310,7 +311,7 @@ impl SegmentedWriter {
             &SegmentLink {
                 set_id: self.set_id,
                 index: next_index,
-                previous,
+                previous: previous.clone(),
             },
         )?;
         next.sync()?;
@@ -319,7 +320,7 @@ impl SegmentedWriter {
         self.events_current = 0;
         self.writer = next;
         self.index = next_index;
-        Ok(())
+        Ok(previous)
     }
     pub fn seal(&mut self, complete: bool) -> io::Result<SealedSet> {
         let durable = self.writer.seal(complete)?;

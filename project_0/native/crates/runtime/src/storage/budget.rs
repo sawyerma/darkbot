@@ -227,6 +227,8 @@ pub fn physical_memory_bytes() -> Option<u64> {
 
 /// macOS `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warning, 4 critical.
 pub const PRESSURE_WARN: i32 = 2;
+/// The OS memory-pressure level from which the host is critical (preflight BLOCKED, DEC-16 HALT).
+pub const PRESSURE_CRITICAL: i32 = 4;
 
 /// Process memory and OS memory state at one instant; `None` where the OS does not report it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
