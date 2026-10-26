@@ -1705,10 +1705,25 @@ pub fn admission_record(
         .ok_or_else(missing)?;
     let record: NetworkAudit =
         journal::read_typed_value(Path::new(&path)).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
-    let source = crate::market_observer::source_name(get("P0_MARKET_SOURCE").as_deref())
+    let source = runtime_capture_source(get)
         .map_err(|e| format!("BOOT_IDENTITY_DRIFT: capture_source ({e})"))?;
     record.validate_admission(approved_at, &token, &current()?, &binary()?, source)?;
     Ok(record)
+}
+
+/// The capture source a Shadow run is audited with: its owner subscribes to accounts and
+/// captures no market stream of its own choice (`p0ctl boot` and `run start` refuse another).
+pub const SHADOW_CAPTURE_SOURCE: &str = "logs";
+
+/// The capture source of the started runtime: a Shadow run's is fixed; econ4h and the raw
+/// capture resolve `P0_MARKET_SOURCE` exactly as their market capture does.
+pub fn runtime_capture_source(
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<&'static str, String> {
+    if get("P0_MODE").as_deref() == Some("shadow") {
+        return Ok(SHADOW_CAPTURE_SOURCE);
+    }
+    crate::market_observer::source_name(get("P0_MARKET_SOURCE").as_deref())
 }
 
 /// Bind both the control executable and the actual runtime it admits.

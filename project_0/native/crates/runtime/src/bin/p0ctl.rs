@@ -1167,7 +1167,9 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     capture_source()?
                 };
                 // A Shadow run captures logs (`run start` passes no source for it).
-                if s.flow.mode == RunMode::Shadow.name() && source != "logs" {
+                if s.flow.mode == RunMode::Shadow.name()
+                    && source != boot_audit::SHADOW_CAPTURE_SOURCE
+                {
                     return Err("BOOT_CAPTURE_SOURCE_SHADOW: a Shadow run captures logs".into());
                 }
                 // The approval first: nothing is imported for an unapproved step.

@@ -198,6 +198,17 @@ fn x1_admission_record_from_the_launcher_environment() {
         run(&env).unwrap_err(),
         "BOOT_IDENTITY_DRIFT: capture_source"
     );
+    // A Shadow run's source is fixed (its launcher exports none): the logs record admits it,
+    // whatever P0_MARKET_SOURCE says.
+    for source in [None, Some("transactions")] {
+        let mut env = full.clone();
+        env.insert("P0_MODE", "shadow".into());
+        env.remove("P0_MARKET_SOURCE");
+        if let Some(s) = source {
+            env.insert("P0_MARKET_SOURCE", s.into());
+        }
+        assert_eq!(run(&env), Ok(n.clone()), "{source:?}");
+    }
     let failing = || Err::<AuditedIdentity, _>("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".into());
     assert_eq!(
         admission_record(&|k| full.get(k).cloned(), &failing, &binary).unwrap_err(),

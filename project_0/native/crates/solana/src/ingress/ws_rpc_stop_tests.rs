@@ -204,7 +204,7 @@ fn requested_stop_is_ok_without_fatal_in_every_session_phase() {
 
 /// R1 rest: a requested stop stays bounded, `Ok` and without `Fatal` when the peer stops reading
 /// (the source's Pong replies to a Ping flood are blocked, its reader keeps reading: V2-14 P3-04;
-/// P0-015: proven by an order — the slot sent after the flood reaches the source in the same
+/// P0-009: proven by an order — the slot sent after the flood reaches the source in the same
 /// session — never by a send latency)
 /// and while a TLS handshake stalls (the peer reads the ClientHello of the
 /// production rustls connector and never answers). Loopback only, never Mainnet. An established
@@ -221,7 +221,7 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
     // send buffer of at most 4 MiB and the peer's 4 KiB receive buffer hold), its reader is not:
     // it takes every Ping and then the slot behind them. A reader blocked on its own Pong (the
     // pre-P3-04 code) ends the session at its Pong timeout and never reaches the slot.
-    // P0-015 (was P0-007): no send-latency threshold decides — a loaded runner's TCP timing is
+    // P0-009 (was P0-007): no send-latency threshold decides — a loaded runner's TCP timing is
     // no verdict.
     const FLOOD_PINGS: usize = 48 * 1024;
     let (flooded, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
