@@ -641,3 +641,145 @@ fn flap_and_four_share_inputs_without_crosstalk() {
         );
     }
 }
+
+/// Phase E §9: recognizer and full decode latency on this machine, per call,
+/// alone and with Flap enabled (run with `cargo test --release -p
+/// darkbot-bsc-trading four_decoder_latency -- --ignored --nocapture`).
+/// Each sample is the mean of a batch of `BATCH` calls, so a stage below
+/// the timer resolution is still measured. The recognizer stage is
+/// destination, selector and table lookup without a decode (a known,
+/// unsupported SELL); the launches include the pending token derivation.
+/// A local decoder metric, not a BUY claim.
+#[test]
+#[ignore = "latency measurement; run in release"]
+fn four_decoder_latency() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    const SAMPLES: usize = 2_000;
+    const BATCH: u64 = 1_000;
+    let deployment = d();
+    let portal = flap::deployment::bsc_mainnet_v5_27_0().portal;
+    let classic = fixture("CLASSIC", "LAUNCH");
+    let open = fixture("OPENFOUR", "LAUNCH");
+    let classic_buy = fixture("CLASSIC", "BUY");
+    let open_buy = fixture("OPENFOUR", "BUY");
+    let mut sell = FourCall::ClassicSellToken.selector().to_vec();
+    sell.extend_from_slice(&[0; 64]);
+    let all = logs();
+    let created = all
+        .iter()
+        .find(|l| l.topics.first() == Some(&FourEventKind::TokenCreated.topic0()))
+        .unwrap();
+    let create = all
+        .iter()
+        .find(|l| l.topics.first() == Some(&FourEventKind::TokenCreate.topic0()))
+        .unwrap();
+    let report = |name: &str, mut samples: Vec<u64>| {
+        samples.sort_unstable();
+        let q = |p: f64| samples[((samples.len() as f64 - 1.0) * p) as usize];
+        println!(
+            "{name}: {} batches of {BATCH}, per call p50={} p95={} p99={} p99.9={} p99.99={} max={} ns",
+            samples.len(),
+            q(0.5),
+            q(0.95),
+            q(0.99),
+            q(0.999),
+            q(0.9999),
+            samples[samples.len() - 1]
+        );
+        // §9: a reproducible >1 ms decoder path is a defect.
+        assert!(q(0.99) < 1_000_000, "{name} p99 above 1 ms");
+    };
+    let measure = |f: &dyn Fn()| -> Vec<u64> {
+        (0..SAMPLES)
+            .map(|_| {
+                let t = Instant::now();
+                for _ in 0..BATCH {
+                    f();
+                }
+                t.elapsed().as_nanos() as u64 / BATCH
+            })
+            .collect()
+    };
+    let launch = |c: &Call| {
+        let r = recognize(&deployment, Some(c.to), black_box(&c.input), MAX);
+        black_box(pending_token(&deployment, &r));
+    };
+    report(
+        "recognizer (no decode)",
+        measure(&|| {
+            black_box(recognize(
+                &deployment,
+                Some(deployment.token_manager2),
+                black_box(&sell),
+                MAX,
+            ));
+        }),
+    );
+    report(
+        "Classic createToken recognize+decode+token",
+        measure(&|| launch(&classic)),
+    );
+    report(
+        "OpenFour createToken recognize+decode+token",
+        measure(&|| launch(&open)),
+    );
+    report(
+        "Classic buyTokenAMAP recognize+decode",
+        measure(&|| {
+            black_box(recognize(
+                &deployment,
+                Some(classic_buy.to),
+                black_box(&classic_buy.input),
+                MAX,
+            ));
+        }),
+    );
+    report(
+        "OpenFour buyByBudget recognize+decode",
+        measure(&|| {
+            black_box(recognize(
+                &deployment,
+                Some(open_buy.to),
+                black_box(&open_buy.input),
+                MAX,
+            ));
+        }),
+    );
+    report(
+        "TokenCreate decode",
+        measure(&|| {
+            black_box(decode_four_log(
+                &deployment,
+                create.emitter,
+                &create.topics,
+                black_box(&create.data),
+            ));
+        }),
+    );
+    report(
+        "TokenCreated decode",
+        measure(&|| {
+            black_box(decode_four_log(
+                &deployment,
+                created.emitter,
+                &created.topics,
+                black_box(&created.data),
+            ));
+        }),
+    );
+    // The shared pending input: both decoders on every call (the Flap one
+    // refuses a Four launch at the destination, and vice versa).
+    report(
+        "Flap+Four on an OpenFour launch",
+        measure(&|| {
+            black_box(flap::recognize::recognize(
+                portal,
+                Some(open.to),
+                black_box(&open.input),
+                MAX,
+            ));
+            launch(&open);
+        }),
+    );
+}
