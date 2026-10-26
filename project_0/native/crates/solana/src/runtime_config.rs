@@ -34,6 +34,10 @@ pub mod defaults {
     /// The quote rounds one rebalancing observation may take at most (each round asks the quotes
     /// the plan still lacks).
     pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;
+    /// A slippage bound in basis points is a fraction of the whole (10 000 bps).
+    pub const BPS_MAX: u64 = 10_000;
+    /// The most accounts a Jupiter route may use (the route provider refuses more).
+    pub const JUPITER_ACCOUNTS_MAX: u64 = 64;
 }
 
 macro_rules! parameters {
@@ -169,6 +173,35 @@ parameters! {
     rebalance_observe_ms = 60000, "ms", "P0_REBALANCE_OBSERVE_MS";
     rebalance_budget_usd_micro = 5000000, "USD-micro", "P0_REBALANCE_BUDGET_USD_MICRO";
     rebalance_quote_rounds = 3, "rounds", "P0_REBALANCE_QUOTE_ROUNDS";
+    // DEC-05: the state owner's parameters, each a default at its call site before (revision 11).
+    max_total_capital = 0, "USD-micro", "P0_MAX_TOTAL_CAPITAL";
+    max_outstanding_inventory = 0, "USD-micro", "P0_MAX_INVENTORY";
+    max_concurrent_positions = 1, "positions", "P0_MAX_CONCURRENT";
+    max_exposure_per_attempt = 0, "USD-micro", "P0_MAX_EXPOSURE";
+    max_daily_loss = 0, "USD-micro", "P0_MAX_DAILY_LOSS";
+    max_failed_attempts_per_day = 0, "attempts", "P0_MAX_FAILED";
+    max_tip = 0, "lamports", "P0_MAX_TIP";
+    max_slippage_bps = 0, "bps", "P0_MAX_SLIPPAGE_BPS";
+    max_outstanding_attempts = 1, "attempts", "P0_MAX_OUTSTANDING";
+    min_profit_usd_micro = 0, "USD-micro", "P0_MIN_PROFIT";
+    jupiter_max_accounts = 64, "accounts", "P0_JUPITER_MAX_ACCOUNTS";
+    compute_unit_limit = 1400000, "compute units", "P0_CU_LIMIT";
+    priority_micro_lamports_per_cu = 0, "micro-lamports/CU", "P0_PRIORITY_MICRO";
+    loaded_accounts_data_size = 67108864, "bytes", "P0_LOADED_DATA";
+    max_opportunity_age_ns = 2000000000, "ns", "P0_MAX_AGE_NS";
+    execution_deadline_ns = 2000000000, "ns", "P0_DEADLINE_NS";
+    integration_probe_limit_per_kind = 8, "probes", "P0_INTEGRATION_PROBE_LIMIT_PER_KIND";
+    threshold_bootstrap_batch = 16, "accounts", "P0_THRESHOLD_BOOTSTRAP_BATCH";
+    candidate_recheck_slots = 1, "slots", "P0_CANDIDATE_RECHECK_SLOTS";
+    candidate_error_recheck_slots = 1, "slots", "P0_CANDIDATE_ERROR_RECHECK_SLOTS";
+    candidate_repeat_soft_cap = 1024, "candidates", "P0_CANDIDATE_REPEAT_SOFT_CAP";
+    rpc_candidates_per_drain = 4, "candidates", "P0_RPC_CANDIDATES_PER_DRAIN";
+    candidate_network_deadline_ms = 5000, "ms", "P0_CANDIDATE_NETWORK_DEADLINE_MS";
+    mt0_interval_seconds = 10, "s", "P0_MT0_INTERVAL_SECS";
+    blockhash_refresh_ms = 10000, "ms", "P0_BLOCKHASH_REFRESH_MS";
+    recovery_root_catchup_seconds = defaults::RECOVERY_ROOT_CATCHUP_SECS, "s", "P0_RECOVERY_ROOT_CATCHUP_SECS";
+    recovery_root_stall_seconds = defaults::RECOVERY_ROOT_STALL_SECS, "s", "P0_RECOVERY_ROOT_STALL_SECS";
+    recovery_root_hard_max_seconds = defaults::RECOVERY_ROOT_HARD_MAX_SECS, "s", "P0_RECOVERY_ROOT_HARD_MAX_SECS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -180,8 +213,14 @@ parameters! {
 /// Jupiter, lane, winner-watch, deployment, reporter and market bounds that were literals or
 /// duplicate defaults (from `owner_status_ms` on, appended); 9: `analytics_status_ms`,
 /// `analytics_runs_listed`, `analytics_jobs_listed` (B03/U-9 analytics job projection); 10:
-/// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01).
-pub const LIMITS_REVISION: u16 = 10;
+/// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01); 11: the
+/// state owner's parameters `max_total_capital` … `recovery_root_hard_max_seconds` and the typed
+/// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]).
+pub const LIMITS_REVISION: u16 = 11;
+
+/// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
+/// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
+pub const OWNER_SETTINGS_REVISION: u16 = 11;
 
 /// The oldest `Limits` layout an earlier record can be read in: revision 4 is checked against the
 /// git history (the current field order filtered to its fields); earlier ones are not.
@@ -198,6 +237,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("max_total_capital") => 11,
         f if position(f) >= position("rebalance_observe_ms") => 10,
         f if position(f) >= position("analytics_status_ms") => 9,
         f if position(f) >= position("owner_status_ms") => 8,
@@ -259,6 +299,28 @@ impl Parameter {
     pub fn name(&self) -> String {
         self.field.replace('_', "-")
     }
+    /// The smallest valid value. A Safety ceiling of 0 admits nothing (fail-closed); a slippage,
+    /// tip, priority fee or profit floor of 0 is a setting of its own; the probe limit is only
+    /// required with `diagnostics` (`validate`). The recovery waits keep their former bounds.
+    pub fn minimum(&self) -> u64 {
+        match self.field {
+            "max_total_capital"
+            | "max_outstanding_inventory"
+            | "max_concurrent_positions"
+            | "max_exposure_per_attempt"
+            | "max_daily_loss"
+            | "max_failed_attempts_per_day"
+            | "max_tip"
+            | "max_slippage_bps"
+            | "max_outstanding_attempts"
+            | "min_profit_usd_micro"
+            | "priority_micro_lamports_per_cu"
+            | "integration_probe_limit_per_kind" => 0,
+            "recovery_root_catchup_seconds" | "recovery_root_hard_max_seconds" => 30,
+            "recovery_root_stall_seconds" => 5,
+            _ => 1,
+        }
+    }
     pub fn maximum(&self) -> u64 {
         match self.field {
             "fe_batch_size" => 100,
@@ -267,8 +329,43 @@ impl Parameter {
             "analytics_runs_listed" => defaults::ANALYTICS_RUNS_MAX,
             "analytics_jobs_listed" => defaults::ANALYTICS_JOBS_MAX,
             "rebalance_quote_rounds" => defaults::REBALANCE_QUOTE_ROUNDS_MAX,
+            // DEC-05: the owner's types (u64 USD-micro/lamports/ns, the census's i64 profit
+            // floor, a bps fraction, the route provider's account bound).
+            "max_total_capital"
+            | "max_outstanding_inventory"
+            | "max_exposure_per_attempt"
+            | "max_daily_loss"
+            | "max_tip"
+            | "priority_micro_lamports_per_cu"
+            | "max_opportunity_age_ns"
+            | "execution_deadline_ns" => u64::MAX,
+            "min_profit_usd_micro" => i64::MAX as u64,
+            "max_slippage_bps" => defaults::BPS_MAX,
+            "jupiter_max_accounts" => defaults::JUPITER_ACCOUNTS_MAX,
+            "recovery_root_catchup_seconds" => 300,
+            "recovery_root_stall_seconds" => 180,
+            "recovery_root_hard_max_seconds" => 900,
             _ => u64::from(u32::MAX),
         }
+    }
+    /// DEC-05/ENTSCHEIDUNGEN §3: the open measurement question that keeps this value
+    /// provisional (B-2 worker count, B-3 sweep batch, B-4 lane weights, B-5 pool idle and
+    /// keepalive); `None` for a value no measurement question covers.
+    pub fn provisional(&self) -> Option<&'static str> {
+        match self.field {
+            "workers" => Some("B-2"),
+            "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => {
+                Some("B-3")
+            }
+            "lane_weight_l0" | "lane_weight_l1" | "lane_weight_l2" => Some("B-4"),
+            "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => Some("B-5"),
+            _ => None,
+        }
+    }
+    /// When a change takes effect: every numeric parameter is read once at the start (DEC-05:
+    /// restart is the rule; a hot change needs a decision of its own).
+    pub fn change_rule(&self) -> &'static str {
+        "restart"
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,6 +410,16 @@ pub struct RuntimeConfig {
     pub fe_mode: String,
     pub fe_targets: Vec<String>,
     pub fe_group: String,
+    /// DEC-05: the owner's typed settings. `P0_USE_THRESHOLD_TRIGGER`: the threshold trigger
+    /// instead of the R127 sweep (DEC-06 turns it into the threshold mode).
+    pub threshold_trigger: bool,
+    /// `P0_C0_CENSUS`: the C0 census on the startup sweep.
+    pub c0_census: bool,
+    /// `P0_SOURCE_GEYSER`: the start mode of the Geyser source unit (S1-02: off|observe; ACTIVE
+    /// needs a qualification the source control refuses without).
+    pub source_geyser: String,
+    /// `P0_SOURCE_GEYSER_PROVIDER`: its provider.
+    pub source_geyser_provider: String,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -332,6 +439,10 @@ impl Default for RuntimeConfig {
                 "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk".into(),
             ],
             fe_group: "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8".into(),
+            threshold_trigger: false,
+            c0_census: false,
+            source_geyser: "off".into(),
+            source_geyser_provider: crate::ingress::sources::PUBLICNODE_ID.into(),
         }
     }
 }
@@ -363,6 +474,14 @@ fn parse_lines(text: &str) -> Result<Vec<(String, String)>, String> {
         out.push((key, value.trim().to_string()));
     }
     Ok(out)
+}
+/// The one on/off parser of CLI, config file and environment (`true`/`false` as before).
+fn on_off(v: &str) -> Result<bool, String> {
+    match v {
+        "true" | "on" => Ok(true),
+        "false" | "off" => Ok(false),
+        _ => Err("expected on/off".to_string()),
+    }
 }
 fn number(key: &str, value: &str) -> Result<u64, String> {
     value
@@ -472,6 +591,23 @@ impl RuntimeConfig {
         }
         c
     }
+    /// A typed on/off setting by field name (only the names `resolve` passes).
+    fn flag(&mut self, field: &str) -> &mut bool {
+        match field {
+            "diagnostics" => &mut self.diagnostics,
+            "threshold_trigger" => &mut self.threshold_trigger,
+            "c0_census" => &mut self.c0_census,
+            _ => unreachable!("no on/off setting {field}"),
+        }
+    }
+    /// A typed text setting by field name (only the names `resolve` passes).
+    fn text(&mut self, field: &str) -> &mut String {
+        match field {
+            "source_geyser" => &mut self.source_geyser,
+            "source_geyser_provider" => &mut self.source_geyser_provider,
+            _ => unreachable!("no text setting {field}"),
+        }
+    }
     /// Explicit operational endpoint wins over legacy verifier aliases, so
     /// provider qualification and the strict worker bind the same endpoint.
     pub fn rpc_url(&self, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
@@ -486,14 +622,30 @@ impl RuntimeConfig {
             if self
                 .limits
                 .get(p.field)
-                .is_none_or(|n| n == 0 || n > p.maximum())
+                .is_none_or(|n| n < p.minimum() || n > p.maximum())
             {
                 return Err(format!(
-                    "invalid --{}: expected 1..={}",
+                    "invalid --{}: expected {}..={}",
                     p.name(),
+                    p.minimum(),
                     p.maximum()
                 ));
             }
+        }
+        // DEC-05: the owner's cross-field rules (formerly checked at its call sites).
+        if self.limits.recovery_root_hard_max_seconds < self.limits.recovery_root_catchup_seconds {
+            return Err(
+                "recovery-root-hard-max-seconds must be >= recovery-root-catchup-seconds".into(),
+            );
+        }
+        if self.diagnostics && self.limits.integration_probe_limit_per_kind == 0 {
+            return Err("integration-probe-limit-per-kind must be > 0 with diagnostics on".into());
+        }
+        self.source_geyser
+            .parse::<crate::ingress::sources::OperatingMode>()
+            .map_err(|_| "invalid source-geyser: expected off|observe|active")?;
+        if self.source_geyser_provider.trim().is_empty() {
+            return Err("source-geyser-provider is empty".into());
         }
         if self.limits.rpc_backoff_ms > self.limits.rpc_backoff_max_ms
             || self.limits.wss_reconnect_ms > self.limits.wss_reconnect_max_ms
@@ -567,8 +719,9 @@ impl RuntimeConfig {
         let seconds = duration_seconds(&self.duration)
             .expect("validated duration")
             .to_string();
-        env.insert("P0_ECON_DURATION_SECS".into(), seconds.clone());
-        env.insert("P0_MARKET_DURATION_SECS".into(), seconds);
+        // DEC-05: the market observer's horizon is its own (`P0_MARKET_DURATION_SECS`, also
+        // `until-stopped`); an econ4h run binds its market to the measurement plan.
+        env.insert("P0_ECON_DURATION_SECS".into(), seconds);
         env.insert("P0_INTEGRATION_PROBE".into(), self.diagnostics.to_string());
         env
     }
@@ -612,6 +765,20 @@ fn profile(s: &str) -> Result<Profile, String> {
     Profile::parse(s).ok_or_else(|| "profile must be smoke|standard|performance|custom".into())
 }
 
+/// DEC-05: the profile each operating mode resolves unless `P0_PROFILE`, a config file's
+/// `profile` or `--profile` selects one — the values the mode ran with before. Shadow keeps one
+/// worker (B-2: provisional, measurement open); econ4h ran on Rayon's default pool of one worker
+/// per available CPU (`performance`); the market observer uses no worker pool.
+pub fn mode_profile(mode: &str) -> Result<Profile, String> {
+    match mode {
+        "shadow" | "market" => Ok(Profile::Standard),
+        "econ4h" => Ok(Profile::Performance),
+        other => Err(format!(
+            "OPERATING_MODE_UNKNOWN: {other} (shadow|econ4h|market)"
+        )),
+    }
+}
+
 /// An operational config file (`--config` / `P0_OPERATIONAL_CONFIG_FILE`): the external file
 /// format decoded straight into typed optional overrides. Unknown keys fail closed.
 #[derive(Debug, Default, Deserialize)]
@@ -629,6 +796,10 @@ struct ConfigFile {
     fe_mode: Option<String>,
     fe_targets: Option<Vec<String>>,
     fe_group: Option<String>,
+    threshold_trigger: Option<bool>,
+    c0_census: Option<bool>,
+    source_geyser: Option<String>,
+    source_geyser_provider: Option<String>,
 }
 impl ConfigFile {
     /// A config file: only the native text format (`key = value`). A JSON config is refused
@@ -642,11 +813,6 @@ impl ConfigFile {
     }
     fn decode_text(text: &str) -> Result<Self, String> {
         let mut f = Self::default();
-        let on_off = |v: &str| match v {
-            "true" | "on" => Ok(true),
-            "false" | "off" => Ok(false),
-            _ => Err("expected on/off".to_string()),
-        };
         let list = |v: &str| {
             v.split(',')
                 .map(str::trim)
@@ -661,9 +827,13 @@ impl ConfigFile {
                 "verification" => f.verification = Some(value),
                 "fe_mode" => f.fe_mode = Some(value),
                 "fe_group" => f.fe_group = Some(value),
+                "source_geyser" => f.source_geyser = Some(value),
+                "source_geyser_provider" => f.source_geyser_provider = Some(value),
                 "fallback" => f.fallback = Some(on_off(&value)?),
                 "adaptive" => f.adaptive = Some(on_off(&value)?),
                 "diagnostics" => f.diagnostics = Some(on_off(&value)?),
+                "threshold_trigger" => f.threshold_trigger = Some(on_off(&value)?),
+                "c0_census" => f.c0_census = Some(on_off(&value)?),
                 "rpc_endpoints" => f.rpc_endpoints = Some(list(&value)),
                 "wss_endpoints" => f.wss_endpoints = Some(list(&value)),
                 "fe_targets" => f.fe_targets = Some(list(&value)),
@@ -679,11 +849,38 @@ impl ConfigFile {
     }
 }
 impl Resolved {
-    /// Precedence: profile < environment < config file < CLI. Unknown keys fail.
+    /// The configuration of a tool outside the operating modes (profile `standard` unless one is
+    /// selected). Precedence: profile < environment < config file < CLI. Unknown keys fail.
     pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
+        Self::resolve(None, args, env)
+    }
+    /// DEC-05: the configuration of operating mode `mode` (shadow|econ4h|market): its profile
+    /// ([`mode_profile`]) unless `P0_PROFILE`, a config file or `--profile` selects one; the
+    /// profile's source names the mode (`mode:econ4h`). Same precedence as [`Self::parse`].
+    pub fn for_mode(
+        mode: &str,
+        args: &[String],
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        Self::resolve(Some(mode), args, env)
+    }
+    fn resolve(
+        mode: Option<&str>,
+        args: &[String],
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self, String> {
+        // A blank variable is unset, as for every `config::require`/`parsed_or` reader.
+        let env = |k: &str| env(k).filter(|v| !v.trim().is_empty());
         let mut cli = BTreeMap::new();
         let mut file = env("P0_OPERATIONAL_CONFIG_FILE");
-        let mut profile_name = env("P0_PROFILE").unwrap_or_else(|| "standard".into());
+        let (mut profile_name, profile_source) = match (env("P0_PROFILE"), mode) {
+            (Some(name), _) => (name, "environment".to_string()),
+            (None, Some(mode)) => (
+                mode_profile(mode)?.name().to_string(),
+                format!("mode:{mode}"),
+            ),
+            (None, None) => ("standard".to_string(), "profile:standard".to_string()),
+        };
         let mut help = false;
         let mut print = false;
         let mut it = args.iter();
@@ -760,9 +957,14 @@ impl Resolved {
             "fe_mode",
             "fe_targets",
             "fe_group",
+            "threshold_trigger",
+            "c0_census",
+            "source_geyser",
+            "source_geyser_provider",
         ] {
             sources.insert(name.to_string(), format!("profile:{profile_name}"));
         }
+        sources.insert("profile".into(), profile_source);
         if env("P0_FE_MODE").is_some() {
             sources.insert("fe_mode".into(), "environment".into());
         }
@@ -791,6 +993,27 @@ impl Resolved {
         if let Some(url) = env("P0_WS_URL") {
             c.wss_endpoints = vec![url];
             sources.insert("wss_endpoints".into(), "environment".into());
+        }
+        // DEC-05: the owner's typed settings and the integration probe (`diagnostics`).
+        for (field, key) in [
+            ("diagnostics", "P0_INTEGRATION_PROBE"),
+            ("threshold_trigger", "P0_USE_THRESHOLD_TRIGGER"),
+            ("c0_census", "P0_C0_CENSUS"),
+        ] {
+            if let Some(raw) = env(key) {
+                let on = on_off(&raw).map_err(|_| format!("invalid {key}: expected on/off"))?;
+                *c.flag(field) = on;
+                sources.insert(field.into(), "environment".into());
+            }
+        }
+        for (field, key) in [
+            ("source_geyser", "P0_SOURCE_GEYSER"),
+            ("source_geyser_provider", "P0_SOURCE_GEYSER_PROVIDER"),
+        ] {
+            if let Some(value) = env(key) {
+                *c.text(field) = value;
+                sources.insert(field.into(), "environment".into());
+            }
         }
         if let Some(duration) = env("P0_MEASUREMENT_DURATION")
             .or_else(|| env("P0_ECON_DURATION_SECS").map(|v| format!("{v}s")))
@@ -837,7 +1060,11 @@ impl Resolved {
             diagnostics,
             fe_mode,
             fe_targets,
-            fe_group
+            fe_group,
+            threshold_trigger,
+            c0_census,
+            source_geyser,
+            source_geyser_provider
         );
         // CLI over everything.
         for (k, val) in cli {
@@ -847,11 +1074,6 @@ impl Resolved {
                     .map_err(|_| format!("invalid --{}", k.replace('_', "-")))?;
                 c.limits.set(&k, n);
             } else {
-                let on_off = |v: &str| match v {
-                    "true" | "on" => Ok(true),
-                    "false" | "off" => Ok(false),
-                    _ => Err("expected on/off".to_string()),
-                };
                 let list = |v: &str| v.split(',').map(String::from).collect::<Vec<_>>();
                 match k.as_str() {
                     "profile" => {
@@ -867,6 +1089,8 @@ impl Resolved {
                     "fallback" => c.fallback = on_off(&val)?,
                     "adaptive" => c.adaptive = on_off(&val)?,
                     "diagnostics" => c.diagnostics = on_off(&val)?,
+                    "threshold_trigger" | "c0_census" => *c.flag(&k) = on_off(&val)?,
+                    "source_geyser" | "source_geyser_provider" => *c.text(&k) = val.clone(),
                     _ => return Err(format!("unknown --{}", k.replace('_', "-"))),
                 }
             }
@@ -917,16 +1141,21 @@ impl Resolved {
             free_only: true,
             live_authorized: false,
             submission_authorized: false,
+            threshold_trigger: c.threshold_trigger,
+            c0_census: c.c0_census,
+            source_geyser: c.source_geyser.clone(),
+            source_geyser_provider: c.source_geyser_provider.clone(),
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off --verification off|index|strict|crosscheck --print-effective-config\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
-                "--{} <u64> [{}; default={}; 1..={}]\n",
+                "--{} <u64> [{}; default={}; {}..={}]\n",
                 p.name(),
                 p.unit,
                 p.default,
+                p.minimum(),
                 p.maximum()
             );
         }
@@ -967,6 +1196,10 @@ impl Resolved {
             ("fe_mode", e.fe_mode.clone()),
             ("fe_targets", e.fe_targets.join(",")),
             ("fe_group", e.fe_group.clone()),
+            ("threshold_trigger", e.threshold_trigger.to_string()),
+            ("c0_census", e.c0_census.to_string()),
+            ("source_geyser", e.source_geyser.clone()),
+            ("source_geyser_provider", e.source_geyser_provider.clone()),
         ] {
             s += &format!(
                 "{} = {value} [source {}]\n",
@@ -975,15 +1208,21 @@ impl Resolved {
             );
         }
         for p in PARAMETERS {
+            let provisional = p
+                .provisional()
+                .map(|q| format!("; provisional, measurement open ({q})"))
+                .unwrap_or_default();
             s += &format!(
-                "--{} = {} {} [default {}; 1..={}; env {}; source {}; restart required]\n",
+                "--{} = {} {} [default {}; {}..={}; env {}; source {}; {} required{provisional}]\n",
                 p.name(),
                 e.limits.get(p.field).unwrap_or(0),
                 p.unit,
                 p.default,
+                p.minimum(),
                 p.maximum(),
                 p.env,
-                src(p.field)
+                src(p.field),
+                p.change_rule()
             );
         }
         s += "free_only=true provider_capacity_qualified=false live_authorized=false submission_authorized=false\n";
@@ -1020,6 +1259,11 @@ pub struct EffectiveConfig {
     pub free_only: bool,
     pub live_authorized: bool,
     pub submission_authorized: bool,
+    /// DEC-05 (from [`OWNER_SETTINGS_REVISION`]): the owner's typed settings.
+    pub threshold_trigger: bool,
+    pub c0_census: bool,
+    pub source_geyser: String,
+    pub source_geyser_provider: String,
 }
 pub fn configured() -> bool {
     ACTIVE.get().is_some()
@@ -1256,9 +1500,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                10,
-                112,
-                "395MzJBYnQ4BwCfga5w2nksqssF3ZAqkxp2C7vFELq8i".to_string()
+                11,
+                140,
+                "8g2vgkxH6T8CGg5viZRoP3SvbC3c9eLLGcXxwfF3G4RD".to_string()
             )
         );
     }
@@ -1396,5 +1640,290 @@ mod tests {
             );
             assert!(Resolved::help().contains(&p.name()));
         }
+    }
+
+    fn mode(mode: &str, args: &[&str], env: &[(&str, &str)]) -> Result<Resolved, String> {
+        Resolved::for_mode(
+            mode,
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &|k| {
+                env.iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            },
+        )
+    }
+
+    /// DEC-05: every operating mode resolves exactly one profile, econ4h without arguments
+    /// included; `P0_PROFILE`, a config file or `--profile` select another one.
+    #[test]
+    fn dec05_every_operating_mode_resolves_its_profile() {
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
+        for (m, profile, workers) in [
+            ("shadow", Profile::Standard, 1),
+            ("econ4h", Profile::Performance, cpus),
+            ("market", Profile::Standard, 1),
+        ] {
+            let r = mode(m, &[], &[]).unwrap();
+            assert_eq!(r.config.profile, profile, "{m}");
+            assert_eq!(r.config.limits.workers, workers, "{m}");
+            assert_eq!(r.sources["profile"], format!("mode:{m}"));
+            assert_eq!(r.sources["workers"], format!("profile:{}", profile.name()));
+        }
+        let r = mode("econ4h", &[], &[("P0_PROFILE", "standard")]).unwrap();
+        assert_eq!(
+            (r.config.profile, r.config.limits.workers),
+            (Profile::Standard, 1)
+        );
+        assert_eq!(r.sources["profile"], "environment");
+        let r = mode("shadow", &["--profile", "performance"], &[]).unwrap();
+        assert_eq!(r.config.limits.workers, cpus);
+        assert_eq!(r.sources["profile"], "cli");
+        assert!(mode("live", &[], &[])
+            .unwrap_err()
+            .starts_with("OPERATING_MODE_UNKNOWN"));
+        // A tool outside the modes keeps profile standard.
+        assert_eq!(parse(&[]).unwrap().config.profile, Profile::Standard);
+    }
+
+    /// DEC-05 parity: the migration changes no effective value. The owner parameters keep the
+    /// defaults of their former call sites (`config::parsed_or` in `state_owner/setup.rs` and the
+    /// literal blockhash refresh at b3cce8ee); every other field keeps its revision-10 default;
+    /// econ4h keeps Rayon's default pool (one worker per CPU, formerly unconfigured), Shadow
+    /// one worker; the typed owner settings keep their former defaults.
+    #[test]
+    fn dec05_migration_keeps_every_effective_value() {
+        let former = [
+            ("max_total_capital", 0),
+            ("max_outstanding_inventory", 0),
+            ("max_concurrent_positions", 1),
+            ("max_exposure_per_attempt", 0),
+            ("max_daily_loss", 0),
+            ("max_failed_attempts_per_day", 0),
+            ("max_tip", 0),
+            ("max_slippage_bps", 0),
+            ("max_outstanding_attempts", 1),
+            ("min_profit_usd_micro", 0),
+            ("jupiter_max_accounts", 64),
+            ("compute_unit_limit", 1_400_000),
+            ("priority_micro_lamports_per_cu", 0),
+            ("loaded_accounts_data_size", 64 * 1024 * 1024),
+            ("max_opportunity_age_ns", 2_000_000_000),
+            ("execution_deadline_ns", 2_000_000_000),
+            ("integration_probe_limit_per_kind", 8),
+            ("threshold_bootstrap_batch", 16),
+            ("candidate_recheck_slots", 1),
+            ("candidate_error_recheck_slots", 1),
+            ("candidate_repeat_soft_cap", 1024),
+            ("rpc_candidates_per_drain", 4),
+            ("candidate_network_deadline_ms", 5_000),
+            ("mt0_interval_seconds", 10),
+            ("blockhash_refresh_ms", 10_000),
+            ("recovery_root_catchup_seconds", 120),
+            ("recovery_root_stall_seconds", 60),
+            ("recovery_root_hard_max_seconds", 300),
+        ];
+        let added: Vec<_> = PARAMETERS
+            .iter()
+            .filter(|p| introduced(p.field) == 11)
+            .map(|p| p.field)
+            .collect();
+        assert_eq!(added, former.map(|(f, _)| f));
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
+        let unset = Limits::default();
+        for (m, workers) in [("shadow", 1), ("econ4h", cpus)] {
+            let r = mode(m, &[], &[("P0_MEASUREMENT_DURATION", "10m")]).unwrap();
+            for (field, value) in former {
+                assert_eq!(r.config.limits.get(field), Some(value), "{m} {field}");
+            }
+            // Revision 10 (before DEC-05): every field equals what that mode ran with.
+            for field in fields_at(10).unwrap() {
+                let before = if field == "workers" {
+                    workers
+                } else {
+                    unset.get(field).unwrap()
+                };
+                assert_eq!(r.config.limits.get(field), Some(before), "{m} {field}");
+            }
+            let d = RuntimeConfig::default();
+            assert_eq!(
+                (
+                    r.config.threshold_trigger,
+                    r.config.c0_census,
+                    r.config.diagnostics
+                ),
+                (false, false, false)
+            );
+            assert_eq!(r.config.source_geyser, "off");
+            assert_eq!(r.config.source_geyser_provider, d.source_geyser_provider);
+            assert_eq!(r.config.duration, "10m");
+        }
+    }
+
+    /// DEC-05: the owner parameters are validated in the registry (formerly at their call sites
+    /// or not at all); a blank variable is unset, as for `parsed_or`.
+    #[test]
+    fn dec05_owner_parameters_are_range_checked() {
+        let ok = |env: &[(&str, &str)]| mode("shadow", &[], env);
+        let r = ok(&[("P0_MAX_SLIPPAGE_BPS", "50"), ("P0_MAX_TOTAL_CAPITAL", "0")]).unwrap();
+        assert_eq!(r.config.limits.max_slippage_bps, 50);
+        assert_eq!(r.sources["max_slippage_bps"], "environment");
+        assert_eq!(
+            ok(&[("P0_MAX_SLIPPAGE_BPS", "  ")])
+                .unwrap()
+                .config
+                .limits
+                .max_slippage_bps,
+            0
+        );
+        for (key, bad) in [
+            ("P0_MAX_SLIPPAGE_BPS", "10001"),
+            ("P0_MIN_PROFIT", "-1"),
+            ("P0_MIN_PROFIT", "9223372036854775808"),
+            ("P0_JUPITER_MAX_ACCOUNTS", "65"),
+            ("P0_JUPITER_MAX_ACCOUNTS", "0"),
+            ("P0_CANDIDATE_RECHECK_SLOTS", "0"),
+            ("P0_MT0_INTERVAL_SECS", "0"),
+            ("P0_CU_LIMIT", "4294967296"),
+            ("P0_RECOVERY_ROOT_CATCHUP_SECS", "29"),
+            ("P0_RECOVERY_ROOT_CATCHUP_SECS", "301"),
+            ("P0_RECOVERY_ROOT_STALL_SECS", "4"),
+            ("P0_RECOVERY_ROOT_HARD_MAX_SECS", "901"),
+            ("P0_USE_THRESHOLD_TRIGGER", "yes"),
+            ("P0_SOURCE_GEYSER", "on"),
+        ] {
+            assert!(ok(&[(key, bad)]).is_err(), "{key}={bad}");
+        }
+        // The hard recovery deadline is at least the catch-up wait.
+        assert!(ok(&[("P0_RECOVERY_ROOT_HARD_MAX_SECS", "60")]).is_err());
+        assert!(ok(&[
+            ("P0_RECOVERY_ROOT_HARD_MAX_SECS", "60"),
+            ("P0_RECOVERY_ROOT_CATCHUP_SECS", "30")
+        ])
+        .is_ok());
+        // The probe limit matters only with the probe on.
+        let off = [("P0_INTEGRATION_PROBE_LIMIT_PER_KIND", "0")];
+        assert!(ok(&off).is_ok());
+        assert!(ok(&[off[0], ("P0_INTEGRATION_PROBE", "true")]).is_err());
+        let p = |f: &str| *PARAMETERS.iter().find(|p| p.field == f).unwrap();
+        assert_eq!(
+            (
+                p("max_slippage_bps").minimum(),
+                p("max_slippage_bps").maximum()
+            ),
+            (0, 10_000)
+        );
+        assert_eq!(p("rpc_rps").minimum(), 1);
+    }
+
+    /// DEC-05 precedence for the owner parameters and settings: profile < environment < config
+    /// file < CLI, each value with its source.
+    #[test]
+    fn dec05_owner_values_follow_the_precedence() {
+        let d = std::env::temp_dir().join(format!("p0_dec05_{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let file = d.join("owner.conf");
+        std::fs::write(
+            &file,
+            "max-slippage-bps = 20\nthreshold-trigger = off\nsource-geyser = observe\n",
+        )
+        .unwrap();
+        let file = file.to_str().unwrap();
+        let env = [
+            ("P0_MAX_SLIPPAGE_BPS", "10"),
+            ("P0_USE_THRESHOLD_TRIGGER", "true"),
+            ("P0_C0_CENSUS", "true"),
+        ];
+        let r = mode("shadow", &[], &env).unwrap();
+        assert_eq!(
+            (r.config.limits.max_slippage_bps, r.config.threshold_trigger),
+            (10, true)
+        );
+        assert_eq!(r.sources["threshold_trigger"], "environment");
+        let r = mode("shadow", &["--config", file], &env).unwrap();
+        assert_eq!(
+            (r.config.limits.max_slippage_bps, r.config.threshold_trigger),
+            (20, false)
+        );
+        assert_eq!(
+            (r.config.c0_census, r.config.source_geyser.as_str()),
+            (true, "observe")
+        );
+        assert_eq!(r.sources["max_slippage_bps"], "config_file");
+        assert_eq!(r.sources["c0_census"], "environment");
+        let r = mode(
+            "shadow",
+            &[
+                "--config",
+                file,
+                "--max-slippage-bps",
+                "30",
+                "--threshold-trigger",
+                "on",
+            ],
+            &env,
+        )
+        .unwrap();
+        assert_eq!(
+            (r.config.limits.max_slippage_bps, r.config.threshold_trigger),
+            (30, true)
+        );
+        assert_eq!(r.sources["threshold_trigger"], "cli");
+        let e = r.effective();
+        assert!(e.threshold_trigger && e.c0_census && e.source_geyser == "observe");
+        assert!(r.text().contains("threshold-trigger = true [source cli]"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-05: `P0_INTEGRATION_PROBE` is the environment source of `diagnostics` (formerly an
+    /// activated config overwrote it with `diagnostics=false`).
+    #[test]
+    fn dec05_integration_probe_environment_is_the_diagnostics_source() {
+        let r = mode("econ4h", &[], &[("P0_INTEGRATION_PROBE", "true")]).unwrap();
+        assert!(r.config.diagnostics);
+        assert_eq!(r.sources["diagnostics"], "environment");
+        assert_eq!(r.config.environment()["P0_INTEGRATION_PROBE"], "true");
+        let r = mode(
+            "econ4h",
+            &["--diagnostics", "off"],
+            &[("P0_INTEGRATION_PROBE", "true")],
+        );
+        assert!(!r.unwrap().config.diagnostics);
+    }
+
+    /// DEC-05: an activated config never overwrites the market observer's own horizon
+    /// (`P0_MARKET_DURATION_SECS`, also `until-stopped`).
+    #[test]
+    fn dec05_activation_keeps_the_market_horizon() {
+        let r = mode(
+            "market",
+            &[],
+            &[("P0_MARKET_DURATION_SECS", "until-stopped")],
+        )
+        .unwrap();
+        let env = r.config.environment();
+        assert!(!env.contains_key("P0_MARKET_DURATION_SECS"));
+        assert_eq!(env["P0_ECON_DURATION_SECS"], "14400");
+    }
+
+    /// DEC-05/§3: provisional values carry their measurement question; every parameter states
+    /// its range and change rule.
+    #[test]
+    fn dec05_provisional_values_are_marked() {
+        let q = |f: &str| {
+            PARAMETERS
+                .iter()
+                .find(|p| p.field == f)
+                .unwrap()
+                .provisional()
+        };
+        assert_eq!(q("workers"), Some("B-2"));
+        assert_eq!(q("sweep_batch_max_events"), Some("B-3"));
+        assert_eq!(q("lane_weight_l1"), Some("B-4"));
+        assert_eq!(q("rpc_pool_idle_ms"), Some("B-5"));
+        assert_eq!(q("max_slippage_bps"), None);
+        let text = mode("shadow", &[], &[]).unwrap().text();
+        assert!(text.contains("--workers = 1 threads [default 1; 1..=4294967295; env RAYON_NUM_THREADS; source profile:standard; restart required; provisional, measurement open (B-2)]"));
+        assert!(text.contains("--max-slippage-bps = 0 bps [default 0; 0..=10000;"));
     }
 }

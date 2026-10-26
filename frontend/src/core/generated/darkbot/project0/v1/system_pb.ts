@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/project0/v1/system.proto.
  */
 export const file_darkbot_project0_v1_system: GenFile = /*@__PURE__*/
-  fileDesc("CiBkYXJrYm90L3Byb2plY3QwL3YxL3N5c3RlbS5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSJLCgxTeXN0ZW1TdGF0dXMSOwoLb3BlcmF0aW9uYWwYASABKAsyJi5kYXJrYm90LnByb2plY3QwLnYxLk9wZXJhdGlvbmFsQ29uZmlnInYKFE9wZXJhdGlvbmFsUGFyYW1ldGVyEg0KBWZpZWxkGAEgASgJEgwKBHVuaXQYAiABKAkSDQoFdmFsdWUYAyABKAQSFQoNZGVmYXVsdF92YWx1ZRgEIAEoBBILCgNlbnYYBSABKAkSDgoGc291cmNlGAYgASgJIuYDCg9FZmZlY3RpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEg8KB3Byb2ZpbGUYAiABKAkSGgoScnBjX2VuZHBvaW50X2NvdW50GAMgASgEEhoKEndzc19lbmRwb2ludF9jb3VudBgEIAEoBBIQCghmYWxsYmFjaxgFIAEoCBIQCghhZGFwdGl2ZRgGIAEoCBIQCghkdXJhdGlvbhgHIAEoCRIUCgx2ZXJpZmljYXRpb24YCCABKAkSEwoLZGlhZ25vc3RpY3MYCSABKAgSDwoHZmVfbW9kZRgKIAEoCRISCgpmZV90YXJnZXRzGAsgAygJEhAKCGZlX2dyb3VwGAwgASgJEkIKB3NvdXJjZXMYDSADKAsyMS5kYXJrYm90LnByb2plY3QwLnYxLkVmZmVjdGl2ZVJlY29yZC5Tb3VyY2VzRW50cnkSIwobcHJvdmlkZXJfY2FwYWNpdHlfcXVhbGlmaWVkGA4gASgIEhEKCWZyZWVfb25seRgPIAEoCBIXCg9saXZlX2F1dGhvcml6ZWQYECABKAgSHQoVc3VibWlzc2lvbl9hdXRob3JpemVkGBEgASgIGi4KDFNvdXJjZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIosBChFPcGVyYXRpb25hbENvbmZpZxI9CgpwYXJhbWV0ZXJzGAEgAygLMikuZGFya2JvdC5wcm9qZWN0MC52MS5PcGVyYXRpb25hbFBhcmFtZXRlchI3CgllZmZlY3RpdmUYAiABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLkVmZmVjdGl2ZVJlY29yZEKUAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCC1N5c3RlbVByb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw");
+  fileDesc("CiBkYXJrYm90L3Byb2plY3QwL3YxL3N5c3RlbS5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSJLCgxTeXN0ZW1TdGF0dXMSOwoLb3BlcmF0aW9uYWwYASABKAsyJi5kYXJrYm90LnByb2plY3QwLnYxLk9wZXJhdGlvbmFsQ29uZmlnIsIBChRPcGVyYXRpb25hbFBhcmFtZXRlchINCgVmaWVsZBgBIAEoCRIMCgR1bml0GAIgASgJEg0KBXZhbHVlGAMgASgEEhUKDWRlZmF1bHRfdmFsdWUYBCABKAQSCwoDZW52GAUgASgJEg4KBnNvdXJjZRgGIAEoCRIPCgdtaW5pbXVtGAcgASgEEg8KB21heGltdW0YCCABKAQSEwoLcHJvdmlzaW9uYWwYCSABKAkSEwoLY2hhbmdlX3J1bGUYCiABKAkiywQKD0VmZmVjdGl2ZVJlY29yZBIOCgZzY2hlbWEYASABKAkSDwoHcHJvZmlsZRgCIAEoCRIaChJycGNfZW5kcG9pbnRfY291bnQYAyABKAQSGgoSd3NzX2VuZHBvaW50X2NvdW50GAQgASgEEhAKCGZhbGxiYWNrGAUgASgIEhAKCGFkYXB0aXZlGAYgASgIEhAKCGR1cmF0aW9uGAcgASgJEhQKDHZlcmlmaWNhdGlvbhgIIAEoCRITCgtkaWFnbm9zdGljcxgJIAEoCBIPCgdmZV9tb2RlGAogASgJEhIKCmZlX3RhcmdldHMYCyADKAkSEAoIZmVfZ3JvdXAYDCABKAkSQgoHc291cmNlcxgNIAMoCzIxLmRhcmtib3QucHJvamVjdDAudjEuRWZmZWN0aXZlUmVjb3JkLlNvdXJjZXNFbnRyeRIjChtwcm92aWRlcl9jYXBhY2l0eV9xdWFsaWZpZWQYDiABKAgSEQoJZnJlZV9vbmx5GA8gASgIEhcKD2xpdmVfYXV0aG9yaXplZBgQIAEoCBIdChVzdWJtaXNzaW9uX2F1dGhvcml6ZWQYESABKAgSGQoRdGhyZXNob2xkX3RyaWdnZXIYEiABKAgSEQoJYzBfY2Vuc3VzGBMgASgIEhUKDXNvdXJjZV9nZXlzZXIYFCABKAkSHgoWc291cmNlX2dleXNlcl9wcm92aWRlchgVIAEoCRouCgxTb3VyY2VzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKLAQoRT3BlcmF0aW9uYWxDb25maWcSPQoKcGFyYW1ldGVycxgBIAMoCzIpLmRhcmtib3QucHJvamVjdDAudjEuT3BlcmF0aW9uYWxQYXJhbWV0ZXISNwoJZWZmZWN0aXZlGAIgASgLMiQuZGFya2JvdC5wcm9qZWN0MC52MS5FZmZlY3RpdmVSZWNvcmRClAEKF2NvbS5kYXJrYm90LnByb2plY3QwLnYxQgtTeXN0ZW1Qcm90b1ABogIDRFBYqgITRGFya2JvdC5Qcm9qZWN0MC5WMcoCE0Rhcmtib3RcUHJvamVjdDBcVjHiAh9EYXJrYm90XFByb2plY3QwXFYxXEdQQk1ldGFkYXRh6gIVRGFya2JvdDo6UHJvamVjdDA6OlYxYgZwcm90bzM");
 
 /**
  * Process-level status of Project_0: STATE topic project0.status. Sent when a reporter session
@@ -76,11 +76,41 @@ export type OperationalParameter = Message<"darkbot.project0.v1.OperationalParam
   env: string;
 
   /**
-   * Origin of the value: profile:<name> | environment | config_file | cli | builtin_default.
+   * Origin of the value: profile:<name> | environment | config_file | cli | fe_mode:full |
+   * builtin_default.
    *
    * @generated from field: string source = 6;
    */
   source: string;
+
+  /**
+   * Smallest valid value.
+   *
+   * @generated from field: uint64 minimum = 7;
+   */
+  minimum: bigint;
+
+  /**
+   * Largest valid value.
+   *
+   * @generated from field: uint64 maximum = 8;
+   */
+  maximum: bigint;
+
+  /**
+   * Open measurement question (ENTSCHEIDUNGEN §3, e.g. B-2) that keeps the value provisional;
+   * empty for a value no measurement question covers.
+   *
+   * @generated from field: string provisional = 9;
+   */
+  provisional: string;
+
+  /**
+   * When a change takes effect: restart (every numeric parameter today).
+   *
+   * @generated from field: string change_rule = 10;
+   */
+  changeRule: string;
 };
 
 /**
@@ -181,7 +211,8 @@ export type EffectiveRecord = Message<"darkbot.project0.v1.EffectiveRecord"> & {
   feGroup: string;
 
   /**
-   * Origin of every configured value by field name.
+   * Origin of every configured value by field name; the profile's own origin is mode:<mode>
+   * (shadow|econ4h|market) when the operating mode selected it.
    *
    * @generated from field: map<string, string> sources = 13;
    */
@@ -214,6 +245,34 @@ export type EffectiveRecord = Message<"darkbot.project0.v1.EffectiveRecord"> & {
    * @generated from field: bool submission_authorized = 17;
    */
   submissionAuthorized: boolean;
+
+  /**
+   * Threshold trigger instead of the R127 sweep (P0_USE_THRESHOLD_TRIGGER).
+   *
+   * @generated from field: bool threshold_trigger = 18;
+   */
+  thresholdTrigger: boolean;
+
+  /**
+   * C0 census on the startup sweep (P0_C0_CENSUS).
+   *
+   * @generated from field: bool c0_census = 19;
+   */
+  c0Census: boolean;
+
+  /**
+   * Start mode of the Geyser source unit: off | observe | active.
+   *
+   * @generated from field: string source_geyser = 20;
+   */
+  sourceGeyser: string;
+
+  /**
+   * Provider of the Geyser source unit.
+   *
+   * @generated from field: string source_geyser_provider = 21;
+   */
+  sourceGeyserProvider: string;
 };
 
 /**

@@ -40,7 +40,7 @@ describe("healthLabel", () => {
 
 describe("execution authorization is the engine's statement, never a fixed GUI claim", () => {
   const system = (liveAuthorized: boolean | null, submissionAuthorized: boolean | null): SystemView =>
-    ({ activated: liveAuthorized != null, profile: null, parameterCount: 1, parameters: new Map(), liveAuthorized, submissionAuthorized });
+    ({ activated: liveAuthorized != null, profile: null, profileSource: null, parameterCount: 1, parameters: new Map(), settings: new Map(), liveAuthorized, submissionAuthorized });
   it("is unknown without a live effective record", () => {
     expect(executionAuthorization(null, "LIVE")).toBe("Authorization unknown");
     expect(executionAuthorization(system(null, null), "LIVE")).toBe("Authorization unknown");

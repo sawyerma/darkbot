@@ -173,6 +173,11 @@ pub struct ParameterValue {
     pub default: u64,
     pub env: &'static str,
     pub source: String,
+    /// DEC-05: the valid range, the open measurement question (B-2 …) and the change rule.
+    pub minimum: u64,
+    pub maximum: u64,
+    pub provisional: Option<&'static str>,
+    pub change_rule: &'static str,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -199,6 +204,10 @@ pub fn operational_snapshot_of(
                 source: effective
                     .and_then(|e| e.sources.get(p.field).cloned())
                     .unwrap_or_else(|| "builtin_default".into()),
+                minimum: p.minimum(),
+                maximum: p.maximum(),
+                provisional: p.provisional(),
+                change_rule: p.change_rule(),
             })
         })
         .collect();

@@ -268,14 +268,10 @@ echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verifica
 # Binary journals (PERSIST-01); the daily summary is a frame of the opportunity journal.
 export P0_RECORD_PATH="$CAPTURE_DIR/opportunities.p0j"
 export P0_MT0_PATH="$CAPTURE_DIR/mt0.p0j"
-export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
-export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
-export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
-export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
-export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
+# DEC-05: the owner limits (P0_MIN_PROFIT, P0_MAX_*, P0_JUPITER_MAX_ACCOUNTS, …) pass through;
+# their one default is the runtime's parameter registry.
 
 mkdir -p "$(dirname "$P0_RECORD_PATH")"
 # The runtime binds code identity (head, binary and source hashes) in its typed run manifest.
@@ -419,14 +415,10 @@ export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
 export P0_MEASUREMENT_DURATION="$DURATION"
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
 export P0_MODE=shadow
-export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
-export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
-export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
-export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
-export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
+# DEC-05: the owner limits (P0_MIN_PROFIT, P0_MAX_*, P0_JUPITER_MAX_ACCOUNTS, …) pass through;
+# their one default is the runtime's parameter registry.
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$PROJECT_DIR/data/.p0-runtime.lock}"
 # The run's code identity (head, source hashes) is read from this checkout, not the build path.
 export P0_PROJECT_DIR="$PROJECT_DIR"

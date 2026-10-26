@@ -5,7 +5,7 @@
 //! never starts a second runtime. Observe-only: LIVE and submission stay disabled.
 //!
 //! ```text
-//! p0ctl [--project DIR] doctor [--scope offline|network] [--network-approved TOKEN --genesis-hash HASH --provider-evidence FILE --output FILE --capture-source logs|transactions] [-- OPERATIONAL_ARGS]
+//! p0ctl [--project DIR] doctor [--mode econ4h|shadow] [--scope offline|network] [--network-approved TOKEN --genesis-hash HASH --provider-evidence FILE --output FILE --capture-source logs|transactions] [-- OPERATIONAL_ARGS]
 //! p0ctl [--project DIR] preflight --duration D [--capture-source logs|transactions]
 //!       [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
 //! p0ctl [--project DIR] run preflight …   (= preflight)
@@ -108,12 +108,19 @@ fn value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
+    // DEC-05: the audit resolves the operational config of the mode `run start` will launch
+    // (its profile), so the audited identity is the launched one.
+    let mode = RunMode::of(args.split(|a| a == "--").next().unwrap_or(&[]))?;
     match value(args, "--scope").as_deref() {
         None | Some("offline") => {}
         Some("network") => {
             #[cfg(feature = "crate_health")]
             {
-                return darkbot_runner::orchestration::boot_network::execute(project, args);
+                return darkbot_runner::orchestration::boot_network::execute(
+                    project,
+                    mode.name(),
+                    args,
+                );
             }
             #[cfg(not(feature = "crate_health"))]
             {
@@ -122,7 +129,8 @@ fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
         }
         Some(s) => return Err(format!("SCOPE_INVALID: {s}")),
     }
-    darkbot_solana::runtime_config::Resolved::parse(
+    darkbot_solana::runtime_config::Resolved::for_mode(
+        mode.name(),
         args.split(|a| a == "--").nth(1).unwrap_or(&[]),
         &|k| std::env::var(k).ok(),
     )?
@@ -196,6 +204,24 @@ enum RunMode {
 }
 
 impl RunMode {
+    /// `--mode` of `options` (p0ctl's own options, before `--`): econ4h unless shadow is given.
+    fn of(options: &[String]) -> Result<Self, String> {
+        if options.iter().filter(|a| *a == "--mode").count() > 1 {
+            return Err("exactly one --mode".into());
+        }
+        match given(options, "--mode")?.as_deref() {
+            None | Some("econ4h") => Ok(RunMode::Econ4h),
+            Some("shadow") => Ok(RunMode::Shadow),
+            Some(other) => Err(format!("--mode {other}: econ4h|shadow")),
+        }
+    }
+    /// The operating mode (`P0_MODE`) of the runtime it launches.
+    fn name(self) -> &'static str {
+        match self {
+            RunMode::Econ4h => "econ4h",
+            RunMode::Shadow => "shadow",
+        }
+    }
     fn launcher(self) -> &'static str {
         match self {
             RunMode::Econ4h => "econ4h-launcher",
@@ -210,10 +236,7 @@ impl RunMode {
         }
     }
     fn prefix(self) -> &'static str {
-        match self {
-            RunMode::Econ4h => "econ4h",
-            RunMode::Shadow => "shadow",
-        }
+        self.name()
     }
 }
 
@@ -240,14 +263,7 @@ const ECON4H_ONLY: [&str; 15] = [
 /// consumed here and never reach the launcher; a Shadow run refuses every C0-E1 option.
 fn launch_plan(args: &[String]) -> Result<(RunMode, Vec<String>), String> {
     let options = args.split(|a| a == "--").next().unwrap_or(&[]);
-    if options.iter().filter(|a| *a == "--mode").count() > 1 {
-        return Err("exactly one --mode".into());
-    }
-    let mode = match given(options, "--mode")?.as_deref() {
-        None | Some("econ4h") => RunMode::Econ4h,
-        Some("shadow") => RunMode::Shadow,
-        Some(other) => return Err(format!("--mode {other}: econ4h|shadow")),
-    };
+    let mode = RunMode::of(options)?;
     if mode == RunMode::Shadow {
         if let Some(bad) = options
             .iter()
@@ -331,6 +347,7 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     }
     // X1: the same rule the launched runtime re-resolves its config with before admission.
     boot_audit::start_config(
+        mode.name(),
         args.split(|a| a == "--").nth(1).unwrap_or(&[]),
         &duration,
         &|k| std::env::var(k).ok(),

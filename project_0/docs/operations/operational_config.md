@@ -17,7 +17,8 @@ project_0/scripts/preflight.sh --profile smoke --print-effective-config
 ```
 
 Inspection requires neither a signer nor endpoint credentials. The text view lists
-name, type, unit, default, range, active value, source and restart requirement.
+name, type, unit, default, range, active value, source, restart requirement and, for a value an
+open measurement question keeps provisional, its question (B-2 … B-5).
 Endpoint URLs are redacted; array position retains priority. Inspecting a profile
 never claims provider capacity, LIVE approval or submission approval.
 
@@ -33,10 +34,16 @@ Empty endpoint values inherit local endpoints. The first explicit endpoint has
 highest priority; fallbacks require `--fallback on` and explicit ordered URLs.
 Store secret-bearing config files outside Git with owner-only permissions.
 
-All changes require restart. Existing invocations without operational flags or a
-profile/config file retain their legacy configuration interface. The Python bridge
-uses the compiled Rust parser; it does not maintain a second set of profile defaults.
-`P0_CONFIG_BIN` can point to the matching built configuration binary.
+All changes require restart. DEC-05: every operating mode (`P0_MODE`) resolves its typed
+configuration, also without arguments, through its profile unless `P0_PROFILE`, a config file or
+`--profile` selects one: `shadow` and `market` → `standard`, `econ4h` → `performance` (one
+worker per CPU, Rayon's former default; Shadow's `workers = 1` is provisional, B-2). The
+profile's source is `mode:<mode>`. `p0ctl doctor --mode econ4h|shadow` audits the profile of
+the mode `run start --mode` launches. The state owner's limits (`--max-slippage-bps`,
+`--max-total-capital`, …, `P0_MAX_*`, `P0_MIN_PROFIT`) and settings (`--threshold-trigger`,
+`--c0-census`, `--source-geyser`, `--source-geyser-provider`; `P0_INTEGRATION_PROBE` sets
+`diagnostics`) are registry fields with range and source; a blank variable is unset. The market
+observer keeps its own horizon (`P0_MARKET_DURATION_SECS`, also `until-stopped`).
 
 ## Profiles and execution scope
 

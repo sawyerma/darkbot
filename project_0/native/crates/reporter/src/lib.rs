@@ -558,6 +558,10 @@ fn operational_config(o: &OperationalSnapshot) -> OperationalConfig {
                 default_value: p.default,
                 env: p.env.to_owned(),
                 source: p.source.clone(),
+                minimum: p.minimum,
+                maximum: p.maximum,
+                provisional: p.provisional.unwrap_or_default().to_owned(),
+                change_rule: p.change_rule.to_owned(),
             })
             .collect(),
         effective: o.effective.as_ref().map(|e| EffectiveRecord {
@@ -582,6 +586,10 @@ fn operational_config(o: &OperationalSnapshot) -> OperationalConfig {
             free_only: e.free_only,
             live_authorized: e.live_authorized,
             submission_authorized: e.submission_authorized,
+            threshold_trigger: e.threshold_trigger,
+            c0_census: e.c0_census,
+            source_geyser: e.source_geyser.clone(),
+            source_geyser_provider: e.source_geyser_provider.clone(),
         }),
     }
 }
@@ -1860,6 +1868,10 @@ mod contract_tests {
             free_only: true,
             live_authorized: false,
             submission_authorized: false,
+            threshold_trigger: true,
+            c0_census: true,
+            source_geyser: "observe".into(),
+            source_geyser_provider: "p".repeat(64),
         };
         let mut s = golden_snapshot();
         s.operational = Some(Arc::new(operational_snapshot_of(&limits, Some(&effective))));

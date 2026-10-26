@@ -567,7 +567,8 @@ fn run(
     Ok(result)
 }
 /// Read permission and FREE_ONLY proof are checked before constructing clients or opening WSS.
-pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
+/// `mode`: the operating mode `run start` will launch (DEC-05: its profile).
+pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, String> {
     let val = |k: &str| {
         args.iter()
             .position(|a| a == k)
@@ -575,8 +576,9 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
             .cloned()
     };
     let operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]);
-    let resolved =
-        darkbot_solana::runtime_config::Resolved::parse(operational, &|k| std::env::var(k).ok())?;
+    let resolved = darkbot_solana::runtime_config::Resolved::for_mode(mode, operational, &|k| {
+        std::env::var(k).ok()
+    })?;
     resolved.activate()?;
     let c = darkbot_solana::runtime_config::active();
     let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_project(project))?;

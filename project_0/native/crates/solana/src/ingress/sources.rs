@@ -52,6 +52,10 @@ impl SourceUnit {
     }
 }
 
+/// The id of the one Geyser provider of this build (`ProviderConfig::publicnode`), the default
+/// of `runtime_config`'s `source_geyser_provider`.
+pub const PUBLICNODE_ID: &str = "publicnode";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperatingMode {
     /// No connection, no events.
@@ -205,7 +209,7 @@ impl ProviderConfig {
         let unknown = Capability::Unknown;
         let (reconnect_initial, reconnect_max) = configured_reconnect_backoff();
         Self {
-            id: "publicnode".into(),
+            id: PUBLICNODE_ID.into(),
             endpoint: "https://solana.publicnode.com".into(),
             auth: Some(AuthRequirement {
                 header: "x-token",

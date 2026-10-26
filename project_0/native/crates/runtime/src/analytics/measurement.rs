@@ -82,18 +82,20 @@ pub struct PhaseBudgets {
     pub enrichment_seconds: u64,
     pub shutdown_grace_seconds: u64,
 }
+/// The phase budgets of the parameter registry's defaults (DEC-05: one default authority).
 impl Default for PhaseBudgets {
     fn default() -> Self {
+        let d = darkbot_solana::runtime_config::Limits::default();
         Self {
-            bootstrap_seconds: 600,
-            stream_ready_seconds: 600,
-            shadow_drain_seconds: 180,
-            market_drain_seconds: 120,
-            quiescence_grace_seconds: 150,
-            strict_seconds: 14400,
-            gap_seconds: 180,
-            enrichment_seconds: 900,
-            shutdown_grace_seconds: 180,
+            bootstrap_seconds: d.bootstrap_seconds,
+            stream_ready_seconds: d.stream_ready_seconds,
+            shadow_drain_seconds: d.drain_seconds,
+            market_drain_seconds: d.market_drain_seconds,
+            quiescence_grace_seconds: d.quiescence_seconds,
+            strict_seconds: d.reconcile_seconds,
+            gap_seconds: d.gap_seconds,
+            enrichment_seconds: d.enrichment_seconds,
+            shutdown_grace_seconds: d.shutdown_seconds,
         }
     }
 }
@@ -1008,12 +1010,12 @@ mod tests {
             phase_journal: "capture/measurement_phases.jsonl".into(),
             compatibility: "c".into(),
         };
-        for revision in [4u16, 7] {
+        for revision in [4u16, 7, 10] {
             let schema = revision + 1;
-            let old = encode_with_limits_revision(&manifest, &effective.limits, revision);
+            let old = encode_with_limits_revision(&manifest, &effective, revision);
             let read: RunManifest = decode(kind::RUN_MANIFEST, schema, &old).unwrap();
             assert_eq!(read, manifest, "revision {revision}");
-            let old = encode_with_limits_revision(&effective, &effective.limits, revision);
+            let old = encode_with_limits_revision(&effective, &effective, revision);
             let read: darkbot_solana::runtime_config::EffectiveConfig =
                 decode(kind::OPERATIONAL_CONFIG, schema, &old).unwrap();
             assert_eq!(read.limits.rpc_rps, 9);
@@ -1022,11 +1024,19 @@ mod tests {
         // A field the old layout did not have takes its default, whatever the writer held now.
         let mut changed = effective.clone();
         changed.limits.fee_rps = 7;
-        let old = encode_with_limits_revision(&changed, &changed.limits, 4);
+        let old = encode_with_limits_revision(&changed, &changed, 4);
         let read: darkbot_solana::runtime_config::EffectiveConfig =
             decode(kind::OPERATIONAL_CONFIG, 5, &old).unwrap();
         assert_eq!(read.limits.fee_rps, Limits::default().fee_rps);
-        let older = encode_with_limits_revision(&manifest, &effective.limits, 4);
+        // DEC-05: a revision-10 record has neither the owner parameters nor the owner settings.
+        let mut owner = effective.clone();
+        (owner.limits.max_slippage_bps, owner.threshold_trigger) = (50, true);
+        owner.source_geyser = "observe".into();
+        let old = encode_with_limits_revision(&owner, &owner, 10);
+        let read: darkbot_solana::runtime_config::EffectiveConfig =
+            decode(kind::OPERATIONAL_CONFIG, 11, &old).unwrap();
+        assert_eq!(read, effective);
+        let older = encode_with_limits_revision(&manifest, &effective, 4);
         assert!(decode::<RunManifest>(kind::RUN_MANIFEST, 4, &older).is_err());
     }
 

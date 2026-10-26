@@ -63,6 +63,28 @@ pub(crate) fn owner_run_id(get: &dyn Fn(&str) -> Option<String>) -> String {
     .unwrap_or_else(|| "-".into())
 }
 
+/// DEC-05: the operational configuration of this start. Every operating mode (shadow, econ4h,
+/// market) runs on its typed configuration, resolved through its profile even without arguments
+/// (a Shadow run's bounded window comes from the launcher's measurement plan, P6-MT MT11/MT12);
+/// another start only with operational arguments, `P0_PROFILE` or a config file.
+pub(crate) fn operational_config(
+    mode: &str,
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<darkbot_solana::runtime_config::Resolved>, String> {
+    use darkbot_solana::runtime_config::Resolved;
+    if matches!(mode, "shadow" | "econ4h" | "market") {
+        return Resolved::for_mode(mode, args, env).map(Some);
+    }
+    let selected = ["P0_PROFILE", "P0_OPERATIONAL_CONFIG_FILE"]
+        .iter()
+        .any(|k| env(k).is_some_and(|v| !v.trim().is_empty()));
+    if args.is_empty() && !selected {
+        return Ok(None);
+    }
+    Resolved::parse(args, env).map(Some)
+}
+
 /// F-01 (CTRL-01/03): a Shadow runtime is only the child of `p0ctl run start --mode shadow`
 /// (its launch marker; admission then requires the approved network audit). Any other start —
 /// an argument-less one included — is refused before anything is read from the network.
@@ -89,17 +111,9 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         crate::console::line(format!("{code}: a Shadow run starts only through `p0ctl run start --mode shadow` (capture.sh shadow)"));
         return Err(Box::new(super::state_owner::OwnerTerminal(code)));
     }
-    let shadow = requested_mode == "shadow";
-    // A Shadow run always runs on its typed configuration: its bounded operational window comes
-    // from the launcher's measurement plan (P6-MT MT11/MT12).
-    if shadow
-        || !args.is_empty()
-        || std::env::var_os("P0_PROFILE").is_some()
-        || std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
+    if let Some(resolved) = operational_config(&requested_mode, &args, &|k| std::env::var(k).ok())
+        .map_err(OperationalConfigError)?
     {
-        let resolved =
-            darkbot_solana::runtime_config::Resolved::parse(&args, &|k| std::env::var(k).ok())
-                .map_err(OperationalConfigError)?;
         if resolved.print {
             print!("{}", resolved.text());
             return Ok(());
@@ -852,6 +866,50 @@ mod supervise_tests {
                     .is_some_and(|e| e.starts_with("CHAIN_VERIFY_index_BLOCKED")));
             }
             let _ = std::fs::remove_dir_all(run.parent().unwrap());
+        }
+    }
+}
+
+#[cfg(test)]
+mod dec05_tests {
+    /// DEC-05: every operating mode starts on its typed configuration through its profile — an
+    /// econ4h or market start without arguments too (formerly unconfigured: Rayon's default pool
+    /// and call-site defaults); another start only with an explicit selection.
+    #[test]
+    fn dec05_every_operating_mode_starts_configured() {
+        let none = |_: &str| None;
+        for (mode, profile) in [
+            ("shadow", "standard"),
+            ("econ4h", "performance"),
+            ("market", "standard"),
+        ] {
+            let r = super::operational_config(mode, &[], &none)
+                .unwrap()
+                .unwrap();
+            assert_eq!(r.config.profile.name(), profile, "{mode}");
+            assert_eq!(r.sources["profile"], format!("mode:{mode}"));
+        }
+        assert!(super::operational_config("", &[], &none).unwrap().is_none());
+        let blank = |k: &str| (k == "P0_PROFILE").then(|| " ".to_string());
+        assert!(super::operational_config("", &[], &blank)
+            .unwrap()
+            .is_none());
+        let selected = |k: &str| (k == "P0_PROFILE").then(|| "smoke".to_string());
+        let r = super::operational_config("", &[], &selected)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.config.profile.name(), "smoke");
+    }
+
+    /// DEC-05: the owner reads its parameters only from the operational config; no call-site
+    /// default is left in its setup or census.
+    #[test]
+    fn dec05_owner_setup_has_no_call_site_default() {
+        for (name, source) in [
+            ("setup.rs", include_str!("state_owner/setup.rs")),
+            ("census.rs", include_str!("state_owner/census.rs")),
+        ] {
+            assert!(!source.contains("parsed_or"), "{name}");
         }
     }
 }

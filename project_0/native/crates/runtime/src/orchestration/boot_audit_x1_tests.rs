@@ -408,11 +408,12 @@ fn x1_bind_state_binds_runtime_scope_and_reports_drift_per_field_class() {
     assert_eq!(s.bind(false).unwrap_err(), "BOOT_IDENTITY_RECORD_INVALID");
 }
 
-/// The config p0ctl audits (operational args + `--duration D`, operator environment) and the
-/// config the launched runtime re-resolves (same args, launcher environment with
-/// `P0_MEASUREMENT_DURATION=D` and its fixed exports, also after the runtime's own activation
-/// exported the config back into its environment) have the same digest; a launcher environment
-/// that changes an operational value does not.
+/// The config p0ctl audits (operational args + `--duration D`, operator environment, the mode's
+/// profile) and the config the launched runtime re-resolves (same args, launcher environment with
+/// `P0_MEASUREMENT_DURATION=D`, `P0_MODE` and its fixed exports, also after the runtime's own
+/// activation exported the config back into its environment) have the same digest; a launcher
+/// environment that changes an operational value does not. DEC-05: econ4h resolves `performance`
+/// (one worker per CPU), shadow `standard`.
 #[test]
 fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
     let d = temp("config");
@@ -427,12 +428,12 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect();
-    let launcher_exports = |duration: &str, secs: u64| -> HashMap<String, String> {
+    let launcher_exports = |mode: &str, duration: &str, secs: u64| -> HashMap<String, String> {
         let mut env = operator.clone();
         for (k, v) in [
             ("P0_MEASUREMENT_DURATION", duration.to_string()),
             ("P0_ECON_DURATION_SECS", secs.to_string()),
-            ("P0_MODE", "econ4h".into()),
+            ("P0_MODE", mode.into()),
             ("P0_LIVE_ENABLED", "false".into()),
             ("P0_SUBMISSION_ENABLED", "false".into()),
             ("P0_MARKET_SOURCE", "logs".into()),
@@ -440,60 +441,74 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
                 "P0_PROGRAM_ID",
                 darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
             ),
-            ("P0_MIN_PROFIT", "0".into()),
-            ("P0_MAX_CONCURRENT", "1".into()),
-            ("P0_MAX_OUTSTANDING", "1".into()),
-            ("P0_MAX_AGE_NS", "2000000000".into()),
-            ("P0_DEADLINE_NS", "2000000000".into()),
-            ("P0_JUPITER_MAX_ACCOUNTS", "64".into()),
             ("P0_CTL_LAUNCH_RUN_ID", "econ4h_x1".into()),
         ] {
             env.insert(k.into(), v);
         }
         env
     };
-    let ctl_identity = |op: &[String], duration: &str| {
+    let ctl_config = |mode: &str, op: &[String], duration: &str| {
         let get = |k: &str| operator.get(k).cloned();
-        let config = start_config(op, duration, &get).unwrap().config;
-        identity_with(&d, flags, &config).unwrap()
+        start_config(mode, op, duration, &get).unwrap().config
+    };
+    let ctl_identity = |mode: &str, op: &[String], duration: &str| {
+        identity_with(&d, flags, &ctl_config(mode, op, duration)).unwrap()
     };
     let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    for op in [
-        args(&[]),
-        args(&["--profile", "standard"]),
-        args(&["--profile", "smoke"]),
-        args(&["--profile", "performance"]),
-        args(&["--rpc-rps", "3", "--fallback", "off"]),
-    ] {
-        for (duration, secs) in [("10m", 600), ("1h", 3600)] {
-            let audited = ctl_identity(&op, duration);
-            let env = launcher_exports(duration, secs);
-            let get = |k: &str| env.get(k).cloned();
-            assert_eq!(
-                launched_identity(&d, flags, &op, &get).unwrap(),
-                audited,
-                "{op:?} {duration}"
-            );
-            // The runtime's own activation exports its config into the environment first.
-            let mut activated = env.clone();
-            let own = darkbot_solana::runtime_config::Resolved::parse(&op, &get).unwrap();
-            activated.extend(own.config.environment());
-            let get = |k: &str| activated.get(k).cloned();
-            assert_eq!(
-                launched_identity(&d, flags, &op, &get).unwrap(),
-                audited,
-                "{op:?} {duration} after activation"
-            );
+    for mode in ["econ4h", "shadow"] {
+        for op in [
+            args(&[]),
+            args(&["--profile", "standard"]),
+            args(&["--profile", "smoke"]),
+            args(&["--profile", "performance"]),
+            args(&["--rpc-rps", "3", "--fallback", "off"]),
+            args(&["--max-slippage-bps", "50", "--threshold-trigger", "off"]),
+        ] {
+            for (duration, secs) in [("10m", 600), ("1h", 3600)] {
+                let audited = ctl_identity(mode, &op, duration);
+                let env = launcher_exports(mode, duration, secs);
+                let get = |k: &str| env.get(k).cloned();
+                assert_eq!(
+                    launched_identity(&d, flags, &op, &get).unwrap(),
+                    audited,
+                    "{mode} {op:?} {duration}"
+                );
+                // The runtime's own activation (`startup::operational_config` of an operating
+                // mode) exports its config into the environment first.
+                let mut activated = env.clone();
+                let own =
+                    darkbot_solana::runtime_config::Resolved::for_mode(mode, &op, &get).unwrap();
+                activated.extend(own.config.environment());
+                let get = |k: &str| activated.get(k).cloned();
+                assert_eq!(
+                    launched_identity(&d, flags, &op, &get).unwrap(),
+                    audited,
+                    "{mode} {op:?} {duration} after activation"
+                );
+            }
         }
     }
+    // DEC-05: each mode audits its own profile; a runtime of the other mode is drift wherever the
+    // two profiles differ (the worker count on a machine with more than one CPU).
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
+    assert_eq!(ctl_config("econ4h", &[], "10m").limits.workers, cpus);
+    assert_eq!(ctl_config("shadow", &[], "10m").limits.workers, 1);
+    let shadow_env = launcher_exports("shadow", "10m", 600);
+    let get = |k: &str| shadow_env.get(k).cloned();
+    assert_eq!(
+        launched_identity(&d, flags, &[], &get).unwrap() == ctl_identity("econ4h", &[], "10m"),
+        cpus == 1
+    );
     // Operational values the launcher environment changes are drift, never admitted.
-    let audited = ctl_identity(&[], "10m");
+    let audited = ctl_identity("econ4h", &[], "10m");
     for (k, v) in [
         ("P0_RPC_URL", "http://127.0.0.2:8899"),
         ("P0_RPC_RPS", "9"),
         ("P0_PROFILE", "smoke"),
+        ("P0_MAX_SLIPPAGE_BPS", "50"),
+        ("P0_USE_THRESHOLD_TRIGGER", "true"),
     ] {
-        let mut env = launcher_exports("10m", 600);
+        let mut env = launcher_exports("econ4h", "10m", 600);
         env.insert(k.into(), v.into());
         let get = |k: &str| env.get(k).cloned();
         let current = launched_identity(&d, flags, &[], &get).unwrap();
@@ -502,12 +517,19 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
             "{k}"
         );
     }
-    let mut env = launcher_exports("10m", 600);
+    let mut env = launcher_exports("econ4h", "10m", 600);
     env.remove("P0_MEASUREMENT_DURATION");
     let get = |k: &str| env.get(k).cloned();
     assert_eq!(
         launched_identity(&d, flags, &[], &get).unwrap_err(),
         "BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION"
+    );
+    let mut env = launcher_exports("econ4h", "10m", 600);
+    env.remove("P0_MODE");
+    let get = |k: &str| env.get(k).cloned();
+    assert_eq!(
+        launched_identity(&d, flags, &[], &get).unwrap_err(),
+        "BOOT_NETWORK_AUDIT_MISSING: P0_MODE"
     );
     std::fs::remove_dir_all(d).unwrap();
 }

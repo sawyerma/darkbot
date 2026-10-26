@@ -34,7 +34,7 @@ export function HealthSection() {
     <h2>System Health <span className="p0-quiet">· {mode}</span></h2>
     <DetailRow title="Run" value={run ? `${run.runId} · ${run.source}/${run.commitment} · ${run.configuredDurationSeconds === 0n ? "Until stopped" : `${run.configuredDurationSeconds} s`}` : "Not reported"}/>
     <DetailRow title="Phase" value={phase ? `${phaseLabel(c)} since ${fmtClockMs(phase.changedUnixMs)}${phase.stopReason ? ` · stop ${phase.stopReason}` : ""}${phase.endResult ? ` · ${phase.endResult}` : ""}` : DASH}/>
-    <DetailRow title="Operational profile" value={s ? `${s.activated ? s.profile : "built-in defaults"} · ${s.parameterCount} parameters` : "Not reported"}/>
+    <DetailRow title="Operational profile" value={s ? `${s.activated ? `${s.profile} (${s.profileSource})` : "built-in defaults"} · ${s.parameterCount} parameters` : "Not reported"}/>
     <DetailRow title="Software & program identity" value={run ? `program ${run.programId}${a?.deploymentError ? ` · ${a.deploymentError}` : ""}` : "Not checked"}/>
     <DetailRow title="RPC / WebSocket / slot progression (last reported)" value={run || t ? `${run?.wsHost ?? DASH} · ${connection} · last slot ${orDash(counterOf(c, "last_observed_slot") ?? t?.lastSlot ?? null)} · frame age ${fmtAgeNs(t?.lastFrameAgeNs)}` : "Not checked"}/>
     <DetailRow title="Transport events" value={t || c?.market ? `${t?.lastState || "none"}${t?.lastCode ? ` ${t.lastCode}` : ""} · HTTP 429 ${n("transport_http_429")} · reconnect attempts ${n("transport_reconnect_attempts")} · recovered ${n("transport_recovered")}` : DASH}/>

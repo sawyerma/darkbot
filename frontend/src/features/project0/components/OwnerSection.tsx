@@ -3,7 +3,7 @@ import type { LiquidatorView } from "../model/owner";
 import type { SystemView } from "../model/status";
 import { nsToMs, programPinStatus } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
-import { orDash } from "../model/statusFormat";
+import { orDash, parameterText } from "../model/statusFormat";
 import { DetailRow, Section } from "./PanelPrimitives";
 
 const ms = (ns: bigint | null) => {
@@ -11,23 +11,41 @@ const ms = (ns: bigint | null) => {
   return v == null ? "—" : `${v} ms`;
 };
 
-/** D01: the owner and liquidator bounds of the engine's parameter registry shown in this tab. */
+/** D01/DEC-05: the owner and liquidator parameters of the engine's registry shown in this tab. */
 const OWNER_PARAMETERS = [
-  "blockhash_max_age_ms", "projection_requeue_max", "lane_weight_l0", "lane_weight_l1", "lane_weight_l2",
+  "workers", "sweep_batch_max_events", "sweep_batch_max_age_ns", "ingress_burst_before_detect",
+  "blockhash_max_age_ms", "blockhash_refresh_ms", "projection_requeue_max", "lane_weight_l0", "lane_weight_l1", "lane_weight_l2",
   "jupiter_timeout_ms", "fe04_settle_retry_ms", "fe04_refresh_ms", "owner_status_ms", "prepared_candidates",
   "rebalance_observe_ms", "rebalance_budget_usd_micro", "rebalance_quote_rounds",
+  "max_total_capital", "max_outstanding_inventory", "max_concurrent_positions", "max_exposure_per_attempt",
+  "max_daily_loss", "max_failed_attempts_per_day", "max_tip", "max_slippage_bps", "max_outstanding_attempts",
+  "min_profit_usd_micro", "jupiter_max_accounts", "compute_unit_limit", "priority_micro_lamports_per_cu",
+  "loaded_accounts_data_size", "max_opportunity_age_ns", "execution_deadline_ns", "integration_probe_limit_per_kind",
+  "threshold_bootstrap_batch", "candidate_recheck_slots", "candidate_error_recheck_slots", "candidate_repeat_soft_cap",
+  "rpc_candidates_per_drain", "candidate_network_deadline_ms", "mt0_interval_seconds",
+  "recovery_root_catchup_seconds", "recovery_root_stall_seconds", "recovery_root_hard_max_seconds",
 ] as const;
+
+/** The owner's typed settings (DEC-05). */
+const OWNER_SETTINGS = ["diagnostics", "threshold_trigger", "c0_census", "source_geyser", "source_geyser_provider"] as const;
+
 
 /**
  * The running state owner as the Rust owner published it (project0.liquidator.state): state,
  * ingress, trigger, the day's decisions, Safety and every capability with its gate. Nothing is
  * derived here; a topic without a state shows its status.
  */
-export function OwnerSection({ owner, topicStatus, parameters }: { owner: LiquidatorView | null; topicStatus: TopicStatus; parameters: SystemView["parameters"] | null }) {
-  const params = OWNER_PARAMETERS.map((name) => {
-    const p = parameters?.get(name);
-    return <DetailRow key={name} title={name} value={p ? `${p.value} ${p.unit} · ${p.source}` : "Not reported"}/>;
-  });
+export function OwnerSection({ owner, topicStatus, system }: { owner: LiquidatorView | null; topicStatus: TopicStatus; system: SystemView | null }) {
+  const params = <>
+    {OWNER_PARAMETERS.map((name) => {
+      const p = system?.parameters.get(name);
+      return <DetailRow key={name} title={name} value={p ? parameterText(p) : "Not reported"}/>;
+    })}
+    {OWNER_SETTINGS.map((name) => {
+      const s = system?.settings.get(name);
+      return <DetailRow key={name} title={name} value={s ? `${s.value} · ${s.source} · restart` : "Not reported"}/>;
+    })}
+  </>;
   if (!owner) {
     return <Section title="Runtime owner" aside={<span className="p0-badge">{topicStatus}</span>}>
       <p className="p0-quiet">No Shadow/econ4h owner state received.</p>{params}</Section>;

@@ -1,9 +1,16 @@
-import type { ProviderView } from "./status";
+import type { ParameterView, ProviderView } from "./status";
 
 export const DASH = "—";
 
 export function orDash(v: bigint | string | null | undefined): string {
   return v === null || v === undefined || v === "" ? DASH : v.toString();
+}
+
+/** DEC-05: value, source, default, range and change rule as the engine states them; a provisional
+ *  value names its open measurement question (ENTSCHEIDUNGEN §3). */
+export function parameterText(p: ParameterView): string {
+  return `${p.value} ${p.unit} · ${p.source} · default ${p.defaultValue} · ${p.minimum}…${p.maximum} · ${p.changeRule}`
+    + (p.provisional ? ` · provisional, measurement open (${p.provisional})` : "");
 }
 
 export function fmtAgeNs(ns: bigint | null | undefined): string {

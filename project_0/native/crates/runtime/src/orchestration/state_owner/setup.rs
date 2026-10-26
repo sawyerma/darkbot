@@ -4,8 +4,8 @@ use super::*;
 type Prepared<F> = Result<(ShadowOwner, F, IngressSessions), Box<dyn std::error::Error>>;
 
 /// S1-02: the controlled sources. The long-tail WSS feed is the canonical baseline; one Geyser
-/// unit (`P0_SOURCE_GEYSER=off|observe`, default `off`; provider `P0_SOURCE_GEYSER_PROVIDER`,
-/// default `publicnode`) observes only: ACTIVE needs a qualification this build has none of. OFF
+/// unit (`source_geyser` = `P0_SOURCE_GEYSER` off|observe, provider `source_geyser_provider`, both
+/// of the operational config, DEC-05) observes only: ACTIVE needs a qualification this build has none of. OFF
 /// constructs and connects nothing. The provider token is read once here, never logged. With
 /// `P0_PROJECT_DIR` the control thread serves `p0ctl source set` at runtime.
 fn configured_sources(
@@ -18,9 +18,9 @@ fn configured_sources(
     use darkbot_solana::ingress::sources::{
         geyser_source, OperatingMode, ProviderConfig, SourceArbiter, SourceUnit,
     };
-    let mode: OperatingMode = config::parsed_or("P0_SOURCE_GEYSER", OperatingMode::Off)?;
-    let provider_id: String =
-        config::parsed_or("P0_SOURCE_GEYSER_PROVIDER", "publicnode".to_string())?;
+    let ops = darkbot_solana::runtime_config::active();
+    let mode: OperatingMode = ops.source_geyser.parse()?;
+    let provider_id = ops.source_geyser_provider.clone();
     let provider = ProviderConfig::publicnode();
     if provider_id != provider.id {
         return Err(format!("SOURCE_PROVIDER_UNKNOWN: {provider_id}").into());
@@ -144,8 +144,8 @@ pub(super) fn prepare(
     // [FIX-78] Bootstrap only the configured group's Banks first. Full-program GPA was ~387 MB
     // in C0 and is unnecessary for dependency discovery.
     let dep_rpc = darkbot_solana::provider::rpc_client(
-        config::require("P0_RPC_URL")?,
-        Duration::from_secs(30),
+        rpc_url.clone(),
+        Duration::from_millis(operational.rpc_timeout_ms),
         Default::default(),
         darkbot_solana::provider::Workload::Bootstrap,
     );
@@ -341,30 +341,12 @@ pub(super) fn prepare(
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
     // is ahead of account notifications still in flight on the same confirmed stream.
-    use darkbot_solana::runtime_config::defaults;
-    let root_catchup_secs: u64 = config::parsed_or(
-        "P0_RECOVERY_ROOT_CATCHUP_SECS",
-        defaults::RECOVERY_ROOT_CATCHUP_SECS,
-    )?;
-    if !(30..=300).contains(&root_catchup_secs) {
-        return Err("P0_RECOVERY_ROOT_CATCHUP_SECS must be 30..=300".into());
-    }
-    // Adaptive root-only stall extension. All limits are bounded and the hard
-    // deadline is independent of progress, with no impact on trading hot paths.
-    let root_stall_secs: u64 = config::parsed_or(
-        "P0_RECOVERY_ROOT_STALL_SECS",
-        defaults::RECOVERY_ROOT_STALL_SECS,
-    )?;
-    let root_hard_secs: u64 = config::parsed_or(
-        "P0_RECOVERY_ROOT_HARD_MAX_SECS",
-        defaults::RECOVERY_ROOT_HARD_MAX_SECS,
-    )?;
-    if !(5..=180).contains(&root_stall_secs)
-        || !(30..=900).contains(&root_hard_secs)
-        || root_hard_secs < root_catchup_secs
-    {
-        return Err("P0_RECOVERY_ROOT_STALL_SECS must be 5..=180 and P0_RECOVERY_ROOT_HARD_MAX_SECS must be 30..=900 and >= P0_RECOVERY_ROOT_CATCHUP_SECS".into());
-    }
+    // Adaptive root-only stall extension. All limits are bounded (the registry's ranges, the
+    // hard deadline at least the catch-up) and the hard deadline is independent of progress,
+    // with no impact on trading hot paths.
+    let root_catchup_secs = operational.recovery_root_catchup_seconds;
+    let root_stall_secs = operational.recovery_root_stall_seconds;
+    let root_hard_secs = operational.recovery_root_hard_max_seconds;
     crate::console::line(format!(
         "recovery: root_soft_s={} root_stall_s={} root_hard_s={}",
         root_catchup_secs, root_stall_secs, root_hard_secs
@@ -458,8 +440,8 @@ pub(super) fn prepare(
     // Safety aus Env (Limits sind Konfiguration), Allowlist aus Source, Submitter nur für Simulation.
     let blockhash = BlockhashCache::new();
     let bh_rpc = darkbot_solana::provider::rpc_client(
-        config::require("P0_RPC_URL")?,
-        Duration::from_secs(30),
+        rpc_url.clone(),
+        Duration::from_millis(operational.rpc_timeout_ms),
         Default::default(),
         darkbot_solana::provider::Workload::LiveRead,
     );
@@ -467,6 +449,7 @@ pub(super) fn prepare(
     let bh_clock = clock;
     let bh_econ = econ.clone();
     let bh_shutdown = shutdown.clone();
+    let bh_interval = Duration::from_millis(operational.blockhash_refresh_ms);
     let blockhash_thread =
         std::thread::Builder::new()
             .name("blockhash".into())
@@ -477,20 +460,21 @@ pub(super) fn prepare(
                     &bh_shutdown,
                     &admission_closed,
                     || bh_cache.refresh(&bh_rpc, bh_clock.now_ns()).map(|_| ()),
-                    Duration::from_secs(10),
+                    bh_interval,
                 )
             })?;
+    // DEC-05: the Safety limits are parameters of the operational config (validated ranges).
     let limits = Limits {
-        max_total_capital: config::parsed_or("P0_MAX_TOTAL_CAPITAL", 0)?,
+        max_total_capital: operational.max_total_capital,
         // USD-micro, conservative hold values (B15).
-        max_outstanding_inventory: config::parsed_or("P0_MAX_INVENTORY", 0)?,
-        max_concurrent_positions: config::parsed_or("P0_MAX_CONCURRENT", 1)?,
-        max_exposure_per_attempt: config::parsed_or("P0_MAX_EXPOSURE", 0)?,
-        max_daily_loss: config::parsed_or("P0_MAX_DAILY_LOSS", 0)?,
-        max_failed_attempts_per_day: config::parsed_or("P0_MAX_FAILED", 0)?,
-        max_tip: config::parsed_or("P0_MAX_TIP", 0)?,
-        max_slippage_bps: config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0)?,
-        max_outstanding_attempts: config::parsed_or("P0_MAX_OUTSTANDING", 1)?,
+        max_outstanding_inventory: operational.max_outstanding_inventory,
+        max_concurrent_positions: u32::try_from(operational.max_concurrent_positions)?,
+        max_exposure_per_attempt: operational.max_exposure_per_attempt,
+        max_daily_loss: operational.max_daily_loss,
+        max_failed_attempts_per_day: u32::try_from(operational.max_failed_attempts_per_day)?,
+        max_tip: operational.max_tip,
+        max_slippage_bps: operational.max_slippage_bps,
+        max_outstanding_attempts: u32::try_from(operational.max_outstanding_attempts)?,
     };
     // L4: one strict parse; the evaluation uses exactly the configured safety value.
     let eval_slippage_bps = limits.max_slippage_bps;
@@ -525,15 +509,15 @@ pub(super) fn prepare(
         protocol::ASSOCIATED_TOKEN_PROGRAM_ID,
         protocol::COMPUTE_BUDGET_PROGRAM_ID,
         darkbot_project0::receivership::SYSTEM_PROGRAM,
-        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        protocol::TOKEN_PROGRAM_ID,
+        protocol::TOKEN_2022_PROGRAM_ID,
     ]
     .iter()
     .map(|s| Pubkey::from_str(s))
     .collect::<Result<_, _>>()?;
     // N2: the owner's candidate path quotes and simulates through the deadline-bound transport.
     let submitter = crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::for_candidates(
-        config::require("P0_RPC_URL")?,
+        rpc_url.clone(),
         true,
     )?);
     let failed_costs = FailedCostMatrix::default(); // alle None → Unknown → nicht handelbar, bis gemessen
@@ -543,32 +527,30 @@ pub(super) fn prepare(
         std::env::var("P0_JUPITER_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
-        config::parsed_or("P0_MAX_SLIPPAGE_BPS", 0)?,
-        config::parsed_or("P0_JUPITER_MAX_ACCOUNTS", 64u8)?,
+        operational.max_slippage_bps,
+        u8::try_from(operational.jupiter_max_accounts)?,
         true,
         false,
     )
     .map_err(|e| format!("route provider: {e}"))?;
     let resources = Resources {
-        compute_unit_limit: config::parsed_or("P0_CU_LIMIT", 1_400_000)?,
-        priority_micro_lamports_per_cu: config::parsed_or("P0_PRIORITY_MICRO", 0)?,
-        loaded_accounts_data_size: Some(config::parsed_or("P0_LOADED_DATA", 64 * 1024 * 1024)?),
+        compute_unit_limit: u32::try_from(operational.compute_unit_limit)?,
+        priority_micro_lamports_per_cu: operational.priority_micro_lamports_per_cu,
+        loaded_accounts_data_size: Some(u32::try_from(operational.loaded_accounts_data_size)?),
     };
     let freshness = Freshness {
-        max_opportunity_age_ns: config::parsed_or("P0_MAX_AGE_NS", 2_000_000_000)?,
-        execution_deadline_ns: config::parsed_or("P0_DEADLINE_NS", 2_000_000_000)?,
+        max_opportunity_age_ns: operational.max_opportunity_age_ns,
+        execution_deadline_ns: operational.execution_deadline_ns,
     };
-    let min_profit: i128 = config::parsed_or::<i128>("P0_MIN_PROFIT", 0)?;
+    let min_profit = i128::from(operational.min_profit_usd_micro);
 
+    // The integration probe is `diagnostics` (`P0_INTEGRATION_PROBE`); its limit is > 0 with
+    // diagnostics on (validated).
     #[cfg(feature = "crate_health")]
-    let integration_probe_enabled: bool = config::parsed_or("P0_INTEGRATION_PROBE", false)?;
+    let integration_probe_enabled = darkbot_solana::runtime_config::active().diagnostics;
     #[cfg(feature = "crate_health")]
-    let integration_probe_limit_per_kind: usize =
-        config::parsed_or("P0_INTEGRATION_PROBE_LIMIT_PER_KIND", 8)?;
-    #[cfg(feature = "crate_health")]
-    if integration_probe_enabled && integration_probe_limit_per_kind == 0 {
-        return Err("P0_INTEGRATION_PROBE_LIMIT_PER_KIND must be > 0 when probe is enabled".into());
-    }
+    let integration_probe_limit_per_kind =
+        usize::try_from(operational.integration_probe_limit_per_kind)?;
 
     // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
     let remote_worker_capacity = usize::try_from(operational.worker_queue)?;
@@ -656,10 +638,9 @@ pub(super) fn prepare(
         winner_watch_cfg.full_queue_backoff_s
     ));
     let winner_tracker = WinnerTracker::new(winner_watch_cfg);
-    let record_path = config::parsed_or::<String>(
-        "P0_RECORD_PATH",
-        "project_0/data/shadow/opportunities.p0j".into(),
-    )?;
+    // Every launcher names the run's own record (one directory per run, never a shared
+    // default journal that a second run would append to).
+    let record_path = config::require("P0_RECORD_PATH")?;
     let journal_path = crate::analytics::journal::binary_path(std::path::Path::new(&record_path));
     std::fs::create_dir_all(journal_path.parent().unwrap_or(std::path::Path::new(".")))?;
     if let Some(effective) = darkbot_solana::runtime_config::effective() {
@@ -719,13 +700,9 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let threshold_bootstrap: VecDeque<Pubkey> = VecDeque::new();
     #[cfg(feature = "crate_health")]
-    let threshold_bootstrap_batch: usize = config::parsed_or("P0_THRESHOLD_BOOTSTRAP_BATCH", 16)?;
+    let threshold_bootstrap_batch = usize::try_from(operational.threshold_bootstrap_batch)?;
     #[cfg(feature = "crate_health")]
-    if threshold_bootstrap_batch == 0 {
-        return Err("P0_THRESHOLD_BOOTSTRAP_BATCH must be > 0".into());
-    }
-    #[cfg(feature = "crate_health")]
-    let use_threshold_trigger: bool = config::parsed_or("P0_USE_THRESHOLD_TRIGGER", false)?;
+    let use_threshold_trigger = darkbot_solana::runtime_config::active().threshold_trigger;
     #[cfg(feature = "crate_health")]
     let threshold_ready = !use_threshold_trigger;
     #[cfg(feature = "crate_health")]
@@ -775,24 +752,11 @@ pub(super) fn prepare(
     // are always forwarded immediately. Unchanged candidates get a bounded periodic Long-Tail
     // recheck so route/fee changes that are not represented by Marginfi state are not starved.
     #[cfg(feature = "crate_health")]
-    let candidate_recheck_slots: u64 = config::parsed_or("P0_CANDIDATE_RECHECK_SLOTS", 1)?;
+    let candidate_recheck_slots = operational.candidate_recheck_slots;
     #[cfg(feature = "crate_health")]
-    if candidate_recheck_slots == 0 {
-        return Err("P0_CANDIDATE_RECHECK_SLOTS must be > 0".into());
-    }
+    let candidate_error_recheck_slots = operational.candidate_error_recheck_slots;
     #[cfg(feature = "crate_health")]
-    let candidate_error_recheck_slots: u64 =
-        config::parsed_or("P0_CANDIDATE_ERROR_RECHECK_SLOTS", 1)?;
-    #[cfg(feature = "crate_health")]
-    if candidate_error_recheck_slots == 0 {
-        return Err("P0_CANDIDATE_ERROR_RECHECK_SLOTS must be > 0".into());
-    }
-    #[cfg(feature = "crate_health")]
-    let candidate_repeat_soft_cap: usize = config::parsed_or("P0_CANDIDATE_REPEAT_SOFT_CAP", 1024)?;
-    #[cfg(feature = "crate_health")]
-    if candidate_repeat_soft_cap == 0 {
-        return Err("P0_CANDIDATE_REPEAT_SOFT_CAP must be > 0".into());
-    }
+    let candidate_repeat_soft_cap = usize::try_from(operational.candidate_repeat_soft_cap)?;
     #[cfg(feature = "crate_health")]
     crate::console::line(format!(
         "r127_candidate_cache_config: recheck_slots={} error_recheck_slots={} repeat_soft_cap={}",
@@ -877,28 +841,21 @@ pub(super) fn prepare(
     // B6: at most this many candidates use the network (routes, fee quote, simulation) until
     // the ingress queue has been drained again; each stops calling the provider after the
     // deadline (default about twice the measured Mainnet pipeline maximum of 2.654 s).
-    let rpc_candidates_per_drain: usize = config::parsed_or("P0_RPC_CANDIDATES_PER_DRAIN", 4)?;
-    let candidate_network_deadline_ms: u64 =
-        config::parsed_or("P0_CANDIDATE_NETWORK_DEADLINE_MS", 5_000)?;
-    if rpc_candidates_per_drain == 0 || candidate_network_deadline_ms == 0 {
-        return Err(
-            "P0_RPC_CANDIDATES_PER_DRAIN and P0_CANDIDATE_NETWORK_DEADLINE_MS must be > 0".into(),
-        );
-    }
+    let rpc_candidates_per_drain = usize::try_from(operational.rpc_candidates_per_drain)?;
+    let candidate_network_deadline_ms = operational.candidate_network_deadline_ms;
     let network = NetworkBudget::new(
         rpc_candidates_per_drain,
         candidate_network_deadline_ms.saturating_mul(1_000_000),
     );
     // [MT0] Measurement only: owner-section timing, queue-age tracking and an off-owner
     // reporter thread (the only place that writes MT0 evidence to disk).
-    let mt0_path = match config::parsed_or::<String>("P0_MT0_PATH", String::new())? {
-        path if path.is_empty() => mt0_default,
-        path => crate::analytics::journal::binary_path(std::path::Path::new(&path)),
+    let mt0_path = match config::require("P0_MT0_PATH") {
+        Ok(path) => crate::analytics::journal::binary_path(std::path::Path::new(&path)),
+        Err(_) => mt0_default,
     };
     std::fs::create_dir_all(mt0_path.parent().unwrap_or(std::path::Path::new(".")))?;
-    let mt0_interval_secs: u64 = config::parsed_or("P0_MT0_INTERVAL_SECS", 10)?;
     let mt0_reporter = darkbot_common::mt0::spawn_reporter(
-        Duration::from_secs(mt0_interval_secs.max(1)),
+        Duration::from_secs(operational.mt0_interval_seconds),
         shutdown.clone(),
         crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
     )?;

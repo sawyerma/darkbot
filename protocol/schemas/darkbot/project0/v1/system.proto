@@ -21,8 +21,18 @@ message OperationalParameter {
   uint64 default_value = 4;
   // Environment variable that sets it.
   string env = 5;
-  // Origin of the value: profile:<name> | environment | config_file | cli | builtin_default.
+  // Origin of the value: profile:<name> | environment | config_file | cli | fe_mode:full |
+  // builtin_default.
   string source = 6;
+  // Smallest valid value.
+  uint64 minimum = 7;
+  // Largest valid value.
+  uint64 maximum = 8;
+  // Open measurement question (ENTSCHEIDUNGEN §3, e.g. B-2) that keeps the value provisional;
+  // empty for a value no measurement question covers.
+  string provisional = 9;
+  // When a change takes effect: restart (every numeric parameter today).
+  string change_rule = 10;
 }
 
 // Secret-free effective operational record (runtime_config::EffectiveConfig).
@@ -51,7 +61,8 @@ message EffectiveRecord {
   repeated string fe_targets = 11;
   // FE group account, base58.
   string fe_group = 12;
-  // Origin of every configured value by field name.
+  // Origin of every configured value by field name; the profile's own origin is mode:<mode>
+  // (shadow|econ4h|market) when the operating mode selected it.
   map<string, string> sources = 13;
   // Provider capacity qualified (fixed false today).
   bool provider_capacity_qualified = 14;
@@ -61,6 +72,14 @@ message EffectiveRecord {
   bool live_authorized = 16;
   // Transaction submission authorized (fixed false today).
   bool submission_authorized = 17;
+  // Threshold trigger instead of the R127 sweep (P0_USE_THRESHOLD_TRIGGER).
+  bool threshold_trigger = 18;
+  // C0 census on the startup sweep (P0_C0_CENSUS).
+  bool c0_census = 19;
+  // Start mode of the Geyser source unit: off | observe | active.
+  string source_geyser = 20;
+  // Provider of the Geyser source unit.
+  string source_geyser_provider = 21;
 }
 
 // Operational configuration of the process.

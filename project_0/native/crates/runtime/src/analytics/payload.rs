@@ -106,7 +106,7 @@ pub(crate) fn decode_prefix<T: DeserializeOwned>(bytes: &mut &[u8]) -> io::Resul
 }
 
 /// `EffectiveConfig` around the `Limits` (the fields before and after it, unchanged since
-/// `LIMITS_READABLE_FROM`).
+/// `LIMITS_READABLE_FROM`; from `OWNER_SETTINGS_REVISION` on [`EffectiveOwner`] follows).
 #[derive(serde::Deserialize)]
 struct EffectiveHead {
     schema: String,
@@ -130,8 +130,18 @@ struct EffectiveTail {
     live_authorized: bool,
     submission_authorized: bool,
 }
+/// DEC-05: the owner's typed settings at the end of an `EffectiveConfig`.
+#[derive(serde::Deserialize)]
+struct EffectiveOwner {
+    threshold_trigger: bool,
+    c0_census: bool,
+    source_geyser: String,
+    source_geyser_provider: String,
+}
 
-/// An `EffectiveConfig` of `Limits` layout `revision` from the front of `bytes`.
+/// An `EffectiveConfig` of `Limits` layout `revision` from the front of `bytes`. A record before
+/// `OWNER_SETTINGS_REVISION` has no owner settings: they read as the built-in defaults, like the
+/// `Limits` fields its layout did not have.
 pub(crate) fn effective_of_revision(
     revision: u16,
     bytes: &mut &[u8],
@@ -141,6 +151,17 @@ pub(crate) fn effective_of_revision(
         .ok_or_else(|| bad("PAYLOAD_DECODE"))?;
     *bytes = rest;
     let t: EffectiveTail = decode_prefix(bytes)?;
+    let owner = if revision >= darkbot_solana::runtime_config::OWNER_SETTINGS_REVISION {
+        decode_prefix(bytes)?
+    } else {
+        let d = darkbot_solana::runtime_config::RuntimeConfig::default();
+        EffectiveOwner {
+            threshold_trigger: d.threshold_trigger,
+            c0_census: d.c0_census,
+            source_geyser: d.source_geyser,
+            source_geyser_provider: d.source_geyser_provider,
+        }
+    };
     Ok(darkbot_solana::runtime_config::EffectiveConfig {
         schema: head.schema,
         profile: head.profile,
@@ -160,18 +181,38 @@ pub(crate) fn effective_of_revision(
         free_only: t.free_only,
         live_authorized: t.live_authorized,
         submission_authorized: t.submission_authorized,
+        threshold_trigger: owner.threshold_trigger,
+        c0_census: owner.c0_census,
+        source_geyser: owner.source_geyser,
+        source_geyser_provider: owner.source_geyser_provider,
     })
 }
 
-/// Test fixture: `value`'s payload with its `Limits` re-encoded in layout `revision` (what that
+/// Test fixture: `value`'s payload with the `Limits` of `effective` re-encoded in layout
+/// `revision` and, before `OWNER_SETTINGS_REVISION`, without its owner settings (what that
 /// revision's writer produced); the limits must occur exactly once in the payload.
 #[cfg(test)]
 pub(crate) fn encode_with_limits_revision<T: Serialize>(
     value: &T,
-    limits: &darkbot_solana::runtime_config::Limits,
+    effective: &darkbot_solana::runtime_config::EffectiveConfig,
     revision: u16,
 ) -> Vec<u8> {
-    let bytes = encode_wire(value).unwrap();
+    let limits = &effective.limits;
+    let mut bytes = encode_wire(value).unwrap();
+    if revision < darkbot_solana::runtime_config::OWNER_SETTINGS_REVISION {
+        let owner = encode_wire(&(
+            effective.threshold_trigger,
+            effective.c0_census,
+            &effective.source_geyser,
+            &effective.source_geyser_provider,
+        ))
+        .unwrap();
+        let at = bytes
+            .windows(owner.len())
+            .position(|w| w == owner.as_slice())
+            .expect("owner settings inside the payload");
+        bytes.drain(at..at + owner.len());
+    }
     let current = encode_wire(limits).unwrap();
     let at = bytes
         .windows(current.len())

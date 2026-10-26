@@ -162,8 +162,9 @@ impl JupiterV2RouteProvider {
         fast: bool,
         for_jito_bundle: bool,
     ) -> Result<Self, String> {
-        if max_accounts == 0 || max_accounts > 64 {
-            return Err("Jupiter max_accounts must be 1..=64".into());
+        let most = darkbot_solana::runtime_config::defaults::JUPITER_ACCOUNTS_MAX;
+        if max_accounts == 0 || u64::from(max_accounts) > most {
+            return Err(format!("Jupiter max_accounts must be 1..={most}"));
         }
         let request_timeout = Duration::from_millis(
             darkbot_solana::runtime_config::active()

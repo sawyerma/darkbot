@@ -132,11 +132,24 @@ export function toCaptureView(m: CaptureMessage): CaptureView {
 
 export function toSystemView(m: SystemMessage): SystemView {
   const effective = m.operational?.effective;
+  const setting = (name: string, value: string): [string, { value: string; source: string }] =>
+    [name, { value, source: effective?.sources[name] ?? "" }];
   return {
     activated: effective !== undefined,
     profile: effective?.profile ?? null,
+    profileSource: effective?.sources.profile ?? null,
     parameterCount: m.operational?.parameters.length ?? 0,
-    parameters: new Map((m.operational?.parameters ?? []).map((p) => [p.field, { value: p.value, unit: p.unit, source: p.source }])),
+    parameters: new Map((m.operational?.parameters ?? []).map((p) => [p.field, {
+      value: p.value, unit: p.unit, source: p.source, defaultValue: p.defaultValue, minimum: p.minimum, maximum: p.maximum,
+      provisional: p.provisional || null, changeRule: p.changeRule,
+    }])),
+    settings: new Map(effective ? [
+      setting("diagnostics", String(effective.diagnostics)),
+      setting("threshold_trigger", String(effective.thresholdTrigger)),
+      setting("c0_census", String(effective.c0Census)),
+      setting("source_geyser", effective.sourceGeyser),
+      setting("source_geyser_provider", effective.sourceGeyserProvider),
+    ] : []),
     liveAuthorized: effective ? effective.liveAuthorized : null,
     submissionAuthorized: effective ? effective.submissionAuthorized : null,
   };

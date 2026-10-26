@@ -2711,11 +2711,15 @@ Secret-free effective operational record (runtime_config::EffectiveConfig).
 | fe_mode | [string](#string) |  | FE mode: smoke | full. |
 | fe_targets | [string](#string) | repeated | FE target accounts, base58. |
 | fe_group | [string](#string) |  | FE group account, base58. |
-| sources | [EffectiveRecord.SourcesEntry](#darkbot-project0-v1-EffectiveRecord-SourcesEntry) | repeated | Origin of every configured value by field name. |
+| sources | [EffectiveRecord.SourcesEntry](#darkbot-project0-v1-EffectiveRecord-SourcesEntry) | repeated | Origin of every configured value by field name; the profile&#39;s own origin is mode:&lt;mode&gt; (shadow|econ4h|market) when the operating mode selected it. |
 | provider_capacity_qualified | [bool](#bool) |  | Provider capacity qualified (fixed false today). |
 | free_only | [bool](#bool) |  | Free-plan-only operation (fixed true today). |
 | live_authorized | [bool](#bool) |  | LIVE authorized (fixed false today). |
 | submission_authorized | [bool](#bool) |  | Transaction submission authorized (fixed false today). |
+| threshold_trigger | [bool](#bool) |  | Threshold trigger instead of the R127 sweep (P0_USE_THRESHOLD_TRIGGER). |
+| c0_census | [bool](#bool) |  | C0 census on the startup sweep (P0_C0_CENSUS). |
+| source_geyser | [string](#string) |  | Start mode of the Geyser source unit: off | observe | active. |
+| source_geyser_provider | [string](#string) |  | Provider of the Geyser source unit. |
 
 
 
@@ -2767,7 +2771,11 @@ One numeric operational parameter of runtime_config::PARAMETERS.
 | value | [uint64](#uint64) |  | Active value of this process. |
 | default_value | [uint64](#uint64) |  | Built-in default. |
 | env | [string](#string) |  | Environment variable that sets it. |
-| source | [string](#string) |  | Origin of the value: profile:&lt;name&gt; | environment | config_file | cli | builtin_default. |
+| source | [string](#string) |  | Origin of the value: profile:&lt;name&gt; | environment | config_file | cli | fe_mode:full | builtin_default. |
+| minimum | [uint64](#uint64) |  | Smallest valid value. |
+| maximum | [uint64](#uint64) |  | Largest valid value. |
+| provisional | [string](#string) |  | Open measurement question (ENTSCHEIDUNGEN §3, e.g. B-2) that keeps the value provisional; empty for a value no measurement question covers. |
+| change_rule | [string](#string) |  | When a change takes effect: restart (every numeric parameter today). |
 
 
 

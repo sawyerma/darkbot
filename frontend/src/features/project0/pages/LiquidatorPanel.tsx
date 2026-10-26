@@ -19,7 +19,7 @@ export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,fina
  <DetailRow title="Running liquidators" value={owner&&ownerStatus==="LIVE"?`1 · ${owner.mode} · ${owner.engine?.runState??"—"} · ${authorization}`:`— · ${ownerStatus} · ${authorization}`}/>
  <DetailRow title="Available working capital" value={usdMicroDisplay(finance?.availableCapitalUsdMicro)}/>
  <DetailRow title="Realized net PnL" value={`${usdMicroDisplay(finance?.realizedNetPnlUsdMicro)} · ${finance?.status??"UNKNOWN"}`}/></Section>
- <OwnerSection owner={owner} topicStatus={ownerStatus} parameters={system?.parameters??null}/>
+ <OwnerSection owner={owner} topicStatus={ownerStatus} system={system}/>
  <Section title="Bots & strategies" aside={<button className="p0-secondary" onClick={()=>fleet.create()}>+ Add bot</button>}>
  <div className="p0-fleet"><div><p className="p0-quiet">Liquidators · {fleet.drafts.length} drafts</p>
  <div role="listbox" aria-label="Bot drafts">{fleet.drafts.map(x=><button key={x.id} role="option" aria-selected={x.id===fleet.selectedId}

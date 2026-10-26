@@ -105,13 +105,31 @@ export interface CaptureView {
   provider: ProviderView | null;
 }
 
+/** One operational parameter as the engine's registry states it (DEC-05: value, source, default,
+ *  range, change rule and the open measurement question that keeps it provisional). */
+export interface ParameterView {
+  value: bigint;
+  unit: string;
+  source: string;
+  defaultValue: bigint;
+  minimum: bigint;
+  maximum: bigint;
+  /** ENTSCHEIDUNGEN §3 question (e.g. B-2); null for a value no measurement question covers. */
+  provisional: string | null;
+  changeRule: string;
+}
+
 export interface SystemView {
   /** false: the process runs on built-in defaults (no effective record). */
   activated: boolean;
   profile: string | null;
+  /** Origin of the profile: mode:<mode> when the operating mode selected it (DEC-05). */
+  profileSource: string | null;
   parameterCount: number;
-  /** Every operational parameter by field (value, unit, source) — the engine's one authority. */
-  parameters: ReadonlyMap<string, { value: bigint; unit: string; source: string }>;
+  /** Every operational parameter by field — the engine's one authority. */
+  parameters: ReadonlyMap<string, ParameterView>;
+  /** The owner's typed settings with their sources (DEC-05); empty without an effective record. */
+  settings: ReadonlyMap<string, { value: string; source: string }>;
   liveAuthorized: boolean | null;
   submissionAuthorized: boolean | null;
 }

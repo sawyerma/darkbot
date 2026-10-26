@@ -2,7 +2,7 @@ import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/project0/v1/capture_pb";
-import { SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
+import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import { AnalyticsJobsSchema, BacktestJobCommandSchema } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
@@ -24,7 +24,7 @@ function ownerTopics(): Map<TopicId, { wireName: string; payloadType: string; pa
   ]);
 }
 
-async function feed(page: Page, initiallyReported = true, owner = false) {
+async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status")) {
   const extra = owner ? ownerTopics() : new Map();
   let socket: WebSocketRoute;
   let seq = 1n;
@@ -56,7 +56,7 @@ async function feed(page: Page, initiallyReported = true, owner = false) {
         if (!initiallyReported) return;
         const own = extra.get(msg.value.topic);
         if (msg.value.topic === TopicId.PROJECT0_STATUS) {
-          send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n, quality: StateQuality.OK, sourceId: "TEST_ONLY", payload: golden("system_status") } });
+          send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n, quality: StateQuality.OK, sourceId: "TEST_ONLY", payload: system } });
         } else if (own) {
           send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n, quality: StateQuality.OK, sourceId: "TEST_ONLY",
             sourceTimestampUnixNs: BigInt(Date.now()) * 1_000_000n, payload: own.payload } });
@@ -246,6 +246,21 @@ test("execution authorization and running liquidators are never fixed claims", a
   await expect(page.getByText("0 · LIVE not authorized")).toHaveCount(0);
   await page.getByRole("button", { name: "+ Add bot" }).click();
   await expect(page.locator(".p0-line", { hasText: "Execution status" })).toHaveText("Execution statusAuthorization unknown");
+});
+
+test("DEC-05: effective values reach the Liquidator tab with source, range and the provisional marker", async ({ page }) => {
+  const m = fromBinary(SystemStatusSchema, golden("system_status"));
+  m.operational!.effective = create(EffectiveRecordSchema, { profile: "performance", sources: { profile: "mode:econ4h", threshold_trigger: "environment" },
+    thresholdTrigger: true, sourceGeyser: "off", sourceGeyserProvider: "publicnode" });
+  await feed(page, true, false, toBinary(SystemStatusSchema, m));
+  await badge(page).click();
+  await expect(page.getByText(`performance (mode:econ4h) · ${m.operational!.parameters.length} parameters`, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await tab(page, "Liquidator");
+  const row = (title: string) => page.locator(".p0-line", { hasText: title });
+  await expect(row("workers").first()).toContainText("1 threads · builtin_default · default 1 · 1…4294967295 · restart · provisional, measurement open (B-2)");
+  await expect(row("max_slippage_bps")).toContainText("0 bps · builtin_default · default 0 · 0…10000 · restart");
+  await expect(row("threshold_trigger")).toContainText("true · environment · restart");
 });
 
 test("owner and analytics topics reach their tabs; job and source commands take the one command path", async ({ page }) => {

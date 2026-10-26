@@ -2,7 +2,7 @@
 
 The launchers pass an operator value through but never set their own default for a key of the
 parameter registry (`runtime_config.rs` `parameters!`) or of `runtime_config::defaults`'
-launcher-wide waits — two defaults drifted apart before (recovery catch-up: Rust 30 s, the econ4h
+launcher-wide waits (DEC-05: the owner's limits included) — two defaults drifted apart before (recovery catch-up: Rust 30 s, the econ4h
 launcher 120 s, Shadow 30 s).
 """
 import pathlib
@@ -18,16 +18,15 @@ def runtime_owned_keys():
     text = CONFIG.read_text()
     block = text[text.index('parameters! {'):]
     block = block[:block.index('\n}')]
-    keys = set(re.findall(r'"((?:P0|RAYON)_[A-Z0-9_]+)";', block))
-    keys |= {'P0_RECOVERY_ROOT_CATCHUP_SECS', 'P0_RECOVERY_ROOT_STALL_SECS',
-             'P0_RECOVERY_ROOT_HARD_MAX_SECS'}
-    return keys
+    return set(re.findall(r'"((?:P0|RAYON)_[A-Z0-9_]+)";', block))
 
 
 class SingleDefault(unittest.TestCase):
     def test_launchers_set_no_default_for_a_runtime_owned_key(self):
         keys = runtime_owned_keys()
-        self.assertIn('P0_INGRESS_BUFFER', keys)
+        # DEC-05: the owner's limits and the recovery waits are registry keys too.
+        self.assertTrue({'P0_INGRESS_BUFFER', 'P0_MAX_CONCURRENT', 'P0_MIN_PROFIT',
+                         'P0_RECOVERY_ROOT_CATCHUP_SECS'} <= keys)
         found = []
         for script in sorted(SCRIPTS.glob('*.sh')):
             for n, line in enumerate(script.read_text().splitlines(), 1):

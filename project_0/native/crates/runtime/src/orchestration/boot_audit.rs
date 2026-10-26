@@ -220,22 +220,24 @@ pub fn identity_with(
     })
 }
 
-/// The operational config of a `p0ctl run start`: its operational arguments (after `--`) plus the
-/// run duration as CLI value. One rule for p0ctl and for the runtime it launches (X1), which
-/// re-resolves it from its own arguments and environment.
+/// The operational config of a `p0ctl run start` of operating mode `mode` (DEC-05: through its
+/// profile): its operational arguments (after `--`) plus the run duration as CLI value. One rule
+/// for p0ctl and for the runtime it launches (X1), which re-resolves it from its own arguments
+/// and environment.
 pub fn start_config(
+    mode: &str,
     operational: &[String],
     duration: &str,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<darkbot_solana::runtime_config::Resolved, String> {
     let mut args = operational.to_vec();
     args.extend(["--duration".into(), duration.into()]);
-    darkbot_solana::runtime_config::Resolved::parse(&args, env)
+    darkbot_solana::runtime_config::Resolved::for_mode(mode, &args, env)
 }
 
 /// X1: the identity of a runtime launched by `p0ctl run start` (`args` = its operational
-/// arguments, `P0_MEASUREMENT_DURATION` = the launcher's `--duration`), compared with the
-/// approved network audit before admission.
+/// arguments, `P0_MEASUREMENT_DURATION` = the launcher's `--duration`, `P0_MODE` its mode),
+/// compared with the approved network audit before admission.
 pub fn launched_identity(
     project: &Path,
     flags: SafetyFlags,
@@ -244,7 +246,8 @@ pub fn launched_identity(
 ) -> Result<AuditedIdentity, String> {
     let duration = env("P0_MEASUREMENT_DURATION")
         .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?;
-    let resolved = start_config(args, &duration, env)
+    let mode = env("P0_MODE").ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MODE")?;
+    let resolved = start_config(&mode, args, &duration, env)
         .map_err(|e| format!("BOOT_IDENTITY_DRIFT: runtime_config ({e})"))?;
     identity_with(project, flags, &resolved.config)
 }

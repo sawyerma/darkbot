@@ -79,7 +79,7 @@ pub(super) fn config(
     journal_path: &std::path::Path,
     use_threshold_trigger: bool,
 ) -> Result<Option<CensusConfig>, Box<dyn std::error::Error>> {
-    if !config::parsed_or("P0_C0_CENSUS", false)? {
+    if !darkbot_solana::runtime_config::active().c0_census {
         return Ok(None);
     }
     // The census rides on the R127 startup sweep; threshold-trigger mode has none, and a census

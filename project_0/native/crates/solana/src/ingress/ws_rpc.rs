@@ -97,30 +97,24 @@ pub(crate) fn is_application_frame(frame: &Message) -> bool {
 }
 
 impl WsRpcConfig {
+    /// The WSS bounds of the operational config (its registry defaults when none is installed,
+    /// DEC-05: no second set of literals); the recovery budget only with an installed config.
     pub fn new(ws_url: String, subscription: Subscription) -> Self {
-        let mut config = WsRpcConfig {
+        let p = &crate::runtime_config::active().limits;
+        WsRpcConfig {
             ws_url,
             subscription,
             commitment: crate::state::STATE_COMMITMENT,
-            reconnect_initial: Duration::from_millis(500),
-            reconnect_max: Duration::from_secs(30),
-            idle_timeout: Duration::from_secs(60),
+            reconnect_initial: Duration::from_millis(p.wss_reconnect_ms),
+            reconnect_max: Duration::from_millis(p.wss_reconnect_max_ms),
+            idle_timeout: Duration::from_millis(p.wss_idle_timeout_ms),
             heartbeat_interval: None,
-            recovery_budget: None,
-            recovery_attempts: 8,
-            ack_per_subscription: Duration::from_millis(5),
+            recovery_budget: crate::runtime_config::configured()
+                .then(|| Duration::from_millis(p.wss_recovery_ms)),
+            recovery_attempts: p.wss_attempts as u32,
+            ack_per_subscription: Duration::from_millis(p.wss_ack_ms_per_subscription),
             health_interval: Duration::from_secs(5),
-        };
-        if crate::runtime_config::configured() {
-            let p = &crate::runtime_config::active().limits;
-            config.reconnect_initial = Duration::from_millis(p.wss_reconnect_ms);
-            config.reconnect_max = Duration::from_millis(p.wss_reconnect_max_ms);
-            config.idle_timeout = Duration::from_millis(p.wss_idle_timeout_ms);
-            config.recovery_budget = Some(Duration::from_millis(p.wss_recovery_ms));
-            config.recovery_attempts = p.wss_attempts as u32;
-            config.ack_per_subscription = Duration::from_millis(p.wss_ack_ms_per_subscription);
         }
-        config
     }
 }
 
