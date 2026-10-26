@@ -6,6 +6,17 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 
 use crate::format::{CaptureRecord, JournalError, RecordKind};
+use crate::storage::budget::{BytePermit, MemoryBudget};
+
+/// Bytes one queued record holds besides its payload: the queue slot.
+pub const RECORD_OVERHEAD: usize = std::mem::size_of::<Queued>();
+
+/// A record in the queue, with the bytes it holds of the capture budget.
+#[derive(Debug)]
+struct Queued {
+    record: CaptureRecord,
+    permit: Option<BytePermit>,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RecorderStats {
@@ -13,6 +24,9 @@ pub struct RecorderStats {
     pub exhausted: bool,
     pub enqueued: u64,
     pub dropped_full: u64,
+    /// Records the capture's byte budget refused (a visible loss like a
+    /// full queue: the sequence is consumed).
+    pub dropped_budget: u64,
     pub rejected_oversize: u64,
     pub disconnected: u64,
 }
@@ -23,35 +37,42 @@ struct RecorderCounters {
     next_sequence: AtomicU64,
     enqueued: AtomicU64,
     dropped_full: AtomicU64,
+    dropped_budget: AtomicU64,
     rejected_oversize: AtomicU64,
     disconnected: AtomicU64,
 }
 
 /// Non-blocking producer side of the bounded capture queue.
 pub struct Recorder {
-    sender: SyncSender<CaptureRecord>,
+    sender: SyncSender<Queued>,
     max_payload: usize,
+    budget: Option<Arc<MemoryBudget>>,
     counters: Arc<RecorderCounters>,
 }
 
 pub struct RecorderDrain {
-    receiver: Receiver<CaptureRecord>,
+    receiver: Receiver<Queued>,
     counters: Arc<RecorderCounters>,
 }
 
 /// Exclusive V2 drain. It cannot be mixed with raw receives.
 pub struct SpannedDrain {
-    receiver: Receiver<CaptureRecord>,
+    receiver: Receiver<Queued>,
     counters: Arc<RecorderCounters>,
     expected: u64,
     reported_lost: u64,
-    pending: Option<CaptureRecord>,
+    pending: Option<Queued>,
+    /// The bytes of the record returned last: released at the next
+    /// receive, after the caller wrote it.
+    held: Option<BytePermit>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordError {
     PayloadTooLarge { len: usize, max: usize },
     QueueFull { sequence: u64 },
+    /// The capture's byte budget is exhausted; the sequence is consumed.
+    BudgetExhausted { sequence: u64 },
     Disconnected { sequence: u64 },
     SequenceOverflow,
 }
@@ -68,17 +89,29 @@ impl Recorder {
         let counters = Arc::new(RecorderCounters {
             exhausted: AtomicBool::new(false),
             next_sequence: AtomicU64::new(0), enqueued: AtomicU64::new(0),
-            dropped_full: AtomicU64::new(0), rejected_oversize: AtomicU64::new(0),
-            disconnected: AtomicU64::new(0),
+            dropped_full: AtomicU64::new(0), dropped_budget: AtomicU64::new(0),
+            rejected_oversize: AtomicU64::new(0), disconnected: AtomicU64::new(0),
         });
-        Ok((Self { sender, max_payload, counters: Arc::clone(&counters) },
+        Ok((Self { sender, max_payload, budget: None, counters: Arc::clone(&counters) },
             RecorderDrain { receiver, counters }))
     }
 
     pub fn bounded_spanned(capacity: usize, max_payload: usize) -> Result<(Self, SpannedDrain), JournalError> {
         let (recorder, drain) = Self::bounded(capacity, max_payload)?;
         Ok((recorder, SpannedDrain { receiver: drain.receiver, counters: drain.counters,
-            expected: 0, reported_lost: 0, pending: None }))
+            expected: 0, reported_lost: 0, pending: None, held: None }))
+    }
+
+    /// A spanned recorder whose queued records hold their bytes
+    /// (`RECORD_OVERHEAD` + payload) in `budget` until the writer took them.
+    pub fn bounded_spanned_budgeted(
+        capacity: usize,
+        max_payload: usize,
+        budget: Arc<MemoryBudget>,
+    ) -> Result<(Self, SpannedDrain), JournalError> {
+        let (mut recorder, drain) = Self::bounded_spanned(capacity, max_payload)?;
+        recorder.budget = Some(budget);
+        Ok((recorder, drain))
     }
 
     /// Never waits. A failed enqueue remains visible through the returned
@@ -107,14 +140,27 @@ impl Recorder {
                 max: self.max_payload,
             });
         }
-        // Allocate before consuming a sequence: allocation failure cannot
-        // fabricate a queue-loss span after a caught unwind.
-        let payload = payload.to_vec().into_boxed_slice();
         let sequence = self.counters.next_sequence.load(Ordering::Acquire);
         let Some(next) = sequence.checked_add(1) else {
             self.counters.exhausted.store(true, Ordering::Release);
             return Err(RecordError::SequenceOverflow);
         };
+        // The bytes are admitted before they are allocated. A refusal
+        // consumes the sequence: replay shows the loss as a gap.
+        let permit = match &self.budget {
+            None => None,
+            Some(budget) => match budget.try_reserve(RECORD_OVERHEAD.saturating_add(payload.len())) {
+                Some(permit) => Some(permit),
+                None => {
+                    self.counters.next_sequence.store(next, Ordering::Release);
+                    self.counters.dropped_budget.fetch_add(1, Ordering::Relaxed);
+                    return Err(RecordError::BudgetExhausted { sequence });
+                }
+            },
+        };
+        // Allocate before consuming a sequence: allocation failure cannot
+        // fabricate a queue-loss span after a caught unwind.
+        let payload = payload.to_vec().into_boxed_slice();
         self.counters.next_sequence.store(next, Ordering::Release);
         let record = CaptureRecord {
             sequence,
@@ -122,7 +168,7 @@ impl Recorder {
             timestamp_ns,
             payload,
         };
-        match self.sender.try_send(record) {
+        match self.sender.try_send(Queued { record, permit }) {
             Ok(()) => {
                 self.counters.enqueued.fetch_add(1, Ordering::Relaxed);
                 Ok(sequence)
@@ -144,6 +190,7 @@ impl Recorder {
             next_sequence: self.counters.next_sequence.load(Ordering::Acquire),
             enqueued: self.counters.enqueued.load(Ordering::Acquire),
             dropped_full: self.counters.dropped_full.load(Ordering::Acquire),
+            dropped_budget: self.counters.dropped_budget.load(Ordering::Acquire),
             rejected_oversize: self.counters.rejected_oversize.load(Ordering::Acquire),
             disconnected: self.counters.disconnected.load(Ordering::Acquire),
         }
@@ -155,24 +202,29 @@ impl SpannedDrain {
     /// QueueFull holes can precede a later success. At channel close its final
     /// cursor also exposes trailing losses. Gap timestamp zero means unknown.
     pub fn recv_spanned(&mut self) -> Result<CaptureRecord, JournalError> {
-        let record = self.pending.take().or_else(|| self.receiver.recv().ok());
-        let next = record.as_ref().map_or_else(
-            || self.counters.next_sequence.load(Ordering::Acquire), |r| r.sequence);
+        // The caller wrote the previous record: its bytes are free.
+        self.held = None;
+        let queued = self.pending.take().or_else(|| self.receiver.recv().ok());
+        let next = queued.as_ref().map_or_else(
+            || self.counters.next_sequence.load(Ordering::Acquire), |q| q.record.sequence);
         if next < self.expected { return Err(JournalError::SequenceGap { expected: self.expected, observed: next }); }
         if next > self.expected {
             let span = next - self.expected;
             // A hole must be backed by actual QueueFull accounting; absence
             // alone never establishes a loss reason.
-            if span > self.counters.dropped_full.load(Ordering::Acquire).saturating_sub(self.reported_lost) { return Err(JournalError::InvalidSpan); }
+            let dropped = self.counters.dropped_full.load(Ordering::Acquire)
+                .saturating_add(self.counters.dropped_budget.load(Ordering::Acquire));
+            if span > dropped.saturating_sub(self.reported_lost) { return Err(JournalError::InvalidSpan); }
             let gap = CaptureRecord { sequence: self.expected, kind: RecordKind::GapSpan,
                 timestamp_ns: 0, payload: span.to_le_bytes().to_vec().into_boxed_slice() };
             self.reported_lost += span;
-            self.pending = record;
+            self.pending = queued;
             self.expected = next;
             return Ok(gap);
         }
-        let record = record.ok_or(JournalError::QueueDisconnected)?;
+        let Queued { record, permit } = queued.ok_or(JournalError::QueueDisconnected)?;
         self.expected = self.expected.checked_add(1).ok_or(JournalError::SequenceOverflow)?;
+        self.held = permit;
         Ok(record)
     }
 
@@ -184,12 +236,13 @@ impl RecorderDrain {
     pub fn recv(&self) -> Result<CaptureRecord, JournalError> {
         self.receiver
             .recv()
+            .map(|queued| queued.record)
             .map_err(|_| JournalError::QueueDisconnected)
     }
 
     pub fn try_recv(&self) -> Result<Option<CaptureRecord>, JournalError> {
         match self.receiver.try_recv() {
-            Ok(record) => Ok(Some(record)),
+            Ok(queued) => Ok(Some(queued.record)),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(JournalError::QueueDisconnected),
         }
@@ -215,6 +268,36 @@ mod cursor_tests {
         assert_eq!(recorder.stats().next_sequence, u64::MAX);
         assert!(recorder.stats().exhausted);
     }
+    /// Storage contract: the queue is bounded by bytes. A record the budget
+    /// refuses is a counted loss with its sequence consumed, so the drain
+    /// reports it as a gap; a record's bytes are held until the writer
+    /// asks for the next one.
+    #[test]
+    fn the_byte_budget_bounds_the_queue_and_its_losses_are_gaps() {
+        let budget = MemoryBudget::new(2 * RECORD_OVERHEAD + 10).unwrap();
+        let (mut recorder, mut drain) =
+            Recorder::bounded_spanned_budgeted(8, 64, Arc::clone(&budget)).unwrap();
+        recorder.try_record(RecordKind::Runtime, 0, &[1; 6]).unwrap();
+        assert_eq!(
+            recorder.try_record(RecordKind::Runtime, 0, &[2; 6]),
+            Err(RecordError::BudgetExhausted { sequence: 1 })
+        );
+        recorder.try_record(RecordKind::Runtime, 0, &[3; 4]).unwrap();
+        assert_eq!(budget.in_use(), 2 * RECORD_OVERHEAD + 10);
+        assert_eq!(recorder.stats().dropped_budget, 1);
+        assert_eq!(drain.recv_spanned().unwrap().sequence, 0);
+        // Held until the next receive.
+        assert_eq!(budget.in_use(), 2 * RECORD_OVERHEAD + 10);
+        let gap = drain.recv_spanned().unwrap();
+        assert_eq!((gap.sequence, gap.kind), (1, RecordKind::GapSpan));
+        assert_eq!(budget.in_use(), RECORD_OVERHEAD + 4);
+        assert_eq!(drain.recv_spanned().unwrap().sequence, 2);
+        recorder.try_record(RecordKind::Runtime, 0, &[4; 6]).unwrap();
+        assert_eq!(drain.recv_spanned().unwrap().sequence, 3);
+        assert_eq!(budget.in_use(), RECORD_OVERHEAD + 6);
+        assert_eq!(budget.peak(), 2 * RECORD_OVERHEAD + 10);
+    }
+
     #[test]
     fn single_loss_is_emitted_before_the_following_success() {
         let (mut recorder, mut drain) = Recorder::bounded_spanned(1, 64).unwrap();

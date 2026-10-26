@@ -13,12 +13,16 @@
 mod format;
 mod recorder;
 mod replay;
+pub mod storage;
 
 pub use format::{
     CaptureRecord, DEFAULT_MAX_PAYLOAD, HEADER_LEN, JOURNAL_MAGIC, JOURNAL_VERSION, JOURNAL_SPAN_VERSION, JournalError,
     JournalManifest, JournalWriter, RecordKind,
 };
-pub use recorder::{RecordError, Recorder, RecorderDrain, RecorderStats, SpannedDrain};
+pub use recorder::{
+    RECORD_OVERHEAD, RecordError, Recorder, RecorderDrain, RecorderStats, SpannedDrain,
+};
+pub use storage::budget::{BytePermit, MemoryBudget};
 pub use replay::JournalReader;
 
 // Checksum and hash primitives shared by the writer and the reader. They stay
