@@ -427,6 +427,56 @@ pub mod capture_preflight {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// v2 (Phase F gate L4): the peak is the densest second of the rates
+    /// run's records and the burst its longest run of seconds above the
+    /// average; the backlog that trace builds drained at the measured writer
+    /// rate, in bytes and records, against the byte budget and the queue.
+    pub const QUEUE_RECORDS: u16 = 21;
+    pub const BACKLOG_BYTES: u16 = 22;
+    pub const BACKLOG_RECORDS: u16 = 23;
+    pub const WRITER_RECORDS_PER_S: u16 = 24;
+
+    pub const V2: Schema = Schema {
+        name: "darkbot.bsc.capture-preflight.v1",
+        record_type: 57,
+        schema_version: 2,
+        fields: &[
+            Field::req(DURATION_S, "duration_s", U64),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(RATES_RUN_ID, "rates_run_id", Text),
+            Field::req(AVERAGE_BYTES_PER_S, "average_bytes_per_s", U64),
+            Field::req(PEAK_BYTES_PER_S, "peak_bytes_per_s", U64),
+            Field::req(BURST_S, "burst_s", U64),
+            Field::req(OVERHEAD_PPM, "overhead_ppm", U64),
+            Field::req(PROBE_BYTES, "probe_bytes", U64),
+            Field::req(WRITER_BYTES_PER_S, "writer_bytes_per_s", U64),
+            Field::req(FREE_DISK_BYTES, "free_disk_bytes", U64),
+            Field::req(DISK_RESERVE_BYTES, "disk_reserve_bytes", U64),
+            Field::req(MEMORY_BUDGET_BYTES, "memory_budget_bytes", U64),
+            Field::req(VERDICT, "verdict", Text),
+            Field::opt(EXPECTED_BYTES, "expected_bytes", U64),
+            Field::opt(BURST_BACKLOG_BYTES, "burst_backlog_bytes", U64),
+            Field::opt(BLOCKING_RESOURCE, "blocking_resource", Text),
+            Field::opt(ACHIEVABLE_S, "achievable_s", U64),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::req(QUEUE_RECORDS, "queue_records", U64),
+            Field::opt(BACKLOG_BYTES, "backlog_bytes", U64),
+            Field::opt(BACKLOG_RECORDS, "backlog_records", U64),
+            Field::req(WRITER_RECORDS_PER_S, "writer_records_per_s", U64),
+        ],
+    };
+
+    /// A preflight record of either version.
+    pub fn decode_preflight(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+    }
 }
 
 /// The native local ingest latency of the production code on one host
@@ -602,6 +652,7 @@ pub const ALL: &[&Schema] = &[
     &replay_proof::SCHEMA,
     &replay_proof::V3,
     &capture_preflight::SCHEMA,
+    &capture_preflight::V2,
     &ingest_latency::SCHEMA,
     &capture_quality::SCHEMA,
 ];

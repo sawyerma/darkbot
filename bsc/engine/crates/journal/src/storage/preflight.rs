@@ -25,6 +25,12 @@ pub struct CapacityInputs {
     pub disk_reserve_bytes: u64,
     /// The capture's byte budget (`MemoryBudget`).
     pub memory_budget_bytes: u64,
+    /// Measured instead of `(peak - writer) * burst`: the largest backlog
+    /// of a recorded trace drained at the writer's rate, in bytes and in
+    /// records, and the recorder's queue capacity in records.
+    pub measured_backlog_bytes: Option<u64>,
+    pub measured_backlog_records: Option<u64>,
+    pub queue_records: u64,
 }
 
 /// The resource that blocks a run.
@@ -36,6 +42,8 @@ pub enum Resource {
     WriterThroughput,
     /// A burst above the writer's rate does not fit the memory budget.
     Memory,
+    /// A burst holds more records than the recorder's queue.
+    Queue,
     /// The journal does not fit the free disk above the reserve.
     Disk,
 }
@@ -79,14 +87,23 @@ pub fn preflight(i: &CapacityInputs) -> Preflight {
         };
     }
     // During a burst the writer drains at its rate; the rest waits in
-    // memory.
-    let backlog = i
-        .peak_bytes_per_s
-        .saturating_sub(i.writer_bytes_per_s)
-        .saturating_mul(i.burst_s);
+    // memory (measured on a trace where one exists).
+    let backlog = i.measured_backlog_bytes.unwrap_or_else(|| {
+        i.peak_bytes_per_s
+            .saturating_sub(i.writer_bytes_per_s)
+            .saturating_mul(i.burst_s)
+    });
     if backlog > i.memory_budget_bytes {
         return Preflight::Blocked {
             resource: Resource::Memory,
+            achievable_s: 0,
+        };
+    }
+    if i.measured_backlog_records
+        .is_some_and(|r| r > i.queue_records)
+    {
+        return Preflight::Blocked {
+            resource: Resource::Queue,
             achievable_s: 0,
         };
     }
@@ -115,6 +132,17 @@ pub fn preflight(i: &CapacityInputs) -> Preflight {
     }
 }
 
+/// The largest backlog of a trace of per-second amounts (bytes or records)
+/// drained at `rate` per second: what waits in memory at its worst.
+pub fn measured_backlog(per_second: &[u64], rate: u64) -> u64 {
+    let (mut backlog, mut worst) = (0u64, 0u64);
+    for amount in per_second {
+        backlog = backlog.saturating_add(*amount).saturating_sub(rate);
+        worst = worst.max(backlog);
+    }
+    worst
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +158,9 @@ mod tests {
             free_disk_bytes: 10_000_000_000,
             disk_reserve_bytes: 1_000_000_000,
             memory_budget_bytes: 64_000_000,
+            measured_backlog_bytes: None,
+            measured_backlog_records: None,
+            queue_records: 4_096,
         }
     }
 
@@ -179,6 +210,36 @@ mod tests {
                 ..
             }
         ));
+        // A measured backlog replaces peak x burst, and its records must fit
+        // the queue.
+        let measured = CapacityInputs {
+            measured_backlog_bytes: Some(64_000_001),
+            ..inputs()
+        };
+        assert!(matches!(
+            preflight(&measured),
+            Preflight::Blocked {
+                resource: Resource::Memory,
+                ..
+            }
+        ));
+        let records = CapacityInputs {
+            measured_backlog_bytes: Some(1),
+            measured_backlog_records: Some(4_097),
+            ..inputs()
+        };
+        assert!(matches!(
+            preflight(&records),
+            Preflight::Blocked {
+                resource: Resource::Queue,
+                ..
+            }
+        ));
+        // The backlog of a trace drained at a rate: it grows through the
+        // seconds above the rate and drains in the quiet ones.
+        assert_eq!(measured_backlog(&[5, 5, 30, 30, 0, 0, 30], 10), 40);
+        assert_eq!(measured_backlog(&[10, 10, 10], 10), 0);
+        assert_eq!(measured_backlog(&[u64::MAX, u64::MAX], 0), u64::MAX);
         // 1.05 MB per second fit into 1.05 GB usable: 1000 s, not 1800.
         let full = CapacityInputs {
             free_disk_bytes: 2_050_000_000,

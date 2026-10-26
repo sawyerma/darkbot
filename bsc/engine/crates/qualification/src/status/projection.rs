@@ -992,7 +992,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // capture→replay identity proof (both written by bsc_runtime).
     let preflight = rundir.join("bsc-runtime/capture-preflight.dbrec");
     if let Some(bytes) = read(&preflight) {
-        match record::decode(&schema::bsc_capture::capture_preflight::SCHEMA, &bytes) {
+        match schema::bsc_capture::capture_preflight::decode_preflight(&bytes) {
             Ok(r) => monitoring
                 .records
                 .push(native_record(rundir, &preflight, &r)),

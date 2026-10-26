@@ -918,6 +918,9 @@ pub fn preflight_setup(config: &RuntimeConfig) -> crate::capture_preflight::Pref
         probe_bytes: config.preflight_probe_bytes,
         disk_reserve_bytes: config.disk_reserve_bytes,
         memory_budget_bytes: config.journal_budget_bytes as u64,
+        queue_records: config.journal_queue as u64,
+        max_payload: journal_max_payload(config),
+        sync: journal_setup(config).sync,
     }
 }
 

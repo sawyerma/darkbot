@@ -5,20 +5,28 @@
 //! capture's byte budget. Every input is a measurement of this host:
 //!
 //! - the rates of the newest run sealed by a `COMPLETE` manifest: its
-//!   journal bytes over its record time (average), the densest segment's
-//!   bytes over its own record time (peak, held for that segment's span),
-//!   and the manifest bytes against the journal bytes (overhead);
+//!   journal bytes over its record time (average), its records read again
+//!   and bucketed per second of record time (the peak second, the longest
+//!   run of seconds above the average as the burst), and the manifest
+//!   bytes against the journal bytes (overhead);
 //! - the writer throughput just measured on the capture volume: records of
 //!   that run's average size through the production `SegmentWriter`
-//!   (append, sync, seal with its read-back hash), timed;
+//!   (append, synced by the configured sync policy, sealed with its
+//!   read-back hash), timed, in bytes and in records per second;
+//! - the backlog that trace builds when drained at that writer rate, in
+//!   bytes against the byte budget and in records against the queue;
 //! - the volume's free bytes (`df -Pk`).
 //!
 //! Without a sealed run there is no rate and the run is `UNMEASURED`. The
 //! verdict is the journal crate's `preflight`.
 
 use crate::runtime_journal::RUN_MANIFEST;
-use darkbot_bsc_journal::storage::preflight::{CapacityInputs, Preflight, Resource, preflight};
+use darkbot_bsc_journal::storage::preflight::{
+    CapacityInputs, Preflight, Resource, measured_backlog, preflight,
+};
+use darkbot_bsc_journal::storage::run::RunReader;
 use darkbot_bsc_journal::storage::segments::{SegmentPolicy, SegmentWriter};
+use darkbot_bsc_journal::storage::writer::SyncPolicy;
 use darkbot_bsc_journal::{CaptureRecord, RecordKind};
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_capture::{capture_preflight as cp, capture_run as cr};
@@ -37,16 +45,46 @@ pub struct Rates {
     pub overhead_ppm: u64,
     /// Journal bytes per frame.
     pub average_record_bytes: u64,
+    /// The run's frame bytes and frames per second of record time.
+    pub bytes_per_second: Vec<u64>,
+    pub records_per_second: Vec<u64>,
 }
 
-fn per_second(bytes: u64, span_ns: u64) -> u64 {
+/// The frame bytes and frames of `run`'s records per second of record time.
+fn per_second(run: &Path, max_payload: usize) -> Result<(Vec<u64>, Vec<u64>), String> {
+    let mut reader =
+        RunReader::open(run, max_payload).map_err(|e| format!("{}: {e}", run.display()))?;
+    let (mut bytes, mut records): (Vec<u64>, Vec<u64>) = (Vec::new(), Vec::new());
+    let mut first: Option<u64> = None;
+    while let Some(r) = reader
+        .next_record()
+        .map_err(|e| format!("{}: {e}", run.display()))?
+    {
+        // Gap spans carry no time; every other record its own.
+        if r.timestamp_ns == 0 {
+            continue;
+        }
+        let start = *first.get_or_insert(r.timestamp_ns);
+        let second = usize::try_from(r.timestamp_ns.saturating_sub(start) / 1_000_000_000)
+            .map_err(|_| "record time beyond the address space".to_string())?;
+        if second >= bytes.len() {
+            bytes.resize(second + 1, 0);
+            records.resize(second + 1, 0);
+        }
+        bytes[second] += (darkbot_bsc_journal::HEADER_LEN + r.payload.len()) as u64;
+        records[second] += 1;
+    }
+    Ok((bytes, records))
+}
+
+fn rate_of(bytes: u64, span_ns: u64) -> u64 {
     u64::try_from((u128::from(bytes) * 1_000_000_000).div_ceil(u128::from(span_ns.max(1))))
         .unwrap_or(u64::MAX)
 }
 
 /// The rates of the newest run of `journal_dir` sealed by a `COMPLETE`
 /// manifest whose records span time; `None` when there is none.
-pub fn rates(journal_dir: &Path) -> Result<Option<Rates>, String> {
+pub fn rates(journal_dir: &Path, max_payload: usize) -> Result<Option<Rates>, String> {
     let mut runs: Vec<u64> = Vec::new();
     for entry in fs::read_dir(journal_dir).map_err(|e| format!("{}: {e}", journal_dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", journal_dir.display()))?;
@@ -94,40 +132,44 @@ pub fn rates(journal_dir: &Path) -> Result<Option<Rates>, String> {
         if journal == 0 || records == 0 {
             continue;
         }
-        let average = per_second(journal, last - first);
-        // The densest segment: its rate, held for its own span.
-        let (peak, burst_ns) = segments
-            .iter()
-            .filter_map(|s| {
-                let (a, b) = span(s)?;
-                Some((per_second(s.u64(cr::segment::BYTES).ok()?, b - a), b - a))
-            })
-            .max()
-            .unwrap_or((average, last - first));
+        let average = rate_of(journal, last - first);
+        let (bytes_per_second, records_per_second) =
+            per_second(&journal_dir.join(id.to_string()), max_payload)?;
+        let peak = bytes_per_second.iter().copied().max().unwrap_or(average);
+        // The longest run of seconds above the average rate.
+        let (mut burst, mut run) = (1u64, 0u64);
+        for b in &bytes_per_second {
+            run = if *b > average { run + 1 } else { 0 };
+            burst = burst.max(run);
+        }
         return Ok(Some(Rates {
             run_id: id.to_string(),
             average_bytes_per_s: average,
             peak_bytes_per_s: peak.max(average),
-            burst_s: burst_ns.div_ceil(1_000_000_000).max(1),
+            burst_s: burst,
             overhead_ppm: u64::try_from(
                 (u128::from(bytes.len() as u64) * 1_000_000).div_ceil(u128::from(journal)),
             )
             .unwrap_or(u64::MAX),
             average_record_bytes: journal.div_ceil(records),
+            bytes_per_second,
+            records_per_second,
         }));
     }
     Ok(None)
 }
 
-/// Bytes per second the production segment writer sustains on the volume
-/// of `volume_dir`: `probe_bytes` of records of `record_bytes` each
-/// appended, synced and sealed (fsync, read-back hash, rename, directory
-/// sync), timed; the probe's directory is removed afterwards.
+/// Bytes and records per second the production segment writer sustains on
+/// the volume of `volume_dir`: `probe_bytes` of records of `record_bytes`
+/// each appended, synced by `sync` like the capture's worker, and sealed
+/// (fsync, read-back hash, rename, directory sync), timed; the probe's
+/// directory is removed afterwards.
 pub fn writer_throughput(
     volume_dir: &Path,
     probe_bytes: u64,
     record_bytes: usize,
-) -> Result<u64, String> {
+    sync: SyncPolicy,
+) -> Result<(u64, u64), String> {
     let header = darkbot_bsc_journal::HEADER_LEN;
     let payload = record_bytes.saturating_sub(header).max(1);
     let dir = volume_dir.join(format!(
@@ -135,7 +177,7 @@ pub fn writer_throughput(
         std::process::id(),
         darkbot_bsc_record::observed_now()?
     ));
-    let run = || -> Result<u64, String> {
+    let run = || -> Result<(u64, u64), String> {
         let mut writer = SegmentWriter::create(
             &dir,
             SegmentPolicy {
@@ -147,6 +189,7 @@ pub fn writer_throughput(
         let body = vec![0xA5u8; payload].into_boxed_slice();
         let started = Instant::now();
         let (mut written, mut sequence) = (0u64, 0u64);
+        let (mut since_sync, mut synced_at) = (0u64, Instant::now());
         while written < probe_bytes {
             writer
                 .append(&CaptureRecord {
@@ -158,13 +201,19 @@ pub fn writer_throughput(
                 .map_err(|e| format!("preflight probe: {e}"))?;
             sequence += 1;
             written += (header + payload) as u64;
+            since_sync += 1;
+            if since_sync >= sync.every_records || synced_at.elapsed() >= sync.every {
+                writer.sync().map_err(|e| format!("preflight probe: {e}"))?;
+                since_sync = 0;
+                synced_at = Instant::now();
+            }
         }
         writer.sync().map_err(|e| format!("preflight probe: {e}"))?;
         writer
             .finish()
             .map_err(|e| format!("preflight probe: {e}"))?;
         let ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-        Ok(per_second(written, ns))
+        Ok((rate_of(written, ns), rate_of(sequence, ns)))
     };
     let result = run();
     let _ = fs::remove_dir_all(&dir);
@@ -221,6 +270,11 @@ pub struct PreflightSetup {
     pub probe_bytes: u64,
     pub disk_reserve_bytes: u64,
     pub memory_budget_bytes: u64,
+    /// The recorder's queue in records, the journal's payload bound and its
+    /// sync policy (the probe syncs like the worker).
+    pub queue_records: u64,
+    pub max_payload: usize,
+    pub sync: SyncPolicy,
 }
 
 /// One preflight: its measured inputs and the verdict.
@@ -229,6 +283,7 @@ pub struct Report {
     pub rates: Option<Rates>,
     pub probe_bytes: u64,
     pub writer_bytes_per_s: u64,
+    pub writer_records_per_s: u64,
     pub inputs: CapacityInputs,
     pub verdict: Preflight,
 }
@@ -236,7 +291,7 @@ pub struct Report {
 /// Measures and checks the planned capture into `journal_dir`.
 pub fn check(journal_dir: &Path, setup: PreflightSetup) -> Result<Report, String> {
     fs::create_dir_all(journal_dir).map_err(|e| format!("{}: {e}", journal_dir.display()))?;
-    let rates = rates(journal_dir)?;
+    let rates = rates(journal_dir, setup.max_payload)?;
     // Without a sealed run nothing is measured; the probe would have no
     // record size either.
     // The probe writes next to the journal directory, never inside it (the
@@ -244,16 +299,17 @@ pub fn check(journal_dir: &Path, setup: PreflightSetup) -> Result<Report, String
     // behind is removed first (Phase F gate M2).
     let volume = journal_dir.parent().unwrap_or(journal_dir);
     remove_stale_probes(volume)?;
-    let (writer, probe) = match &rates {
+    let ((writer, writer_records), probe) = match &rates {
         Some(r) => (
             writer_throughput(
                 volume,
                 setup.probe_bytes,
                 usize::try_from(r.average_record_bytes).unwrap_or(usize::MAX),
+                setup.sync,
             )?,
             setup.probe_bytes,
         ),
-        None => (0, 0),
+        None => ((0, 0), 0),
     };
     let inputs = CapacityInputs {
         duration_s: setup.duration_s,
@@ -265,11 +321,20 @@ pub fn check(journal_dir: &Path, setup: PreflightSetup) -> Result<Report, String
         free_disk_bytes: free_disk(journal_dir)?,
         disk_reserve_bytes: setup.disk_reserve_bytes,
         memory_budget_bytes: setup.memory_budget_bytes,
+        // The recorded trace drained at the measured writer rate.
+        measured_backlog_bytes: rates
+            .as_ref()
+            .map(|r| measured_backlog(&r.bytes_per_second, writer)),
+        measured_backlog_records: rates
+            .as_ref()
+            .map(|r| measured_backlog(&r.records_per_second, writer_records)),
+        queue_records: setup.queue_records,
     };
     Ok(Report {
         rates,
         probe_bytes: probe,
         writer_bytes_per_s: writer,
+        writer_records_per_s: writer_records,
         verdict: preflight(&inputs),
         inputs,
     })
@@ -282,7 +347,7 @@ impl Report {
 
     pub fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
         let i = &self.inputs;
-        let mut d = Draft::new(&cp::SCHEMA);
+        let mut d = Draft::new(&cp::V2);
         d.set(cp::DURATION_S, i.duration_s)
             .set(cp::CHAIN_ID, 56u64)
             .set(cp::PROVENANCE_TOOL, "bsc_runtime capture-preflight")
@@ -296,12 +361,20 @@ impl Report {
             .set(cp::FREE_DISK_BYTES, i.free_disk_bytes)
             .set(cp::DISK_RESERVE_BYTES, i.disk_reserve_bytes)
             .set(cp::MEMORY_BUDGET_BYTES, i.memory_budget_bytes)
+            .set(cp::QUEUE_RECORDS, i.queue_records)
+            .set(cp::WRITER_RECORDS_PER_S, self.writer_records_per_s)
             .push(
                 cp::NON_CLAIMS,
                 "LOCAL_MEASUREMENT: this host's capture volume and its last sealed run; the source rate of a native geth capture may differ",
             );
         if let Some(r) = &self.rates {
             d.set(cp::RATES_RUN_ID, r.run_id.as_str());
+        }
+        if let Some(b) = i.measured_backlog_bytes {
+            d.set(cp::BACKLOG_BYTES, b);
+        }
+        if let Some(r) = i.measured_backlog_records {
+            d.set(cp::BACKLOG_RECORDS, r);
         }
         match self.verdict {
             Preflight::Qualified {
@@ -366,6 +439,7 @@ fn resource_name(r: Resource) -> &'static str {
         Resource::WriterThroughput => "WRITER_THROUGHPUT",
         Resource::Memory => "MEMORY",
         Resource::Disk => "DISK",
+        Resource::Queue => "QUEUE",
     }
 }
 
@@ -373,7 +447,6 @@ fn resource_name(r: Resource) -> &'static str {
 mod tests {
     use super::*;
     use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RuntimeJournal};
-    use darkbot_bsc_record::decode;
 
     fn setup(duration_s: u64, reserve: u64) -> PreflightSetup {
         PreflightSetup {
@@ -381,6 +454,12 @@ mod tests {
             probe_bytes: 1 << 20,
             disk_reserve_bytes: reserve,
             memory_budget_bytes: 64 << 20,
+            queue_records: 256,
+            max_payload: 4096,
+            sync: SyncPolicy {
+                every_records: 64,
+                every: std::time::Duration::from_millis(1_000),
+            },
         }
     }
 
@@ -420,7 +499,7 @@ mod tests {
         write(&dir, 5);
         // A newer run without a manifest is not a measurement.
         fs::create_dir_all(dir.join("9")).unwrap();
-        let rates = rates(&dir).unwrap().unwrap();
+        let rates = rates(&dir, 4096).unwrap().unwrap();
         assert_eq!(rates.run_id, "5");
         // 101 frames of 64 payload bytes and the 1-byte end record, each
         // with its frame header, in 1 s.
@@ -437,8 +516,14 @@ mod tests {
         let r = check(&dir, setup(1_800, 0)).unwrap();
         assert!(r.qualified(), "{}", r.summary());
         assert!(r.writer_bytes_per_s > 0 && r.inputs.free_disk_bytes > 0);
-        let record = decode(&cp::SCHEMA, &r.encode(1).unwrap()).unwrap();
+        let record = cp::decode_preflight(&r.encode(1).unwrap()).unwrap();
         assert_eq!(record.text(cp::VERDICT).unwrap(), "QUALIFIED");
+        assert_eq!(record.u64(cp::QUEUE_RECORDS).unwrap(), 256);
+        assert!(record.u64(cp::WRITER_RECORDS_PER_S).unwrap() > 0);
+        assert_eq!(
+            record.u64(cp::BACKLOG_BYTES).ok(),
+            r.inputs.measured_backlog_bytes
+        );
         assert_eq!(record.text(cp::RATES_RUN_ID).unwrap(), "5");
         // The probe leaves nothing behind, in the journal directory or next
         // to it, and the stale one is gone.
