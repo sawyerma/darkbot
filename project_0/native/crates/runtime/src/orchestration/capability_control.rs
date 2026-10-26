@@ -1,4 +1,5 @@
-//! DEC-13 operator capability control (`p0ctl capability set LIVE LIVE|OFF`): typed,
+//! DEC-13 operator capability control (`p0ctl capability set LIVE LIVE|OFF`, DEC-04
+//! `p0ctl capability set HOLD_B OFF|OBSERVE|ACTIVE`): typed,
 //! append-only request files beside the source-control log, rung by the same doorbell and handed
 //! to the state owner by the same control thread (`source_control::spawn`). The operator's value
 //! is the *requested* one; only the owner decides the *effective* one and records it
@@ -8,7 +9,7 @@ use crate::analytics::journal;
 use crate::analytics::payload::{CapabilityControlOutcome, CapabilityControlRequest};
 use std::path::{Path, PathBuf};
 
-/// The one controllable capability of this build.
+/// The controllable capability of FE-06 (DEC-13).
 pub const LIVE: &str = "LIVE";
 /// LIVE not requested — the value of every start.
 pub const LIVE_OFF: &str = "OFF";
@@ -34,14 +35,24 @@ fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
         .map_err(|e| e.replace("SOURCE_CONTROL_IO", "CAPABILITY_CONTROL_IO"))
 }
 
+/// The controllable capabilities and their values: LIVE (DEC-13), the B hold mode (DEC-04).
+pub const CAPABILITIES: [(&str, &[&str]); 2] = [
+    (LIVE, &LIVE_VALUES),
+    (
+        crate::execution::hold_b::HOLD_B,
+        &crate::execution::hold_b::HOLD_B_VALUES,
+    ),
+];
+
 /// A request names a known capability and one of its values.
 pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
-    if capability != LIVE {
-        return Err(format!("CAPABILITY_UNKNOWN: {capability} (only {LIVE})"));
-    }
-    if !LIVE_VALUES.contains(&requested) {
+    let Some((_, values)) = CAPABILITIES.iter().find(|(c, _)| *c == capability) else {
+        return Err(format!("CAPABILITY_UNKNOWN: {capability} (LIVE|HOLD_B)"));
+    };
+    if !values.contains(&requested) {
         return Err(format!(
-            "CAPABILITY_VALUE_INVALID: {capability} {requested} (OFF|LIVE)"
+            "CAPABILITY_VALUE_INVALID: {capability} {requested} ({})",
+            values.join("|")
         ));
     }
     Ok(())
@@ -192,6 +203,16 @@ mod tests {
             .unwrap_err()
             .starts_with("CAPABILITY_UNKNOWN"));
         assert!(validate(LIVE, "ON")
+            .unwrap_err()
+            .starts_with("CAPABILITY_VALUE_INVALID"));
+        // DEC-04: the B hold mode is a capability of its own values.
+        for v in crate::execution::hold_b::HOLD_B_VALUES {
+            assert_eq!(validate(crate::execution::hold_b::HOLD_B, v), Ok(()));
+        }
+        assert!(validate(crate::execution::hold_b::HOLD_B, "LIVE")
+            .unwrap_err()
+            .starts_with("CAPABILITY_VALUE_INVALID"));
+        assert!(validate(LIVE, "OBSERVE")
             .unwrap_err()
             .starts_with("CAPABILITY_VALUE_INVALID"));
         assert_eq!(

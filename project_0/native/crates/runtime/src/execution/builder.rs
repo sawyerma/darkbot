@@ -88,6 +88,27 @@ pub mod p0 {
         }
     }
 
+    /// DEC-04: the sizing facts B of a plan is checked against.
+    pub(crate) fn hold_facts(
+        sz: &Sizing,
+        asset_mint: Pubkey,
+        liab_mint: Pubkey,
+        funding_mint: Option<Pubkey>,
+    ) -> crate::execution::hold_b::HoldFacts {
+        crate::execution::hold_b::HoldFacts {
+            asset_bank: sz.asset_bank,
+            liab_bank: sz.liab_bank,
+            asset_mint,
+            liab_mint,
+            withdraw_bank_units: sz.withdraw_amount,
+            repay_amount: sz.repay_amount,
+            repay_all: sz.repay_all,
+            seized_hold_value: sz.seized_hold_value,
+            repay_high_value: sz.repay_high_value,
+            funding_mint,
+        }
+    }
+
     /// B15: the hold value of a seizure — its conservative price (high bias, the larger of EMA
     /// and spot, rounded up), never below the protocol equity value; an unknown price is a hold
     /// no inventory limit admits.
@@ -114,6 +135,9 @@ pub mod p0 {
         /// FE-02: the same `repay_amount` at the low-biased liability price (rounded down);
         /// `None` = price unknown. Values a ZERO_PREFUND swap surplus conservatively.
         pub repay_low_value: Option<u64>,
+        /// DEC-04: the same `repay_amount` at the high-biased liability price (rounded up);
+        /// `None` = price unknown. Values B's liability surplus as an inventory hold.
+        pub repay_high_value: Option<u64>,
         pub liability_needed_value: u64, // USD-Micro
         pub liability_inventory_value: u64,
         pub funding_bank: Option<Pubkey>,
@@ -264,6 +288,14 @@ pub mod p0 {
                     repay_value: sz.repay_transfer_value_micro,
                     repay_low_value: sizer
                         .native_amount_conservative_value_usd_micro(
+                            &sz.liab_bank,
+                            sz.repay_amount,
+                            now_unix_s as i64,
+                            slot,
+                        )
+                        .ok(),
+                    repay_high_value: sizer
+                        .native_amount_conservative_cost_usd_micro(
                             &sz.liab_bank,
                             sz.repay_amount,
                             now_unix_s as i64,
@@ -1377,6 +1409,20 @@ pub mod p0 {
             self.instructions
         }
 
+        fn hold_b(
+            &self,
+            plan: &ReceivershipPlan,
+            sol_debit: Option<u64>,
+        ) -> crate::execution::hold_b::BHold {
+            crate::execution::hold_b::hold_b_of(
+                self.state,
+                &self.program,
+                &self.liquidator,
+                plan,
+                sol_debit,
+            )
+        }
+
         fn plans(
             &self,
             account: &Pubkey,
@@ -1574,6 +1620,7 @@ pub mod p0 {
                                 lookup_tables: protocol_luts.clone(),
                                 prerequisite_txs: vec![],
                                 inventory_holds: vec![(liab_mint, sz.repay_amount)],
+                                hold_facts: Some(hold_facts(&sz, asset_mint, liab_mint, None)),
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1660,6 +1707,12 @@ pub mod p0 {
                                     (liab_mint, inv.min(sz.repay_amount)),
                                     (funding_mint, buy.amount_in),
                                 ),
+                                hold_facts: Some(hold_facts(
+                                    &sz,
+                                    asset_mint,
+                                    liab_mint,
+                                    Some(funding_mint),
+                                )),
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1819,6 +1872,9 @@ pub mod p0 {
                                             lookup_tables: vec![].into(),
                                             prerequisite_txs: vec![],
                                             inventory_holds: vec![],
+                                            hold_facts: Some(hold_facts(
+                                                &sz, asset_mint, liab_mint, None,
+                                            )),
                                             sol_costs: SolCosts {
                                                 flat_fee_lamports: sz.flat_sol_fee_lamports,
                                                 record_rent_lamports: Some(0),
@@ -1855,6 +1911,9 @@ pub mod p0 {
                                         ),
                                         prerequisite_txs: vec![],
                                         inventory_holds: vec![],
+                                        hold_facts: Some(hold_facts(
+                                            &sz, asset_mint, liab_mint, None,
+                                        )),
                                         sol_costs: SolCosts {
                                             flat_fee_lamports: sz.flat_sol_fee_lamports,
                                             record_rent_lamports: Some(0),
@@ -1965,6 +2024,7 @@ pub mod p0 {
                 seized_hold_value: 0,
                 repay_value,
                 repay_low_value: Some(repay_value),
+                repay_high_value: Some(repay_value),
                 liability_needed_value: repay_value,
                 liability_inventory_value: 0,
                 funding_bank: None,
@@ -2286,6 +2346,7 @@ pub mod p0 {
                         seized_hold_value: 1_100,
                         repay_value: 500,
                         repay_low_value: Some(500),
+                        repay_high_value: Some(500),
                         liability_needed_value: 500,
                         liability_inventory_value: 10_000,
                         funding_bank: None,
@@ -3062,6 +3123,226 @@ pub mod p0 {
                 e.text.starts_with("ATA:PREWARM_REQUIRED: asset ATA="),
                 "{e}"
             );
+        }
+
+        /// DEC-04: the plans of the fixture with a pinned Jupiter ExactIn swap of the whole
+        /// withdrawal (1 000 in, 600 quoted, 50 bps: floor 597) and the fixture state.
+        fn dec04_plans(f: &PlansFixture) -> (FixtureSource, Vec<ReceivershipPlan>) {
+            use crate::execution::route::tests::swap_ix;
+            use crate::execution::route::JUP_ROUTE;
+            let (asset_mint, liab_mint) = (f.banks[0].1, f.banks[1].1);
+            let route = Route {
+                instructions: vec![swap_ix(
+                    JUP_ROUTE,
+                    &f.liquidator,
+                    &asset_mint,
+                    &liab_mint,
+                    (1_000, 600, 50, 0),
+                )],
+                lookup_tables: vec![],
+                swap_program: darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID
+                    .parse()
+                    .unwrap(),
+                amount_in: 1_000,
+                quoted_out: 600,
+                minimum_executable_out: Some(597),
+                enforced_slippage_bps: Some(50),
+            };
+            let src = f.state(Pubkey::default(), true);
+            let plans = f.plans(&src, &|l: u64| Some(l), &TestRoutes(Some(route)), true);
+            (src, plans)
+        }
+
+        /// DEC-04 (§4, B): one parity test per component through the production `plans()` path
+        /// — the signed withdraw and repay against the sizing, the swap's ExactIn input against
+        /// the credited collateral, its floor and quote for the liability, the SOL debit; an
+        /// inventory plan keeps the whole seizure and swaps nothing; an unmodelled mint, a
+        /// flash-funded plan and missing facts are unqualified (A applies).
+        #[test]
+        fn dec04_b_flows_come_from_the_signed_plan() {
+            use crate::execution::hold_b::{hold_b_of, AssetFlow, BHold};
+            let f = PlansFixture::new();
+            let (src, plans) = dec04_plans(&f);
+            let (asset, liab) = (f.banks[0].1.to_string(), f.banks[1].1.to_string());
+            let of = |class: FundingClass| {
+                plans
+                    .iter()
+                    .find(|p| p.input.funding == class)
+                    .unwrap()
+                    .clone()
+            };
+            let b = |p: &ReceivershipPlan| hold_b_of(&src, &f.program, &f.liquidator, p, Some(7));
+            let flow = |reserve, residual_max| AssetFlow {
+                reserve,
+                residual_max,
+            };
+            let zp = of(FundingClass::ZeroPrefundSameTx);
+            let BHold::Exact(x) = b(&zp) else {
+                panic!("{:?}", b(&zp));
+            };
+            // The whole withdrawal is swapped; the swap credits ≥ 597 for the 500 repaid, its
+            // quote leaves 100 at the high liability price (500 per 500).
+            assert_eq!(
+                x.flows,
+                [
+                    ("SOL".to_string(), flow(7, 0)),
+                    (asset.clone(), flow(0, 0)),
+                    (liab.clone(), flow(0, 100)),
+                ]
+                .into()
+            );
+            assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (100, "PLAIN"));
+            // A keeps the whole seizure in the inventory limit.
+            assert_eq!(zp.inventory_hold_usd_micro, 1_100);
+            let inv = of(FundingClass::NoSwapInventory);
+            let BHold::Exact(y) = b(&inv) else {
+                panic!("{:?}", b(&inv));
+            };
+            assert_eq!(y.flows[&liab], flow(500, 0));
+            assert_eq!(y.flows[&asset], flow(0, 1_000));
+            assert_eq!(y.inventory_usd_micro, 1_100);
+            let unqualified = |p: &ReceivershipPlan| match b(p) {
+                BHold::Unqualified(r) => r,
+                exact => panic!("{exact:?}"),
+            };
+            let mut p = zp.clone();
+            p.hold_facts.as_mut().unwrap().withdraw_bank_units = 999;
+            assert_eq!(unqualified(&p), "B_PARITY_WITHDRAW");
+            let mut p = zp.clone();
+            p.hold_facts.as_mut().unwrap().repay_amount = 499;
+            assert_eq!(unqualified(&p), "B_PARITY_REPAY");
+            // The signed swap spends more than the withdrawal credits.
+            let mut p = zp.clone();
+            let swap = p
+                .instructions
+                .iter_mut()
+                .find(|ix| {
+                    ix.program_id
+                        == darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID
+                            .parse()
+                            .unwrap()
+                })
+                .unwrap();
+            let at = swap.data.len() - 19;
+            swap.data[at..at + 8].copy_from_slice(&1_001u64.to_le_bytes());
+            assert_eq!(unqualified(&p), "B_SWAP_INPUT_EXCEEDS_CREDIT");
+            let mut p = zp.clone();
+            p.input.funding = FundingClass::FlashFunded;
+            assert_eq!(unqualified(&p), "B_FLASH_FUNDED_BLOCKED");
+            let mut p = zp.clone();
+            p.hold_facts = None;
+            assert_eq!(unqualified(&p), "B_HOLD_FACTS_MISSING");
+            assert_eq!(
+                hold_b_of(&src, &f.program, &f.liquidator, &zp, None),
+                BHold::Unqualified("B_SOL_DEBIT_UNKNOWN".into())
+            );
+            // An inventory plan that swaps is not an inventory plan.
+            let mut p = inv.clone();
+            p.instructions.extend(
+                zp.instructions
+                    .iter()
+                    .filter(|ix| {
+                        ix.program_id
+                            == darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID
+                                .parse()
+                                .unwrap()
+                    })
+                    .cloned(),
+            );
+            assert_eq!(unqualified(&p), "B_INVENTORY_PLAN_SWAPS");
+            // A mint the state does not know has no transfer model.
+            let mut thin = f.state(Pubkey::default(), true);
+            thin.0.remove(&f.banks[1].1);
+            assert_eq!(
+                hold_b_of(&thin, &f.program, &f.liquidator, &zp, Some(7)),
+                BHold::Unqualified("B_MINT_UNMODELLED:MINT_STATE_UNKNOWN".into())
+            );
+        }
+
+        /// DEC-04 (§4, B): the integration conversion — the credited underlying of a Kamino,
+        /// Drift or JupLend withdrawal, its kind — and a JIT buy: the funding it spends, the
+        /// liability its floor leaves to the inventory.
+        #[test]
+        fn dec04_b_integration_conversion_and_jit_buy() {
+            use crate::execution::hold_b::{b_hold, AssetFlow, BHold, BInputs};
+            use crate::execution::route::tests::swap_ix;
+            use crate::execution::route::JUP_ROUTE;
+            use darkbot_project0::integration::{IntegrationExecutionAmount, IntegrationKind};
+            let f = PlansFixture::new();
+            let (_, plans) = dec04_plans(&f);
+            let zp = plans
+                .iter()
+                .find(|p| p.input.funding == FundingClass::ZeroPrefundSameTx)
+                .unwrap();
+            let asset = f.banks[0].1.to_string();
+            let with = |plan: &ReceivershipPlan, exec| {
+                b_hold(BInputs {
+                    plan,
+                    program: &f.program,
+                    taker: &f.liquidator,
+                    exec,
+                    unmodelled_mint: None,
+                    sol_debit: Some(7),
+                })
+            };
+            for (kind, code) in [
+                (IntegrationKind::Kamino, "KAMINO"),
+                (IntegrationKind::Drift, "DRIFT"),
+                (IntegrationKind::JupLend, "JUPLEND"),
+            ] {
+                // The withdraw instruction carries 1 000 (the converted instruction amount);
+                // the venue credits 1 200, the swap spends 1 000: 200 stay, 200/1 200 of the
+                // seizure's 1 100.
+                let exec = IntegrationExecutionAmount {
+                    kind,
+                    bank_units: 1_000,
+                    instruction_amount: 1_000,
+                    underlying_out: 1_200,
+                };
+                let BHold::Exact(x) = with(zp, Ok(Some(exec))) else {
+                    panic!("{kind:?}");
+                };
+                assert_eq!(x.flows[&asset].residual_max, 200, "{kind:?}");
+                assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (284, code));
+                let other = IntegrationExecutionAmount {
+                    instruction_amount: 999,
+                    ..exec
+                };
+                assert_eq!(
+                    with(zp, Ok(Some(other))),
+                    BHold::Unqualified("B_PARITY_WITHDRAW".into())
+                );
+            }
+            assert_eq!(
+                with(zp, Err("KAMINO_UNDERLYING_ZERO".into())),
+                BHold::Unqualified("B_INTEGRATION:KAMINO_UNDERLYING_ZERO".into())
+            );
+            // JIT: the buy spends 300 funding for ≥ 199 (quote 200) of the 500 repaid.
+            let funding = Pubkey::new_unique();
+            let mut jit = plans
+                .iter()
+                .find(|p| p.input.funding == FundingClass::NoSwapInventory)
+                .unwrap()
+                .clone();
+            jit.input.funding = FundingClass::JitShortfall;
+            jit.hold_facts.as_mut().unwrap().funding_mint = Some(funding);
+            jit.prerequisite_txs = vec![vec![swap_ix(
+                JUP_ROUTE,
+                &f.liquidator,
+                &funding,
+                &f.banks[1].1,
+                (300, 200, 50, 0),
+            )]];
+            let BHold::Exact(x) = with(&jit, Ok(None)) else {
+                panic!("jit");
+            };
+            let flow = |reserve, residual_max| AssetFlow {
+                reserve,
+                residual_max,
+            };
+            assert_eq!(x.flows[&funding.to_string()], flow(300, 0));
+            assert_eq!(x.flows[&f.banks[1].1.to_string()], flow(301, 0));
+            assert_eq!(x.inventory_usd_micro, 1_100);
         }
 
         /// N7 stage 1 through the production `plans()` path: the ZERO_PREFUND plan (in-TX ExactIn

@@ -168,6 +168,20 @@ pub enum RecordEvent {
         read: Option<crate::execution::one_shot::non_landing::NonLandingRead>,
         read_error: Option<String>,
     },
+    /// DEC-04 (OBSERVE): one settled attempt's A hold (wallet reservation, inventory value),
+    /// B and its finalized wallet deltas and open-inventory mark, each prediction checked per
+    /// asset (an underestimation is flagged).
+    HoldFlows {
+        approval_id: String,
+        mode: crate::execution::hold_b::HoldMode,
+        a_wallet: std::collections::BTreeMap<String, u64>,
+        a_inventory_usd_micro: u64,
+        b: crate::execution::hold_b::BHold,
+        actual: std::collections::BTreeMap<String, i128>,
+        actual_inventory_usd_micro: i128,
+        a_checks: Vec<crate::execution::hold_b::FlowCheck>,
+        b_checks: Vec<crate::execution::hold_b::FlowCheck>,
+    },
 }
 /// DEC-01: what happened to a parked candidate (`RecordEvent::BlockhashPark`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

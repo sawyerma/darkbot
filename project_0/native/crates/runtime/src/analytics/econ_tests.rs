@@ -887,6 +887,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             prerequisite_txs: vec![],
             sol_costs: Default::default(),
             inventory_holds: vec![],
+            hold_facts: None,
         }])
     }
 }
@@ -968,6 +969,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1126,6 +1128,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     let account = Pubkey::new_unique();
     let key = |r: &OpportunityRecord| {
@@ -1324,6 +1327,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             simulation_failure: None,
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
+            hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
     };
@@ -1433,6 +1437,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1553,6 +1558,26 @@ impl crate::execution::pipeline::ReceivershipBuilder for AdmissionBuilder {
         }
         Ok(plans)
     }
+    /// DEC-04: an exact B of the plan — its SOL debit, nothing kept, an inventory value of 7.
+    fn hold_b(
+        &self,
+        _: &crate::execution::pipeline::ReceivershipPlan,
+        sol_debit: Option<u64>,
+    ) -> crate::execution::hold_b::BHold {
+        use crate::execution::hold_b::{AssetFlow, BHold, PlanFlows};
+        BHold::Exact(PlanFlows {
+            flows: [(
+                "SOL".to_string(),
+                AssetFlow {
+                    reserve: sol_debit.unwrap_or(0),
+                    residual_max: 0,
+                },
+            )]
+            .into(),
+            inventory_usd_micro: 7,
+            kind: "PLAIN".into(),
+        })
+    }
 }
 thread_local! {
     /// B4: the record rent (lamports) `AdmissionBuilder` plans carry on this test thread.
@@ -1585,6 +1610,7 @@ fn live_evaluate_within(
         payer,
         target,
         deadline_ns,
+        &crate::execution::hold_b::HoldGate::OBSERVE,
     )
 }
 
@@ -1599,6 +1625,7 @@ fn evaluate_in(
     payer: &solana_sdk::signature::Keypair,
     target: Pubkey,
     deadline_ns: u64,
+    hold: &crate::execution::hold_b::HoldGate,
 ) -> crate::analytics::record::OpportunityRecord {
     use crate::execution::pipeline::Pipeline;
     use darkbot_project0::{execution::Freshness, planner::Allowlist};
@@ -1650,6 +1677,7 @@ fn evaluate_in(
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04,
+        hold,
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -1741,6 +1769,88 @@ fn v2_15_a_state_aged_during_the_simulation_is_never_handed_off() {
         r.reason
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-04 through the LIVE pipeline and the FE-04 admission: in OBSERVE B is computed for the
+/// signed plan and kept with the reservation (mode, A's inventory hold, B), A's inventory hold
+/// is reserved; in an effective ACTIVE of a qualified kind B's is; in OFF nothing is computed.
+#[test]
+fn dec04_live_admission_keeps_the_holds_and_active_reserves_b() {
+    use crate::execution::hold_b::{BEvidence, BHold, HoldGate, HoldMode};
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let adapter = || HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+        simulate_delay: Duration::ZERO,
+        context_slot: Some(10),
+        context_slot_again: Some(10),
+    };
+    let run = |gate: &HoldGate| {
+        let dir = std::env::temp_dir().join(format!("p0-dec04-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, mut s) = (adapter(), safety());
+        let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+        let r = evaluate_in(
+            crate::execution::pipeline::Mode::Live,
+            (&a, &mut s, Some(&mut fe04)),
+            &payer,
+            target,
+            u64::MAX,
+            gate,
+        );
+        assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason);
+        let hold = fe04.journal.attempt_holds().and_then(|h| h.hold.cloned());
+        let _ = std::fs::remove_dir_all(dir);
+        (hold, s.inventory_reserved())
+    };
+    let (hold, reserved) = run(&HoldGate::OBSERVE);
+    let hold = hold.expect("kept with the reservation");
+    assert_eq!(
+        (hold.mode, hold.a_inventory_usd_micro),
+        (HoldMode::Observe, 0)
+    );
+    assert!(
+        matches!(&hold.b, BHold::Exact(f) if f.inventory_usd_micro == 7 && f.flows["SOL"].reserve == 205)
+    );
+    assert_eq!(reserved, 0, "OBSERVE reserves A");
+    let mut evidence = BEvidence::default();
+    evidence.per_kind.insert("PLAIN".into(), (1, 0));
+    evidence.exact = 1;
+    let active = HoldGate {
+        mode: HoldMode::Active,
+        n: Some(1),
+        evidence,
+    };
+    let (hold, reserved) = run(&active);
+    assert_eq!(hold.unwrap().mode, HoldMode::Active);
+    assert_eq!(reserved, 7, "an effective ACTIVE reserves B");
+    let off = HoldGate {
+        mode: HoldMode::Off,
+        ..HoldGate::OBSERVE
+    };
+    assert_eq!(run(&off), (None, 0), "OFF computes nothing");
 }
 
 /// B4: a plan that creates the liquidation record carries its rent into the admission: above
@@ -2193,6 +2303,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -2316,6 +2427,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             simulation_failure: None,
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
+            hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason_text().unwrap_or_default();
@@ -2474,6 +2586,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             simulation_failure: None,
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
+            hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -3271,6 +3384,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         simulation_failure: None,
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -3560,6 +3674,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         simulation_failure: None,
         blockhash_park: park,
         fe04: None,
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
@@ -4734,6 +4849,7 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
         &payer,
         target,
         u64::MAX,
+        &crate::execution::hold_b::HoldGate::OBSERVE,
     );
     assert_eq!(mode, crate::execution::pipeline::Mode::Shadow);
     assert!(

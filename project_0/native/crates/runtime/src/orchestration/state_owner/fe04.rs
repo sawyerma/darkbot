@@ -201,6 +201,35 @@ impl ShadowOwner {
         }
     }
 
+    /// DEC-04 (OBSERVE): the typed record of a settled attempt's holds against its finalized
+    /// flows (an attempt admitted in OFF has none).
+    fn fe04_hold_flows(&mut self, s: &Settlement) {
+        use crate::execution::hold_b::{a_flows, compare, BHold};
+        let Some(held) = self.fe04_held.as_ref().and_then(|j| j.attempt_holds()) else {
+            return;
+        };
+        let (Some(hold), a_wallet) = (held.hold, held.a_wallet) else {
+            return;
+        };
+        let record = RecordEvent::HoldFlows {
+            approval_id: held.approval_id.to_string(),
+            mode: hold.mode,
+            a_wallet: a_wallet.clone(),
+            a_inventory_usd_micro: hold.a_inventory_usd_micro,
+            b: hold.b.clone(),
+            actual: s.wallet_deltas.clone(),
+            actual_inventory_usd_micro: s.unrealized_inventory_usd_micro,
+            a_checks: compare(&a_flows(a_wallet), &s.wallet_deltas),
+            b_checks: match &hold.b {
+                BHold::Exact(f) => compare(&f.flows, &s.wallet_deltas),
+                BHold::Unqualified(_) => vec![],
+            },
+        };
+        if let Err(e) = self.evidence.emit(OwnerEvidence::Record(record)) {
+            owner_log!(self, "fe04_settlement: hold record not written {e}");
+        }
+    }
+
     /// DEC-03: the non-landing status of the held journal's latest subject with this run's
     /// latest read of it.
     pub(super) fn fe04_non_landing_status(&self) -> Option<NonLandingStatus> {
@@ -309,6 +338,8 @@ impl ShadowOwner {
                     self.fe04_unbooked = None;
                     self.fe04_rebuild_book();
                 }
+                // DEC-04 (OBSERVE): A, B and the finalized flows of the attempt, once.
+                self.fe04_hold_flows(&s);
                 // C02/F-04: the settlement is the one landing-telemetry path (exactly once: a
                 // repeated or restarted settlement takes the `settled_before` branch).
                 let released = if booked.is_ok() {

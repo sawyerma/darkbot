@@ -118,6 +118,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_settle_due: None,
         fe04_unbooked: None,
         fe04_non_landing: Default::default(),
+        hold_gate: crate::execution::hold_b::HoldGate::OBSERVE,
         inventory_targets: Default::default(),
         jit_funding_bank: None,
         rebalance: super::rebalance::Observer::new(
@@ -2270,9 +2271,22 @@ fn fe04_fixture(
     crate::execution::one_shot::Intent,
     crate::execution::one_shot::non_landing::NonLandingRead,
 ) {
+    fe04_fixture_held(tag, phase, None)
+}
+
+/// `fe04_fixture` with the attempt reserved with the holds `hold` (DEC-04).
+fn fe04_fixture_held(
+    tag: &str,
+    phase: &str,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+) -> (
+    Fixture,
+    crate::execution::one_shot::Intent,
+    crate::execution::one_shot::non_landing::NonLandingRead,
+) {
     let mut f = fixture_with(tag, None);
     let (wallet, dir) = (f.owner.liquidator.to_string(), f.dir.join("fe04"));
-    let intent = crate::execution::one_shot::test_unknown_attempt(&dir, &wallet);
+    let intent = crate::execution::one_shot::test_unknown_attempt_held(&dir, &wallet, hold);
     let proof = crate::execution::one_shot::non_landing::loopback::proving(
         &crate::execution::one_shot::settlement::SettlementSubject::from(&intent)
             .non_landing()
@@ -2385,6 +2399,97 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     assert!(again.book.is_empty() && again.settle_due.is_none());
     assert_eq!((again.unbooked, safety.capital_in_use()), (None, 0));
     cleanup(f);
+}
+
+/// DEC-04 (OBSERVE) in the running owner: a settled landed attempt is one typed `HoldFlows`
+/// record — A's wallet reservation and inventory hold, B and the finalized deltas, each checked
+/// per asset — and the journals' B evidence; with N decided an ACTIVE request becomes effective
+/// from that evidence, without N it stays OBSERVE with the B-8 reason.
+#[test]
+fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
+    use crate::analytics::payload::{decode, Payload};
+    use crate::execution::hold_b::{AssetFlow, BHold, HoldEvidence, HoldMode, PlanFlows};
+    let hold = HoldEvidence {
+        mode: HoldMode::Observe,
+        a_inventory_usd_micro: 1_100,
+        b: BHold::Exact(PlanFlows {
+            flows: [(
+                "SOL".to_string(),
+                AssetFlow {
+                    reserve: 20,
+                    residual_max: 0,
+                },
+            )]
+            .into(),
+            inventory_usd_micro: 0,
+            kind: "PLAIN".into(),
+        }),
+    };
+    let (mut f, intent, _) = fe04_fixture_held("dec04_owner", "unknown", Some(hold.clone()));
+    install_sol_price(&mut f);
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    fe04_answer(&f, exit_observation(&intent.signatures[0], true, -20, &[]));
+    run_until(&mut f, fe04_settled);
+    // The journals' evidence: one exact B without an underestimation.
+    f.owner.fe04_refresh = std::time::Duration::ZERO;
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.hold_gate.evidence.exact, 1);
+    let request = |requested: &str, seq| crate::analytics::payload::CapabilityControlRequest {
+        seq,
+        capability: crate::execution::hold_b::HOLD_B.into(),
+        requested: requested.into(),
+        requested_unix_s: 1,
+    };
+    f.owner
+        .apply_capability_control(1, Ok(request("ACTIVE", 1)));
+    assert_eq!(f.owner.hold_gate.mode, HoldMode::Observe);
+    assert_eq!(
+        f.owner.sources.capabilities.hold_b_block,
+        crate::execution::hold_b::B8_UNDECIDED
+    );
+    f.owner.hold_gate.n = Some(1);
+    f.owner
+        .apply_capability_control(2, Ok(request("ACTIVE", 2)));
+    assert_eq!(f.owner.hold_gate.mode, HoldMode::Active);
+    let row = f
+        .owner
+        .owner_snapshot(0)
+        .capabilities
+        .into_iter()
+        .find(|c| c.name == crate::execution::hold_b::HOLD_B)
+        .unwrap();
+    assert_eq!(
+        (row.requested, row.effective, row.block_reason),
+        ("ACTIVE", "ACTIVE", "")
+    );
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == RecordEvent::KIND {
+            if let RecordEvent::HoldFlows {
+                a_wallet,
+                b,
+                actual,
+                b_checks,
+                a_checks,
+                ..
+            } = decode(frame.kind, frame.schema, &frame.payload).unwrap()
+            {
+                records.push((a_wallet, b, actual, b_checks, a_checks));
+            }
+        }
+    }
+    assert_eq!(records.len(), 1, "one record per settled attempt");
+    let (a_wallet, b, actual, b_checks, a_checks) = &records[0];
+    assert_eq!(a_wallet["SOL"], 20);
+    assert_eq!(b, &hold.b);
+    assert_eq!(actual["SOL"], -20);
+    assert!(b_checks.iter().chain(a_checks).all(|c| !c.underestimated));
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// DEC-03 (N-2) in the running owner: a read with a B sighting and no landing is an open

@@ -580,6 +580,7 @@ impl ShadowOwner {
                 crate::execution::pipeline::BlockhashPark::Off
             },
             fe04: None,
+            hold: &self.hold_gate,
         };
         #[cfg(feature = "crate_health")]
         let pipeline_started_ns = self.clock.now_ns();

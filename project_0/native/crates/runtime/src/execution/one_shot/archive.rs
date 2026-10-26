@@ -201,6 +201,7 @@ fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::Attemp
             })
             .collect(),
         open_positions: exit::open_positions(saved),
+        hold: saved.hold.clone(),
     }
 }
 

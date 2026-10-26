@@ -368,6 +368,71 @@ message WalletsState {
   // DEC-03: the non-landing status of the held attempt or its latest exit; unset without a held
   // FE-04 journal.
   NonLanding non_landing = 15;
+  // DEC-04: the B hold mode and the held attempt's A, B and finalized flows; unset without an
+  // owner projection.
+  HoldB hold_b = 16;
+}
+
+// DEC-04 (V7): the B hold mode — requested and effective (ACTIVE only with the user's N and the
+// journals' evidence) — the evidence, Safety's reserved inventory and capital, and the held
+// attempt's holds.
+message HoldB {
+  // OFF | OBSERVE | ACTIVE.
+  string requested = 1;
+  // OFF | OBSERVE | ACTIVE.
+  string effective = 2;
+  // Why the effective mode is not the requested one; empty when it is.
+  string block_reason = 3;
+  // The user's N (B-8); unset while undecided.
+  optional uint64 n = 4;
+  // Landed, settled attempts with an exact B and no underestimation.
+  uint64 evidence_exact = 5;
+  // Landed, settled attempts whose B underestimated a flow.
+  uint64 evidence_underestimated = 6;
+  // Landed, settled attempts without an exact B.
+  uint64 evidence_unqualified = 7;
+  // Inventory holds reserved by unsettled attempts, USD micro.
+  uint64 inventory_reserved_usd_micro = 8;
+  // Capital in use by unsettled attempts, USD micro.
+  uint64 capital_in_use_usd_micro = 9;
+  // The held attempt's holds; unset without one (or one admitted in OFF).
+  HoldAttempt attempt = 10;
+}
+
+// DEC-04: one attempt's holds: A (wallet reservation, inventory hold) and B against the
+// finalized flows.
+message HoldAttempt {
+  // The mode it was admitted in: OFF | OBSERVE | ACTIVE.
+  string mode = 1;
+  // A's wallet reservation per asset ("SOL" lamports or mint units).
+  repeated AssetAmount a_wallet = 2;
+  // A's inventory hold: the conservative value of the whole seizure, USD micro.
+  uint64 a_inventory_usd_micro = 3;
+  // EXACT | UNQUALIFIED.
+  string b_class = 4;
+  // Why B is unqualified (A applies); empty when exact.
+  string b_reason = 5;
+  // PLAIN | KAMINO | DRIFT | JUPLEND; empty when unqualified.
+  string b_kind = 6;
+  // B's inventory hold, USD micro; unset when unqualified.
+  optional uint64 b_inventory_usd_micro = 7;
+  // B per asset against the finalized delta.
+  repeated HoldFlow flows = 8;
+}
+
+// DEC-04: one asset of B: what the wallet holds before the attempt and keeps at most after it,
+// the finalized delta and whether B underestimated it.
+message HoldFlow {
+  // "SOL" or the mint, base58.
+  string asset = 1;
+  // Base units held before the attempt.
+  uint64 reserve = 2;
+  // Base units kept at most after it.
+  uint64 residual_max = 3;
+  // The finalized wallet delta; unset until settled (or beyond int64).
+  optional sint64 actual = 4;
+  // The delta is a debit beyond the reserve or an inflow beyond the residual.
+  bool underestimated = 5;
 }
 
 // DEC-03 (N-2): the non-landing status of one FE-04 subject — exactly one result class, the

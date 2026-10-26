@@ -13,6 +13,10 @@ impl ShadowOwner {
                     self.reservations =
                         crate::execution::reservation::WalletReservations::refreshed(dir, &wallet);
                 }
+                // DEC-04: the B evidence of the journals (unreadable: none, ACTIVE impossible).
+                self.hold_gate.evidence = crate::execution::accounting::Ledger::load(dir, &wallet)
+                    .map(|l| l.b_evidence())
+                    .unwrap_or_default();
                 // P0-PROD-CTRL-04: the accounting the status projection carries, read only when
                 // a status tap is installed (read-only, no wallet lock).
                 #[cfg(feature = "crate_health")]
@@ -27,6 +31,7 @@ impl ShadowOwner {
                 self.fe04_refreshed = std::time::Instant::now();
             }
         }
+        self.refresh_hold_gate();
         #[cfg(feature = "crate_health")]
         self.rebalance_observe();
         #[cfg(feature = "crate_health")]

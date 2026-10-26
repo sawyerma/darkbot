@@ -50,6 +50,8 @@ pub struct AttemptRecord {
     pub exits: Vec<ExitRecord>,
     /// The open inventory after the settled exits.
     pub open_positions: BTreeMap<String, Position>,
+    /// DEC-04: the holds the attempt was admitted with (`None`: OFF or before DEC-04).
+    pub hold: Option<crate::execution::hold_b::HoldEvidence>,
 }
 
 /// FE-07: the cumulative decision.
@@ -98,6 +100,20 @@ impl Ledger {
     pub fn load(directory: &std::path::Path, wallet: &str) -> Result<Self, String> {
         crate::execution::one_shot::archive::records(directory, wallet)
             .map(|attempts| Self { attempts })
+    }
+
+    /// DEC-04: the B evidence of the landed, settled attempts — each B against its finalized
+    /// wallet deltas.
+    pub fn b_evidence(&self) -> crate::execution::hold_b::BEvidence {
+        let mut e = crate::execution::hold_b::BEvidence::default();
+        for a in &self.attempts {
+            if let (Some(hold), Some(s)) = (&a.hold, &a.settlement) {
+                if s.landed {
+                    e.add(hold, &s.wallet_deltas);
+                }
+            }
+        }
+        e
     }
 
     pub fn totals(&self) -> Totals {
@@ -332,6 +348,7 @@ mod tests {
             }),
             exits: vec![],
             open_positions: BTreeMap::new(),
+            hold: None,
         }
     }
 

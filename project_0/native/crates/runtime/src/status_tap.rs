@@ -439,6 +439,49 @@ pub struct OwnerWallets {
     /// DEC-03: the non-landing status of the held attempt or its latest exit; `None` without
     /// a held FE-04 journal.
     pub non_landing: Option<OwnerNonLanding>,
+    /// DEC-04: the B hold mode and the held attempt's A, B and finalized flows.
+    pub hold_b: Option<OwnerHoldB>,
+}
+
+/// DEC-04: the B hold mode (requested, effective, why not, the user's N and the journals'
+/// evidence), Safety's reserved inventory and capital, and the held attempt's holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerHoldB {
+    pub requested: &'static str,
+    pub effective: &'static str,
+    pub block_reason: &'static str,
+    pub n: Option<u64>,
+    pub evidence_exact: u64,
+    pub evidence_underestimated: u64,
+    pub evidence_unqualified: u64,
+    pub inventory_reserved_usd_micro: u64,
+    pub capital_in_use_usd_micro: u64,
+    pub attempt: Option<OwnerHoldAttempt>,
+}
+
+/// DEC-04: one attempt's holds: the mode it was admitted in, A's wallet reservation and
+/// inventory hold, B (EXACT with its kind and inventory value, or UNQUALIFIED and why) and per
+/// asset B's flow against the finalized delta (`None` until settled).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerHoldAttempt {
+    pub mode: &'static str,
+    pub a_wallet: Vec<(String, u64)>,
+    pub a_inventory_usd_micro: u64,
+    pub b_class: &'static str,
+    pub b_reason: String,
+    pub b_kind: String,
+    pub b_inventory_usd_micro: Option<u64>,
+    pub flows: Vec<OwnerHoldFlow>,
+}
+
+/// DEC-04: one asset of B against the finalized delta.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerHoldFlow {
+    pub asset: String,
+    pub reserve: u64,
+    pub residual_max: u64,
+    pub actual: Option<i128>,
+    pub underestimated: bool,
 }
 
 /// DEC-03 (N-2 §6): one subject's non-landing status — its result class, the latest read's B

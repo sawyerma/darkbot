@@ -229,6 +229,10 @@ struct Saved {
     /// not released that way, and for frames before N-2.
     #[serde(default)]
     non_landing: Option<non_landing::NonLandingRelease>,
+    /// DEC-04 (schema 7): the hold mode, A's inventory hold and B the attempt was admitted with;
+    /// written by the reservation only (`None`: OFF, or a frame before DEC-04).
+    #[serde(default)]
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
 }
 /// Schema ≤ 3 layout of `Phase` (its settlement before the realized/unrealized split).
 #[derive(Deserialize)]
@@ -271,6 +275,7 @@ impl TryFrom<SavedV2> for Saved {
             observations: v.observations,
             exits: Vec::new(),
             non_landing: None,
+            hold: None,
         })
     }
 }
@@ -295,6 +300,7 @@ impl TryFrom<SavedV3> for Saved {
             observations: v.observations,
             exits: Vec::new(),
             non_landing: None,
+            hold: None,
         })
     }
 }
@@ -318,6 +324,33 @@ impl From<SavedV4> for Saved {
             observations: v.observations,
             exits: Vec::new(),
             non_landing: None,
+            hold: None,
+        }
+    }
+}
+/// Schema-6 layout of `Saved` (the DEC-03 release class, before the DEC-04 holds).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV6 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    exits: Vec<exit::ExitAttempt>,
+    non_landing: Option<non_landing::NonLandingRelease>,
+}
+impl From<SavedV6> for Saved {
+    fn from(v: SavedV6) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: v.exits,
+            non_landing: v.non_landing,
+            hold: None,
         }
     }
 }
@@ -342,6 +375,7 @@ impl From<SavedV5> for Saved {
             observations: v.observations,
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: None,
+            hold: None,
         }
     }
 }
@@ -424,9 +458,9 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 6 since the DEC-03 release class, 5 since exits, 4 since the
-/// realized/unrealized settlement, 3 since C12). Schema-5, -4, -3, -2 and schema-1 JSON frames of
-/// older journals stay readable.
+/// (`FE04_TRANSITION`, schema 7 since the DEC-04 holds, 6 since the DEC-03 release class, 5 since
+/// exits, 4 since the realized/unrealized settlement, 3 since C12). Schema-6 … -2 and schema-1
+/// JSON frames of older journals stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
@@ -457,9 +491,15 @@ struct VersionV5 {
     transition: Transition,
     state: SavedV5,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV6 {
+    transition: Transition,
+    state: SavedV6,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    const SCHEMA: u16 = 6;
+    const SCHEMA: u16 = 7;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -480,6 +520,10 @@ impl crate::analytics::payload::Payload for Version {
                 state: v.state.into(),
             })),
             5 => Some(decode_wire::<VersionV5>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            6 => Some(decode_wire::<VersionV6>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -515,9 +559,14 @@ struct LegacyImportV5 {
     legacy_sha256: String,
     state: SavedV5,
 }
+#[derive(Deserialize)]
+struct LegacyImportV6 {
+    legacy_sha256: String,
+    state: SavedV6,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 6;
+    const SCHEMA: u16 = 7;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -538,6 +587,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 state: v.state.into(),
             })),
             5 => Some(decode_wire::<LegacyImportV5>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            6 => Some(decode_wire::<LegacyImportV6>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -668,6 +721,10 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         return false;
     }
     let same = |p: &Saved| p.approval == next.approval && p.intent == next.intent;
+    // DEC-04: the holds are written by the reservation and never change afterwards.
+    if previous.is_some_and(|p| p.hold != next.hold) {
+        return false;
+    }
     // DEC-03: only a non-landing writes a release class, and only a proving one.
     let released = match (previous, transition) {
         (None, _) => next.non_landing.is_none(),
@@ -810,11 +867,21 @@ fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), 
 /// signature through the real journal, which is closed again; its intent.
 #[cfg(all(test, feature = "crate_health"))]
 pub(crate) fn test_unknown_attempt(dir: &Path, wallet: &str) -> Intent {
+    test_unknown_attempt_held(dir, wallet, None)
+}
+
+/// `test_unknown_attempt` reserved with the holds `hold` (DEC-04).
+#[cfg(all(test, feature = "crate_health"))]
+pub(crate) fn test_unknown_attempt_held(
+    dir: &Path,
+    wallet: &str,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+) -> Intent {
     let (_, mut a, mut i, c) = tests::setup();
     a.wallet = wallet.into();
     i.wallet = wallet.into();
     let mut j = Journal::open(dir, wallet).unwrap();
-    j.reserve(a, i.clone(), &c).unwrap();
+    j.reserve_held(a, i.clone(), &c, hold).unwrap();
     j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
     i
 }
@@ -962,7 +1029,18 @@ impl Journal {
         self.saved = Some(version.state);
         Ok(())
     }
+    #[cfg(test)]
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
+        self.reserve_held(approval, intent, now, None)
+    }
+    /// The reservation with the attempt's holds (DEC-04, `None`: OFF).
+    fn reserve_held(
+        &mut self,
+        approval: Approval,
+        intent: Intent,
+        now: &Current,
+        hold: Option<crate::execution::hold_b::HoldEvidence>,
+    ) -> Result<(), String> {
         if self.saved.is_some() {
             return Err(err("ONE_SHOT_ALREADY_CONSUMED_OR_UNKNOWN"));
         }
@@ -981,6 +1059,7 @@ impl Journal {
                 observations: BTreeMap::new(),
                 exits: Vec::new(),
                 non_landing: None,
+                hold,
             },
             Transition::Reserve,
         )
@@ -1264,6 +1343,7 @@ mod tests {
             .collect(),
             exits: Vec::new(),
             non_landing: None,
+            hold: None,
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -1528,16 +1608,25 @@ mod tests {
             c_blocks: 4,
             c_through_slot: 960,
         });
-        let version = Version {
+        // The schema-6 mirror reproduces its pinned bytes, which read without holds.
+        let v6 = VersionV6 {
             transition: Transition::ExitNotLanded,
-            state: released.clone(),
+            state: SavedV6 {
+                approval: released.approval.clone(),
+                intent: released.intent.clone(),
+                phase: released.phase.clone(),
+                finalized: released.finalized.clone(),
+                observations: released.observations.clone(),
+                exits: released.exits.clone(),
+                non_landing: released.non_landing.clone(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let bytes = crate::analytics::payload::encode_wire(&v6).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 6, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitNotLanded, released)
+            (Transition::ExitNotLanded, released.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -1547,9 +1636,46 @@ mod tests {
             ),
             "FE04_TRANSITION schema-6 layout changed"
         );
+        // Schema 7 (DEC-04) is pinned with the attempt's holds: OBSERVE, A's 1.1 USD, an exact B.
+        let mut held = released;
+        held.hold = Some(crate::execution::hold_b::HoldEvidence {
+            mode: crate::execution::hold_b::HoldMode::Observe,
+            a_inventory_usd_micro: 1_100,
+            b: crate::execution::hold_b::BHold::Exact(crate::execution::hold_b::PlanFlows {
+                flows: [(
+                    "SOL".to_string(),
+                    crate::execution::hold_b::AssetFlow {
+                        reserve: 5_000,
+                        residual_max: 0,
+                    },
+                )]
+                .into(),
+                inventory_usd_micro: 100,
+                kind: "PLAIN".into(),
+            }),
+        });
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: held.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 7, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, held)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2246,
+                "CEg9YPuop7vqjGvgQvzPHtkUKUoYVR5nyQQxyipF3UvC".to_string()
+            ),
+            "FE04_TRANSITION schema-7 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 6, no JSON value
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 7, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -1565,10 +1691,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 6 since the DEC-03 release class; schemas 5, 4, 3 and 2 stay readable.
+        // Schema 7 since the DEC-04 holds; schemas 6 … 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 6)
+            (journal::kind::FE04_TRANSITION, 7)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -1615,7 +1741,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 6],
+                [1, 7],
                 "historical frame kept, the reopen transition is typed"
             );
         }
@@ -2219,7 +2345,7 @@ mod tests {
                     .simulate(&adapter, test_deadline(), test_binding())
                     .unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
-                j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
+                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None)
                     .unwrap();
                 let result = j.submit_payload(&simulated, &c, 123, test_deadline());
                 assert_eq!(result.is_ok(), failure == 0);
@@ -2264,7 +2390,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None)
             .unwrap();
         let past = std::time::Instant::now();
         assert_eq!(
@@ -2528,9 +2654,9 @@ mod tests {
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
-            .reserve_payload(a.clone(), i.clone(), &c, &reversed)
+            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None)
             .is_err());
-        j.reserve_payload(a, i, &c, &original).unwrap();
+        j.reserve_payload(a, i, &c, &original, None).unwrap();
         assert!(j.submit_payload(&reversed, &c, 1, test_deadline()).is_err());
         assert_eq!(adapter.calls.get(), 0);
         drop(j);
@@ -2579,6 +2705,31 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&wrapper).unwrap()).unwrap();
         path
     }
+    /// DEC-04: the reservation writes the holds; no later transition changes them.
+    #[test]
+    fn dec04_replay_keeps_the_admitted_holds() {
+        use crate::execution::hold_b::{BHold, HoldEvidence, HoldMode};
+        let (dir, a, i, _) = setup();
+        let hold = Some(HoldEvidence {
+            mode: HoldMode::Observe,
+            a_inventory_usd_micro: 1_100,
+            b: BHold::Unqualified("B_SWAP_PROGRAM_UNMODELLED".into()),
+        });
+        let mut reserve = reserved(&a, &i);
+        reserve.hold = hold.clone();
+        assert!(legal(None, Transition::Reserve, &reserve));
+        let mut unknown = reserve.clone();
+        unknown.phase = Phase::HandoffUnknown;
+        assert!(legal(Some(&reserve), Transition::Handoff, &unknown));
+        let mut changed = unknown.clone();
+        changed.hold = None;
+        assert!(!legal(Some(&reserve), Transition::Handoff, &changed));
+        let mut observed = unknown.clone();
+        observed.hold.as_mut().unwrap().mode = HoldMode::Active;
+        assert!(!legal(Some(&unknown), Transition::Observe, &observed));
+        let _ = fs::remove_dir_all(dir);
+    }
+
     /// DEC-03: replay accepts a release class only from a non-landing and only a proving one
     /// (none: a frame before N-2); every other transition keeps it unchanged.
     #[test]
@@ -2627,6 +2778,7 @@ mod tests {
             observations: BTreeMap::new(),
             exits: Vec::new(),
             non_landing: None,
+            hold: None,
         }
     }
     pub(super) fn path_of(j: &Journal) -> PathBuf {

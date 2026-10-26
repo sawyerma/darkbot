@@ -172,6 +172,7 @@ pub enum Mode {
 
 /// Was der Receivership-Builder (P5-06) liefern muss. Implementierung gegen das
 /// marginfi-Crate/IDL; hier nur der Contract.
+#[cfg_attr(test, derive(Clone))]
 pub struct ReceivershipPlan {
     pub market_identity: Option<crate::analytics::record::MarketPlanIdentity>,
     /// The receivership TX. E2: its planner steps are derived from these bytes
@@ -204,6 +205,9 @@ pub struct ReceivershipPlan {
     /// liability; a JIT plan the liability inventory it uses and the funding its buy spends.
     /// The intent holds all of them. Empty: the plan spends no held inventory.
     pub inventory_holds: Vec<(Pubkey, u64)>,
+    /// DEC-04: the sizing facts B is checked against (`None`: a plan without them, B
+    /// unqualified).
+    pub hold_facts: Option<crate::execution::hold_b::HoldFacts>,
 }
 
 /// FE-02/B4: SOL a plan's execution debits from the wallet beyond the network fee and the tip:
@@ -323,6 +327,15 @@ pub trait ReceivershipBuilder {
     }
     /// E2: the pinned instruction table the plans' instructions are classified with.
     fn instruction_table(&self) -> &InstructionTable;
+    /// DEC-04: B of `plan` from its signed instructions and the builder's state (`sol_debit`:
+    /// the plan's SOL debit of its fee quote). A builder without state derives none.
+    fn hold_b(
+        &self,
+        _plan: &ReceivershipPlan,
+        _sol_debit: Option<u64>,
+    ) -> crate::execution::hold_b::BHold {
+        crate::execution::hold_b::BHold::Unqualified("B_BUILDER_WITHOUT_STATE".into())
+    }
     /// N2: all external work of planning (route quotes, route-fit re-quotes) ends by `deadline`.
     fn plans(
         &self,
@@ -436,6 +449,8 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     /// B1/FE-04: the one durable admission of a LIVE candidate (the one-shot owner's journal and
     /// approval). `None`: LIVE stops at the send boundary, no submit call exists.
     pub fe04: Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>,
+    /// DEC-04: the hold mode a LIVE candidate's inventory hold and B are evaluated with.
+    pub hold: &'a crate::execution::hold_b::HoldGate,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -1316,11 +1331,20 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
         }
+        // DEC-04: B of the signed plan (not in OFF); the inventory hold is A's unless an
+        // effective ACTIVE qualifies B — the same value is reserved and released.
+        let hold_b = (self.hold.mode != crate::execution::hold_b::HoldMode::Off).then(|| {
+            self.builder
+                .hold_b(&plan, plan.sol_debit_lamports(fee_lamports))
+        });
+        let inventory_hold = self
+            .hold
+            .inventory_hold(plan.inventory_hold_usd_micro, hold_b.as_ref());
         // B1/B15: capital and the worst-case inventory are reserved before the durable admission.
         if let Err(d) = self.safety.check(
             now_unix_s,
             plan.exposure,
-            plan.inventory_hold_usd_micro,
+            inventory_hold,
             plan.tip,
             plan.slippage_bps,
             &plan.assets,
@@ -1356,6 +1380,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 deadline,
                 t_handoff_ns,
                 simulated: simulated_payload,
+                hold: hold_b.map(|b| crate::execution::hold_b::HoldEvidence {
+                    mode: self.hold.mode,
+                    a_inventory_usd_micro: plan.inventory_hold_usd_micro,
+                    b,
+                }),
             },
             self.submitter,
         );
@@ -1373,7 +1402,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 // Nothing durable exists and nothing was sent: the reservation is released.
                 if let Err(v) = self
                     .safety
-                    .release_without_outcome(plan.exposure, plan.inventory_hold_usd_micro)
+                    .release_without_outcome(plan.exposure, inventory_hold)
                 {
                     rec.reason = Some(Rejection::SubmissionRefused {
                         reason,

@@ -40,6 +40,8 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
     for (capability, value, code_text) in [
         ("JITO", "LIVE", "CAPABILITY_UNKNOWN"),
         ("LIVE", "ON", "CAPABILITY_VALUE_INVALID"),
+        ("HOLD_B", "LIVE", "CAPABILITY_VALUE_INVALID"),
+        ("HOLD_B", "ACTIVE", "CAPABILITY_NO_RUNTIME"),
     ] {
         let (code, _, err) = p0ctl(&d, &["capability", "set", capability, value]);
         assert_eq!(code, 2);

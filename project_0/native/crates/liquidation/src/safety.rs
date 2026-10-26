@@ -527,6 +527,11 @@ impl Safety {
     pub fn inventory_outstanding(&self) -> u64 {
         self.inventory_outstanding
     }
+
+    /// DEC-04: the inventory holds reserved by attempts not yet settled (USD micro).
+    pub fn inventory_reserved(&self) -> u64 {
+        self.inventory_reserved
+    }
 }
 
 #[cfg(test)]

@@ -203,6 +203,7 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
         || p.finalized != next.finalized
         || p.observations != next.observations
         || p.non_landing != next.non_landing
+        || p.hold != next.hold
     {
         return false;
     }

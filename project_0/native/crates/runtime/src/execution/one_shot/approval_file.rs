@@ -562,6 +562,7 @@ mod tests {
                     )
                 })
                 .collect(),
+            hold: None,
         }
     }
 

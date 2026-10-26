@@ -1005,6 +1005,10 @@ pub(super) fn prepare(
         fe04_settle_due,
         fe04_unbooked,
         fe04_non_landing: Default::default(),
+        hold_gate: crate::execution::hold_b::HoldGate {
+            n: darkbot_solana::runtime_config::active().hold_b_min_attempts,
+            ..crate::execution::hold_b::HoldGate::OBSERVE
+        },
         inventory_targets,
         jit_funding_bank,
         #[cfg(feature = "crate_health")]

@@ -428,6 +428,10 @@ pub struct RuntimeConfig {
     /// (`P0_NON_LANDING_SOURCES`, comma separated; redacted like the endpoints). Two usable
     /// sources of different operators confirm a non-landing with C; fewer leave C alone.
     pub non_landing_sources: Vec<String>,
+    /// DEC-04 (B-8): N, the finalized attempts with an exact B and no underestimation before B
+    /// may be ACTIVE (`P0_HOLD_B_MIN_ATTEMPTS`). The user's decision, no default: unset keeps B
+    /// in OBSERVE.
+    pub hold_b_min_attempts: Option<u64>,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -437,6 +441,7 @@ impl Default for RuntimeConfig {
             rpc_endpoints: vec![],
             wss_endpoints: vec![],
             non_landing_sources: vec![],
+            hold_b_min_attempts: None,
             fallback: false,
             adaptive: true,
             duration: "4h".into(),
@@ -720,6 +725,9 @@ impl RuntimeConfig {
             }
         }
         self.non_landing_source_list()?;
+        if self.hold_b_min_attempts == Some(0) {
+            return Err("hold_b_min_attempts must be at least 1 (B-8)".into());
+        }
         if !["off", "index", "strict", "crosscheck"].contains(&self.verification.as_str()) {
             return Err("invalid verification mode".into());
         }
@@ -838,6 +846,7 @@ struct ConfigFile {
     rpc_endpoints: Option<Vec<String>>,
     wss_endpoints: Option<Vec<String>>,
     non_landing_sources: Option<Vec<String>>,
+    hold_b_min_attempts: Option<u64>,
     fallback: Option<bool>,
     adaptive: Option<bool>,
     duration: Option<String>,
@@ -887,6 +896,9 @@ impl ConfigFile {
                 "rpc_endpoints" => f.rpc_endpoints = Some(list(&value)),
                 "wss_endpoints" => f.wss_endpoints = Some(list(&value)),
                 "non_landing_sources" => f.non_landing_sources = Some(list(&value)),
+                "hold_b_min_attempts" => {
+                    f.hold_b_min_attempts = Some(number("hold_b_min_attempts", &value)?)
+                }
                 "fe_targets" => f.fe_targets = Some(list(&value)),
                 field if Limits::default().get(field).is_some() => {
                     f.limits
@@ -1046,6 +1058,14 @@ impl Resolved {
             c.non_landing_sources = v.split(',').map(|e| e.trim().to_string()).collect();
             sources.insert("non_landing_sources".into(), "environment".into());
         }
+        if let Some(raw) = env("P0_HOLD_B_MIN_ATTEMPTS") {
+            c.hold_b_min_attempts = Some(
+                raw.trim()
+                    .parse()
+                    .map_err(|_| "invalid P0_HOLD_B_MIN_ATTEMPTS: expected a count".to_string())?,
+            );
+            sources.insert("hold_b_min_attempts".into(), "environment".into());
+        }
         if let Some(url) = env("P0_WS_URL") {
             c.wss_endpoints = vec![url];
             sources.insert("wss_endpoints".into(), "environment".into());
@@ -1100,6 +1120,10 @@ impl Resolved {
             c.non_landing_sources = v;
             sources.insert("non_landing_sources".into(), "config_file".into());
         }
+        if let Some(n) = file.hold_b_min_attempts {
+            c.hold_b_min_attempts = Some(n);
+            sources.insert("hold_b_min_attempts".into(), "config_file".into());
+        }
         if let Some(v) = file.wss_endpoints.filter(|v| !v.is_empty()) {
             c.wss_endpoints = v;
             sources.insert("wss_endpoints".into(), "config_file".into());
@@ -1145,6 +1169,10 @@ impl Resolved {
                     "fe_group" => c.fe_group = val.clone(),
                     "rpc_endpoints" => c.rpc_endpoints = list(&val),
                     "non_landing_sources" => c.non_landing_sources = list(&val),
+                    "hold_b_min_attempts" => {
+                        c.hold_b_min_attempts =
+                            Some(val.parse().map_err(|_| "configuration type mismatch")?)
+                    }
                     "wss_endpoints" => c.wss_endpoints = list(&val),
                     "fe_targets" => c.fe_targets = list(&val),
                     "fallback" => c.fallback = on_off(&val)?,
@@ -1209,7 +1237,7 @@ impl Resolved {
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1253,6 +1281,13 @@ impl Resolved {
             self.config.non_landing_sources.len(),
             src("non_landing_sources")
         );
+        s += &match self.config.hold_b_min_attempts {
+            Some(n) => format!(
+                "hold-b-min-attempts = {n} [source {}]\n",
+                src("hold_b_min_attempts")
+            ),
+            None => "hold-b-min-attempts = undecided (B-8: B ACTIVE blocked)\n".to_string(),
+        };
         for (name, value) in [
             ("fallback", e.fallback.to_string()),
             ("adaptive", e.adaptive.to_string()),
@@ -1460,6 +1495,36 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, 2);
+    }
+    /// DEC-04 (B-8): N has no default (undecided keeps B in OBSERVE), comes from environment,
+    /// file or CLI, is at least 1 and is printed with its source.
+    #[test]
+    fn dec04_hold_b_min_attempts_has_no_default() {
+        let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+        let r = Resolved::parse(&[], &env).unwrap();
+        assert_eq!(r.config.hold_b_min_attempts, None);
+        assert!(r
+            .text()
+            .contains("hold-b-min-attempts = undecided (B-8: B ACTIVE blocked)"));
+        let r = Resolved::parse(&["--hold-b-min-attempts".into(), "5".into()], &env).unwrap();
+        assert_eq!(r.config.hold_b_min_attempts, Some(5));
+        assert!(r.text().contains("hold-b-min-attempts = 5 [source cli]"));
+        let env7 = |k: &str| match k {
+            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_HOLD_B_MIN_ATTEMPTS" => Some("7".to_string()),
+            _ => None,
+        };
+        let r = Resolved::parse(&[], &env7).unwrap();
+        assert_eq!(
+            (
+                r.config.hold_b_min_attempts,
+                r.sources["hold_b_min_attempts"].as_str()
+            ),
+            (Some(7), "environment")
+        );
+        for bad in ["0", "-1", "x"] {
+            assert!(parse(&["--hold-b-min-attempts", bad]).is_err(), "{bad}");
+        }
     }
     /// DEC-03: the non-landing B sources (`operator=URL`) from environment and CLI in the common
     /// precedence, validated (a lowercase operator label of at most 32, an http(s) URL with a

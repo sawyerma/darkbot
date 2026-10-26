@@ -234,6 +234,7 @@ impl Journal {
         intent: Intent,
         now: &Current,
         simulated: &SimulatedPayload<'_>,
+        hold: Option<crate::execution::hold_b::HoldEvidence>,
     ) -> Result<(), String> {
         if simulated.payload.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
             return Err(err("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"));
@@ -241,7 +242,7 @@ impl Journal {
         if !simulated.payload.matches(&intent) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
-        self.reserve(approval, intent, now)
+        self.reserve_held(approval, intent, now, hold)
     }
 
     /// Exactly one adapter call, only after the UNKNOWN state was fsynced, bounded by the

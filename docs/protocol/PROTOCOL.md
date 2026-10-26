@@ -130,6 +130,9 @@
     - [DataSource](#darkbot-project0-v1-DataSource)
     - [Fe04Approval](#darkbot-project0-v1-Fe04Approval)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
+    - [HoldAttempt](#darkbot-project0-v1-HoldAttempt)
+    - [HoldB](#darkbot-project0-v1-HoldB)
+    - [HoldFlow](#darkbot-project0-v1-HoldFlow)
     - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
     - [LossCount](#darkbot-project0-v1-LossCount)
     - [NonLanding](#darkbot-project0-v1-NonLanding)
@@ -2335,6 +2338,75 @@ finance_snapshot_id as project0.wallets.state). Unknown values stay unset.
 
 
 
+<a name="darkbot-project0-v1-HoldAttempt"></a>
+
+### HoldAttempt
+DEC-04: one attempt&#39;s holds: A (wallet reservation, inventory hold) and B against the
+finalized flows.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [string](#string) |  | The mode it was admitted in: OFF | OBSERVE | ACTIVE. |
+| a_wallet | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | A&#39;s wallet reservation per asset (&#34;SOL&#34; lamports or mint units). |
+| a_inventory_usd_micro | [uint64](#uint64) |  | A&#39;s inventory hold: the conservative value of the whole seizure, USD micro. |
+| b_class | [string](#string) |  | EXACT | UNQUALIFIED. |
+| b_reason | [string](#string) |  | Why B is unqualified (A applies); empty when exact. |
+| b_kind | [string](#string) |  | PLAIN | KAMINO | DRIFT | JUPLEND; empty when unqualified. |
+| b_inventory_usd_micro | [uint64](#uint64) | optional | B&#39;s inventory hold, USD micro; unset when unqualified. |
+| flows | [HoldFlow](#darkbot-project0-v1-HoldFlow) | repeated | B per asset against the finalized delta. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-HoldB"></a>
+
+### HoldB
+DEC-04 (V7): the B hold mode — requested and effective (ACTIVE only with the user&#39;s N and the
+journals&#39; evidence) — the evidence, Safety&#39;s reserved inventory and capital, and the held
+attempt&#39;s holds.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| requested | [string](#string) |  | OFF | OBSERVE | ACTIVE. |
+| effective | [string](#string) |  | OFF | OBSERVE | ACTIVE. |
+| block_reason | [string](#string) |  | Why the effective mode is not the requested one; empty when it is. |
+| n | [uint64](#uint64) | optional | The user&#39;s N (B-8); unset while undecided. |
+| evidence_exact | [uint64](#uint64) |  | Landed, settled attempts with an exact B and no underestimation. |
+| evidence_underestimated | [uint64](#uint64) |  | Landed, settled attempts whose B underestimated a flow. |
+| evidence_unqualified | [uint64](#uint64) |  | Landed, settled attempts without an exact B. |
+| inventory_reserved_usd_micro | [uint64](#uint64) |  | Inventory holds reserved by unsettled attempts, USD micro. |
+| capital_in_use_usd_micro | [uint64](#uint64) |  | Capital in use by unsettled attempts, USD micro. |
+| attempt | [HoldAttempt](#darkbot-project0-v1-HoldAttempt) |  | The held attempt&#39;s holds; unset without one (or one admitted in OFF). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-HoldFlow"></a>
+
+### HoldFlow
+DEC-04: one asset of B: what the wallet holds before the attempt and keeps at most after it,
+the finalized delta and whether B underestimated it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| asset | [string](#string) |  | &#34;SOL&#34; or the mint, base58. |
+| reserve | [uint64](#uint64) |  | Base units held before the attempt. |
+| residual_max | [uint64](#uint64) |  | Base units kept at most after it. |
+| actual | [sint64](#sint64) | optional | The finalized wallet delta; unset until settled (or beyond int64). |
+| underestimated | [bool](#bool) |  | The delta is a debit beyond the reserve or an inflow beyond the residual. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-LiquidatorState"></a>
 
 ### LiquidatorState
@@ -2728,6 +2800,7 @@ wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
 | policy_reserves | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Never-spent policy reserves of the inventory bands. |
 | held_attempt | [string](#string) |  | State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED. |
 | non_landing | [NonLanding](#darkbot-project0-v1-NonLanding) |  | DEC-03: the non-landing status of the held attempt or its latest exit; unset without a held FE-04 journal. |
+| hold_b | [HoldB](#darkbot-project0-v1-HoldB) |  | DEC-04: the B hold mode and the held attempt&#39;s A, B and finalized flows; unset without an owner projection. |
 
 
 

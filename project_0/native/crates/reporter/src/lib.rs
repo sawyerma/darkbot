@@ -16,12 +16,12 @@ use proto::control::{
 };
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
-    EffectiveRecord, Fe04Approval, FinanceSummary, LiquidatorState, LossCount, MarketAssessment,
-    MarketCounters, NonLanding, NonLandingSource, OperationalConfig, OperationalParameter,
-    OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerTrigger, PhaseStatus, ProgramPin,
-    ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal,
-    RunInfo, SourceDecision, SourceStats, StateCounters, SystemStatus, TransportStatus,
-    WalletsState, WriterLane,
+    EffectiveRecord, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow, LiquidatorState,
+    LossCount, MarketAssessment, MarketCounters, NonLanding, NonLandingSource, OperationalConfig,
+    OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerTrigger,
+    PhaseStatus, ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan,
+    RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters,
+    SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -372,6 +372,44 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
             calls: n.calls,
             bytes: n.bytes,
             reads: n.reads,
+        }),
+        hold_b: w.hold_b.as_ref().map(|h| HoldB {
+            requested: h.requested.into(),
+            effective: h.effective.into(),
+            block_reason: h.block_reason.into(),
+            n: h.n,
+            evidence_exact: h.evidence_exact,
+            evidence_underestimated: h.evidence_underestimated,
+            evidence_unqualified: h.evidence_unqualified,
+            inventory_reserved_usd_micro: h.inventory_reserved_usd_micro,
+            capital_in_use_usd_micro: h.capital_in_use_usd_micro,
+            attempt: h.attempt.as_ref().map(|a| HoldAttempt {
+                mode: a.mode.into(),
+                a_wallet: a
+                    .a_wallet
+                    .iter()
+                    .map(|(asset, units)| AssetAmount {
+                        asset: asset.clone(),
+                        units: *units,
+                    })
+                    .collect(),
+                a_inventory_usd_micro: a.a_inventory_usd_micro,
+                b_class: a.b_class.into(),
+                b_reason: a.b_reason.clone(),
+                b_kind: a.b_kind.clone(),
+                b_inventory_usd_micro: a.b_inventory_usd_micro,
+                flows: a
+                    .flows
+                    .iter()
+                    .map(|f| HoldFlow {
+                        asset: f.asset.clone(),
+                        reserve: f.reserve,
+                        residual_max: f.residual_max,
+                        actual: f.actual.and_then(|d| i64::try_from(d).ok()),
+                        underestimated: f.underestimated,
+                    })
+                    .collect(),
+            }),
         }),
     }
 }
@@ -1429,6 +1467,7 @@ mod contract_tests {
                 policy_reserves: [("SOL".to_string(), 50_000_000)].into(),
                 held_attempt: "NONE",
                 non_landing: None,
+                hold_b: None,
             },
             finance: OwnerFinance {
                 as_of_slot: 400_000_200,
@@ -1663,6 +1702,34 @@ mod contract_tests {
             calls: Some(20),
             bytes: Some(1_234_567),
             reads: 3,
+        });
+        // DEC-04: OBSERVE requested ACTIVE (B-8 undecided), a settled attempt with an exact B.
+        held.wallets.hold_b = Some(darkbot_runner::status_tap::OwnerHoldB {
+            requested: "ACTIVE",
+            effective: "OBSERVE",
+            block_reason: "B-8: N not decided (hold_b_min_attempts unset)",
+            n: None,
+            evidence_exact: 1,
+            evidence_underestimated: 0,
+            evidence_unqualified: 0,
+            inventory_reserved_usd_micro: 1_100,
+            capital_in_use_usd_micro: 5_000,
+            attempt: Some(darkbot_runner::status_tap::OwnerHoldAttempt {
+                mode: "OBSERVE",
+                a_wallet: vec![("SOL".into(), 20)],
+                a_inventory_usd_micro: 1_100,
+                b_class: "EXACT",
+                b_reason: String::new(),
+                b_kind: "PLAIN".into(),
+                b_inventory_usd_micro: Some(100),
+                flows: vec![darkbot_runner::status_tap::OwnerHoldFlow {
+                    asset: "SOL".into(),
+                    reserve: 20,
+                    residual_max: 0,
+                    actual: Some(-21),
+                    underestimated: true,
+                }],
+            }),
         });
         check_golden(
             "wallets_state_non_landing.hex",

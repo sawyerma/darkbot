@@ -183,6 +183,13 @@ impl ShadowOwner {
                     crate::orchestration::capability_control::live_effective(requested);
                 cap("LIVE", requested, effective, block_reason)
             },
+            // DEC-04: the B hold mode, requested and effective (ACTIVE gated by N and evidence).
+            cap(
+                crate::execution::hold_b::HOLD_B,
+                self.sources.capabilities.hold_b_requested.code(),
+                self.hold_gate.mode.code(),
+                self.sources.capabilities.hold_b_block,
+            ),
             cap(
                 "SUBMISSION",
                 "OFF",
@@ -300,6 +307,76 @@ impl ShadowOwner {
                 .and_then(|j| j.step_state())
                 .map_or("NONE", |s| s.name()),
             non_landing: self.non_landing_projection(),
+            hold_b: Some(self.hold_b_projection()),
+        }
+    }
+
+    /// DEC-04: the B hold mode with its evidence, Safety's reserved inventory and capital, and
+    /// the held attempt's A, B and finalized flows.
+    fn hold_b_projection(&self) -> crate::status_tap::OwnerHoldB {
+        use crate::execution::hold_b::{compare, BHold};
+        use crate::status_tap::{OwnerHoldAttempt, OwnerHoldFlow};
+        let e = &self.hold_gate.evidence;
+        let attempt = self
+            .fe04_held
+            .as_ref()
+            .and_then(|j| j.attempt_holds())
+            .and_then(|held| {
+                let hold = held.hold?;
+                let (b_class, b_reason, b_kind, b_inventory, flows) = match &hold.b {
+                    BHold::Exact(f) => {
+                        let checks = held
+                            .settled_deltas
+                            .map(|d| compare(&f.flows, d))
+                            .unwrap_or_default();
+                        let flows = f
+                            .flows
+                            .iter()
+                            .map(|(asset, flow)| {
+                                let check = checks.iter().find(|c| &c.asset == asset);
+                                OwnerHoldFlow {
+                                    asset: asset.clone(),
+                                    reserve: flow.reserve,
+                                    residual_max: flow.residual_max,
+                                    actual: check.map(|c| c.actual),
+                                    underestimated: check.is_some_and(|c| c.underestimated),
+                                }
+                            })
+                            .collect();
+                        (
+                            "EXACT",
+                            String::new(),
+                            f.kind.clone(),
+                            Some(f.inventory_usd_micro),
+                            flows,
+                        )
+                    }
+                    BHold::Unqualified(reason) => {
+                        ("UNQUALIFIED", reason.clone(), String::new(), None, vec![])
+                    }
+                };
+                Some(OwnerHoldAttempt {
+                    mode: hold.mode.code(),
+                    a_wallet: held.a_wallet.iter().map(|(a, u)| (a.clone(), *u)).collect(),
+                    a_inventory_usd_micro: hold.a_inventory_usd_micro,
+                    b_class,
+                    b_reason,
+                    b_kind,
+                    b_inventory_usd_micro: b_inventory,
+                    flows,
+                })
+            });
+        crate::status_tap::OwnerHoldB {
+            requested: self.sources.capabilities.hold_b_requested.code(),
+            effective: self.hold_gate.mode.code(),
+            block_reason: self.sources.capabilities.hold_b_block,
+            n: self.hold_gate.n,
+            evidence_exact: e.exact,
+            evidence_underestimated: e.underestimated,
+            evidence_unqualified: e.unqualified,
+            inventory_reserved_usd_micro: self.safety.inventory_reserved(),
+            capital_in_use_usd_micro: self.safety.capital_in_use(),
+            attempt,
         }
     }
 

@@ -173,6 +173,9 @@ pub(super) struct ShadowOwner {
     fe04_unbooked: Option<fe04::Fe04Unbooked>,
     /// DEC-03: the latest non-landing read of this run (the Wallets projection).
     fe04_non_landing: fe04::Fe04NonLanding,
+    /// DEC-04: the hold mode the pipeline evaluates with (effective mode, the user's N, the
+    /// evidence of the FE-04 journals).
+    hold_gate: crate::execution::hold_b::HoldGate,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     /// P5-JIT-01: the bank whose inventory funds a JIT buy (`P0_JIT_FUNDING_BANK`, empty: none).

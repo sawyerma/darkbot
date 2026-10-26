@@ -27,7 +27,7 @@ pub use crate::execution::one_shot::exit::WSOL_MINT;
 /// `12bc5f67` (`idl.json` SHA-256 `764ea6d7…5c50`); parity with the deployed program is FE-01
 /// (NOT_RUN). Anchor discriminators = sha256("global:<name>")[..8]. Only the ExactIn routes are
 /// accepted; any other discriminator (token ledger, exact out, newer instructions) fails closed.
-const JUP_ROUTE: [u8; 8] = [229, 23, 203, 151, 122, 227, 173, 42];
+pub(crate) const JUP_ROUTE: [u8; 8] = [229, 23, 203, 151, 122, 227, 173, 42];
 const JUP_SHARED_ACCOUNTS_ROUTE: [u8; 8] = [193, 32, 155, 51, 65, 214, 156, 129];
 const JUP_ROUTE_WITH_TOKEN_LEDGER: [u8; 8] = [150, 86, 71, 116, 167, 93, 14, 104];
 const JUP_SHARED_ROUTE_WITH_TOKEN_LEDGER: [u8; 8] = [230, 121, 143, 80, 119, 159, 106, 170];
@@ -724,7 +724,7 @@ fn jupiter_error(status: reqwest::StatusCode, body: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[test]
     fn jupiter_error_keeps_only_status_or_allowlisted_code() {
@@ -814,7 +814,7 @@ mod tests {
     }
 
     /// A synthetic (not recorded) Jupiter ExactIn route instruction in the pinned layout.
-    fn swap_ix(
+    pub(crate) fn swap_ix(
         disc: [u8; 8],
         taker: &Pubkey,
         from: &Pubkey,

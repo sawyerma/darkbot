@@ -72,6 +72,8 @@ pub struct Candidate<'a> {
     pub t_handoff_ns: u64,
     /// DEC-02: the pipeline's simulation of exactly `txs`, when it passed (`None`: none).
     pub simulated: Option<super::transport::SimulatedPayload<'a>>,
+    /// DEC-04: the mode, A's inventory hold and B the attempt is admitted with (`None`: OFF).
+    pub hold: Option<crate::execution::hold_b::HoldEvidence>,
 }
 
 #[derive(Debug)]
@@ -208,9 +210,9 @@ impl Fe04Admission {
             exact_signed_payload_simulated: simulated.exact_signed_payload_simulated(),
             bundle_simulated: simulated.bundle_simulated(),
         };
-        if let Err(e) = self
-            .journal
-            .reserve_payload(a.clone(), intent, &current, &simulated)
+        if let Err(e) =
+            self.journal
+                .reserve_payload(a.clone(), intent, &current, &simulated, c.hold)
         {
             // A failed write may still have reached the disk: never treated as nothing.
             return if e.starts_with("JOURNAL") {

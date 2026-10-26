@@ -77,6 +77,11 @@ pub(super) struct OwnerCapabilities {
     pub(super) config_version: Option<u64>,
     /// The requested LIVE value: `OFF` at every start (a run never inherits a LIVE request).
     pub(super) live_requested: &'static str,
+    /// DEC-04: the requested B hold mode: OBSERVE at every start; the effective one is the
+    /// owner's hold gate.
+    pub(super) hold_b_requested: crate::execution::hold_b::HoldMode,
+    /// Why the effective B hold mode is not the requested one ("" when it is).
+    pub(super) hold_b_block: &'static str,
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
     pub(super) applied: u64,
     pub(super) refused: u64,
@@ -88,6 +93,8 @@ impl Default for OwnerCapabilities {
             dir: None,
             config_version: None,
             live_requested: crate::orchestration::capability_control::LIVE_OFF,
+            hold_b_requested: crate::execution::hold_b::HoldMode::Observe,
+            hold_b_block: "",
             last_decision: None,
             applied: 0,
             refused: 0,
@@ -319,6 +326,19 @@ impl ShadowOwner {
         Ok(())
     }
 
+    /// DEC-04: the effective B hold mode of the requested one (`hold_b::effective`: ACTIVE only
+    /// with the user's N and the evidence), and why it is not the requested one.
+    pub(super) fn refresh_hold_gate(&mut self) {
+        let requested = self.sources.capabilities.hold_b_requested;
+        let (mode, block) = crate::execution::hold_b::effective(
+            requested,
+            self.hold_gate.n,
+            &self.hold_gate.evidence,
+        );
+        self.hold_gate.mode = mode;
+        self.sources.capabilities.hold_b_block = block;
+    }
+
     /// DEC-13: one capability request: a valid one becomes the requested value; the effective
     /// one is decided by `capability_control::live_effective` alone (BLOCKED without FE-06).
     /// Recorded like a source decision (`outcome_<seq>.p0j`, the projection's last decision).
@@ -328,6 +348,7 @@ impl ShadowOwner {
         request: Result<crate::analytics::payload::CapabilityControlRequest, String>,
     ) {
         use crate::orchestration::capability_control as cap;
+        let request_capability = request.as_ref().ok().map(|r| r.capability.clone());
         let (text, valid) = match request {
             Ok(r) => (
                 cap::shown(&r.capability, &r.requested),
@@ -335,19 +356,37 @@ impl ShadowOwner {
             ),
             Err(reason) => ("unreadable".to_string(), Err(reason)),
         };
+        let hold_b =
+            matches!(&request_capability, Some(c) if c == crate::execution::hold_b::HOLD_B);
         let c = &mut self.sources.capabilities;
         let applied = valid.is_ok();
         if let Ok(requested) = &valid {
-            c.live_requested = cap::LIVE_VALUES
-                .into_iter()
-                .find(|v| v == requested)
-                .unwrap_or(cap::LIVE_OFF);
+            if hold_b {
+                c.hold_b_requested =
+                    crate::execution::hold_b::HoldMode::parse(requested).unwrap_or_default();
+            } else {
+                c.live_requested = cap::LIVE_VALUES
+                    .into_iter()
+                    .find(|v| v == requested)
+                    .unwrap_or(cap::LIVE_OFF);
+            }
             c.applied = c.applied.saturating_add(1);
         } else {
             c.refused = c.refused.saturating_add(1);
         }
-        let requested = c.live_requested;
-        let (effective, block_reason) = cap::live_effective(requested);
+        let (requested, effective, block_reason) = if hold_b {
+            self.refresh_hold_gate();
+            let c = &self.sources.capabilities;
+            (
+                c.hold_b_requested.code(),
+                self.hold_gate.mode.code(),
+                c.hold_b_block,
+            )
+        } else {
+            let requested = self.sources.capabilities.live_requested;
+            let (effective, block_reason) = cap::live_effective(requested);
+            (requested, effective, block_reason)
+        };
         let detail = match valid {
             Ok(_) => format!("requested {requested} · effective {effective} · {block_reason}"),
             Err(reason) => reason,
