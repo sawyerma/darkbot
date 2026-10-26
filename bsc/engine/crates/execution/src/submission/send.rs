@@ -306,6 +306,9 @@ pub struct AdapterReport {
     /// An error of the lane when a submission state was recorded. Never
     /// expected; kept instead of being dropped.
     pub lane_error: Option<LaneError>,
+    /// Clock read when an egress transport's commit returned (`T_queue`);
+    /// `None` for every wire transport.
+    pub t_queue_ns: Option<u64>,
 }
 
 impl AdapterReport {
@@ -317,9 +320,10 @@ impl AdapterReport {
         )
     }
 
-    /// Queue-commit time. These adapters have no queue: always `None`.
+    /// Queue-commit time: the local node's egress lane commit (Phase I
+    /// gate M4); `None` for an adapter without a queue. Not a send.
     pub fn t_queue_commit_ns(&self) -> Option<u64> {
-        None
+        self.t_queue_ns
     }
 
     /// The send time, as far as it is known.
@@ -742,7 +746,33 @@ fn run<S: Slot>(
 
         // The permit. From here on every failure is unknown.
         let (transport, frame) = slot.parts();
+        let egress = transport.is_egress();
         let written = match lane.start_write(ticket, adapter, buy_hash) {
+            // The local node's egress lane takes the permit's write itself
+            // (no frame, no wire), after the same write check.
+            Ok(write) if egress => {
+                let t_write = clock.now_ns();
+                match deadline.check(clock_id, t_write) {
+                    Ok(elapsed) => {
+                        record.t_write_check_ns = Some(t_write);
+                        record.elapsed_at_write_check_ns = Some(elapsed);
+                        match transport.commit_egress(write, t_write) {
+                            Ok(()) => Written::Complete,
+                            Err(_) => Written::Failed {
+                                accepted: 0,
+                                cause: UnknownCause::Write,
+                            },
+                        }
+                    }
+                    Err(error) => {
+                        report.miss();
+                        Written::Failed {
+                            accepted: 0,
+                            cause: UnknownCause::WriteDeadline(error),
+                        }
+                    }
+                }
+            }
             Ok(write) => match frame.fill_buy(write.bytes()) {
                 // Everything the transport must do before the wire, such
                 // as encrypting the request into TLS records, happens now,
@@ -791,6 +821,9 @@ fn run<S: Slot>(
         match written {
             Written::Complete => {
                 record.t_boundary_ns = Some(after_ns);
+                if egress {
+                    record.t_queue_ns = Some(after_ns);
+                }
                 record.outcome = SendOutcome::HandedOff;
                 record.lane_error = lane.write_completed(ticket, adapter).err();
                 if frame.kind() != AdapterKind::LocalGeth {
@@ -854,6 +887,7 @@ fn entry(
         t_response_ns: None,
         response: None,
         lane_error: None,
+        t_queue_ns: None,
     }
 }
 

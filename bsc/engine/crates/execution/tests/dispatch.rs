@@ -898,6 +898,65 @@ fn boundaries_are_measured_but_no_unqualified_one_is_a_send_time() {
     assert_eq!(record.t_queue_commit_ns(), None);
 }
 
+/// Phase I gate M4: the local node's adapter over the FastLane egress lane
+/// (C1.7) on an isolated arena: the dispatch commits exactly the permit's
+/// signed BUY with the write check's clock read, records the commit as
+/// `T_queue` (not a send), and the node's coordinator reads it once. The
+/// egress transport takes no frame.
+#[test]
+fn local_geth_commits_the_raw_buy_to_the_egress_lane() {
+    use darkbot_bsc_execution::submission::egress::EgressTransport;
+    use darkbot_bsc_execution::submission::transport::Transport;
+    use darkbot_bsc_geth_ipc::RecordKind;
+    use darkbot_bsc_geth_ipc::outbound::egress_lane;
+    use darkbot_bsc_geth_ipc::protocol_v2::{ArenaV2, ConsumerV2, arena_path_v2};
+    const GENERATION: u64 = 4_242;
+    let dir = std::env::temp_dir().join(format!("bsc-egress-dispatch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = arena_path_v2(&dir, GENERATION);
+    let arena = ArenaV2::create(&path, GENERATION, &[egress_lane()]).unwrap();
+    let mut world = World::prepared();
+    let table = frozen_table();
+    let plan = plan(&world, &table, single_inputs(&world));
+    let mut frame = local_frame(&plan, &table);
+    let mut node = EgressTransport::open(&path, GENERATION).unwrap();
+    let current = world.snapshot;
+    let report = {
+        let mut armed = [Armed {
+            adapter: adapter(LOCAL),
+            transport: &mut node,
+            frame: &mut frame,
+        }];
+        dispatch_diagnostic(
+            &mut world.lane,
+            &plan,
+            &context(&table, &current),
+            &ScriptClock::new(CLOCK, &[100, 200, 250, 300]),
+            &deadline(),
+            &mut armed,
+        )
+        .unwrap()
+    };
+    let record = *report.adapter(adapter(LOCAL)).unwrap();
+    assert_eq!(record.outcome, SendOutcome::HandedOff);
+    assert_eq!(record.t_write_check_ns, Some(250));
+    assert_eq!(record.t_queue_commit_ns(), Some(300));
+    // The queue is local: the send time stays the node's (deferred).
+    assert_eq!(record.send_time(), SendTime::TrackedDeferredC1);
+    assert_eq!(node.last_sequence(), Some(0));
+    let mut coordinator = ConsumerV2::open(&path, GENERATION, egress_lane()).unwrap();
+    let received = coordinator.try_consume().unwrap().unwrap();
+    assert_eq!(received.kind, RecordKind::OutboundSignedTx);
+    assert_eq!(received.timestamp_ns, 250);
+    assert_eq!(&received.payload[..], &world.raw_buy[..]);
+    assert!(coordinator.try_consume().unwrap().is_none());
+    // No frame is ever written to the egress lane.
+    assert!(node.write(&world.raw_buy).is_err());
+    drop((coordinator, node, arena));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn local_geth_sends_the_raw_buy_and_its_send_time_is_deferred_to_c1() {
     let mut world = World::prepared();

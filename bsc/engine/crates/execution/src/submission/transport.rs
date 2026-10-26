@@ -108,6 +108,26 @@ pub trait Transport {
     fn max_request_len(&self) -> usize {
         usize::MAX
     }
+
+    /// Whether this transport is the local node's egress lane (Phase I
+    /// gate M4), which takes the released transaction itself, the
+    /// permit's write, not a frame. The default: a wire transport.
+    fn is_egress(&self) -> bool {
+        false
+    }
+
+    /// Commits the permit's released transaction to the egress lane with
+    /// `commit_ns` (the write check's clock read); its return is
+    /// `T_queue`, a local queue commit, not a send. Only an egress
+    /// transport takes it; the default refuses (nothing committed).
+    fn commit_egress(
+        &mut self,
+        write: darkbot_bsc_trading::intent::EgressWrite<'_>,
+        commit_ns: u64,
+    ) -> io::Result<()> {
+        let _ = (write, commit_ns);
+        Err(io::ErrorKind::Unsupported.into())
+    }
 }
 
 /// A [`Transport`] over any `std::io` stream, for diagnostics only.

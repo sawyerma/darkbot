@@ -24,6 +24,7 @@
 
 pub mod blockrazor;
 pub mod club48;
+pub mod egress;
 pub mod frame;
 pub mod local_geth;
 pub mod response;
