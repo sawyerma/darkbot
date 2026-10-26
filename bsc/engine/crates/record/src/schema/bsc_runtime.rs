@@ -363,19 +363,22 @@ pub mod runtime_status {
         /// Blocks that did not extend the head (or were not the expected
         /// anchor): the retained chain is dropped and the block re-anchors.
         pub const DISCONTINUITIES: u16 = 47;
-        /// Own candidates whose nonce a nonce fact proves consumed without
-        /// their inclusion, and own uncertain txs whose nonce it proves
-        /// consumed by an unknown tx; resolutions undone by a later orphan.
-        pub const DROPPED: u16 = 48;
+        /// Candidates whose nonce is proven consumed (an own account's nonce
+        /// fact, or any sender's later nonce included) without them being
+        /// seen included; uncertain txs whose nonce is so proven consumed by
+        /// an unknown tx; of all, those resolved by a later inclusion; and
+        /// resolutions undone because their evidence block left the chain.
+        pub const CONSUMED_NOT_SEEN: u16 = 48;
         pub const CONSUMED_UNATTRIBUTED: u16 = 49;
-        pub const FACT_RESOLUTIONS_REVERTED: u16 = 50;
+        pub const RESOLUTIONS_REVERTED: u16 = 50;
         /// The latest refused input, as its kind.
         pub const LAST_REFUSED: u16 = 51;
+        pub const RESOLVED_BY_LATER_INCLUSION: u16 = 52;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.state",
             record_type: 0,
-            schema_version: 2,
+            schema_version: 3,
             fields: &[
                 Field::opt(HEAD, "head", U64),
                 Field::req(COHERENT, "coherent", Bool),
@@ -424,10 +427,15 @@ pub mod runtime_status {
                 Field::req(CHECKPOINT_ERRORS, "checkpoint_errors", U64),
                 Field::opt(LAST_CONFLICT, "last_conflict", Text),
                 Field::req(DISCONTINUITIES, "discontinuities", U64),
-                Field::req(DROPPED, "dropped", U64),
+                Field::req(CONSUMED_NOT_SEEN, "consumed_not_seen", U64),
                 Field::req(CONSUMED_UNATTRIBUTED, "consumed_unattributed", U64),
-                Field::req(FACT_RESOLUTIONS_REVERTED, "fact_resolutions_reverted", U64),
+                Field::req(RESOLUTIONS_REVERTED, "resolutions_reverted", U64),
                 Field::opt(LAST_REFUSED, "last_refused", Text),
+                Field::req(
+                    RESOLVED_BY_LATER_INCLUSION,
+                    "resolved_by_later_inclusion",
+                    U64,
+                ),
             ],
         };
     }

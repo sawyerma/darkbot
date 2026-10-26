@@ -330,9 +330,13 @@ impl StateOwner {
             .set(e::CHECKPOINT_WRITES, self.checkpoint_writes)
             .set(e::CHECKPOINT_ERRORS, self.checkpoint_errors)
             .set(e::DISCONTINUITIES, c.discontinuities)
-            .set(e::DROPPED, c.dropped)
+            .set(e::CONSUMED_NOT_SEEN, c.consumed_not_seen)
             .set(e::CONSUMED_UNATTRIBUTED, c.consumed_unattributed)
-            .set(e::FACT_RESOLUTIONS_REVERTED, c.fact_resolutions_reverted);
+            .set(
+                e::RESOLVED_BY_LATER_INCLUSION,
+                c.resolved_by_later_inclusion,
+            )
+            .set(e::RESOLUTIONS_REVERTED, c.resolutions_reverted);
         if let Some((n, _)) = self.state.high_water() {
             d.set(e::HEAD, n);
         }

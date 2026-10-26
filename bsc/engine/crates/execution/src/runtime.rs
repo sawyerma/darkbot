@@ -538,10 +538,12 @@ impl Canonical {
             }
             CanonicalEvent::Gap { from, to } => {
                 self.resyncs += 1;
+                // Heights below the window were never part of it.
+                let from = from.max(self.window_first_block);
                 if to >= from {
                     self.blocks_skipped += to - from + 1;
+                    journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
                 }
-                journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
             }
             // The C2 owner's reconciliation input; no G0.4 count.
             CanonicalEvent::NonceFact { .. } => {}
@@ -1460,9 +1462,9 @@ mod tests {
         fs::remove_dir_all(&base).unwrap();
     }
 
-    /// A too-deep reorg whose orphaned blocks reach below the window (a
-    /// resume backfill) counts only the window's heights as skipped
-    /// (review 4 LOW: before, 9 was counted although it precedes the window).
+    /// A too-deep reorg or a gap reaching below the window (a resume
+    /// backfill) counts only the window's heights as skipped (review 4
+    /// LOWs: before, 9 was counted although it precedes the window).
     #[test]
     fn a_too_deep_reorg_never_counts_heights_before_the_window() {
         const BLOCK_MS: u64 = 1_792_000_000_000;
@@ -1498,6 +1500,10 @@ mod tests {
         );
         // Heights 10..=13, not 9..=13.
         assert_eq!((c.resyncs, c.blocks_skipped), (1, 4));
+        // A gap after a failed reorg can start below the window (the
+        // follower restarts at the fork point): 9 is not counted either.
+        c.event(5, CanonicalEvent::Gap { from: 9, to: 13 }, &mut journal);
+        assert_eq!((c.resyncs, c.blocks_skipped), (2, 8));
         journal.finish().unwrap();
         fs::remove_dir_all(&base).unwrap();
     }
