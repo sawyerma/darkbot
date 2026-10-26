@@ -552,11 +552,13 @@ pub mod runtime_status {
         pub const TERMS: u16 = 26;
         pub const MIGRATIONS: u16 = 27;
         pub const INCOMPLETE: u16 = 28;
+        /// v3: PAPER positions entered and not yet closed.
+        pub const OPEN: u16 = 29;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.strategy",
             record_type: 0,
-            schema_version: 2,
+            schema_version: 3,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -586,6 +588,7 @@ pub mod runtime_status {
                 Field::req(TERMS, "terms", U64),
                 Field::req(MIGRATIONS, "migrations", U64),
                 Field::req(INCOMPLETE, "incomplete", U64),
+                Field::req(OPEN, "open", U64),
             ],
         };
     }
@@ -714,7 +717,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 13,
+        schema_version: 14,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -793,6 +796,9 @@ pub mod strategy_replay {
     pub const TERMS: u16 = 32;
     pub const MIGRATIONS: u16 = 33;
     pub const INCOMPLETE: u16 = 34;
+    /// v2 (H gate L10): PAPER positions still open when the strategy's
+    /// periods ended (not valued). v2 decisions carry their features.
+    pub const OPEN_AT_END: u16 = 35;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.strategy-replay.v1",
@@ -839,6 +845,58 @@ pub mod strategy_replay {
             Field::req(INCOMPLETE, "incomplete", U64),
         ],
     };
+
+    pub const V2: Schema = Schema {
+        name: "darkbot.bsc.strategy-replay.v1",
+        record_type: 62,
+        schema_version: 2,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(RECORDS, "records", U64),
+            Field::req(STARTS, "starts", U64),
+            Field::req(JOURNALED, "journaled", U64),
+            Field::req(REPLAYED, "replayed", U64),
+            Field::opt(FIRST_DIFFERENCE, "first_difference", U64),
+            Field::opt(CONFIG_MATCH, "config_match", Bool),
+            Field::req(LAUNCHES, "launches", U64),
+            Field::req(PASSED, "passed", U64),
+            Field::req(REJECTED, "rejected", U64),
+            Field::req(DATA_INCOMPLETE, "data_incomplete", U64),
+            Field::req(NOT_TRACKED, "not_tracked", U64),
+            Field::req(SLOT_LIMIT, "slot_limit", U64),
+            Field::req(CREATOR_SOLD, "creator_sold", U64),
+            Field::req(ENTERED, "entered", U64),
+            Field::req(CANCELLED, "cancelled", U64),
+            Field::req(EXITS_CREATOR_SELL, "exits_creator_sell", U64),
+            Field::req(EXITS_TARGET, "exits_target", U64),
+            Field::req(EXITS_STOP, "exits_stop", U64),
+            Field::req(EXITS_TIMEOUT, "exits_timeout", U64),
+            Field::req(GAINS, "gains", U64),
+            Field::req(LOSSES, "losses", U64),
+            Field::req(GAIN_WEI, "gain_wei", U256),
+            Field::req(LOSS_WEI, "loss_wei", U256),
+            Field::req(UNRESOLVED, "unresolved", U64),
+            Field::req(TRADES, "trades", U64),
+            Field::req(TERMS, "terms", U64),
+            Field::req(MIGRATIONS, "migrations", U64),
+            Field::req(INCOMPLETE, "incomplete", U64),
+            Field::req(OPEN_AT_END, "open_at_end", U64),
+        ],
+    };
+
+    /// A replay record of either version.
+    pub fn decode_replay(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+    }
 }
 
 pub const ALL: &[&Schema] = &[
@@ -847,4 +905,5 @@ pub const ALL: &[&Schema] = &[
     &source_mode_receipt::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
+    &strategy_replay::V2,
 ];

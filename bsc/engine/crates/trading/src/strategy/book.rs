@@ -319,6 +319,15 @@ impl TokenBook {
         self.untrack(Untracked::Gap);
     }
 
+    /// The price of the empty curve (the launch without a purchase, t0 of
+    /// its observation), as [`TokenBook::price`] at no reserve and no
+    /// circulating supply.
+    pub fn empty_price(&self) -> Option<(U256, U256)> {
+        let curve = self.terms.curve?;
+        let den = U256::from(crate::economics::flap::curve::TOTAL_SUPPLY).checked_add(curve.h)?;
+        (!den.is_zero()).then_some((curve.r, den))
+    }
+
     /// The marginal price as a fraction: virtual quote reserve over virtual
     /// tokens, `(r + reserve) / (TOTAL + h - circulating)`, both in wei.
     pub fn price(&self) -> Option<(U256, U256)> {

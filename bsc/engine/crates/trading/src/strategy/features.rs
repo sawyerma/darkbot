@@ -150,8 +150,12 @@ impl Observation {
             return;
         }
         if self.price_t0.is_none() {
-            // A launch without a purchase: the empty curve is t0.
-            self.price_t0 = book.price();
+            // A launch without a purchase: the empty curve is t0 (the book
+            // already holds this trade, so not its price), the start of the
+            // peak as well (the original's state at creation).
+            self.price_t0 = book.empty_price();
+            self.price_t = self.price_t0;
+            self.peak = self.price_t0;
         }
         if trade.sell {
             self.sell_count += 1;
@@ -189,13 +193,16 @@ impl Observation {
         let wei = |v: U256| num(i128::try_from(v).ok());
         let one = scale(p);
         let unique = self.per_buyer.len() as u64;
+        // The original's order: each buyer's share rounded at `p` places,
+        // squared, summed, the sum rounded at `p` places.
         let hhi = (!self.buy_wei.is_zero())
             .then(|| {
-                let squares = self
-                    .per_buyer
-                    .iter()
-                    .try_fold(U256::ZERO, |a, (_, v)| a.checked_add(v.checked_mul(*v)?))?;
-                ratio(squares, self.buy_wei.checked_mul(self.buy_wei)?, p)
+                let squares = self.per_buyer.iter().try_fold(U256::ZERO, |a, (_, v)| {
+                    let share = U256::from(u128::try_from(ratio(*v, self.buy_wei, p)?).ok()?);
+                    a.checked_add(share.checked_mul(share)?)
+                })?;
+                let unit = U256::from(u128::try_from(one?).ok()?);
+                ratio(squares, unit.checked_mul(unit)?, p)
             })
             .flatten();
         let first_n: U256 = self
@@ -203,6 +210,9 @@ impl Observation {
             .iter()
             .take(first_buyer_window)
             .fold(U256::ZERO, |a, (_, v)| a.saturating_add(*v));
+        // Without a trade in the window the empty curve is t0 and t.
+        let price_t0 = self.price_t0.or_else(|| book.empty_price());
+        let price_t = self.price_t.or(price_t0);
         let progress = book
             .terms
             .dex_threshold
@@ -232,11 +242,11 @@ impl Observation {
             num(self
                 .first_sell_ms
                 .map(|t| i128::from(t.saturating_sub(self.t0_ms)))),
-            num(match (self.price_t, self.price_t0, one) {
+            num(match (price_t, price_t0, one) {
                 (Some(t), Some(t0), Some(one)) => quotient(t, t0, p).map(|q| q - one),
                 _ => None,
             }),
-            if self.price_t0.is_some() {
+            if price_t0.is_some() {
                 Value::Num(self.max_drawdown)
             } else {
                 Value::Null
@@ -361,9 +371,52 @@ mod tests {
         let b = book();
         let o = Observation::new([7; 20], (10, 1), 1_000, 3_000, 4);
         let f = o.features(&b, 5);
-        for i in [6, 7, 8, 9, 10, 11, 12] {
+        for i in [6, 7, 8, 9, 10] {
             assert_eq!(f[i], Value::Null, "{}", NAMES[i]);
         }
         assert_eq!(f[0], Value::Num(0));
+        // H gate MEDIUM 2: the empty curve is t0 and t: no change, no
+        // drawdown (the original's 0, not NULL).
+        assert_eq!((f[11], f[12]), (Value::Num(0), Value::Num(0)));
+    }
+
+    /// H gate MEDIUM 2: a launch without a creator purchase has the empty
+    /// curve as t0, so a first BUY in the window is a price change (before:
+    /// t0 was the price after that BUY, so the change was 0).
+    #[test]
+    fn t0_of_a_launch_without_a_purchase_is_the_empty_curve() {
+        let mut b = book();
+        let mut o = Observation::new([7; 20], (10, 1), 1_000, 3_000, 4);
+        let first = buy(&mut b, 11, 0, 1, 1_000_000_000_000_000_000);
+        o.trade(&first, 1_750, &b);
+        let f = o.features(&b, 5);
+        let Value::Num(change) = f[11] else {
+            panic!("{:?}", f[11])
+        };
+        assert!(change > 0, "{change}");
+        assert_eq!(f[12], Value::Num(0));
+    }
+
+    /// H gate LOW 8: the concentration rounds as the original: shares 1/7
+    /// and 6/7 at four places (0.1429, 0.8571) squared and summed is 0.7550
+    /// (the exact value 0.75510... would round to 0.7551).
+    #[test]
+    fn the_concentration_rounds_each_share_first() {
+        let mut o = Observation::new([7; 20], (10, 1), 1_000, 3_000, 4);
+        let b = book();
+        for (trader, wei) in [(1u8, 1u64), (2, 6)] {
+            let t = Trade {
+                block_number: 11,
+                tx_index: u64::from(trader),
+                log_index: 0,
+                sell: false,
+                trader: [trader; 20],
+                amount: U256::from(1u8),
+                eth: U256::from(wei),
+                fee: U256::ZERO,
+            };
+            o.trade(&t, 1_500, &b);
+        }
+        assert_eq!(o.features(&b, 5)[8], Value::Num(7_550));
     }
 }

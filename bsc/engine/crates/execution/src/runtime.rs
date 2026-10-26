@@ -76,9 +76,24 @@ pub struct StrategyConfig {
 }
 
 impl StrategyConfig {
+    /// The frozen gas evidence the strategy may read, compiled in: each
+    /// file the economics snapshot binds, as this build's tree holds it
+    /// (the snapshot guard keeps the tree equal to the frozen snapshot).
+    pub const FROZEN_GAS_EVIDENCE: [(&'static str, &'static [u8]); 2] = [
+        (
+            "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
+            include_bytes!("../../trading/fixtures/bsc/receipts_20261026.txt"),
+        ),
+        (
+            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261026.txt",
+            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261026.txt"),
+        ),
+    ];
+
     /// The gas evidence of the configured files under `repo_root`; each
-    /// must be a file the economics snapshot binds (frozen evidence, never
-    /// another file), and at least one is named.
+    /// must be a file the economics snapshot binds with exactly its frozen
+    /// content (H gate L9: a path alone is no binding), and at least one
+    /// is named.
     pub fn gas(
         &self,
         repo_root: &Path,
@@ -94,10 +109,18 @@ impl StrategyConfig {
                     "{p}: not a file the economics snapshot binds (BSC_STRATEGY_C_GAS_EVIDENCE)"
                 ));
             }
+            let frozen = Self::FROZEN_GAS_EVIDENCE
+                .iter()
+                .find(|(f, _)| f == p)
+                .map(|(_, bytes)| *bytes)
+                .ok_or_else(|| format!("{p}: not frozen gas evidence of this build"))?;
             let path = repo_root.join(p);
-            text.push_str(
-                &std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
-            );
+            if std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))? != frozen {
+                return Err(format!(
+                    "{p}: differs from the frozen gas evidence of this build"
+                ));
+            }
+            text.push_str(std::str::from_utf8(frozen).map_err(|e| format!("{p}: {e}"))?);
             text.push('\n');
         }
         darkbot_bsc_trading::economics::network::GasEvidence::parse(&text)

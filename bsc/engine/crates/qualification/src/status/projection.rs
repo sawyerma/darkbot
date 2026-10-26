@@ -1042,7 +1042,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     if let Some(replay) = newest("strategy-replay-")
         && let Some(bytes) = read(&replay)
     {
-        match record::decode(&schema::bsc_runtime::strategy_replay::SCHEMA, &bytes) {
+        match schema::bsc_runtime::strategy_replay::decode_replay(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &replay, &r)),
             Err(_) => warnings.push("STRATEGY_REPLAY_INVALID".into()),
         }

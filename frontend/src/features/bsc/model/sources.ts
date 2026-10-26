@@ -85,7 +85,7 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     state: fresh ? y("state") : "STALE",
     detail: [f.get("strategy[0].reason"), `following ${y("followed")} · observation ${y("observation_ms")} ms · open at most ${y("max_open")} · PAPER input ${y("input_wei")} wei`].filter(Boolean).join(" · "),
     decisions: `launches ${y("launches")} · passed ${y("passed")} · rejected ${y("rejected")} · data incomplete ${y("data_incomplete")} · not tracked ${y("not_tracked")} · slot limit ${y("slot_limit")} · creator sold before the entry ${y("creator_sold")} · inputs: trades ${y("trades")}, terms ${y("terms")}, migrations ${y("migrations")}, incomplete ${y("incomplete")}`,
-    paper: `entered ${y("entered")} · cancelled ${y("cancelled")} · exits creator sell ${y("exits_creator_sell")}, target ${y("exits_target")}, stop ${y("exits_stop")}, timeout ${y("exits_timeout")} · gains ${y("gains")} (${y("gain_wei")} wei) · losses ${y("losses")} (${y("loss_wei")} wei) · unresolved ${y("unresolved")}`,
+    paper: `entered ${y("entered")} · cancelled ${y("cancelled")} · exits creator sell ${y("exits_creator_sell")}, target ${y("exits_target")}, stop ${y("exits_stop")}, timeout ${y("exits_timeout")} · gains ${y("gains")} (${y("gain_wei")} wei) · losses ${y("losses")} (${y("loss_wei")} wei) · unresolved ${y("unresolved")} · open ${y("open")} (not valued)`,
   } : undefined;
   return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec, capture, strategy }, health };
 }

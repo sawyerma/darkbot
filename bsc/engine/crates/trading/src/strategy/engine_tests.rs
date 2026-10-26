@@ -407,3 +407,103 @@ fn a_busy_slot_discards_for_good() {
     }
     assert_eq!(c.kinds(), ["decided 105 Pass", "decided 105 SlotLimit"]);
 }
+
+/// H gate HIGH 1: the exit fills after the real trades of its block; a dump
+/// in that block lowers the proceeds (before: the shadow ignored every
+/// trade while exiting).
+#[test]
+fn the_exit_fills_after_the_trades_of_its_block() {
+    let run = |dump: bool| {
+        let mut cfg = config("");
+        cfg.hold_ms = 1_500;
+        let mut c = Chain::new(cfg);
+        c.launch(TOKEN, 5_000_000_000_000_000);
+        for i in 1..=4u8 {
+            c.next_block();
+            for j in 0..5u8 {
+                c.buy(TOKEN, [i * 10 + j; 20], 500_000_000_000_000_000);
+            }
+        }
+        // 105: decided; 106: filled at its end; the timeout triggers at
+        // the end of 108 (seen when 109 arrives).
+        for _ in 0..5 {
+            c.next_block();
+        }
+        // 109: the exit block; the holders dump in it.
+        if dump {
+            for i in 1..=4u8 {
+                c.sell(TOKEN, [i * 10; 20], 150_000);
+            }
+        }
+        c.next_block(); // 110: the exit filled at the end of 109
+        let exited = c.out.iter().find_map(|o| match o {
+            Output::Exited { exit, block, .. } => Some((*block, exit.proceeds_wei)),
+            _ => None,
+        });
+        (c.kinds(), exited.unwrap())
+    };
+    let (kinds, (block, calm)) = run(false);
+    assert_eq!(
+        kinds[1..],
+        [
+            "entered 106",
+            "trigger 108 Timeout",
+            "exited 109 Timeout loss"
+        ]
+    );
+    assert_eq!(block, 109);
+    let (_, (_, dumped)) = run(true);
+    assert!(dumped < calm, "{dumped} < {calm}");
+}
+
+/// H gate MEDIUM 4: a fill block whose height was skipped (a gap) cancels
+/// the entry at the next block; the slot is free again (before: the token
+/// stayed Entering for good and held its slot).
+#[test]
+fn a_skipped_fill_block_cancels_and_frees_the_slot() {
+    use super::book::Untracked;
+    let mut cfg = config("");
+    cfg.max_open = 1;
+    let mut c = Chain::new(cfg);
+    c.passing_launch(TOKEN); // 105: decided, fills at the end of 106
+    c.feed(Input::Incomplete);
+    c.block = 108; // 106 and 107 skipped
+    c.next_block(); // 109: the end of 108
+    c.next_block();
+    assert!(
+        c.out.iter().any(|o| matches!(
+            o,
+            Output::EntryCancelled {
+                block: 109,
+                cancel: Cancel::NotTracked(Untracked::Gap),
+                ..
+            }
+        )),
+        "{:?}",
+        c.kinds()
+    );
+    assert_eq!(c.engine.followed(), 0);
+}
+
+/// H gate MEDIUM 5: under TX_LANDS a creator sale between the decision and
+/// the fill lets the BUY land, then latches CREATOR_SELL at once (the
+/// original's latch for any creator sale once filled).
+#[test]
+fn tx_lands_then_exits_on_the_creators_earlier_sale() {
+    let mut cfg = config("");
+    cfg.creator_sold_before_fill = CreatorSoldBeforeFill::TxLands;
+    let mut c = Chain::new(cfg);
+    c.passing_launch(TOKEN);
+    c.sell(TOKEN, CREATOR, 100_000);
+    c.next_block(); // 106
+    c.next_block(); // the fill at the end of 106; 107
+    c.next_block(); // the end of 107
+    assert_eq!(
+        c.kinds()[..3],
+        [
+            "decided 105 Pass".to_string(),
+            "entered 106".to_string(),
+            "trigger 107 CreatorSell".to_string()
+        ]
+    );
+}

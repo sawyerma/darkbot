@@ -153,6 +153,11 @@ const UNRESOLVED: u8 = 6;
 
 pub const OUTPUT_LEN: usize = 1 + 1 + 8 + 20 + 1 + 1 + 4 * 32;
 
+/// A decision carries its 16 features in place of the four words: a tag
+/// (0 NULL, 1 number, 2 flag false, 3 flag true) and the value (i128,
+/// little-endian) each, so a replay compares them too.
+pub const DECIDED_LEN: usize = 1 + 1 + 8 + 20 + 1 + 1 + 16 * 17;
+
 fn decision_code(d: Decision) -> (u8, u8) {
     match d {
         Decision::Pass => (0, 0),
@@ -164,15 +169,33 @@ fn decision_code(d: Decision) -> (u8, u8) {
     }
 }
 
+/// Why a token is not tracked: the reason in the high nibble, for a term
+/// outside the scope the term in the low one (1 version, 2 quote token,
+/// 3 NFT gate, 4 holding cap, 5 curve, 6 tax, 7 threshold, 8 not
+/// tradable, 15 another).
 fn untracked_code(u: Untracked) -> u8 {
-    match u {
-        Untracked::Unsupported(_) => 1,
-        Untracked::TermsIncomplete => 2,
-        Untracked::TradeMismatch => 3,
-        Untracked::Migrated => 4,
-        Untracked::Gap => 5,
-        Untracked::ShadowReplay => 6,
-    }
+    let (reason, term) = match u {
+        Untracked::Unsupported(why) => (
+            1,
+            match why {
+                "version" => 1,
+                "quote token" => 2,
+                "nft gate" => 3,
+                "holding cap" => 4,
+                "curve" => 5,
+                "tax" => 6,
+                "threshold" => 7,
+                "not tradable" => 8,
+                _ => 15,
+            },
+        ),
+        Untracked::TermsIncomplete => (2, 0),
+        Untracked::TradeMismatch => (3, 0),
+        Untracked::Migrated => (4, 0),
+        Untracked::Gap => (5, 0),
+        Untracked::ShadowReplay => (6, 0),
+    };
+    (reason << 4) | term
 }
 
 fn reason_code(r: ExitReason) -> u8 {
@@ -184,23 +207,48 @@ fn reason_code(r: ExitReason) -> u8 {
     }
 }
 
+fn decided_payload(o: &Output) -> Vec<u8> {
+    let Output::Decided {
+        token,
+        block,
+        decision,
+        features,
+    } = o
+    else {
+        return Vec::new();
+    };
+    use darkbot_bsc_trading::strategy::features::Value;
+    let (code, detail) = decision_code(*decision);
+    let mut out = Vec::with_capacity(DECIDED_LEN);
+    out.push(b'Y');
+    out.push(DECIDED);
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(token);
+    out.push(code);
+    out.push(detail);
+    for v in features.iter() {
+        let (tag, value) = match v {
+            Value::Null => (0u8, 0i128),
+            Value::Num(n) => (1, *n),
+            Value::Flag(false) => (2, 0),
+            Value::Flag(true) => (3, 0),
+        };
+        out.push(tag);
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}
+
 /// A strategy output (`Y | kind u8 | block u64 | token [20] | code u8 |
 /// detail u8 | four words`): a decision (verdict, failed feature or
-/// reason), an entry (tokens, input, network fee, spent), a cancel, an exit
-/// trigger, an exit (proceeds, network fee, the result, 0 gain / 1 loss),
-/// an unresolved position.
+/// reason; its 16 features in place of the words, [`DECIDED_LEN`]), an
+/// entry (tokens, input, network fee, spent), a cancel, an exit trigger, an
+/// exit (proceeds, network fee, the result, 0 gain / 1 loss), an
+/// unresolved position.
 pub fn output_payload(o: &Output) -> Vec<u8> {
     let (kind, block, token, code, detail, words): (u8, u64, [u8; 20], u8, u8, [U256; 4]) = match o
     {
-        Output::Decided {
-            token,
-            block,
-            decision,
-            ..
-        } => {
-            let (c, d) = decision_code(*decision);
-            (DECIDED, *block, *token, c, d, [U256::ZERO; 4])
-        }
+        Output::Decided { .. } => return decided_payload(o),
         Output::Entered {
             token,
             block,
@@ -368,7 +416,11 @@ pub fn status_draft(
     .set(st::TRADES, c.trades)
     .set(st::TERMS, c.terms)
     .set(st::MIGRATIONS, c.migrations)
-    .set(st::INCOMPLETE, c.incomplete);
+    .set(st::INCOMPLETE, c.incomplete)
+    .set(
+        st::OPEN,
+        strategy.map_or(0, |s| s.engine.open_positions() as u64),
+    );
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -478,6 +530,8 @@ pub struct Replay {
     pub config_match: Option<bool>,
     pub read_error: Option<String>,
     pub counters: Counters,
+    /// PAPER positions still open when the strategy's periods ended.
+    pub open_at_end: u64,
 }
 
 /// Replays the run `run_id` under `journal_dir`; `config_sha256` is the
@@ -529,6 +583,7 @@ pub fn replay(
                 // The counters of every period the strategy ran add up.
                 if let Some(s) = strategy.take() {
                     add(&mut out.counters, &s.counters);
+                    out.open_at_end += s.engine.open_positions() as u64;
                 }
                 if *on == 1 {
                     out.starts += 1;
@@ -545,6 +600,7 @@ pub fn replay(
     }
     if let Some(s) = strategy {
         add(&mut out.counters, &s.counters);
+        out.open_at_end += s.engine.open_positions() as u64;
     }
     out.journaled = journaled.len() as u64;
     out.replayed = replayed.len() as u64;
@@ -596,6 +652,10 @@ impl Replay {
             "INCOMPLETE"
         } else if self.starts == 0 {
             "NOT_RUN"
+        } else if self.config_match.is_none() {
+            // No run manifest names the configuration: nothing says the
+            // replay ran with the run's (H gate L6).
+            "INCOMPLETE"
         } else if self.first_difference.is_some() || self.config_match == Some(false) {
             "DIFFERS"
         } else {
@@ -627,7 +687,7 @@ impl Replay {
         use darkbot_bsc_record::Value;
         use darkbot_bsc_record::schema::bsc_runtime::strategy_replay as sr;
         let c = &self.counters;
-        let mut d = darkbot_bsc_record::Draft::new(&sr::SCHEMA);
+        let mut d = darkbot_bsc_record::Draft::new(&sr::V2);
         d.set(sr::RUN_ID, self.run_id.as_str())
             .set(sr::CHAIN_ID, 56u64)
             .set(sr::PROVENANCE_TOOL, "bsc_runtime strategy-replay")
@@ -658,7 +718,8 @@ impl Replay {
             .set(sr::TRADES, c.trades)
             .set(sr::TERMS, c.terms)
             .set(sr::MIGRATIONS, c.migrations)
-            .set(sr::INCOMPLETE, c.incomplete);
+            .set(sr::INCOMPLETE, c.incomplete)
+            .set(sr::OPEN_AT_END, self.open_at_end);
         if let Some(i) = self.first_difference {
             d.set(sr::FIRST_DIFFERENCE, i);
         }
@@ -674,7 +735,7 @@ impl Replay {
     pub fn summary(&self) -> String {
         let c = &self.counters;
         format!(
-            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; inputs: trades {}, terms {}, migrations {}, incomplete {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {})\n{}",
+            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; inputs: trades {}, terms {}, migrations {}, incomplete {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {}, open at the end {} (not valued))\n{}",
             self.run_id,
             self.verdict(),
             self.records,
@@ -703,6 +764,7 @@ impl Replay {
             c.losses,
             c.loss_wei,
             c.unresolved,
+            self.open_at_end,
             self.reasons().join("\n"),
         )
     }
@@ -957,7 +1019,8 @@ mod tests {
             .map(|p| (p[1], u64_at(p, 2).unwrap(), p[30]))
             .collect();
         assert_eq!(kinds, [(DECIDED, 105, 0), (ENTERED, 106, 0)]);
-        assert!(out.iter().all(|p| p.len() == OUTPUT_LEN && p[0] == b'Y'));
+        assert_eq!((out[0].len(), out[1].len()), (DECIDED_LEN, OUTPUT_LEN));
+        assert!(out.iter().all(|p| p[0] == b'Y'));
         assert_eq!(&out[0][10..30], &TOKEN);
         assert_eq!(
             U256::from_be_slice(&out[1][32 + 32..32 + 64]),
@@ -1068,11 +1131,17 @@ mod tests {
         assert_eq!(r.verdict(), "PASS", "{}", r.summary());
         assert_eq!((r.starts, r.journaled, r.replayed), (1, 2, 2));
         assert_eq!(r.counters, s.counters);
-        let rec = darkbot_bsc_record::decode(
-            &darkbot_bsc_record::schema::bsc_runtime::strategy_replay::SCHEMA,
+        // H gate L10: the position entered at 106 was still open at the
+        // switch.
+        assert_eq!(r.open_at_end, 1);
+        let rec = darkbot_bsc_record::schema::bsc_runtime::strategy_replay::decode_replay(
             &r.encode(1).unwrap(),
         )
         .unwrap();
+        assert_eq!(
+            rec.get(darkbot_bsc_record::schema::bsc_runtime::strategy_replay::OPEN_AT_END),
+            Some(&darkbot_bsc_record::Value::U64(1))
+        );
         assert_eq!(
             rec.get(darkbot_bsc_record::schema::bsc_runtime::strategy_replay::VERDICT),
             Some(&darkbot_bsc_record::Value::Text("PASS".into()))
@@ -1084,7 +1153,34 @@ mod tests {
         assert_eq!((r.verdict(), r.first_difference), ("DIFFERS", Some(1)));
         let r = replay(&base, "7", max, &config(), &gas(), Some([0xC1; 32])).unwrap();
         assert_eq!((r.verdict(), r.config_match), ("DIFFERS", Some(false)));
+        // H gate MEDIUM 3: the decision's features are part of its record,
+        // so a feature computed differently is a difference.
+        let mut filtered = config();
+        // The creator's share rounded at 2 places instead of 4.
+        filtered.ratio_places = 2;
+        let r = replay(&base, "7", max, &filtered, &gas(), Some([0xC0; 32])).unwrap();
+        assert_eq!((r.verdict(), r.first_difference), ("DIFFERS", Some(0)));
+        // H gate L6: without the run manifest the configuration is unknown.
+        std::fs::remove_file(base.join("7").join(crate::runtime_journal::RUN_MANIFEST)).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        assert_eq!((r.verdict(), r.config_match), ("INCOMPLETE", None));
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// H gate L7: a token outside the scope keeps which term put it there.
+    #[test]
+    fn the_untracked_reason_keeps_the_term() {
+        assert_eq!(untracked_code(Untracked::Unsupported("quote token")), 0x12);
+        assert_eq!(untracked_code(Untracked::Unsupported("nft gate")), 0x13);
+        assert_eq!(untracked_code(Untracked::Unsupported("holding cap")), 0x14);
+        assert_eq!(untracked_code(Untracked::Gap), 0x50);
+        let d = output_payload(&Output::Decided {
+            token: TOKEN,
+            block: 9,
+            decision: Decision::NotTracked(Untracked::Unsupported("version")),
+            features: Box::new([darkbot_bsc_trading::strategy::features::Value::Null; 16]),
+        });
+        assert_eq!((d.len(), d[30], d[31]), (DECIDED_LEN, 3, 0x11));
     }
 
     /// The runtime reads only gas evidence the economics snapshot binds:
@@ -1108,6 +1204,21 @@ mod tests {
         ] {
             assert!(with(bad).gas(&root).is_err(), "{bad:?}");
         }
+        // H gate L9: the right path with other content is refused.
+        let copy = std::env::temp_dir().join(format!("bsc-gas-bound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copy);
+        for (path, bytes) in crate::runtime::StrategyConfig::FROZEN_GAS_EVIDENCE {
+            std::fs::create_dir_all(copy.join(path).parent().unwrap()).unwrap();
+            std::fs::write(copy.join(path), bytes).unwrap();
+        }
+        assert!(configured.gas(&copy).is_ok());
+        let flap = crate::runtime::StrategyConfig::FROZEN_GAS_EVIDENCE[1].0;
+        let mut changed = std::fs::read(copy.join(flap)).unwrap();
+        changed.extend_from_slice(b"FLAP BUY 1 aa bb 1 100 50 1 2 cc dd\n");
+        std::fs::write(copy.join(flap), changed).unwrap();
+        let refused = configured.gas(&copy).unwrap_err();
+        assert!(refused.contains("differs from the frozen"), "{refused}");
+        std::fs::remove_dir_all(&copy).unwrap();
     }
 
     #[test]

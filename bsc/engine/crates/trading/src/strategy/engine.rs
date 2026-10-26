@@ -172,10 +172,14 @@ enum Stage {
         fill_ms: u64,
         fill_block: u64,
     },
+    /// `exit_block`: the SELL fills at its end, after its trades;
+    /// `fill_block`: the entry's, after which real trades are replayed on
+    /// the shadow (the exit block's among them).
     Exiting {
         entry: Entry,
         shadow: Box<TokenBook>,
         fill_block: u64,
+        exit_block: u64,
         reason: ExitReason,
     },
 }
@@ -213,6 +217,14 @@ impl Engine {
     /// The tokens followed (observing, entering, open or exiting).
     pub fn followed(&self) -> usize {
         self.tokens.len()
+    }
+
+    /// PAPER positions entered and not yet closed (open or exiting).
+    pub fn open_positions(&self) -> usize {
+        self.tokens
+            .values()
+            .filter(|t| matches!(t.stage, Stage::Open { .. } | Stage::Exiting { .. }))
+            .count()
     }
 
     fn token_mut(&mut self, token: &[u8; 20]) -> Option<&mut Token> {
@@ -390,10 +402,13 @@ impl Engine {
             };
             match t.stage {
                 Stage::Observing(_) => {}
+                // At the fill block, or the first block after it when its
+                // height was skipped (a gap leaves the book untracked, so
+                // that fill cancels).
                 Stage::Entering {
                     fill_block,
                     decided_block,
-                } if fill_block == number => {
+                } if fill_block <= number => {
                     let sold_after_decision = t.creator_sold.is_some_and(|b| b >= decided_block);
                     let result = if sold_after_decision
                         && self.cfg.creator_sold_before_fill == CreatorSoldBeforeFill::FreeCancel
@@ -462,7 +477,10 @@ impl Engine {
                         continue;
                     }
                     let mut reasons = Vec::new();
-                    if t.creator_sold.is_some_and(|b| b >= fill_block) {
+                    // Any sale of the creator latches once the position is
+                    // open (one before the decision rejected it; one before
+                    // the fill under TX_LANDS counts here).
+                    if t.creator_sold.is_some() {
                         reasons.push(ExitReason::CreatorSell);
                     }
                     if let Some((target, stop)) = self.valuation(&shadow, &e) {
@@ -485,7 +503,8 @@ impl Engine {
                             t.stage = Stage::Exiting {
                                 entry: e,
                                 shadow,
-                                fill_block: number.saturating_add(self.cfg.fill_delay_blocks),
+                                fill_block,
+                                exit_block: number.saturating_add(self.cfg.fill_delay_blocks),
                                 reason,
                             };
                         }
@@ -494,9 +513,10 @@ impl Engine {
                 Stage::Exiting {
                     entry: e,
                     shadow,
-                    fill_block,
+                    exit_block,
                     reason,
-                } if fill_block == number => {
+                    ..
+                } if exit_block <= number => {
                     let valued = t
                         .book
                         .tracking()

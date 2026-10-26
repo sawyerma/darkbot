@@ -145,6 +145,7 @@ describe("BSC source control", () => {
     expect(v?.decisions).toContain("launches 3 · passed 1");
     expect(v?.paper).toContain("entered 1");
     expect(v?.paper).toContain("(120000000000000 wei)");
+    expect(v?.paper).toContain("open ? (not valued)");
     expect(v?.detail).not.toContain("undefined");
     const refused = runtimeView([status(10_000, "GAS_EVIDENCE_REFUSED", "flap_gas_20261026.txt: missing")], 11_000).view.strategy;
     expect(refused?.detail).toContain("flap_gas_20261026.txt: missing");
