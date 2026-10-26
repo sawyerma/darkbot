@@ -54,6 +54,10 @@ pub enum QuoteError {
     InvalidCurveState,
     /// The quote is zero.
     ZeroOutput,
+    /// The BUY's output is above the origin's per-origin holding allowance:
+    /// the Portal fills only up to it and refunds the rest, a partial fill
+    /// that is not quoted.
+    HoldingCapExceeded,
     /// Fee split failure.
     Fee(FeeError),
     /// Arithmetic failure.
@@ -83,6 +87,7 @@ impl core::fmt::Display for QuoteError {
             Self::OutsideQualifiedSegment => f.write_str("quote: swap leaves the known segment"),
             Self::InvalidCurveState => f.write_str("quote: inconsistent curve state"),
             Self::ZeroOutput => f.write_str("quote: output is zero"),
+            Self::HoldingCapExceeded => f.write_str("quote: above the per-origin holding cap"),
             Self::Fee(e) => write!(f, "quote: {e}"),
             Self::Arith(e) => write!(f, "quote: {e}"),
         }

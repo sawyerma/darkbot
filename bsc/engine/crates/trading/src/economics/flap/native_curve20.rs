@@ -89,6 +89,19 @@ pub struct NativeBuyInputs {
     pub tax_on_bonding_curve_enabled: bool,
     /// Whether the caller is exempt from fees.
     pub caller_fee_exempt: bool,
+    /// The per-origin holding cap of the BUY's origin at this state.
+    pub holding_cap: HoldingCap,
+}
+
+/// The Portal's per-origin holding cap for one origin at a state (v5.27.0
+/// `maxBuyPerOrigin` and `buyQuotaOf`: `maxSupply · bps / 10000` less the
+/// origin's balance; a token with `bps == 0` has none).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoldingCap {
+    None,
+    /// The tokens the origin may still acquire. A BUY above it fills only up
+    /// to it and refunds the rest; the quote refuses it.
+    Remaining(U256),
 }
 
 /// Result of a native BUY quote.
@@ -139,6 +152,11 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
     let output_amount = supply_after - inputs.circulating_before;
     if output_amount.is_zero() {
         return Err(QuoteError::ZeroOutput);
+    }
+    if let HoldingCap::Remaining(remaining) = inputs.holding_cap
+        && output_amount > remaining
+    {
+        return Err(QuoteError::HoldingCapExceeded);
     }
 
     Ok(NativeBuyQuote {
@@ -280,6 +298,15 @@ pub const WITNESSED_MAINNET_TERMS: VenueBuyTerms = VenueBuyTerms {
     caller_fee_exempt: false,
 };
 
+/// The holding cap of the qualified state, directly after a `newTokenV6`
+/// launch without extension, for an origin that holds none of the token:
+/// none. A cap comes only from the admin setters (`setTokenMaxBuyBps`,
+/// `setTokenNFTGate`, each announced by its event) or from the NFT-gate
+/// extension of `newTokenV7`, which the profile refuses (`g02_flap_parity`
+/// records each sampled launch receipt's cap and gate). Any other state's
+/// cap is an input the quote enforces.
+pub const FRESH_LAUNCH_HOLDING_CAP: HoldingCap = HoldingCap::None;
+
 /// The input amount covered by the independent EVM execution on mainnet
 /// state: 0.001 BNB, in wei.
 pub const QUALIFIED_MAINNET_INPUT_WEI: u64 = 1_000_000_000_000_000;
@@ -364,6 +391,7 @@ pub fn admit_native_buy(
         buy_tax_bps: state.buy_tax_bps,
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+        holding_cap: FRESH_LAUNCH_HOLDING_CAP,
     })?;
     let min_output_amount = min_output(quote.output_amount, policy.slippage_bps())?;
     Ok(AdmittedBuy::new(
@@ -412,19 +440,32 @@ mod parity_tests {
                         buy_tax_bps: buy_tax,
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
+                        holding_cap: HoldingCap::None,
                     })
                     .unwrap()
                     .output_amount;
                     if local == chain {
                         buys += 1;
                     } else {
-                        // 2 % of the 1e9-token supply.
-                        assert_eq!(
-                            chain,
-                            U256::from(20_000_000u64) * U256::from(10u64).pow(U256::from(18u64)),
-                            "{line}"
-                        );
+                        // 2 % of the 1e9-token supply: the call's origin
+                        // holds none, so its allowance is the whole cap,
+                        // and the quote refuses what the Portal cuts.
+                        let cap =
+                            U256::from(20_000_000u64) * U256::from(10u64).pow(U256::from(18u64));
+                        assert_eq!(chain, cap, "{line}");
                         assert!(local > chain, "{line}");
+                        let refused = quote_native_buy(&NativeBuyInputs {
+                            curve_id: CURVE_ID_RH_BNB,
+                            reserve_before: reserve,
+                            circulating_before: supply,
+                            input_amount: amount,
+                            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                            buy_tax_bps: buy_tax,
+                            tax_on_bonding_curve_enabled: true,
+                            caller_fee_exempt: false,
+                            holding_cap: HoldingCap::Remaining(cap),
+                        });
+                        assert_eq!(refused, Err(QuoteError::HoldingCapExceeded), "{line}");
                         capped += 1;
                     }
                 }
@@ -520,6 +561,7 @@ mod tests {
             buy_tax_bps: launch.buy_tax,
             tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
             caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+            holding_cap: HoldingCap::None,
         }
     }
 
@@ -556,6 +598,27 @@ mod tests {
             min_output(quote.output_amount, 100),
             Ok(U256::from(174_898_315_381_323_502_112_040u128))
         );
+    }
+
+    /// A BUY above the origin's holding allowance is refused, never quoted
+    /// as the partial fill the Portal would make; at or below it, it is
+    /// quoted unchanged.
+    #[test]
+    fn a_buy_above_the_holding_allowance_is_refused() {
+        let free = quote_native_buy(&witnessed(1_000_000_000_000_000))
+            .unwrap()
+            .output_amount;
+        let capped = |remaining: U256| {
+            let mut inputs = witnessed(1_000_000_000_000_000);
+            inputs.holding_cap = HoldingCap::Remaining(remaining);
+            quote_native_buy(&inputs).map(|q| q.output_amount)
+        };
+        assert_eq!(capped(free), Ok(free));
+        assert_eq!(
+            capped(free - U256::from(1u8)),
+            Err(QuoteError::HoldingCapExceeded)
+        );
+        assert_eq!(capped(U256::ZERO), Err(QuoteError::HoldingCapExceeded));
     }
 
     #[test]

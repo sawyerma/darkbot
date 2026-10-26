@@ -14,7 +14,7 @@ use darkbot_bsc_record::schema::{
 };
 use darkbot_bsc_record::{Draft, Value, decode, sha256};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CURVE_ID_RH_BNB as CURVE_RH_BNB_ID, NativeBuyInputs, quote_native_buy,
+    CURVE_ID_RH_BNB as CURVE_RH_BNB_ID, HoldingCap, NativeBuyInputs, quote_native_buy,
 };
 use darkbot_bsc_trading::economics::slippage::min_output;
 use std::io::Write;
@@ -62,6 +62,7 @@ fn main() {
         buy_tax_bps: 100,
         tax_on_bonding_curve_enabled: true,
         caller_fee_exempt: false,
+        holding_cap: HoldingCap::None,
     })
     .unwrap_or_else(|e| panic!("native Curve-20 quote failed: {e}"));
     let min_output = min_output(quote.output_amount, SLIPPAGE_BPS as u16)

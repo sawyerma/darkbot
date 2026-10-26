@@ -10,22 +10,30 @@
 //! inputs and SELL fractions of the circulating supply, each compared
 //! exactly (no tolerance). Token state comes from `getTokenV8Safe` at the
 //! same pin. Nothing is signed or sent.
+//!
+//! The per-origin holding cap (`maxBuyPerOrigin`, `buyQuotaOf` of the
+//! call's origin, `nftGate`) is read at the same pin, and each token's
+//! launch (selector, a cap or NFT gate set in the launch receipt) from its
+//! `TokenCreated` receipt: a BUY above the origin's allowance fills only up
+//! to it, which the local quote refuses (`QuoteError::HoldingCapExceeded`).
 #![forbid(unsafe_code)]
 
 #[path = "g01_common/mod.rs"]
 mod common;
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_sol_types::{SolCall, sol};
+use alloy_sol_types::{SolCall, SolEvent, sol};
 use common::chain::bloom_has;
 use common::edge::{self, CallOutcome, Endpoint, Pin};
 use common::util::{number, rpc_from_config};
 use darkbot_bsc_execution::rpc_wire::Limits;
 use darkbot_bsc_qualification::c1_common::Args;
+use darkbot_bsc_trading::economics::flap::QuoteError;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CURVE_ID_RH_BNB, NativeBuyInputs, NativeSellInputs, WITNESSED_MAINNET_TERMS, curve20,
-    quote_native_buy, quote_native_sell,
+    CURVE_ID_RH_BNB, HoldingCap, NativeBuyInputs, NativeSellInputs, WITNESSED_MAINNET_TERMS,
+    curve20, quote_native_buy, quote_native_sell,
 };
+use darkbot_bsc_trading::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
 use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
 use darkbot_bsc_trading::venues::flap::events::PortalEventKind;
 use std::path::Path;
@@ -60,6 +68,11 @@ sol! {
         uint8 dexId;
     }
     function getTokenV8Safe(address token) external view returns (TokenStateV8Safe state);
+    function maxBuyPerOrigin(address token) external view returns (uint16 bps, uint256 maxBuyAmount);
+    function buyQuotaOf(address token, address origin) external view returns (uint256 bought, uint256 remaining);
+    function nftGate(address token) external view returns (address nft);
+    event FlapTokenMaxBuyPerOriginSet(address indexed token, uint16 bps, uint256 maxBuyAmount);
+    event FlapNFTGated(address token, address nft);
 }
 
 /// `TokenStatus.Tradable`: on the bonding curve.
@@ -97,7 +110,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let args = Args::parse(std::env::args().skip(1));
-    args.only(&["rpc", "scan-blocks", "max-tokens", "fixture-out"])?;
+    args.only(&["rpc", "scan-blocks", "max-tokens", "tokens", "fixture-out"])?;
     let fixture_out = args.opt("fixture-out")?.map(std::path::PathBuf::from);
     let mut lines: Vec<String> = Vec::new();
     let rpc_url = match args.opt("rpc")? {
@@ -117,15 +130,25 @@ fn run() -> Result<(), String> {
         Duration::from_millis(defaults::RETRY_PAUSE_MS),
     );
     edge::require_bsc(rpc.chain_id()?)?;
-    let head = rpc.block_number()?;
-    let pinned = head - defaults::CONFIRMATIONS;
-    let pin: Pin = edge::pin_of(pinned, &rpc.header(pinned)?)?;
+    let scanned = rpc.block_number()? - defaults::CONFIRMATIONS;
     let portal = bsc_mainnet_v5_27_0().portal;
     let topic = B256::from(PortalEventKind::TokenCreated.topic0());
-    // Newest launches first.
-    let mut tokens: Vec<Address> = Vec::new();
-    let mut to = pinned;
-    while to > pinned.saturating_sub(scan) && tokens.len() < max_tokens * 4 {
+    // Tokens named by `--tokens` first (their launch not scanned), then the
+    // newest launches, each with what its launch receipt set.
+    let mut tokens: Vec<(Address, Launch)> = Vec::new();
+    for t in args.opt("tokens")?.into_iter().flat_map(|v| v.split(',')) {
+        let token: Address = t.trim().parse().map_err(|e| format!("--tokens {t}: {e}"))?;
+        tokens.push((
+            token,
+            Launch {
+                tx: None,
+                cap_bps: None,
+                nft: None,
+            },
+        ));
+    }
+    let mut to = scanned;
+    while to > scanned.saturating_sub(scan) && tokens.len() < max_tokens * 4 {
         let from = to.saturating_sub(defaults::HEADER_BATCH - 1);
         let headers = rpc.headers(from, to)?;
         for h in headers.iter().rev() {
@@ -135,24 +158,24 @@ fn run() -> Result<(), String> {
             for r in rpc.block_receipts(h)? {
                 for l in r.logs.iter().filter(|l| l.address == portal) {
                     if l.topics.first() == Some(&topic) && l.data.len() >= 4 * 32 {
-                        tokens.push(Address::from_slice(&l.data[3 * 32 + 12..4 * 32]));
+                        let token = Address::from_slice(&l.data[3 * 32 + 12..4 * 32]);
+                        tokens.push((token, Launch::of(&r, portal, token)));
                     }
                 }
             }
         }
         to = from.saturating_sub(1);
     }
-    println!(
-        "pin {} {} ({} launches found)",
-        pin.number,
-        pin.hash,
-        tokens.len()
-    );
-    let (mut quoted, mut matched, mut mismatched) = (0usize, 0usize, 0usize);
-    for token in tokens {
+    println!("scanned to {scanned} ({} launches found)", tokens.len());
+    let (mut quoted, mut matched, mut mismatched, mut unsupported) = (0usize, 0, 0, 0);
+    for (token, launch) in tokens {
         if quoted >= max_tokens {
             break;
         }
+        // Each token at its own fresh pin: a public node keeps the state
+        // of recent blocks only.
+        let pinned = rpc.block_number()? - defaults::CONFIRMATIONS;
+        let pin: Pin = edge::pin_of(pinned, &rpc.header(pinned)?)?;
         let CallOutcome::Returned(raw) =
             rpc.call_at(portal, &getTokenV8SafeCall { token }.abi_encode(), &pin)?
         else {
@@ -167,11 +190,79 @@ fn run() -> Result<(), String> {
             continue;
         }
         quoted += 1;
+        let view = |input: Vec<u8>| -> Result<Vec<u8>, String> {
+            match rpc.call_at(portal, &input, &pin)? {
+                CallOutcome::Returned(r) => Ok(r),
+                CallOutcome::Reverted(_) => Err(format!("{token}: lens call reverted")),
+            }
+        };
+        let cap = maxBuyPerOriginCall { token }.abi_encode();
+        let cap =
+            maxBuyPerOriginCall::abi_decode_returns(&view(cap)?).map_err(|e| e.to_string())?;
+        let quota = buyQuotaOfCall {
+            token,
+            origin: Address::ZERO,
+        }
+        .abi_encode();
+        let quota = buyQuotaOfCall::abi_decode_returns(&view(quota)?).map_err(|e| e.to_string())?;
+        let nft = nftGateCall { token }.abi_encode();
+        let nft = nftGateCall::abi_decode_returns(&view(nft)?).map_err(|e| e.to_string())?;
+        let holding_cap = if cap.bps == 0 {
+            HoldingCap::None
+        } else {
+            HoldingCap::Remaining(quota.remaining)
+        };
+        // The launch call: `portal:<selector>` when sent to the Portal,
+        // `via:<selector>` when another contract launched through it,
+        // `unscanned` for a token named by `--tokens`.
+        let (selector, launch_cap, launch_nft) = match launch.tx {
+            Some(hash) => {
+                let tx = rpc.transaction(hash)?;
+                (
+                    format!(
+                        "{}:{}",
+                        if tx.to == Some(portal) {
+                            "portal"
+                        } else {
+                            "via"
+                        },
+                        tx.input
+                            .get(..4)
+                            .map_or_else(|| "NONE".to_string(), alloy_primitives::hex::encode)
+                    ),
+                    launch.cap_bps.map_or("NONE".to_string(), |b| b.to_string()),
+                    launch
+                        .nft
+                        .map_or("NONE".to_string(), alloy_primitives::hex::encode),
+                )
+            }
+            None => (
+                "unscanned".to_string(),
+                "UNKNOWN".to_string(),
+                "UNKNOWN".to_string(),
+            ),
+        };
+        // What the production quote does not claim: another token version
+        // (newTokenV7 tokens charge differently) and an NFT-gated market.
+        let scope = if s.tokenVersion != TOKEN_VERSION_TAXED_V3 {
+            "UNSUPPORTED_VERSION"
+        } else if nft != Address::ZERO {
+            "UNSUPPORTED_NFT_GATE"
+        } else {
+            "SUPPORTED"
+        };
+        let token_facts = format!(
+            "{} {} {} {selector} {launch_cap} {launch_nft} {} {scope}",
+            cap.bps,
+            quota.remaining,
+            alloy_primitives::hex::encode(nft),
+            s.tokenVersion,
+        );
         let tax = |v: U256| u16::try_from(v).map_err(|_| format!("{token}: tax {v}"));
         let (buy_tax, sell_tax) = (tax(s.buyTaxRate)?, tax(s.sellTaxRate)?);
         println!(
-            "token {token} reserve {} supply {} buyTax {buy_tax} sellTax {sell_tax} version {}",
-            s.reserve, s.circulatingSupply, s.tokenVersion
+            "token {token} pin {} reserve {} supply {} buyTax {buy_tax} sellTax {sell_tax} version {} cap {token_facts}",
+            pin.number, s.reserve, s.circulatingSupply, s.tokenVersion
         );
         let quote =
             |input: Address, output: Address, amount: U256| -> Result<Option<U256>, String> {
@@ -201,20 +292,20 @@ fn run() -> Result<(), String> {
                 buy_tax_bps: buy_tax,
                 tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
                 caller_fee_exempt: false,
+                holding_cap,
             })
             .map(|q| q.output_amount);
-            let ok = chain == local.ok();
-            if ok {
-                matched += 1
-            } else {
-                mismatched += 1
-            }
-            println!(
-                "  BUY  {amount} -> chain {chain:?} local {local:?} {}",
-                if ok { "MATCH" } else { "MISMATCH" }
-            );
-            lines.push(sample(
-                &pin, token, &s, buy_tax, sell_tax, "BUY", amount, chain,
+            // A BUY above the allowance fills only up to it: the local quote
+            // refuses it, the Portal answers the allowance.
+            let ok = match (&local, holding_cap) {
+                (Err(QuoteError::HoldingCapExceeded), HoldingCap::Remaining(r)) => chain == Some(r),
+                _ => chain == local.ok(),
+            };
+            let verdict = count(scope, ok, &mut matched, &mut mismatched, &mut unsupported);
+            println!("  BUY  {amount} -> chain {chain:?} local {local:?} {verdict}");
+            lines.push(format!(
+                "{} {token_facts}",
+                sample(&pin, token, &s, buy_tax, sell_tax, "BUY", amount, chain)
             ));
         }
         for ppm in SELL_PPM {
@@ -235,26 +326,24 @@ fn run() -> Result<(), String> {
             })
             .map(|q| q.output_amount);
             let ok = chain == local.ok();
-            if ok {
-                matched += 1
-            } else {
-                mismatched += 1
-            }
-            println!(
-                "  SELL {amount} -> chain {chain:?} local {local:?} {}",
-                if ok { "MATCH" } else { "MISMATCH" }
-            );
-            lines.push(sample(
-                &pin, token, &s, buy_tax, sell_tax, "SELL", amount, chain,
+            let verdict = count(scope, ok, &mut matched, &mut mismatched, &mut unsupported);
+            println!("  SELL {amount} -> chain {chain:?} local {local:?} {verdict}");
+            lines.push(format!(
+                "{} {token_facts}",
+                sample(&pin, token, &s, buy_tax, sell_tax, "SELL", amount, chain)
             ));
         }
     }
-    println!("tokens {quoted}, samples matched {matched}, mismatched {mismatched}");
+    println!(
+        "tokens {quoted}, samples matched {matched}, mismatched {mismatched}, outside the supported scope {unsupported}"
+    );
     if let Some(path) = fixture_out {
         let text = format!(
-            "# Portal.quoteExactInput (eth_call, Portal 0x{}, v5.27.0) at the pinned block, with getTokenV8Safe at the same pin\n\
+            "# Portal.quoteExactInput (eth_call, Portal 0x{}, v5.27.0) at a pinned block per token, with getTokenV8Safe at the same pin\n\
              # (curve-20 native-quote tokens on the bonding curve; bsc-dataseed, read-only; g02_flap_parity).\n\
-             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT>\n{}\n",
+             # maxBuyPerOrigin, buyQuotaOf(origin 0x0) and nftGate at the same pin; the launch selector and the cap / NFT gate set in the launch receipt;\n\
+             # the token version and whether the production quote claims the token (SUPPORTED: version 6 without NFT gate).\n\
+             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE>\n{}\n",
             alloy_primitives::hex::encode(portal),
             lines.join("\n")
         );
@@ -264,6 +353,68 @@ fn run() -> Result<(), String> {
         return Err(format!("{mismatched} samples differ"));
     }
     Ok(())
+}
+
+/// Counts one sample: a mismatch only inside the supported scope.
+fn count(
+    scope: &str,
+    ok: bool,
+    matched: &mut usize,
+    mismatched: &mut usize,
+    unsupported: &mut usize,
+) -> &'static str {
+    match (scope, ok) {
+        ("SUPPORTED", true) => {
+            *matched += 1;
+            "MATCH"
+        }
+        ("SUPPORTED", false) => {
+            *mismatched += 1;
+            "MISMATCH"
+        }
+        _ => {
+            *unsupported += 1;
+            "UNSUPPORTED"
+        }
+    }
+}
+
+/// What a token's launch receipt set besides the launch itself (`tx` is
+/// `None` for a token named by `--tokens`).
+struct Launch {
+    tx: Option<B256>,
+    cap_bps: Option<u16>,
+    nft: Option<Address>,
+}
+
+impl Launch {
+    fn of(receipt: &common::edge::Receipt, portal: Address, token: Address) -> Self {
+        let mut launch = Launch {
+            tx: Some(receipt.transaction_hash),
+            cap_bps: None,
+            nft: None,
+        };
+        for l in receipt.logs.iter().filter(|l| l.address == portal) {
+            match l.topics.first() {
+                Some(t)
+                    if *t == FlapTokenMaxBuyPerOriginSet::SIGNATURE_HASH
+                        && l.topics.get(1) == Some(&token.into_word())
+                        && l.data.len() >= 32 =>
+                {
+                    launch.cap_bps = Some(u16::from_be_bytes([l.data[30], l.data[31]]));
+                }
+                Some(t)
+                    if *t == FlapNFTGated::SIGNATURE_HASH
+                        && l.data.len() >= 64
+                        && l.data[12..32] == token[..] =>
+                {
+                    launch.nft = Some(Address::from_slice(&l.data[44..64]));
+                }
+                _ => {}
+            }
+        }
+        launch
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
