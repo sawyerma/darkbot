@@ -134,6 +134,8 @@ pub struct IngressCore {
     max_launch_calldata: usize,
     /// The frozen Four.meme deployment its decoder recognizes launches of.
     four: FourDeployment,
+    /// The last observation was the first full sighting of its hash.
+    last_first_full: bool,
 }
 
 fn index(source: SourceId) -> usize {
@@ -189,6 +191,19 @@ pub fn launch_venue(four: &FourDeployment, raw: &[u8], max_calldata: usize) -> O
     }
 }
 
+/// Whether canonical signed bytes are addressed to a frozen venue contract
+/// (the Flap Portal, TokenManager2, OpenFour Core): the venues' pending
+/// flow, launches or not (competitor BUYs and SELLs).
+pub fn venue_target(four: &FourDeployment, raw: &[u8]) -> bool {
+    let Ok(target) = decode_tx_target(raw) else {
+        return false;
+    };
+    let Some(to) = target.to.map(Address::from) else {
+        return false;
+    };
+    to == Address::from(C14_FLAP_SCOPE.addresses[0]) || four.family_of(to).is_some()
+}
+
 /// The pre-execution token of canonical signed bytes that the production
 /// Four.meme decoder (Phase E) recognizes as a launch (Classic or OpenFour
 /// `createToken` of `deployment`); `None` for anything else, including
@@ -225,7 +240,14 @@ impl IngressCore {
             launches: 0,
             max_launch_calldata,
             four: bsc_mainnet_g01_129842711(),
+            last_first_full: false,
         }
+    }
+
+    /// Whether the last observation was the first verified full sighting of
+    /// its hash (a launch or not): what a pending capture journals.
+    pub fn last_first_full(&self) -> bool {
+        self.last_first_full
     }
 
     pub fn stats(&self, source: SourceId) -> SourceStats {
@@ -273,6 +295,7 @@ impl IngressCore {
         let i = index(source);
         let bit = 1u8 << i;
         self.stats[i].last_event_ns = Some(now_ns);
+        self.last_first_full = false;
         match observation {
             Observation::Connected => {
                 self.stats[i].connected = true;
@@ -324,6 +347,7 @@ impl IngressCore {
                     self.stats[i].launch_sightings += 1;
                 }
                 let Some(seen) = self.seen.get_mut(&hash) else {
+                    self.last_first_full = true;
                     self.stats[i].first_any += 1;
                     self.stats[i].first_full += 1;
                     if flap {
@@ -350,6 +374,7 @@ impl IngressCore {
                 match seen.first_full {
                     // The first actionable sighting, even after a hash-only one.
                     None => {
+                        self.last_first_full = true;
                         seen.first_full = Some((i, now_ns, wall_us));
                         seen.launch = launch;
                         self.stats[i].first_full += 1;
@@ -568,6 +593,50 @@ mod tests {
         );
         assert_eq!(core.launches(), 0);
         assert_eq!(core.stats(SourceId::Drpc).launch_first, 0);
+    }
+
+    /// Phase F: the first full sighting of any hash is flagged (what a
+    /// pending capture keeps), a duplicate or hash-only one is not; the
+    /// venue flow is told from other traffic.
+    #[test]
+    fn first_full_sightings_and_venue_targets_are_told_apart() {
+        let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
+        let buy: Vec<u8> = alloy_primitives::hex::decode(
+            calls
+                .lines()
+                .find(|l| l.starts_with("OPENFOUR BUY"))
+                .unwrap()
+                .split_whitespace()
+                .nth(10)
+                .unwrap(),
+        )
+        .unwrap();
+        let four = bsc_mainnet_g01_129842711();
+        assert!(venue_target(&four, &buy));
+        assert!(venue_target(&four, &legacy(PORTAL, LAUNCH)));
+        assert!(!venue_target(&four, &legacy([7; 20], LAUNCH)));
+        assert!(!venue_target(&four, b"not a transaction"));
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
+        let full = |h| Observation::Full { hash: h, raw: &buy };
+        core.observe(
+            SourceId::Drpc,
+            Observation::HashOnly { hash: [1; 32] },
+            1,
+            None,
+        );
+        assert!(!core.last_first_full());
+        // The first full sighting after a hash-only one.
+        assert_eq!(
+            core.observe(SourceId::PublicNode, full([1; 32]), 2, None),
+            None
+        );
+        assert!(core.last_first_full());
+        core.observe(SourceId::Drpc, full([1; 32]), 3, None);
+        assert!(!core.last_first_full());
+        core.observe(SourceId::Drpc, full([2; 32]), 4, None);
+        assert!(core.last_first_full());
+        core.observe(SourceId::Drpc, Observation::Connected, 5, None);
+        assert!(!core.last_first_full());
     }
 
     /// Phase E review M1: an OpenFour launch of a preset outside the frozen

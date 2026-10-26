@@ -14,6 +14,10 @@
 //! - `RawSignedTx`: the first verified full sighting of a launch (Flap C1
 //!   scope or a Four.meme `createToken`, Phase F), `source u8 | hash [32] |
 //!   canonical signed bytes`: a replay decodes them again.
+//! - `TxpoolAccepted`: the first verified full sighting of another pending
+//!   transaction, as far as the capture scope keeps them
+//!   (`BSC_RUNTIME_CAPTURE_PENDING`: `VENUES` those addressed to a venue
+//!   contract, the competitor flow; `ALL` every one), the same layout.
 //! - `Runtime` `b'L'`: a later sighting of a launch from another source,
 //!   `b'L' | source u8 | hash [32] | lag_ns u64 LE`.
 //! - `Runtime` `b'S'`: a source transition, `b'S' | source u8 | event u8`
@@ -49,8 +53,10 @@
 //! - `Runtime` `b'X'`: the clean end of this process (journal committed
 //!   after it); its absence marks a killed or crashed process.
 //!
-//! Other pending transactions are only counted (runtime status), not
-//! journaled: the journal stays bounded over long read-only runs.
+//! With `LAUNCHES` (the default) other pending transactions are only
+//! counted (runtime status), not journaled: the journal stays small over
+//! long read-only runs; a scoped Phase-F capture chooses `VENUES` or `ALL`
+//! (the byte budget and the preflight bound it).
 
 use crate::canonical_join::{FourToken, Joined, LaunchRef, LaunchTx, Venue};
 use crate::sources::SourceId;
@@ -251,6 +257,44 @@ pub fn window_payload(tag: u8, number: u64, hash: &[u8; 32]) -> Vec<u8> {
     out.extend_from_slice(&number.to_le_bytes());
     out.extend_from_slice(hash);
     out
+}
+
+/// Which pending transactions besides launches the journal keeps
+/// (`BSC_RUNTIME_CAPTURE_PENDING`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureScope {
+    Launches,
+    /// Also every one addressed to a venue contract (`ingress::venue_target`).
+    Venues,
+    /// Also every other one.
+    All,
+}
+
+impl CaptureScope {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "LAUNCHES" => Ok(Self::Launches),
+            "VENUES" => Ok(Self::Venues),
+            "ALL" => Ok(Self::All),
+            other => Err(format!(
+                "BSC_RUNTIME_CAPTURE_PENDING={other} is not LAUNCHES, VENUES or ALL"
+            )),
+        }
+    }
+
+    /// Whether the first full sighting of a pending transaction that is no
+    /// launch is journaled.
+    pub fn keeps(
+        self,
+        four: &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+        raw: &[u8],
+    ) -> bool {
+        match self {
+            Self::Launches => false,
+            Self::Venues => crate::ingress::venue_target(four, raw),
+            Self::All => true,
+        }
+    }
 }
 
 /// The run manifest's file name inside a run directory.
@@ -573,6 +617,27 @@ fn write_durable(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The pending capture scope: nothing besides launches, the venue
+    /// flow, or everything; anything else is refused at parse.
+    #[test]
+    fn the_capture_scope_keeps_what_it_names() {
+        let four = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711();
+        let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
+        let row: Vec<&str> = calls
+            .lines()
+            .find(|l| l.starts_with("CLASSIC BUY"))
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        let venue = alloy_primitives::hex::decode(row[10]).unwrap();
+        let other = b"not a venue transaction";
+        let keeps = |s: &str, raw: &[u8]| CaptureScope::parse(s).unwrap().keeps(&four, raw);
+        assert!(!keeps("LAUNCHES", &venue));
+        assert!(keeps("VENUES", &venue) && !keeps("VENUES", other));
+        assert!(keeps("ALL", other));
+        assert!(CaptureScope::parse("SOME").is_err());
+    }
 
     /// Every Four verdict's byte reads back as that verdict; no other does.
     #[test]

@@ -31,8 +31,8 @@ use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
-    CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal, SourceEvent,
-    canonical_launch_payload, first_sighting_payload, later_sighting_payload,
+    CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
+    SourceEvent, canonical_launch_payload, first_sighting_payload, later_sighting_payload,
     orphaned_launch_payload, paper_handoff_payload, pending_launch_payload, reorg_payload,
     resync_payload, source_event_payload, window_payload,
 };
@@ -46,6 +46,7 @@ use darkbot_bsc_journal::storage::writer::SyncPolicy;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, observed_now};
 use darkbot_bsc_trading::chain_state::engine::StateLimits;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -82,6 +83,8 @@ pub struct RuntimeConfig {
     pub journal_segment_ms: u64,
     pub journal_sync_records: u64,
     pub journal_sync_ms: u64,
+    /// Which pending transactions besides launches the journal keeps.
+    pub capture_pending: CaptureScope,
     /// The capacity preflight of a scoped capture: its planned duration,
     /// the writer probe's bytes and the disk reserve.
     pub capture_duration_s: u64,
@@ -161,6 +164,11 @@ impl RuntimeConfig {
         let watched = values.remove("BSC_STATE_WATCHED");
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
+        let capture_pending = CaptureScope::parse(
+            values
+                .remove("BSC_RUNTIME_CAPTURE_PENDING")
+                .ok_or("BSC_RUNTIME_CAPTURE_PENDING is required")?,
+        )?;
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -316,6 +324,7 @@ impl RuntimeConfig {
             journal_segment_ms: take("BSC_RUNTIME_JOURNAL_SEGMENT_MS", 1_000, 86_400_000)?,
             journal_sync_records: take("BSC_RUNTIME_JOURNAL_SYNC_RECORDS", 1, 1 << 20)?,
             journal_sync_ms: take("BSC_RUNTIME_JOURNAL_SYNC_MS", 1, 60_000)?,
+            capture_pending,
             capture_duration_s: take("BSC_RUNTIME_CAPTURE_DURATION_S", 60, 604_800)?,
             preflight_probe_bytes: take("BSC_RUNTIME_PREFLIGHT_PROBE_BYTES", 1 << 20, 1 << 32)?,
             disk_reserve_bytes: take("BSC_RUNTIME_DISK_RESERVE_BYTES", 0, 1 << 40)?,
@@ -988,6 +997,8 @@ pub fn run(
         .map(|_| Arc::new(AtomicU64::new(0)))
         .collect();
     let mut core = IngressCore::new(config.dedup_hashes, config.max_launch_calldata);
+    // The venue contracts the pending capture's VENUES scope keeps.
+    let four_deployment = bsc_mainnet_g01_129842711();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
@@ -1240,7 +1251,19 @@ pub fn run(
                         &later_sighting_payload(source, &hash, lag_ns),
                     );
                 }
-                None => {}
+                // Not a launch: the pending capture scope decides.
+                None => {
+                    if let Event::Full { raw, hash, .. } = &event
+                        && core.last_first_full()
+                        && config.capture_pending.keeps(&four_deployment, raw)
+                    {
+                        journal.record(
+                            RecordKind::TxpoolAccepted,
+                            at,
+                            &first_sighting_payload(source, hash, raw),
+                        );
+                    }
+                }
             }
         }
         // Canonical events: every queued one, then the joins that are due.

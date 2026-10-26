@@ -35,6 +35,10 @@ pub struct Proof {
     /// First sightings decoded again: Flap, Four Classic, OpenFour.
     pub sightings: [u64; 3],
     pub undecodable: u64,
+    /// Other pending first sightings kept by the capture scope, and those
+    /// addressed to a venue contract.
+    pub pending: u64,
+    pub pending_to_venues: u64,
     pub census_state: String,
     pub census_deterministic: bool,
     pub status_launches: Option<u64>,
@@ -82,6 +86,15 @@ pub fn prove(
                 match reader.next_record() {
                     Ok(Some(r)) => {
                         p.records += 1;
+                        if r.kind == RecordKind::TxpoolAccepted {
+                            p.pending += 1;
+                            p.pending_to_venues += u64::from(
+                                r.payload
+                                    .get(33..)
+                                    .is_some_and(|raw| crate::ingress::venue_target(&four, raw)),
+                            );
+                            continue;
+                        }
                         if r.kind != RecordKind::RawSignedTx {
                             continue;
                         }
@@ -220,6 +233,8 @@ impl Proof {
             .set(rp::FOUR_SIGHTINGS, self.sightings[1])
             .set(rp::OPENFOUR_SIGHTINGS, self.sightings[2])
             .set(rp::UNDECODABLE_SIGHTINGS, self.undecodable)
+            .set(rp::PENDING_SIGHTINGS, self.pending)
+            .set(rp::PENDING_TO_VENUES, self.pending_to_venues)
             .set(rp::CENSUS_STATE, self.census_state.as_str())
             .set(rp::CENSUS_DETERMINISTIC, self.census_deterministic)
             .set(rp::VERDICT, self.verdict)
@@ -253,7 +268,7 @@ impl Proof {
 
     pub fn summary(&self) -> String {
         format!(
-            "replay proof of run {}: {} (segments {}, records {}, last sequence {}, manifest match {}, sightings Flap {} Four {} OpenFour {} undecodable {}, census {} deterministic {}, runtime Flap counter {})\n{}",
+            "replay proof of run {}: {} (segments {}, records {}, last sequence {}, manifest match {}, sightings Flap {} Four {} OpenFour {} undecodable {}, other pending {} (to venues {}), census {} deterministic {}, runtime Flap counter {})\n{}",
             self.run_id,
             self.verdict,
             self.segments,
@@ -265,6 +280,8 @@ impl Proof {
             self.sightings[1],
             self.sightings[2],
             self.undecodable,
+            self.pending,
+            self.pending_to_venues,
             self.census_state,
             self.census_deterministic,
             self.status_launches
@@ -323,6 +340,17 @@ mod tests {
         alloy_primitives::hex::decode(row[10]).unwrap()
     }
 
+    fn openfour_buy() -> Vec<u8> {
+        let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
+        let row: Vec<&str> = calls
+            .lines()
+            .find(|l| l.starts_with("OPENFOUR BUY"))
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        alloy_primitives::hex::decode(row[10]).unwrap()
+    }
+
     fn status(started: u64, launches: u64) -> Vec<u8> {
         let mut d = Draft::new(&rs::SCHEMA);
         d.set(rs::GENERATION, 1u64)
@@ -368,6 +396,12 @@ mod tests {
                 &first_sighting_payload(SourceId::Drpc, &[hashes + i as u8; 32], raw),
             );
         }
+        // One other pending sighting the capture scope kept: a venue BUY.
+        put(
+            &mut j,
+            RecordKind::TxpoolAccepted,
+            &first_sighting_payload(SourceId::Drpc, &[hashes + 9; 32], &openfour_buy()),
+        );
         put(
             &mut j,
             RecordKind::Canonical,
@@ -385,6 +419,7 @@ mod tests {
         let p = prove(&base, "7", Some(&status(7, 2)), MAX + 64, MAX).unwrap();
         assert_eq!(p.verdict, "PASS", "{}", p.summary());
         assert_eq!((p.sightings, p.undecodable), ([2, 0, 1], 0));
+        assert_eq!((p.pending, p.pending_to_venues), (1, 1));
         assert!(p.segments > 1 && p.manifest_match && p.census_deterministic);
         assert_eq!(p.status_match, Some(true));
         let r = decode(&rp::SCHEMA, &p.encode(1).unwrap()).unwrap();

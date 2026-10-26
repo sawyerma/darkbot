@@ -201,11 +201,15 @@ pub mod replay_proof {
     pub const VERDICT: u16 = 20;
     pub const REASONS: u16 = 21;
     pub const NON_CLAIMS: u16 = 22;
+    /// Other pending first sightings the capture scope kept
+    /// (`TxpoolAccepted`), and those addressed to a venue contract.
+    pub const PENDING_SIGHTINGS: u16 = 23;
+    pub const PENDING_TO_VENUES: u16 = 24;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.replay-proof.v1",
         record_type: 56,
-        schema_version: 1,
+        schema_version: 2,
         fields: &[
             Field::req(RUN_ID, "run_id", Text),
             Field::req(CHAIN_ID, "chain_id", U64),
@@ -233,6 +237,8 @@ pub mod replay_proof {
             Field::req(VERDICT, "verdict", Text),
             Field::rep(REASONS, "reasons", Text),
             Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::req(PENDING_SIGHTINGS, "pending_sightings", U64),
+            Field::req(PENDING_TO_VENUES, "pending_to_venues", U64),
         ],
     };
 }
@@ -304,11 +310,95 @@ pub mod capture_preflight {
     };
 }
 
+/// The native local ingest latency of the production code on one host
+/// (Phase F contract §8, the local part): per stage, measured per event on
+/// real bytes, the quantiles and the counts at or above 0.5 / 1 / 3 ms.
+/// The geth hook stages (peer decode → native event → ring → Rust) need a
+/// synced node and are not in it.
+pub mod ingest_latency {
+    use super::*;
+
+    pub mod stage {
+        use super::*;
+
+        pub const NAME: u16 = 1;
+        pub const SAMPLES: u16 = 2;
+        pub const MIN_NS: u16 = 3;
+        pub const MEAN_NS: u16 = 4;
+        pub const P50_NS: u16 = 5;
+        pub const P95_NS: u16 = 6;
+        pub const P99_NS: u16 = 7;
+        pub const P99_9_NS: u16 = 8;
+        pub const P99_99_NS: u16 = 9;
+        pub const MAX_NS: u16 = 10;
+        pub const GE_500US: u16 = 11;
+        pub const GE_1MS: u16 = 12;
+        pub const GE_3MS: u16 = 13;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.ingest-latency.stage",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(NAME, "name", Text),
+                Field::req(SAMPLES, "samples", U64),
+                Field::req(MIN_NS, "min_ns", U64),
+                Field::req(MEAN_NS, "mean_ns", U64),
+                Field::req(P50_NS, "p50_ns", U64),
+                Field::req(P95_NS, "p95_ns", U64),
+                Field::req(P99_NS, "p99_ns", U64),
+                Field::opt(P99_9_NS, "p99_9_ns", U64),
+                Field::opt(P99_99_NS, "p99_99_ns", U64),
+                Field::req(MAX_NS, "max_ns", U64),
+                Field::req(GE_500US, "ge_500us", U64),
+                Field::req(GE_1MS, "ge_1ms", U64),
+                Field::req(GE_3MS, "ge_3ms", U64),
+            ],
+        };
+    }
+
+    pub const HOST: u16 = 1;
+    pub const BUILD: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const GIT_HEAD: u16 = 5;
+    pub const WARMUP: u16 = 6;
+    pub const STAGES: u16 = 7;
+    /// Two clock reads back to back: the floor of every sample.
+    pub const CLOCK_OVERHEAD_P50_NS: u16 = 8;
+    /// Records the recorder refused during the measurement (counted).
+    pub const RECORDER_LOST: u16 = 9;
+    pub const NON_CLAIMS: u16 = 10;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.ingest-latency.v1",
+        record_type: 58,
+        schema_version: 1,
+        fields: &[
+            Field::req(HOST, "host", Text),
+            Field::req(BUILD, "build", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(WARMUP, "warmup", U64),
+            Field::nested(STAGES, "stages", Presence::Repeated, &stage::SCHEMA),
+            Field::req(CLOCK_OVERHEAD_P50_NS, "clock_overhead_p50_ns", U64),
+            Field::req(RECORDER_LOST, "recorder_lost", U64),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &capture_run::SCHEMA,
     &capture_run::V2,
     &replay_proof::SCHEMA,
     &capture_preflight::SCHEMA,
+    &ingest_latency::SCHEMA,
 ];
 
 #[cfg(test)]
