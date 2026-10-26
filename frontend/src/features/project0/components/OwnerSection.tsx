@@ -109,7 +109,10 @@ function ModeRequest({ owner, live, capability, label, action, active }: {
 }) {
   const { busy } = useAnalyticsControl();
   const row = owner.capabilities.find((c) => c.name === capability) ?? null;
-  const [mode, setMode] = useState<Mode>("OBSERVE");
+  // The operator's current request until another value is chosen (a click never changes it unseen).
+  const [chosen, setMode] = useState<Mode | null>(null);
+  const requested = row && ["OFF", "OBSERVE", "ACTIVE"].includes(row.requested) ? row.requested as Mode : "OFF";
+  const mode = chosen ?? requested;
   const version = owner.capabilityConfigVersion;
   const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
     : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";

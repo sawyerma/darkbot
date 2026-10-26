@@ -585,6 +585,19 @@ pub mod p0 {
         ) -> Result<Option<Route>, String> {
             self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
         }
+        /// DEC-11: ExactIn for a bundle's prerequisite TX (the JIT buy) — a router that
+        /// distinguishes it leaves out venues a Jito bundle cannot carry; otherwise the ExactIn
+        /// quote.
+        fn quote_bundle_exact_in(
+            &self,
+            from_mint: &Pubkey,
+            to_mint: &Pubkey,
+            amount_in: u64,
+            prewarmed_atas: &[PrewarmedAta],
+            deadline: Instant,
+        ) -> Result<Option<Route>, String> {
+            self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
+        }
     }
 
     const ROUTE_DIAGNOSTICS_MAX: usize = 64;
@@ -650,7 +663,8 @@ pub mod p0 {
             return Ok(None);
         }
         let mut used = 1;
-        let Some(reverse) = routes.quote_exact_in(
+        // DEC-11: the buy is the bundle's prerequisite TX; its sizing quote asks the same venues.
+        let Some(reverse) = routes.quote_bundle_exact_in(
             liab_mint,
             funding_mint,
             amount_out,
@@ -666,8 +680,13 @@ pub mod p0 {
         let mut best: Option<(u64, Route)> = None;
         while used < JIT_MAX_QUOTES && Instant::now() < deadline {
             used += 1;
-            let route =
-                routes.quote_exact_in(funding_mint, liab_mint, input, prewarmed_atas, deadline)?;
+            let route = routes.quote_bundle_exact_in(
+                funding_mint,
+                liab_mint,
+                input,
+                prewarmed_atas,
+                deadline,
+            )?;
             let floor = route.as_ref().and_then(|r| r.minimum_executable_out);
             let next = match (route, floor) {
                 (Some(r), Some(f)) if f >= amount_out => {

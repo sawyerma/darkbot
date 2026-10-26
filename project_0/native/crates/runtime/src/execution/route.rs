@@ -150,7 +150,6 @@ pub struct JupiterV2RouteProvider {
     slippage_bps: u64,
     max_accounts: u8,
     fast: bool,
-    for_jito_bundle: bool,
 }
 
 impl JupiterV2RouteProvider {
@@ -160,7 +159,6 @@ impl JupiterV2RouteProvider {
         slippage_bps: u64,
         max_accounts: u8,
         fast: bool,
-        for_jito_bundle: bool,
     ) -> Result<Self, String> {
         let most = darkbot_solana::runtime_config::defaults::JUPITER_ACCOUNTS_MAX;
         if max_accounts == 0 || u64::from(max_accounts) > most {
@@ -183,7 +181,6 @@ impl JupiterV2RouteProvider {
             slippage_bps,
             max_accounts,
             fast,
-            for_jito_bundle,
         })
     }
 
@@ -195,7 +192,9 @@ impl JupiterV2RouteProvider {
     }
 
     /// One `/build` request: local refusals, the N2 deadline, MT0 measurement, the classified
-    /// transport/status errors and the parsed response.
+    /// transport/status errors and the parsed response. DEC-11: `for_jito_bundle` for a
+    /// bundle's prerequisite TX (the router leaves out venues a Jito bundle cannot carry).
+    #[allow(clippy::too_many_arguments)]
     fn request_build(
         &self,
         from_mint: &Pubkey,
@@ -203,6 +202,7 @@ impl JupiterV2RouteProvider {
         amount: u64,
         max_accounts: u8,
         wrap_and_unwrap_sol: bool,
+        for_jito_bundle: bool,
         deadline: Instant,
     ) -> Result<BuildResponse, String> {
         // N2: no request after the candidate deadline; one in flight ends at it.
@@ -235,7 +235,7 @@ impl JupiterV2RouteProvider {
                     max_accounts.min(self.max_accounts).max(1).to_string(),
                 ),
                 ("wrapAndUnwrapSol", wrap_and_unwrap_sol.to_string()),
-                ("forJitoBundle", self.for_jito_bundle.to_string()),
+                ("forJitoBundle", for_jito_bundle.to_string()),
             ]);
         if self.fast {
             req = req.query(&[("mode", "fast")]);
@@ -300,6 +300,7 @@ impl JupiterV2RouteProvider {
             .map_err(|e| format!("jupiter /build json: {e}"))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn exact_in(
         &self,
         from_mint: &Pubkey,
@@ -307,10 +308,18 @@ impl JupiterV2RouteProvider {
         amount: u64,
         prewarmed_atas: &[PrewarmedAta],
         max_accounts: u8,
+        for_jito_bundle: bool,
         deadline: Instant,
     ) -> Result<Option<Route>, String> {
-        let build =
-            self.request_build(from_mint, to_mint, amount, max_accounts, false, deadline)?;
+        let build = self.request_build(
+            from_mint,
+            to_mint,
+            amount,
+            max_accounts,
+            false,
+            for_jito_bundle,
+            deadline,
+        )?;
         if build.swap_mode != "ExactIn" {
             return Err(format!("jupiter unexpected swapMode {}", build.swap_mode));
         }
@@ -433,7 +442,15 @@ impl JupiterV2RouteProvider {
         deadline: Instant,
     ) -> Result<Route, String> {
         let wsol = Pubkey::from_str(WSOL_MINT).map_err(|e| e.to_string())?;
-        let build = self.request_build(mint, &wsol, amount, self.max_accounts, true, deadline)?;
+        let build = self.request_build(
+            mint,
+            &wsol,
+            amount,
+            self.max_accounts,
+            true,
+            false,
+            deadline,
+        )?;
         if build.swap_mode != "ExactIn" {
             return Err(format!("jupiter unexpected swapMode {}", build.swap_mode));
         }
@@ -492,6 +509,27 @@ impl RouteProvider for JupiterV2RouteProvider {
             amount_in,
             prewarmed_atas,
             self.max_accounts,
+            false,
+            deadline,
+        )
+    }
+
+    /// DEC-11: the JIT buy is a bundle's prerequisite TX: `forJitoBundle`.
+    fn quote_bundle_exact_in(
+        &self,
+        from_mint: &Pubkey,
+        to_mint: &Pubkey,
+        amount_in: u64,
+        prewarmed_atas: &[PrewarmedAta],
+        deadline: Instant,
+    ) -> Result<Option<Route>, String> {
+        self.exact_in(
+            from_mint,
+            to_mint,
+            amount_in,
+            prewarmed_atas,
+            self.max_accounts,
+            true,
             deadline,
         )
     }
@@ -515,6 +553,7 @@ impl RouteProvider for JupiterV2RouteProvider {
             amount_in,
             prewarmed_atas,
             max_accounts,
+            false,
             deadline,
         )
     }
@@ -970,18 +1009,31 @@ pub(crate) mod tests {
 
     /// A loopback `/build` that answers every request with `body` (raw JSON, as Jupiter does).
     fn serve_build(body: serde_json::Value) -> String {
+        serve_build_logged(body).0
+    }
+
+    /// `serve_build`, with the request line of every request in arrival order.
+    fn serve_build_logged(
+        body: serde_json::Value,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let body = body.to_string();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = requests.clone();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = true;
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).unwrap_or(0) <= 2 {
                         break;
+                    }
+                    if std::mem::take(&mut first) {
+                        log.lock().unwrap().push(line.trim_end().to_string());
                     }
                 }
                 let _ = stream.write_all(
@@ -994,7 +1046,29 @@ pub(crate) mod tests {
                 );
             }
         });
-        url
+        (url, requests)
+    }
+
+    /// DEC-11: the JIT buy is a bundle's prerequisite TX — its `/build` asks for a Jito-bundle
+    /// route; every single-TX route (ZERO_PREFUND swap, rebalance, exit sale) does not.
+    #[test]
+    fn dec11_only_the_bundle_prerequisite_asks_for_a_jito_bundle_route() {
+        let (taker, from, to) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let (url, requests) = serve_build_logged(serde_json::json!({}));
+        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+            .unwrap()
+            .with_base_url(url);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline);
+        let _ = provider.quote_bundle_exact_in(&from, &to, 500, &[], deadline);
+        let lines = requests.lock().unwrap().clone();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].contains("forJitoBundle=false"), "{}", lines[0]);
+        assert!(lines[1].contains("forJitoBundle=true"), "{}", lines[1]);
     }
 
     /// FE-02/E2 through the real adapter (loopback `/build`, synthetic response): the route's
@@ -1035,7 +1109,7 @@ pub(crate) mod tests {
             if let Some(t) = threshold {
                 body["otherAmountThreshold"] = t.into();
             }
-            let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+            let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
                 .unwrap()
                 .with_base_url(serve_build(body));
             provider.exact_in(
@@ -1044,6 +1118,7 @@ pub(crate) mod tests {
                 500,
                 &[],
                 64,
+                false,
                 Instant::now() + Duration::from_secs(5),
             )
         };

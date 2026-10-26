@@ -744,9 +744,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // Preheld inventory) share one compiled and signed transaction of this evaluation.
         let mut built_txs: Vec<(TxPlan, darkbot_solana::tx::BuiltTx)> = Vec::new();
         for mut plan in plans {
-            // DEC-11: on an effective bundle path a plan with prerequisite TXs is a bundle — it
-            // pays the configured tip in its own TX and is priced on the bundle path.
-            let bundled = !plan.prerequisite_txs.is_empty() && self.submitter.supports_bundle();
+            // DEC-11: a bundle pays the configured tip in its own TX and is priced on the bundle
+            // path, exactly as the boundary builds it.
+            let bundled = self.bundles(&plan);
             if bundled {
                 if let Some(tip) = self.bundle_tip {
                     plan.tip = tip.lamports;
@@ -1110,8 +1110,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
         // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
         // path; otherwise this single signed TX is the payload.
-        let use_bundle =
-            self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0);
+        let use_bundle = self.bundles(&plan);
         // B18: T_sign and its slot exactly once, when the payload is completely signed — here for
         // the single TX (also with a tip but no bundle path), after the bundle otherwise.
         // [FIX-40] the slot is read at T_sign, lock-free.
@@ -1418,6 +1417,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
         }
         rec.with_timeline(&tl)
+    }
+
+    /// [FIX-4/FIX-15]/DEC-11: `plan` goes as a bundle — prerequisite TXs or a tip, on a bundle
+    /// path; the one rule the pricing and the boundary share.
+    fn bundles(&self, plan: &ReceivershipPlan) -> bool {
+        self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0)
     }
 
     /// N2/D2: the network fee of one exact message, quoted once per evaluation (`fee_quotes`,

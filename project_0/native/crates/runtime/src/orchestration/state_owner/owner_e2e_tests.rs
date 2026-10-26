@@ -234,7 +234,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         ),
         bundle_config: None,
         failed_costs: FailedCostMatrix::default(),
-        routes: JupiterV2RouteProvider::new(liquidator, None, 0, 64, true, false).unwrap(),
+        routes: JupiterV2RouteProvider::new(liquidator, None, 0, 64, true).unwrap(),
         resources: Resources {
             compute_unit_limit: 1_400_000,
             priority_micro_lamports_per_cu: 0,

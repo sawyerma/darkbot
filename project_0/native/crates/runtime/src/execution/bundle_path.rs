@@ -6,7 +6,8 @@
 //! by the pipeline). A bundle is simulated only by a qualified bundle simulator — a provider
 //! qualification this build does not hold (FE-06/P8) — so the bundle simulation stays
 //! unavailable, no Jito endpoint is called and FE-04 refuses bundles (`bundle_simulated =
-//! false`). Every submission is refused by `ObserveOnly` regardless.
+//! false`); the bundle submit itself refuses. Every submission is refused by `ObserveOnly`
+//! regardless.
 use darkbot_solana::submit::{
     jito::JitoAdapter, rpc::RpcSubmitter, FeeQuoteError, MessageFeeQuote, SimResult,
     SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError,
@@ -147,6 +148,8 @@ impl SubmissionAdapter for OwnerSubmitter {
     ) -> Result<SubmitAck, SubmitError> {
         self.rpc.submit(tx, t_handoff_ns, deadline)
     }
+    /// The handoff boundary: without a qualified bundle simulator no bundle reaches the block
+    /// engine (beside `ObserveOnly` and the missing bundle simulation token).
     fn submit_bundle(
         &self,
         txs: &[VersionedTransaction],
@@ -154,7 +157,7 @@ impl SubmissionAdapter for OwnerSubmitter {
         deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
         match &self.jito {
-            Some(jito) => jito.submit_bundle(txs, t_handoff_ns, deadline),
+            Some(_) => Err(SubmitError::Rejected(BUNDLE_SIMULATOR_UNQUALIFIED.into())),
             None => self.rpc.submit_bundle(txs, t_handoff_ns, deadline),
         }
     }
@@ -224,6 +227,10 @@ mod tests {
             s.simulate_bundle(&[], deadline),
             SimResult::Unavailable(BUNDLE_SIMULATOR_UNQUALIFIED.into())
         );
+        assert!(matches!(
+            s.submit_bundle(&[], 0, deadline),
+            Err(SubmitError::Rejected(r)) if r == BUNDLE_SIMULATOR_UNQUALIFIED
+        ));
         assert!(calls.lock().unwrap().is_empty(), "no Jito call");
         s.set_bundle_path(None, timeout).unwrap();
         assert!(!s.supports_bundle());

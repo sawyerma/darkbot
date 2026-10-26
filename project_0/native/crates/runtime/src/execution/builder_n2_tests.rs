@@ -517,7 +517,6 @@ fn n2_hanging_jupiter_ends_planning_at_the_deadline() {
         50,
         64,
         true,
-        false,
     )
     .unwrap()
     .with_base_url(jupiter.url.clone());
@@ -803,7 +802,7 @@ fn fe02_zero_prefund_end_to_end_through_the_real_adapters() {
         _ => Answer::Status(500),
     });
     let routes =
-        crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, None, 50, 64, false, false)
+        crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, None, 50, 64, false)
             .unwrap()
             .with_base_url(jupiter.url.clone());
     let submitter = rpc_submitter(&rpc.url, n2_budget(4));
@@ -1020,7 +1019,7 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
         "simulateTransaction" => simulation_ok(),
         _ => Answer::Status(500),
     });
-    let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+    let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
         .unwrap()
         .with_base_url(jupiter.url.clone());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -1083,7 +1082,7 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let route_of = |build: serde_json::Value| {
         let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
-        crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+        crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
             .unwrap()
             .with_base_url(jupiter.url.clone())
             .exit_to_sol(&mint, 1_000, deadline)

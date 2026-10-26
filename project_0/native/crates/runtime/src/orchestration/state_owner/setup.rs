@@ -547,7 +547,6 @@ pub(super) fn prepare(
         operational.max_slippage_bps,
         u8::try_from(operational.jupiter_max_accounts)?,
         true,
-        false,
     )
     .map_err(|e| format!("route provider: {e}"))?;
     let resources = Resources {
