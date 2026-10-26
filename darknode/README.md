@@ -120,59 +120,101 @@ flowchart TB
 
 Ein positiver API-Request ist **kein bestätigter Fill**. Keine blinde Wiederholung nach Timeout. Bei offenem Trade darf die Engine nicht irrtümlich neu eröffnen. Serverbestätigte Bitget-Schutzorders können bei einem lokalen Ausfall bestehen bleiben; lokal berechnete Break-even-/Trailing-Anpassungen laufen ohne Engine nicht weiter. Exakte Kontomodus-/Schutzordersemantik wird in Gate 1 geprüft.
 
-## 4. Node-System V1 – nur die Regeln sind frei verdrahtbar
+
+## 4. Node-Builder V1 – verbindliche visuelle Referenz
+
+**[Interaktiven Builder herunterladen / als HTML lokal öffnen](docs/visuals/builder_examples.html)** · [Gate-1-Node-Spezifikation](docs/GATE_1.md#node-builder-referenz-und-drei-verbindliche-beispiele).
+
+**Wichtig zur Darstellung auf GitHub:** Mermaid wird direkt in dieser README gerendert; GitHub führt eingebettetes HTML/JavaScript nicht als interaktive App aus. Die Datei `docs/visuals/builder_examples.html` ist deshalb ein **eigenständiger, offline lauffähiger HTML-Prototyp**. Datei herunterladen und im Browser öffnen. Sie ist kein produktiver React-Flow-Build und speichert weder in Git noch im Backend. Der visuelle Rahmen entspricht dem bestehenden **Graphite-Design**, die DarkNode-Reiter sind ausschließlich **Overview, Builder, Backtest, Live, Wallet**. Im Builder links nur **Nodes** mit fünf Kategorien; Parameter **direkt im Node**, kein Node Inspector, keine Signalprüfung, keine eigenen Monitoring-/Gate-Anzeigen.
+
+### Gemeinsamer Signalweg
 
 ```mermaid
 flowchart LR
-    M["Bitget BTCUSDT<br/>5s Candles"] --> W["Williams %R<br/>Length 14"]
-    M --> A["Andean<br/>Length 40 / Signal 7"]
-    M --> BX["BX / XTrender"]
-    W --> WL{"W_norm > 70?"}
-    W --> WS{"W_norm < 30?"}
-    A --> AL{"bullish?"}
-    A --> AS{"bearish?"}
-    BX --> BL{"long bestätigt?"}
-    BX --> BS{"short bestätigt?"}
-    WL --> LA{"AND"}
-    AL --> LA
-    BL --> LA
-    WS --> SA{"AND"}
-    AS --> SA
-    BS --> SA
-    LA --> LE["LONG_ENTRY"]
-    SA --> SE["SHORT_ENTRY"]
-    W --> WE{"Williams Exit-Schwelle?"}
-    A --> AE{"Andean-Reversal?"}
-    WE --> OR{"OR"}
-    AE --> OR
-    OR --> EX["LONG_EXIT"]
-    classDef ind fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
-    classDef cond fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
-    classDef signal fill:#dcfce7,stroke:#16a34a,color:#14532d
-    class W,A,BX ind
-    class WL,WS,AL,AS,BL,BS,WE,AE,LA,SA,OR cond
-    class LE,SE,EX signal
+  subgraph DATA["MARKTDATEN"]
+    M["Bitget BTCUSDT · 5s"]
+  end
+  subgraph IND["INDIKATOREN"]
+    W["Williams %R · 14"]
+    A["Andean · 40 / 7"]
+    BX["BX / XTrender"]
+  end
+  subgraph COND["BEDINGUNGEN"]
+    C1["Williams > 70 %"]
+    C2["Williams < 30 %"]
+    AL["Bullish"]
+    AS["Bearish"]
+    BL["Bullish"]
+    BS["Bearish"]
+    ANDL{"AND"}
+    ANDS{"AND"}
+  end
+  subgraph ACT["AKTIONEN"]
+    LE["Long eröffnen"]
+    SE["Short eröffnen"]
+    LX["Long schließen"]
+    SX["Short schließen"]
+  end
+  subgraph RISK["RISIKO-REGELN"]
+    SL["Stop-Loss"]
+    BE["Break-even"]
+    TR["Trailing"]
+  end
+  CORE["EIN RUST POSITION CONTROLLER<br/>Long / Short / Both · FLAT / OPEN / RECOVERING"]
+  EXEC["Bitget Order / Fill / Position"]
+  M --> W & A & BX
+  W --> C1 & C2
+  A --> AL & AS
+  BX --> BL & BS
+  C1 & AL & BL --> ANDL
+  C2 & AS & BS --> ANDS
+  ANDL --> LE
+  ANDS --> SE
+  C2 --> LX
+  C1 --> SX
+  LE & SE & LX & SX --> CORE
+  SL & BE & TR --> CORE
+  CORE --> EXEC
+  EXEC -.->|"Reconciliation"| CORE
 ```
 
-**Beispiel, keine aus dem Pine-Script abgeleitete feste Entry-Regel:** Benutzer stellt Williams-LONG `>70 %` und SHORT `<30 %` ein. Klassischer Williams %R liegt in **−100 bis 0**. Normierte Anzeige `W_norm = W_raw + 100`: 70 % entspricht −30; 30 % entspricht −70. Rohwert und normalisierter Wert werden im Typ-/Einheitenvertrag unterschieden.
+**Action-Nodes erzeugen nur typisierte Intents, niemals unmittelbare Bitget-Orders.** Der einzig autoritative Rust-Position-/Risk-/Execution-Owner löst widersprüchliche Signale, Stop/Exit-Priorität, echten Positionsstatus und Re-Arm. Die beispielhaften Exit-Eingänge oben sind einfache Anschlüsse; in der Strategie können sie eigene unabhängige Vergleichs- oder Logikketten besitzen.
 
-Der User-Graph erzeugt ausschließlich **Signalabsichten**. Entry/Exit sind getrennt. Stop-Management, Kapitalreservierung, Sicherheits-Gates, Bitget-Orders und Reconciliation **liegen außerhalb des frei editierbaren Graphen**. Zusätzliche Signalindikatoren (z. B. RLS) werden später einfach angeschlossen.
+### Drei umschaltbare Builder-Vorlagen
 
-### Verbindliches Node-Template
+| Vorlage | Entry-Regeln | Exit-Regeln | Zweck |
+|---|---|---|---|
+| **01 · Williams Long/Short** | LONG: Wnorm > 70 %, SHORT: Wnorm < 30 % | LONG-Exit: Wnorm < 55 %, SHORT-Exit: Wnorm > 45 % | Vier unabhängige Signalpfade auf **einen** Controller |
+| **02 · Williams + Andean + BX** | LONG: (Wnorm > 70) AND Andean Bull AND BX Bull; SHORT spiegelbildlich mit Wnorm < 30 | Separate Schwellen (Beispiel 55/45) | Mehrere Indikatoren per AND kombinieren |
+| **03 · Cross / Exit / Re-Entry** | LONG: CrossAbove Wnorm 70, SHORT: CrossBelow Wnorm 30 | Exit über neue 55-/45-Cross-Ereignisse | Edge-Signale und erneutes Scharfschalten nach bestätigtem Schließen |
 
-| Einheitlicher Vertrag | Pflicht |
-|---|---|
-| `type_id / type_version / instance_id` | Fester Typ und reproduzierbare Instanz |
-| `parameter_schema` | Typen, Wertebereiche, Defaults, Validation |
-| `timeframe / clock / evaluation_policy` | Event, Kerzenschluss oder explizites Intrabar-Verhalten |
-| `input_ports / output_ports` | Typisierte Ports **mit Einheit und Domain**: Candle, Scalar, PercentNormalized, Bool3, Signal, PositionRef |
-| `warmup / validity / freshness` | Historienbedarf; INVALID/UNKNOWN sperrt neue Entries |
-| `snapshot / restore / deterministic_hash` | Zustandswiederaufnahme, Replay, unveränderliche Version |
-| `evaluator` | Rust-Modul; gleiche Funktion bei Replay, Backtest und Live |
+**Alle Zahlen und Signalpfade sind ausschließlich Entwurfs-/UX-Beispiele und keine validierte Pine-Strategie oder Handelsfreigabe.** Klassischer Williams %R: −100 bis 0; `Wnorm = Wraw + 100`, Einheit und Zeitrahmen im Node-Typ prüfen. Ab V1 sind die fünf Kategorien **Marktdaten, Indikatoren, Bedingungen, Aktionen, Risiko** sichtbar. Erlaubte Verbindungen sind typisiert (`Candle`, `Scalar<unit>`, `Bool3`, `SignalIntent`, `RiskPolicy`); unpassende Einheiten/Ports, Rückkopplung ohne Delay, STALE/INVALID werden vor Handel geblockt. Der Controller hat **keine** frei verknüpfbare Möglichkeit, die Risk-/Execution-Gates zu umgehen.
 
-Logic-Nodes: Compare, GT/LT/GTE/LTE, Between, CrossAbove/Below, AND/OR/XOR/NOT/NOR/NAND, Confirm-N-bars, Rising/Falling, Hysteresis/Reset. Ein Logik-Node verarbeitet `TRUE/FALSE/INVALID` (Kleene/fehlersichere Semantik verbindlich definieren). Kein implizites Umrechnen verschiedener Einheiten oder Timeframes. Zyklen nur als explizit definierte zustandsbehaftete Nodes; sonst DAG und Topologiesortierung. Eine reine Leitung bedeutet **Daten-/Wertabhängigkeit, keinen Thread, keinen WS-Subscribe, keinen Netzwerkaufruf**.
+### 24/7-Laufzeit und wichtigste Prioritäten
 
-React Flow ist die Oberfläche; Rust validiert/kompiliert das typisierte, via Protobuf gespeicherte Strategy-IR. Dieselben Indikatoren werden nicht pro ausgehendem Kabel neu berechnet. Graphänderung → neue Version/Hash → erneute Backtest-/Freigabeprüfung; laufende Version nicht stillschweigend überschreiben.
+```mermaid
+flowchart TB
+  GRAPH["Immutable Rust Strategy Graph<br/>nur Inputs/Signals/Risk-Policies"] --> OWNER["Ein Position-Owner<br/>State: FLAT / ENTRY_PENDING / OPEN / EXIT_PENDING / RECOVERING"]
+  OWNER --> Q{"Bitget-Position + Daten<br/>bekannt und gültig?"}
+  Q -->|"Nein"| HOLD["HOLD / REST-WS-Reconciliation"]
+  Q -->|"Ja: FLAT"| EN{"Erlaubter, frisch scharfgeschalteter Entry?"}
+  EN -->|"LONG / SHORT eindeutig"| ENTRY["Persistenter Order-Intent → Bitget"]
+  EN -->|"Kein / Konflikt"| WAIT["Beobachten"]
+  Q -->|"Ja: OPEN"| EXIT{"Stop / TP / Exit-Signal?"}
+  EXIT -->|"Ja"| CLOSE["Reduce-only Exit → Bitget"]
+  EXIT -->|"Nein"| PROTECT["Stop-/BE-/Trailing-Policy prüfen"]
+  ENTRY --> FILL["Echten Fill + initialen Schutz bestätigen"]
+  FILL --> OWNER
+  CLOSE --> CONFIRM{"Bitget bestätigt FLAT?"}
+  CONFIRM -->|"Nein / UNKNOWN"| HOLD
+  CONFIRM -->|"Ja"| REARM["Re-Arm: neues gültiges Signal erforderlich"]
+  REARM --> OWNER
+  PROTECT --> OWNER
+  HOLD --> OWNER
+```
+
+**24/7 bedeutet:** die Rust-Engine läuft auf einem dauerhaft betriebenen Host und bleibt unabhängig von einem geöffneten DarkBot-Frontend. Exchange-native bestätigte Stops können weiterbestehen, lokale dynamische Stopanpassungen benötigen die laufende Engine. Erst Backtest/Replay → Bitget Demo → Fault-Gates → separat autorisiertes LIVE.
+
 
 ## 5. Indikatorreferenz / Pine-Status
 
