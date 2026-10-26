@@ -285,6 +285,77 @@ pub fn resync_payload(from: u64, to: u64) -> Vec<u8> {
     out
 }
 
+/// A canonical Flap curve trade (Phase H): `T | sell u8 | block u64 |
+/// block_hash [32] | tx_index u64 | tx_hash [32] | log_index u64 |
+/// origin [20] | token [20] | trader [20] | amount [32] | eth [32] |
+/// fee [32] | post_price [32]` (integers little-endian, amounts as the
+/// event's big-endian words).
+pub fn flap_trade_payload(t: &crate::chain_follower::CanonicalTrade) -> Vec<u8> {
+    let mut out = Vec::with_capacity(FLAP_TRADE_LEN);
+    out.push(b'T');
+    out.push(u8::from(t.sell));
+    out.extend_from_slice(&t.block_number.to_le_bytes());
+    out.extend_from_slice(&t.block_hash);
+    out.extend_from_slice(&t.tx_index.to_le_bytes());
+    out.extend_from_slice(&t.tx_hash);
+    out.extend_from_slice(&t.log_index.to_le_bytes());
+    out.extend_from_slice(&t.origin);
+    out.extend_from_slice(&t.token);
+    out.extend_from_slice(&t.trader);
+    out.extend_from_slice(&t.amount);
+    out.extend_from_slice(&t.eth);
+    out.extend_from_slice(&t.fee);
+    out.extend_from_slice(&t.post_price);
+    out
+}
+
+/// The length of a `T` record.
+pub const FLAP_TRADE_LEN: usize = 278;
+
+/// A `T` record back; `None` for any other bytes.
+pub fn flap_trade_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTrade> {
+    if p.len() != FLAP_TRADE_LEN || p[0] != b'T' || p[1] > 1 {
+        return None;
+    }
+    let at = |from: usize, n: usize| p.get(from..from + n);
+    let u64_at = |from: usize| Some(u64::from_le_bytes(at(from, 8)?.try_into().ok()?));
+    let a20 = |from: usize| -> Option<[u8; 20]> { at(from, 20)?.try_into().ok() };
+    let a32 = |from: usize| -> Option<[u8; 32]> { at(from, 32)?.try_into().ok() };
+    Some(crate::chain_follower::CanonicalTrade {
+        sell: p[1] == 1,
+        block_number: u64_at(2)?,
+        block_hash: a32(10)?,
+        tx_index: u64_at(42)?,
+        tx_hash: a32(50)?,
+        log_index: u64_at(82)?,
+        origin: a20(90)?,
+        token: a20(110)?,
+        trader: a20(130)?,
+        amount: a32(150)?,
+        eth: a32(182)?,
+        fee: a32(214)?,
+        post_price: a32(246)?,
+    })
+}
+
+/// A Portal trade log the decoder refused (Phase H): `W | block u64 |
+/// block_hash [32] | tx_index u64 | log_index u64`; that block's trades
+/// are incomplete.
+pub fn trade_gap_payload(
+    block: u64,
+    block_hash: &[u8; 32],
+    tx_index: u64,
+    log_index: u64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(57);
+    out.push(b'W');
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(block_hash);
+    out.extend_from_slice(&tx_index.to_le_bytes());
+    out.extend_from_slice(&log_index.to_le_bytes());
+    out
+}
+
 /// A window mark: `b'H'` first, `b'E'` last, `b'K'` checkpoint.
 pub fn window_payload(tag: u8, number: u64, hash: &[u8; 32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(41);

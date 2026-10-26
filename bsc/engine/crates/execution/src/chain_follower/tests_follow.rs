@@ -778,6 +778,10 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             assert!(label.starts_with(&block_number.to_string()), "{label}");
             format!("nonce {:02x} at {label} = {next_nonce}", sender[0])
         }
+        CanonicalEvent::FlapTrade(t) => format!("trade {} {}", t.block_number, t.log_index),
+        CanonicalEvent::FlapTradeUndecodable { block_number, .. } => {
+            format!("undecodable trade {block_number}")
+        }
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
     }
 }
@@ -893,6 +897,12 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         "block 101A <- 100A txs 4",
         "launch Flap 101A tx:direct token Some(113) creator Some(222) buys Some(2) first Some(1) \
          sender 15 nonce 13 c1 true",
+        // Phase H: the block's Portal trades after its launches, in receipt
+        // and log order (the creator's own buy in the launch transaction too).
+        "trade 101 1",
+        "trade 101 2",
+        "trade 101 4",
+        "trade 101 5",
         "block 102A <- 101A txs 0",
         "reorg 102A -> 103B",
         "block 102B <- 101A txs 1",
@@ -913,6 +923,8 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         "block 106D <- 105D txs 2",
         "launch Flap 106D tx:router token Some(115) creator Some(222) buys None first None \
          sender 203 nonce 1592 c1 false",
+        // Its malformed buy log: the block's trades are incomplete.
+        "undecodable trade 106",
         "gap 107..=111",
         "block 112D <- 111D txs 0",
         "fault Request { call: Receipts(113), error: Rpc(-32000) }",
@@ -1082,7 +1094,13 @@ fn a_real_launch_block_through_the_whole_path() {
         chunk: 4096,
     };
     let outcome = follow_script(script, limits(), &[], None);
-    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    // Phase H: the block's trades follow its launches; checked apart.
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
+        .events
+        .into_iter()
+        .map(|(e, _)| e)
+        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Block {
             number,
@@ -1171,7 +1189,13 @@ fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
         chunk: 4096,
     };
     let outcome = follow_script(script, limits(), &[], None);
-    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    // Phase H: the block's trades follow its launches; checked apart.
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
+        .events
+        .into_iter()
+        .map(|(e, _)| e)
+        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Block { number, .. },
         CanonicalEvent::Launch(first),
@@ -1210,7 +1234,13 @@ fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
     let limits = limits();
     assert_eq!(limits.tx_attempts, 2);
     let outcome = follow_script(script, limits, &[], None);
-    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    // Phase H: the block's trades follow its launches; checked apart.
+    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) = outcome
+        .events
+        .into_iter()
+        .map(|(e, _)| e)
+        .partition(|e| matches!(e, CanonicalEvent::FlapTrade(_)));
+    assert_real_block_trades(&trades);
     let [
         CanonicalEvent::Fault(FollowerFault::Request {
             error: RequestError::Unverifiable(RejectReason::HashMismatch),
@@ -1488,4 +1518,20 @@ fn a_gap_after_a_failed_reorg_starts_at_the_fork_point() {
         (Some(112), true, 0),
         "the owner follows the new chain"
     );
+}
+
+/// The Flap trades of the real launch block 129774331: every one of that
+/// block, in receipt and log order, none of a failed receipt.
+fn assert_real_block_trades(trades: &[CanonicalEvent]) {
+    assert!(!trades.is_empty());
+    let mut last = None;
+    for t in trades {
+        let CanonicalEvent::FlapTrade(t) = t else {
+            panic!("{t:?}");
+        };
+        assert_eq!(t.block_number, 129_774_331);
+        let at = (t.tx_index, t.log_index);
+        assert!(last.is_none_or(|l| l < at), "{at:?} after {last:?}");
+        last = Some(at);
+    }
 }

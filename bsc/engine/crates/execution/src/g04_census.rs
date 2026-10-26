@@ -74,6 +74,10 @@ pub struct Window {
     pub native_connected_ms: u64,
     /// Its disconnects, rate limits and stops inside the capture window.
     pub native_interruptions: u64,
+    /// Phase H: the Flap curve trades journaled (`T`) and the Portal trade
+    /// logs the decoder refused (`W`).
+    pub flap_trades: u64,
+    pub trade_gaps: u64,
     pub state: &'static str,
 }
 
@@ -532,6 +536,12 @@ fn replay(
                     });
                 }
             }
+            (RecordKind::Canonical, Some(b'T'))
+                if crate::runtime_journal::flap_trade_of(p).is_some() =>
+            {
+                window.flap_trades += 1;
+            }
+            (RecordKind::Canonical, Some(b'W')) if p.len() == 57 => window.trade_gaps += 1,
             (RecordKind::Canonical, Some(tag @ (b'H' | b'E' | b'K'))) if p.len() == 41 => {
                 let number = u64_at(p, 1);
                 match tag {
@@ -1858,6 +1868,62 @@ mod tests {
         write(&dir, 1, &[(RecordKind::Canonical, 1, payload)]);
         let c = census(&dir, 4096, None).unwrap();
         assert_eq!((c.fetch_lag_ms_min, c.clock_suspect), (Some(-40), true));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase H: the Flap trades (`T`) and refused trade logs (`W`) of a
+    /// window are counted, never unparsed; a damaged `T` is.
+    #[test]
+    fn flap_trades_and_trade_gaps_are_counted() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-trades-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let trade = crate::chain_follower::CanonicalTrade {
+            block_number: 10,
+            block_hash: [10; 32],
+            tx_index: 2,
+            tx_hash: [2; 32],
+            log_index: 7,
+            origin: [3; 20],
+            sell: true,
+            token: [4; 20],
+            trader: [5; 20],
+            amount: [6; 32],
+            eth: [7; 32],
+            fee: [8; 32],
+            post_price: [9; 32],
+        };
+        let t = crate::runtime_journal::flap_trade_payload(&trade);
+        assert_eq!(crate::runtime_journal::flap_trade_of(&t), Some(trade));
+        let mut damaged = t.clone();
+        damaged[1] = 2;
+        assert_eq!(crate::runtime_journal::flap_trade_of(&damaged), None);
+        write(
+            &dir,
+            1_000,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                (RecordKind::Canonical, 2, t),
+                (
+                    RecordKind::Canonical,
+                    3,
+                    crate::runtime_journal::trade_gap_payload(10, &[10; 32], 3, 9),
+                ),
+                (RecordKind::Canonical, 4, damaged),
+                (
+                    RecordKind::Canonical,
+                    5,
+                    window_payload(b'E', 10, &[10; 32]),
+                ),
+                (RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()),
+            ],
+        );
+        let c = census(&dir, 4096, None).unwrap();
+        let w = &c.windows[0];
+        assert_eq!((w.flap_trades, w.trade_gaps, w.unparsed_records), (1, 1, 1));
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -283,6 +283,8 @@ impl StateOwner {
             },
             CanonicalEvent::Launch(_)
             | CanonicalEvent::RevertedLaunch { .. }
+            | CanonicalEvent::FlapTrade(_)
+            | CanonicalEvent::FlapTradeUndecodable { .. }
             | CanonicalEvent::Fault(_) => return,
         };
         self.apply(&input);

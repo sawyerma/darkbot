@@ -431,6 +431,7 @@ impl Follower {
             );
         }
         let reverted = launches::reverted(&receipts, &objects, self.max_launch_calldata);
+        let trades = launches::flap_trades(&head, &receipts);
         let txs = head
             .txs
             .iter()
@@ -465,6 +466,9 @@ impl Follower {
                 tx_index,
                 tx_hash,
             });
+        }
+        for trade in trades {
+            sink(trade);
         }
         self.kept.push_back((header.number, header.hash));
         while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {

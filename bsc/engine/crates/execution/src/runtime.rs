@@ -33,9 +33,9 @@ use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
     STOP_PAYLOAD, SourceEvent, canonical_launch_payload, first_sighting_payload,
-    ingress_drop_payload, later_sighting_payload, launch_id_payload, orphaned_launch_payload,
-    own_binary_sha256, paper_handoff_payload, pending_launch_payload, reorg_payload,
-    resync_payload, source_event_payload, window_payload,
+    flap_trade_payload, ingress_drop_payload, later_sighting_payload, launch_id_payload,
+    orphaned_launch_payload, own_binary_sha256, paper_handoff_payload, pending_launch_payload,
+    reorg_payload, resync_payload, source_event_payload, trade_gap_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -524,6 +524,9 @@ struct Canonical {
     /// Launch calls included and reverted, and the recent ones (a reorg
     /// within the follower's window takes them out again).
     reverted_launches: u64,
+    /// Phase H: Flap curve trades journaled, and trade logs refused.
+    flap_trades: u64,
+    flap_trades_undecodable: u64,
     reverted_recent: Vec<(u64, [u8; 32], [u8; 32], crate::canonical_join::Venue)>,
     /// The deepest reorg the follower reports (`BSC_CANONICAL_REORG_DEPTH`).
     reorg_window: u64,
@@ -550,6 +553,8 @@ impl Canonical {
             backfill_blocks: 0,
             backfill_launches: 0,
             reverted_launches: 0,
+            flap_trades: 0,
+            flap_trades_undecodable: 0,
             reverted_recent: Vec::new(),
             reorg_window: config.limits.reorg_depth,
             blocks_skipped: 0,
@@ -616,6 +621,27 @@ impl Canonical {
             // Before the window: not part of the G0.4 counts (the C2 owner
             // has applied them already).
             CanonicalEvent::Launch(_) if !self.first_journaled => self.backfill_launches += 1,
+            CanonicalEvent::FlapTrade(_) | CanonicalEvent::FlapTradeUndecodable { .. }
+                if !self.first_journaled => {}
+            // Phase H: every Flap curve trade of the window, for the
+            // strategy and its replay.
+            CanonicalEvent::FlapTrade(t) => {
+                self.flap_trades += 1;
+                journal.record(RecordKind::Canonical, at, flap_trade_payload(&t));
+            }
+            CanonicalEvent::FlapTradeUndecodable {
+                block_number,
+                block_hash,
+                tx_index,
+                log_index,
+            } => {
+                self.flap_trades_undecodable += 1;
+                journal.record(
+                    RecordKind::Canonical,
+                    at,
+                    trade_gap_payload(block_number, &block_hash, tx_index, log_index),
+                );
+            }
             CanonicalEvent::RevertedLaunch { .. } if !self.first_journaled => {}
             CanonicalEvent::RevertedLaunch {
                 venue,

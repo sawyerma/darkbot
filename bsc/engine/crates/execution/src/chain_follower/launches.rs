@@ -31,8 +31,8 @@ use darkbot_bsc_trading::venues::fourmeme::events::{
 };
 use darkbot_bsc_trading::venues::fourmeme::recognize::PendingToken;
 
-use super::CanonicalLaunch;
 use super::jsonrpc::{BlockHead, Log, Receipt};
+use super::{CanonicalEvent, CanonicalLaunch, CanonicalTrade};
 use crate::ingress::{four_launch_token, is_flap_launch};
 use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verify_parsed};
 
@@ -314,6 +314,47 @@ fn buys_after(
         }
     }
     Some((count, first))
+}
+
+/// The Portal trades of the block's successful receipts, in receipt and
+/// log order (Phase H); a trade log the decoder refuses is reported, not
+/// skipped silently.
+pub(super) fn flap_trades(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalEvent> {
+    let bought = PortalEventKind::TokenBought.topic0();
+    let sold = PortalEventKind::TokenSold.topic0();
+    let mut out = Vec::new();
+    for receipt in receipts.iter().filter(|r| r.succeeded) {
+        for log in receipt.logs.iter().filter(|l| {
+            l.address == FLAP_PORTAL && l.topics.first().is_some_and(|t| *t == bought || *t == sold)
+        }) {
+            out.push(match flap_log(log) {
+                PortalLog::Event(PortalEvent::TokenBought(t) | PortalEvent::TokenSold(t)) => {
+                    CanonicalEvent::FlapTrade(CanonicalTrade {
+                        block_number: block.header.number,
+                        block_hash: block.header.hash,
+                        tx_index: receipt.tx_index,
+                        tx_hash: receipt.tx_hash,
+                        log_index: log.log_index,
+                        origin: receipt.from,
+                        sell: log.topics.first() == Some(&sold),
+                        token: t.token.into_array(),
+                        trader: t.trader.into_array(),
+                        amount: t.amount.to_be_bytes(),
+                        eth: t.eth.to_be_bytes(),
+                        fee: t.fee.to_be_bytes(),
+                        post_price: t.post_price.to_be_bytes(),
+                    })
+                }
+                _ => CanonicalEvent::FlapTradeUndecodable {
+                    block_number: block.header.number,
+                    block_hash: block.header.hash,
+                    tx_index: receipt.tx_index,
+                    log_index: log.log_index,
+                },
+            });
+        }
+    }
+    out
 }
 
 /// One log through the production Flap decoder (`trading::venues::flap`).

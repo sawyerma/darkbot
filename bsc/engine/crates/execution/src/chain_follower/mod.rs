@@ -279,8 +279,44 @@ pub enum CanonicalEvent {
         block_number: u64,
         block_hash: [u8; 32],
     },
+    /// A Flap curve trade of the block just reported (Phase H), in
+    /// receipt and log order after its launches.
+    FlapTrade(CanonicalTrade),
+    /// A Portal trade log of a successful receipt that the production
+    /// decoder refuses: the trades of that block are not complete.
+    FlapTradeUndecodable {
+        block_number: u64,
+        block_hash: [u8; 32],
+        tx_index: u64,
+        log_index: u64,
+    },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
+}
+
+/// One Portal `TokenBought`/`TokenSold` of a successful receipt
+/// (`trading::venues::flap::events::CurveTrade`), with its position and the
+/// transaction's sender.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalTrade {
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    pub tx_index: u64,
+    pub tx_hash: [u8; 32],
+    pub log_index: u64,
+    /// The transaction's sender (the holding cap's `tx.origin`).
+    pub origin: [u8; 20],
+    pub sell: bool,
+    pub token: [u8; 20],
+    pub trader: [u8; 20],
+    /// Tokens bought or sold.
+    pub amount: [u8; 32],
+    /// The native amount spent (BUY) or received (SELL).
+    pub eth: [u8; 32],
+    /// The protocol fee.
+    pub fee: [u8; 32],
+    /// The price after the trade, as the Portal reports it.
+    pub post_price: [u8; 32],
 }
 
 /// One launch in a canonical block.

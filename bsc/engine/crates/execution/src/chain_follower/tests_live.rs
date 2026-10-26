@@ -120,6 +120,7 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
             );
             facts.push((block_number, next_nonce));
         }
+        CanonicalEvent::FlapTrade(_) | CanonicalEvent::FlapTradeUndecodable { .. } => {}
         CanonicalEvent::Fault(fault) => faults.push(fault),
     };
     run_follower(
