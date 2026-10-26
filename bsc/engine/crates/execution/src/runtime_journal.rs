@@ -49,7 +49,7 @@
 
 use crate::canonical_join::{Joined, LaunchRef, LaunchTx, Venue};
 use crate::sources::SourceId;
-use darkbot_bsc_journal::storage::metrics::StorageMetrics;
+use darkbot_bsc_journal::storage::metrics::{MetricsView, StorageMetrics};
 use darkbot_bsc_journal::storage::segments::{SealedSegment, SegmentPolicy, SegmentWriter};
 use darkbot_bsc_journal::storage::writer::{self, SyncPolicy, WorkerEnd};
 use darkbot_bsc_journal::{JournalError, MemoryBudget, RECORD_OVERHEAD, RecordKind, Recorder};
@@ -287,6 +287,16 @@ pub struct CaptureRun {
     pub complete: bool,
 }
 
+/// The capture's storage health of this moment (runtime status).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CaptureStatus {
+    pub writer: MetricsView,
+    pub budget_max: u64,
+    pub budget_in_use: u64,
+    pub budget_peak: u64,
+    pub budget_refused: u64,
+}
+
 pub struct RuntimeJournal {
     dir: PathBuf,
     started_ms: u64,
@@ -375,6 +385,16 @@ impl RuntimeJournal {
 
     pub fn healthy(&self) -> bool {
         !self.metrics.view().failed
+    }
+
+    pub fn capture(&self) -> CaptureStatus {
+        CaptureStatus {
+            writer: self.metrics.view(),
+            budget_max: self.budget.max() as u64,
+            budget_in_use: self.budget.in_use() as u64,
+            budget_peak: self.budget.peak() as u64,
+            budget_refused: self.budget.refused(),
+        }
     }
 
     /// Closes the queue, lets the worker append what is queued and seal

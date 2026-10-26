@@ -21,7 +21,8 @@ export interface CanonicalView { state: string; head: string; headAgeMs: string;
 export interface ChainStateView { coherent: string; head: string; held: string; effects: string; faults: string; checkpoint: string }
 /** The C3 PAPER path (component BSC_EXEC effective SHADOW): ends at the PAPER sink, never sends. */
 export interface ExecView { state: string; detail: string; path: string; latency: string }
-export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView }
+export interface CaptureView { state: string; detail: string }
+export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView; capture?: CaptureView }
 export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; runtime: RuntimeView }
 
 /** Rewrites a runtime status may miss before it is STALE. */
@@ -70,7 +71,13 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     path: `lanes ${x("lanes_left")}/${x("lanes_armed")} · launches ${x("launches")} · to the PAPER sink ${x("handoffs")} · refused: not decoded ${x("refused_not_decoded")}, profile ${x("refused_profile")}, no C2 snapshot ${x("refused_no_snapshot")}, admission ${x("refused_admission")}, intent ${x("refused_intent")}, lanes exhausted ${x("refused_lanes_exhausted")}, lane ${x("refused_lane")}, build ${x("refused_build")}, same token ${x("refused_duplicate_token")}, session cap ${x("refused_session_cap")}, plan/frame ${x("refused_plan")}, start deadline ${x("refused_deadline")}, dispatch ${x("refused_dispatch")} · session spent ${x("session_spent_wei")} wei`,
     latency: f.has("exec[0].latency_p50_ns") ? `T_ingress → T_shadow_sink p50 ${x("latency_p50_ns")} ns · p99 ${x("latency_p99_ns")} ns · max ${x("latency_max_ns")} ns (${x("latency_samples")} samples; not T_send)` : "no PAPER BUY yet",
   } : undefined;
-  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec }, health };
+  // Phase F: the segmented capture's writer, durability watermark and byte budget.
+  const k = (n: string) => f.get(`capture[0].${n}`) ?? "?";
+  const capture: CaptureView | undefined = f.has("capture[0].state") ? {
+    state: fresh ? k("state") : "STALE",
+    detail: `records ${k("records")} (${k("bytes")} bytes) · sealed segments ${k("segments_sealed")} · durable to sequence ${f.get("capture[0].durable_sequence") ?? "none yet"} (syncs ${k("syncs")}) · lost ${f.get("journal_lost") ?? "?"} at the recorder, ${k("lost_records")} in gap spans · budget ${k("budget_in_use_bytes")}/${k("budget_max_bytes")} bytes (peak ${k("budget_peak_bytes")}, refused ${k("budget_refused")}) · write errors ${k("write_errors")}`,
+  } : undefined;
+  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec, capture }, health };
 }
 
 /** The source group from the native record; nothing is inferred locally. */

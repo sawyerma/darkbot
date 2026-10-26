@@ -106,6 +106,8 @@ try{
  await until(async()=> (await srcLine('BSC_INGRESS_PUBLICNODE').innerText()).includes('SHADOW'),'PUBLICNODE effective SHADOW pushed');
  // The read-only runtime (launchd) connects the effective SHADOW source: real verified pending txs from PublicNode.
  await until(async()=> (await p.locator('.g-line',{hasText:'BSC runtime'}).first().innerText()).includes('RUNNING'),'BSC runtime RUNNING');
+// Phase F: the segmented capture's storage health, from the same runtime status.
+await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/.test(await p.locator('.g-line',{hasText:'BSC capture'}).first().innerText()),'BSC capture HEALTHY');
  await until(async()=> {const t=await srcLine('BSC_INGRESS_PUBLICNODE').innerText();const n=Number((t.match(/full (\d+)/)||[])[1]);return t.includes('HEALTHY')&&n>0;},'PUBLICNODE HEALTHY with real verified full txs');
  assert(!(await srcLine('BSC_INGRESS_GETH').innerText()).includes('HEALTHY'),'GETH not connected (OFF)');
  // The canonical follower (free public RPC) follows real Mainnet blocks: Monitoring §6.

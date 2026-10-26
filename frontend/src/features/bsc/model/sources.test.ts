@@ -127,4 +127,24 @@ describe("BSC source control", () => {
     expect(runtimeView([status(10_000, true, true)], 11_000).view.exec?.latency).toContain("not T_send");
     expect(runtimeView([status(10_000, true)], 20_000).view.exec?.state).toBe("STALE");
   });
+
+  it("shows the segmented capture's storage health from the runtime, a durable sequence only once synced", () => {
+    const status = (observed: number, capture: boolean, durable = false): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      { name: "journal_lost", value: "1", kind: 2, unit: "" },
+      ...(capture ? [{ name: "capture[0].state", value: "HEALTHY", kind: 7, unit: "" }, { name: "capture[0].records", value: "42", kind: 2, unit: "" },
+        { name: "capture[0].segments_sealed", value: "2", kind: 2, unit: "" }, { name: "capture[0].budget_peak_bytes", value: "900", kind: 2, unit: "" },
+        { name: "capture[0].budget_max_bytes", value: "67108864", kind: 2, unit: "" }] : []),
+      ...(durable ? [{ name: "capture[0].durable_sequence", value: "41", kind: 2, unit: "" }] : [])] });
+    expect(runtimeView([status(10_000, false)], 11_000).view.capture).toBeUndefined();
+    const v = runtimeView([status(10_000, true)], 11_000).view.capture;
+    expect(v?.state).toBe("HEALTHY");
+    expect(v?.detail).toContain("records 42");
+    expect(v?.detail).toContain("sealed segments 2");
+    expect(v?.detail).toContain("durable to sequence none yet");
+    expect(v?.detail).toContain("lost 1 at the recorder");
+    expect(v?.detail).toContain("peak 900");
+    expect(runtimeView([status(10_000, true, true)], 11_000).view.capture?.detail).toContain("durable to sequence 41");
+    expect(runtimeView([status(10_000, true)], 20_000).view.capture?.state).toBe("STALE");
+  });
 });

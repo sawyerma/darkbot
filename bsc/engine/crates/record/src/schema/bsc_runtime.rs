@@ -453,6 +453,51 @@ pub mod runtime_status {
         };
     }
 
+    /// The capture's storage (Phase F): the segmented journal's writer,
+    /// its durability watermark and the byte budget of the queued records.
+    pub mod capture {
+        use super::*;
+
+        /// Frames appended to sealed or open segments.
+        pub const RECORDS: u16 = 1;
+        pub const BYTES: u16 = 2;
+        /// Records the gap spans written say were lost.
+        pub const LOST_RECORDS: u16 = 3;
+        pub const SEGMENTS_SEALED: u16 = 4;
+        pub const SYNCS: u16 = 5;
+        /// The last sequence known to be on disk.
+        pub const DURABLE_SEQUENCE: u16 = 6;
+        pub const BUDGET_MAX_BYTES: u16 = 7;
+        pub const BUDGET_IN_USE_BYTES: u16 = 8;
+        pub const BUDGET_PEAK_BYTES: u16 = 9;
+        /// Records the byte budget refused (each a gap).
+        pub const BUDGET_REFUSED: u16 = 10;
+        pub const WRITE_ERRORS: u16 = 11;
+        /// `HEALTHY` or `FAILED` (a write, sync or seal failed: the capture
+        /// is no longer complete).
+        pub const STATE: u16 = 12;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.capture",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(RECORDS, "records", U64),
+                Field::req(BYTES, "bytes", U64),
+                Field::req(LOST_RECORDS, "lost_records", U64),
+                Field::req(SEGMENTS_SEALED, "segments_sealed", U64),
+                Field::req(SYNCS, "syncs", U64),
+                Field::opt(DURABLE_SEQUENCE, "durable_sequence", U64),
+                Field::req(BUDGET_MAX_BYTES, "budget_max_bytes", U64),
+                Field::req(BUDGET_IN_USE_BYTES, "budget_in_use_bytes", U64),
+                Field::req(BUDGET_PEAK_BYTES, "budget_peak_bytes", U64),
+                Field::req(BUDGET_REFUSED, "budget_refused", U64),
+                Field::req(WRITE_ERRORS, "write_errors", U64),
+                Field::req(STATE, "state", Text),
+            ],
+        };
+    }
+
     /// The C3 execution path in PAPER mode (component `BSC_EXEC` effective
     /// SHADOW): from the pending launch to the PAPER sink (`T_shadow_sink`,
     /// never `T_send`).
@@ -572,11 +617,13 @@ pub mod runtime_status {
     pub const STATE: u16 = 13;
     /// Present while a PAPER execution path is configured.
     pub const EXEC: u16 = 14;
+    /// The capture's storage health (Phase F).
+    pub const CAPTURE: u16 = 15;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 9,
+        schema_version: 10,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -601,6 +648,7 @@ pub mod runtime_status {
             Field::req(STATUS_INTERVAL_MS, "status_interval_ms", U64),
             Field::nested(STATE, "state", Presence::Optional, &state::SCHEMA),
             Field::nested(EXEC, "exec", Presence::Optional, &exec::SCHEMA),
+            Field::nested(CAPTURE, "capture", Presence::Optional, &capture::SCHEMA),
         ],
     };
 }

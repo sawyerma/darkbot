@@ -31,9 +31,10 @@ use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
-    EXIT_PAYLOAD, JournalSetup, RuntimeJournal, SourceEvent, canonical_launch_payload,
-    first_sighting_payload, later_sighting_payload, orphaned_launch_payload, paper_handoff_payload,
-    pending_launch_payload, reorg_payload, resync_payload, source_event_payload, window_payload,
+    CaptureStatus, EXIT_PAYLOAD, JournalSetup, RuntimeJournal, SourceEvent,
+    canonical_launch_payload, first_sighting_payload, later_sighting_payload,
+    orphaned_launch_payload, paper_handoff_payload, pending_launch_payload, reorg_payload,
+    resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -835,6 +836,7 @@ fn status_bytes(
     journal: &str,
     journal_records: u64,
     journal_lost: u64,
+    capture: Option<&CaptureStatus>,
     canonical: Option<&Canonical>,
     owner: Option<&StateOwner>,
     exec: Option<&ExecRuntime>,
@@ -852,6 +854,26 @@ fn status_bytes(
         .set(rs::JOURNAL_LOST, journal_lost)
         .set(rs::MODE, "READ_ONLY")
         .set(rs::STATUS_INTERVAL_MS, status_interval_ms);
+    if let Some(c) = capture {
+        use rs::capture as k;
+        let w = &c.writer;
+        let mut e = Draft::new(&k::SCHEMA);
+        e.set(k::RECORDS, w.records)
+            .set(k::BYTES, w.bytes)
+            .set(k::LOST_RECORDS, w.lost_records)
+            .set(k::SEGMENTS_SEALED, w.segments_sealed)
+            .set(k::SYNCS, w.syncs)
+            .set(k::BUDGET_MAX_BYTES, c.budget_max)
+            .set(k::BUDGET_IN_USE_BYTES, c.budget_in_use)
+            .set(k::BUDGET_PEAK_BYTES, c.budget_peak)
+            .set(k::BUDGET_REFUSED, c.budget_refused)
+            .set(k::WRITE_ERRORS, w.write_errors)
+            .set(k::STATE, if w.failed { "FAILED" } else { "HEALTHY" });
+        if let Some(v) = w.durable_sequence {
+            e.set(k::DURABLE_SEQUENCE, v);
+        }
+        d.set(rs::CAPTURE, e.into_nested());
+    }
     for (source, s, h) in stats {
         use rs::source as e;
         let mut row = Draft::new(&e::SCHEMA);
@@ -1249,6 +1271,7 @@ pub fn run(
                 &journal_rel.display().to_string(),
                 journal.appended(),
                 journal.lost(),
+                Some(&journal.capture()),
                 canonical.as_ref(),
                 owner.as_ref(),
                 exec.as_ref(),
@@ -1639,6 +1662,11 @@ mod tests {
             "j",
             0,
             0,
+            Some(&CaptureStatus {
+                budget_max: 64,
+                budget_peak: 9,
+                ..CaptureStatus::default()
+            }),
             Some(&c),
             None,
             None,
@@ -1651,6 +1679,17 @@ mod tests {
             "no C2 owner, no state record"
         );
         assert_eq!(r.u64(rs::STATUS_INTERVAL_MS).unwrap(), config.status_ms);
+        // Phase F: the capture's storage health rides along.
+        let k = r.nested(rs::CAPTURE).unwrap();
+        assert_eq!(
+            (
+                k.u64(rs::capture::BUDGET_MAX_BYTES).unwrap(),
+                k.u64(rs::capture::BUDGET_PEAK_BYTES).unwrap(),
+                k.text(rs::capture::STATE).unwrap()
+            ),
+            (64, 9, "HEALTHY")
+        );
+        assert_eq!(k.opt_u64(rs::capture::DURABLE_SEQUENCE).unwrap(), None);
         let n = r.nested(rs::CANONICAL).unwrap();
         assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 2);
         assert_eq!(n.u64(rs::canonical::TX_UNVERIFIABLE).unwrap(), 1);

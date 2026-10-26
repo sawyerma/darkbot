@@ -34,6 +34,7 @@ export function MonitoringPanel() {
     <PlacedSection panel="monitoring" section={1} records={records}>
       <Line label="Source modes generation" value={sources.available ? sources.generation.toString() : sources.reason} hint="Native bsc_runtime source owner; requested vs. effective, LIVE stays BLOCKED" />
       <Line label="BSC runtime" value={<ValueState state={sources.runtime.state} />} hint={`${sources.runtime.mode} · launches ${sources.runtime.launches} · journal ${sources.runtime.journal}`} />
+      {sources.runtime.capture && <Line label="BSC capture" value={<ValueState state={sources.runtime.capture.state} />} hint={sources.runtime.capture.detail} />}
       {sources.rows.map(row => <Line key={row.id} label={row.id} value={<><ValueState state={row.effective} /> <ValueState state={row.health} /></>}
         hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}${row.counters ? ` · ${row.counters}` : ""}`} />)}
       <SourceActions view={sources} />
