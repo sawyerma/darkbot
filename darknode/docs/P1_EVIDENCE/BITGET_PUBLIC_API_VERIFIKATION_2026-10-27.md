@@ -14,7 +14,7 @@
 | P1.3 – Instrument-Katalog | V3-Instrument-REST, BTCUSDT-Parameter, 12 Position-Tiers | **PASS (Abruf und Schema);** Historisierung/Änderungserkennung nicht getestet |
 | P1.3 – Funding | Aktueller Funding-Satz; 2 × 100 historische Einträge | **PASS (Abruf und zwei Seiten);** gesamte Reichweite nicht getestet |
 | P1.4 – Public WebSocket | SBE `publicTrade`, `books1`, `books50`; JSON-`ticker`; ACK und Text-`pong` | **PASS (Kurztest);** Reconnect, Latenz, Alarm, Dauerbetrieb offen |
-| P1.4 – SBE-V4-Decoder | 235/235 Frames dekodiert, 29/29 Trades gegen REST identisch | **PASS (getestete V4-Frames);** V5/Delta/Rekonstruktion offen |
+| P1.4 – SBE-V4-/V5-Decoder | V4: 235/235 Frames, 29/29 Trades REST-paritätisch; **Demo-V5:** 25/25 Frames, 1 Snapshot + 24 Updates angewandt | **PASS für beobachtete Kurztests**; V5-Buchparität/Recovery, Produktiv-V5, Rust-Code offen |
 | P1.7 – öffentliche Trade-Historie | V2 `fills-history`, 1.000er-Seiten, Cursor, 60/89 Tage, Grenzfehler | **PASS (getestete Abfragen);** tatsächliche gesamte Coverage / Retry offen |
 | P1.7 – historische Candles | V3-Kerzen, Mark/Index und 120 Tage alte 1h-Kerzen | **PASS (Abruf);** OHLCV-Parität noch nicht geprüft |
 | R2b – Download-Center | Kein Export heruntergeladen oder gegen Live verglichen | **NOT_RUN** |
@@ -192,3 +192,35 @@ Die Rohlogs wurden dem Repository **nicht** hinzugefügt und nicht mit einem SHA
 **R2 Public Transport/REST-Fähigkeiten:** in den getesteten Punkten **OBSERVED/PASS**.  
 **P1.3, P1.4, P1.7:** **teilweise verifiziert**, verbleibende Prüfungen **OPEN/NOT_RUN**.  
 **Gesamt-P1:** **NOT_RUN**. **Gate 1:** **OPEN**. Keine Freigabe zum Handel oder zur Implementierung weiterer Phasen durch dieses Dokument.
+
+## 9. R2 – Demo-SBE V5: echter BTCUSDT-Depth50-Test (27.10.2026)
+
+**Quelle:** Nutzer-Terminalausgabe aus `bitget_r2_depth_probe.py` unter macOS; drei serielle öffentliche WS-Messfenster (15 s / 10 s / 6 s) mit `symbol=BTCUSDT`, `instType=usdt-futures`, `topic=books50`. Empfangene rohe WS-Frames wurden **lokal** als `DNR2CAP1`-Captures mit `time_ns, frame_type, length, payload` gespeichert. Die Captures selbst wurden dem Git-Repository **nicht** übergeben; Hashes sind **vom lokalen Terminal gemeldet, nicht unabhängig durch einen Git-/Container-Readback überprüft**. Keine Orders und kein API-Key.
+
+| Quelle und URL | Beobachtung | Bewertung |
+|---|---|---|
+| **DEMO_JSON** `wss://wspap.bitget.com/v3/ws/public` | 3 Textframes: Subscribe-ACK=1, Pong=1, **1 Snapshot**. Best Bid 80150.7, Ask 80155.3, 50+50 Level, seq=27298460305, pseq=0 | **OBSERVED** JSON-Demo-Snapshot; keine JSON-Updates im Kurztest |
+| **DEMO_SBE_CANDIDATE** `wss://wspap.bitget.com/v3/ws/public/sbe` | 27 Frames: ACK=1, Pong=1, **25 echte binäre V5-Frames**; **1 Snapshot + 24 Updates**; 25 `applied`, kein gemeldeter Parser-/Sequenzfehler | **OBSERVED V5**. Der vorher nur vermutete `/sbe`-Demo-Pfad war zur Messzeit tatsächlich erreichbar; keine Garantie gegen spätere Änderungen |
+| **LIVE_SBE_BASELINE** `wss://ws.bitget.com/v3/ws/public/sbe` | 221 Frames: ACK=1, Pong=1, **219 × V4**; keine V5-Buchverarbeitung versucht | **OBSERVED V4** vor dem offiziellen Live-Wechsel am 05.11.2026 |
+
+**V5-Sequenzkette (echte Ausgabestichprobe):**
+
+```text
+snapshot  seq=27298460305  pseq=0             bid=80150.7 ask=80155.3 levels=50/50
+update 1 seq=27298476413  pseq=27298460305   bid=80150.7 ask=80155.3 levels=50/50
+update 2 seq=27298476475  pseq=27298476413   bid=80150.7 ask=80155.6 levels=50/50
+```
+
+Die erste JSON- und SBE-Messung zeigen denselben Snapshot-Sequenzwert und denselben Top-of-Book. **Messungen liefen nacheinander**, nicht als zeitgleicher, unabhängiger 50-Level-Paritätstest. 24 Updates wurden auf eine lokale Dezimal-Preis→Menge-Tabelle angewandt; das Terminal meldet kein `gap`, kein `crossed_book` und keinen `decode_error`. Es wurden **nicht** alle resultierenden 50 Tiefenstufen nach jedem Delta gegen eine unabhängige Referenz validiert. Der Python-Test akzeptiert eine weiter gefasste erste Update-Sequenzbedingung und ersetzt keinen formal geprüften Rust-State-Machine-Test. Keinesfalls als Produktionsabnahme deklarieren.
+
+**Lokal gemeldete Originalcapture-Hashes (SHA-256):**
+
+| Capture in `~/Downloads` | SHA-256 (Terminalmeldung) |
+|---|---|
+| `BITGET_R2_DEMO_JSON.capture` | `3903dcff42a1f35fbcd8d41574426d94b1239a61fff7d21d1c8004ed28f1154f` |
+| `BITGET_R2_DEMO_SBE_CANDIDATE.capture` | `e4a0d1be4d49a1e1e7d397bc78efc175f96d55f940c23e40f56b6b5dff2f760f` |
+| `BITGET_R2_LIVE_SBE_BASELINE.capture` | `76f393f4ba26e2c2ddea9479801be19eda964a5f0c56b7acea6814134e8bd61e` |
+
+**Externe Primärquellen:** [Bitget Update Preview – V5 und 05.11.2026](https://www.bitget.com/docs/uta/update-preview), [SBE XML-Schema](https://www.bitget.com/docs/uta/websocket/sbe/sbe-intro), [Demo-Quickstart](https://www.bitget.com/docs/uta/quick-start). Bitgets Quickstart dokumentiert den Demo-JSON-Host; der ergänzte Demo-SBE-Pfad ist **praktisch ermittelt**, nicht als offizieller Quickstart-Host nachgewiesen.
+
+**R2-Folgeprüfungen / OPEN:** Originalcapture auf Checksumme/Format prüfen, echtes V5-Schema als Hash pinnen, kanonisches deterministisches Offline-Replay, absichtlich entfernten/duplizierten Frame als `GAP` erkennen, Resubscribe+neuen Snapshot validieren, 50-Level-Parität über gesamte Sequenz (idealerweise mit parallel synchronisiertem Referenzfeed), nach 05.11.2026 live V5 prüfen, schließlich Rust-Decoder und Burst-/Dauerlauf testen. Die bisherige `P1=NOT_RUN`- und `Gate 1=OPEN`-Einstufung bleibt unverändert.
