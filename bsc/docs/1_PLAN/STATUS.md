@@ -9,14 +9,14 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 0 | V2 abgelegt, V1 historisch, diese Tabelle | TECHNISCH FERTIG | dieser Commit | – | Paket 1 |
 | 1 | Gate A/B: BSC-005 T5, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | TECHNISCH FERTIG — EXTERNAL_BLOCKED: SIGN/V5/Grant/echter G0.7/G0.8 (Nutzerfreigabe) | `746fdf29`, `f91274bb`, `e9f88965`; Reviewer 25.10.: kein HIGH/CRITICAL, alle MEDIUM/LOW behoben | Readiness real: `BLOCKED` (kein V5 ohne SIGN) | – |
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
-| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (3a `6e9a357a`/`a55e73f7`, 3b `c41a27bc`, 3c `a28572ad`, 3d kanonischer Follower + G0.4-Zensus `a79afb0e`, 3f C1-Evidence binär/BSC-033 + C1.9 neu gemessen (eligible, n=10000) `3892ebf4`, BSC-023 Analytics `b3df0205`) | `b3df0205` | C1.9b neu (Chapel-Replay, ohne eigene Keys), volle Non-Race-geth-Suite (C1.10A), C1.10-Freeze, Phase-Gate-Reviewer; BSC-025 + Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | C1.9b + geth-Suite |
+| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (Gate-Review `ee32acb8`: FAIL — alle Funde behoben: G0.4 gegen Blockzeit/C1-Scope/Abdeckung/SIGTERM `402393a6`, C17-Ursache + reproduzierbare Builds `995a2a27`; C1.9/C1.9b/Gates mit den eingefrorenen Binaries neu `818525b1`; C1.10 FROZEN neu `e6177bba`) | `e6177bba` | zweites Phase-Gate-Review; BSC-025 + Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | Phase-Gate-Review |
 | 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | nach Paket 3 |
 | 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
 | 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
 | 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
-| P | G0.4 Rohdaten (parallel) | OFFEN (Pending-Seite `a28572ad`, kanonischer Nenner + Zensus `a79afb0e`; Live 10 min: 1334 Blöcke, 15 Flap-Launches, 3 vor Block voll sichtbar, 12 von keiner Quelle) | `a79afb0e` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
+| P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition korrigiert `402393a6`: vor der Blockzeit, C1-Scope, Abdeckung) | `402393a6` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
 
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 
