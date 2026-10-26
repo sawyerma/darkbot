@@ -10,7 +10,7 @@
 //!   two inclusions of one nonce are impossible and refused, never summed.
 //! - Counterfactual (replay) cost: never a "typical gas" constant. A frozen
 //!   evidence set of real receipts per path class gives the largest observed
-//!   gas used of that class (a documented adverse bound, labeled as an
+//!   gas used of that class (the documented bound of its frozen sample, labeled as an
 //!   assumption), priced at the replay block's own gas-price evidence.
 //!
 //! Exact integer arithmetic; overflow is an error.
@@ -122,8 +122,12 @@ pub enum Action {
     Sell,
     /// `approve` of the venue as spender (the sell path's prerequisite).
     Approve,
-    /// An included call to the venue that reverted.
-    Reverted,
+    /// An included call to the venue that reverted, by what it attempted
+    /// (Phase G gate M2: a reverted launch is no evidence of a reverted
+    /// trade).
+    RevertedLaunch,
+    RevertedBuy,
+    RevertedSell,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -178,7 +182,7 @@ impl GasEvidence {
         &self.classes
     }
 
-    /// The adverse counterfactual fee of one transaction of `class` at
+    /// The counterfactual fee (an assumption) of one transaction of `class` at
     /// `gas_price_wei` (the replay block's evidence): the largest observed
     /// gas used of that class. An assumption bound, not a measurement of
     /// the counterfactual transaction.

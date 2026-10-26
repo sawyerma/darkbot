@@ -7,7 +7,7 @@
 //! approval (unless already given) and SELL network fees. Never a guessed
 //! percentage: whatever a quote refuses (holding cap, DEX threshold,
 //! unwitnessed branch) or a path class without gas evidence fails closed.
-//! The network fee is the class's adverse counterfactual bound at the
+//! The network fee is the class's largest observed gas used (an assumption) at the
 //! given gas price (`network::GasEvidence`), an assumption labeled as such,
 //! not a measurement of the trade.
 
@@ -134,10 +134,14 @@ pub fn outcome(entry: &Entry, exit: &Exit) -> Result<Outcome, PositionError> {
 #[cfg(test)]
 mod tests {
     use super::super::native_curve20::{
-        CURVE_ID_RH_BNB, FRESH_LAUNCH_HOLDING_CAP, PROFILE_DEX_SUPPLY_THRESHOLD,
-        QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS,
+        FRESH_LAUNCH_HOLDING_CAP, PricedToken, QUALIFIED_MAINNET_INPUT_WEI, TokenTerms,
+        WITNESSED_MAINNET_TERMS, profile_terms,
     };
     use super::*;
+
+    fn priced(buy: u16, sell: u16) -> PricedToken {
+        PricedToken::new(&profile_terms(buy, sell)).unwrap()
+    }
 
     /// The Flap BUY, approval and SELL classes of the receipts fixture.
     fn evidence() -> GasEvidence {
@@ -160,16 +164,14 @@ mod tests {
 
     fn fresh_buy() -> NativeBuyInputs {
         NativeBuyInputs {
-            curve_id: CURVE_ID_RH_BNB,
+            token: priced(100, 100),
             reserve_before: U256::ZERO,
             circulating_before: U256::ZERO,
             input_amount: U256::from(QUALIFIED_MAINNET_INPUT_WEI),
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-            buy_tax_bps: 100,
             tax_on_bonding_curve_enabled: true,
             caller_fee_exempt: false,
             holding_cap: FRESH_LAUNCH_HOLDING_CAP,
-            dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
         }
     }
 
@@ -189,12 +191,11 @@ mod tests {
         assert_eq!(e.tokens, quote.output_amount);
         assert_eq!(e.spent_wei, buy.input_amount + buy_fee);
         let sell = NativeSellInputs {
-            curve_id: CURVE_ID_RH_BNB,
+            token: priced(100, 100),
             reserve_before: quote.reserve_after,
             circulating_before: quote.supply_after,
             input_amount: e.tokens,
-            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-            sell_tax_bps: 100,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
             tax_on_bonding_curve_enabled: true,
             caller_fee_exempt: false,
         };
@@ -229,13 +230,42 @@ mod tests {
         );
     }
 
+    /// Phase G gate H1: a position whose token left the curve has no exit
+    /// price (`QuoteError::Migrated`), never a curve quote.
+    #[test]
+    fn a_migrated_token_has_no_exit() {
+        let gas = evidence();
+        let price = U256::from(100_000_000u64);
+        let e = entry(&fresh_buy(), &gas, price).unwrap();
+        let threshold = PricedToken::new(&profile_terms(100, 100))
+            .unwrap()
+            .dex_supply_threshold();
+        let sell = NativeSellInputs {
+            token: priced(100, 100),
+            reserve_before: U256::from(16u64) * U256::from(10u64).pow(U256::from(18u64)),
+            circulating_before: threshold + U256::from(1_000u64),
+            input_amount: e.tokens,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+        };
+        assert_eq!(
+            exit(&e, &sell, false, &gas, price),
+            Err(PositionError::Quote(QuoteError::Migrated))
+        );
+    }
+
     /// A refused quote or a class without evidence fails the path closed.
     #[test]
     fn a_refused_quote_or_missing_gas_evidence_fails_closed() {
         let gas = evidence();
         let price = U256::from(100_000_000u64);
         let mut buy = fresh_buy();
-        buy.dex_supply_threshold = U256::from(1u8);
+        buy.token = PricedToken::new(&TokenTerms {
+            dex_supply_threshold: U256::from(1u8),
+            ..profile_terms(100, 100)
+        })
+        .unwrap();
         assert_eq!(
             entry(&buy, &gas, price),
             Err(PositionError::Quote(QuoteError::ReachesDexThreshold))

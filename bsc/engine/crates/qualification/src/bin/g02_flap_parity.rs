@@ -25,13 +25,14 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_sol_types::{SolCall, SolEvent, sol};
 use common::chain::bloom_has;
 use common::edge::{self, CallOutcome, Endpoint, Pin};
-use common::util::{number, rpc_from_config};
+use common::util::{bounded, rpc_from_config};
 use darkbot_bsc_execution::rpc_wire::Limits;
 use darkbot_bsc_qualification::c1_common::Args;
 use darkbot_bsc_trading::economics::flap::QuoteError;
+use darkbot_bsc_trading::economics::flap::curve::Curve;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CURVE_ID_RH_BNB, HoldingCap, NativeBuyInputs, NativeSellInputs, WITNESSED_MAINNET_TERMS,
-    curve20, quote_native_buy, quote_native_sell,
+    HoldingCap, NativeBuyInputs, NativeSellInputs, PricedToken, TokenTerms, Unpriced,
+    WITNESSED_MAINNET_TERMS, curve20, quote_native_buy, quote_native_sell,
 };
 use darkbot_bsc_trading::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
 use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
@@ -81,14 +82,15 @@ const TRADABLE: u8 = 1;
 /// Every tunable bound and its default (each overridable by its flag).
 mod defaults {
     pub use crate::common::util::net::*;
-    /// `--scan-blocks`: newest blocks searched for `TokenCreated`.
+    /// `--scan-blocks` (1..=100000): newest blocks searched for `TokenCreated`.
     pub const SCAN_BLOCKS: u64 = 3_000;
-    /// `--max-tokens`: tokens quoted.
+    /// `--max-tokens` (1..=200): tokens quoted.
     pub const MAX_TOKENS: usize = 12;
 }
 
-/// BUY inputs (wei) and SELL sizes (parts per million of the circulating
-/// supply) of the grid.
+/// The evidence grid (not a tunable of any decision): BUY inputs (wei) and
+/// SELL sizes (parts per million of the circulating supply) from dust to
+/// half the supply.
 const BUY_WEI: [u128; 5] = [
     1_000_000_000_000,
     1_000_000_000_000_000,
@@ -117,8 +119,8 @@ fn run() -> Result<(), String> {
         Some(u) => u.to_string(),
         None => rpc_from_config(Path::new(defaults::RPC_CONFIG))?,
     };
-    let scan: u64 = number(&args, "scan-blocks", defaults::SCAN_BLOCKS)?;
-    let max_tokens: usize = number(&args, "max-tokens", defaults::MAX_TOKENS)?;
+    let scan: u64 = bounded(&args, "scan-blocks", defaults::SCAN_BLOCKS, 1, 100_000)?;
+    let max_tokens: usize = bounded(&args, "max-tokens", defaults::MAX_TOKENS, 1, 200)?;
     let rpc = Endpoint::new(
         &rpc_url,
         Limits {
@@ -168,6 +170,7 @@ fn run() -> Result<(), String> {
     }
     println!("scanned to {scanned} ({} launches found)", tokens.len());
     let (mut quoted, mut matched, mut mismatched, mut unsupported) = (0usize, 0, 0, 0);
+    let mut skipped: Vec<String> = Vec::new();
     for (token, launch) in tokens {
         if quoted >= max_tokens {
             break;
@@ -182,20 +185,57 @@ fn run() -> Result<(), String> {
             continue;
         };
         let s = getTokenV8SafeCall::abi_decode_returns(&raw).map_err(|e| e.to_string())?;
-        let c = curve20();
-        if s.status != TRADABLE
-            || s.quoteTokenAddress != Address::ZERO
-            || (s.r, s.h, s.k) != (c.r, c.h, c.k)
-        {
-            continue;
-        }
-        quoted += 1;
         let view = |input: Vec<u8>| -> Result<Vec<u8>, String> {
             match rpc.call_at(portal, &input, &pin)? {
                 CallOutcome::Returned(r) => Ok(r),
                 CallOutcome::Reverted(_) => Err(format!("{token}: lens call reverted")),
             }
         };
+        let nft = nftGateCall { token }.abi_encode();
+        let nft = nftGateCall::abi_decode_returns(&view(nft)?).map_err(|e| e.to_string())?;
+        let tax = |v: U256| u16::try_from(v).map_err(|_| format!("{token}: tax {v}"));
+        let terms = TokenTerms {
+            tradable: s.status == TRADABLE,
+            version: s.tokenVersion,
+            quote_token: s.quoteTokenAddress.into_array(),
+            nft_gate: nft.into_array(),
+            curve: Curve {
+                r: s.r,
+                h: s.h,
+                k: s.k,
+            },
+            dex_supply_threshold: s.dexSupplyThresh,
+            buy_tax_bps: tax(s.buyTaxRate)?,
+            sell_tax_bps: tax(s.sellTaxRate)?,
+        };
+        // The production scope decides (`PricedToken::new`). A token off the
+        // native curve 20 or off the curve has no Portal quote to compare:
+        // recorded with its reason, never dropped silently. One on it but
+        // outside the scope (another version, an NFT gate) is still sampled
+        // against the version-6 rule, as evidence of the difference.
+        let priced = PricedToken::new(&terms);
+        let comparable = PricedToken::new(&TokenTerms {
+            version: TOKEN_VERSION_TAXED_V3,
+            nft_gate: [0; 20],
+            ..terms
+        });
+        let local_token = match (priced, comparable) {
+            (Ok(t), _) | (Err(Unpriced::Version(_) | Unpriced::NftGate), Ok(t)) => t,
+            (Err(why), _) => {
+                let line = format!(
+                    "# skipped {token} at {}: {why:?} (status {} version {} quote {} curve20 {})",
+                    pin.number,
+                    s.status,
+                    s.tokenVersion,
+                    s.quoteTokenAddress,
+                    terms.curve == curve20()
+                );
+                println!("{line}");
+                skipped.push(line);
+                continue;
+            }
+        };
+        quoted += 1;
         let cap = maxBuyPerOriginCall { token }.abi_encode();
         let cap =
             maxBuyPerOriginCall::abi_decode_returns(&view(cap)?).map_err(|e| e.to_string())?;
@@ -205,8 +245,6 @@ fn run() -> Result<(), String> {
         }
         .abi_encode();
         let quota = buyQuotaOfCall::abi_decode_returns(&view(quota)?).map_err(|e| e.to_string())?;
-        let nft = nftGateCall { token }.abi_encode();
-        let nft = nftGateCall::abi_decode_returns(&view(nft)?).map_err(|e| e.to_string())?;
         let holding_cap = if cap.bps == 0 {
             HoldingCap::None
         } else {
@@ -242,14 +280,11 @@ fn run() -> Result<(), String> {
                 "UNKNOWN".to_string(),
             ),
         };
-        // What the production quote does not claim: another token version
-        // (newTokenV7 tokens charge differently) and an NFT-gated market.
-        let scope = if s.tokenVersion != TOKEN_VERSION_TAXED_V3 {
-            "UNSUPPORTED_VERSION"
-        } else if nft != Address::ZERO {
-            "UNSUPPORTED_NFT_GATE"
-        } else {
-            "SUPPORTED"
+        let scope = match priced {
+            Ok(_) => "SUPPORTED",
+            Err(Unpriced::Version(_)) => "UNSUPPORTED_VERSION",
+            Err(Unpriced::NftGate) => "UNSUPPORTED_NFT_GATE",
+            Err(_) => "UNSUPPORTED",
         };
         let token_facts = format!(
             "{} {} {} {selector} {launch_cap} {launch_nft} {} {} {scope}",
@@ -259,8 +294,7 @@ fn run() -> Result<(), String> {
             s.tokenVersion,
             s.dexSupplyThresh,
         );
-        let tax = |v: U256| u16::try_from(v).map_err(|_| format!("{token}: tax {v}"));
-        let (buy_tax, sell_tax) = (tax(s.buyTaxRate)?, tax(s.sellTaxRate)?);
+        let (buy_tax, sell_tax) = (terms.buy_tax_bps, terms.sell_tax_bps);
         println!(
             "token {token} pin {} reserve {} supply {} buyTax {buy_tax} sellTax {sell_tax} version {} dexSupplyThresh {} cap {token_facts}",
             pin.number, s.reserve, s.circulatingSupply, s.tokenVersion, s.dexSupplyThresh
@@ -285,16 +319,14 @@ fn run() -> Result<(), String> {
             let amount = U256::from(wei);
             let chain = quote(Address::ZERO, token, amount)?;
             let local = quote_native_buy(&NativeBuyInputs {
-                curve_id: CURVE_ID_RH_BNB,
+                token: local_token,
                 reserve_before: s.reserve,
                 circulating_before: s.circulatingSupply,
                 input_amount: amount,
                 protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                buy_tax_bps: buy_tax,
                 tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
                 caller_fee_exempt: false,
                 holding_cap,
-                dex_supply_threshold: s.dexSupplyThresh,
             })
             .map(|q| q.output_amount);
             // A BUY above the allowance fills only up to it: the local quote
@@ -317,12 +349,11 @@ fn run() -> Result<(), String> {
             }
             let chain = quote(token, Address::ZERO, amount)?;
             let local = quote_native_sell(&NativeSellInputs {
-                curve_id: CURVE_ID_RH_BNB,
+                token: local_token,
                 reserve_before: s.reserve,
                 circulating_before: s.circulatingSupply,
                 input_amount: amount,
-                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                sell_tax_bps: sell_tax,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
                 tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
                 caller_fee_exempt: false,
             })
@@ -337,7 +368,8 @@ fn run() -> Result<(), String> {
         }
     }
     println!(
-        "tokens {quoted}, samples matched {matched}, mismatched {mismatched}, outside the supported scope {unsupported}"
+        "tokens {quoted}, samples matched {matched}, mismatched {mismatched}, outside the supported scope {unsupported}, launches skipped {}",
+        skipped.len()
     );
     if let Some(path) = fixture_out {
         let text = format!(
@@ -345,8 +377,11 @@ fn run() -> Result<(), String> {
              # (curve-20 native-quote tokens on the bonding curve; bsc-dataseed, read-only; g02_flap_parity).\n\
              # maxBuyPerOrigin, buyQuotaOf(origin 0x0) and nftGate at the same pin; the launch selector and the cap / NFT gate set in the launch receipt;\n\
              # the token version and whether the production quote claims the token (SUPPORTED: version 6 without NFT gate).\n\
-             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <dex-supply-threshold> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE>\n{}\n",
+             # the scope is the production one (PricedToken::new); a sample outside it is quoted locally as if version 6 without a gate.\n\
+             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <dex-supply-threshold> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE|UNSUPPORTED>\n{}{}{}\n",
             alloy_primitives::hex::encode(portal),
+            skipped.join("\n"),
+            if skipped.is_empty() { "" } else { "\n" },
             lines.join("\n")
         );
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;

@@ -36,6 +36,21 @@ pub fn number<T: std::str::FromStr>(args: &Args, flag: &str, default: T) -> Resu
     }
 }
 
+/// A numeric flag inside `min..=max` (every tunable has its bounds).
+pub fn bounded<T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy>(
+    args: &Args,
+    flag: &str,
+    default: T,
+    min: T,
+    max: T,
+) -> Result<T, String> {
+    let v = number(args, flag, default)?;
+    if v < min || v > max {
+        return Err(format!("--{flag} {v} is outside {min}..={max}"));
+    }
+    Ok(v)
+}
+
 /// `BSC_READINESS_RPC_HTTPS` of a public `KEY=VALUE` file.
 pub fn rpc_from_config(path: &Path) -> Result<String, String> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase());

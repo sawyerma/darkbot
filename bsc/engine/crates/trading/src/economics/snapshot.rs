@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-2";
+pub const MODEL_VERSION: &str = "bsc-economics-3";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -79,21 +79,35 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "ROUND TRIP",
         support: Support::Priced,
-        rule: "flap::position: entry = BUY input + BUY network fee for the quoted tokens; exit = SELL of exactly those tokens, its quoted native amount less the approval (unless given) and SELL network fees; the network fees the classes' adverse counterfactual bound at the given gas price",
+        rule: "flap::position: entry = BUY input + BUY network fee for the quoted tokens; exit = SELL of exactly those tokens, its quoted native amount less the approval (unless given) and SELL network fees; the network fees each class's largest observed gas used at the given gas price (an assumption, not a measurement of the trade)",
     },
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
         path: "APPROVE BEFORE SELL",
         support: Support::Costed,
-        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt",
+        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt and fixtures/bsc/flap_gas_20261026.txt (approve(Portal) of tokens the Portal knows)",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; token version 7 (newTokenV7)",
+        surface: "Portal v5.27.0; every token version but 6 (live: 2 and 7)",
         path: "BUY, SELL",
         support: Support::Unsupported,
-        rule: "a live version-7 token is charged about 0.25 % more than the version-6 rule on both sides (g02_flap_parity); no verified rule",
+        rule: "PricedToken::new refuses it; a live version-7 token is charged about 0.25 % more than the version-6 rule on both sides (fixtures/flap/quote_parity_g02_v3.txt); no verified rule for any",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: "Portal v5.27.0; another curve or quote token, or a token not Tradable",
+        path: "BUY, SELL",
+        support: Support::Unsupported,
+        rule: "PricedToken::new refuses it; the g02 tools record such launches as skipped with the reason",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: FLAP_V6,
+        path: "REVERTED BUY, REVERTED SELL",
+        support: Support::Unsupported,
+        rule: "no reverted-trade outcome in flap::position and no reverted Portal swap in the gas sample; reverts are keyed by the attempted action (network::Action), so a reverted launch is no evidence of one",
     },
     Scope {
         venue: "FLAP",
@@ -149,7 +163,7 @@ pub const SCOPES: &[Scope] = &[
         surface: "chain 56",
         path: "NETWORK COST",
         support: Support::Costed,
-        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price (fixtures/bsc/receipts_20261026.txt)",
+        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price, an assumption (fixtures/bsc/receipts_20261026.txt, fixtures/bsc/flap_gas_20261026.txt with the receipts per class in its header)",
     },
 ];
 
@@ -177,7 +191,7 @@ pub const POLICIES: &[(&str, &str)] = &[
     ),
     (
         "gas_evidence",
-        "receipts only; no typical-gas constant; a class without evidence fails closed",
+        "receipts only; no typical-gas constant; a class without evidence fails closed; the counterfactual is the largest observed gas used of its frozen sample, an assumption; a BUY that graduated its token is the migration class, not a BUY",
     ),
     (
         "unknown",
@@ -188,6 +202,7 @@ pub const POLICIES: &[(&str, &str)] = &[
 /// The repository files whose bytes are the model and its evidence.
 pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/economics/arith.rs",
+    "bsc/engine/crates/trading/src/economics/flap/doge_v3.rs",
     "bsc/engine/crates/trading/src/economics/fees.rs",
     "bsc/engine/crates/trading/src/economics/flap/curve.rs",
     "bsc/engine/crates/trading/src/economics/flap/mod.rs",
@@ -197,11 +212,29 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/economics/policy.rs",
     "bsc/engine/crates/trading/src/economics/slippage.rs",
     "bsc/engine/crates/trading/src/economics/snapshot.rs",
+    "bsc/engine/crates/trading/src/venues/flap/abi.rs",
+    "bsc/engine/crates/trading/src/venues/flap/deployment.rs",
     "bsc/engine/crates/trading/src/venues/flap/profile.rs",
+    "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261026.txt",
     "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02.txt",
+    "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02_v2.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt",
+    "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt",
+];
+
+/// The economics sources not bound, each with its reason (Phase G gate M4:
+/// every file under `economics/` is bound or named here).
+pub const EXCLUDED_FILES: &[(&str, &str)] = &[
+    (
+        "bsc/engine/crates/trading/src/economics/mod.rs",
+        "module list only",
+    ),
+    (
+        "bsc/engine/crates/trading/src/economics/network/tests.rs",
+        "tests of network.rs against its bound fixture",
+    ),
 ];
 
 /// The canonical text the snapshot hash is taken of: `files` are the
@@ -266,13 +299,45 @@ mod tests {
         assert!(SCOPES.iter().all(|s| !s.rule.is_empty()));
     }
 
+    /// Phase G gate M4: every source under `economics/` is bound or
+    /// excluded with a reason, and nothing is both.
+    #[test]
+    fn every_economics_source_is_bound_or_excluded() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        walk(&root.join("src/economics"), &mut files);
+        assert!(files.len() > 10);
+        for f in files {
+            let rel = format!(
+                "bsc/engine/crates/trading/{}",
+                f.strip_prefix(root).unwrap().to_string_lossy()
+            );
+            let bound = BOUND_FILES.contains(&rel.as_str());
+            let excluded = EXCLUDED_FILES.iter().any(|(p, _)| *p == rel);
+            assert!(
+                bound != excluded,
+                "{rel}: bound {bound}, excluded {excluded}"
+            );
+        }
+    }
+
     /// The manifest names every bound file in order and changes with any
     /// byte of them.
     #[test]
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-2\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-3\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

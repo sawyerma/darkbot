@@ -47,6 +47,9 @@ pub struct Receipt {
     pub contract_address: Option<Address>,
     pub status: u64,
     pub logs: Vec<Log>,
+    /// `gasUsed` and `effectiveGasPrice`, when the node answers them.
+    pub gas_used: Option<u64>,
+    pub effective_gas_price: Option<U256>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +62,9 @@ pub struct Tx {
     pub to: Option<Address>,
     pub input: Vec<u8>,
     pub value: U256,
+    /// The gas limit and the transaction type, when the node answers them.
+    pub gas: Option<u64>,
+    pub tx_type: Option<u64>,
 }
 
 /// A canonical block with its full transactions.
@@ -479,6 +485,8 @@ fn receipt_of(v: &Json) -> Result<Receipt, String> {
         contract_address: opt(v, "contractAddress", address_of)?,
         status: req(v, "status", u64_of)?,
         logs,
+        gas_used: opt(v, "gasUsed", u64_of)?,
+        effective_gas_price: opt(v, "effectiveGasPrice", u256_of)?,
     })
 }
 
@@ -492,6 +500,8 @@ fn tx_of(v: &Json) -> Result<Tx, String> {
         to: opt(v, "to", address_of)?,
         input: req(v, "input", bytes_of)?,
         value: req(v, "value", u256_of)?,
+        gas: opt(v, "gas", u64_of)?,
+        tx_type: opt(v, "type", u64_of)?,
     })
 }
 
@@ -1285,6 +1295,8 @@ mod tests {
             contract_address: None,
             status: 1,
             logs: vec![],
+            gas_used: None,
+            effective_gas_price: None,
         };
         assert!(require_receipts_of(&header, std::slice::from_ref(&receipt)).is_err());
         let mut same = receipt.clone();
@@ -1301,6 +1313,8 @@ mod tests {
             to: None,
             input: vec![],
             value: U256::ZERO,
+            gas: None,
+            tx_type: None,
         };
         assert!(require_tx_at(&tx, &same).is_err());
     }

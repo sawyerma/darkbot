@@ -52,6 +52,7 @@ use crate::economics::arith::{add, sub};
 use crate::economics::fees::split_fee;
 use crate::economics::policy::BuyPolicy;
 use crate::economics::slippage::min_output;
+use crate::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
 use crate::venues::flap::profile::{ClassifiedLaunch, LaunchProfile};
 
 /// Curve id of `CURVE_RH_BNB`.
@@ -70,11 +71,111 @@ pub fn curve20() -> Curve {
     }
 }
 
+/// A token's terms as the Portal holds them (`getTokenV8Safe`, the launch
+/// receipt's term events, `nftGate`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenTerms {
+    /// `TokenStatus.Tradable`: on the bonding curve.
+    pub tradable: bool,
+    pub version: u8,
+    pub quote_token: [u8; 20],
+    /// `nftGate(token)`; zero without a gate.
+    pub nft_gate: [u8; 20],
+    pub curve: Curve,
+    pub dex_supply_threshold: U256,
+    pub buy_tax_bps: u16,
+    pub sell_tax_bps: u16,
+}
+
+/// Why a token is outside the priced scope (`economics::snapshot`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unpriced {
+    NotTradable,
+    Version(u8),
+    QuoteToken,
+    NftGate,
+    Curve,
+    Tax,
+    Threshold,
+}
+
+/// The terms the native curve-20 quotes are valid for: a tradable Flap
+/// token version 6, quoted in native BNB, without an NFT gate, on curve
+/// 20, with taxes below 100 % and a DEX threshold within the supply. Only
+/// [`PricedToken::new`] builds one, so a quote can never be asked for a
+/// token outside the scope (Economics gate §12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PricedToken {
+    buy_tax_bps: u16,
+    sell_tax_bps: u16,
+    dex_supply_threshold: U256,
+}
+
+impl PricedToken {
+    pub fn new(t: &TokenTerms) -> Result<Self, Unpriced> {
+        if !t.tradable {
+            return Err(Unpriced::NotTradable);
+        }
+        if t.version != TOKEN_VERSION_TAXED_V3 {
+            return Err(Unpriced::Version(t.version));
+        }
+        if t.quote_token != [0; 20] {
+            return Err(Unpriced::QuoteToken);
+        }
+        if t.nft_gate != [0; 20] {
+            return Err(Unpriced::NftGate);
+        }
+        if t.curve != curve20() {
+            return Err(Unpriced::Curve);
+        }
+        if t.buy_tax_bps >= 10_000 || t.sell_tax_bps >= 10_000 {
+            return Err(Unpriced::Tax);
+        }
+        if t.dex_supply_threshold.is_zero()
+            || t.dex_supply_threshold > U256::from(super::curve::TOTAL_SUPPLY)
+        {
+            return Err(Unpriced::Threshold);
+        }
+        Ok(Self {
+            buy_tax_bps: t.buy_tax_bps,
+            sell_tax_bps: t.sell_tax_bps,
+            dex_supply_threshold: t.dex_supply_threshold,
+        })
+    }
+
+    pub fn buy_tax_bps(&self) -> u16 {
+        self.buy_tax_bps
+    }
+
+    pub fn sell_tax_bps(&self) -> u16 {
+        self.sell_tax_bps
+    }
+
+    pub fn dex_supply_threshold(&self) -> U256 {
+        self.dex_supply_threshold
+    }
+}
+
+/// The terms of the qualified profile's token (a classified `newTokenV6`
+/// launch without extension, `venues::flap::profile`) with its taxes.
+pub fn profile_terms(buy_tax_bps: u16, sell_tax_bps: u16) -> TokenTerms {
+    TokenTerms {
+        tradable: true,
+        version: TOKEN_VERSION_TAXED_V3,
+        quote_token: [0; 20],
+        nft_gate: [0; 20],
+        curve: curve20(),
+        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
+        buy_tax_bps,
+        sell_tax_bps,
+    }
+}
+
 /// Inputs of the native BUY arithmetic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeBuyInputs {
-    /// Curve id of the token; must be [`CURVE_ID_RH_BNB`].
-    pub curve_id: u8,
+    /// The token's validated terms (taxes, DEX threshold).
+    pub token: PricedToken,
     /// Quote reserve of the token before this BUY, in wei.
     pub reserve_before: U256,
     /// Circulating token supply before this BUY.
@@ -83,18 +184,12 @@ pub struct NativeBuyInputs {
     pub input_amount: U256,
     /// Protocol fee in basis points.
     pub protocol_fee_bps: u16,
-    /// Buy tax of the token in basis points.
-    pub buy_tax_bps: u16,
     /// Whether the venue applies the buy tax on the bonding curve.
     pub tax_on_bonding_curve_enabled: bool,
     /// Whether the caller is exempt from fees.
     pub caller_fee_exempt: bool,
     /// The per-origin holding cap of the BUY's origin at this state.
     pub holding_cap: HoldingCap,
-    /// The circulating supply at which the token leaves the curve for its
-    /// DEX (`getTokenV8Safe.dexSupplyThresh`); a BUY reaching it migrates,
-    /// which the quote refuses.
-    pub dex_supply_threshold: U256,
 }
 
 /// The Portal's per-origin holding cap for one origin at a state (v5.27.0
@@ -129,8 +224,8 @@ pub struct NativeBuyQuote {
 
 /// Arithmetic of a direct native-BNB bonding-curve BUY. Not an admission.
 pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, QuoteError> {
-    if inputs.curve_id != CURVE_ID_RH_BNB {
-        return Err(QuoteError::UnsupportedCurve);
+    if inputs.circulating_before >= inputs.token.dex_supply_threshold {
+        return Err(QuoteError::Migrated);
     }
     if inputs.input_amount.is_zero() {
         return Err(QuoteError::ZeroInput);
@@ -145,7 +240,7 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
     let fees = split_fee(
         inputs.input_amount,
         inputs.protocol_fee_bps,
-        inputs.buy_tax_bps,
+        inputs.token.buy_tax_bps,
     )?;
     let net_reserve_input = sub(inputs.input_amount, fees.combined)?;
     let reserve_after = add(inputs.reserve_before, net_reserve_input)?;
@@ -157,7 +252,7 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
     if output_amount.is_zero() {
         return Err(QuoteError::ZeroOutput);
     }
-    if supply_after >= inputs.dex_supply_threshold {
+    if supply_after >= inputs.token.dex_supply_threshold {
         return Err(QuoteError::ReachesDexThreshold);
     }
     if let HoldingCap::Remaining(remaining) = inputs.holding_cap
@@ -180,18 +275,16 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
 /// Inputs of the native SELL arithmetic (tokens to native BNB on the curve).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeSellInputs {
-    /// Curve id of the token; must be [`CURVE_ID_RH_BNB`].
-    pub curve_id: u8,
+    /// The token's validated terms (taxes, DEX threshold).
+    pub token: PricedToken,
     /// Quote reserve of the token before this SELL, in wei.
     pub reserve_before: U256,
     /// Circulating token supply before this SELL.
     pub circulating_before: U256,
     /// Tokens sold.
     pub input_amount: U256,
-    /// Protocol fee in basis points.
+    /// Protocol SELL fee in basis points.
     pub protocol_fee_bps: u16,
-    /// Sell tax of the token in basis points.
-    pub sell_tax_bps: u16,
     /// Whether the venue applies the tax on the bonding curve.
     pub tax_on_bonding_curve_enabled: bool,
     /// Whether the caller is exempt from fees.
@@ -241,8 +334,10 @@ pub fn split_sell_fee(
 /// remainder of one combined floor). Witnessed exactly against
 /// `Portal.quoteExactInput` (`fixtures/flap/quote_parity_*.txt`).
 pub fn quote_native_sell(inputs: &NativeSellInputs) -> Result<NativeSellQuote, QuoteError> {
-    if inputs.curve_id != CURVE_ID_RH_BNB {
-        return Err(QuoteError::UnsupportedCurve);
+    // At or past the DEX threshold the token left the curve (Economics
+    // gate §12: the migration path is unsupported, never priced).
+    if inputs.circulating_before >= inputs.token.dex_supply_threshold {
+        return Err(QuoteError::Migrated);
     }
     if inputs.input_amount.is_zero() {
         return Err(QuoteError::ZeroInput);
@@ -262,7 +357,11 @@ pub fn quote_native_sell(inputs: &NativeSellInputs) -> Result<NativeSellQuote, Q
         return Err(QuoteError::InvalidCurveState);
     }
     let gross_output = inputs.reserve_before - reserve_after;
-    let fees = split_sell_fee(gross_output, inputs.protocol_fee_bps, inputs.sell_tax_bps)?;
+    let fees = split_sell_fee(
+        gross_output,
+        inputs.protocol_fee_bps,
+        inputs.token.sell_tax_bps,
+    )?;
     let output_amount = sub(gross_output, fees.combined)?;
     if output_amount.is_zero() {
         return Err(QuoteError::ZeroOutput);
@@ -288,6 +387,8 @@ pub struct VenueBuyTerms {
     pub default_curve_id: u8,
     /// Protocol fee on a BUY, in basis points.
     pub protocol_buy_fee_bps: u16,
+    /// Protocol fee on a SELL, in basis points (`getFeeRate` second word).
+    pub protocol_sell_fee_bps: u16,
     /// Whether the buy tax applies on the bonding curve.
     pub tax_on_bonding_curve_enabled: bool,
     /// Whether the intended caller is exempt from fees.
@@ -295,12 +396,14 @@ pub struct VenueBuyTerms {
 }
 
 /// Venue terms of the witnessed mainnet executions (G0.6a read-only
-/// preflight: native quoting enabled, curve id 20, 100 bps BUY fee, tax on
-/// the curve enabled; G0.6a EVM execution: caller not exempt).
+/// preflight: native quoting enabled, curve id 20, 100 bps BUY and SELL
+/// fee, tax on the curve enabled; G0.6a EVM execution: caller not exempt;
+/// the SELL fee also by the Portal and executed SELL parity of Phase G).
 pub const WITNESSED_MAINNET_TERMS: VenueBuyTerms = VenueBuyTerms {
     native_quote_enabled: true,
     default_curve_id: CURVE_ID_RH_BNB,
     protocol_buy_fee_bps: 100,
+    protocol_sell_fee_bps: 100,
     tax_on_bonding_curve_enabled: true,
     caller_fee_exempt: false,
 };
@@ -328,7 +431,9 @@ pub const QUALIFIED_MAINNET_INPUT_WEI: u64 = 1_000_000_000_000_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QualifiedNativeState {
     token: Address,
-    buy_tax_bps: u16,
+    /// The profile's validated terms (the classifier binds buy and sell
+    /// tax to the same witnessed value).
+    terms: PricedToken,
     snapshot: SnapshotId,
 }
 
@@ -361,7 +466,11 @@ impl QualifiedNativeState {
         }
         Ok(Self {
             token: classified.token(),
-            buy_tax_bps: classified.buy_tax_bps(),
+            terms: PricedToken::new(&profile_terms(
+                classified.buy_tax_bps(),
+                classified.buy_tax_bps(),
+            ))
+            .map_err(AdmissionError::Unpriced)?,
             snapshot,
         })
     }
@@ -395,16 +504,14 @@ pub fn admit_native_buy(
         return Err(AdmissionError::UnqualifiedAmount);
     }
     let quote = quote_native_buy(&NativeBuyInputs {
-        curve_id: WITNESSED_MAINNET_TERMS.default_curve_id,
+        token: state.terms,
         reserve_before: U256::ZERO,
         circulating_before: U256::ZERO,
         input_amount,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-        buy_tax_bps: state.buy_tax_bps,
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
         holding_cap: FRESH_LAUNCH_HOLDING_CAP,
-        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     })?;
     let min_output_amount = min_output(quote.output_amount, policy.slippage_bps())?;
     Ok(AdmittedBuy::new(
@@ -423,6 +530,21 @@ mod parity_tests {
     //! arithmetic against `Portal.quoteExactInput` at pinned states of live
     //! curve-20 tokens (`fixtures/flap/quote_parity_g02.txt`, g02_flap_parity).
     use super::*;
+
+    /// The profile's terms with these taxes (validated).
+    fn priced(buy: u16, sell: u16) -> PricedToken {
+        PricedToken::new(&profile_terms(buy, sell)).unwrap()
+    }
+
+    /// The same at another DEX threshold.
+    #[allow(dead_code)]
+    fn priced_at(buy: u16, sell: u16, threshold: U256) -> PricedToken {
+        PricedToken::new(&TokenTerms {
+            dex_supply_threshold: threshold,
+            ..profile_terms(buy, sell)
+        })
+        .unwrap()
+    }
 
     const PARITY: &str = include_str!("../../../fixtures/flap/quote_parity_g02.txt");
 
@@ -445,16 +567,14 @@ mod parity_tests {
             match f[7] {
                 "BUY" => {
                     let local = quote_native_buy(&NativeBuyInputs {
-                        curve_id: CURVE_ID_RH_BNB,
+                        token: priced(buy_tax, buy_tax),
                         reserve_before: reserve,
                         circulating_before: supply,
                         input_amount: amount,
                         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                        buy_tax_bps: buy_tax,
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
                         holding_cap: HoldingCap::None,
-                        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                     })
                     .unwrap()
                     .output_amount;
@@ -469,16 +589,14 @@ mod parity_tests {
                         assert_eq!(chain, cap, "{line}");
                         assert!(local > chain, "{line}");
                         let refused = quote_native_buy(&NativeBuyInputs {
-                            curve_id: CURVE_ID_RH_BNB,
+                            token: priced(buy_tax, buy_tax),
                             reserve_before: reserve,
                             circulating_before: supply,
                             input_amount: amount,
                             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                            buy_tax_bps: buy_tax,
                             tax_on_bonding_curve_enabled: true,
                             caller_fee_exempt: false,
                             holding_cap: HoldingCap::Remaining(cap),
-                            dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                         });
                         assert_eq!(refused, Err(QuoteError::HoldingCapExceeded), "{line}");
                         capped += 1;
@@ -486,12 +604,11 @@ mod parity_tests {
                 }
                 "SELL" => {
                     let local = quote_native_sell(&NativeSellInputs {
-                        curve_id: CURVE_ID_RH_BNB,
+                        token: priced(sell_tax, sell_tax),
                         reserve_before: reserve,
                         circulating_before: supply,
                         input_amount: amount,
-                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                        sell_tax_bps: sell_tax,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
                     })
@@ -544,27 +661,22 @@ mod parity_tests {
             }
             let local = match f[7] {
                 "BUY" => quote_native_buy(&NativeBuyInputs {
-                    curve_id: CURVE_ID_RH_BNB,
+                    token: priced(buy_tax, buy_tax),
                     reserve_before: reserve,
                     circulating_before: supply,
                     input_amount: amount,
                     protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                    buy_tax_bps: buy_tax,
                     tax_on_bonding_curve_enabled: true,
                     caller_fee_exempt: false,
                     holding_cap,
-                    // Not recorded in v1/v2: the threshold every sampled
-                    // token reports (no sample comes near it).
-                    dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                 })
                 .map(|q| q.output_amount),
                 "SELL" => quote_native_sell(&NativeSellInputs {
-                    curve_id: CURVE_ID_RH_BNB,
+                    token: priced(sell_tax, sell_tax),
                     reserve_before: reserve,
                     circulating_before: supply,
                     input_amount: amount,
-                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                    sell_tax_bps: sell_tax,
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
                     tax_on_bonding_curve_enabled: true,
                     caller_fee_exempt: false,
                 })
@@ -630,12 +742,11 @@ mod parity_tests {
                 "BUY" => {
                     let cap_bps: u16 = f[12].parse().unwrap();
                     let q = quote_native_buy(&NativeBuyInputs {
-                        curve_id: CURVE_ID_RH_BNB,
+                        token: priced_at(buy_tax, sell_tax, n(16)),
                         reserve_before: reserve,
                         circulating_before: supply,
                         input_amount: eth,
                         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                        buy_tax_bps: buy_tax,
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
                         holding_cap: if cap_bps == 0 {
@@ -643,7 +754,6 @@ mod parity_tests {
                         } else {
                             HoldingCap::Remaining(n(13))
                         },
-                        dex_supply_threshold: n(16),
                     })
                     .unwrap();
                     assert_eq!((q.output_amount, q.protocol_fee), (amount, fee), "{line}");
@@ -651,12 +761,11 @@ mod parity_tests {
                 }
                 "SELL" => {
                     let q = quote_native_sell(&NativeSellInputs {
-                        curve_id: CURVE_ID_RH_BNB,
+                        token: priced_at(buy_tax, sell_tax, n(16)),
                         reserve_before: reserve,
                         circulating_before: supply,
                         input_amount: amount,
-                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                        sell_tax_bps: sell_tax,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
                     })
@@ -668,7 +777,7 @@ mod parity_tests {
             }
         }
         // Four state windows (fixture header): 52 BUYs and 16 SELLs equal to
-        // the unit; one version-7 BUY recorded outside the supported scope.
+        // the unit; one version-2 BUY recorded outside the supported scope.
         assert_eq!((buys, sells, outside), (52, 16, 1));
     }
 
@@ -688,6 +797,21 @@ mod parity_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The profile's terms with these taxes (validated).
+    fn priced(buy: u16, sell: u16) -> PricedToken {
+        PricedToken::new(&profile_terms(buy, sell)).unwrap()
+    }
+
+    /// The same at another DEX threshold.
+    #[allow(dead_code)]
+    fn priced_at(buy: u16, sell: u16, threshold: U256) -> PricedToken {
+        PricedToken::new(&TokenTerms {
+            dex_supply_threshold: threshold,
+            ..profile_terms(buy, sell)
+        })
+        .unwrap()
+    }
     use crate::economics::fees::FeeError;
     use crate::economics::policy::PolicyError;
     use crate::transactions::legacy::testdata::unhex;
@@ -734,16 +858,14 @@ mod tests {
     fn witnessed(input_amount: u64) -> NativeBuyInputs {
         let launch = witnessed_native_launch();
         NativeBuyInputs {
-            curve_id: WITNESSED_MAINNET_TERMS.default_curve_id,
+            token: priced(launch.buy_tax, launch.buy_tax),
             reserve_before: U256::ZERO,
             circulating_before: U256::ZERO,
             input_amount: U256::from(input_amount),
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-            buy_tax_bps: launch.buy_tax,
             tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
             caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
             holding_cap: HoldingCap::None,
-            dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
         }
     }
 
@@ -789,7 +911,7 @@ mod tests {
         let free = quote_native_buy(&witnessed(1_000_000_000_000_000)).unwrap();
         let at = |threshold: U256| {
             let mut inputs = witnessed(1_000_000_000_000_000);
-            inputs.dex_supply_threshold = threshold;
+            inputs.token = priced_at(100, 100, threshold);
             quote_native_buy(&inputs).map(|q| q.output_amount)
         };
         assert_eq!(
@@ -854,12 +976,91 @@ mod tests {
         assert!(second.output_amount < first.output_amount);
     }
 
+    /// Phase G gate H2: no quote input exists for a token outside the
+    /// priced scope; each deviation is refused by name.
+    #[test]
+    fn a_priced_token_is_only_a_scoped_token() {
+        let ok = profile_terms(100, 100);
+        assert!(PricedToken::new(&ok).is_ok());
+        let refused = |t: TokenTerms| PricedToken::new(&t).err();
+        assert_eq!(
+            refused(TokenTerms {
+                tradable: false,
+                ..ok
+            }),
+            Some(Unpriced::NotTradable)
+        );
+        assert_eq!(
+            refused(TokenTerms { version: 2, ..ok }),
+            Some(Unpriced::Version(2))
+        );
+        assert_eq!(
+            refused(TokenTerms { version: 7, ..ok }),
+            Some(Unpriced::Version(7))
+        );
+        assert_eq!(
+            refused(TokenTerms {
+                quote_token: [1; 20],
+                ..ok
+            }),
+            Some(Unpriced::QuoteToken)
+        );
+        assert_eq!(
+            refused(TokenTerms {
+                nft_gate: [1; 20],
+                ..ok
+            }),
+            Some(Unpriced::NftGate)
+        );
+        let mut other = curve20();
+        other.r += U256::from(1u8);
+        assert_eq!(
+            refused(TokenTerms { curve: other, ..ok }),
+            Some(Unpriced::Curve)
+        );
+        assert_eq!(
+            refused(TokenTerms {
+                sell_tax_bps: 10_000,
+                ..ok
+            }),
+            Some(Unpriced::Tax)
+        );
+        assert_eq!(
+            refused(TokenTerms {
+                dex_supply_threshold: U256::ZERO,
+                ..ok
+            }),
+            Some(Unpriced::Threshold)
+        );
+    }
+
+    /// Phase G gate H1: at or past its DEX threshold a token left the
+    /// curve; neither side is quoted there.
+    #[test]
+    fn a_migrated_token_is_not_quoted() {
+        let threshold = U256::from(PROFILE_DEX_SUPPLY_THRESHOLD);
+        let mut buy = witnessed(1_000_000_000_000_000);
+        buy.circulating_before = threshold;
+        assert_eq!(quote_native_buy(&buy), Err(QuoteError::Migrated));
+        let sell = NativeSellInputs {
+            token: priced(100, 100),
+            reserve_before: U256::from(16u64) * U256::from(10u64).pow(U256::from(18u64)),
+            circulating_before: threshold + U256::from(1_000u64),
+            input_amount: U256::from(1_000u64),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+        };
+        assert_eq!(quote_native_sell(&sell), Err(QuoteError::Migrated));
+        let below = NativeSellInputs {
+            circulating_before: threshold - U256::from(1u8),
+            ..sell
+        };
+        assert_ne!(quote_native_sell(&below), Err(QuoteError::Migrated));
+    }
+
     #[test]
     fn unsupported_and_unwitnessed_branches_are_rejected() {
-        let mut inputs = witnessed(1);
-        inputs.curve_id = 19;
-        assert_eq!(quote_native_buy(&inputs), Err(QuoteError::UnsupportedCurve));
-
         let mut inputs = witnessed(1_000_000_000_000_000);
         inputs.input_amount = U256::ZERO;
         assert_eq!(quote_native_buy(&inputs), Err(QuoteError::ZeroInput));
@@ -880,7 +1081,7 @@ mod tests {
 
         let mut inputs = witnessed(1_000_000_000_000_000);
         inputs.protocol_fee_bps = 5_000;
-        inputs.buy_tax_bps = 5_000;
+        inputs.token = priced(5_000, 100);
         assert_eq!(
             quote_native_buy(&inputs),
             Err(QuoteError::Fee(FeeError::RateTooHigh))
@@ -889,9 +1090,14 @@ mod tests {
 
     #[test]
     fn inconsistent_or_extreme_state_is_an_error_not_a_panic() {
-        // Circulating supply above what the curve yields.
+        // Circulating supply beyond the curve: past the DEX threshold the
+        // token left it (refused before any arithmetic).
         let mut inputs = witnessed(1_000_000_000_000_000);
         inputs.circulating_before = U256::MAX;
+        assert_eq!(quote_native_buy(&inputs), Err(QuoteError::Migrated));
+        // Above what the reserve yields, below the threshold.
+        let mut inputs = witnessed(1_000_000_000_000_000);
+        inputs.circulating_before = U256::from(PROFILE_DEX_SUPPLY_THRESHOLD) - U256::from(1u8);
         assert_eq!(
             quote_native_buy(&inputs),
             Err(QuoteError::InvalidCurveState)
@@ -902,11 +1108,14 @@ mod tests {
         inputs.reserve_before = U256::MAX;
         assert!(quote_native_buy(&inputs).is_err());
 
-        // An input too small to move the curve by one token unit.
+        // Where an input is too small to move the curve by one token unit
+        // the token has long left the curve: refused as migrated (below the
+        // threshold one wei buys about 1.5e7 units; `ZeroOutput` stays a
+        // defensive check).
         let mut inputs = witnessed(1);
         inputs.reserve_before = U256::from(u128::MAX);
         inputs.circulating_before = supply(curve20(), U256::from(u128::MAX)).unwrap();
-        assert_eq!(quote_native_buy(&inputs), Err(QuoteError::ZeroOutput));
+        assert_eq!(quote_native_buy(&inputs), Err(QuoteError::Migrated));
     }
 
     #[test]

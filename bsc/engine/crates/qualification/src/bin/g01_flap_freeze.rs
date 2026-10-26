@@ -3060,6 +3060,8 @@ mod tests {
             to: Some(d.portal),
             input,
             value: alloy_primitives::U256::ZERO,
+            gas: None,
+            tx_type: None,
         };
         let params = production::LaunchParamsV6 {
             name: b"n",

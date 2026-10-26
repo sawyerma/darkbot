@@ -381,8 +381,7 @@ where
         abi_words::<FEE_RATE_WORDS>(&wire.call(at, read, portal, &GET_FEE_RATE_SELECTOR)?)
             .map_err(abi(read))?;
     let protocol_buy_fee_bps = word_bps(&buy).map_err(abi(read))?;
-    // The SELL fee is checked as the G0.7 preflight does, then not used.
-    word_bps(&sell).map_err(abi(read))?;
+    let protocol_sell_fee_bps = word_bps(&sell).map_err(abi(read))?;
 
     let read = ProbeRead::TaxOnBondingCurve;
     let [tax] =
@@ -398,6 +397,7 @@ where
         native_quote_enabled,
         default_curve_id,
         protocol_buy_fee_bps,
+        protocol_sell_fee_bps,
         tax_on_bonding_curve_enabled,
         caller_fee_exempt,
     })

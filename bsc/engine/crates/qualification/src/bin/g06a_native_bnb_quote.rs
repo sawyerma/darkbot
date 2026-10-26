@@ -14,7 +14,7 @@ use darkbot_bsc_record::schema::{
 };
 use darkbot_bsc_record::{Draft, Value, decode, sha256};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CURVE_ID_RH_BNB as CURVE_RH_BNB_ID, HoldingCap, NativeBuyInputs, PROFILE_DEX_SUPPLY_THRESHOLD,
+    CURVE_ID_RH_BNB as CURVE_RH_BNB_ID, HoldingCap, NativeBuyInputs, PricedToken, profile_terms,
     quote_native_buy,
 };
 use darkbot_bsc_trading::economics::slippage::min_output;
@@ -55,16 +55,15 @@ fn main() {
         .unwrap_or(DEFAULT_BUY_VALUE_WEI);
 
     let quote = quote_native_buy(&NativeBuyInputs {
-        curve_id: CURVE_RH_BNB_ID,
+        token: PricedToken::new(&profile_terms(100, 100))
+            .unwrap_or_else(|e| panic!("profile terms: {e:?}")),
         reserve_before: U256::ZERO,
         circulating_before: U256::ZERO,
         input_amount: U256::from(buy_value),
         protocol_fee_bps: 100,
-        buy_tax_bps: 100,
         tax_on_bonding_curve_enabled: true,
         caller_fee_exempt: false,
         holding_cap: HoldingCap::None,
-        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     })
     .unwrap_or_else(|e| panic!("native Curve-20 quote failed: {e}"));
     let min_output = min_output(quote.output_amount, SLIPPAGE_BPS as u16)

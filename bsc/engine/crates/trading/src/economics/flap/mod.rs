@@ -55,6 +55,9 @@ pub enum QuoteError {
     InvalidCurveState,
     /// The quote is zero.
     ZeroOutput,
+    /// The token is at or past its DEX threshold: it left the curve, and its
+    /// migration path is not quoted.
+    Migrated,
     /// The BUY's supply after it reaches the token's DEX threshold: the
     /// token would leave the curve (migration), which is not quoted.
     ReachesDexThreshold,
@@ -93,6 +96,7 @@ impl core::fmt::Display for QuoteError {
             Self::ZeroOutput => f.write_str("quote: output is zero"),
             Self::HoldingCapExceeded => f.write_str("quote: above the per-origin holding cap"),
             Self::ReachesDexThreshold => f.write_str("quote: reaches the DEX threshold"),
+            Self::Migrated => f.write_str("quote: the token left the curve"),
             Self::Fee(e) => write!(f, "quote: {e}"),
             Self::Arith(e) => write!(f, "quote: {e}"),
         }
@@ -104,6 +108,8 @@ impl std::error::Error for QuoteError {}
 /// Why a BUY is not admissible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdmissionError {
+    /// The profile's token terms are outside the priced scope.
+    Unpriced(native_curve20::Unpriced),
     /// The launch was classified against another code generation than the
     /// state snapshot.
     GenerationMismatch,
@@ -140,6 +146,9 @@ impl From<SlippageError> for AdmissionError {
 impl core::fmt::Display for AdmissionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::Unpriced(u) => {
+                write!(f, "admission: token terms outside the priced scope: {u:?}")
+            }
             Self::GenerationMismatch => f.write_str("admission: code generation mismatch"),
             Self::CandidateMismatch => f.write_str("admission: snapshot of another launch"),
             Self::PolicyGenerationMismatch => f.write_str("admission: policy generation mismatch"),

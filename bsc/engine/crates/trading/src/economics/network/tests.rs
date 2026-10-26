@@ -30,7 +30,9 @@ fn rows() -> Vec<Row> {
                 "BUY" => Action::Buy,
                 "SELL" => Action::Sell,
                 "APPROVE" => Action::Approve,
-                "REVERTED" => Action::Reverted,
+                "REVERTED_LAUNCH" => Action::RevertedLaunch,
+                "REVERTED_BUY" => Action::RevertedBuy,
+                "REVERTED_SELL" => Action::RevertedSell,
                 other => panic!("class {other}"),
             };
             let status = match f[5] {
@@ -61,7 +63,7 @@ fn rows() -> Vec<Row> {
 #[test]
 fn realized_cost_is_gas_used_times_effective_price_for_success_and_revert() {
     let rows = rows();
-    assert_eq!(rows.len(), 35);
+    assert_eq!(rows.len(), 34);
     for r in &rows {
         assert!(r.cost.gas_used <= r.gas_limit);
         assert_eq!(
@@ -70,7 +72,10 @@ fn realized_cost_is_gas_used_times_effective_price_for_success_and_revert() {
         );
         assert_eq!(
             r.status == ExecutionStatus::Reverted,
-            r.class.action == Action::Reverted
+            matches!(
+                r.class.action,
+                Action::RevertedLaunch | Action::RevertedBuy | Action::RevertedSell
+            )
         );
     }
     // A Flap BUY: 284 708 gas at 0.1 gwei.
@@ -91,7 +96,7 @@ fn realized_cost_is_gas_used_times_effective_price_for_success_and_revert() {
     // A reverted Classic BUY is charged too.
     let revert = rows
         .iter()
-        .find(|r| r.class.venue == Venue::FourClassic && r.class.action == Action::Reverted)
+        .find(|r| r.class.venue == Venue::FourClassic && r.class.action == Action::RevertedBuy)
         .unwrap();
     assert!(revert.cost.fee_wei().unwrap() > U256::ZERO);
     let huge = IncludedCost {
@@ -165,10 +170,13 @@ fn a_nonce_lifecycle_charges_its_one_inclusion_once() {
 #[test]
 fn counterfactual_cost_uses_the_class_evidence_or_fails_closed() {
     let mut e = GasEvidence::default();
-    for r in rows()
-        .iter()
-        .filter(|r| r.status == ExecutionStatus::Succeeded || r.class.action == Action::Reverted)
-    {
+    for r in rows().iter().filter(|r| {
+        r.status == ExecutionStatus::Succeeded
+            || matches!(
+                r.class.action,
+                Action::RevertedLaunch | Action::RevertedBuy | Action::RevertedSell
+            )
+    }) {
         e.add(r.class, r.cost.gas_used).unwrap();
     }
     let open_launch = PathClass {
@@ -188,7 +196,7 @@ fn counterfactual_cost_uses_the_class_evidence_or_fails_closed() {
     // No OpenFour revert was observed: no cost is guessed for it.
     let open_revert = PathClass {
         venue: Venue::OpenFour,
-        action: Action::Reverted,
+        action: Action::RevertedBuy,
     };
     assert_eq!(
         e.counterfactual_fee_wei(open_revert, price),

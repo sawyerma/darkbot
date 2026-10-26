@@ -267,6 +267,8 @@ impl Archive {
                 to: None,
                 input: vec![],
                 value: U256::ZERO,
+                gas: None,
+                tx_type: None,
             },
             classic_receipt: Receipt {
                 block_number: 0,
@@ -278,6 +280,8 @@ impl Archive {
                 contract_address: None,
                 status: 0,
                 logs: vec![],
+                gas_used: None,
+                effective_gas_price: None,
             },
             classic_implementation: Address::ZERO,
             openfour_slots: Vec::new(),

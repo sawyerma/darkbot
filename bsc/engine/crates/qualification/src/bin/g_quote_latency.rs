@@ -18,9 +18,9 @@ use darkbot_bsc_record::schema::bsc_capture::ingest_latency::stage as st;
 use darkbot_bsc_record::schema::bsc_economics::quote_latency as ql;
 use darkbot_bsc_record::{Draft, Value};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CURVE_ID_RH_BNB, FRESH_LAUNCH_HOLDING_CAP, HoldingCap, NativeBuyInputs, NativeSellInputs,
-    PROFILE_DEX_SUPPLY_THRESHOLD, QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS,
-    quote_native_buy, quote_native_sell,
+    FRESH_LAUNCH_HOLDING_CAP, HoldingCap, NativeBuyInputs, NativeSellInputs, PricedToken,
+    QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS, profile_terms, quote_native_buy,
+    quote_native_sell,
 };
 use darkbot_bsc_trading::economics::slippage::min_output;
 use std::hint::black_box;
@@ -67,6 +67,11 @@ fn run() -> Result<(), String> {
     }
     let root = Path::new(".");
     let text = std::fs::read_to_string(root.join(PARITY)).map_err(|e| format!("{PARITY}: {e}"))?;
+    // The parity set's states are version-6 curve-20 native tokens (its
+    // SUPPORTED rows); the profile's terms with each sample's taxes.
+    let token = |buy: u16, sell: u16| {
+        PricedToken::new(&profile_terms(buy, sell)).map_err(|e| format!("{e:?}"))
+    };
     let (mut buys, mut sells) = (Vec::new(), Vec::new());
     for line in text
         .lines()
@@ -80,26 +85,21 @@ fn run() -> Result<(), String> {
         let tax = |i: usize| f[i].parse::<u16>().map_err(|e| format!("{line}: {e}"));
         match f[7] {
             "BUY" => buys.push(NativeBuyInputs {
-                curve_id: CURVE_ID_RH_BNB,
+                token: token(tax(5)?, tax(6)?)?,
                 reserve_before: n(3)?,
                 circulating_before: n(4)?,
                 input_amount: n(8)?,
                 protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                buy_tax_bps: tax(5)?,
                 tax_on_bonding_curve_enabled: true,
                 caller_fee_exempt: false,
                 holding_cap: HoldingCap::None,
-                // Not recorded in the v2 set: the threshold every sampled
-                // token reports.
-                dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
             }),
             "SELL" => sells.push(NativeSellInputs {
-                curve_id: CURVE_ID_RH_BNB,
+                token: token(tax(5)?, tax(6)?)?,
                 reserve_before: n(3)?,
                 circulating_before: n(4)?,
                 input_amount: n(8)?,
-                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-                sell_tax_bps: tax(6)?,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
                 tax_on_bonding_curve_enabled: true,
                 caller_fee_exempt: false,
             }),
@@ -110,16 +110,14 @@ fn run() -> Result<(), String> {
         return Err(format!("{PARITY}: no supported BUY or SELL state"));
     }
     let fresh = NativeBuyInputs {
-        curve_id: CURVE_ID_RH_BNB,
+        token: token(100, 100)?,
         reserve_before: U256::ZERO,
         circulating_before: U256::ZERO,
         input_amount: U256::from(QUALIFIED_MAINNET_INPUT_WEI),
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-        buy_tax_bps: 100,
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
         holding_cap: FRESH_LAUNCH_HOLDING_CAP,
-        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     };
     let measure = |f: &mut dyn FnMut(usize)| -> Vec<u64> {
         for i in 0..warmup {
