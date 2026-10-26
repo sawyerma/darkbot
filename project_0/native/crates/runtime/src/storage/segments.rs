@@ -933,6 +933,103 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+    /// DEC-16: the recovery link binds exactly the crashed segment's readable frames and their
+    /// chain head: another crashed segment of the same size and tail fails closed.
+    #[test]
+    fn dec16_a_recovery_link_binds_its_crashed_segment_exactly() {
+        let d = dir("recover_binding");
+        let crash = |name: &str, rows: &[(Provenance, Vec<u8>)]| {
+            let first = d.join(name).join("market.p0j");
+            std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+            write(&first, 0, rows, false);
+            let bytes = std::fs::read(&first).unwrap();
+            std::fs::write(&first, &bytes[..bytes.len() - 5]).unwrap();
+            first
+        };
+        let a = crash("a", &rows(8));
+        // Same frame count and sizes, other payloads (other provenance sequence numbers).
+        let other: Vec<_> = rows(16)[8..].to_vec();
+        let b = crash("b", &other);
+        assert_eq!(
+            std::fs::metadata(&a).unwrap().len(),
+            std::fs::metadata(&b).unwrap().len()
+        );
+        let (mut w, _) = SegmentedWriter::recover(&a, 0).unwrap();
+        append_rows(&mut w, &rows(2));
+        w.seal(true).unwrap();
+        assert!(verify_chain(&a).is_ok());
+        std::fs::copy(&b, &a).unwrap();
+        assert!(verify_chain(&a)
+            .unwrap_err()
+            .contains("SEGMENT_RECOVERY_MISMATCH"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a chain that ended in order is never continued — not even by a recovery link
+    /// that binds its sealed last segment exactly: without an announced successor it is an
+    /// orphan, in place of the announced successor's link it is no link.
+    #[test]
+    fn dec16_no_recovery_link_continues_a_sealed_segment() {
+        for announced in [false, true] {
+            let d = dir("recover_sealed");
+            let first = d.join("market.p0j");
+            let mut w = Writer::create(&first).unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &MarketCoverage::SlotFailed {
+                    slot: 1,
+                    error: "x".into(),
+                },
+            )
+            .unwrap();
+            if announced {
+                w.append_typed(
+                    Provenance::default(),
+                    &SegmentNext {
+                        set_id: [3; 16],
+                        index: 1,
+                        next_file: "market.000002.p0j".into(),
+                    },
+                )
+                .unwrap();
+            }
+            w.seal(true).unwrap();
+            let r = journal::Reader::open(&first).map(|mut r| {
+                while r.next_frame().unwrap().is_some() {}
+                r
+            });
+            let r = r.unwrap();
+            let previous = SegmentRef {
+                file: "market.p0j".into(),
+                index: 1,
+                frames: r.frames(),
+                root_sha256: r.root(),
+                events_through: 1,
+            };
+            let mut forged = Writer::create(&segment_path(&first, 2)).unwrap();
+            forged
+                .append_typed(
+                    Provenance::default(),
+                    &SegmentRecovery {
+                        set_id: [3; 16],
+                        index: 2,
+                        previous,
+                        torn_bytes: 0,
+                    },
+                )
+                .unwrap();
+            forged.seal(true).unwrap();
+            let want = if announced {
+                "SEGMENT_LINK_MISSING"
+            } else {
+                "SEGMENT_ORPHAN"
+            };
+            let e = verify_chain(&first).unwrap_err();
+            assert!(e.contains(want), "{announced}: {e}");
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
     /// DEC-16: a rotation interrupted after its seal is finished with the announced successor
     /// (its normal link, no recovery); interrupted before the seal it is a crash.
     #[test]
