@@ -95,9 +95,8 @@ pub struct ExecConfig {
     pub start_limit_ns: u64,
     /// Largest adapter request, in bytes.
     pub max_frame: usize,
-    /// Phase I: single-intent lanes for Strategy C's PAPER intents (a BUY
-    /// or an exit's approval at the sender's next nonce), and as many for
-    /// an exit's SELL at the nonce after it.
+    /// Phase I: single-intent lanes for Strategy C's PAPER intents, one per
+    /// nonce of the sender's sequence (BUY n, approval n+1, SELL n+2).
     pub strategy_lanes: usize,
     /// The exposure cap of Strategy C's PAPER intents in one session (no
     /// money is involved; the strategy's own limits bound its entries).
@@ -105,6 +104,10 @@ pub struct ExecConfig {
     /// Gas limits of an exit's approval and SELL.
     pub approve_gas_limit: u64,
     pub sell_gas_limit: u64,
+    /// Phase I gate L-a: the oldest canonical head (its timestamp against
+    /// now) a strategy intent is formed on; a follower catching up does
+    /// not act on old blocks as if they were fresh.
+    pub strategy_max_head_age_ms: u64,
 }
 
 impl ExecConfig {
@@ -154,6 +157,9 @@ impl ExecConfig {
             return Err(
                 "BSC_EXEC_APPROVE_GAS_LIMIT and BSC_EXEC_SELL_GAS_LIMIT must be positive".into(),
             );
+        }
+        if self.strategy_max_head_age_ms == 0 {
+            return Err("BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS must be positive".into());
         }
         Ok(())
     }
@@ -218,6 +224,12 @@ pub enum Refusal {
     /// Phase I gate M3: a strategy nonce was reserved and not handed off;
     /// no later PAPER transaction of the sender could pass that hole.
     NonceGap,
+    /// Phase I gate L-a: the canonical head is older than
+    /// `strategy_max_head_age_ms`.
+    StaleHead,
+    /// Phase I gate L-d: a C3 BUY at the next nonce while a strategy
+    /// intent holds it.
+    NonceTaken,
 }
 
 impl Refusal {
@@ -238,6 +250,8 @@ impl Refusal {
             Self::Dispatch => "DISPATCH",
             Self::NotHeld => "NOT_HELD",
             Self::NonceGap => "NONCE_GAP",
+            Self::StaleHead => "STALE_HEAD",
+            Self::NonceTaken => "NONCE_TAKEN",
         }
     }
 }
@@ -286,10 +300,27 @@ struct Held {
 }
 
 /// The C2 facts of a Strategy C intent: the canonical snapshot under
-/// (policy, codehash) generations, and the head.
+/// (policy, codehash) generations, and the head; and the wall time its age
+/// is measured at (unix ms).
 pub struct CanonicalContext<'a> {
     pub snapshot: &'a dyn Fn(u64, u64) -> Option<SnapshotId>,
     pub head: Option<ChainHead>,
+    pub now_unix_ms: u64,
+}
+
+impl CanonicalContext<'_> {
+    /// The head, if it is at most `max_ms` old (its timestamp is unix
+    /// seconds, so the age is overstated by less than a second).
+    fn fresh_head(&self, max_ms: u64) -> Result<ChainHead, Refusal> {
+        let head = self.head.ok_or(Refusal::NoSnapshot)?;
+        let age = self
+            .now_unix_ms
+            .saturating_sub(head.timestamp.saturating_mul(1_000));
+        if age > max_ms {
+            return Err(Refusal::StaleHead);
+        }
+        Ok(head)
+    }
 }
 
 /// One Strategy C PAPER transaction that reached the sink (Phase I). Its
@@ -298,6 +329,8 @@ pub struct CanonicalContext<'a> {
 pub struct PaperIntent {
     pub kind: IntentKind,
     pub token: [u8; 20],
+    /// The canonical head block it was formed on.
+    pub block: u64,
     pub handoff: PaperHandoff,
     pub times: StageTimes,
     /// The signed transaction (a local test artefact, never sent).
@@ -476,6 +509,12 @@ pub struct PaperExecutor {
     strategy_first_nonce: u64,
     strategy_used: usize,
     strategy_nonce_gap: bool,
+    /// Gate L-d: one sender, one sequence. A C3 BUY disclosed at the next
+    /// nonce n (its alternatives all share it) makes the strategy start
+    /// at n+1 (its first lane skipped); a strategy intent holding n
+    /// refuses C3's later BUYs (NONCE_TAKEN).
+    c3_took_nonce: bool,
+    strategy_skipped_first: bool,
     strategy_spent_wei: U256,
     strategy_bought: Vec<Held>,
     exited: Vec<[u8; 20]>,
@@ -532,11 +571,21 @@ struct RawSink<'a> {
     scratch: &'a mut Vec<u8>,
 }
 
+/// What one dispatch to the sink consumed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Consumed {
+    /// The economic admission (`begin_send`): its exposure counts
+    /// whatever followed.
+    admission: bool,
+    /// A permit's write was started (or the dispatch broke after the
+    /// admission): the bytes may be out, their nonce is taken.
+    disclosed: bool,
+}
+
 /// Binds a signed transaction in its lane, plans it as the single raw
 /// transaction of the local node's adapter and dispatches it to the sink.
-/// Returns the handoff, the prepared and planned times, and whether the
-/// economic admission was consumed (`begin_send`): its exposure counts
-/// whatever followed.
+/// Returns the handoff, the prepared and planned times, and what the
+/// dispatch consumed.
 #[allow(clippy::too_many_arguments)]
 fn raw_to_sink(
     parts: RawSink<'_>,
@@ -548,7 +597,7 @@ fn raw_to_sink(
     head: ChainHead,
     clock: &dyn Clock,
     start_ns: u64,
-) -> (Result<PaperHandoff, Refusal>, u64, u64, bool) {
+) -> (Result<PaperHandoff, Refusal>, u64, u64, Consumed) {
     let RawSink {
         lane,
         sink,
@@ -558,7 +607,7 @@ fn raw_to_sink(
     } = parts;
     let tx_hash = match lane.prepare(ticket, raw, expected, snapshot, scratch) {
         Ok(h) => h,
-        Err(_) => return (Err(Refusal::Lane), 0, 0, false),
+        Err(_) => return (Err(Refusal::Lane), 0, 0, Consumed::default()),
     };
     let prepared_ns = clock.now_ns();
     let adapter = paper_raw_adapter();
@@ -602,7 +651,7 @@ fn raw_to_sink(
     })();
     let (plan, mut frame, deadline) = match planned {
         Ok(p) => p,
-        Err(r) => return (Err(r), prepared_ns, 0, false),
+        Err(r) => return (Err(r), prepared_ns, 0, Consumed::default()),
     };
     let planned_ns = clock.now_ns();
     let mut transport = SinkTransport {
@@ -630,10 +679,16 @@ fn raw_to_sink(
         }],
     );
     let handoff = transport.handoff;
-    let admitted = match &dispatched {
-        Ok(report) => report.admitted(),
-        Err(DispatchError::DispatchBinding(_)) => true,
-        Err(_) => false,
+    let consumed = match &dispatched {
+        Ok(report) => Consumed {
+            admission: report.admitted(),
+            disclosed: report.admitted() && !report.admitted_without_disclosure,
+        },
+        Err(DispatchError::DispatchBinding(_)) => Consumed {
+            admission: true,
+            disclosed: true,
+        },
+        Err(_) => Consumed::default(),
     };
     let result = match dispatched {
         Err(_) => Err(Refusal::Dispatch),
@@ -643,7 +698,18 @@ fn raw_to_sink(
             _ => Err(Refusal::Dispatch),
         },
     };
-    (result, prepared_ns, planned_ns, admitted)
+    (result, prepared_ns, planned_ns, consumed)
+}
+
+/// One single-intent lane at `nonce` behind the arm's durable fence.
+fn fenced_lane(
+    chain_id: u64,
+    sender: Address,
+    nonce: u64,
+    cap: u128,
+) -> Result<IntentLane, ArmError> {
+    let armed = ArmedFence::from_durable_startup(chain_id, sender, nonce, U256::from(cap));
+    IntentLane::armed(armed, 1).map_err(|e| ArmError::Lane(format!("{e:?}")))
 }
 
 /// A runtime clock reading as a submission [`Clock`].
@@ -773,10 +839,7 @@ impl PaperExecutor {
         body.extend_from_slice(&config.strategy_session_cap_wei.to_le_bytes());
         let fence = fence_dir.join(format!("paper-{session}-{arm}.fence"));
         durable_fence(&fence, &body)?;
-        let lane_at = |nonce: u64, cap: u128| -> Result<IntentLane, ArmError> {
-            let armed = ArmedFence::from_durable_startup(chain_id, sender, nonce, U256::from(cap));
-            IntentLane::armed(armed, 1).map_err(|e| ArmError::Lane(format!("{e:?}")))
-        };
+        let lane_at = |nonce: u64, cap: u128| fenced_lane(chain_id, sender, nonce, cap);
         // C3's pool: alternative BUYs from the same canonical state, all
         // at the next nonce. Strategy C's: its sequence, one nonce each.
         let pools = (
@@ -817,6 +880,8 @@ impl PaperExecutor {
             strategy_used: 0,
             strategy_first_nonce: next_nonce,
             strategy_nonce_gap: false,
+            c3_took_nonce: false,
+            strategy_skipped_first: false,
             strategy_spent_wei: U256::ZERO,
             strategy_bought: Vec::with_capacity(strategy_lanes.len()),
             exited: Vec::with_capacity(strategy_lanes.len()),
@@ -905,6 +970,9 @@ impl PaperExecutor {
         let exposure = self.budget.max_total_wei;
         if self.spent_wei + exposure > U256::from(self.config.session_cap_wei) {
             return Err(Refusal::SessionCap);
+        }
+        if self.strategy_used > 0 && !self.strategy_skipped_first {
+            return Err(Refusal::NonceTaken);
         }
         let Some(lane) = self.lanes.get_mut(self.used) else {
             return Err(Refusal::LanesExhausted);
@@ -1006,14 +1074,18 @@ impl PaperExecutor {
         let handoff = transport.handoff;
         // The exposure is the session's once the economic admission was
         // consumed (`begin_send`), whatever followed.
-        let admitted = match &dispatched {
-            Ok(report) => report.admitted(),
-            Err(DispatchError::DispatchBinding(_)) => true,
-            Err(_) => false,
+        let (admitted, disclosed) = match &dispatched {
+            Ok(report) => (
+                report.admitted(),
+                report.admitted() && !report.admitted_without_disclosure,
+            ),
+            Err(DispatchError::DispatchBinding(_)) => (true, true),
+            Err(_) => (false, false),
         };
         if admitted {
             self.spent_wei += exposure;
         }
+        self.c3_took_nonce |= disclosed;
         let report = dispatched.map_err(|_| Refusal::Dispatch)?;
 
         match report.adapter(adapter).map(|r| r.outcome) {
@@ -1104,17 +1176,60 @@ impl PaperExecutor {
 
     /// The next strategy lane: its nonce is the next of the PAPER
     /// sender's sequence (each lane one nonce above the last). Refused
-    /// once a reserved nonce was not handed off (a hole no later PAPER
+    /// once a taken nonce was not handed off (a hole no later PAPER
     /// transaction could pass on chain).
     fn next_strategy_lane(&mut self) -> Result<usize, Refusal> {
         if self.strategy_nonce_gap {
             return Err(Refusal::NonceGap);
+        }
+        if self.strategy_used == 0 && self.c3_took_nonce {
+            self.strategy_used = 1;
+            self.strategy_skipped_first = true;
         }
         if self.strategy_used >= self.strategy_lanes.len() {
             return Err(Refusal::LanesExhausted);
         }
         self.strategy_used += 1;
         Ok(self.strategy_used - 1)
+    }
+
+    /// A strategy intent refused with the lanes from `from` taken (gate
+    /// N1). Nothing of it disclosed (no permit's write started): their
+    /// nonces are free again, the lanes re-armed fresh behind the same
+    /// fence. Its bytes may be out, or a lane broke: a hole, the
+    /// strategy's intents stop.
+    fn strategy_refused(&mut self, from: usize, disclosed: bool) {
+        if disclosed {
+            self.strategy_nonce_gap = true;
+            return;
+        }
+        let chain_id = self.deployment.deployment().chain_id;
+        let sender = Address::from(self.identity.address());
+        for index in from..self.strategy_used {
+            let nonce = self.strategy_first_nonce + index as u64;
+            match fenced_lane(
+                chain_id,
+                sender,
+                nonce,
+                self.config.strategy_session_cap_wei,
+            ) {
+                Ok(lane) => self.strategy_lanes[index] = lane,
+                Err(_) => {
+                    self.strategy_nonce_gap = true;
+                    return;
+                }
+            }
+        }
+        self.strategy_used = from;
+    }
+
+    /// An exit refused at the lane `from`; with nothing of it out (`none_out`
+    /// and not `disclosed`) the token can be exited later.
+    fn exit_refused(&mut self, token: [u8; 20], from: usize, disclosed: bool, none_out: bool) {
+        self.strategy_refused(from, disclosed);
+        if none_out && !disclosed {
+            self.exited.retain(|t| *t != token);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1141,7 +1256,7 @@ impl PaperExecutor {
             self.deployment.codehash_generation(),
         )
         .ok_or(Refusal::NoSnapshot)?;
-        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
         let state = CurveState::tracked(
             Address::from(token),
             curve.terms,
@@ -1170,9 +1285,8 @@ impl PaperExecutor {
             return Err(Refusal::SessionCap);
         }
         let index = self.next_strategy_lane()?;
-        let lane = &mut self.strategy_lanes[index];
-        let Ok(ticket) = lane.reserve(admitted.token()) else {
-            self.strategy_nonce_gap = true;
+        let Ok(ticket) = self.strategy_lanes[index].reserve(admitted.token()) else {
+            self.strategy_refused(index, true);
             return Err(Refusal::Lane);
         };
         let sender = Address::from(self.identity.address());
@@ -1193,14 +1307,14 @@ impl PaperExecutor {
         let expected = match built {
             Ok(e) => e,
             Err(r) => {
-                self.strategy_nonce_gap = true;
+                self.strategy_refused(index, false);
                 return Err(r);
             }
         };
         let signed_ns = clock.now_ns();
-        let (handoff, prepared_ns, planned_ns, admitted_exposure) = raw_to_sink(
+        let (handoff, prepared_ns, planned_ns, consumed) = raw_to_sink(
             RawSink {
-                lane,
+                lane: &mut self.strategy_lanes[index],
                 sink: &mut self.sink,
                 table: &self.table,
                 config: &self.config,
@@ -1215,13 +1329,13 @@ impl PaperExecutor {
             clock,
             start_ns,
         );
-        if admitted_exposure {
+        if consumed.admission {
             self.strategy_spent_wei += budget.max_total_wei;
         }
         let handoff = match handoff {
             Ok(h) => h,
             Err(r) => {
-                self.strategy_nonce_gap = true;
+                self.strategy_refused(index, consumed.disclosed);
                 return Err(r);
             }
         };
@@ -1233,6 +1347,7 @@ impl PaperExecutor {
         Ok(PaperIntent {
             kind: IntentKind::Buy,
             token,
+            block: head.number,
             handoff,
             times: StageTimes {
                 ingress_ns: decided_ns,
@@ -1273,7 +1388,7 @@ impl PaperExecutor {
             self.deployment.codehash_generation(),
         )
         .ok_or(Refusal::NoSnapshot)?;
-        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
         let state = CurveState::tracked(
             Address::from(token),
             curve.terms,
@@ -1307,35 +1422,38 @@ impl PaperExecutor {
         }
         let approve_index = self.next_strategy_lane()?;
         let sell_index = self.next_strategy_lane()?;
-        self.exited.push(token);
         let mut tickets = [None, None];
         for (slot, index) in [approve_index, sell_index].into_iter().enumerate() {
             match self.strategy_lanes[index].reserve(admitted.token()) {
                 Ok(t) => tickets[slot] = Some(t),
                 Err(_) => {
-                    self.strategy_nonce_gap = true;
+                    self.strategy_refused(approve_index, true);
                     return Err(Refusal::Lane);
                 }
             }
         }
         let [Some(approve_ticket), Some(sell_ticket)] = tickets else {
-            self.strategy_nonce_gap = true;
+            self.strategy_refused(approve_index, true);
             return Err(Refusal::Lane);
         };
+        if sell_ticket.nonce() != approve_ticket.nonce() + 1 {
+            self.strategy_refused(approve_index, true);
+            return Err(Refusal::Intent);
+        }
         let sender = Address::from(self.identity.address());
-        let expected = match ExpectedExit::from_admitted(
+        let Ok(expected) = ExpectedExit::from_admitted(
             &self.deployment,
             &admitted,
             &self.exit_policy,
             sender,
             approve_ticket.nonce(),
-        ) {
-            Ok(e) if sell_ticket.nonce() == approve_ticket.nonce() + 1 => e,
-            _ => {
-                self.strategy_nonce_gap = true;
-                return Err(Refusal::Intent);
-            }
+        ) else {
+            self.strategy_refused(approve_index, false);
+            return Err(Refusal::Intent);
         };
+        // Taken from here: a refusal before the approval is out frees
+        // the token for a later exit as well as its nonces.
+        self.exited.push(token);
         for (kind, index, ticket, gas) in [
             (
                 IntentKind::Approve,
@@ -1352,7 +1470,7 @@ impl PaperExecutor {
                 _ => expected.sign_sell(self.identity.signer(), &mut self.scratch, &mut self.raw),
             };
             if built.is_err() {
-                self.strategy_nonce_gap = true;
+                self.exit_refused(token, index, false, out.is_empty());
                 return Err(Refusal::Build);
             }
             let signed_ns = clock.now_ns();
@@ -1360,7 +1478,7 @@ impl PaperExecutor {
                 IntentKind::Approve => ExpectedTx::Approve(&expected),
                 _ => ExpectedTx::Sell(&expected),
             };
-            let (handoff, prepared_ns, planned_ns, admitted_exposure) = raw_to_sink(
+            let (handoff, prepared_ns, planned_ns, consumed) = raw_to_sink(
                 RawSink {
                     lane: &mut self.strategy_lanes[index],
                     sink: &mut self.sink,
@@ -1377,19 +1495,20 @@ impl PaperExecutor {
                 clock,
                 start_ns,
             );
-            if admitted_exposure {
+            if consumed.admission {
                 self.strategy_spent_wei += gas;
             }
             let handoff = match handoff {
                 Ok(h) => h,
                 Err(r) => {
-                    self.strategy_nonce_gap = true;
+                    self.exit_refused(token, index, consumed.disclosed, out.is_empty());
                     return Err(r);
                 }
             };
             out.push(PaperIntent {
                 kind,
                 token,
+                block: head.number,
                 handoff,
                 times: StageTimes {
                     ingress_ns: triggered_ns,
@@ -1529,6 +1648,7 @@ mod tests {
             strategy_session_cap_wei: 100_000_000_000_000_000,
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
+            strategy_max_head_age_ms: 30_000,
         }
     }
 
@@ -2013,10 +2133,14 @@ mod tests {
         snapshot(B256::ZERO, policy, codehash)
     }
 
+    /// Now: one second after the test head.
+    const NOW_MS: u64 = 1_793_000_001_000;
+
     fn strategy_c2(head: Option<ChainHead>) -> CanonicalContext<'static> {
         CanonicalContext {
             snapshot: &canonical,
             head,
+            now_unix_ms: NOW_MS,
         }
     }
 
@@ -2191,6 +2315,7 @@ mod tests {
         let none = CanonicalContext {
             snapshot: &|_, _| None,
             head: Some(HEAD),
+            now_unix_ms: NOW_MS,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &none, &clock(1, 1), 1),
@@ -2199,6 +2324,17 @@ mod tests {
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &strategy_c2(None), &clock(1, 1), 1),
             Err(Refusal::NoSnapshot)
+        );
+        // Gate L-a: a head older than the bound (30 s) is not acted on; a
+        // follower catching up does not trade old blocks as fresh.
+        let late = CanonicalContext {
+            snapshot: &canonical,
+            head: Some(HEAD),
+            now_unix_ms: HEAD.timestamp * 1_000 + 30_001,
+        };
+        assert_eq!(
+            exec.on_strategy_buy([1; 20], curve, input, &late, &clock(1, 1), 1),
+            Err(Refusal::StaleHead)
         );
         // Input plus gas is above the cap.
         assert_eq!(
@@ -2238,35 +2374,145 @@ mod tests {
         fs::remove_dir_all(&d).unwrap();
     }
 
-    /// Phase I gate M3: a reserved strategy nonce that is not handed off (a
-    /// transport start deadline missed) leaves a hole; no later strategy
-    /// intent is signed (no later PAPER transaction could pass it).
+    /// Phase I gate L-d: one sender, one sequence. A C3 BUY handed off at
+    /// nonce 0 makes the strategy's BUY take nonce 1 (before: nonce 0 a
+    /// second time), C3's alternatives keep nonce 0; with a strategy
+    /// intent holding nonce 0 first, a C3 BUY is refused NONCE_TAKEN.
     #[test]
-    fn a_nonce_hole_stops_the_strategys_intents() {
-        let mut cfg = config(2, 2);
-        cfg.strategy_lanes = 4;
-        let (mut exec, d) = armed("strategy-gap", cfg);
+    fn c3_and_the_strategy_share_one_nonce_sequence() {
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
         let curve = curve_after(1_000_000_000_000_000_000);
         let input = U256::from(10_000_000_000_000_000u64);
-        // Every reading 2 ms apart: the 1 ms start deadline passes.
-        let slow = clock(1, 2_000_000);
-        assert_eq!(
-            exec.on_strategy_buy([1; 20], curve, input, &strategy_c2(Some(HEAD)), &slow, 1),
-            Err(Refusal::Deadline)
-        );
-        assert_eq!(
-            exec.on_strategy_buy(
-                [2; 20],
+        let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
+        let mut cfg = config(2, 2);
+        cfg.strategy_lanes = 4;
+        let c3 = |exec: &mut PaperExecutor, salt: u8| {
+            let (hash, raw, call) = launch(salt, 7);
+            exec.on_launch(
+                PendingLaunch {
+                    hash,
+                    raw: &raw,
+                    to: Some(portal),
+                    input: &call,
+                    ingress_ns: 100,
+                },
+                &c2(Some(HEAD)),
+                &clock(100, 7),
+            )
+        };
+        let (mut exec, d) = armed("shared-c3-first", cfg.clone());
+        assert_eq!(nonce(&c3(&mut exec, 0).unwrap().raw), 0);
+        let buy = exec
+            .on_strategy_buy(
+                [0xAB; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
-                &clock(1, 1),
+                &clock(500, 3),
+                500,
+            )
+            .unwrap();
+        assert_eq!(nonce(&buy.raw), 1);
+        let (_, left, next_nonce, _, gap) = exec.strategy_lanes();
+        assert_eq!((left, next_nonce, gap), (2, 2, false));
+        assert_eq!(nonce(&c3(&mut exec, 1).unwrap().raw), 0);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+
+        let (mut exec, d) = armed("shared-strategy-first", cfg);
+        let buy = exec
+            .on_strategy_buy(
+                [0xAB; 20],
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(500, 3),
+                500,
+            )
+            .unwrap();
+        assert_eq!(nonce(&buy.raw), 0);
+        assert_eq!(c3(&mut exec, 0), Err(Refusal::NonceTaken));
+        assert_eq!(exec.counters().refused("NONCE_TAKEN"), 1);
+        assert_eq!(exec.lanes(), (2, 2));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// `step` apart, `jump` more at the reading number `at` (from 1).
+    fn clock_jump(start: u64, step: u64, at: u64, jump: u64) -> FnClock<impl Fn() -> u64> {
+        let (now, reads) = (Cell::new(start), Cell::new(0u64));
+        FnClock {
+            id: CLOCK_ID,
+            now: move || {
+                reads.set(reads.get() + 1);
+                let extra = if reads.get() == at { jump } else { 0 };
+                now.set(now.get() + step + extra);
+                now.get()
+            },
+        }
+    }
+
+    /// Phase I gate M3/N1: a strategy intent refused before anything of it
+    /// was disclosed (the start deadline missed at the pre-permit check, the
+    /// 7th clock reading) frees its nonces: the next intent takes them and
+    /// the held position still exits (before: a hole, every later intent
+    /// NONCE_GAP). Refused after a permit's write started (the write check,
+    /// the 8th reading), its bytes may be out: a hole, no later strategy
+    /// intent is signed (no later PAPER transaction could pass it).
+    #[test]
+    fn a_nonce_is_taken_again_only_when_nothing_was_disclosed() {
+        let mut cfg = config(2, 2);
+        cfg.strategy_lanes = 6;
+        let (mut exec, d) = armed("strategy-gap", cfg);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let input = U256::from(10_000_000_000_000_000u64);
+        let c2 = strategy_c2(Some(HEAD));
+        let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
+        let a = exec
+            .on_strategy_buy([1; 20], curve, input, &c2, &clock(1, 1), 1)
+            .unwrap();
+        assert_eq!(nonce(&a.raw), 0);
+        let late = 2_000_000;
+        assert_eq!(
+            exec.on_strategy_buy([2; 20], curve, input, &c2, &clock_jump(1, 1, 7, late), 1),
+            Err(Refusal::Deadline)
+        );
+        let (_, _, next_nonce, _, gap) = exec.strategy_lanes();
+        assert_eq!((next_nonce, gap), (1, false));
+        // The exit of A, first late before its approval's permit: nothing
+        // out, its nonces and the token free; then on time.
+        let tokens = decode_swap_exact_input_native(decode_signed(&a.raw).unwrap().tx.input)
+            .unwrap()
+            .min_output_amount;
+        let exit_curve = curve_after(1_010_000_000_000_000_000);
+        assert_eq!(
+            exec.on_strategy_exit(
+                [1; 20],
+                tokens,
+                exit_curve,
+                &c2,
+                &clock_jump(1, 1, 7, late),
                 1
             ),
+            (Vec::new(), Some(Refusal::Deadline))
+        );
+        let (exits, refused) =
+            exec.on_strategy_exit([1; 20], tokens, exit_curve, &c2, &clock(1, 1), 1);
+        assert_eq!(refused, None);
+        let nonces: Vec<u64> = exits.iter().map(|i| nonce(&i.raw)).collect();
+        assert_eq!(nonces, [1, 2]);
+        // C: late at the write check, after its permit: a hole.
+        assert_eq!(
+            exec.on_strategy_buy([3; 20], curve, input, &c2, &clock_jump(1, 1, 8, late), 1),
+            Err(Refusal::Dispatch)
+        );
+        assert_eq!(
+            exec.on_strategy_buy([4; 20], curve, input, &c2, &clock(1, 1), 1),
             Err(Refusal::NonceGap)
         );
         let (_, left, next_nonce, _, gap) = exec.strategy_lanes();
-        assert_eq!((left, next_nonce, gap), (3, 1, true));
+        assert_eq!((left, next_nonce, gap), (2, 4, true));
+        assert_eq!(exec.strategy_counters().handoffs, 3);
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
     }

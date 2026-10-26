@@ -957,6 +957,77 @@ fn local_geth_commits_the_raw_buy_to_the_egress_lane() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Phase I gate L-b: the egress lane armed on a builder's slot of a bundle
+/// plan is refused before anything is consumed (before: the bundle's BUY
+/// alone was committed to the node's lane).
+#[test]
+fn the_egress_lane_takes_no_builder_slot() {
+    use darkbot_bsc_execution::submission::egress::EgressTransport;
+    use darkbot_bsc_geth_ipc::outbound::egress_lane;
+    use darkbot_bsc_geth_ipc::protocol_v2::{ArenaV2, ConsumerV2, arena_path_v2};
+    const GENERATION: u64 = 4_244;
+    let dir = std::env::temp_dir().join(format!("bsc-egress-builder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = arena_path_v2(&dir, GENERATION);
+    let arena = ArenaV2::create(&path, GENERATION, &[egress_lane()]).unwrap();
+    let mut world = World::prepared();
+    let table = frozen_table();
+    let plan = both_builders(&world, &table);
+    let mut club48 = club48_frame(&world, &plan, &table);
+    let mut blockrazor = blockrazor_frame(&world, &plan, &table);
+    let mut node = EgressTransport::open(&path, GENERATION).unwrap();
+    let mut other = FakeTransport::ready();
+    let current = world.snapshot;
+    let result = dispatch_diagnostic(
+        &mut world.lane,
+        &plan,
+        &context(&table, &current),
+        &quick_clock(),
+        &deadline(),
+        &mut [
+            Armed {
+                adapter: adapter(CLUB48),
+                transport: &mut node,
+                frame: &mut club48,
+            },
+            Armed {
+                adapter: adapter(BLOCKRAZOR),
+                transport: &mut other,
+                frame: &mut blockrazor,
+            },
+        ],
+    );
+    assert_eq!(result.err(), Some(DispatchError::EgressMismatch));
+    assert_eq!(node.last_sequence(), None);
+    let mut coordinator = ConsumerV2::open(&path, GENERATION, egress_lane()).unwrap();
+    assert!(coordinator.try_consume().unwrap().is_none());
+    // Nothing consumed: the intent is still dispatched over its builders.
+    let report = dispatch_diagnostic(
+        &mut world.lane,
+        &plan,
+        &context(&table, &current),
+        &quick_clock(),
+        &deadline(),
+        &mut [
+            Armed {
+                adapter: adapter(CLUB48),
+                transport: &mut FakeTransport::ready(),
+                frame: &mut club48,
+            },
+            Armed {
+                adapter: adapter(BLOCKRAZOR),
+                transport: &mut other,
+                frame: &mut blockrazor,
+            },
+        ],
+    )
+    .unwrap();
+    assert!(report.admitted());
+    drop((coordinator, node, arena));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn local_geth_sends_the_raw_buy_and_its_send_time_is_deferred_to_c1() {
     let mut world = World::prepared();

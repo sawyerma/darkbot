@@ -437,6 +437,7 @@ impl ExecRuntime {
         action: &crate::runtime_strategy::StrategyAction,
         owner: &StateOwner,
         clock: &dyn Clock,
+        now_unix_ms: u64,
     ) -> Option<(
         Vec<crate::paper_exec::PaperIntent>,
         Option<crate::paper_exec::Refusal>,
@@ -447,6 +448,7 @@ impl ExecRuntime {
         let c2 = CanonicalContext {
             snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
             head: owner.head(),
+            now_unix_ms,
         };
         Some(match *action {
             StrategyAction::Buy {
@@ -624,6 +626,7 @@ mod tests {
                 strategy_session_cap_wei: 100_000_000_000_000_000,
                 approve_gas_limit: 100_000,
                 sell_gas_limit: 1_500_000,
+                strategy_max_head_age_ms: 30_000,
             },
             reprobe,
             reprobe_failures: 1,
@@ -907,7 +910,9 @@ mod tests {
             decided_ns: 0,
         };
         // Not armed: nothing is executed.
-        assert!(x.on_strategy(&buy, &owner, &clock).is_none());
+        // The head below is of 1_793_000_000 s; now is 10 s later.
+        let now_ms = 1_793_000_010_000;
+        assert!(x.on_strategy(&buy, &owner, &clock, now_ms).is_none());
         settle(&mut x, &owner, "https://probe.invalid");
         owner.canonical(&CanonicalEvent::Block {
             number: HEAD,
@@ -928,23 +933,28 @@ mod tests {
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x).0, "ARMED");
         // Gate M1: no exit without a held BUY.
-        let (none, refused) = x.on_strategy(&exit, &owner, &clock).unwrap();
+        let (none, refused) = x.on_strategy(&exit, &owner, &clock, now_ms).unwrap();
         assert_eq!(
             (none.len(), refused),
             (0, Some(crate::paper_exec::Refusal::NotHeld))
         );
-        let (intents, refused) = x.on_strategy(&buy, &owner, &clock).unwrap();
+        let (intents, refused) = x.on_strategy(&buy, &owner, &clock, now_ms).unwrap();
         assert_eq!((intents.len(), refused), (1, None));
         assert_eq!(intents[0].kind, IntentKind::Buy);
         assert_eq!(intents[0].times.ingress_ns, 0);
-        let (intents, refused) = x.on_strategy(&exit, &owner, &clock).unwrap();
+        let (intents, refused) = x.on_strategy(&exit, &owner, &clock, now_ms).unwrap();
         assert_eq!(refused, None);
         assert_eq!(
             intents.iter().map(|i| i.kind).collect::<Vec<_>>(),
             [IntentKind::Approve, IntentKind::Sell]
         );
         // A second exit of the token is refused and counted, not executed.
-        assert!(x.on_strategy(&exit, &owner, &clock).unwrap().0.is_empty());
+        assert!(
+            x.on_strategy(&exit, &owner, &clock, now_ms)
+                .unwrap()
+                .0
+                .is_empty()
+        );
         let r = record(&x);
         assert_eq!(r.u64(e::STRATEGY_INTENTS).unwrap(), 4);
         assert_eq!(r.u64(e::STRATEGY_HANDOFFS).unwrap(), 3);
@@ -1176,8 +1186,13 @@ mod tests {
 
         let config =
             RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
-        const T: u64 = 1_793_000_000_450;
-        let mut c = Canonical::new(config.canonical.as_ref().unwrap(), T);
+        // Gate L-a: blocks of now (an older head than
+        // BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS is refused).
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let mut c = Canonical::new(config.canonical.as_ref().unwrap(), t);
         let mut cfg = config.strategy.engine.clone();
         cfg.rules = Vec::new();
         let mut gas = GasEvidence::default();
@@ -1222,8 +1237,8 @@ mod tests {
             number: HEAD + i,
             hash: hash(i),
             parent_hash: if i == 1 { [0xb1; 32] } else { hash(i - 1) },
-            timestamp_s: (T + (i - 1) * 450) / 1_000,
-            timestamp_ms: T + (i - 1) * 450,
+            timestamp_s: (t + (i - 1) * 450) / 1_000,
+            timestamp_ms: t + (i - 1) * 450,
             observed: Instant::now(),
             observed_unix_ms: None,
             txs: Vec::new(),
@@ -1348,6 +1363,9 @@ mod tests {
                 && crate::runtime_strategy::paper_intent_kind(&rec.payload)
                     == Some(crate::paper_exec::IntentKind::Buy)
             {
+                // Gate L-a: J names the head block the BUY was formed on.
+                let block = u64::from_le_bytes(rec.payload[62..70].try_into().unwrap());
+                assert!(block > HEAD, "{block}");
                 intents += 1;
             }
         }

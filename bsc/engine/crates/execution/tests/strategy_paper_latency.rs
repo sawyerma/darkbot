@@ -182,6 +182,7 @@ fn strategy_paper_path_latency() {
             strategy_session_cap_wei: u128::MAX / 4,
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
+            strategy_max_head_age_ms: 30_000,
         },
         Arming {
             next_nonce: 0,
@@ -230,9 +231,11 @@ fn strategy_paper_path_latency() {
         number,
         timestamp: ms / 1_000,
     });
+    // The head's own time: a fresh head (the age bound is not measured).
     let c2 = CanonicalContext {
         snapshot: &|policy, codehash| state.canonical_snapshot_id(policy, codehash),
         head,
+        now_unix_ms: head.map_or(0, |h| h.timestamp * 1_000),
     };
 
     let mut journal = RuntimeJournal::open(

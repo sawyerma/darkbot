@@ -275,6 +275,7 @@ fn c3_paper_path_latency() {
             strategy_session_cap_wei: one * launches as u128,
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
+            strategy_max_head_age_ms: 30_000,
         },
         Arming {
             next_nonce: 0,

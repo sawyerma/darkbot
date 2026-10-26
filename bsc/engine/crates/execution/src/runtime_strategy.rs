@@ -403,16 +403,17 @@ enum Pending {
 
 /// A Strategy C PAPER transaction at the sink (Phase I), a `Runtime`
 /// record: `J | kind u8 (1 BUY, 2 approval, 3 SELL) | sink sequence u64 |
-/// tx_hash [32] | token [20] | decided, admitted, signed, sink ns u64 |
-/// the signed bytes` (a local artefact, never sent).
+/// tx_hash [32] | token [20] | head block u64 | decided, admitted, signed,
+/// sink ns u64 | the signed bytes` (a local artefact, never sent).
 pub fn paper_intent_payload(i: &PaperIntent) -> Vec<u8> {
     let t = i.times;
-    let mut out = Vec::with_capacity(1 + 1 + 8 + 32 + 20 + 4 * 8 + i.raw.len());
+    let mut out = Vec::with_capacity(1 + 1 + 8 + 32 + 20 + 8 + 4 * 8 + i.raw.len());
     out.push(b'J');
     out.push(i.kind.code());
     out.extend_from_slice(&i.handoff.sequence.to_le_bytes());
     out.extend_from_slice(&i.handoff.tx_hash);
     out.extend_from_slice(&i.token);
+    out.extend_from_slice(&i.block.to_le_bytes());
     for ns in [t.ingress_ns, t.admitted_ns, t.signed_ns, t.sink_ns] {
         out.extend_from_slice(&ns.to_le_bytes());
     }

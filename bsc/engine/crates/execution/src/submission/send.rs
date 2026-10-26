@@ -91,7 +91,7 @@ use darkbot_bsc_trading::intent::{
     AdapterId, HaltReason, IntentLane, LaneError, MAX_ADAPTERS, SubmissionState, Ticket,
 };
 use darkbot_bsc_trading::submission_policy::capability::{
-    AdapterKind, AdapterTable, HandoffBoundary,
+    AdapterKind, AdapterTable, HandoffBoundary, SubmissionMode,
 };
 use darkbot_bsc_trading::submission_policy::plan::{
     ChainHead, PlanError, QualifiedReleasePlan, SubmissionPlan, TransportDeadlineError,
@@ -132,6 +132,7 @@ trait Slot {
     fn frame(&self) -> &Frame;
     fn parts(&mut self) -> (&mut dyn Transport, &mut Frame);
     fn binding(&self) -> Option<TransportBinding>;
+    fn is_egress(&self) -> bool;
 }
 
 impl Slot for Armed<'_> {
@@ -158,6 +159,10 @@ impl Slot for Armed<'_> {
     fn binding(&self) -> Option<TransportBinding> {
         None
     }
+
+    fn is_egress(&self) -> bool {
+        self.transport.is_egress()
+    }
 }
 
 impl Slot for ReleaseArmed<'_> {
@@ -183,6 +188,10 @@ impl Slot for ReleaseArmed<'_> {
 
     fn binding(&self) -> Option<TransportBinding> {
         Some(self.transport.binding())
+    }
+
+    fn is_egress(&self) -> bool {
+        self.transport.transport().is_egress()
     }
 }
 
@@ -458,6 +467,10 @@ pub enum DispatchError {
     /// The lane's dispatch is not the one the plan describes. The admission
     /// was consumed and nothing was written; the lane is stopped.
     DispatchBinding(PlanError),
+    /// An egress transport (the local node's lane) armed for another
+    /// adapter kind than the local node's or another plan than a single
+    /// raw transaction.
+    EgressMismatch,
 }
 
 impl core::fmt::Display for DispatchError {
@@ -475,6 +488,9 @@ impl core::fmt::Display for DispatchError {
             Self::Plan(error) => write!(f, "dispatch: {error}"),
             Self::Lane(error) => write!(f, "dispatch: {error}"),
             Self::DispatchBinding(error) => write!(f, "dispatch binding: {error}"),
+            Self::EgressMismatch => {
+                f.write_str("dispatch: egress lane armed for another adapter or plan")
+            }
         }
     }
 }
@@ -633,6 +649,14 @@ fn run<S: Slot>(
         }
         if frame.len() > slot.max_request_len() {
             return Err(DispatchError::RequestTooLarge);
+        }
+        // The egress lane takes the local node's single raw transaction
+        // only (Phase I gate L-b): never one transaction of a bundle.
+        if slot.is_egress()
+            && (frame.kind() != AdapterKind::LocalGeth
+                || plan.mode() != SubmissionMode::SingleRawBuy)
+        {
+            return Err(DispatchError::EgressMismatch);
         }
         if let Mode::Release(qualifications) = mode {
             let current = qualifications.current(adapter);

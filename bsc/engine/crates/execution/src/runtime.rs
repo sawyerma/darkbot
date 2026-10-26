@@ -373,6 +373,11 @@ impl RuntimeConfig {
                     )?),
                     approve_gas_limit: take("BSC_EXEC_APPROVE_GAS_LIMIT", 21_000, 100_000_000)?,
                     sell_gas_limit: take("BSC_EXEC_SELL_GAS_LIMIT", 21_000, 100_000_000)?,
+                    strategy_max_head_age_ms: take(
+                        "BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS",
+                        1_000,
+                        600_000,
+                    )?,
                 },
             }),
         };
@@ -574,6 +579,13 @@ fn strategy_to_paper(
     let Some(s) = c.strategy.as_mut() else {
         return;
     };
+    // Gate L-a: the head's age against the wall clock now; unreadable, every
+    // head is too old.
+    let now_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_millis()).ok())
+        .unwrap_or(u64::MAX);
     for action in s.take_actions() {
         let handed = match (exec.as_mut(), owner.as_ref()) {
             (Some(x), Some(o)) => x.on_strategy(
@@ -583,6 +595,7 @@ fn strategy_to_paper(
                     id: CLOCK_ID_MONOTONIC,
                     now: || clock.now_ns(),
                 },
+                now_unix_ms,
             ),
             _ => None,
         };
