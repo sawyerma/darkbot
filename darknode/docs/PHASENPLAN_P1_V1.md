@@ -5,13 +5,13 @@
 | Dokumentfeld | Wert |
 |---|---|
 | Dokument | `darknode/docs/PHASENPLAN_P1_V1.md` |
-| Version | **1.1 – konsolidierte Planungsbaseline (Dokumentrevision)** |
+| Version | **1.2 – Raw-Trades-first für Historie/Backtest** |
 | Stand | **27.10.2026** |
 | Status | **DRAFT · GATE 1 OFFEN · KEINE IMPLEMENTIERUNGSFREIGABE** |
 | Projekt | DarkNode im vorhandenen DarkBot-Monorepo |
 | P1-Instrument | **Bitget USDT-Futures · BTCUSDT** (exakte Produkt-/Account-Konvention in R2 verifizieren) |
 | Sprache | **Rust**, React/TypeScript nur im bestehenden Frontend |
-| Referenzen | `GATE_1.md`, `WS_AI_IDEEN.md`, `ENDPOINT_REGISTRY.md`, `P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md`, vorhandener DarkBot-Phasenplan; **TEIL1_MARKTDATEN.md ist abgelöst** |
+| Referenzen | `GATE_1.md`, `WS_AI_IDEEN.md`, `ENDPOINT_REGISTRY.md`, `P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md`, `P1_EVIDENCE/BITGET_HISTORICAL_RAW_TRADES_TIME_RATE_2026-10-27.md`, vorhandener DarkBot-Phasenplan; **TEIL1_MARKTDATEN.md ist abgelöst** |
 | Historische Codebasis | [`sawyerma/ws_ai` @ `1f27ed319b70eb94ba6990799f120743819f1534`](https://github.com/sawyerma/ws_ai/tree/1f27ed319b70eb94ba6990799f120743819f1534) |
 | Handelsfreigabe | **Keine**: P1 enthält weder Orders noch Live-Trading |
 
@@ -34,8 +34,8 @@ flowchart LR
   subgraph BITGET["BITGET · QUELLEN"]
     SBE["SBE v3 · publicTrade / books1 / books50"]
     JSON["Ticker / Mark / Funding · JSON nur extern"]
-    REST["Öffentliches REST · Instrumente / verfügbare Trades"]
-    ARCH["Download-Center · Bulk-Historie"]
+    REST["Classic V2 · historische Einzeltrades<br/>1 ms · bis 90 Tage (gemessen)"]
+    ARCH["Download-Center · ältere Rohtrades<br/>Format/Zeitraum noch zu verifizieren"]
   end
   REG[("Endpoint-Registry<br/>versioniert · SQLite")]
   INS["P1.3 Instrument-Katalog"]
@@ -47,7 +47,7 @@ flowchart LR
   INS --> AD
   AD --> L0[("P1.5 L0 Raw-Frame-Journal")]
   AD --> L1[("P1.5 L1 Event-Dateien + Zeitindex")]
-  AD --> AGG["P1.6 Deterministischer 1s-/MTF-Aggregator"]
+  L1 --> AGG["P1.6 Eigene Aggregation<br/>Rohtrades → 1s → 5s/10s/30s/1m"]
   AGG --> L2[("P1.6 L2 Candle-Cache")]
   REST --> IMPORT["P1.7 Import / Repair"]
   ARCH --> IMPORT
@@ -55,6 +55,10 @@ flowchart LR
   L1 --> GAP["P1.7 Coverage-/Gap-Ledger"]
   GAP --> IMPORT
   L2 --> HIS["P1.8 History-Reader"]
+  L1 --> BT["Backtest/Replay<br/>volle Einzeltrade-Information"]
+  L2 --> BT
+  BT -.-> QUAL["Coverage- und Versions-Gate"]
+  GAP -.-> QUAL
   AGG --> PUSH["P1.8 Live-Bar-Publisher"]
   HIS --> GW["Bestehendes DarkBot Protobuf-Gateway"]
   PUSH --> GW
@@ -238,6 +242,7 @@ flowchart TB
   A --> B --> C --> D --> E
   E --> F
   E --> G
+  G --> F
   F --> H
   G --> H
   D --> I
@@ -331,8 +336,9 @@ flowchart TB
 
 **Lieferumfang**
 
+- **Verbindlich für jedes historische Backtesting: originale öffentliche Einzeltrades als Rohdaten laden, vollständig und verlustfrei in L1 speichern und die benötigten 1s-, 5s-, 10s-, 30s- und 1m-Candles selbst aggregieren. Bitget-REST-1m-Candles sind nur Referenz/Gegenprobe und dürfen nicht als Ersatz für fehlende Tickdaten in synthetische 1s-Bars zerlegt werden.** Identische Live-/Historien-Aggregationslogik.
 - Ein inkrementeller Rust-Aggregator: Trade-Events → 1s OHLCV, Quote-Volumen, Count, Buy-/Sell-Volumen, soweit definierbar.
-- 5s/10s/30s/1m und weitere **konfigurierte** Timeframes aus derselben **qualifizierten** 1s-Schicht; einheitliche Boundary-/Watermark-/Timer-Semantik.
+- 5s/10s/30s/1m und weitere **konfigurierte** Timeframes aus derselben **qualifizierten** 1s-Schicht; einheitliche Boundary-/Watermark-/Timer-Semantik. Für die Sekunde `[t,t+1s)` werden Open/High/Low/Close/Volumen aus **allen echten Trades** berechnet. Trade-IDs und Quell-Reihenfolge erhalten, da viele Trades denselben Millisekunden-Zeitstempel besitzen.
 - L2-Binärdateien, Zeitindex, Cache-Status `OPEN/FINAL/INVALID`, Instrument-/Dataset-/Aggregator-Version.
 - Keine erfundenen Null-Trades. Ob eine tradefreie Sekunde als fehlender Bar, Flat-Bar oder DataGap interpretiert wird, entscheidet R4 und steht versioniert im Dataset.
 - Late-/Out-of-Order-Fälle: unveränderlicher Live-Decision-Trail; nachträgliche Research-Rebuilds unter **neuer** Dataset-Version.
@@ -347,13 +353,14 @@ flowchart TB
 **Lieferumfang**
 
 - Coverage-/Gap-Ledger in SQLite: Instrument, Quelle, Zeitbereich, Ereignissequenzen/IDs, Status, Ursache, Validation-Hash, offene Reparaturversuche.
-- Bulk-Importer für **reale** Bitget-Download-Center-Dateien; begrenzte Concurrency, Resume, Hash und Provenance. Archivdaten nicht als eigenes WS-Capture etikettieren.
+- **Rohtrades zuerst (Backtest-Pflicht):** öffentliche Classic-V2-Trades innerhalb der verifizierten 90-Tage-Grenze inkl. originaler Trade-ID, Preis, Menge, Side, Exchange-Millisekundenzeit und Quellreihenfolge importieren. Erst nach Coverage-/Konfliktqualifizierung daraus 1s/MTF-Candles ableiten; 1m-Candles ersetzen keine Einzeltrade-Historie.
+- Bulk-Importer für **reale** Bitget-Download-Center-Dateien; begrenzte Concurrency, Resume, Hash und Provenance. Archivdaten nicht als eigenes WS-Capture etikettieren. Ältere Rohtrades >90 Tage erfordern gesonderte verifizierte Quelle.
 - **Verifizierter öffentlicher REST-Reparaturadapter:** Classic V2 `/api/v2/mix/market/fills-history`, `symbol=BTCUSDT`, `productType=usdt-futures`, `limit<=1000`, `idLessThan` über letzte `tradeId`, `startTime`/`endTime` mit **höchstens 7 Tagen**, nur **innerhalb 90 Tagen**; `10 Req/s/IP` als noch zu messendes offizielles Rate-Limit. Eigenständige Capability-Matrix gegenüber UTA V3, wo `idLessThan` für `/api/v3/market/fills` **nicht belegt** ist. Gleiche fachliche Trade-Normalisierung wie Live; ID/Zeitgrenzen, Cursor-Stillstand, HTTP-429/Timeout und Endpunkt-Deprecation fail-closed behandeln.
 - Priorität: echte bekannte Lücken vor optionaler Ausdehnung der Historie; Backoff/Rate-Limiter pro dokumentiertem Endpoint; Memory-/Writer-Druck berücksichtigt.
 - Grob-/Fein-Scan als **Plausibilitätskontrolle**, nicht als Beweis vollständiger Trade-Abdeckung; kein Trade in einer Sekunde kann normal sein.
 - Nach Import Dedupe/Conflict-Report, neue Dataset-Version und gezielter Rebuild der betroffenen L2-Bereiche.
 
-**Abnahme:** Download-Echtdaten importiert; wiederholter Import verändert Unique-Trade-Menge nicht; künstlicher Verbindungsbruch ergibt explizite Gap-Bilanz; Reparatur nur bei belegbarer Quelle; REST-Antwort „keine Trades“ von HTTP-/Rate-/Parser-Fehler unterscheidbar; Konsistenz gegen parallelen Feed im Overlap; unbehebbare Lücke bleibt sichtbar `UNRESOLVED`.
+**Abnahme:** Rohtrade-Import + deterministischer 1s/5s/10s/30s/1m-Rebuild eines qualifizierten historischen Zeitfensters belegt; identische ms-Zeitstempel, leere Sekunden und unvollständige Coverage korrekt behandelt; Download-Echtdaten importiert; wiederholter Import verändert Unique-Trade-Menge nicht; künstlicher Verbindungsbruch ergibt explizite Gap-Bilanz; Reparatur nur bei belegbarer Quelle; REST-Antwort „keine Trades“ von HTTP-/Rate-/Parser-Fehler unterscheidbar; Konsistenz gegen parallelen Feed im Overlap; unbehebbare Lücke bleibt sichtbar `UNRESOLVED`.
 
 **Exit:** belegte Dataset-Abdeckung, nicht bloß eine angegebene Zeitspanne.
 
@@ -425,7 +432,7 @@ Die Zeitziele sind **vorläufige Gate-1-Ziele**, keine schon gemessenen Resultat
 | **K08** | BTCUSDT-Tag Replay | **< 90 s** pro definiertem vollen Aufzeichnungstag auf Zielhardware | vollständiges L1-Eventvolumen/Dateiversion pinnen |
 | **K09** | Writer unter Live-Last | Keine dauerhaft wachsende Queue; kein unmarkierter Write-Drop | Peak+Stresstest, disk-full Injection |
 | **K10** | Storagegröße | B/Tag und bytes/Event real gemessen, getrennt Trade/BBO/Depth50 und L0/L1/L2, Snapshots vs Delta, Writer-Overhead, zstd, Indizes und Aufbewahrung | **mindestens 24 h Live-Capture im V5-Depth50-Modus nach 05.11.2026**; frühere V4-Messung nur als explizite Vergleichsbaseline, keine V5-Kapazitätsprognose |
-| **K11** | Bitget-Kerzen-Gegenprobe | Abweichungen vollständig erklärbar, keine stillen OHLC-/Timeframe-Fehler | echter gemeinsamer Vergleichszeitraum |
+| **K11** | Historische Rohtrades → eigene 1s-/MTF-Candles | Alle qualifizierten Einzeltrades vollständig und deterministisch zu 1s/5s/10s/30s/1m aggregiert; Bitget-1m nur Gegenprobe, keine synthetischen Subminute-Candles | echter vollständiger Handelszeitraum, Golden-Tests, Coverage- und 1m-Gegenvergleich |
 | **K12** | Gateway-Integrität | Kein doppeltes Prepend, kein Scrollsprung, keine fremde Request-Antwort, kein neuer Exchange-WS-Owner | 2-Chart-/Reconnect-/Slow-Client-Test |
 | **K13** | 24/7-Betrieb | **7 Tage** autonom, getestete Reconnects, keine manuellen Eingriffe zum Weiterlaufen | Signierte Tagesreports und Manifest-Hashes |
 | **K14** | No JSON intern | 0 produktive JSON-Verträge nach Exchange-Boundary; **L0 enthält extern vorgegebene opake JSON-Bytes** | Code-/Dependency-/Wire-/Dateiformat-Inventur |
@@ -463,6 +470,7 @@ Die Zeitziele sind **vorläufige Gate-1-Ziele**, keine schon gemessenen Resultat
 | **T22** Neuer Instrument-Snapshot / Step-Änderung | Alte Records mit alter Version korrekt; neue mit neuer | P1.3/1.5 |
 | **T23** Replay vs Live identischer Capture | Gleiche Bar-/Qualitäts-Trace-Hashes, soweit Timerfolge identisch | P1.6 |
 | **T24** 7-Tage-Dauerlauf | Alle Datenbereiche bilanziert, Ressourcen und Latency dokumentiert | P1.10 |
+| **T25** Historische Trades selbst aggregieren | Echte historische 1-ms-Einzeltrades inkl. identischer Zeitstempel → deterministische 1s- und MTF-Candles; unvollständige Coverage gesperrt; kein 1m-Rückrechnen | P1.6/1.7 |
 
 **Alte `ws_ai`-Regressionen explizit abgedeckt:** einzelner Trade aus Multi-Trade-Batch, alte Bitget-REST-Funktionssignaturen, globale Scroll-Ereignisse, doppelte History-/Live-Quellen, fehlende Durability zwischen Queue-ACK und Disk.
 
@@ -595,3 +603,4 @@ P1 kann **nur dann als PASS** gelten, wenn die Punkte D01–D08 am selben fixier
 |---|---|---|
 | V1.0 | 26.10.2026 | Erstentwurf P1 Marktdatenkette |
 | **V1.1** | **27.10.2026** | Nachgewiesene Classic-V2-Historien-API/O03, V5-Live- und V4-Offline-Vertrag, R2-/K10-Termin, SQLite-Registry-Referenz, P1.9 Outbox/Watchdog/Externer Heartbeat, chrony/Uhrqualität, O13 L0-Löschung, O14 Alarmziel, Tardis-Host-Hinweis, Dokument-/Mermaid-Konsistenz |
+| **V1.2** | **27.10.2026** | Historische Rohtrades als verpflichtende Backtest-Quelle, eigener 1s-/MTF-Aggregator, T25, Diagramme und Mess-Evidenz |
