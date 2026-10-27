@@ -18,6 +18,23 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 9 | Release-Kandidat | TECHNISCH FERTIG — EXTERNAL_BLOCKED: Abschnitt „Release-Kandidat (Paket 9)" (Mainnet-geth, verifizierte ABIs, Linux-Ziel, Live-PAPER/J, G0.4, Funding/SIGN/V5/ARM/G0.7/G0.8) | `8f26b02a` | Manifest-Build an `8f26b02a` | externe Freigaben |
 | P | G0.4 Rohdaten (parallel) | OFFEN — Lauf aktiv: `~/.darkbot/g04/campaign_20261027`, 2026-10-27T08:05Z → 2026-11-03T08:05Z (Release-`bsc_runtime` `6b3c59bb…` an `3eadf6d5`, PublicNode + dRPC, C2/EXEC/STRATEGY_C SHADOW, Pending VENUES; Preflight QUALIFIED 1,17 GB); Kriterien-VORSCHLAG `bsc/config/g04_criteria.env` vor jeder Auswertung (Messdefinition `aba025e3`, T_ingress = WSS-Frame ab `b6db0d95`) | `aba025e3` | Kriterien-Bestätigung (Nutzer, Auftrag §8) | nach Laufende: census, replay-proof, capture-quality, strategy-replay; Urteil nur mit bestätigten Kriterien |
 
+## Gate 0 — Stand je Stufe (27.10., Nutzerauftrag: kostenfreie G0.1–G0.6 inkl. G0.4, G0.7/G0.8 vorbereiten)
+
+Pakete 0–9 schließen nur C0–I technisch ab; **Gate 0 ist nicht bestanden**. Lokale Latenz, `T_send`, N+1-Platzierung und physisches `T_buy−T0` bleiben getrennt.
+
+| Stufe | Stand | Beleg | Offen (konkret) |
+|---|---|---|---|
+| G0.1 | Flap v5.27.0 und Four v3 (zwei Classic-Paare) eingefroren; numerischer Vertrag des Versuchs = V5-Schwellen PASS/ADAPT/STOP, 1 Versuch, ≤ 481163500000000 wei (Vorschlag) | `g01/flap_freeze_20261026T115009Z`, `g01/four_freeze_20261026T134532Z`, `acceptance_contract.rs:530` | Flap v5.27.2 (`0x6fc1…9968`) auf Sourcify ohne Treffer (27.10.); Four-Implementierungen TokenManager2 `0xf32e…`, Helper3 `0x0cc7…`, OpenFour-Core `0x02d7…` ohne Quelle → MegaNode-Key (Nutzerkonto) |
+| G0.2 | Self-Launch: Felder belegt (DRY). Fremde Launches: C3 baut einen BUY nur im qualifizierten Profil (`profile.rs:229-302`, inkl. Name/Beneficiary des eigenen Launches) → **kein Pre-Block-BUY für fremde Launches**; Profil-Zensus der ersten Kampagnenstunden: 0/28 im Profil (22 Nicht-BNB-Quote, 5 Creator-Kauf, 1 Steuerdauer), 0 nur wegen Identität | `g02_flap_launch_profiles` (`ce385f95`) | Auswahl des fremden Profils nach dem 7-Tage-Zensus, dann G0.3-Beweis und Qualifikation; Four Classic nur Kandidaten-Token, Four/OpenFour-Economics UNSUPPORTED (Quelle) |
+| G0.3 | Self-Launch: PASS (DRY 15.10., Portal v5.24); Requalifikation am aktuellen Portal: schlüsselfreies PREPARE läuft | `g06a/g06a_prepare_20261027T082739Z` | fremde Profile nicht bewiesen |
+| G0.4 | Kampagne läuft 27.10. 08:05Z → 03.11. 08:05Z (PublicNode voll, dRPC nur Hashes); Census v10 mit N+1-Platzierung (`b3b0fd48`); Urteil `g04-verdict` (`93d3c22e`) | Zeile P | Kriterien-Bestätigung (Nutzer, Auftrag §8) |
+| G0.5 | Self-Launch-Transport PASS (02.10.); Produktionspfad lokal bis zur PAPER-Senke p50 218 / p99 258 µs (M4 Max, nicht `T_send`) | `c3/`, `g06/` | `T_send` des Produktionspfads: synchronisierter geth (≥ 2–3 TB; MacBook 336 GB frei) oder freigegebene nicht ausführbare Builder-Probe wie 16.10. |
+| G0.6 | DRY PASS (Self-Launch); Head-of-Line gleichzeitiger Launches: bis 3 unter 1 ms (p99), der 4. bei 1,02 ms, ab dem 5. jeder > 1 ms; Gültigkeit je BUY | `g06/` (`fc657eec`) | Inclusion-Seite UNQUALIFIED bis G0.7; LIVE-Nonce-Folge gleichzeitiger BUYs nicht geübt (PAPER-Alternativen) |
+| G0.7 | nicht ausgeführt; Guard UNARMED | Runbook oben | Funding, SIGN, V5, ARM, Grant (Nutzer); Portal v5.27.2 quellverifiziert |
+| G0.8 | Werkzeug bereit; Blast-Archiv am 27.10. `QUALIFIED` (Tiefe 1/128/1200/28800) | `g08_mainnet_verify --qualify-history` | G0.7-Evidence |
+| G0.9–G0.11 | nach G0.8 (Abhängigkeit); Builder-Liste: 34 Einträge von 6 Betreibern (good-will-alliance `123165bf`), Validator-Liste nicht mehr veröffentlicht | – | G0.7/G0.8 |
+| J / KB / K | gesperrt durch ihre Abhängigkeiten (G0.8-Verdikt, G0.4, Nutzer-Risikoentscheidung) | – | – |
+
 ## Operator-Runbook (Paket 8; jeder Befehl am Code geprüft)
 
 Nur READ_ONLY/SHADOW/PAPER. Guard `FROZEN_APPROVED_V5_SHA256="UNARMED"` (`bsc/engine/crates/execution/src/acceptance_guard.rs:30`), `approved=false`, `execution_ready=false`; SIGN/ARM/SEND/LIVE nur nach gesonderter Freigabe. Alle Befehle aus dem Repository-Root.
