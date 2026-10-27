@@ -253,7 +253,8 @@ pub fn sk07_selftest(dir: &Path) -> Part {
             return Err("the crashed segment changed".into());
         }
         let s = segments::verify_chain(&first)?;
-        if (s.segments, s.events, s.sealed, s.complete, s.recovered) != (4, 6, true, true, 1) {
+        // Sealed, never complete: a chain continued after a crash may have lost frames.
+        if (s.segments, s.events, s.sealed, s.complete, s.recovered) != (4, 6, true, false, 1) {
             return Err(format!("chain {s:?}"));
         }
         let mut r = segments::ChainReader::open(&first).map_err(io)?;
@@ -321,13 +322,16 @@ pub fn capacity(report: &preflight::CapacityReport) -> Part {
     )
 }
 
-/// The provider evidence and the provider budget of one window. The evidence must qualify every
-/// usable endpoint (FREE_ONLY, measured, fresh: `validate_provider_evidence`); the window budget
-/// of a rolling run (`max_requests`, `rpc_rps` per window) must fit each endpoint's proof.
+/// The provider evidence and the provider budget of the runway. The evidence must qualify every
+/// usable endpoint (FREE_ONLY, measured, fresh: `validate_provider_evidence`); the budget must
+/// fit each endpoint's proof: `rpc_rps` within its allowed rate, and its available calls (a
+/// quota of no stated period) must cover every window of the runway at the window cap
+/// `max_requests` — one window's cap covers no continuous run.
 pub fn provider(
     config: &darkbot_solana::runtime_config::RuntimeConfig,
     evidence: Option<&provider_evidence::ProviderEvidence>,
     now: u64,
+    binding: &Binding,
 ) -> (Part, Part, Option<u64>) {
     let Some(proof) = evidence else {
         let missing = "no provider evidence (p0ctl horizon qualify --provider-evidence ID|FILE)";
@@ -354,13 +358,18 @@ pub fn provider(
             Err(e) => Part::of(PartState::Fail, e),
         };
     let l = &config.limits;
+    let windows = binding
+        .minimum_runway_seconds
+        .div_ceil(binding.checkpoint_seconds.max(1))
+        .max(1);
+    let need_calls = l.max_requests.saturating_mul(windows);
     let short: Vec<String> = proof
         .providers
         .iter()
-        .filter(|p| p.allowed_rps < l.rpc_rps as f64 || p.available_calls < l.max_requests)
+        .filter(|p| p.allowed_rps < l.rpc_rps as f64 || p.available_calls < need_calls)
         .map(|p| {
             format!(
-                "{}: allowed_rps {} / rpc_rps {}, available_calls {} / max_requests {}",
+                "{}: allowed_rps {} / rpc_rps {}, available_calls {} / {need_calls} ({windows} window(s) × max_requests {})",
                 &p.provider_binding[..p.provider_binding.len().min(12)],
                 p.allowed_rps,
                 l.rpc_rps,
@@ -373,7 +382,7 @@ pub fn provider(
         Part::of(
             PartState::Pass,
             format!(
-                "window budget rpc_rps {} and max_requests {} within every proof",
+                "rpc_rps {} and {need_calls} calls ({windows} window(s) × max_requests {}) within every proof",
                 l.rpc_rps, l.max_requests
             ),
         )
@@ -407,8 +416,10 @@ pub fn qualify(
     capture_source: &str,
     inputs: &Inputs,
 ) -> Result<Qualification, String> {
-    let store = inputs.project.join(STORE);
-    let work = store.join(format!(".work.{}", std::process::id()));
+    // The SK-07 self-test, the write probe and the host facts on the run volume.
+    let work = inputs
+        .runs_root
+        .join(format!(".until-stopped-{}", std::process::id()));
     let runtime = if ROLLING_MODES.contains(&binding.mode.as_str()) {
         Part::of(
             PartState::Pass,
@@ -452,7 +463,7 @@ pub fn qualify(
         None => None,
     };
     let (provider_evidence, provider_budget, evidence_valid_until_unix_s) =
-        provider(config, evidence.as_ref(), inputs.now);
+        provider(config, evidence.as_ref(), inputs.now, &binding);
     Ok(Qualification {
         schema: SCHEMA,
         binding,
@@ -508,14 +519,33 @@ pub fn get(project: &Path, id: &str) -> Result<Qualification, String> {
         );
     }
     let path = project.join(STORE).join(format!("{id}.p0j"));
-    let bytes = std::fs::read(&path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => "UNTIL_STOPPED_QUALIFICATION_UNKNOWN".to_string(),
-        _ => format!("UNTIL_STOPPED_STORE: {e}"),
-    })?;
+    let read = || -> Result<Vec<u8>, String> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => "UNTIL_STOPPED_QUALIFICATION_UNKNOWN".to_string(),
+                _ => format!("UNTIL_STOPPED_STORE: {e}"),
+            })?
+            .take(provider_evidence::RECORD_LIMIT as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("UNTIL_STOPPED_STORE: {e}"))?;
+        if bytes.len() > provider_evidence::RECORD_LIMIT {
+            return Err("UNTIL_STOPPED_QUALIFICATION_LIMIT".into());
+        }
+        Ok(bytes)
+    };
+    let bytes = read()?;
     if !provider_evidence::names(id, &bytes) {
         return Err("UNTIL_STOPPED_QUALIFICATION_CHANGED".into());
     }
-    journal::read_typed_value(&path).map_err(|_| "UNTIL_STOPPED_QUALIFICATION_FORMAT".into())
+    let q = journal::read_typed_value(&path)
+        .map_err(|_| "UNTIL_STOPPED_QUALIFICATION_FORMAT".to_string())?;
+    // The record decoded is the one the id names (read again after the decode).
+    if read()? != bytes {
+        return Err("UNTIL_STOPPED_QUALIFICATION_CHANGED".into());
+    }
+    Ok(q)
 }
 
 /// The verdict of a window whose gates all held.
@@ -537,6 +567,8 @@ pub struct WindowCheck {
     pub ended_unix_s: u64,
     /// Bytes the run's journals grew by in the window (its measured data rate).
     pub bytes_written: u64,
+    /// The run journals' size at the window's end.
+    pub bytes_total: u64,
     pub free_bytes: Option<u64>,
     /// Bytes the minimum runway needs at that rate (the preflight's disk need).
     pub runway_need_bytes: u64,
@@ -558,6 +590,7 @@ pub struct WindowInputs<'a> {
     pub started_unix_s: u64,
     pub ended_unix_s: u64,
     pub bytes_written: u64,
+    pub bytes_total: u64,
     pub run_volume: &'a Path,
     pub environment: preflight::Environment,
     pub provider: darkbot_solana::provider::WindowUsage,
@@ -582,6 +615,9 @@ pub fn check_window(
         .ended_unix_s
         .saturating_sub(inputs.started_unix_s)
         .max(1);
+    let next_end = inputs
+        .ended_unix_s
+        .saturating_add(binding.checkpoint_seconds);
     let request = preflight::Request::from_limits(
         &config.limits,
         binding.minimum_runway_seconds,
@@ -627,6 +663,8 @@ pub fn check_window(
             }
             Some(_) => {}
         }
+        // An OS that reports no pressure level leaves this gate open, as in the preflight
+        // (unknown is not BLOCKED there); the memory budgets of the writers still bound RAM.
         if let Some(level) = env
             .memory_pressure
             .filter(|l| *l >= crate::storage::budget::PRESSURE_CRITICAL)
@@ -656,11 +694,20 @@ pub fn check_window(
                 "no valid provider evidence".into(),
             ));
         };
-        let (part, _, _) = provider(config, Some(evidence), inputs.ended_unix_s);
+        // Valid through the window to come, with the budget its admission demanded.
+        let (part, budget, until) = provider(config, Some(evidence), next_end, binding);
         if part.state != PartState::Pass {
+            let code = if until.is_some_and(|u| u < next_end) {
+                "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED"
+            } else {
+                "UNTIL_STOPPED_PROVIDER_EVIDENCE_UNQUALIFIED"
+            };
+            return Err((code, format!("{id}: {}", part.reason)));
+        }
+        if budget.state != PartState::Pass {
             return Err((
-                "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED",
-                format!("{id}: {}", part.reason),
+                "UNTIL_STOPPED_PROVIDER_BUDGET_UNQUALIFIED",
+                format!("{id}: {}", budget.reason),
             ));
         }
         Ok(format!(
@@ -671,7 +718,8 @@ pub fn check_window(
     let (_, _, evidence_valid_until_unix_s) = provider(
         config,
         inputs.evidence.as_ref().map(|(_, e)| e),
-        inputs.ended_unix_s,
+        next_end,
+        binding,
     );
     let (verdict, detail) = match halt {
         Ok(detail) => (CONTINUE.to_string(), detail),
@@ -682,6 +730,7 @@ pub fn check_window(
         started_unix_s: inputs.started_unix_s,
         ended_unix_s: inputs.ended_unix_s,
         bytes_written: inputs.bytes_written,
+        bytes_total: inputs.bytes_total,
         free_bytes: env.free_disk_bytes,
         runway_need_bytes,
         memory_pressure: env.memory_pressure,
@@ -694,12 +743,14 @@ pub fn check_window(
     }
 }
 
-/// The newest provider evidence in the controller's store that is valid at `now` for this
-/// configuration (an operator imports fresh evidence while an unbounded run goes on).
+/// The newest provider evidence in the controller's store that qualifies this run (evidence and
+/// budget, `binding`) through `at` (an operator imports fresh evidence while an unbounded run
+/// goes on).
 pub fn newest_evidence(
     project: &Path,
     config: &darkbot_solana::runtime_config::RuntimeConfig,
-    now: u64,
+    binding: &Binding,
+    at: u64,
 ) -> Option<(String, provider_evidence::ProviderEvidence)> {
     let dir = std::fs::read_dir(project.join(provider_evidence::STORE)).ok()?;
     let mut best: Option<(u64, String, provider_evidence::ProviderEvidence)> = None;
@@ -715,8 +766,8 @@ pub fn newest_evidence(
         else {
             continue;
         };
-        let (part, _, until) = provider(config, Some(&evidence), now);
-        if let (PartState::Pass, Some(until)) = (part.state, until) {
+        let (part, budget, until) = provider(config, Some(&evidence), at, binding);
+        if let (PartState::Pass, PartState::Pass, Some(until)) = (part.state, budget.state, until) {
             if best.as_ref().is_none_or(|(b, _, _)| until > *b) {
                 best = Some((until, id.to_string(), evidence));
             }
@@ -725,79 +776,138 @@ pub fn newest_evidence(
     best.map(|(_, id, e)| (id, e))
 }
 
-/// The verdict recorded for a window a crash interrupted (the run resumed after it).
+/// The verdict recorded for a window a crash interrupted whose gates held at the restart.
 pub const CRASH_RECOVERED: &str = "UNTIL_STOPPED_CRASH_RECOVERED";
+/// The refusal of a window after the run halted (a HALT is final: a new run is a new start).
+pub const HALTED: &str = "UNTIL_STOPPED_HALTED";
 /// The journal of an unbounded run's windows, in its run directory.
 pub const WINDOWS_JOURNAL: &str = "windows.p0j";
+
+/// The first frame of an unbounded run's windows journal: what the run was admitted as.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub binding: Binding,
+    pub qualification_id: String,
+    pub started_unix_s: u64,
+}
+impl Payload for RunRecord {
+    const KIND: u16 = kind::UNTIL_STOPPED_RUN;
+}
+
+/// What a window boundary measured (the runtime rotated its segmented journals and ended its
+/// provider window just before).
+pub struct Measured<'a> {
+    pub now: u64,
+    /// The run journals' size now.
+    pub bytes: u64,
+    pub run_volume: &'a Path,
+    /// The host facts (`preflight::environment(run_volume)` in production).
+    pub environment: preflight::Environment,
+    pub provider: darkbot_solana::provider::WindowUsage,
+    /// The newest valid provider evidence ([`newest_evidence`]).
+    pub evidence: Option<(String, provider_evidence::ProviderEvidence)>,
+    /// The segment this boundary sealed (path, sealed chain root).
+    pub sealed: Option<(&'a Path, [u8; 32])>,
+}
+
+fn coded(code: &'static str) -> std::io::Error {
+    journal::coded(code)
+}
 
 /// DEC-16: the rolling windows of an unbounded run, the one mode-neutral driver every mode's
 /// runtime calls: `due` tells a window's end; at it the runtime rotates its segmented journals
 /// (`SegmentedWriter::rotate_now`) and ends its provider window (`Budget::roll_window`), and
-/// `close` re-checks the gates ([`check_window`]), journals the verdict and opens the next
-/// window. A verdict other than `CONTINUE` is the run's safe HALT. After a crash `resume`
-/// continues the windows journal by its SK-07 recovery and records the interrupted window.
+/// `close` re-checks the gates ([`check_window`]) and journals the verdict durably. A verdict
+/// other than `CONTINUE` is the run's safe HALT and final: the driver refuses every further
+/// window (`HALTED`). After a crash `resume` continues only the same admitted run that never
+/// halted — the windows journal by its SK-07 recovery — and re-checks every gate for the
+/// window the crash interrupted before the next one opens.
 pub struct RollingWindows {
     binding: Binding,
     journal: segments::SegmentedWriter,
     window: u64,
     started_unix_s: u64,
     bytes_at_start: u64,
+    halted: Option<String>,
+    /// How the chain continued, for the window a crash interrupted (closed first after resume).
+    recovery: Option<String>,
 }
 
 impl RollingWindows {
-    /// Opens the first window of a new run at `now` (`bytes` its journals' size so far).
-    pub fn start(run_dir: &Path, binding: Binding, now: u64, bytes: u64) -> std::io::Result<Self> {
-        Ok(Self {
-            binding,
-            journal: segments::SegmentedWriter::create(&run_dir.join(WINDOWS_JOURNAL), 0)?,
-            window: 1,
-            started_unix_s: now,
-            bytes_at_start: bytes,
-        })
-    }
-
-    /// Continues a run after a crash: the windows journal continues by its recovery link, the
-    /// window the crash interrupted is recorded (`CRASH_RECOVERED`, from the last recorded end
-    /// to `now`) and the next window opens.
-    pub fn resume(run_dir: &Path, binding: Binding, now: u64, bytes: u64) -> std::io::Result<Self> {
-        let first = run_dir.join(WINDOWS_JOURNAL);
-        let mut last: Option<WindowCheck> = None;
-        let mut r = segments::ChainReader::open(&first)?;
-        while let Some(f) = r.next_frame()? {
-            if f.kind == kind::UNTIL_STOPPED_WINDOW {
-                last = Some(f.typed()?);
-            }
-        }
-        let (mut journal, how) = segments::SegmentedWriter::recover(&first, 0)?;
-        let window = last.as_ref().map_or(1, |w| w.window + 1);
-        let started = last.as_ref().map_or(now, |w| w.ended_unix_s);
-        let interrupted = WindowCheck {
-            window,
-            started_unix_s: started,
-            ended_unix_s: now,
-            bytes_written: 0,
-            free_bytes: None,
-            runway_need_bytes: 0,
-            memory_pressure: None,
-            provider: darkbot_solana::provider::WindowUsage {
-                requests: 0,
-                bytes: 0,
+    /// Opens the first window of a new run admitted as `binding` with `qualification_id`.
+    pub fn start(
+        run_dir: &Path,
+        binding: Binding,
+        qualification_id: &str,
+        now: u64,
+        bytes: u64,
+    ) -> std::io::Result<Self> {
+        let mut journal = segments::SegmentedWriter::create(&run_dir.join(WINDOWS_JOURNAL), 0)?;
+        journal.append_typed(
+            Self::provenance(0),
+            &RunRecord {
+                binding: binding.clone(),
+                qualification_id: qualification_id.into(),
+                started_unix_s: now,
             },
-            evidence_id: None,
-            evidence_valid_until_unix_s: None,
-            sealed: None,
-            verdict: CRASH_RECOVERED.into(),
-            detail: format!("{how:?}"),
-        };
-        journal.append_typed(Self::provenance(window), &interrupted)?;
+        )?;
         journal.sync()?;
         Ok(Self {
             binding,
             journal,
-            window: window + 1,
+            window: 1,
             started_unix_s: now,
             bytes_at_start: bytes,
+            halted: None,
+            recovery: None,
         })
+    }
+
+    /// Continues a run after a crash: only the same admitted run (its run record's binding and
+    /// qualification), only one that never halted. The windows journal continues by its
+    /// recovery link; the window the crash interrupted (from the last recorded end to now) is
+    /// checked like any window — `CRASH_RECOVERED` when its gates hold, else its HALT code.
+    pub fn resume(
+        run_dir: &Path,
+        binding: Binding,
+        qualification_id: &str,
+        config: &darkbot_solana::runtime_config::RuntimeConfig,
+        capture_source: &str,
+        m: Measured,
+    ) -> std::io::Result<(Self, WindowCheck)> {
+        let first = run_dir.join(WINDOWS_JOURNAL);
+        let (mut run, mut last): (Option<RunRecord>, Option<WindowCheck>) = (None, None);
+        let mut r = segments::ChainReader::open(&first)?;
+        while let Some(f) = r.next_frame()? {
+            match f.kind {
+                kind::UNTIL_STOPPED_RUN if run.is_none() && last.is_none() => {
+                    run = Some(f.typed()?)
+                }
+                kind::UNTIL_STOPPED_WINDOW if run.is_some() => last = Some(f.typed()?),
+                _ => return Err(coded("UNTIL_STOPPED_JOURNAL_INVALID")),
+            }
+        }
+        let run = run.ok_or_else(|| coded("UNTIL_STOPPED_JOURNAL_INVALID"))?;
+        if run.binding != binding || run.qualification_id != qualification_id {
+            return Err(coded("UNTIL_STOPPED_RESUME_DRIFT"));
+        }
+        if let Some(w) = &last {
+            if w.verdict != CONTINUE && w.verdict != CRASH_RECOVERED {
+                return Err(coded(HALTED));
+            }
+        }
+        let (journal, how) = segments::SegmentedWriter::recover(&first, 0)?;
+        let mut this = Self {
+            binding,
+            journal,
+            window: last.as_ref().map_or(1, |w| w.window + 1),
+            started_unix_s: last.as_ref().map_or(run.started_unix_s, |w| w.ended_unix_s),
+            bytes_at_start: last.as_ref().map_or(0, |w| w.bytes_total),
+            halted: None,
+            recovery: Some(format!("{how:?}")),
+        };
+        let check = this.close(config, capture_source, m)?;
+        Ok((this, check))
     }
 
     fn provenance(window: u64) -> Provenance {
@@ -813,6 +923,11 @@ impl RollingWindows {
         self.window
     }
 
+    /// The HALT code once a window halted the run.
+    pub fn halted(&self) -> Option<&str> {
+        self.halted.as_deref()
+    }
+
     /// Whether the open window ended at `now`.
     pub fn due(&self, now: u64) -> bool {
         now >= self
@@ -820,74 +935,57 @@ impl RollingWindows {
             .saturating_add(self.binding.checkpoint_seconds)
     }
 
-    /// Ends the open window at `now`: re-checks its gates, journals the verdict (durably) and
-    /// opens the next window. `bytes` is the run journals' size now.
-    #[allow(clippy::too_many_arguments)]
+    /// Ends the open window at `m.now`: re-checks its gates, journals the verdict durably and
+    /// opens the next window — or, on a HALT, refuses every further one.
     pub fn close(
         &mut self,
         config: &darkbot_solana::runtime_config::RuntimeConfig,
         capture_source: &str,
-        run_volume: &Path,
-        now: u64,
-        bytes: u64,
-        provider: darkbot_solana::provider::WindowUsage,
-        evidence: Option<(String, provider_evidence::ProviderEvidence)>,
-        sealed: Option<(&Path, [u8; 32])>,
+        m: Measured,
     ) -> std::io::Result<WindowCheck> {
-        let environment = preflight::environment(run_volume);
-        self.close_measured(
-            config,
-            capture_source,
-            run_volume,
-            environment,
-            (now, bytes),
-            provider,
-            evidence,
-            sealed,
-        )
-    }
-
-    /// `close` with the host facts measured by the caller.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn close_measured(
-        &mut self,
-        config: &darkbot_solana::runtime_config::RuntimeConfig,
-        capture_source: &str,
-        run_volume: &Path,
-        environment: preflight::Environment,
-        (now, bytes): (u64, u64),
-        provider: darkbot_solana::provider::WindowUsage,
-        evidence: Option<(String, provider_evidence::ProviderEvidence)>,
-        sealed: Option<(&Path, [u8; 32])>,
-    ) -> std::io::Result<WindowCheck> {
-        let check = check_window(
+        if self.halted.is_some() {
+            return Err(coded(HALTED));
+        }
+        let mut check = check_window(
             config,
             &self.binding,
             capture_source,
             WindowInputs {
                 window: self.window,
                 started_unix_s: self.started_unix_s,
-                ended_unix_s: now,
-                bytes_written: bytes.saturating_sub(self.bytes_at_start),
-                run_volume,
-                environment,
-                provider,
-                evidence,
-                sealed,
+                ended_unix_s: m.now,
+                bytes_written: m.bytes.saturating_sub(self.bytes_at_start),
+                bytes_total: m.bytes,
+                run_volume: m.run_volume,
+                environment: m.environment,
+                provider: m.provider,
+                evidence: m.evidence,
+                sealed: m.sealed,
             },
         );
+        // A resumed run journals its interrupted window under its recovery verdict.
+        if let Some(how) = self.recovery.take() {
+            if check.verdict == CONTINUE {
+                check.verdict = CRASH_RECOVERED.into();
+            }
+            check.detail = format!("{how}; {}", check.detail);
+        }
         self.journal
             .append_typed(Self::provenance(self.window), &check)?;
         self.journal.sync()?;
+        if check.verdict != CONTINUE && check.verdict != CRASH_RECOVERED {
+            self.halted = Some(check.verdict.clone());
+        }
         self.window += 1;
-        self.started_unix_s = now;
-        self.bytes_at_start = bytes;
+        self.started_unix_s = m.now;
+        self.bytes_at_start = m.bytes;
         Ok(check)
     }
 
-    /// Seals the windows journal at the run's end (`complete`: it ended by its operator stop,
-    /// not by a HALT).
-    pub fn finish(mut self, complete: bool) -> std::io::Result<()> {
+    /// Seals the windows journal at the run's end; complete only for an operator stop of a run
+    /// that never halted.
+    pub fn finish(mut self, stopped_by_operator: bool) -> std::io::Result<()> {
+        let complete = stopped_by_operator && self.halted.is_none();
         self.journal.seal(complete).map(|_| ())
     }
 }
@@ -1108,15 +1206,17 @@ pub(crate) mod tests {
         );
     }
 
-    /// DEC-16: the provider evidence must qualify every usable endpoint and stay fresh; a
-    /// window's budget must fit each proof. Without evidence both parts are NOT_RUN.
+    /// DEC-16: the provider evidence must qualify every usable endpoint and stay fresh; its
+    /// available calls must cover every window of the runway (one window's cap is no continuous
+    /// run). Without evidence both parts are NOT_RUN.
     #[test]
-    fn dec16_provider_parts_need_fresh_evidence_that_covers_a_window() {
+    fn dec16_provider_parts_need_fresh_evidence_that_covers_the_runway() {
         let c = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
             ..Default::default()
         };
-        let (e, b, until) = provider(&c, None, 1_000);
+        let run = binding(3_600, 86_400);
+        let (e, b, until) = provider(&c, None, 1_000, &run);
         assert_eq!(
             (e.state, b.state, until),
             (PartState::NotRun, PartState::NotRun, None)
@@ -1138,22 +1238,34 @@ pub(crate) mod tests {
             source_sha256: "s".into(),
         };
         let l = &c.limits;
-        let enough = proof(l.rpc_rps as f64, l.max_requests, 900.0);
-        let (e, b, until) = provider(&c, Some(&enough), 1_000);
+        let runway_calls = l.max_requests * 24;
+        let enough = proof(l.rpc_rps as f64, runway_calls, 900.0);
+        let (e, b, until) = provider(&c, Some(&enough), 1_000, &run);
         assert_eq!(
             (e.state, b.state),
             (PartState::Pass, PartState::Pass),
             "{e:?} {b:?}"
         );
         assert_eq!(until, Some(900 + l.fe_qualification_age_seconds));
+        // One window's calls, or one call less than the runway, are not enough.
+        for calls in [l.max_requests, runway_calls - 1] {
+            let (_, b, _) = provider(
+                &c,
+                Some(&proof(l.rpc_rps as f64, calls, 900.0)),
+                1_000,
+                &run,
+            );
+            assert_eq!(b.state, PartState::Fail, "{calls}: {b:?}");
+        }
         let (_, b, _) = provider(
             &c,
-            Some(&proof(l.rpc_rps as f64, l.max_requests - 1, 900.0)),
+            Some(&proof(l.rpc_rps as f64 - 1.0, runway_calls, 900.0)),
             1_000,
+            &run,
         );
         assert_eq!(b.state, PartState::Fail, "{b:?}");
-        let stale = 1_000 + l.fe_qualification_age_seconds;
-        let (e, _, _) = provider(&c, Some(&enough), stale);
+        let stale = 1_001 + l.fe_qualification_age_seconds;
+        let (e, _, _) = provider(&c, Some(&enough), stale, &run);
         assert_eq!(e.state, PartState::Fail, "{e:?}");
     }
 
@@ -1190,19 +1302,26 @@ pub(crate) mod tests {
             assert!(e.contains(part), "{e}");
         }
         assert!(!e.contains("sk07"), "{e}");
+        // The self-test and the probe ran on the run volume and left nothing.
         assert!(!d
-            .join(STORE)
-            .join(format!(".work.{}", std::process::id()))
+            .join("data/runs")
+            .join(format!(".until-stopped-{}", std::process::id()))
             .exists());
         std::fs::remove_dir_all(d).unwrap();
     }
 
+    /// FREE_ONLY evidence for the configured endpoint that covers `run`'s runway.
     fn evidence_for(
         c: &darkbot_solana::runtime_config::RuntimeConfig,
+        run: &Binding,
         measured: f64,
     ) -> ProviderEvidence {
         let binding =
             journal::hex(&solana_sdk::hash::hash(c.rpc_endpoints[0].as_bytes()).to_bytes());
+        let windows = run
+            .minimum_runway_seconds
+            .div_ceil(run.checkpoint_seconds)
+            .max(1);
         ProviderEvidence {
             providers: vec![ProviderProof {
                 policy: "FREE_ONLY".into(),
@@ -1211,7 +1330,7 @@ pub(crate) mod tests {
                 measured_at_unix_s: measured,
                 evidence_sha256: Some("a".repeat(64)),
                 allowed_rps: c.limits.rpc_rps as f64,
-                available_calls: c.limits.max_requests,
+                available_calls: c.limits.max_requests * windows,
             }],
             wss_provider_binding: None,
             wss_free_only: true,
@@ -1258,6 +1377,7 @@ pub(crate) mod tests {
             started_unix_s: 1_000,
             ended_unix_s: 4_600,
             bytes_written: 3_600 * 1_000,
+            bytes_total: 9 * 3_600 * 1_000,
             run_volume: &d,
             environment: env,
             provider,
@@ -1268,7 +1388,7 @@ pub(crate) mod tests {
             requests: 5,
             bytes: 50,
         };
-        let ok = evidence_for(&c, 4_000.0);
+        let ok = evidence_for(&c, &b, 4_000.0);
         let check = |i| check_window(&c, &b, "logs", i);
         let w0 = check(inputs(
             env.clone(),
@@ -1334,13 +1454,37 @@ pub(crate) mod tests {
             halt(inputs(env.clone(), used, None, sealed.root_sha256)),
             "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING"
         );
-        let stale = evidence_for(
-            &c,
-            4_600.0 - c.limits.fe_qualification_age_seconds as f64 - 1.0,
+        // Valid at the window's end but not through the window to come (ends 8,200).
+        let mut one_window = ok.clone();
+        one_window.providers[0].available_calls = c.limits.max_requests;
+        assert_eq!(
+            halt(inputs(
+                env.clone(),
+                used,
+                Some(one_window),
+                sealed.root_sha256
+            )),
+            "UNTIL_STOPPED_PROVIDER_BUDGET_UNQUALIFIED"
+        );
+        let mut short_age = c.clone();
+        short_age.limits.fe_qualification_age_seconds = 4_000;
+        // Measured at 4,000: fresh through 8,000 — not through the window to come (8,200).
+        let expired = check_window(
+            &short_age,
+            &b,
+            "logs",
+            inputs(env.clone(), used, Some(ok.clone()), sealed.root_sha256),
         );
         assert_eq!(
-            halt(inputs(env.clone(), used, Some(stale), sealed.root_sha256)),
-            "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED"
+            expired.verdict, "UNTIL_STOPPED_PROVIDER_EVIDENCE_EXPIRED",
+            "{}",
+            expired.detail
+        );
+        let mut free = ok.clone();
+        free.providers[0].policy = "PAID".into();
+        assert_eq!(
+            halt(inputs(env.clone(), used, Some(free), sealed.root_sha256)),
+            "UNTIL_STOPPED_PROVIDER_EVIDENCE_UNQUALIFIED"
         );
         // A changed sealed segment on disk.
         let mut bytes = std::fs::read(&sealed_path).unwrap();
@@ -1356,124 +1500,243 @@ pub(crate) mod tests {
     }
 
     /// DEC-16: a running window takes the newest provider evidence the operator imported that
-    /// is valid at its end; an expired or unreadable record is never taken.
+    /// qualifies the run (evidence and runway budget) through the given time; an expired, a
+    /// short or an unreadable record is never taken.
     #[test]
-    fn dec16_a_window_takes_the_newest_valid_provider_evidence() {
+    fn dec16_a_window_takes_the_newest_qualifying_provider_evidence() {
         let d = temp("newest");
         let c = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
             ..Default::default()
         };
-        assert!(newest_evidence(&d, &c, 5_000).is_none());
-        let import = |measured: f64| {
-            let file = d.join(format!("e{measured}.p0j"));
-            journal::write_typed_value(&file, 0, &evidence_for(&c, measured)).unwrap();
+        let run = binding(3_600, 86_400);
+        assert!(newest_evidence(&d, &c, &run, 5_000).is_none());
+        let import = |e: &ProviderEvidence, tag: &str| {
+            let file = d.join(format!("e{tag}.p0j"));
+            journal::write_typed_value(&file, 0, e).unwrap();
             provider_evidence::import(&d, &file).unwrap()
         };
-        let older = import(1_000.0);
-        let newer = import(3_000.0);
-        let (id, _) = newest_evidence(&d, &c, 5_000).unwrap();
-        assert_eq!(id, newer);
-        let expired = 1_001 + c.limits.fe_qualification_age_seconds;
-        assert_eq!(newest_evidence(&d, &c, expired).unwrap().0, newer);
-        assert!(newest_evidence(&d, &c, 3_001 + c.limits.fe_qualification_age_seconds).is_none());
+        let older = import(&evidence_for(&c, &run, 1_000.0), "older");
+        let newer = import(&evidence_for(&c, &run, 3_000.0), "newer");
+        let mut short = evidence_for(&c, &run, 4_000.0);
+        short.providers[0].available_calls = c.limits.max_requests;
+        import(&short, "short");
+        let age = c.limits.fe_qualification_age_seconds;
+        assert_eq!(newest_evidence(&d, &c, &run, 5_000).unwrap().0, newer);
+        assert_eq!(newest_evidence(&d, &c, &run, 1_001 + age).unwrap().0, newer);
+        assert!(newest_evidence(&d, &c, &run, 3_001 + age).is_none());
         std::fs::write(
             d.join(provider_evidence::STORE)
                 .join(format!("{newer}.p0j")),
             b"x",
         )
         .unwrap();
-        assert_eq!(newest_evidence(&d, &c, 5_000).unwrap().0, older);
+        assert_eq!(newest_evidence(&d, &c, &run, 5_000).unwrap().0, older);
         std::fs::remove_dir_all(d).unwrap();
     }
 
-    /// DEC-16: the rolling windows of an unbounded run: due at their end, each verdict journaled
-    /// durably (CONTINUE or a HALT code), and after a crash the run resumes — the windows journal
-    /// continues by its SK-07 recovery and the interrupted window is recorded.
-    #[test]
-    fn dec16_rolling_windows_journal_every_verdict_and_resume_after_a_crash() {
-        let d = temp("windows");
-        let c = darkbot_solana::runtime_config::RuntimeConfig {
-            rpc_endpoints: vec!["https://rpc.invalid".into()],
-            ..Default::default()
-        };
-        let b = binding(60, 3_600);
-        let env = preflight::Environment {
-            free_disk_bytes: Some(u64::MAX / 4),
-            memory_pressure: Some(1),
-            ..Default::default()
-        };
-        let ev = || Some(("0123456789abcdef".to_string(), evidence_for(&c, 1_000.0)));
-        let usage = |requests| darkbot_solana::provider::WindowUsage { requests, bytes: 0 };
-        let mut w = RollingWindows::start(&d, b.clone(), 1_000, 0).unwrap();
-        assert!(!w.due(1_059) && w.due(1_060));
-        let first = w
-            .close_measured(
-                &c,
-                "logs",
-                &d,
-                env.clone(),
-                (1_060, 6_000),
-                usage(1),
-                ev(),
-                None,
-            )
-            .unwrap();
-        assert_eq!(
-            (first.window, first.verdict.as_str(), first.bytes_written),
-            (1, CONTINUE, 6_000)
-        );
-        let halted = w
-            .close_measured(
-                &c,
-                "logs",
-                &d,
-                env.clone(),
-                (1_120, 6_000),
-                usage(c.limits.max_requests),
-                ev(),
-                None,
-            )
-            .unwrap();
-        assert_eq!(halted.verdict, "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED");
-        drop(w); // crash: the windows journal is never sealed
-        let mut w = RollingWindows::resume(&d, b.clone(), 1_300, 6_000).unwrap();
-        assert_eq!(w.window(), 4);
-        let after = w
-            .close_measured(&c, "logs", &d, env, (1_360, 9_000), usage(1), ev(), None)
-            .unwrap();
-        assert_eq!(
-            (after.window, after.verdict.as_str(), after.bytes_written),
-            (4, CONTINUE, 3_000)
-        );
-        w.finish(true).unwrap();
-        let journal = d.join(WINDOWS_JOURNAL);
-        let mut r = segments::ChainReader::open(&journal).unwrap();
-        let mut seen = Vec::new();
-        while let Some(f) = r.next_frame().unwrap() {
-            if f.kind == kind::UNTIL_STOPPED_WINDOW {
-                let w: WindowCheck = f.typed().unwrap();
-                seen.push((w.window, w.verdict, w.started_unix_s, w.ended_unix_s));
+    /// A journaled window: index, verdict, start, end, bytes written.
+    type Seen = (u64, String, u64, u64, u64);
+
+    struct Run {
+        dir: PathBuf,
+        config: darkbot_solana::runtime_config::RuntimeConfig,
+        binding: Binding,
+    }
+    impl Run {
+        fn new(tag: &str) -> Self {
+            Self {
+                dir: temp(tag),
+                config: darkbot_solana::runtime_config::RuntimeConfig {
+                    rpc_endpoints: vec!["https://rpc.invalid".into()],
+                    ..Default::default()
+                },
+                binding: binding(60, 3_600),
             }
         }
+        fn at(&self, now: u64, bytes: u64, requests: u64, free: u64) -> Measured<'_> {
+            Measured {
+                now,
+                bytes,
+                run_volume: &self.dir,
+                environment: preflight::Environment {
+                    free_disk_bytes: Some(free),
+                    memory_pressure: Some(1),
+                    ..Default::default()
+                },
+                provider: darkbot_solana::provider::WindowUsage { requests, bytes: 0 },
+                evidence: Some((
+                    "0123456789abcdef".into(),
+                    evidence_for(&self.config, &self.binding, 1_000.0),
+                )),
+                sealed: None,
+            }
+        }
+        fn windows(&self) -> (Vec<Seen>, segments::ChainSummary) {
+            let journal = self.dir.join(WINDOWS_JOURNAL);
+            let mut r = segments::ChainReader::open(&journal).unwrap();
+            let mut seen = Vec::new();
+            while let Some(f) = r.next_frame().unwrap() {
+                if f.kind == kind::UNTIL_STOPPED_WINDOW {
+                    let w: WindowCheck = f.typed().unwrap();
+                    seen.push((
+                        w.window,
+                        w.verdict,
+                        w.started_unix_s,
+                        w.ended_unix_s,
+                        w.bytes_written,
+                    ));
+                }
+            }
+            (seen, segments::verify_chain(&journal).unwrap())
+        }
+    }
+    impl Drop for Run {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+    const FREE: u64 = u64::MAX / 4;
+
+    /// DEC-16: the windows of an unbounded run are due at their end and journaled durably; after
+    /// a crash the same run resumes — the journal continues by its SK-07 recovery, the window
+    /// the crash interrupted is checked like any window (CRASH_RECOVERED, its data rate since
+    /// the last recorded window) — and the run is never complete afterwards.
+    #[test]
+    fn dec16_rolling_windows_resume_the_same_run_after_a_crash() {
+        let r = Run::new("windows_resume");
+        let mut w = RollingWindows::start(&r.dir, r.binding.clone(), "q1", 1_000, 0).unwrap();
+        assert!(!w.due(1_059) && w.due(1_060));
+        let first = w
+            .close(&r.config, "logs", r.at(1_060, 6_000, 1, FREE))
+            .unwrap();
+        assert_eq!(first.verdict, CONTINUE, "{}", first.detail);
+        drop(w); // crash: never sealed
+        let (mut w, interrupted) = RollingWindows::resume(
+            &r.dir,
+            r.binding.clone(),
+            "q1",
+            &r.config,
+            "logs",
+            r.at(1_300, 9_000, 0, FREE),
+        )
+        .unwrap();
+        assert_eq!(
+            interrupted.verdict, CRASH_RECOVERED,
+            "{}",
+            interrupted.detail
+        );
+        assert!(
+            interrupted.detail.starts_with("Crash"),
+            "{}",
+            interrupted.detail
+        );
+        let after = w
+            .close(&r.config, "logs", r.at(1_360, 9_500, 1, FREE))
+            .unwrap();
+        assert_eq!(after.verdict, CONTINUE);
+        w.finish(true).unwrap();
+        let (seen, chain) = r.windows();
         assert_eq!(
             seen,
             [
-                (1, CONTINUE.to_string(), 1_000, 1_060),
-                (
-                    2,
-                    "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED".to_string(),
-                    1_060,
-                    1_120
-                ),
-                (3, CRASH_RECOVERED.to_string(), 1_120, 1_300),
-                (4, CONTINUE.to_string(), 1_300, 1_360),
+                (1, CONTINUE.into(), 1_000, 1_060, 6_000),
+                (2, CRASH_RECOVERED.into(), 1_060, 1_300, 3_000),
+                (3, CONTINUE.into(), 1_300, 1_360, 500),
             ]
         );
-        let s = segments::verify_chain(&journal).unwrap();
-        assert!(s.sealed && s.complete && s.recovered == 1, "{s:?}");
+        assert!(
+            chain.sealed && !chain.complete && chain.recovered == 1,
+            "{chain:?}"
+        );
         // A run that ended in order is never resumed.
-        assert!(RollingWindows::resume(&d, b, 1_400, 9_000).is_err());
-        std::fs::remove_dir_all(d).unwrap();
+        assert!(RollingWindows::resume(
+            &r.dir,
+            r.binding.clone(),
+            "q1",
+            &r.config,
+            "logs",
+            r.at(1_400, 9_500, 0, FREE)
+        )
+        .is_err());
+    }
+
+    /// DEC-16: a HALT is final — no further window, no resume after a crash.
+    #[test]
+    fn dec16_a_halt_is_final_even_across_a_crash() {
+        let r = Run::new("windows_halt");
+        let mut w = RollingWindows::start(&r.dir, r.binding.clone(), "q1", 1_000, 0).unwrap();
+        let halted = w
+            .close(
+                &r.config,
+                "logs",
+                r.at(1_060, 6_000, r.config.limits.max_requests, FREE),
+            )
+            .unwrap();
+        assert_eq!(halted.verdict, "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED");
+        assert_eq!(w.halted(), Some("UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED"));
+        let refused = w
+            .close(&r.config, "logs", r.at(1_120, 6_000, 0, FREE))
+            .unwrap_err();
+        assert_eq!(refused.to_string(), HALTED);
+        drop(w); // crash before the HALT was sealed
+        let refused = RollingWindows::resume(
+            &r.dir,
+            r.binding.clone(),
+            "q1",
+            &r.config,
+            "logs",
+            r.at(1_300, 6_000, 0, FREE),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(refused.to_string(), HALTED);
+        assert_eq!(
+            r.windows().0.len(),
+            1,
+            "nothing was journaled after the HALT"
+        );
+    }
+
+    /// DEC-16: only the admitted run resumes (its run record's binding and qualification), and
+    /// a resumed run's interrupted window halts it when a gate no longer holds.
+    #[test]
+    fn dec16_a_resume_binds_its_run_and_rechecks_every_gate() {
+        let r = Run::new("windows_drift");
+        let mut w = RollingWindows::start(&r.dir, r.binding.clone(), "q1", 1_000, 0).unwrap();
+        w.close(&r.config, "logs", r.at(1_060, 6_000, 1, FREE))
+            .unwrap();
+        drop(w);
+        let mut other = r.binding.clone();
+        other.binary_sha256 = "other".into();
+        for (b, q) in [(other, "q1"), (r.binding.clone(), "q2")] {
+            let e = RollingWindows::resume(
+                &r.dir,
+                b,
+                q,
+                &r.config,
+                "logs",
+                r.at(1_300, 6_000, 0, FREE),
+            )
+            .err()
+            .unwrap();
+            assert_eq!(e.to_string(), "UNTIL_STOPPED_RESUME_DRIFT");
+        }
+        let (mut w, interrupted) = RollingWindows::resume(
+            &r.dir,
+            r.binding.clone(),
+            "q1",
+            &r.config,
+            "logs",
+            r.at(1_300, 6_000, 0, 1),
+        )
+        .unwrap();
+        assert_eq!(interrupted.verdict, "UNTIL_STOPPED_RUNWAY_EXHAUSTED");
+        assert_eq!(
+            w.close(&r.config, "logs", r.at(1_360, 6_000, 0, FREE))
+                .unwrap_err()
+                .to_string(),
+            HALTED
+        );
     }
 }

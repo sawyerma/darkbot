@@ -207,7 +207,8 @@ mod tests {
     use darkbot_runner::storage::segments::{segment_path, SegmentedWriter};
 
     /// DEC-16: a chain continued after a crash (its crashed segment with a torn tail) verifies
-    /// with its recovery reported; the crashed segment's readable frames are counted.
+    /// INCOMPLETE (frames may be lost) with its recovery reported; the crashed segment's
+    /// readable frames are counted.
     #[test]
     fn dec16_verify_reports_a_recovered_chain() {
         let d = std::env::temp_dir().join(format!("p0_journal_recovered_{}", std::process::id()));
@@ -231,7 +232,7 @@ mod tests {
         w.append_typed(Provenance::default(), &row(9)).unwrap();
         w.seal(true).unwrap();
         let line = super::verify(&first).unwrap();
-        assert!(line.starts_with("JOURNAL status=COMPLETE "), "{line}");
+        assert!(line.starts_with("JOURNAL status=INCOMPLETE "), "{line}");
         assert!(
             line.contains(" segments=2 ") && line.contains(" recovered=1 "),
             "{line}"

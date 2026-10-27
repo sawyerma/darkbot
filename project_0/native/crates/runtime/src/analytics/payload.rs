@@ -875,6 +875,9 @@ macro_rules! typed_kinds {
             k::UNTIL_STOPPED_WINDOW => {
                 $f::<crate::orchestration::until_stopped::WindowCheck>($kind, $schema, $bytes)
             }
+            k::UNTIL_STOPPED_RUN => {
+                $f::<crate::orchestration::until_stopped::RunRecord>($kind, $schema, $bytes)
+            }
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::ECON_SNAPSHOT => $f::<super::econ::SnapshotFrame>($kind, $schema, $bytes),
             k::ECON_FINAL => $f::<super::econ::SnapshotReport>($kind, $schema, $bytes),

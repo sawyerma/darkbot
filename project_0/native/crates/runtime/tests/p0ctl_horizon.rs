@@ -126,8 +126,10 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
     ]);
     assert_eq!(code, 2);
     assert!(err.contains("drift: runtime_config,horizon"), "{err}");
-    // Refused before any start step: no owner lock, no run directory.
-    assert!(!ctl.project.join("data/runs").exists());
+    // Refused before any start step: no owner lock, no run directory (the qualification's
+    // probe ran on the run volume and left nothing).
+    let runs = ctl.project.join("data/runs");
+    assert!(!runs.exists() || std::fs::read_dir(&runs).unwrap().next().is_none());
     let (code, _, err) = start(&["--duration", "1h"]);
     assert_eq!(code, 2);
     assert!(err.contains("exclusive"), "{err}");

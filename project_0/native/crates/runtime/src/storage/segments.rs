@@ -110,6 +110,41 @@ pub fn is_continuation(path: &Path) -> bool {
         && path.extension().and_then(|x| x.to_str()) == Some("p0j")
 }
 
+/// Creates segment `path` with its first control frame atomically (DEC-16): written and synced
+/// under a temporary name, then linked into place — never over an existing file — so a crash
+/// leaves no header-only segment that would block the chain's recovery.
+fn create_with<P: Payload>(path: &Path, first: &P) -> io::Result<Writer> {
+    let temp = temp_path(path);
+    let _ = std::fs::remove_file(&temp);
+    let mut w = Writer::create(&temp)?;
+    let created = (|| {
+        w.append_typed(
+            Provenance {
+                source: journal::source::STORAGE,
+                ..Default::default()
+            },
+            first,
+        )?;
+        w.sync()?;
+        std::fs::hard_link(&temp, path)?;
+        std::fs::File::open(
+            path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )?
+        .sync_all()
+    })();
+    let _ = std::fs::remove_file(&temp);
+    created?;
+    w.path = path.to_path_buf();
+    Ok(w)
+}
+
+/// The temporary name a segment is written under before it is linked into place.
+fn temp_path(path: &Path) -> PathBuf {
+    path.with_file_name(format!(".{}.tmp", file_name(path)))
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -160,10 +195,6 @@ impl SegmentedWriter {
         while r.next_frame()?.is_some() {}
         let index = r.segments();
         let crashed = segment_path(first, index);
-        let control = Provenance {
-            source: journal::source::STORAGE,
-            ..Default::default()
-        };
         let previous = SegmentRef {
             file: file_name(&crashed),
             index,
@@ -172,14 +203,13 @@ impl SegmentedWriter {
             events_through: r.events,
         };
         let next_path = segment_path(first, index + 1);
-        let (set_id, recovered, mut next) = if r.reader.sealed {
+        let (set_id, recovered, next) = if r.reader.sealed {
             // Sealed with an announced, missing successor: the interrupted rotation.
             let (Some(set_id), true) = (r.set_id, r.announced_missing) else {
                 return Err(bad("SEGMENT_CHAIN_SEALED"));
             };
-            let mut next = Writer::create(&next_path)?;
-            next.append_typed(
-                control,
+            let next = create_with(
+                &next_path,
                 &SegmentLink {
                     set_id,
                     index: index + 1,
@@ -195,9 +225,8 @@ impl SegmentedWriter {
                 Some(id) => id,
                 None => journal::random16()?,
             };
-            let mut next = Writer::create(&next_path)?;
-            next.append_typed(
-                control,
+            let next = create_with(
+                &next_path,
                 &SegmentRecovery {
                     set_id,
                     index: index + 1,
@@ -214,7 +243,6 @@ impl SegmentedWriter {
                 next,
             )
         };
-        next.sync()?;
         let mut sealed_bytes = 0;
         for i in 1..=index {
             sealed_bytes += std::fs::metadata(segment_path(first, i))?.len();
@@ -290,7 +318,7 @@ impl SegmentedWriter {
             ..Default::default()
         };
         self.writer.append_typed(
-            control.clone(),
+            control,
             &SegmentNext {
                 set_id: self.set_id,
                 index: self.index,
@@ -305,16 +333,14 @@ impl SegmentedWriter {
             root_sha256: durable.hash,
             events_through: self.events_sealed + self.events_current,
         };
-        let mut next = Writer::create(&next_path)?;
-        next.append_typed(
-            control,
+        let next = create_with(
+            &next_path,
             &SegmentLink {
                 set_id: self.set_id,
                 index: next_index,
                 previous: previous.clone(),
             },
         )?;
-        next.sync()?;
         self.sealed_bytes += self.writer.position();
         self.events_sealed += self.events_current;
         self.events_current = 0;
@@ -401,6 +427,9 @@ impl ChainReader {
                 Some(f) if f.kind == kind::SEGMENT_LINK => {
                     return Err(bad("SEGMENT_LINK_MISPLACED"))
                 }
+                Some(f) if f.kind == kind::SEGMENT_RECOVERY => {
+                    return Err(bad("SEGMENT_RECOVERY_MISPLACED"))
+                }
                 Some(f) => {
                     if self.next_file.is_some() {
                         if f.kind == journal::MANIFEST {
@@ -415,8 +444,10 @@ impl ChainReader {
                     return Ok(Some(f));
                 }
                 None => {
+                    // DEC-16: a chain continued after a crash may have lost frames: never
+                    // complete, however its last segment was sealed.
                     self.sealed = self.reader.sealed;
-                    self.complete = self.reader.complete;
+                    self.complete = self.reader.complete && self.recovered == 0;
                     let announced = self.next_file.take();
                     let path = segment_path(&self.first, self.index + 1);
                     let successor = match std::fs::symlink_metadata(&path) {
@@ -449,8 +480,16 @@ impl ChainReader {
                         root_sha256: self.reader.root(),
                         events_through: self.events,
                     };
-                    let mut next = journal::Reader::open_capture(&path)?;
-                    match next.next_frame()? {
+                    // Without an announced successor any unreadable or foreign file there is an
+                    // orphan.
+                    let opened = journal::Reader::open_capture(&path)
+                        .and_then(|mut n| n.next_frame().map(|f| (n, f)));
+                    let (next, first) = match opened {
+                        Ok(read) => read,
+                        Err(_) if announced.is_none() => return Err(bad("SEGMENT_ORPHAN")),
+                        Err(e) => return Err(e),
+                    };
+                    match first {
                         Some(f) if f.kind == kind::SEGMENT_RECOVERY && !self.reader.sealed => {
                             let rec = f.typed::<SegmentRecovery>()?;
                             let crashed =
@@ -882,7 +921,7 @@ mod tests {
                     s.recovered,
                     s.torn_bytes
                 ),
-                (n + 2, 49, true, true, 1, torn_bytes),
+                (n + 2, 49, true, false, 1, torn_bytes),
                 "{max}"
             );
             let replayed: Vec<u64> = replay(&first).unwrap().iter().map(|r| r.0).collect();
@@ -1030,6 +1069,101 @@ mod tests {
         }
     }
 
+    /// DEC-16: a recovery link names its chain and position: another set id or index fails
+    /// closed, and a recovery frame anywhere but a successor's first frame is refused.
+    #[test]
+    fn dec16_a_recovery_link_names_its_set_and_index_and_sits_only_first() {
+        let d = dir("recover_forged");
+        let first = d.join("market.p0j");
+        let n = write(&first, 4096, &rows(20), false);
+        assert!(n >= 2, "the chain rotated: its set id is known");
+        let crashed = segment_path(&first, n);
+        let bytes = std::fs::read(&crashed).unwrap();
+        std::fs::write(&crashed, &bytes[..bytes.len() - 5]).unwrap();
+        let mut r = ChainReader::open(&first).unwrap();
+        while r.next_frame().unwrap().is_some() {}
+        let previous = SegmentRef {
+            file: file_name(&crashed),
+            index: n,
+            frames: r.reader.frames(),
+            root_sha256: r.reader.root(),
+            events_through: r.events(),
+        };
+        let torn_bytes = std::fs::metadata(&crashed).unwrap().len() - r.reader.position();
+        let forge = |set_id: [u8; 16], index: u32| {
+            let path = segment_path(&first, n + 1);
+            let _ = std::fs::remove_file(&path);
+            let mut w = Writer::create(&path).unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &SegmentRecovery {
+                    set_id,
+                    index,
+                    previous: previous.clone(),
+                    torn_bytes,
+                },
+            )
+            .unwrap();
+            w.seal(true).unwrap();
+            verify_chain(&first)
+        };
+        let real = r.set_id.unwrap();
+        assert!(forge(real, n + 1).is_ok());
+        assert!(forge([9; 16], n + 1)
+            .unwrap_err()
+            .contains("SEGMENT_RECOVERY_MISMATCH"));
+        assert!(forge(real, n + 5)
+            .unwrap_err()
+            .contains("SEGMENT_RECOVERY_MISMATCH"));
+        // A recovery frame inside a segment is no event.
+        let lone = d.join("lone.p0j");
+        let mut w = Writer::create(&lone).unwrap();
+        w.append_typed(
+            Provenance::default(),
+            &SegmentRecovery {
+                set_id: real,
+                index: 2,
+                previous,
+                torn_bytes: 0,
+            },
+        )
+        .unwrap();
+        w.seal(true).unwrap();
+        assert!(verify_chain(&lone)
+            .unwrap_err()
+            .contains("SEGMENT_RECOVERY_MISPLACED"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a successor is linked into place only complete with its first frame; a crash
+    /// while it is written leaves only its temporary file, which never blocks the recovery.
+    #[test]
+    fn dec16_a_temporary_successor_never_blocks_the_recovery() {
+        let d = dir("recover_temp");
+        let first = d.join("market.p0j");
+        write(&first, 0, &rows(4), false);
+        let stale = temp_path(&segment_path(&first, 2));
+        std::fs::write(&stale, b"a header and nothing more").unwrap();
+        assert!(
+            verify_chain(&first).is_ok(),
+            "a temporary file is no segment"
+        );
+        let (mut w, how) = SegmentedWriter::recover(&first, 0).unwrap();
+        assert!(
+            matches!(how, Recovered::Crash { segment: 1, .. }),
+            "{how:?}"
+        );
+        assert!(!stale.exists());
+        append_rows(&mut w, &rows(2));
+        w.seal(true).unwrap();
+        let s = verify_chain(&first).unwrap();
+        assert_eq!(
+            (s.segments, s.events, s.sealed, s.complete, s.recovered),
+            (2, 6, true, false, 1)
+        );
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
     /// DEC-16: a rotation interrupted after its seal is finished with the announced successor
     /// (its normal link, no recovery); interrupted before the seal it is a crash.
     #[test]
@@ -1076,7 +1210,7 @@ mod tests {
             let s = verify_chain(&p).unwrap();
             assert_eq!(
                 (s.segments, s.events, s.complete, s.recovered),
-                (2, 5, true, u32::from(!sealed))
+                (2, 5, sealed, u32::from(!sealed))
             );
             std::fs::remove_dir_all(d).unwrap();
         }
