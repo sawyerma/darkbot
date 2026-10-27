@@ -797,5 +797,53 @@ fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
     bounded.insert("P0_MEASUREMENT_DURATION", "1m".into());
     bounded.insert("P0_MARKET_DURATION_SECS", "60".into());
     assert!(admit(&bounded).unwrap().rolling.is_none());
+    // An autostarted capture runs only under the standing approval in force for exactly this
+    // run, and takes its maximum runtime; a revoked one admits nothing.
+    use super::super::autostart as auto;
+    assert_eq!(rolling.max_runtime_seconds, None);
+    let grant = auto::Grant {
+        binding: binding.clone(),
+        operational: vec![],
+        duration: "until-stopped:1m:2m".into(),
+        qualification_id: id.clone(),
+        provider_evidence_id: "0123456789abcdef".into(),
+        genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+        capture_source: "logs".into(),
+        budget: auto::WindowBudget::of(&config().unwrap()),
+        max_runtime_seconds: 600,
+        expires_unix_s: 5_000,
+    };
+    let mut autostarted = full.clone();
+    autostarted.insert(auto::ENV_AUTOSTART, grant.digest().unwrap());
+    assert_eq!(admit(&autostarted).err(), Some("AUTOSTART_NOT_PERMITTED"));
+    auto::record(
+        &d,
+        &auto::Event::Granted {
+            grant: Box::new(grant.clone()),
+            granted_unix_s: 1_000,
+        },
+    )
+    .unwrap();
+    let rolling = admit(&autostarted).unwrap().rolling.unwrap();
+    assert_eq!(rolling.max_runtime_seconds, Some(600));
+    let mut drifted = autostarted.clone();
+    drifted.insert(
+        ENV_UNTIL_STOPPED_QUALIFICATION,
+        us::put(&d, &{
+            let mut q = complete.clone();
+            q.qualified_at_unix_s += 1;
+            q
+        })
+        .unwrap(),
+    );
+    assert_eq!(admit(&drifted).err(), Some("AUTOSTART_NOT_PERMITTED"));
+    auto::record(
+        &d,
+        &auto::Event::Revoked {
+            revoked_unix_s: 1_002,
+        },
+    )
+    .unwrap();
+    assert_eq!(admit(&autostarted).err(), Some("AUTOSTART_NOT_PERMITTED"));
     let _ = std::fs::remove_dir_all(d);
 }

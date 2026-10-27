@@ -1,5 +1,6 @@
 //! Single state-owner lifecycle and bounded worker coordination.
 
+pub mod autostart;
 pub mod boot_audit;
 pub mod boot_control;
 pub mod capability_control;

@@ -123,6 +123,8 @@ pub mod kind {
     pub const UNTIL_STOPPED_WINDOW: u16 = 505;
     /// DEC-16: the first frame of an unbounded run's windows journal (what it was admitted as).
     pub const UNTIL_STOPPED_RUN: u16 = 506;
+    /// DEC-16: the standing autostart approval's grants and revocations.
+    pub const UNTIL_STOPPED_AUTOSTART: u16 = 507;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
@@ -221,6 +223,7 @@ pub mod kind {
         UNTIL_STOPPED_QUALIFICATION,
         UNTIL_STOPPED_WINDOW,
         UNTIL_STOPPED_RUN,
+        UNTIL_STOPPED_AUTOSTART,
         MT0_SNAPSHOT,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,

@@ -13,6 +13,7 @@
 //! p0ctl [--project DIR] run start --until-stopped --checkpoint D --minimum-runway D [--qualification ID]   (DEC-16: RunHorizon::admit)
 //! p0ctl [--project DIR] horizon qualify --mode econ4h|market|shadow --checkpoint D --minimum-runway D [--provider-evidence ID|FILE] [-- OPERATIONAL_ARGS...]
 //! p0ctl [--project DIR] horizon status --qualification ID
+//! p0ctl [--project DIR] autostart preview|grant|revoke|status|start …   (DEC-16: the standing autostart approval)
 //! p0ctl [--project DIR] run status [--run RUN_ID]
 //! p0ctl [--project DIR] run stop [--run RUN_ID]
 //! p0ctl [--project DIR] runs list
@@ -485,9 +486,12 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(POLL);
     }
 }
+
+/// The cadence a waiting controller re-reads a worker's state at.
+const POLL: Duration = Duration::from_millis(200);
 
 /// Last occurrence of each status tag in the bounded tail of the runtime log.
 fn log_tail(path: &Path) -> Vec<String> {
@@ -813,6 +817,258 @@ fn horizon_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         _ => Err(HORIZON_USAGE.into()),
+    }
+}
+
+const AUTOSTART_USAGE: &str = "usage: p0ctl autostart preview --qualification ID --checkpoint D --minimum-runway D --genesis-hash HASH --max-runtime D (--valid-for D | --expires-unix-s N) [--capture-source logs|transactions]
+  | p0ctl autostart grant  (the preview's options with --expires-unix-s N) --confirm DIGEST
+  | p0ctl autostart revoke | p0ctl autostart status | p0ctl autostart start
+DEC-16: the standing approval for the autostart of an unbounded raw capture (Dauerfreigabe),
+separate from its qualification and from LIVE (disabled): bound to the run (mode, configuration
+hash, executables, window, runway), its qualification, provider evidence, genesis pin, capture
+source, window budget, the maximum runtime of each autostarted run and its expiry; the grant
+records exactly the previewed binding (its digest). `start` (the app's autostart) runs the whole
+boot flow under it - offline audit, network audit, start - and the capture admits itself under
+it. A revocation ends it at once.";
+
+/// DEC-16: `p0ctl autostart` — the standing approval of an unbounded raw capture's autostart.
+fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::autostart::{
+        self as auto, Event, Grant, Terms, WindowBudget,
+    };
+    use darkbot_runner::orchestration::boot_control as bc;
+    use darkbot_solana::runtime_config::duration_seconds;
+    let need = |flag: &str| -> Result<String, String> {
+        given(args, flag)?.ok_or_else(|| format!("{flag} required\n{AUTOSTART_USAGE}"))
+    };
+    let now = unix_now()?;
+    // The run as it would start now: its binding and its window budget.
+    let run_of =
+        |mode: &str, duration: &str| -> Result<(until_stopped::Binding, WindowBudget), String> {
+            if mode != boot_audit::MARKET_MODE {
+                return Err(format!(
+                    "AUTOSTART_MODE: {mode} (the app autostarts the raw capture, mode market)"
+                ));
+            }
+            load_capture_env()?;
+            let (binding, resolved) = until_stopped::binding(
+                project,
+                mode,
+                &[],
+                duration,
+                &|k| std::env::var(k).ok(),
+                &boot_audit::binary_identity_for,
+            )?;
+            Ok((binding, WindowBudget::of(&resolved.config)))
+        };
+    // Whether the grant permits an autostart now: its run unchanged and still admitted.
+    let permitted = |g: &Grant| -> Result<(), String> {
+        let (binding, budget) = run_of(&g.binding.mode, &g.duration)?;
+        g.permits(&binding, &budget, now)?;
+        raw_capture_source(Some(g.capture_source.clone()))
+            .map_err(|e| format!("AUTOSTART_NOT_PERMITTED: {e}"))?;
+        let q = until_stopped::get(project, &g.qualification_id)?;
+        RunHorizon::of(darkbot_solana::runtime_config::horizon(&g.duration)?)
+            .admit(Some(&q), &binding, now)
+            .map_err(|gaps| format!("AUTOSTART_NOT_PERMITTED: {gaps}"))
+    };
+    match args.first().map(String::as_str) {
+        Some(step @ ("preview" | "grant")) => {
+            let qid = need("--qualification")?;
+            let q = until_stopped::get(project, &qid)?;
+            let (checkpoint, runway) = (need("--checkpoint")?, need("--minimum-runway")?);
+            let duration = darkbot_solana::runtime_config::until_stopped(&checkpoint, &runway)?;
+            let (binding, budget) = run_of(&q.binding.mode, &duration)?;
+            let expires_unix_s = match (
+                given(args, "--expires-unix-s")?,
+                given(args, "--valid-for")?,
+            ) {
+                (Some(at), None) => at
+                    .parse::<u64>()
+                    .map_err(|_| "--expires-unix-s: unix seconds")?,
+                (None, Some(d)) if step == "preview" => now.saturating_add(duration_seconds(&d)?),
+                _ => {
+                    return Err(format!(
+                        "AUTOSTART_EXPIRY: preview takes --valid-for D or --expires-unix-s N, grant the previewed --expires-unix-s N\n{AUTOSTART_USAGE}"
+                    ))
+                }
+            };
+            let (genesis, max_runtime) = (need("--genesis-hash")?, need("--max-runtime")?);
+            let grant = Grant::for_run(
+                &q,
+                &qid,
+                &binding,
+                &[],
+                &duration,
+                budget,
+                Terms {
+                    genesis_hash: genesis.clone(),
+                    capture_source: raw_capture_source(given(args, "--capture-source")?)?,
+                    max_runtime_seconds: duration_seconds(&max_runtime)?,
+                    expires_unix_s,
+                },
+                now,
+            )?;
+            let digest = grant.digest()?;
+            print!("{}", grant.terminal()?);
+            if step == "preview" {
+                println!(
+                    "AUTOSTART_PREVIEW {digest}: to grant exactly this binding: p0ctl autostart grant --qualification {qid} --checkpoint {checkpoint} --minimum-runway {runway} --genesis-hash {genesis} --max-runtime {max_runtime} --expires-unix-s {expires_unix_s} --capture-source {} --confirm {digest}",
+                    grant.capture_source
+                );
+                return Ok(true);
+            }
+            if need("--confirm")? != digest {
+                return Err(format!(
+                    "AUTOSTART_CONFIRM_MISMATCH: the binding now is {digest}, not the confirmed one (preview again)"
+                ));
+            }
+            let replaced = auto::current(project)?
+                .map(|(_, g, _)| g.digest())
+                .transpose()?;
+            let seq = auto::record(
+                project,
+                &Event::Granted {
+                    grant: Box::new(grant),
+                    granted_unix_s: now,
+                },
+            )?;
+            println!(
+                "AUTOSTART_GRANTED {digest} (event {seq}){}",
+                replaced.map_or(String::new(), |r| format!("; replaces {r}"))
+            );
+            Ok(true)
+        }
+        Some("revoke") => {
+            let (_, g, _) = auto::current(project)?
+                .ok_or("AUTOSTART_NOT_GRANTED: no standing approval to revoke")?;
+            let seq = auto::record(
+                project,
+                &Event::Revoked {
+                    revoked_unix_s: now,
+                },
+            )?;
+            println!("AUTOSTART_REVOKED {} (event {seq})", g.digest()?);
+            Ok(true)
+        }
+        Some("status") => {
+            let Some((seq, g, granted)) = auto::current(project)? else {
+                println!("AUTOSTART_NONE: no standing approval in force");
+                return Ok(false);
+            };
+            print!("{}", g.terminal()?);
+            println!("granted_unix_s={granted} event={seq}");
+            match permitted(&g) {
+                Ok(()) => {
+                    println!("AUTOSTART_PERMITTED {}", g.digest()?);
+                    Ok(true)
+                }
+                Err(e) => {
+                    println!("{e}");
+                    Ok(false)
+                }
+            }
+        }
+        Some("start") => {
+            let (_, g, _) = auto::current(project)?.ok_or(
+                "AUTOSTART_NOT_GRANTED: no standing approval in force (p0ctl autostart grant)",
+            )?;
+            permitted(&g)?;
+            let digest = g.digest()?;
+            let strings = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+            let flow_id = jobs::new_id()?;
+            // The whole boot flow, each step approved by the standing approval.
+            if !boot_cmd(
+                project,
+                &strings(&[
+                    "offline",
+                    "--flow",
+                    &flow_id,
+                    "--mode",
+                    &g.binding.mode,
+                    "--duration",
+                    &g.duration,
+                ]),
+            )? {
+                return Err(format!("AUTOSTART_OFFLINE_BLOCKED: boot flow {flow_id}"));
+            }
+            auto::record(
+                project,
+                &Event::Used {
+                    digest: digest.clone(),
+                    flow_id: flow_id.clone(),
+                    started_unix_s: now,
+                },
+            )?;
+            let offline = bc::status(project, &flow_id)?.flow.offline.readiness_token;
+            boot_cmd(
+                project,
+                &strings(&[
+                    "network",
+                    "--flow",
+                    &flow_id,
+                    "--approve",
+                    &offline[..16],
+                    "--capture-source",
+                    &g.capture_source,
+                    "--genesis-hash",
+                    &g.genesis_hash,
+                    "--provider-evidence",
+                    &g.provider_evidence_id,
+                ]),
+            )?;
+            let network = boot_step_end(project, &flow_id, bc::NETWORK)?;
+            let token = network
+                .network_record
+                .map(|r| r.audit.readiness_token[..16].to_string())
+                .ok_or("AUTOSTART_NETWORK_RECORD_MISSING")?;
+            boot_cmd(
+                project,
+                &strings(&[
+                    "start",
+                    "--flow",
+                    &flow_id,
+                    "--approve",
+                    &token,
+                    "--qualification",
+                    &g.qualification_id,
+                    "--autostart",
+                    &digest,
+                ]),
+            )?;
+            let started = boot_step_end(project, &flow_id, bc::START)?;
+            let run = match started.start {
+                bc::StepState::Done(o) => o.run_id.unwrap_or_default(),
+                _ => String::new(),
+            };
+            println!("AUTOSTART_STARTED {digest}: boot flow {flow_id} started {run}");
+            Ok(true)
+        }
+        _ => Err(AUTOSTART_USAGE.into()),
+    }
+}
+
+/// The flow once its `step` ended: COMPLETED, else its end is the refusal.
+fn boot_step_end(
+    project: &Path,
+    flow_id: &str,
+    step: &str,
+) -> Result<darkbot_runner::orchestration::boot_control::FlowStatus, String> {
+    use darkbot_runner::orchestration::boot_control::{self as bc, StepState};
+    loop {
+        let s = bc::status(project, flow_id)?;
+        let state = if step == bc::NETWORK {
+            &s.network
+        } else {
+            &s.start
+        };
+        match state {
+            StepState::Done(o) if o.state == bc::COMPLETED => return Ok(s),
+            StepState::Done(o) => return Err(format!("AUTOSTART_{step}_{}: {}", o.state, o.code)),
+            StepState::Interrupted => return Err(format!("AUTOSTART_{step}_INTERRUPTED")),
+            StepState::NotRun => return Err(format!("AUTOSTART_{step}_NOT_REQUESTED")),
+            StepState::Queued | StepState::Running { .. } => std::thread::sleep(POLL),
+        }
     }
 }
 
@@ -1149,6 +1405,7 @@ fn start_raw_capture(
     record: &str,
     token: &str,
     qualification: Option<String>,
+    autostart: Option<String>,
 ) -> Result<Option<String>, String> {
     use darkbot_solana::runtime_config::{horizon, Horizon, UNTIL_STOPPED};
     // DEC-16: an unbounded flow runs the capture until stopped, admitted with its qualification.
@@ -1172,6 +1429,13 @@ fn start_raw_capture(
     let mut command = Command::new(&ctl);
     if let Some(id) = &qualification {
         command.env(boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION, id);
+    }
+    // DEC-16: an autostarted capture names the standing approval it runs under.
+    if let Some(digest) = &autostart {
+        command.env(
+            darkbot_runner::orchestration::autostart::ENV_AUTOSTART,
+            digest,
+        );
     }
     let out = command
         .args(["capture", "start", &length])
@@ -1353,6 +1617,22 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     )?;
                     RunHorizon::of(horizon).admit(Some(&q), &binding, unix_now()?)?;
                     worker_args.extend(["--qualification".to_string(), id]);
+                    // An autostart (`p0ctl autostart start`) names the standing approval in force.
+                    if let Some(digest) = given(options, "--autostart")? {
+                        if !raw {
+                            return Err(
+                                "AUTOSTART_MODE: only the raw capture (mode market) is autostarted"
+                                    .into(),
+                            );
+                        }
+                        darkbot_runner::orchestration::autostart::in_force(project, &digest)?;
+                        worker_args.extend(["--autostart".to_string(), digest]);
+                    }
+                } else if given(options, "--autostart")?.is_some() {
+                    return Err(
+                        "AUTOSTART_UNBOUNDED_ONLY: a standing approval autostarts an unbounded run"
+                            .into(),
+                    );
                 }
                 let verify = given(options, "--chain-verify")?.unwrap_or_else(|| "off".into());
                 worker_args.extend(["--chain-verify".to_string(), verify.clone()]);
@@ -1433,6 +1713,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             &record,
                             &token,
                             given(options, "--qualification")?,
+                            given(options, "--autostart")?,
                         );
                     }
                     // DEC-16: an unbounded runtime run starts through run start --until-stopped
@@ -2070,13 +2351,14 @@ fn main() -> ExitCode {
             (Some("capability"), _) => capability_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),
+            (Some("autostart"), _) => autostart_cmd(&project, &rest),
             (Some("backtest"), _) => foreground_job(&project, "backtest", &rest),
             (Some("optimize"), _) => foreground_job(&project, "optimize", &rest),
             (Some("job"), _) => job_cmd(&project, &rest),
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|boot|backtest|optimize|job|profiles|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04 …".into()),
         }
     });
     match result {

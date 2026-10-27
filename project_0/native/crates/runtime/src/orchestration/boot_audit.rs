@@ -1856,11 +1856,36 @@ pub(crate) fn market_admission_with(
             crate::analytics::measurement::RunHorizon::of(horizon)
                 .admit(Some(&q), &binding, now)
                 .map_err(refuse)?;
+            let config = config().map_err(|_| "BOOT_IDENTITY_DRIFT")?;
+            // An autostarted capture runs under its standing approval: exactly this run with its
+            // qualification and window budget, unexpired, for at most its maximum runtime.
+            let max_runtime_seconds = match get(super::autostart::ENV_AUTOSTART)
+                .filter(|v| !v.is_empty())
+            {
+                None => None,
+                Some(digest) => {
+                    let refuse = |why: String| {
+                        crate::console::line(why);
+                        "AUTOSTART_NOT_PERMITTED"
+                    };
+                    let grant = super::autostart::in_force(&project, &digest).map_err(refuse)?;
+                    if grant.qualification_id != id {
+                        return Err(refuse(
+                            "AUTOSTART_NOT_PERMITTED: the run names another qualification".into(),
+                        ));
+                    }
+                    grant
+                        .permits(&binding, &super::autostart::WindowBudget::of(&config), now)
+                        .map_err(refuse)?;
+                    Some(grant.max_runtime_seconds)
+                }
+            };
             Some(super::until_stopped::Rolling {
                 project,
                 binding,
                 qualification_id: id,
-                config: config().map_err(|_| "BOOT_IDENTITY_DRIFT")?,
+                config,
+                max_runtime_seconds,
             })
         }
     };

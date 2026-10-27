@@ -2987,16 +2987,20 @@ fn a01_source_health_reconnects_reach_the_capture_projection() {
     assert_eq!(s.transport.unwrap().reconnects, 2);
 }
 
-/// DEC-16: an unbounded raw capture (`until-stopped`, admitted with its rolling binding) against
-/// a loopback WebSocket rolls its windows: each boundary seals a market segment and journals the
-/// window's verdict; while its gates hold the capture goes on, and the first window that finds
-/// no valid provider evidence halts it — drained, sealed INCOMPLETE, the run result names the
-/// HALT. Ordered by the journal, never by timing: the evidence goes once a window held.
-#[test]
-fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_gate() {
+struct Unbounded {
+    capture: std::thread::JoinHandle<Result<(), String>>,
+    server: std::thread::JoinHandle<()>,
+    root: std::path::PathBuf,
+    project: std::path::PathBuf,
+    run_dir: std::path::PathBuf,
+}
+
+/// DEC-16: an unbounded raw capture of 1-s windows (2-s runway) against a loopback WebSocket,
+/// with provider evidence in the controller's store; `max_runtime_seconds` as an autostarted
+/// run's standing approval sets it.
+fn unbounded_capture(tag: &str, max_runtime_seconds: Option<u64>) -> Unbounded {
     use crate::orchestration::provider_evidence::{self as pe, ProviderEvidence, ProviderProof};
     use crate::orchestration::until_stopped as us;
-    use std::time::{Duration, Instant};
     use tungstenite::Message;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -3041,7 +3045,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
         }
     });
     let root = std::env::temp_dir().join(format!(
-        "dec16_capture_{}_{}",
+        "dec16_capture_{tag}_{}_{}",
         std::process::id(),
         utc_compact(unix_now_s().unwrap())
     ));
@@ -3078,6 +3082,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
         binding: us::tests::binding(1, 2),
         qualification_id: "0123456789abcdef".into(),
         config,
+        max_runtime_seconds,
     };
     let out = root.join("out").to_string_lossy().to_string();
     let cfg = MarketConfig::from_lookup(
@@ -3102,19 +3107,51 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
     let capture = std::thread::spawn(move || {
         super::capture::run_published(cfg, Clock::try_new().unwrap(), None, None, Some(rolling))
     });
-    let windows = run_dir.join(us::WINDOWS_JOURNAL);
-    let verdicts = || -> Vec<us::WindowCheck> {
-        let Ok(mut r) = crate::storage::segments::ChainReader::open(&windows) else {
-            return Vec::new();
-        };
-        let mut seen = Vec::new();
-        while let Ok(Some(f)) = r.next_frame() {
-            if f.kind == crate::analytics::journal::kind::UNTIL_STOPPED_WINDOW {
-                seen.push(f.typed().unwrap());
-            }
-        }
-        seen
+    Unbounded {
+        capture,
+        server,
+        root,
+        project,
+        run_dir,
+    }
+}
+
+/// The window verdicts journaled so far.
+fn window_verdicts(
+    run_dir: &std::path::Path,
+) -> Vec<crate::orchestration::until_stopped::WindowCheck> {
+    let windows = run_dir.join(crate::orchestration::until_stopped::WINDOWS_JOURNAL);
+    let Ok(mut r) = crate::storage::segments::ChainReader::open(&windows) else {
+        return Vec::new();
     };
+    let mut seen = Vec::new();
+    while let Ok(Some(f)) = r.next_frame() {
+        if f.kind == crate::analytics::journal::kind::UNTIL_STOPPED_WINDOW {
+            seen.push(f.typed().unwrap());
+        }
+    }
+    seen
+}
+
+/// DEC-16: an unbounded raw capture (`until-stopped`, admitted with its rolling binding) against
+/// a loopback WebSocket rolls its windows: each boundary seals a market segment and journals the
+/// window's verdict; while its gates hold the capture goes on, and the first window that finds
+/// no valid provider evidence halts it — drained, sealed INCOMPLETE, the run result names the
+/// HALT. Ordered by the journal, never by timing: the evidence goes once a window held.
+#[test]
+fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_gate() {
+    use crate::orchestration::provider_evidence as pe;
+    use crate::orchestration::until_stopped as us;
+    use std::time::{Duration, Instant};
+    let Unbounded {
+        capture,
+        server,
+        root,
+        project,
+        run_dir,
+    } = unbounded_capture("halt", None);
+    let windows = run_dir.join(us::WINDOWS_JOURNAL);
+    let verdicts = || window_verdicts(&run_dir);
     let waiting = Instant::now();
     while verdicts().is_empty() {
         assert!(
@@ -3154,4 +3191,31 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
     let market = crate::storage::segments::verify_chain(&run_dir.join(MARKET_JOURNAL)).unwrap();
     assert!(market.segments as usize > all.len() && market.sealed && !market.complete);
     let _ = fs::remove_dir_all(&root);
+}
+
+/// DEC-16: an autostarted unbounded capture ends in order at its standing approval's maximum
+/// runtime — drained and sealed, its windows journal complete, every window held — never
+/// running on past it.
+#[test]
+fn dec16_an_autostarted_capture_ends_in_order_at_its_maximum_runtime() {
+    use crate::orchestration::until_stopped as us;
+    let u = unbounded_capture("max_runtime", Some(3));
+    let result = u.capture.join().unwrap();
+    u.server.join().unwrap();
+    assert_eq!(
+        result,
+        Err(format!(
+            "MARKET_CAPTURE_INCOMPLETE: {}",
+            crate::orchestration::autostart::MAX_RUNTIME
+        ))
+    );
+    let all = window_verdicts(&u.run_dir);
+    assert!(
+        !all.is_empty() && all.iter().all(|w| w.verdict == us::CONTINUE),
+        "{all:?}"
+    );
+    let chain =
+        crate::storage::segments::verify_chain(&u.run_dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    assert!(chain.sealed && chain.complete, "{chain:?}");
+    let _ = (&u.project, fs::remove_dir_all(&u.root));
 }

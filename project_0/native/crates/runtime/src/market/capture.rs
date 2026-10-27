@@ -625,9 +625,14 @@ fn run_embedded_inner(
         if window.is_some_and(|(_, cutoff)| clock.now_ns() >= cutoff) {
             break;
         }
-        // DEC-16: an unbounded capture's window boundary; its first HALT stops the capture.
+        // DEC-16: an unbounded capture's window boundary; its first HALT stops the capture. An
+        // autostarted one ends in order at its standing approval's maximum runtime.
         if let (Some(w), Some(r)) = (windows.as_mut(), &rolling) {
             let now_s = clock_unix_s(&clock);
+            if r.max_runtime_seconds.is_some_and(|max| w.ran(max, now_s)) {
+                stop_reason = crate::orchestration::autostart::MAX_RUNTIME;
+                break;
+            }
             if w.due(now_s) {
                 match roll_window(w, r, &mut sink, &cfg, now_s) {
                     Ok(check) if check.verdict == crate::orchestration::until_stopped::CONTINUE => {
@@ -912,10 +917,14 @@ fn run_embedded_inner(
         finished_unix_s: clock_unix_s(&clock),
     };
     let (summary, report, write_error) = finish_capture(&cfg, &mut core, &mut sink, outcome)?;
-    // DEC-16: the windows journal ends with the capture (complete only for an operator stop of a
-    // run that never halted).
+    // DEC-16: the windows journal ends with the capture (complete only for a run that ended in
+    // order — an operator stop or its maximum runtime — and never halted).
     if let Some(w) = windows.take() {
-        if let Err(e) = w.finish(stop_reason == "OPERATOR_STOP") {
+        let in_order = matches!(
+            stop_reason,
+            "OPERATOR_STOP" | crate::orchestration::autostart::MAX_RUNTIME
+        );
+        if let Err(e) = w.finish(in_order) {
             crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
         }
     }

@@ -549,13 +549,15 @@ pub fn get(project: &Path, id: &str) -> Result<Qualification, String> {
 }
 
 /// What an admitted unbounded run's rolling windows check against: its project (the stores),
-/// its binding, its qualification and its resolved configuration.
+/// its binding, its qualification and its resolved configuration — and, for an autostarted run,
+/// the maximum runtime of its standing approval (`autostart::Grant`).
 #[derive(Clone, Debug)]
 pub struct Rolling {
     pub project: PathBuf,
     pub binding: Binding,
     pub qualification_id: String,
     pub config: darkbot_solana::runtime_config::RuntimeConfig,
+    pub max_runtime_seconds: Option<u64>,
 }
 
 /// The verdict of a window whose gates all held.
@@ -837,6 +839,7 @@ pub struct RollingWindows {
     journal: segments::SegmentedWriter,
     window: u64,
     started_unix_s: u64,
+    run_started_unix_s: u64,
     bytes_at_start: u64,
     halted: Option<String>,
     /// How the chain continued, for the window a crash interrupted (closed first after resume).
@@ -867,6 +870,7 @@ impl RollingWindows {
             journal,
             window: 1,
             started_unix_s: now,
+            run_started_unix_s: now,
             bytes_at_start: bytes,
             halted: None,
             recovery: None,
@@ -912,6 +916,7 @@ impl RollingWindows {
             journal,
             window: last.as_ref().map_or(1, |w| w.window + 1),
             started_unix_s: last.as_ref().map_or(run.started_unix_s, |w| w.ended_unix_s),
+            run_started_unix_s: run.started_unix_s,
             bytes_at_start: last.as_ref().map_or(0, |w| w.bytes_total),
             halted: None,
             recovery: Some(format!("{how:?}")),
@@ -936,6 +941,11 @@ impl RollingWindows {
     /// The HALT code once a window halted the run.
     pub fn halted(&self) -> Option<&str> {
         self.halted.as_deref()
+    }
+
+    /// Whether the run, started at its run record, has run `max_seconds` at `now`.
+    pub fn ran(&self, max_seconds: u64, now: u64) -> bool {
+        now >= self.run_started_unix_s.saturating_add(max_seconds)
     }
 
     /// Whether the open window ended at `now`.
@@ -992,10 +1002,10 @@ impl RollingWindows {
         Ok(check)
     }
 
-    /// Seals the windows journal at the run's end; complete only for an operator stop of a run
-    /// that never halted.
-    pub fn finish(mut self, stopped_by_operator: bool) -> std::io::Result<()> {
-        let complete = stopped_by_operator && self.halted.is_none();
+    /// Seals the windows journal at the run's end; complete only for a run that ended in order
+    /// (an operator stop, or the maximum runtime of its standing approval) and never halted.
+    pub fn finish(mut self, ended_in_order: bool) -> std::io::Result<()> {
+        let complete = ended_in_order && self.halted.is_none();
         self.journal.seal(complete).map(|_| ())
     }
 }
@@ -1026,7 +1036,7 @@ pub(crate) mod tests {
     fn pass(reason: &str) -> Part {
         Part::of(PartState::Pass, reason)
     }
-    fn qualified(b: &Binding) -> Qualification {
+    pub(crate) fn qualified(b: &Binding) -> Qualification {
         Qualification {
             schema: SCHEMA,
             binding: b.clone(),

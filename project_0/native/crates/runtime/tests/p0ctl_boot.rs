@@ -491,7 +491,7 @@ fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualificati
     std::fs::write(
         &ctl,
         format!(
-            "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$*\" \"$P0_MEASUREMENT_DURATION\" \"$P0_UNTIL_STOPPED_QUALIFICATION\" >> '{}'; echo 'Capture gestartet pid=1 dauer=until-stopped launch=l9'\n",
+            "#!/bin/sh\nprintf '%s|%s|%s|%s\\n' \"$*\" \"$P0_MEASUREMENT_DURATION\" \"$P0_UNTIL_STOPPED_QUALIFICATION\" \"$P0_UNTIL_STOPPED_AUTOSTART\" >> '{}'; echo 'Capture gestartet pid=1 dauer=until-stopped launch=l9'\n",
             calls.display()
         ),
     )
@@ -509,13 +509,46 @@ fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualificati
             "0123456789abcdef",
             "--qualification",
             "fedcba9876543210",
+            "--autostart",
+            "89abcdef01234567",
         ],
         Some(&ctl),
     );
     assert_eq!(code, 0, "{err}");
+    // An autostarted capture names the standing approval it runs under (it admits itself).
     assert_eq!(
         std::fs::read_to_string(&calls).unwrap().trim(),
-        format!("capture start until-stopped|{horizon}|fedcba9876543210")
+        format!("capture start until-stopped|{horizon}|fedcba9876543210|89abcdef01234567")
     );
+    // A standing approval autostarts only an unbounded run.
+    let (code, err) = run(
+        &[
+            "boot",
+            "offline",
+            "--flow",
+            "f1",
+            "--mode",
+            "market",
+            "--duration",
+            "1m",
+        ],
+        None,
+    );
+    assert!(code == 0 || code == 2, "{err}");
+    let (code, err) = run(
+        &[
+            "boot",
+            "start",
+            "--flow",
+            "f1",
+            "--approve",
+            "0123456789abcdef",
+            "--autostart",
+            "89abcdef01234567",
+        ],
+        None,
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("AUTOSTART_UNBOUNDED_ONLY"), "{err}");
     let _ = std::fs::remove_dir_all(&d);
 }
