@@ -21,7 +21,7 @@
 | DN-D12 | **Kosten-/Fillmodell:** tatsächlicher Bitget-Gebührensatz und Maker/Taker, Spread, Slippage, Funding | OPEN – Account + Testdaten |
 | DN-D13 | **Mehrere Bots auf identischem Kontrakt:** zunächst explizit verboten | FESTGELEGT für V1 |
 | DN-D14 | **Exakte Gateway Topic-/ProjectId-Vergabe:** 70–89 nur Kandidat, noch nicht reserviert | OPEN – Governance |
-| DN-D15 | **Leistungsziel:** intern niedrige p99-Latenz messen; keine übertragene BSC/P0-1-ms-End-to-End-Vorgabe | FESTGELEGT |
+| DN-D15 | **Leistungsziel:** intern niedrige p99-Latenz messen; keine übertragene BSC/P0-1-ms-End-to-End-Vorgabe. **P5 §5c** definiert L1–L9 und WS-vs-REST-Test; konkrete Zielwerte/Host-Spike weiter offen | FESTGELEGT als Messpflicht; numerische Gates OPEN |
 | DN-D16 | **Oberfläche:** DarkNode-Tabs exakt Overview / Builder / Backtest / Live / Wallet; kein permanenter Inspector, keine Signalprüfung und kein zusätzlicher Monitor/Gate-Tab | FESTGELEGT |
 | DN-D17 | **Höchste Logik:** Open/Close-Intents + Stop-/BE-/Trailing-Policies an genau einen Rust Position-/Risk-/Execution-Owner; BOTH ist Berechtigung für beide Richtungen, nicht simultane Gegenpositionen | FESTGELEGT |
 | DN-D18 | **No JSON intern:** Bitget-JSON ausschließlich am externen Adapterrand; innerhalb Rust/Protobuf/Binärformate; in L0 dürfen externe Originalbytes opak abgelegt werden | FESTGELEGT; Implementierungsnachweis offen |

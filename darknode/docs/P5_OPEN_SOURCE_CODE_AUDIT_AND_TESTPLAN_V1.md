@@ -1,4 +1,4 @@
-# DarkNode P5 – Open-Source-Code-Audit und einheitlicher Sicherheits-Gesamttest V1.1
+# DarkNode P5 – Open-Source-Code-Audit und einheitlicher Sicherheits-Gesamttest V1.2
 
 **Stand:** 27.10.2026 · **Status:** Quellcode-Recherche zum fixierten Stand, keine P5-Laufzeitabnahme · **P5 = NOT_RUN, GATE 1 = OPEN, SIGN/ARM/LIVE verboten.**  
 **Bindend:** [PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md), besonders S0–S7 und P5-A01–A28. P3 bezeichnet die Indikator-/Node-Engine, P5 die Private Execution. Keine Änderungen an BSC/Project_0, keine parallele Architektur.
@@ -93,6 +93,17 @@ Die P5-V1.2-Präzisierungen in [PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md#5b-prä
 | P4/P8/P9 · Wirtschaftlichkeit, **separat von DN-P5-ALL-001** | OOS/WFA netto nach Gebühren/Spread/Slippage/Funding, Non-Fills und tatsächlicher Positionsgröße; echte Demo-Fills nicht als Live-Slippage behandeln; vorab fixiertes Kriterium für ökonomische LIVE-Qualifikation | NOT_RUN |
 
 Die 28 A-IDs sind der **technische** Sicherheits-Gesamttest. Ökonomische Strategiequalifikation ist die **eigene** P4/P8/P9-Abnahme, nicht durch eine weitere P5-Runner-Flag automatisch erfüllt. Der `DN-P5-ALL-001`-Runner wird damit nicht als bereits lauffähig ausgewiesen.
+
+
+## 3b. Latenz- und Transportabnahme – P5 V1.3 / P8
+
+**Verbindliche Referenz:** [P5 V1.3, Abschnitt 5c](PHASENPLAN_P5_V1.md). `DN-P5-ALL-001` bleibt ein Runner gegen A01–A28, **nicht** ein fiktiver zusätzlicher PASS-Test. `NOT_RUN`, bis ein produktiver Rust-Owner, versionierte Fixtures, qualifizierter Demo-Host und Messwerte vorliegen.
+
+- **Lane A:** Order-/Risk-/WS-/Journal-Aufrufpfad und vorhandene Rust-Tokio-Komponenten zeilengenau auditieren; keine blockierenden Locks/DB/GUI-Zugriffe in reiner Signalrechnung; keine ungeprüfte Default-/biased-`select!`-Priorität; keine getrennten konkurrierenden Owner; REST- und WS-Case-Semantik für `stopLoss`/`stoploss` und ACK vs Fill typisiert.
+- **Lane B:** deterministisches Replay mit Burst/Backpressure, Journal-`fsync`-Stall/Disk-full, Emergency gegen Partial-Fill/late-Fill, WS Disconnect unmittelbar nach Netzwerk-Send, Konkurrenz von Entry und Stopverlust; pro Failure die `NO_ENTRY`-/`UNKNOWN`-/Exposure-/Stop-Invarianten prüfen.
+- **Lane D/E:** explizit genehmigte Bitget-Demo-Capabilities getrennt für REST-Place-Order und private WS-Place-Order mit Preset-SL/Reduce-only, deduplizierbarem `clientOid` und tatsächlich vorhandenem Stop; erst dann latenzbezogene Transportentscheidung; kein automatischer REST-Fallback nach unbekanntem WS-Send.
+- **Lane F/P8:** pro `L1–L9` aus P5-§5c min/p50/p95/p99/p99.9/max mit Queue-Wait, `fsync`, Netzwerk-Send, ACK, Fill und Stop-Bestätigung, unter Host-Last/Netzausfall und über den vorgesehenen Soak. Grenzwerte **vor** Abnahme festlegen; fehlende p99-Assertions ⇒ `NOT_RUN/BLOCKED`, niemals `PASS`.
+- **Safety-vor-Speed:** Niemand darf die Intent-Persistenz, Risk-Reserve, Exchange-Reconciliation oder Stop-Bestätigung abschalten, um eine Latenzmetrik zu verbessern. Gute CPU-Zahlen ohne getestete Exchange-Latenz oder fehlender Stopdeckung sind **kein** erfolgreicher Gesamttest.
 
 ## 4. Fehlende Vorarbeiten, bevor der Gesamttest echt laufen kann
 

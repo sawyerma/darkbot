@@ -1,6 +1,6 @@
-# DarkNode – PHASENPLAN P5 V1.2: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
+# DarkNode – PHASENPLAN P5 V1.3: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
 
-**Stand:** 27.10.2026 · **Revision V1.2:** S0–S7 / P5-A01–A28, Größenregel, Exchange-Drift, Strategy-ID, Kostengates · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
+**Stand:** 27.10.2026 · **Revision V1.3:** S0–S7 / P5-A01–A28, Größenregel, Exchange-Drift, Strategy-ID, Kostengates, zeitkritischer Rust-Ausführungspfad · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
 **Projektkonvention:** Im Gesamtplan [PHASENPLAN.md](PHASENPLAN.md) bezeichnet **P3 die Indikator-/Graph-Engine**; die private Bitget-Anbindung ist **P5**. Diese Datei konkretisiert ausschließlich P5, ohne die bestehenden P0–P10-IDs umzudeuten. P1 bleibt öffentliche Marktdaten/Rohtrade-Aufzeichnung und 1s-/MTF-Aggregation.
 
 ## 1. Verifizierter Dokumentationsstand vs. echter Nachweis
@@ -201,6 +201,68 @@ Die **technische P5-Implementierung** darf gemäß Gesamtphasenplan parallel zu 
 | A28 | Stop-Trigger `mark` vs `market`, Preisgap, Kosten- und Funding-Schock; keine modellierte Fill-Garantie |
 
 **Primärquellen (Dokumentation, keine Demo-Evidenz):** [Bitget Strategy Trading / `clientOid` und `tpsl`](https://www.bitget.com/docs/catalog/trading/strategy-trading), [Bitget Best Practices / Open-Order-ID-Uniqueness](https://www.bitget.com/docs/uta/best-practices-guide), [Bitget UTA Enumerations / Forced-Reduction und ADL](https://www.bitget.com/docs/uta/enum), [Bitget Account Channel / Equity](https://www.bitget.com/docs/uta/websocket/private/Account-Channel), [Bitget Account Settings / Mode und Leverage](https://www.bitget.com/docs/catalog/account/account-settings).
+
+
+## 5c. V1.3 – Verbindlicher Low-Latency-Rust-Pfad und P5-Performance-Gate (27.10.2026)
+
+**Status:** Architektur-/Testvertrag; Umsetzung, Benchmarks, Bitget-REST/WS-Vergleich und Grenzwerte sind **OPEN/NOT_RUN**. Eine schnelle Rust-Rechnung beweist **weder** schnellen Exchange-ACK **noch** Fill-/Stop-Schutz. `DN-D15` verlangt interne p99-Messungen, **keine von BSC/Project_0 übernommene 1-ms-End-to-End-Zusage**. `DN-P5-ALL-001` nutzt **weiter dieselben P5-A01–A28**, plus P8-Latenzledger; keine separate konkurrierende Trading-Architektur.
+
+### Laufzeitstruktur – deterministischer Sicherheits-Owner, voneinander isolierte IO
+
+```text
+P1 öffentlicher WS/SBE → typisiertes Event → P3 Indikator/Graph → SignalIntent
+                                                       |
+                                                       v
+                             EIN Account-Risk/Position/Order-Owner (Rust)
+                    [frische Positions-/Risk-Snapshots; exakte Fixed-Point-Menge]
+                                                       |
+                               [NO_ENTRY oder reservierter OrderIntent]
+                                                       |
+                          dedizierter persistenter Journal-Writer → fsync ACK
+                                                       |
+                       signierter, vorbereiteter Bitget-Request → WS ODER REST
+                                                       |
+                        Exchange ACK / private WS-Fill / Positions-/Stopstatus
+                                                       |
+                  State-Machine/Reconciliation → bestätigte Stopdeckung / Alarm
+```
+
+- Alle fachlichen Entscheidungen, Position-/Exposure-Reservationen, Exit-/Emergency-Guards und `clientOid`-Zuordnung werden **single-writer** durch einen Rust-Owner je Bitget-Konto serialisiert; **kein** zweiter Risiko-Owner in Exchange-Clients, React, Gateway oder parallelen Task-Handlern. Marketdata-Decode, Order-Transport, private WS, Journal-IO, Telemetrie, Backtest und Chart/Paging sind eigene begrenzte Tasks/Queues; kein `await` auf Frontend, Datenbank-Query, Chart, Backfill oder Logging **innerhalb** einer reinen Signal-/Risk-Rechnung.
+- Typisierte `SignalIntent`, `OrderIntent`, `OrderEvent`, `PositionSnapshot`, `RiskSnapshot`, `StopCoverage` und `EmergencyIntent`; Preis/Menge/Notional als Fixed-Point/Decimal. Externe REST-/WS-JSON-Serialisierung ausschließlich im Bitget-Adapterrand. Wiederverwendung bestehender Rust-/Tokio-/DarkBot-Patterns nach gemessenem Bibliotheksvergleich (R6); keine Python-/Browser-Ausführung im Trade-Pfad.
+- Priorisierte **kontrollierte** Ereignisklassen: Verlust der Schutzdeckung, private Fills/Positionskorrekturen und autorisierte Emergency-Aktion **vor** neuen Entries, Chart-/History-/UI-Events nachrangig. Überholregeln müssen kausale Fill-/Order-Reihenfolgen und aktuelle bestätigte Restposition wahren; **kein** blindes `select!`-Polling mit möglichem Starvation/Unknown-Mengen-Bypass. Bounded High-/Normal-Priority-Channels mit dokumentierter Fairness und Reserven; bei Überlast **Entries sperren**, kritische Zustandsereignisse **nie still verwerfen**. Stop- und Emergency-Verarbeitung darf nicht hinter einem historischen Import, langsamer L0-/SQLite-Schreiblast oder GUI-Traffic blockieren.
+- Der unveränderliche `clientOid`-/Payload-/Risk-Intent ist **vor dem Netz-Send** dauerhaft geschrieben und `fsync`-bestätigt. Die unvermeidliche Persistenz-Latenz zählt ausdrücklich **zur Orderlatenz**. Dedizierter Journal-Writer, vorreservierte Speicher-/Notfallkapazität und Crash-Faults werden gemessen; ein asynchron nur gepufferter, nicht dauerhafter Schreibauftrag ist **keine** Freigabe. Disk-full/`fsync`-Timeout darf nicht unbemerkt in einen Order-Bypass münden. Ein ungeklärter Emergency-Durability-Fall ist ein **explizites Blocker-Gate**, nicht durch „schnell trotzdem senden“ geheilt.
+- Für Schutz ist **börsenseitiger** qualifizierter initialer Preset-SL das Ziel, weil ein lokaler Rust-Trailing-/Exit-Prozess bei Host-, Feed- und Netzwerkausfall nicht triggern kann. Bitget `preset stoploss`/Teilfill-/Restmengen-Semantik und exakte Exchange-Stop-Bestätigung bleiben offene Demo-Gates. Lokale Strategie-Exits und BE/Trailing sind **zusätzliche** Steuerungen, niemals Ersatz für den bestätigten Basisschutz.
+
+### Bitget-Ordertransport: WS gegenüber REST als echtes R6/P5-Entscheidungsgate
+
+Bitget dokumentiert neben `POST /api/v3/trade/place-order` auch **UTA-V3 private WS `op=trade, topic=place-order`** einschließlich Futures-Market/Limit, `clientOid`, `reduceOnly`, `slTriggerBy`, `slOrderType` und **kleingeschriebenem `stoploss`**; im REST-Contract heißt das entsprechende Feld `stopLoss`. Der Typ-/Case-Unterschied ist **ein Adaptertest**, keine interne JSON-Freigabe. [Offizielle WS-Place-Order-Dokumentation](https://www.bitget.com/docs/uta/websocket/private/Place-Order-Channel) · [Offizielle REST-Order-Dokumentation](https://www.bitget.com/docs/catalog/trading/order-management).
+
+1. **Beide Wege getrennt qualifizieren** (private Demo-Account, gleicher Positionsmodus/Instrument-/Stop-Typ). WS kann eine bestehende TLS-Verbindung nutzen; REST kann mit Keep-alive arbeiten. Der Vorteil muss am konkreten Linux-Host gemessen werden; **keine Annahme „WebSocket ist immer schneller“**.
+2. Je Transport: Signatur/Login/Timeout, Rate-Limit, Connection-Health, Order-/`clientOid`-Korrelation, ACK/Fill-/Stop-Readback und Journal-`UNKNOWN` bei ambivalentem Send nachweisen. Besonders WS: Orderrequest-ACK ist **nicht** Fill; nach Connection-Drop vor Antwort niemals REST als „Fallback“ **mit neuer Order** benutzen, bis Exchange-Abgleich stattgefunden hat.
+3. Falls WS- und REST-Fields/-Semantik für Preset-SL oder `reduceOnly` abweichen: nicht nach nominalem Speed auswählen, sondern nur nach nachgewiesener **korrekter** Schutz-/Close-Semantik. Laufender Transportwechsel oder Live-Failover wird separat fault-getestet und zunächst fail-closed gesperrt.
+4. UTA Ordertransport **nie** im P1-Public-SBE-Decoder-/L0-Schreibthread; Netzwerk-Timestamps und Rate-Limits werden inklusive Send-Queue-Wartezeit gemessen.
+
+### Instrumentierung, Grenzwerte und verbindliche Abnahme (P5-A / P8)
+
+**Monotone lokale Zeitpunkte**, nach `trace_id`, `clientOid`, `connection_id` und Ordertyp korreliert, **ohne** blockierendes per-event Log:
+
+| Abschnitt | Zu messende Differenz |
+|---|---|
+| L1 | letzter benötigter P1-Trade/Bar empfangen → Strategie-`SignalIntent` |
+| L2 | `SignalIntent` → Risk-Decision/Reservation inklusive Queue-Wait |
+| L3 | Reservation → `fsync`-bestätigter Intent (inkl. Journal-Queue und Disk-Tail) |
+| L4 | durable Intent → Netzwerk-`write` abgeschlossen (inkl. Sign/Serialize/Transport-Queue) |
+| L5 | Netzwerk-`write` → bestätigter Exchange-ACK; **kein Fill** |
+| L6 | ACK bzw. Send → erster/einzelner/letzter Fill via Private WS, Quote und REST-Reconcile |
+| L7 | erster/Partial-Fill → qualifizierte **börsenseitige Stop-/Mengen-Bestätigung** |
+| L8 | Stop-Verlust bzw. Emergency-Trigger → Alarm/Entry-Halt → journalisierter Reduce-only-Close-Send |
+| L9 | Restart/Disconnect/Rate-Limit/Disk-full → `NO_ENTRY` und anschließend qualifiziertes Recovery |
+
+Je Abschnitt `count, min, p50, p95, p99, p99.9, max`, Event-/Queue-Verluste, Hostregion, CPU-/Disk-/Netzlast, Release-Git-SHA, Strategie-/Adapterversion, Exchange-/Clock-Qualität, Modus und Fixture-/Demo-Hash; Cold-Start vs warm, Idle vs Burst, Normal vs Failure getrennt. Markt-/Exchange-Ereigniszeiten sind nicht ungeprüft mit lokalen Monotonic-Timestamps subtrahierbar. `L1–L4` sind interne/hostkontrollierte Pfade, `L5–L7` enthalten Bitget, Netzwerk und Matching; ein extrem schneller Rust-Benchmark darf die letzteren nicht ausblenden.
+
+**Testpflicht:** 1s/5s-/Burst-Feeds; saturierte Chart-/Import-/Logger-Queues; konkurrierende Entry-/Stop-/Cancel-/Partial-Fill-/Emergency-Events; 429; privaten WS-Verlust; REST-/WS-Transportwahl; Disk-full und langsames `fsync`; Hostkill vor/nach Send; State-/Stop-/Exposure-Invarianten unter allen Kombinationen. Mapping: **A06/A08/A12/A21/A22/A27** durable ACK/Retry; **A07/A17–A20/A28** Schutzlatenz; **A10/A11/A13/A14/A23/A24/A26** Priorität/Hard Risk; **P8** Tail-/Soak-Performance.
+
+**Offener Performance-Entscheid:** Konkrete p99/p99.9-Zielwerte für **internen** Signal→Durable-Send einschließlich `fsync`, L7-Stop-Deckung und L8-Notfallreaktion müssen **vor der Demo-Abnahme**, anhand R6-Host-/REST-vs-WS-Spikes **vorab versioniert** und als echte harte PASS-/FAIL-Assertions implementiert werden. Keine gemessenen Werte, keine Zahlen aus anderen Projekten und keine erfundene Börsen-Garantie. `LIVE` bleibt gesperrt, solange die technischen Schutzinvarianten oder erforderlichen Latenz-Gates fehlen.
 
 ## 6. Referenzvergleich Open Source (keine produktive Dependency-Freigabe)
 
