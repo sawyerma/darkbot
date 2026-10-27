@@ -96,7 +96,8 @@ pub(super) fn capture_end(
     }
     // DEC-16: an unbounded capture ends only by its stop, its maximum runtime or the end of its
     // standing approval — an ordered end only with nothing failed and its drain complete.
-    let unbounded_end = cfg.duration_secs == 0 && ordered_reason(stop_reason);
+    let unbounded_end =
+        cfg.duration_secs == 0 && crate::orchestration::until_stopped::ordered_reason(stop_reason);
     if (stop_reason == "OPERATOR_STOP" && !unbounded_end) || (unbounded_end && !stream_ready) {
         // Requested stop (also before StreamReady): sealed INCOMPLETE, not a provider failure.
         return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
@@ -129,32 +130,6 @@ pub(super) fn capture_end(
         return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
     }
     Ok(())
-}
-
-/// DEC-16: the stop reasons that end an unbounded run in order.
-pub(super) fn ordered_reason(stop_reason: &str) -> bool {
-    matches!(
-        stop_reason,
-        "OPERATOR_STOP"
-            | crate::orchestration::autostart::MAX_RUNTIME
-            | crate::orchestration::autostart::ENDED
-    )
-}
-
-/// DEC-16: whether an unbounded run ended in order — by an ordered reason with its drain
-/// complete, its ingress quiescent and nothing failed (its windows journal is complete only then).
-pub(super) fn ended_in_order(
-    stop_reason: &str,
-    drain_complete: bool,
-    write_error: Option<&str>,
-    ingress_end_error: Option<&str>,
-    quiescent: &Result<(), String>,
-) -> bool {
-    ordered_reason(stop_reason)
-        && drain_complete
-        && write_error.is_none()
-        && ingress_end_error.is_none()
-        && quiescent.is_ok()
 }
 
 /// Facts handed from the capture/drain phases to the shared finishing path.
@@ -571,28 +546,11 @@ impl EconWindows<'_> {
             }
             *checkpoint_index = 0;
             self.open += 1;
-            if check.verdict != crate::orchestration::until_stopped::CONTINUE {
+            if check.halt_code().is_some() {
                 return Ok(true);
             }
         }
         Ok(false)
-    }
-}
-
-/// DEC-16: a HALT of an autostarted run suspends its standing approval (no further autostart
-/// until the operator grants again).
-fn suspend_autostart(
-    rolling: &crate::orchestration::until_stopped::Rolling,
-    verdict: &str,
-    now_s: u64,
-) {
-    if let Some(digest) = &rolling.autostart {
-        match crate::orchestration::autostart::suspend(&rolling.project, digest, verdict, now_s) {
-            Ok(()) => crate::console::line(format!(
-                "[UNTIL_STOPPED] standing approval {digest} suspended by {verdict}"
-            )),
-            Err(e) => crate::console::line(format!("AUTOSTART_SUSPEND_FAILED {e}")),
-        }
     }
 }
 
@@ -635,7 +593,7 @@ fn resume_windows(
         check.window, check.verdict, check.detail
     ));
     if let Some(verdict) = windows.halted().map(str::to_string) {
-        suspend_autostart(rolling, &verdict, now_s);
+        rolling.suspend_autostart(&verdict, now_s);
         if let Err(e) = windows.finish(false) {
             crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
         }
@@ -879,21 +837,11 @@ fn run_embedded_inner(
             // The boundary first: a window that ended is checked before the run may end.
             if w.due(now_s) {
                 match roll_window(w, r, &mut sink, &cfg, now_s) {
-                    Ok(check) if check.verdict == crate::orchestration::until_stopped::CONTINUE => {
-                        // An autostarted run goes on only while its standing approval is in force.
-                        if let Some(digest) = &r.autostart {
-                            if let Err(e) =
-                                crate::orchestration::autostart::in_force(&r.project, digest)
-                            {
-                                crate::console::line(format!("[UNTIL_STOPPED] {e}"));
-                                stop_reason = crate::orchestration::autostart::ENDED;
-                                break;
-                            }
+                    Ok(check) => {
+                        if let Some(reason) = r.after_window(&check) {
+                            stop_reason = reason;
+                            break;
                         }
-                    }
-                    Ok(_) => {
-                        stop_reason = "UNTIL_STOPPED_HALT";
-                        break;
                     }
                     Err(e) => {
                         write_error = Some(e);
@@ -902,7 +850,7 @@ fn run_embedded_inner(
                     }
                 }
             }
-            if r.max_runtime_seconds.is_some_and(|max| w.ran(max, now_s)) {
+            if r.max_runtime_reached(w, now_s) {
                 stop_reason = crate::orchestration::autostart::MAX_RUNTIME;
                 break;
             }
@@ -1235,7 +1183,7 @@ fn run_embedded_inner(
     // order (drained, quiescent, nothing failed) and never halted; an autostarted run's HALT
     // suspends its standing approval.
     if let Some(w) = windows.take() {
-        let in_order = ended_in_order(
+        let in_order = crate::orchestration::until_stopped::ended_in_order(
             stop_reason,
             drain_complete,
             write_error.as_deref(),
@@ -1243,7 +1191,7 @@ fn run_embedded_inner(
             &quiescent,
         );
         if let (Some(verdict), Some(r)) = (w.halted().map(str::to_string), &rolling) {
-            suspend_autostart(r, &verdict, clock_unix_s(&clock));
+            r.suspend_autostart(&verdict, clock_unix_s(&clock));
         }
         if let Err(e) = w.finish(in_order) {
             crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));

@@ -581,6 +581,77 @@ pub const ENV_RESUME: &str = "P0_UNTIL_STOPPED_RESUME";
 
 /// The verdict of a window whose gates all held.
 pub const CONTINUE: &str = "CONTINUE";
+/// The stop reason of an unbounded run one of whose windows halted it.
+pub const HALT_STOP: &str = "UNTIL_STOPPED_HALT";
+/// The operator's stop of a run.
+pub const OPERATOR_STOP: &str = "OPERATOR_STOP";
+
+/// DEC-16: whether a window's verdict is a HALT (neither `CONTINUE` nor the verdict of a window a
+/// crash interrupted whose gates held).
+pub fn halts(verdict: &str) -> bool {
+    verdict != CONTINUE && verdict != CRASH_RECOVERED
+}
+
+/// DEC-16: the stop reasons that end an unbounded run in order, in every mode.
+pub fn ordered_reason(stop_reason: &str) -> bool {
+    matches!(
+        stop_reason,
+        OPERATOR_STOP | super::autostart::MAX_RUNTIME | super::autostart::ENDED
+    )
+}
+
+/// DEC-16: whether an unbounded run ended in order — by an ordered reason with its drain
+/// complete, its ingress quiescent and nothing failed (its windows journal is complete only then).
+pub fn ended_in_order(
+    stop_reason: &str,
+    drain_complete: bool,
+    write_error: Option<&str>,
+    ingress_end_error: Option<&str>,
+    quiescent: &Result<(), String>,
+) -> bool {
+    ordered_reason(stop_reason)
+        && drain_complete
+        && write_error.is_none()
+        && ingress_end_error.is_none()
+        && quiescent.is_ok()
+}
+
+impl Rolling {
+    /// DEC-16: a HALT of an autostarted run suspends its standing approval (no further autostart
+    /// until the operator grants again).
+    pub fn suspend_autostart(&self, verdict: &str, now_s: u64) {
+        if let Some(digest) = &self.autostart {
+            match super::autostart::suspend(&self.project, digest, verdict, now_s) {
+                Ok(()) => crate::console::line(format!(
+                    "[UNTIL_STOPPED] standing approval {digest} suspended by {verdict}"
+                )),
+                Err(e) => crate::console::line(format!("AUTOSTART_SUSPEND_FAILED {e}")),
+            }
+        }
+    }
+
+    /// DEC-16: why the run stops after the window `check` closed — its HALT, or (autostarted)
+    /// the end of its standing approval — or `None` while it goes on.
+    pub fn after_window(&self, check: &WindowCheck) -> Option<&'static str> {
+        if check.halt_code().is_some() {
+            return Some(HALT_STOP);
+        }
+        // An autostarted run goes on only while its standing approval is in force.
+        if let Some(digest) = &self.autostart {
+            if let Err(e) = super::autostart::in_force(&self.project, digest) {
+                crate::console::line(format!("[UNTIL_STOPPED] {e}"));
+                return Some(super::autostart::ENDED);
+            }
+        }
+        None
+    }
+
+    /// DEC-16: whether an autostarted run has run its standing approval's maximum runtime.
+    pub fn max_runtime_reached(&self, windows: &RollingWindows, now_s: u64) -> bool {
+        self.max_runtime_seconds
+            .is_some_and(|max| windows.ran(max, now_s))
+    }
+}
 
 /// The segment a window sealed, as its writer sealed it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -613,6 +684,12 @@ pub struct WindowCheck {
 }
 impl Payload for WindowCheck {
     const KIND: u16 = kind::UNTIL_STOPPED_WINDOW;
+}
+impl WindowCheck {
+    /// The HALT code of a window whose gates did not hold.
+    pub fn halt_code(&self) -> Option<&str> {
+        halts(&self.verdict).then_some(self.verdict.as_str())
+    }
 }
 
 /// What a window measured, handed to [`check_window`].
@@ -925,7 +1002,7 @@ impl RollingWindows {
             return Err(coded("UNTIL_STOPPED_RESUME_DRIFT"));
         }
         if let Some(w) = &last {
-            if w.verdict != CONTINUE && w.verdict != CRASH_RECOVERED {
+            if halts(&w.verdict) {
                 return Err(coded(HALTED));
             }
         }
@@ -1012,7 +1089,7 @@ impl RollingWindows {
         self.journal
             .append_typed(Self::provenance(self.window), &check)?;
         self.journal.sync()?;
-        if check.verdict != CONTINUE && check.verdict != CRASH_RECOVERED {
+        if halts(&check.verdict) {
             self.halted = Some(check.verdict.clone());
         }
         self.window += 1;
@@ -1795,5 +1872,70 @@ pub(crate) mod tests {
                 .to_string(),
             HALTED
         );
+    }
+
+    /// DEC-16 (stage 3, shared by every mode): a window halts a run only by a gate code — never by
+    /// `CONTINUE` or the recovery verdict — and the run stops after it by `UNTIL_STOPPED_HALT`; a
+    /// run without a standing approval goes on after a window whose gates held, and only an
+    /// autostarted run has a maximum runtime.
+    #[test]
+    fn dec16_a_window_halts_a_run_only_by_a_gate_code_in_every_mode() {
+        assert!(!halts(CONTINUE));
+        assert!(!halts(CRASH_RECOVERED));
+        assert!(halts("UNTIL_STOPPED_RUNWAY_EXHAUSTED"));
+        let d = std::env::temp_dir().join(format!("p0_us_after_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let b = binding(60, 120);
+        let mut rolling = Rolling {
+            project: d.clone(),
+            binding: b.clone(),
+            qualification_id: "0123456789abcdef".into(),
+            config: darkbot_solana::runtime_config::RuntimeConfig::default(),
+            max_runtime_seconds: None,
+            resume: None,
+            autostart: None,
+        };
+        let windows = RollingWindows::start(&d, b, "0123456789abcdef", 1_000, 0).unwrap();
+        let check = |verdict: &str| WindowCheck {
+            window: 1,
+            started_unix_s: 1_000,
+            ended_unix_s: 1_060,
+            bytes_written: 0,
+            bytes_total: 0,
+            free_bytes: None,
+            runway_need_bytes: 0,
+            memory_pressure: None,
+            provider: darkbot_solana::provider::WindowUsage {
+                requests: 0,
+                bytes: 0,
+            },
+            evidence_id: None,
+            evidence_valid_until_unix_s: None,
+            sealed: None,
+            verdict: verdict.into(),
+            detail: String::new(),
+        };
+        for code in [
+            "UNTIL_STOPPED_SEGMENT_INTEGRITY",
+            "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED",
+        ] {
+            assert_eq!(check(code).halt_code(), Some(code));
+            assert_eq!(rolling.after_window(&check(code)), Some(HALT_STOP));
+        }
+        assert_eq!(check(CRASH_RECOVERED).halt_code(), None);
+        assert_eq!(rolling.after_window(&check(CONTINUE)), None);
+        assert_eq!(rolling.after_window(&check(CRASH_RECOVERED)), None);
+        assert!(
+            !rolling.max_runtime_reached(&windows, u64::MAX),
+            "no approval, no maximum"
+        );
+        rolling.max_runtime_seconds = Some(300);
+        assert!(!rolling.max_runtime_reached(&windows, 1_299));
+        assert!(rolling.max_runtime_reached(&windows, 1_300));
+        assert!(!ordered_reason(HALT_STOP));
+        assert!(ordered_reason(OPERATOR_STOP));
+        windows.finish(false).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

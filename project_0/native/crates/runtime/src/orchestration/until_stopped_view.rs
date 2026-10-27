@@ -167,7 +167,7 @@ fn newest_run(root: &Path) -> Option<RunView> {
         let record = record?;
         let halted = last
             .as_ref()
-            .filter(|w| w.verdict != us::CONTINUE && w.verdict != us::CRASH_RECOVERED)
+            .filter(|w| us::halts(&w.verdict))
             .map(|w| w.verdict.clone());
         return Some(RunView {
             run_id: dir.file_name()?.to_string_lossy().into_owned(),

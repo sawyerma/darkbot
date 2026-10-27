@@ -3523,7 +3523,8 @@ fn dec16_an_autostarted_capture_that_halts_suspends_its_approval() {
 /// its windows journal is not complete. A fixed capture's operator stop stays as it was.
 #[test]
 fn dec16_an_ordered_end_needs_a_complete_drain_and_nothing_failed() {
-    use super::capture::{capture_end, ended_in_order};
+    use super::capture::capture_end;
+    use crate::orchestration::until_stopped::ended_in_order;
     let config = |duration: &str| {
         MarketConfig::from_lookup(
             &env_of(&[
