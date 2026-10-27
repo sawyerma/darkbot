@@ -71,8 +71,10 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(exit.success(), "{exit:?}");
-    // The handler wrote the runtime's own stop request.
-    assert!(stop_file(&base).exists());
+    // The handler wrote the runtime's own stop request (its stop record
+    // ends the window below), and the clean stop consumed it (Paket 8
+    // review L7: a stop file left behind stopped the next start at once).
+    assert!(!stop_file(&base).exists());
     let c = census(
         &base.join("bsc-runtime/journal"),
         journal_max_payload(&config),
@@ -105,8 +107,9 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     assert_eq!(pre.status.code(), Some(2), "{pre:?}");
     assert!(String::from_utf8_lossy(&pre.stdout).contains("BLOCKED by UNMEASURED"));
     assert!(base.join("bsc-runtime/capture-preflight.dbrec").exists());
-    // The Phase F quality verdict of the same run: clean, but no native
-    // source and far shorter than planned, so not a Phase F acceptance.
+    // The Phase F quality verdict of the same run: its records span no
+    // time, so it observed nothing and is no clean capture (Paket 8
+    // review L7: before, CLEAN); no native source, so no acceptance.
     let quality = Command::new(bin)
         .args(["capture-quality", "--rundir"])
         .arg(&base)
@@ -115,7 +118,8 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&quality.stdout);
-    assert!(quality.status.success(), "{quality:?}");
-    assert!(out.contains(": CLEAN (Phase F acceptance NOT_MET"), "{out}");
+    assert!(!quality.status.success(), "{quality:?}");
+    assert!(out.contains(": NOT_CLEAN (Phase F acceptance NOT_MET"), "{out}");
+    assert!(out.contains("empty capture window (0 s)"), "{out}");
     fs::remove_dir_all(&base).unwrap();
 }
