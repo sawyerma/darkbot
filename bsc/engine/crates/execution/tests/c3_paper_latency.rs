@@ -394,6 +394,9 @@ fn c3_paper_path_latency() {
     let (mut cold, mut misses) = (0u64, 0u64);
     let (mut alloc_min, mut alloc_max) = (u64::MAX, 0u64);
     let mut scratch = Vec::with_capacity(512);
+    // G0.6 validity of every handoff, checked after the loop: the launch it
+    // answers, its token and its signed BUY (moved, not copied).
+    let mut handoffs: Vec<([u8; 32], [u8; 32], [u8; 20], Vec<u8>)> = Vec::with_capacity(launches);
     // The cold launch alone, then the rest in bursts.
     let chunks = std::iter::once(0..1).chain(
         (1..launches)
@@ -497,6 +500,7 @@ fn c3_paper_path_latency() {
                             samples[k].push(v);
                         }
                     }
+                    handoffs.push((hash, buy.launch_hash, buy.token, buy.raw));
                     Hot0Decision::Reject
                 },
             );
@@ -505,6 +509,32 @@ fn c3_paper_path_latency() {
     }
     drop(arena);
     journal.finish().unwrap();
+    // G0.6: launches taken together are not cross-wired, overwritten or
+    // duplicated — one BUY per launch, its own token in its calldata, signed
+    // by the PAPER sender. Every C3 PAPER BUY is an alternative from the same
+    // canonical state (never mined), so all carry the arm's next nonce: a
+    // LIVE nonce sequence of simultaneous BUYs is not exercised here.
+    assert_eq!(handoffs.len() as u64, launches as u64 - misses);
+    let mut tokens = std::collections::HashSet::new();
+    for (k, (delivered, answered, token, raw)) in handoffs.iter().enumerate() {
+        assert_eq!(delivered, answered, "handoff {k} answers another launch");
+        assert!(tokens.insert(*token), "handoff {k} repeats a token");
+        let signed = decode_signed(raw).unwrap();
+        assert_eq!(signed.tx.nonce, 0, "handoff {k}: the arm's next nonce");
+        assert_eq!(
+            recover_legacy_sender(&signed, 56, &mut scratch).unwrap(),
+            sender,
+            "handoff {k} signer"
+        );
+        assert!(
+            signed.tx.input.windows(20).any(|w| w == token),
+            "handoff {k} calldata misses its token"
+        );
+    }
+    println!(
+        "G0.6 validity: {} handoffs, one per launch, distinct tokens in their calldata, PAPER signer, all at the arm's next nonce (PAPER alternatives)",
+        handoffs.len()
+    );
     println!(
         "C3 PAPER path, {} launches measured after a cold one and {WARMUP} warm-up, this machine (not T_send):",
         samples[0].len()
@@ -584,7 +614,7 @@ fn c3_paper_path_latency() {
             d.push(
                 c::NON_CLAIMS,
                 format!(
-                    "BURST {burst}: launches published {burst} at a time and taken one by one by the single executor; a synthetic arrival pattern, not an observed one"
+                    "BURST {burst}: launches published {burst} at a time and taken one by one by the single executor; a synthetic arrival pattern, not an observed one; PAPER BUYs share the arm's next nonce (alternatives, never mined): no LIVE nonce sequence of simultaneous BUYs is exercised"
                 )
                 .as_str(),
             );
