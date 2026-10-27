@@ -3,6 +3,20 @@
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-25 (latest binding offline C0–I implementation, technical DoD, network/market and G0.7 safety; historical v9.1/v9/v8 preserved)
 
+## NEUESTE NUTZERENTSCHEIDUNG (27.10.2026) — BSC-WALLET-CONTROLS UND TECHNISCHE SCHALTBARKEIT
+
+Diese Entscheidung ist für die weitere **technische Implementierung** aktueller als ältere Entwicklungsstopps. Alle BSC-Funktionen, auch die technisch vorbereitete Phase J und ihre Controls, dürfen ohne echten Mainnet-BUY vollständig implementiert, integriert und mit Testidentitäten geprüft werden. Historische Gate-0-Evidence und wirtschaftliche Korrektheitsprüfungen bleiben erhalten.
+
+**Zwei unabhängige native Wallet-Schalter:** `LAUNCHER` und `BUYER` bekommen jeweils `ENABLE/DISABLE`. Initialzustand, fehlender Zustand und Wiederanlauf: **beide DISABLED**. Jeder produktive Pfad einschließlich direkter CLI-Runner muss den Zustand vor Mainnet-SIGN/SEND prüfen. Ein GUI-only-Schalter genügt nicht. Bereits gesendete Transaktionen können durch DISABLE nicht rückgängig gemacht werden.
+
+**Weitere Controls:** Vorhandene Source-/Component-/Candidate-Schalter wiederverwenden; fehlende fachlich getrennte Venue-, Runtime- und wirtschaftliche Freigabesteuerungen ohne neue Architektur technisch ergänzen. Alle wirtschaftlichen Controls haben Initialzustand `DISABLED/OFF`. Ein Wallet-ENABLE aktiviert niemals automatisch LIVE, Signieren oder Senden. Sicherheitsprüfungen für Chain, Kandidat/V5, Nonce, Budget, Anti-Replay und Providerqualität bleiben verbindlich.
+
+**Ein Steuerungsweg:** Native Rust-Owner → typisierte, persistierte Konfiguration mit `requested/effective`, CAS-Generation, Receipt und Blockgrund → sanitisiertes `darkbot.bsc.v1` Protobuf → gemeinsames Gateway → bestehende BSC-Adapter/Store → fünf bestehende React-Reiter. Launcher und Buyer mit eigenen Enable-/Disable-Bedienelementen in `Wallets`; identische native Authority für Terminal und Frontend. F0-VAR und Native-/CLI-/Proto-/Gateway-/UI-E2E einschließlich Crash/Recovery nachweisen. Kein Project_0-Eingriff.
+
+**Umsetzungsstatus:** Dieser Plantext ist eine SOLL-Vorgabe; er aktiviert nichts. Während der Umsetzung sind beide Wallets und sämtliche wirtschaftlichen Controls deaktiviert; kein echtes SIGN/ARM/SEND/BUY oder Providerkauf. Ausstehende G0.7/G0.8-Evidence blockiert nicht die technische Implementierung, bleibt aber für reale Qualifikationsaussagen offen.
+
+---
+
 ## GELTENDE REGELN — KONSOLIDIERTE LESEREGEL (25.10.2026, NEUESTE NUTZERENTSCHEIDUNG)
 
 **Bei widersprechenden älteren datierten Entwicklungsstopps gilt dieser neueste bindende Nachtrag.** Historische Abschnitte und damalige Code-/Teststatus bleiben als Historie erhalten. Das `bsc/docs/1_PLAN/GATE0_TESTPLAN_SHORT.md` bleibt fachliche Autorität für echte G0.7/G0.8-, Kosten-, Timing- und wirtschaftliche Sicherheitsnachweise; die hier ausdrücklich **aufgehobene Voraussetzung „erst real kaufen, dann Offline-Code schreiben“** darf nicht über einen alten Status oder einen untergeordneten Auftrag wieder eingeführt werden. Aktueller Code-/Abnahmestand steht in `bsc/docs/1_PLAN/STATUS.md`.
