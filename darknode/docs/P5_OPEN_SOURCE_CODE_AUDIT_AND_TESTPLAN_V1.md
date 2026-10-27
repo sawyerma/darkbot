@@ -105,6 +105,10 @@ Die 28 A-IDs sind der **technische** Sicherheits-Gesamttest. Ökonomische Strate
 - **Lane F/P8:** pro `L1–L9` aus P5-§5c min/p50/p95/p99/p99.9/max mit Queue-Wait, `fsync`, Netzwerk-Send, ACK, Fill und Stop-Bestätigung, unter Host-Last/Netzausfall und über den vorgesehenen Soak. Grenzwerte **vor** Abnahme festlegen; fehlende p99-Assertions ⇒ `NOT_RUN/BLOCKED`, niemals `PASS`.
 - **Safety-vor-Speed:** Niemand darf die Intent-Persistenz, Risk-Reserve, Exchange-Reconciliation oder Stop-Bestätigung abschalten, um eine Latenzmetrik zu verbessern. Gute CPU-Zahlen ohne getestete Exchange-Latenz oder fehlender Stopdeckung sind **kein** erfolgreicher Gesamttest.
 
+## 3c. Wallet-/Account-Synchronisation – Pflichtassertions in bestehenden P5-A-Tests
+
+Verbindliches Dokument: [WALLET_ACCOUNT_SYNC_V1.md](WALLET_ACCOUNT_SYNC_V1.md). **Alle folgenden Nachweise NOT_RUN.** In `DN-P5-ALL-001` ergänzen statt neuer Test-ID: **A02/A13** Account-Identität/DEMO/USDT-vs-USD; **A08/A12/A26/A27** WS-Reconnect/REST-Snapshot-Barrier, Order-Kanal ohne initiale vollständige Liste, verspätete Event-Reihenfolge, Bitget-App-/Transfer-/Fremdorders und Resync ohne Doppelorder; **A11/A14** Equity/Available/Reservierung/Positionsgrößenkontrolle inkl. fremder Exchange-Exposure; **A17–A20/A28** echte Stopdeckung gegenüber Exchange-Position; **A24/A26/P7** Wallet/Overview/Live aus **demselben** Rust-Protobuf-Account-State, Stale-Anzeige und Browserunabhängigkeit. **P8** misst private WS→Risk und WS→Wallet-Publish sowie Reconnect-/REST-Budget-Last. Ein erfolgreicher WS-Subscribe alleine ist **kein** `PASS`.
+
 ## 4. Fehlende Vorarbeiten, bevor der Gesamttest echt laufen kann
 
 1. **Aktueller DarkNode-Codezustand:** Git `darknode/` hat bisher Dokumentation/Diagramme, aber keine bestätigte produktive P5-Rust-Implementierung. Deshalb können A13–A28 nicht gegen echte P5-Ausführungszustände bestanden werden.
