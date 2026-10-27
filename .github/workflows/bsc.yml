@@ -1,0 +1,56 @@
+name: bsc
+# The BSC engine regression with all features, including the seven bsc/tools
+# tests (cargo test bsc_tools), on macOS (the host: account home, boot
+# session, switch owner) and Linux (the cross-platform components).
+# Standard GitHub-hosted runners of a public repository: no extra cost.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bsc/**'
+      - 'protocol/**'
+      - 'frontend/contracts/bsc-*.json'
+      - 'ops/bsc-control.sh'
+      - '.github/workflows/bsc.yml'
+  workflow_dispatch:
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: bsc/engine
+    steps:
+      - uses: actions/checkout@v4
+      # The workspace's rust-version (bsc/engine/Cargo.toml).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.93.1'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bsc/engine
+      - name: npm dependencies of the DRY tools (package-lock)
+        working-directory: bsc/tools
+        run: |
+          npm ci --prefix abi-tools
+          npm ci --prefix evm-audit-tools
+      - name: cargo regression, all features (bsc_tools runs the seven tool tests)
+        run: cargo test --locked --no-fail-fast --workspace --all-features
+      - name: the seven tool tests ran, each with its fixed count
+        run: |
+          cargo test --locked --all-features -p darkbot-bsc-execution --test bsc_tools -- --nocapture 2>&1 | tee ../tools.txt
+          cargo test --locked --all-features -p darkbot-bsc-qualification --test bsc_tools -- --nocapture 2>&1 | tee -a ../tools.txt
+          for f in test_g06a_dry_modes.py test_g06a_shell_scope.py test_g06a_key_hygiene.cjs test_g06a_private_mode.cjs \
+                   test_g06a_state_pin.cjs test_readiness_job.py test_status_sync.py; do
+            grep -E "bsc_tools $f: exit Some[(]0[)], tests [0-9]+, pass [0-9]+, fail 0, error 0, skip 0$" ../tools.txt \
+              || { echo "::error::$f did not run with all its tests passing"; exit 1; }
+          done

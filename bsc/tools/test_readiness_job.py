@@ -46,7 +46,9 @@ class WrapperTests(unittest.TestCase):
   self.assertEqual(result['result_code'],'BLOCKED')
   self.assertEqual(seen.get('BSC_MAINNET_RPC_HTTPS'),'https://rpc.example.invalid/')
   self.assertEqual(seen.get('DARKBOT_G07_CLOCK_ID'),'macos.CLOCK_UPTIME_RAW')
-  boot=subprocess.run(['/usr/sbin/sysctl','-n','kern.bootsessionuuid'],capture_output=True,text=True).stdout.strip()
+  # The host's boot identity as the native owner reads it (macOS boot session, Linux boot_id).
+  boot=subprocess.run(['/usr/sbin/sysctl','-n','kern.bootsessionuuid'],capture_output=True,text=True).stdout.strip() if sys.platform=='darwin' else pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+  self.assertTrue(boot)
   self.assertEqual(seen.get('DARKBOT_G07_BOOT_ID'),boot)
   self.assertEqual(seen.get('DARKBOT_BSC_CHECKOUT'),'/fixture/checkout')
  def test_without_a_configured_endpoint_the_readiness_binary_never_starts(self):

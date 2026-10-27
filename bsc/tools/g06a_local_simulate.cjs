@@ -183,67 +183,18 @@ function balanceOfCalldata(owner) {
     'function balanceOf(address owner) view returns(uint256)'
   ]).encodeFunctionData('balanceOf', [owner]);
 }
-async function main() {
-  const outPath = process.argv[2];
-  if (!outPath) throw new Error('usage: node g06a_local_simulate.cjs <local_simulation.dbrec>');
-
-  const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
-  const keys = takeKeys(process.env);
-  requireSigningSwitches();
-  let launcherWallet = new ethers.Wallet(keys.launcher);
-  let buyerWallet = new ethers.Wallet(keys.buyer);
-  keys.launcher = keys.buyer = null;
-  const launcherAddress = launcherWallet.address;
-  const buyerAddress = buyerWallet.address;
-  if (launcherAddress.toLowerCase() === buyerAddress.toLowerCase()) {
-    throw new Error('launcher and buyer must be distinct');
-  }
-
-  const portal = ethers.getAddress(PORTAL);
-  const implAddr = ethers.getAddress(req('DARKBOT_G06A_TAX_V3_IMPL'));
-  const salt = req('DARKBOT_G06A_SALT');
-  const token = predictedToken(portal, implAddr, salt);
-
-  const launcherNonce = dec('DARKBOT_G06A_LAUNCHER_NONCE');
-  const buyerNonce = dec('DARKBOT_G06A_BUYER_NONCE');
-  const gasPrice = dec('DARKBOT_G06A_GAS_PRICE_WEI');
-  const launchGasLimit = dec('DARKBOT_G06A_LAUNCH_GAS_LIMIT');
-  const buyGasLimit = dec('DARKBOT_G06A_BUY_GAS_LIMIT');
-  const launchValue = dec('DARKBOT_G06A_LAUNCH_VALUE_WEI');
-  const buyValue = process.env.DARKBOT_G06A_BUY_VALUE_WEI
-    ? BigInt(process.env.DARKBOT_G06A_BUY_VALUE_WEI)
-    : BUY_VALUE_DEFAULT;
-  const localExpected = dec('DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT');
-  if (localExpected <= 0n) throw new Error('local expected output must be >0');
-  const minOutput = localExpected * (10000n - SLIPPAGE_BPS) / 10000n;
-  if (minOutput <= 0n) throw new Error('minOutput must be >0');
-
-  const launchData = launchCalldata(launcherAddress, salt);
-  const buyData = buyCalldata(token, buyValue, minOutput);
-  // The salt, the launch calldata and the token never leave the process.
-  guardEgress([salt, launchData, token]);
-
-  const launchReq = {
-    chainId: CHAIN_ID, nonce: launcherNonce, gasPrice, gasLimit: launchGasLimit,
-    to: portal, value: launchValue, data: launchData, type: 0,
-  };
-  const buyReq = {
-    chainId: CHAIN_ID, nonce: buyerNonce, gasPrice, gasLimit: buyGasLimit,
-    to: portal, value: buyValue, data: buyData, type: 0,
-  };
-
-  // Offline signing only. Raw bytes are intentionally never printed or persisted.
-  const rawLaunch = await launcherWallet.signTransaction(launchReq);
-  const rawBuy = await buyerWallet.signTransaction(buyReq);
-  launcherWallet = buyerWallet = null;
-  const launchHash = ethers.keccak256(rawLaunch);
-  const buyHash = ethers.keccak256(rawBuy);
-
+// The read-only chain part of the simulation, main()'s only simulation path
+// (and its tests'): the chain ID, BSC-002's block pin before any state read,
+// the local EVM run of the prepared launch and BUY on exactly that block's
+// state, the gas upper bounds and the pending nonces. It never signs, sends,
+// asks or changes a switch, or writes evidence.
+async function simulatePrepared(p) {
+  const { rpcUrl, parentNumber, parentHash, portal, token, launcherAddress, buyerAddress } = p;
+  const { launcherNonce, buyerNonce, gasPrice, launchGasLimit, buyGasLimit, launchValue, buyValue, launchData, buyData } = p;
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
   if (chain !== CHAIN_ID) throw new Error(`wrong chain: ${chain}`);
-  const parentNumber = dec('DARKBOT_G06A_SEND_HEAD');
   // BSC-002: exactly the preflight's block, by hash (DARKBOT_G06A_SEND_HEAD_HASH).
-  const parent = await requireBlock(rpc, rpcUrl, parentNumber, req('DARKBOT_G06A_SEND_HEAD_HASH'), 'before the simulation');
+  const parent = await requireBlock(rpc, rpcUrl, parentNumber, parentHash, 'before the simulation');
 
   const common = createCustomCommon(
     { chainId: Number(CHAIN_ID) },
@@ -353,6 +304,77 @@ async function main() {
   const buyerPending = BigInt(await rpc(
     rpcUrl, 'eth_getTransactionCount', [buyerAddress, 'pending']
   ));
+  return {
+    parent, returned, balance, launcherPending, buyerPending,
+    launchExecutionGas: launchRes.execResult.executionGasUsed,
+    buyExecutionGas: buyRes.execResult.executionGasUsed,
+    launchIntrinsic, buyIntrinsic, launchGasUpper, buyGasUpper,
+  };
+}
+
+async function main() {
+  const outPath = process.argv[2];
+  if (!outPath) throw new Error('usage: node g06a_local_simulate.cjs <local_simulation.dbrec>');
+
+  const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
+  const keys = takeKeys(process.env);
+  requireSigningSwitches();
+  let launcherWallet = new ethers.Wallet(keys.launcher);
+  let buyerWallet = new ethers.Wallet(keys.buyer);
+  keys.launcher = keys.buyer = null;
+  const launcherAddress = launcherWallet.address;
+  const buyerAddress = buyerWallet.address;
+  if (launcherAddress.toLowerCase() === buyerAddress.toLowerCase()) {
+    throw new Error('launcher and buyer must be distinct');
+  }
+
+  const portal = ethers.getAddress(PORTAL);
+  const implAddr = ethers.getAddress(req('DARKBOT_G06A_TAX_V3_IMPL'));
+  const salt = req('DARKBOT_G06A_SALT');
+  const token = predictedToken(portal, implAddr, salt);
+
+  const launcherNonce = dec('DARKBOT_G06A_LAUNCHER_NONCE');
+  const buyerNonce = dec('DARKBOT_G06A_BUYER_NONCE');
+  const gasPrice = dec('DARKBOT_G06A_GAS_PRICE_WEI');
+  const launchGasLimit = dec('DARKBOT_G06A_LAUNCH_GAS_LIMIT');
+  const buyGasLimit = dec('DARKBOT_G06A_BUY_GAS_LIMIT');
+  const launchValue = dec('DARKBOT_G06A_LAUNCH_VALUE_WEI');
+  const buyValue = process.env.DARKBOT_G06A_BUY_VALUE_WEI
+    ? BigInt(process.env.DARKBOT_G06A_BUY_VALUE_WEI)
+    : BUY_VALUE_DEFAULT;
+  const localExpected = dec('DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT');
+  if (localExpected <= 0n) throw new Error('local expected output must be >0');
+  const minOutput = localExpected * (10000n - SLIPPAGE_BPS) / 10000n;
+  if (minOutput <= 0n) throw new Error('minOutput must be >0');
+
+  const launchData = launchCalldata(launcherAddress, salt);
+  const buyData = buyCalldata(token, buyValue, minOutput);
+  // The salt, the launch calldata and the token never leave the process.
+  guardEgress([salt, launchData, token]);
+
+  const launchReq = {
+    chainId: CHAIN_ID, nonce: launcherNonce, gasPrice, gasLimit: launchGasLimit,
+    to: portal, value: launchValue, data: launchData, type: 0,
+  };
+  const buyReq = {
+    chainId: CHAIN_ID, nonce: buyerNonce, gasPrice, gasLimit: buyGasLimit,
+    to: portal, value: buyValue, data: buyData, type: 0,
+  };
+
+  // Offline signing only. Raw bytes are intentionally never printed or persisted.
+  const rawLaunch = await launcherWallet.signTransaction(launchReq);
+  const rawBuy = await buyerWallet.signTransaction(buyReq);
+  launcherWallet = buyerWallet = null;
+  const launchHash = ethers.keccak256(rawLaunch);
+  const buyHash = ethers.keccak256(rawBuy);
+
+  const parentNumber = dec('DARKBOT_G06A_SEND_HEAD');
+  const sim = await simulatePrepared({
+    rpcUrl, parentNumber, parentHash: req('DARKBOT_G06A_SEND_HEAD_HASH'), portal, token,
+    launcherAddress, buyerAddress, launcherNonce, buyerNonce, gasPrice, launchGasLimit, buyGasLimit,
+    launchValue, buyValue, launchData, buyData,
+  });
+  const { parent, returned, balance, launchGasUpper, buyGasUpper } = sim;
 
   const floorWei = dec('DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI');
   const floorEvidenceSha = req('DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256');
@@ -375,8 +397,8 @@ async function main() {
     token,
     launcher: launcherAddress,
     buyer: buyerAddress,
-    launcher_pending_nonce: launcherPending,
-    buyer_pending_nonce: buyerPending,
+    launcher_pending_nonce: sim.launcherPending,
+    buyer_pending_nonce: sim.buyerPending,
     launch_success: true,
     buy_success: true,
     simulated_received_amount: returned,
@@ -384,10 +406,10 @@ async function main() {
     local_expected_output_input: localExpected,
     min_output: minOutput,
     output_difference: (returned - localExpected).toString(),
-    launch_execution_gas: launchRes.execResult.executionGasUsed,
-    buy_execution_gas: buyRes.execResult.executionGasUsed,
-    launch_intrinsic_gas: BigInt(launchIntrinsic),
-    buy_intrinsic_gas: BigInt(buyIntrinsic),
+    launch_execution_gas: sim.launchExecutionGas,
+    buy_execution_gas: sim.buyExecutionGas,
+    launch_intrinsic_gas: BigInt(sim.launchIntrinsic),
+    buy_intrinsic_gas: BigInt(sim.buyIntrinsic),
     launch_gas_used: launchGasUpper,
     buy_gas_used: buyGasUpper,
     gas_accounting: 'conservative upper bound = intrinsic + runCall executionGasUsed; refunds not subtracted',
@@ -415,4 +437,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { takeKeys, requireSigningSwitches };
+module.exports = { takeKeys, requireSigningSwitches, simulatePrepared };

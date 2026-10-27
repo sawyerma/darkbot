@@ -2853,7 +2853,7 @@
     },
     {
       "source_path": "bsc/tools/readiness_job.py",
-      "source_sha": "9771d9b5442e927edcca451dc58101cab8cd94e79345697ebd62edb3dd87ad64",
+      "source_sha": "0b9436113831829694e922a4b20f5b98a360788237e6a7ab9eb0ef86c8018e2b",
       "owner": "BSC lifecycle",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },

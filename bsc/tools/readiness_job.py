@@ -44,6 +44,15 @@ def public_config(path):
         values[key] = value.strip()
     return values
 
+def boot_id():
+    """The host boot identity, read as the native owner reads it (sources.rs boot_session)."""
+    if sys.platform == 'darwin':
+        return subprocess.run(['/usr/sbin/sysctl', '-n', 'kern.bootsessionuuid'], capture_output=True, text=True, timeout=5).stdout.strip()
+    try:
+        return pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    except OSError:
+        return ''
+
 try:
     # Exact allowlist: never inherit a signing key, RPC token or builder authorization.
     # BSC-050 A-scan: the endpoint and the clock come from the snapshot's public
@@ -56,7 +65,7 @@ try:
     env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(pathlib.Path.home()),
            'BSC_MAINNET_RPC_HTTPS': rpc}
     if config.get('DARKBOT_G07_CLOCK_ID'): env['DARKBOT_G07_CLOCK_ID'] = config['DARKBOT_G07_CLOCK_ID']
-    boot = subprocess.run(['/usr/sbin/sysctl', '-n', 'kern.bootsessionuuid'], capture_output=True, text=True, timeout=5).stdout.strip()
+    boot = boot_id()
     if boot: env['DARKBOT_G07_BOOT_ID'] = boot
     if (root / 'CHECKOUT').is_file(): env['DARKBOT_BSC_CHECKOUT'] = (root / 'CHECKOUT').read_text().strip()
     with temporary.open('xb') as output:

@@ -44,3 +44,7 @@ status-reporter = ["dep:prost", "dep:prost-build", "dep:protox"]
 [[bin]]
 name = "bsc-status-reporter"
 required-features = ["status-reporter"]
+
+[[test]]
+name = "bsc_tools"
+required-features = ["status-reporter"]

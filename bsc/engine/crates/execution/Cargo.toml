@@ -133,3 +133,7 @@ required-features = ["runtime"]
 [[test]]
 name = "runtime_signal"
 required-features = ["runtime"]
+
+[[test]]
+name = "bsc_tools"
+required-features = ["g07-mainnet", "runtime"]
