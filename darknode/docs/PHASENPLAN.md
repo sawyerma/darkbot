@@ -1,6 +1,6 @@
 # DarkNode – Verbindlicher Phasenplan (Planungsbaseline)
 
-**Version:** 0.3 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** P1/P2- und UX-Konsistenz, automatisierte Protobuf-Feldpflege, M1-Durchstich, P5-Betriebssicherheit (nur Planung, keine Implementierung)  
+**Version:** 0.4 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** P1/P2- und UX-Konsistenz, automatisierte Protobuf-Feldpflege, M1-Durchstich, P5-Betriebssicherheit (nur Planung, keine Implementierung)  
 **Scope:** `darknode/` mit eigenem Rust-Owner; ein vorhandenes DarkBot-Frontend/Gateway; Bitget als initiale einzige Exchange. Kein LIVE, kein Deploy und keine Implementation durch diesen Dokumentations-Commit.  
 **Maßstab:** Jede Phase ist erst fertig, wenn ihre Nachweise am festen Commit reproduzierbar sind. **P0–P10** sind Umsetzungsphasen **nach** dem vorgeschalteten Research-**GATE 1**.
 
@@ -41,6 +41,22 @@ flowchart LR
 - **M1-A – rein lesend:** BTCUSDT echte Bitget-Rohtrades → eigener Rust-1s-/5s-Aggregator (P1.6/T25–T27) → zunächst Williams %R als typisierter Node → SignalIntent → Rust-Risk-Entscheid im `NO_SEND`-Modus → eigene DarkNode-Protobuf-Projektion → Gateway → Browser. Wallet zunächst ehrlich `UNAVAILABLE`, solange noch kein qualifizierter privater Read-only-Kontosync besteht. Später echte Wallet-/Positionswerte aus qualifiziertem Read-only-API-Zugang, nie Mock-Balances.
 - **M1-B – ausschließlich gesondert freigegebene Bitget-Demo-Orders:** Erst nach zuständigen P5-Demo-Capability-/Journal-/Stop-/Partial-Fill-/Emergency-/Reconciliation-Vorgates und **expliziter** Demo-Mutationsfreigabe: streng begrenzter Entry mit serverseitigem Initial-SL → tatsächlicher Fill → Stop-Readback → Exit → REST/WS-Abgleich → Darstellung von Position/Wallet/Order. Ein unbekannter Order-/Schutzstatus blockiert alle weiteren Entries; keine blinde Wiederholung. Ohne qualifizierten Schutz/Mode bleibt M1-B **BLOCKED**, auch wenn M1-A erfolgreich ist.
 - **Nachweis pro Stufe:** eingefrorener Code-SHA, Quellen-/Signal-/Schema-Goldens, echte (oder ausdrücklich markierte Fault-)Fixtures, Rust→Protobuf→Gateway→UI-Roundtrip, realer Readback und eindeutige Zustands-/Order-/Fill-IDs. Weder Demo-PASS noch M1-PASS autorisiert P9-LIVE.
+
+## Entscheidungen, die **jetzt** feststehen – keine Rückstellung bis zur Implementierung
+
+| Entscheidung | **Ab jetzt verbindliches V1-SOLL** | Was erst ein echter Test beweisen kann |
+|---|---|---|
+| Kontobetrieb `DN-D08` | **Bitget UTA V3, USDT-FUTURES, dediziertes Bot-Unterkonto, `holdMode=one_way_mode`, Futures-`marginMode=isolated`**. Hedge/Cross sind in V1 **verboten** (sicher erkennen/ablehnen, nicht vollständig positiv supporten). Keine stille automatische Umschaltung. | Ob das **konkrete** Demo-/Live-Unterkonto `accountMode/accountLevel/holdMode/symbolConfigList` so bereitstellt und ob Market/Preset-SL/reduceOnly/Partial-Fills in genau dieser Kombination funktionieren. `NO_ENTRY` bei Abweichung. |
+| Kontoeinstellungen | Erst `GET /api/v3/account/info` und `settings`, Settings-Soll/Ist vergleichen, für Leverage `pre-set-leverage` und autorisierten `set-leverage` **nur FLAT ohne offene/UNKNOWN Orders**, dann erneuter Readback. **Account-Mode-Wechsel kein autonomer Bot-Task.** One-way/Isolated und Leverage/Stop-Mengen müssen auch nach Reconnect exakt bestätigt sein. | Schreib- und Readback-Fähigkeit, `posSide` und `marginMode` in den tatsächlichen UTA-V3-Bitget-Requests und WS-Responses auf Demo. Besonders: `place-order` kann ohne `marginMode` auf `crossed` zurückfallen – **nie Feld still weglassen**. |
+| Protobuf-Census | **Descriptor-Set aus bestehendem Buf/protox als Feldquelle + kleines versioniertes, per Feldnummer validiertes Semantik-/UI-Manifest**. Kein separat handgepflegtes 20-Spalten-Dokument und zunächst keine neue protoc-Extension-Abhängigkeit. Generator-/Required-CI-Checks DN-PROTO-001–008 sind P0/P7-Umsetzungspflicht. | Generator schreiben/ausführen, Feld-Producer/UI-Abdeckung, `buf breaking`, Rust/TS-Goldens und Negativtests; alles aktuell `NOT_RUN`. |
+| CI | Bestehende Protobuf-/Gateway-/Frontend-CI **erweitern**. Pfadfilter müssen auch `darknode/**` einschließlich reiner Rust-Quellcodeänderungen abdecken; für reine Markdown-Änderungen Doc-/Linkcheck statt erzwungener Runtime-Tests. Kein neues CI-System. | Workflow-Änderung und realer Trigger-/Required-Check-Beleg; bisher nicht implementiert. |
+| Früher M1-Durchstich | **M1-A read-only vorgezogen**: reale Rohtrades→eigene Bars→Williams→Risk ohne Order→Gateway→React. **M1-B erst nach autorisierter Bitget-Demo-Mutations-Lane und qualifizierten P5-Gates**. | Es existiert noch kein ausführbarer M1-Rust/React-Pfad; daher nicht jetzt als bestanden testbar. |
+| Produktionshost und Secrets | **V1-Zielplattform Linux, dedizierter unprivilegierter systemd-Dienstnutzer, `systemd-creds`/encrypted credentials als bevorzugter Dienst-Secret-Mechanismus**, keine Klartext-Keys in Git/Browser/Protobuf/Logs. Ziel ist **ein aktiver** Order-Owner; manuelle Rotation/Revoke-Prozedur. | Konkretes Linux-/Credential-/TPM-/Schlüssel-Restore-Profil, Diensthärtung und Pen-/Rotationstests am ausgewählten Host. |
+| Backup/Disaster Recovery | **Verschlüsseltes und Integritäts-geprüftes Off-Host-Backup** für kritische Journale/SQLite-Control/Graph-Versionen/Manifeste und Konfiguration **ohne Secrets**, plus bewusst qualifizierter Boot **ohne jegliche lokale Recovery-Datei**. Stop-/Exchange-Reconciliation vor Wiederfreigabe; ohne Journal standardmäßig `HALTED/RECOVERING`, kein Auto-LIVE. | Externer Storage/Schlüsselverwahrung/RPO/RTO anhand Hostdesign und echte Recovery-/Host-Kill-/Kaltstarttests. |
+
+**Wichtig zur Begriffsklärung:** **`DN-D08 = ENTSCHEIDUNG FESTGELEGT, ACCOUNT-CAPABILITY = NOT_RUN`** ist kein Widerspruch. Der Betrieb bleibt `NO_ENTRY`, bis die Account-Prüfung passt; eine Produktentscheidung **ersetzt** keinen Bitget-Test. Unabhängig davon bleiben P5 und Gate 1 im Research-Status, SIGN/ARM/LIVE gesperrt. S0–S7 gelten vollständig.
+
+**Bitget-Primärquellen zur Architekturentscheidung:** [Get Account Settings / Pre-set-/Set-Leverage](https://www.bitget.com/docs/catalog/account/account-settings), [UTA Isolated-V3-Änderungen ab 19.05.2026](https://www.bitget.com/docs/uta/changelog/2026-05), [Futures Place Order / MarginMode](https://www.bitget.com/docs/catalog/trading/order-management). Beachten: `accountLevel=isolated` und `symbolConfigList[].marginMode=isolated` sind **verschiedene** Accountinformationen. Keinen Wert aus dem anderen ableiten.
 
 ## P0 – Baseline, Source-Audit, ADRs und Protobuf-Verträge
 
@@ -91,7 +107,7 @@ flowchart LR
 
 ## P5 – Bitget Private API, Orderowner, Recovery und Risiko
 
-**Verbindlicher Detailplan:** [P5 V1.4 – UTA V3 Private API, S0–S7, Order-/Stop-Recovery, Low-Latency und Operations](PHASENPLAN_P5_V1.md). **P3 bleibt die Indikator-/Node-Engine**, P5 verwaltet die private Bitget-Anbindung. **Die vollständige USDT-Futures-Instruments-Liste ist noch nicht real abgefragt; bislang nur BTCUSDT.**
+**Verbindlicher Detailplan:** [P5 V1.5 – UTA V3 Private API, S0–S7, Order-/Stop-Recovery, Low-Latency und Operations](PHASENPLAN_P5_V1.md). **P3 bleibt die Indikator-/Node-Engine**, P5 verwaltet die private Bitget-Anbindung. **Die vollständige USDT-Futures-Instruments-Liste ist noch nicht real abgefragt; bislang nur BTCUSDT.**
 
 **Auftrag:** serverseitige Secrets, Trade-/Read-Rechte ohne Withdrawal, IP-Whitelist; Private WS/REST für Account, offene Orders, Fills, Positionen, Schutzorders und Orderstatus. Ein persistenter zentraler Order-Owner. Vor Senden `clientOid`, Payloadhash, Bot/Graph-Version und Risk-Reservation fsync/persistent; Orderzustände von SUBMIT_PENDING über ACK/WORKING/PARTIAL/FILLED bis CLOSED/UNKNOWN. Initialen Bitget-Stop nur auf bestätigte Venue-Capability gestützt. Break-even/Trailing/Reduce-only/TP-SL und Exit-Prioritäten testbar.
 

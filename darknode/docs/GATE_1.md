@@ -14,7 +14,7 @@
 | DN-D05 | **Frontend:** bestehender DarkBot-React-Graphite-Stack und **ein** Gateway; versionierte Protobuf-Kommunikation | FESTGELEGT |
 | DN-D06 | **Kapital:** Bitget CEX, API-Key Read/Trade ohne Auszahlung; MetaMask nicht nötig | FESTGELEGT |
 | DN-D07 | **MVP:** genau ein qualifizierter Bot, danach mehrere isolierte feste Paar-/Strategieinstanzen | FESTGELEGT |
-| DN-D08 | **Exakter Kontomodus:** UTA vs anderes, One-way/Hedge, isolated/cross, API V3-Capabilities | OPEN – One-way + Isolated bevorzugter enger V1-Demo-Prüfkandidat; positive Matrix nur für freigegebene Capabilities, andere Modi werden sicher abgelehnt |
+| DN-D08 | **V1-Kontomodus:** UTA V3, USDT-FUTURES, eigenes Bot-Unterkonto, `one_way_mode` + `isolated`; Hedge/Cross verboten und fail-closed. Account-Modus nicht autonom ändern; Ist/Settings/Fills/Stops prüfen | **PRODUKTENTSCHEID FESTGELEGT**; echte Private-API-/Demo-Capability und Konto-Readback `NOT_RUN`. Details [PHASENPLAN.md](PHASENPLAN.md) |
 | DN-D09 | **Serverseitige Stop-/TP-/Trailing-Semantik** pro Futures-Kontrakt und Ordertyp | OPEN – Bitget-Demo-Evidenz |
 | DN-D10 | **Engine-Reuse:** NautilusTrader, Barter oder schlanker eigener Rust-Kern; Lizenz, Performance, Einbindung | OPEN – technische Spikes |
 | DN-D11 | **Trigger:** Schwellen-level vs CROSS, Hysterese/Rearm, Barclose vs intrabar und Exit-Priorität | OPEN – Golden-Regelfälle |
@@ -27,7 +27,7 @@
 | DN-D18 | **No JSON intern:** Bitget-JSON ausschließlich am externen Adapterrand; innerhalb Rust/Protobuf/Binärformate; in L0 dürfen externe Originalbytes opak abgelegt werden | FESTGELEGT; Implementierungsnachweis offen |
 | DN-D19 | **P1-Speicher:** Roh-/Normaldaten/Candle-Cache als L0/L1/L2-Binärdateien; kleine transaktionale Control-/Registry-/Gap-/Manifestdaten in SQLite; keine produktiven Redis/Parquet/ClickHouse-Pfade | FESTGELEGT; R2c/R2d offen |
 
-**P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN.
+**P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN; Linux/systemd und verschlüsseltes Off-Host-Backup sind nun verbindliche V1-Designentscheidungen, keine bereits getesteten Hosts.
 
 „FESTGELEGT“ bezeichnet das **Produkt-/Architekturziel**, keinen implementierten und keinen getesteten Sachverhalt. Alle API-/Fremdcode-Behauptungen müssen vor Übernahme gegen exakte Version/Commit und Tests verifiziert werden.
 
@@ -80,7 +80,7 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 ## P5 – Private Bitget-Futures-Anbindung (Research-Artefakt)
 
-[PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md) (V1.2) dokumentiert offizielle UTA-V3-Konto-/Hebel-/Order-/Stop-/Private-WS-Capabilities, Open-Source-Vergleiche, Demo-Verträge, die zentrale Rust-Order-Autorität und die Sicherheits-/Crash-Gates. **Alle privaten Funktionen sind bisher nur dokumentiert, NICHT RUN**. Der volle USDT-Futures-Symbolkatalog ist ebenfalls noch nicht abgerufen. Keine Modus-/Hebeländerung und keine Order während Gate 1.
+[PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md) (V1.5) dokumentiert offizielle UTA-V3-Konto-/Hebel-/Order-/Stop-/Private-WS-Capabilities, Open-Source-Vergleiche, Demo-Verträge, die zentrale Rust-Order-Autorität und die Sicherheits-/Crash-Gates. **Alle privaten Funktionen sind bisher nur dokumentiert, NICHT RUN**. Der volle USDT-Futures-Symbolkatalog ist ebenfalls noch nicht abgerufen. Keine Modus-/Hebeländerung und keine Order während Gate 1.
 
 ## 3. Open-Source-Analyse: Daten, Exchange, Backtest, Nodes, Charts
 
