@@ -17,7 +17,8 @@
 //!   overwritten.
 //!
 //! Exit status: 0 PASS, 1 FAIL, 2 INCOMPLETE, 3 the harness could not run
-//! or could not write its evidence.
+//! (also: `BSC_ECON_SEND` not ENABLED in the native owner state, plan
+//! 27.10.) or could not write its evidence.
 
 use std::env;
 use std::fs::OpenOptions;
@@ -60,6 +61,12 @@ fn run() -> Result<Verdict, String> {
     {
         return Err("Q5A_PROVIDERS may only name club48 and blockrazor".to_owned());
     }
+    // Plan 27.10.: every Mainnet bundle submission, this empty probe too,
+    // needs BSC_ECON_SEND ENABLED in the native owner state of this boot.
+    darkbot_bsc_execution::sources::require_enabled_here(&[
+        darkbot_bsc_execution::sources::SwitchId::Send,
+    ])
+    .map_err(|e| format!("refused by the native switches: {e}; nothing sent"))?;
     let blockrazor_auth = match env::var("Q5A_BLOCKRAZOR_AUTHORIZATION") {
         Err(_) => Auth::Missing,
         Ok(value) => AuthorizationToken::new(value).map_or(Auth::Invalid, Auth::Token),

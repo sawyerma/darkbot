@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { takeKeys } = require('./g06a_local_simulate.cjs');
+const { takeKeys, requireSigningSwitches } = require('./g06a_local_simulate.cjs');
 
 const KEY1 = '0x' + '0'.repeat(63) + '1';
 const KEY2 = '0x' + '0'.repeat(63) + '2';
@@ -36,4 +36,30 @@ test('the simulation never reads a key elsewhere and drops its signers after sig
   const dropped = main.indexOf('launcherWallet = buyerWallet = null;');
   assert.ok(signed > 0 && dropped > signed);
   assert.doesNotMatch(main.slice(dropped + 'launcherWallet = buyerWallet = null;'.length), /launcherWallet|buyerWallet/);
+});
+
+test('plan 27.10.: the native switches are asked after the keys left the environment, before any signer', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'g06a_local_simulate.cjs'), 'utf8');
+  const main = source.slice(source.indexOf('async function main()'));
+  const take = main.indexOf('takeKeys(process.env)');
+  const ask = main.indexOf('requireSigningSwitches();');
+  const wallet = main.indexOf('new ethers.Wallet(');
+  assert.ok(take > 0 && take < ask && ask < wallet);
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'g06a-switch-'));
+  const fake = (code) => {
+    const p = path.join(dir, `handoff-${code}`);
+    // The stand-in records its argv and environment, then answers like the owner.
+    fs.writeFileSync(p, `#!/bin/sh\nprintf '%s\\n' "$@" > ${dir}/argv-${code}\nenv > ${dir}/env-${code}\n[ ${code} = 0 ] && echo controls=ENABLED || echo "STOP: CONTROL_DISABLED at generation 0: BSC_ECON_SIGN DISABLED" >&2\nexit ${code}\n`);
+    fs.chmodSync(p, 0o755);
+    return p;
+  };
+  requireSigningSwitches(fake(0), '/home/x');
+  assert.equal(fs.readFileSync(path.join(dir, 'argv-0'), 'utf8'), 'controls\n--require\nBSC_WALLET_LAUNCHER\nBSC_WALLET_BUYER\nBSC_ECON_SIGN\n');
+  const env = fs.readFileSync(path.join(dir, 'env-0'), 'utf8');
+  assert.match(env, /^HOME=\/home\/x$/m);
+  assert.doesNotMatch(env, /PRIVATE_KEY|SALT/);
+  assert.throws(() => requireSigningSwitches(fake(2), '/home/x'), /native switches refuse the signature: STOP: CONTROL_DISABLED at generation 0: BSC_ECON_SIGN DISABLED/);
+  assert.throws(() => requireSigningSwitches(path.join(dir, 'missing'), '/home/x'), /native switches refuse the signature/);
+  fs.rmSync(dir, { recursive: true });
 });

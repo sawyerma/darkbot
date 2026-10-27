@@ -313,6 +313,18 @@ fn run(args: &[String]) -> Result<bool, String> {
                         g.switch_now(s.switch, boot.as_deref()),
                     )
                 }))
+                .chain([
+                    (
+                        darkbot_bsc_execution::sources::RUNTIME_MODE,
+                        g.runtime.requested,
+                        g.runtime.effective,
+                    ),
+                    (
+                        darkbot_bsc_execution::sources::BUY_ATTEMPTS_PER_DAY,
+                        g.buy_limit.requested,
+                        g.buy_limit.effective,
+                    ),
+                ])
                 .collect::<Vec<_>>();
             for (name, requested, effective) in rows {
                 println!(
@@ -326,6 +338,17 @@ fn run(args: &[String]) -> Result<bool, String> {
                         .unwrap_or_default()
                 );
             }
+            let usage = darkbot_bsc_execution::sources::buy_usage(
+                std::path::Path::new(flag(rest, "--state")?),
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!(
+                "buy_attempts day_utc={} used={} limit={} remaining={}",
+                usage.day.utc,
+                usage.used,
+                usage.limit,
+                usage.remaining()
+            );
             Ok(true)
         }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {

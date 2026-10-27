@@ -234,6 +234,25 @@ message ControlSwitch {
   // The generation that request wrote.
   optional uint64 set_generation = 7;
 }
+// The persisted daily limit of economic BUY attempts (plan 27.10.) at the native owner and
+// its use on the current UTC day; every attempt that may send takes a slot before its
+// authority is consumed. A limit is never a permission to execute.
+message BuyAttemptLimit {
+  // Attempts allowed per UTC calendar day; 0 (initially) allows none.
+  uint64 per_day = 1;
+  // The UTC calendar day counted, YYYY-MM-DD.
+  string day_utc = 2;
+  // Slots taken on that day, sent or unclear attempts included.
+  uint64 used = 3;
+  // per_day minus used, never below zero.
+  uint64 remaining = 4;
+  // The owner generation; the compare-and-swap of the next request.
+  uint64 generation = 5;
+  // The request that last set the limit; empty while never set.
+  string request_id = 6;
+  // The generation that request wrote.
+  optional uint64 set_generation = 7;
+}
 // Bound launch plan, without signatures, raw transactions or execution authority.
 message BscLaunchState {
   // True only if the current V5 contract is present and valid.
@@ -252,6 +271,11 @@ message BscLaunchState {
   // The economic switches SIGN, ARM, SEND, ATTEMPT and LIVE of the native owner; absent
   // before its state exists.
   repeated ControlSwitch economic_controls = 7;
+  // The daily BUY attempt limit and today's use; absent before the owner state exists.
+  BuyAttemptLimit buy_attempt_limit = 8;
+  // The global runtime mode BSC_RUNTIME_MODE (OFF, SHADOW, PAPER; LIVE stays BLOCKED) in the
+  // ControlSwitch shape; absent before the owner state exists.
+  ControlSwitch runtime_mode = 9;
 }
 // Read-only G0.8 results; submission acknowledgement is not acquisition.
 message BscMonitoringState {

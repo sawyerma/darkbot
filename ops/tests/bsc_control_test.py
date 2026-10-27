@@ -70,6 +70,10 @@ try:
     gen=int(subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources')],capture_output=True,text=True,check=True).stdout.splitlines()[0].split('=')[1])
     h.run('bsc','source','request','BSC_STATE_C2','SHADOW',str(gen),'e2e-c2-crash')
     h.run('bsc','source','request','BSC_STRATEGY_C','SHADOW',str(gen+1),'e2e-strategy-crash')
+    # Plan 27.10.: a wallet switch ENABLED before the crash is DISABLED by the restarted runtime.
+    h.run('bsc','source','request','BSC_WALLET_LAUNCHER','ENABLED',str(gen+2),'e2e-launcher-crash')
+    show=lambda: subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources')],capture_output=True,text=True,check=True).stdout
+    assert 'BSC_WALLET_LAUNCHER requested=ENABLED effective=ENABLED' in show(), show()
     for _ in range(60):
         if 'state.checkpoint_writes' in status() and 'state.checkpoint_writes = 0' not in status(): break
         time.sleep(1)
@@ -82,6 +86,11 @@ try:
             restored=next((l for l in status().splitlines() if l.startswith('state.checkpoint_restore')),'')
             if 'RESTORED' in restored: break
     assert len(runs())>len(before) and 'RESTORED' in restored, (before, runs(), restored)
+    for _ in range(30):
+        if 'BSC_WALLET_LAUNCHER requested=DISABLED effective=DISABLED' in show(): break
+        time.sleep(1)
+    assert 'BSC_WALLET_LAUNCHER requested=DISABLED effective=DISABLED' in show(), show()
+    print('PASS restart: the wallet switch ENABLED before the crash is DISABLED (RESTART_RESET)', flush=True)
     # Strategy C runs in the restarted run before it is stopped (the replay below needs its switch).
     for _ in range(30):
         if 'strategy.state = "SHADOW"' in status(): break

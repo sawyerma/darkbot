@@ -72,8 +72,31 @@ const BSC_ECONOMIC_IDS: [&str; 5] = [
     "BSC_ECON_LIVE",
 ];
 const BSC_SWITCH_MODES: [&str; 2] = ["DISABLED", "ENABLED"];
+/// Plan v9 §2.5: the global runtime mode at the same owner (LIVE stays BLOCKED there).
+const BSC_RUNTIME: &str = "bsc.runtime.mode.set";
+const BSC_RUNTIME_IDS: [&str; 1] = ["BSC_RUNTIME_MODE"];
+const BSC_RUNTIME_MODES: [&str; 4] = ["OFF", "SHADOW", "PAPER", "LIVE"];
+/// Plan 27.10. (8b4721bb): the persisted daily limit of economic BUY attempts (a decimal count
+/// per UTC day) at the same owner; a limit, never a permission to execute.
+const BSC_ATTEMPT_LIMIT: &str = "bsc.attempt.limit.set";
+const BSC_ATTEMPT_LIMIT_IDS: [&str; 1] = ["BSC_BUY_ATTEMPTS_PER_DAY"];
 /// Every request the native mode/switch owner (`bsc_runtime source request`) takes.
-const BSC_OWNER_ACTIONS: [&str; 4] = [BSC_SOURCE, BSC_VENUE, BSC_WALLET, BSC_ECONOMIC];
+const BSC_OWNER_ACTIONS: [&str; 6] = [
+    BSC_SOURCE,
+    BSC_VENUE,
+    BSC_WALLET,
+    BSC_ECONOMIC,
+    BSC_RUNTIME,
+    BSC_ATTEMPT_LIMIT,
+];
+
+/// A daily limit as the owner parses it: a plain decimal within u32, no sign or leading zero.
+fn per_day_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && (s == "0" || !s.starts_with('0'))
+        && s.parse::<u32>().is_ok()
+}
 /// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
 const BACKTEST_START: &str = "project0.analytics.backtest.start";
 const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
@@ -147,17 +170,23 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
 /// The only accepted owner request: `<ID>:<MODE>` from the action's fixed sets as resource and
 /// the generation of the displayed native state as CAS (`wallet_policy_version` for a wallet,
 /// `config_version` otherwise); no parameters.
-fn source_request(req: &CommandRequest) -> Option<(&'static str, &'static str, u64)> {
+fn source_request(req: &CommandRequest) -> Option<(&'static str, String, u64)> {
     let (ids, modes): (&[&'static str], &[&'static str]) = match req.action.as_str() {
         BSC_SOURCE => (&BSC_SOURCE_IDS, &BSC_SOURCE_MODES),
         BSC_VENUE => (&BSC_VENUE_IDS, &BSC_SOURCE_MODES),
         BSC_WALLET => (&BSC_WALLET_IDS, &BSC_SWITCH_MODES),
         BSC_ECONOMIC => (&BSC_ECONOMIC_IDS, &BSC_SWITCH_MODES),
+        BSC_RUNTIME => (&BSC_RUNTIME_IDS, &BSC_RUNTIME_MODES),
+        BSC_ATTEMPT_LIMIT => (&BSC_ATTEMPT_LIMIT_IDS, &[]),
         _ => return None,
     };
     let (id, mode) = req.resource_id.split_once(':')?;
     let id = ids.iter().copied().find(|s| *s == id)?;
-    let mode = modes.iter().copied().find(|m| *m == mode)?;
+    let mode = if req.action == BSC_ATTEMPT_LIMIT {
+        per_day_ok(mode).then(|| mode.to_string())?
+    } else {
+        modes.iter().copied().find(|m| *m == mode)?.to_string()
+    };
     if !req.params.is_empty() {
         return None;
     }
@@ -165,9 +194,10 @@ fn source_request(req: &CommandRequest) -> Option<(&'static str, &'static str, u
         (BSC_WALLET, expected_version::Version::WalletPolicyVersion(generation)) => {
             Some((id, mode, generation))
         }
-        (BSC_SOURCE | BSC_VENUE | BSC_ECONOMIC, expected_version::Version::ConfigVersion(g)) => {
-            Some((id, mode, g))
-        }
+        (
+            BSC_SOURCE | BSC_VENUE | BSC_ECONOMIC | BSC_RUNTIME | BSC_ATTEMPT_LIMIT,
+            expected_version::Version::ConfigVersion(g),
+        ) => Some((id, mode, g)),
         _ => None,
     }
 }
@@ -1028,6 +1058,8 @@ impl Control {
                             BSC_WALLET => "Wallet request takes exactly <BSC_WALLET_LAUNCHER|BSC_WALLET_BUYER>:<DISABLED|ENABLED> and the wallet_policy_version generation",
                             BSC_ECONOMIC => "Economic request takes exactly <BSC_ECON_SIGN|ARM|SEND|ATTEMPT|LIVE>:<DISABLED|ENABLED> and the config_version generation",
                             BSC_VENUE => "Venue request takes exactly <BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR>:<OFF|SHADOW|LIVE> and the config_version generation",
+                            BSC_RUNTIME => "Runtime request takes exactly BSC_RUNTIME_MODE:<OFF|SHADOW|PAPER|LIVE> and the config_version generation",
+                            BSC_ATTEMPT_LIMIT => "Limit request takes exactly BSC_BUY_ATTEMPTS_PER_DAY:<decimal count per UTC day> and the config_version generation",
                             _ => "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
                         },
                     )
@@ -1433,7 +1465,7 @@ impl Control {
         p: &Paths,
         id: &str,
         encoded: Vec<u8>,
-        (source, mode, generation): (&str, &str, u64),
+        (source, mode, generation): (&str, String, u64),
     ) -> CommandResponse {
         let accepted = reply(
             id,
@@ -1461,7 +1493,7 @@ impl Control {
         let output = tokio::time::timeout(
             Duration::from_secs(50),
             Command::new(&p.ctl)
-                .args(["bsc", "source", "request", source, mode, &generation, id])
+                .args(["bsc", "source", "request", source, &mode, &generation, id])
                 .env("DARKBOT_STAGED", "1")
                 .env("DARKBOT_NO_OPEN", "1")
                 .kill_on_drop(true)
@@ -1492,7 +1524,7 @@ impl Control {
         if self.persist(id, &record).is_err() {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
-        tracing::info!(request_id=%id, phase=record.phase, source, mode, "bsc owner request");
+        tracing::info!(request_id=%id, phase=record.phase, source, mode=%mode, "bsc owner request");
         CommandResponse {
             phase: record.phase,
             detail: record.detail,
@@ -1884,6 +1916,10 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// `source_request` with its mode as a static text, for comparing literals.
+    fn sr(req: &CommandRequest) -> Option<(&'static str, &'static str, u64)> {
+        source_request(req).map(|(id, mode, g)| (id, &*Box::leak(mode.into_boxed_str()), g))
+    }
 
     /// CI-N1: a hermetic launchd stand-in that knows no job — what launchd answers for an absent
     /// label — so the tests never read the host's launchd and also run where none exists (Linux).
@@ -2714,9 +2750,64 @@ mod tests {
                 ConfigVersion(6),
                 None,
             ),
+            (
+                BSC_RUNTIME,
+                "BSC_RUNTIME_MODE:PAPER",
+                ConfigVersion(7),
+                Some(("BSC_RUNTIME_MODE", "PAPER", 7)),
+            ),
+            (
+                BSC_RUNTIME,
+                "BSC_RUNTIME_MODE:ENABLED",
+                ConfigVersion(7),
+                None,
+            ),
+            (BSC_SOURCE, "BSC_RUNTIME_MODE:PAPER", ConfigVersion(7), None),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:10",
+                ConfigVersion(8),
+                Some(("BSC_BUY_ATTEMPTS_PER_DAY", "10", 8)),
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:0",
+                ConfigVersion(8),
+                Some(("BSC_BUY_ATTEMPTS_PER_DAY", "0", 8)),
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:010",
+                ConfigVersion(8),
+                None,
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:-1",
+                ConfigVersion(8),
+                None,
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:4294967296",
+                ConfigVersion(8),
+                None,
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:x",
+                ConfigVersion(8),
+                None,
+            ),
+            (
+                BSC_ATTEMPT_LIMIT,
+                "BSC_BUY_ATTEMPTS_PER_DAY:3",
+                WalletPolicyVersion(8),
+                None,
+            ),
         ] {
             assert_eq!(
-                source_request(&request(action, resource, Some(v))),
+                sr(&request(action, resource, Some(v))),
                 parsed,
                 "{action} {resource}"
             );
@@ -2727,8 +2818,14 @@ mod tests {
             Some(WalletPolicyVersion(1)),
         );
         with_params.params = vec![1].into();
-        assert_eq!(source_request(&with_params), None);
-        for action in [BSC_VENUE, BSC_WALLET, BSC_ECONOMIC] {
+        assert_eq!(sr(&with_params), None);
+        for action in [
+            BSC_VENUE,
+            BSC_WALLET,
+            BSC_ECONOMIC,
+            BSC_RUNTIME,
+            BSC_ATTEMPT_LIMIT,
+        ] {
             assert!(allowed(ProjectId::Bsc as i32, action));
             assert!(!allowed(ProjectId::Project0 as i32, action));
         }
@@ -3385,26 +3482,23 @@ mod tests {
         let config = |g| Some(expected_version::Version::ConfigVersion(g));
         // Parsing: only known sources and modes, only config_version, no parameters.
         assert_eq!(
-            source_request(&request("x", "BSC_INGRESS_DRPC:LIVE", config(4))),
+            sr(&request("x", "BSC_INGRESS_DRPC:LIVE", config(4))),
             Some(("BSC_INGRESS_DRPC", "LIVE", 4))
         );
         // The C2 state component is switched by the same owner and action.
         assert_eq!(
-            source_request(&request("x", "BSC_STATE_C2:SHADOW", config(4))),
+            sr(&request("x", "BSC_STATE_C2:SHADOW", config(4))),
             Some(("BSC_STATE_C2", "SHADOW", 4))
         );
         assert_eq!(
-            source_request(&request("x", "BSC_EXEC:LIVE", config(5))),
+            sr(&request("x", "BSC_EXEC:LIVE", config(5))),
             Some(("BSC_EXEC", "LIVE", 5))
         );
         assert_eq!(
-            source_request(&request("x", "BSC_STRATEGY_C:SHADOW", config(6))),
+            sr(&request("x", "BSC_STRATEGY_C:SHADOW", config(6))),
             Some(("BSC_STRATEGY_C", "SHADOW", 6))
         );
-        assert_eq!(
-            source_request(&request("x", "BSC_STATE_C3:SHADOW", config(4))),
-            None
-        );
+        assert_eq!(sr(&request("x", "BSC_STATE_C3:SHADOW", config(4))), None);
         for (resource, expected) in [
             ("BSC_INGRESS_DRPC", config(4)),
             ("BSC_INGRESS_OTHER:SHADOW", config(4)),
@@ -3415,15 +3509,11 @@ mod tests {
                 Some(expected_version::Version::ProfileVersion(4)),
             ),
         ] {
-            assert_eq!(
-                source_request(&request("x", resource, expected)),
-                None,
-                "{resource}"
-            );
+            assert_eq!(sr(&request("x", resource, expected)), None, "{resource}");
         }
         let mut with_params = request("x", "BSC_INGRESS_DRPC:SHADOW", config(4));
         with_params.params = vec![1].into();
-        assert_eq!(source_request(&with_params), None);
+        assert_eq!(sr(&with_params), None);
         assert!(allowed(ProjectId::Bsc as i32, BSC_SOURCE));
         assert!(!allowed(ProjectId::Project0 as i32, BSC_SOURCE));
 

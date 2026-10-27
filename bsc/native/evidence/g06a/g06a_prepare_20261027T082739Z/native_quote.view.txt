@@ -1,0 +1,21 @@
+# darkbot.g06a.native-bnb-quote.v2 (record type 23, schema version 1)
+file_sha256 = bd2af5fc60fa6006f1e235b7bc078c37035e00602108e17864f1c01dfe9b244d
+_provenance.tool = "g06a_native_bnb_quote"
+_provenance.observed_unix_ms = 1793095888128
+preflight_record_sha256 = 0x50bb5a5cd8dc58a6267fe3352479c39677d88788af1dd5f141568fbc5411abbe
+curve_id = 20
+buy_value_wei = 1000000000000
+protocol_fee_bps = 100
+buy_tax_bps = 100
+tax_on_bonding_curve_enabled = true
+protocol_fee_wei = 10000000000
+bonding_curve_tax_wei = 10000000000
+combined_fee_wei = 20000000000
+net_reserve_input_wei = 980000000000
+reserve_after_wei = 980000000000
+circulating_before = 0
+expected_output = 176693134169499757962
+slippage_bps = 100
+min_output = 174926202827804760382
+network_actions = "NONE"
+authority = "Binary Mainnet preflight + exact Curve-20 fixed-point implementation; requires independent EVM cross-check before DRY-2 PASS"

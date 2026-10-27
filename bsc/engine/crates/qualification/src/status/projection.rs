@@ -623,8 +623,8 @@ fn control_switches(dir: &Path) -> Option<Vec<ControlSwitch>> {
                     let now = g.switch_now(*id, boot.as_deref());
                     ControlSwitch {
                         id: id.name().into(),
-                        requested: s.requested.name().into(),
-                        effective: now.name().into(),
+                        requested: s.requested.name(),
+                        effective: now.name(),
                         block_reason: now.reason().unwrap_or_default().into(),
                         generation: g.generation,
                         request_id: s
@@ -1140,6 +1140,48 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             .filter(|c| !c.id.starts_with("BSC_WALLET_"))
             .cloned()
             .collect();
+    }
+    // Plan v9 §2.5 and 27.10.: the runtime mode and the daily BUY limit with
+    // today's use (UTC), from the same owner.
+    if sources.join("generations").is_dir() {
+        match darkbot_bsc_execution::sources::current_generation(&sources) {
+            Ok(g) => {
+                let set_by = |s: &darkbot_bsc_execution::sources::Setting| {
+                    (
+                        s.set_by
+                            .as_ref()
+                            .map(|b| b.request_id.clone())
+                            .unwrap_or_default(),
+                        s.set_by.as_ref().map(|b| b.generation),
+                    )
+                };
+                let (request_id, set_generation) = set_by(&g.runtime);
+                launch.runtime_mode = Some(ControlSwitch {
+                    id: darkbot_bsc_execution::sources::RUNTIME_MODE.into(),
+                    requested: g.runtime.requested.name(),
+                    effective: g.runtime.effective.name(),
+                    block_reason: g.runtime.effective.reason().unwrap_or_default().into(),
+                    generation: g.generation,
+                    request_id,
+                    set_generation,
+                });
+                if let Ok(usage) =
+                    darkbot_bsc_execution::sources::buy_usage(&sources, now() * 1_000)
+                {
+                    let (request_id, set_generation) = set_by(&g.buy_limit);
+                    launch.buy_attempt_limit = Some(BuyAttemptLimit {
+                        per_day: u64::from(usage.limit),
+                        day_utc: usage.day.utc.clone(),
+                        used: usage.used,
+                        remaining: usage.remaining(),
+                        generation: g.generation,
+                        request_id,
+                        set_generation,
+                    });
+                }
+            }
+            Err(_) => warnings.push("OWNER_SETTINGS_INVALID".into()),
+        }
     }
     // The running runtime's own status (health and counters per source).
     let runtime_status = rundir.join("bsc-runtime/status.dbrec");

@@ -16,7 +16,7 @@ use darkbot_bsc_execution::{
     acceptance_guard::{LiveGuardContext, V5_RELATIVE_PATH, verify_live_authorization},
     attempt_authority,
     qualification_capture::{CaptureSession, CaptureSummary},
-    sources::{SwitchId, require_enabled_here},
+    sources::{SwitchId, consume_buy_attempt_here, require_enabled_here},
 };
 use darkbot_bsc_record::Value as RecordValue;
 use schema::g07::evidence;
@@ -318,6 +318,11 @@ fn main() {
     // Nothing is consumed while a switch was disabled since the signing.
     require_enabled_here(&ATTEMPT_SWITCHES)
         .unwrap_or_else(|e| panic!("G0.7 refused by the native switches: {e}"));
+    // Plan 27.10. (8b4721bb): the attempt takes a slot of the persisted
+    // daily BUY limit (UTC day, 0 initially) before its authority is
+    // consumed; a retry of the same attempt finds its slot.
+    consume_buy_attempt_here(&attempt_id, unix_time_ms())
+        .unwrap_or_else(|e| panic!("G0.7 refused by the daily BUY limit: {e}"));
     let authority_git = attempt_authority::Git::origin();
     let claim_note: String = format!("{boot_id}/{}/{}", std::process::id(), unix_time_ms())
         .chars()

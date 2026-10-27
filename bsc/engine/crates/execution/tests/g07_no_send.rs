@@ -372,6 +372,11 @@ fn the_native_switches_gate_signing_the_authority_and_the_send() {
     let guard = pos("let authorized = verify_live_authorization(");
     assert!(keys < at[0] && at[0] < sign);
     assert!(sign < at[1] && at[1] < authority);
+    // Plan 27.10. (8b4721bb): the daily BUY limit is taken after that check
+    // and before the authority, exactly once.
+    let limit = pos("consume_buy_attempt_here(&attempt_id, unix_time_ms())");
+    assert!(at[1] < limit && limit < authority);
+    assert_eq!(SOURCE.matches("consume_buy_attempt_here(").count(), 1);
     assert!(guard < at[2] && at[2] < send_head);
     assert!(SOURCE[at[2]..send_head].contains("pre_egress_abort(capture, &capture_clock, unsent, \"native switches\", &e)"));
     let set = &SOURCE[pos("const ATTEMPT_SWITCHES")..];

@@ -46,7 +46,8 @@ function dec(name) { return BigInt(req(name)); }
 // BSC-007 (BSC_Bug_V2 P2-D5): both wallet keys are read once and every key
 // variable leaves this process's environment before they are used (also
 // when one is missing); only the two signers hold them, until both
-// transactions are signed. No child process is started.
+// transactions are signed. The one child process (the native switch check
+// below) starts only after that, with PATH and HOME only.
 function takeKeys(env) {
   const launcher = env.DARKBOT_G06A_LAUNCHER_PRIVATE_KEY;
   const buyer = env.DARKBOT_G06A_BUYER_PRIVATE_KEY;
@@ -56,6 +57,21 @@ function takeKeys(env) {
   if (!launcher) throw new Error('DARKBOT_G06A_LAUNCHER_PRIVATE_KEY is required');
   if (!buyer) throw new Error('DARKBOT_G06A_BUYER_PRIVATE_KEY is required');
   return { launcher, buyer };
+}
+// Plan 27.10.: these local Mainnet signatures need both wallets and SIGN
+// ENABLED in the native owner state of this boot session; the native owner
+// (`g06a_dry_handoff controls`, built by the DRY harness) is asked, and a
+// refusal stops before anything is signed, also when this script runs
+// without the harness.
+const SIGNING_SWITCHES = ['BSC_WALLET_LAUNCHER', 'BSC_WALLET_BUYER', 'BSC_ECON_SIGN'];
+function requireSigningSwitches(handoff = path.join(__dirname, '../engine/target/debug/g06a_dry_handoff'), home = process.env.HOME) {
+  const env = { PATH: '/usr/bin:/bin' };
+  if (home) env.HOME = home;
+  try {
+    require('child_process').execFileSync(handoff, ['controls', '--require', ...SIGNING_SWITCHES], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    throw new Error(`native switches refuse the signature: ${String((e.stderr && e.stderr.length ? e.stderr : e.message)).trim()}`);
+  }
 }
 async function rpc(url, method, params = []) {
   const delaysMs = [0, 150, 500, 1200];
@@ -173,6 +189,7 @@ async function main() {
 
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
   const keys = takeKeys(process.env);
+  requireSigningSwitches();
   let launcherWallet = new ethers.Wallet(keys.launcher);
   let buyerWallet = new ethers.Wallet(keys.buyer);
   keys.launcher = keys.buyer = null;
@@ -398,4 +415,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { takeKeys };
+module.exports = { takeKeys, requireSigningSwitches };

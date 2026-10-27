@@ -7,7 +7,7 @@ import { checkStatus } from "../model/checks";
 import type { BscTab } from "../BscPage";
 import { runtimeView } from "../model/sources";
 import { useNativeRecords } from "./useNativeRecords";
-import { economicRows, summary, switchRow } from "../model/switches";
+import { buyLimitRow, economicRows, summary, switchRow } from "../model/switches";
 
 const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
 const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
@@ -45,6 +45,8 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <Line label="LIVE" value={<ValueState state={s?.liveState} />} />
       <Line label="Wallet switches" value={summary(walletSwitches)} hint="Native permissions; switch them in Wallets. DISABLED initially and after every restart" />
       <Line label="Economic switches" value={summary(economicRows(launch?.economicControls))} hint="Native permissions; switch them in Launch / BUY. None of them is LIVE or an approval" />
+      <Line label="Runtime mode" value={<ValueState state={switchRow("BSC_RUNTIME_MODE", launch?.runtimeMode).effective} />} hint="Global execution mode of the native owner; set it in Launch / BUY" />
+      <Line label="Daily BUY limit" value={buyLimitRow(launch?.buyAttemptLimit).summary} hint="Persisted per UTC day at the native owner; set it in Launch / BUY" />
     </Section>
     <Section title={title(4)}>
       <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: read-only observation of the effective SHADOW sources; no build, signature or send exists`} />

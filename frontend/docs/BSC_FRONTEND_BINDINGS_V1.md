@@ -15,7 +15,9 @@ Diese neuere technische SOLL-Vorgabe aus dem BSC-Phasenplan ersetzt ältere Entw
 - Bestehende Source-/Component-/Candidate-Steuerungen wiederverwenden, fehlende Venue-/Runtime-/Wirtschaftscontrols technisch ergänzen, alle wirtschaftlichen Modi default `DISABLED/OFF`. Die Kette Native → Protobuf/Golden → Gateway → Adapter/Store → React und der CLI-Weg müssen in echten F0-VAR- und E2E-/Negativtests nachgewiesen werden.
 - Weiterhin keine wirtschaftliche Mainnet-Aktion aus der Dokumentations-/Implementierungsarbeit ableiten. Wallet-ENABLE allein ist keine Freigabe von LIVE, SIGN oder SEND; wirtschaftliche Korrektheits-, V5-/Nonce-/Budget- und Anti-Replay-Gates bleiben bestehen.
 
-**IST vor Implementierung:** Launcher und Buyer sind im `WalletsPanel.tsx` bislang reine Anzeigen. `BscWalletsState` enthält keine getrennten Enable-Felder und `gateway/src/control.rs` keinen Wallet-Enable-Command. Dies ist `SOLL_MISSING`, nicht schon `IST_CONNECTED`. Ältere Abschnitte mit „kein neuer Wallet-Command“ beschreiben den früheren Entwicklungsumfang, nicht diesen aktuellen SOLL-Auftrag.
+**IST nach Implementierung (27.10., `b72bf2ed` ff.): `IST_CONNECTED`.** `ControlSwitch` (`launcher_control`, `buyer_control`, `economic_controls`) aus dem nativen `bsc_runtime`-Owner; Gateway `bsc.wallet.set` / `bsc.economic.set` / `bsc.venue.mode.set`; ENABLE/DISABLE in Wallets §1/§2, Launch §5/§7, Venues in Monitoring §2; F0-VAR, Gateway-, Owner-, Prozess- und Browser-E2E-Tests (Stand und Belege: `bsc/docs/1_PLAN/STATUS.md`).
+
+**IST vor Implementierung (historisch):** Launcher und Buyer sind im `WalletsPanel.tsx` bislang reine Anzeigen. `BscWalletsState` enthält keine getrennten Enable-Felder und `gateway/src/control.rs` keinen Wallet-Enable-Command. Dies ist `SOLL_MISSING`, nicht schon `IST_CONNECTED`. Ältere Abschnitte mit „kein neuer Wallet-Command“ beschreiben den früheren Entwicklungsumfang, nicht diesen aktuellen SOLL-Auftrag.
 
 ---
 

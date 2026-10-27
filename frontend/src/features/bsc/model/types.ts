@@ -16,6 +16,8 @@ export interface BscStatusView {
 }
 /** One native wallet or economic switch (plan 27.10.): a permission, never an action. */
 export interface ControlSwitchView {id:string;requested:string;effective:string;blockReason:string;generation:bigint;requestId:string;setGeneration?:bigint}
-export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contractFields:PublicField[];runtimeFields:PublicField[];reason:string;records:NativeRecordView[];economicControls:ControlSwitchView[]}
+/** The persisted daily BUY attempt limit and its use on the current UTC day (plan 27.10.). */
+export interface BuyAttemptLimitView {perDay:bigint;dayUtc:string;used:bigint;remaining:bigint;generation:bigint;requestId:string;setGeneration?:bigint}
+export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contractFields:PublicField[];runtimeFields:PublicField[];reason:string;records:NativeRecordView[];economicControls:ControlSwitchView[];buyAttemptLimit?:BuyAttemptLimitView;runtimeMode?:ControlSwitchView}
 export interface BscMonitoringView {state:string;evidence?:Evidence;results:PublicField[];records:NativeRecordView[]}
 export interface BscWalletsView {expectedAddress:string;walletStatus:string;launcherAddress:string;buyerAddress:string;chainId?:bigint;launcherBalanceWei?:string;buyerBalanceWei?:string;observedBlock?:bigint;observedUnixS:bigint;source:string;requiredLauncherWei?:string;requiredBuyerWei?:string;evidence?:Evidence;launcherControl?:ControlSwitchView;buyerControl?:ControlSwitchView}

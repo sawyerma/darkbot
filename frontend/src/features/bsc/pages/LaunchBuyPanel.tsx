@@ -12,8 +12,9 @@ import { MISSING_INTEGRATION, candidateControlView } from "../model/candidate";
 import { labelOf } from "../model/placement";
 import { CandidateActions } from "../CandidateActions";
 import { useCandidateControl } from "@/core/realtime/candidateControl";
-import { economicRows, type SwitchRow } from "../model/switches";
-import { SwitchActions } from "../SwitchActions";
+import { buyLimitRow, economicRows, switchRow, type SwitchRow } from "../model/switches";
+import { RUNTIME_CHOICES, SwitchActions } from "../SwitchActions";
+import { BuyLimitActions } from "../BuyLimitActions";
 
 /** The economic switches of one section, with what each permits and the request that set it. */
 function EconomicSwitches({ rows, testId }: { rows: SwitchRow[]; testId: string }) {
@@ -40,6 +41,8 @@ export function LaunchBuyPanel() {
   const r = status?.readiness;
   const g = status?.guard;
   const economic = economicRows(launch?.economicControls);
+  const runtimeMode = switchRow("BSC_RUNTIME_MODE", launch?.runtimeMode);
+  const limit = buyLimitRow(launch?.buyAttemptLimit);
   const pick = (...ids: string[]) => economic.filter(row => ids.includes(row.id));
   return <>
     <Line label="Plan source quality" value={<ValueState state={quality} />} hint="bsc.launch.state transport" />
@@ -71,12 +74,18 @@ export function LaunchBuyPanel() {
       <Line label="Contract note" value={launch?.reason || "—"} />
       <EvidenceRows evidence={launch?.evidence} />
       <EconomicSwitches rows={pick("BSC_ECON_SIGN", "BSC_ECON_ARM", "BSC_ECON_LIVE")} testId="bsc-economic-authorization" />
+      <Line label="Runtime mode" value={<ValueState state={runtimeMode.effective} />}
+        hint={`requested ${runtimeMode.requested}${runtimeMode.blockReason ? ` · ${runtimeMode.blockReason}` : ""} · ${runtimeMode.hint} · generation ${runtimeMode.available ? runtimeMode.generation.toString() : runtimeMode.reason} · last set by ${runtimeMode.receipt}`} />
+      <SwitchActions rows={[runtimeMode]} testId="bsc-runtime-mode" action="bsc.runtime.mode.set" modes={RUNTIME_CHOICES} />
     </PlacedSection>
     <PlacedSection panel="launch" section={6} records={records} />
     <PlacedSection panel="launch" section={7} records={records}>
       <Line label="Attempt ID" value={g?.attemptId || "—"} />
       <Line label="Maximum attempts" value={g?.maxAttempts?.toString() ?? "UNKNOWN"} />
       <EconomicSwitches rows={pick("BSC_ECON_SEND", "BSC_ECON_ATTEMPT")} testId="bsc-economic-attempt" />
+      <Line label="BUY attempts per UTC day" value={limit.available ? limit.perDay.toString() : limit.summary}
+        hint={`${limit.summary} · generation ${limit.generation.toString()} · last set by ${limit.receipt} · every attempt that may send counts (sent or unclear too); 0 allows none; never a permission to execute`} />
+      <BuyLimitActions row={limit} />
     </PlacedSection>
     <PlacedSection panel="launch" section={8} records={records}>
       <ReadinessActions />

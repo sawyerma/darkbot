@@ -761,3 +761,32 @@ fn the_evidence_binds_identity_workload_and_verdict_and_holds_no_secret() {
     assert!(!contains_secret(&text, "a-token-that-was-never-written"));
     assert!(!contains_secret(&text, ""));
 }
+
+/// Plan 27.10.: the Q5A builder probe sends Mainnet `eth_sendBundle`
+/// requests, so it needs BSC_ECON_SEND ENABLED in the native owner state of
+/// this boot; without it (no state under HOME) it stops before any file,
+/// connection or request.
+#[test]
+fn the_q5a_probe_refuses_without_the_send_switch() {
+    let home = std::env::temp_dir().join(format!("q5a-switch-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let evidence = home.join("evidence.json");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_u5_tls_qualify"))
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &home)
+        .env("Q5A_EVIDENCE_PATH", &evidence)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("refused by the native switches: CONTROL_DISABLED")
+            && err.contains("BSC_ECON_SEND DISABLED")
+            && err.contains("nothing sent"),
+        "{err}"
+    );
+    assert!(!evidence.exists(), "no evidence file reserved");
+    std::fs::remove_dir_all(&home).unwrap();
+}

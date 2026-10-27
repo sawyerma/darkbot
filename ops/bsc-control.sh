@@ -77,6 +77,13 @@ bsc_runtime_down() {
   launchctl bootout "$DOMAIN/$BSC_RUNTIME_LABEL" >/dev/null 2>&1 || true
   rm -f "$RUNDIR/bsc.runtime.stop"
 }
+# Plan 27.10.: a stop leaves every wallet and economic switch DISABLED (the
+# owner's restart reset); a terminal runner never finds one ENABLED after it.
+bsc_switches_reset() {
+  [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
+  [ -d "$RUNDIR/bsc-sources" ] || return 0
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source init --state "$RUNDIR/bsc-sources" >/dev/null
+}
 bsc_readiness_start() {
   assert_not_down
   bsc_check_launch "$@"
@@ -128,10 +135,10 @@ bsc_candidate_request() {
 # refuses one request with its generation as the CAS and prints the receipt;
 # a requested LIVE is recorded and stays BLOCKED, an ENABLED switch is a
 # permission only. Nothing here signs or sends. The same command the GUI uses.
-BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|LIVE|DISABLED|ENABLED <generation> <request_id>; bsc source show"
+BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLED|<attempts per UTC day> <generation> <request_id>; bsc source show"
 bsc_source_request() {
   [ "$#" -eq 4 ] || die "$BSC_REQUEST_USAGE"
-  case "$2" in OFF|SHADOW|LIVE|DISABLED|ENABLED) ;; *) die "unknown mode" ;; esac
+  case "$2" in OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLED) ;; ''|*[!0-9]*) die "unknown mode" ;; esac
   case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \

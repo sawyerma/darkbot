@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ECONOMIC_SWITCHES, SWITCHES_UNAVAILABLE, economicRows, summary, switchRow } from "./switches";
+import { ECONOMIC_SWITCHES, SWITCHES_UNAVAILABLE, buyLimitRow, economicRows, limitInputOk, summary, switchRow } from "./switches";
 import type { ControlSwitchView } from "./types";
 
 const sw = (id: string, over: Partial<ControlSwitchView> = {}): ControlSwitchView =>
@@ -28,5 +28,18 @@ describe("BSC wallet and economic switches (plan 27.10.)", () => {
     const rows = economicRows([sw("BSC_ECON_LIVE"), sw("BSC_ECON_SIGN")]);
     expect(rows.map(r => r.id)).toEqual([...ECONOMIC_SWITCHES]);
     expect(rows.map(r => r.available)).toEqual([true, false, false, false, true]);
+  });
+  it("the runtime mode takes its four modes; anything else is not requestable", () => {
+    const row = switchRow("BSC_RUNTIME_MODE", sw("BSC_RUNTIME_MODE", { requested: "PAPER", effective: "PAPER" }));
+    expect([row.label, row.available, row.effective]).toEqual(["Runtime mode", true, "PAPER"]);
+    expect(switchRow("BSC_RUNTIME_MODE", sw("BSC_RUNTIME_MODE", { requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_DISABLED" })).blockReason).toBe("ECONOMIC_LIVE_DISABLED");
+    expect(switchRow("BSC_RUNTIME_MODE", sw("BSC_RUNTIME_MODE", { requested: "UNKNOWN" })).available).toBe(false);
+  });
+  it("the daily BUY limit shows its use on the UTC day and accepts only what the owner takes", () => {
+    expect(buyLimitRow(undefined)).toMatchObject({ available: false, summary: SWITCHES_UNAVAILABLE });
+    const row = buyLimitRow({ perDay: 3n, dayUtc: "2026-10-27", used: 1n, remaining: 2n, generation: 9n, requestId: "lim", setGeneration: 8n });
+    expect(row).toMatchObject({ available: true, summary: "1 of 3 used on 2026-10-27 (UTC) · 2 remaining", receipt: "lim @ generation 8" });
+    for (const ok of ["0", "10", "4294967295"]) expect(limitInputOk(ok)).toBe(true);
+    for (const bad of ["", "-1", "01", "1.5", "x", "4294967296", " 3"]) expect(limitInputOk(bad)).toBe(false);
   });
 });

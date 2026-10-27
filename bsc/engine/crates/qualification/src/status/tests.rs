@@ -1445,3 +1445,71 @@ fn the_wallet_and_economic_switches_are_projected_typed() {
     );
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// Plan v9 §2.5 and 27.10.: the runtime mode and the daily BUY limit reach
+/// Launch / BUY typed, with today's (UTC) use of the limit.
+#[test]
+fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
+    use darkbot_bsc_execution::sources::{Entity, Mode, Store};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-settings-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let run = root.join("run");
+    fs::create_dir_all(&run).unwrap();
+    let s = projection::project(&root, &run);
+    assert_eq!(
+        (
+            s.launch.runtime_mode.clone(),
+            s.launch.buy_attempt_limit.clone()
+        ),
+        (None, None)
+    );
+    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    store.restart(1).unwrap();
+    let s = projection::project(&root, &run);
+    let mode = s.launch.runtime_mode.unwrap();
+    assert_eq!(
+        (
+            mode.id.as_str(),
+            mode.requested.as_str(),
+            mode.effective.as_str()
+        ),
+        ("BSC_RUNTIME_MODE", "OFF", "OFF")
+    );
+    let limit = s.launch.buy_attempt_limit.unwrap();
+    assert_eq!(
+        (limit.per_day, limit.used, limit.remaining, limit.generation),
+        (0, 0, 0, 0)
+    );
+    store
+        .request("rt", Entity::Runtime, Mode::Paper, 0, 2)
+        .unwrap();
+    store
+        .request("bl", Entity::BuyLimit, Mode::PerDay(3), 1, 3)
+        .unwrap();
+    store
+        .consume_buy_attempt("attempt-1", projection::now() * 1_000)
+        .unwrap();
+    let s = projection::project(&root, &run);
+    let mode = s.launch.runtime_mode.unwrap();
+    assert_eq!(
+        (
+            mode.effective.as_str(),
+            mode.request_id.as_str(),
+            mode.set_generation
+        ),
+        ("PAPER", "rt", Some(1))
+    );
+    let limit = s.launch.buy_attempt_limit.unwrap();
+    assert_eq!(
+        (
+            limit.per_day,
+            limit.used,
+            limit.remaining,
+            limit.generation,
+            limit.request_id.as_str()
+        ),
+        (3, 1, 2, 2, "bl")
+    );
+    assert_eq!(limit.day_utc.len(), 10);
+    fs::remove_dir_all(&root).unwrap();
+}

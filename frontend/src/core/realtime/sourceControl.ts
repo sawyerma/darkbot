@@ -11,7 +11,7 @@ import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
 export type SourceMode = "OFF" | "SHADOW" | "LIVE";
 export type SwitchMode = "DISABLED" | "ENABLED";
 /** The allowlisted gateway actions of the owner and the CAS each states. */
-export type OwnerAction = "bsc.source.mode.set" | "bsc.venue.mode.set" | "bsc.wallet.set" | "bsc.economic.set";
+export type OwnerAction = "bsc.source.mode.set" | "bsc.venue.mode.set" | "bsc.wallet.set" | "bsc.economic.set" | "bsc.runtime.mode.set" | "bsc.attempt.limit.set";
 /** `origin` names the control group that sent it; each shows only its own receipt. */
 interface Receipt { id: string; phase: string; detail: string; origin: string }
 interface SourceControlState { busy: boolean; receipt: Receipt | null }
@@ -39,7 +39,7 @@ async function lookup(id: string): Promise<void> {
 }
 /** One request per user action; the generation is the CAS of the displayed native state
  *  (`walletPolicyVersion` for a wallet switch, `configVersion` otherwise). */
-export async function ownerCommand(origin: string, action: OwnerAction, id: string, mode: SourceMode | SwitchMode, generation: bigint): Promise<void> {
+export async function ownerCommand(origin: string, action: OwnerAction, id: string, mode: string, generation: bigint): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();
   useSourceControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail: `${id} ${mode}`, origin } });

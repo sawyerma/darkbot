@@ -25,6 +25,8 @@ Diese Entscheidung ist für die weitere **technische Implementierung** aktueller
 
 **Ein Steuerungsweg:** Native Rust-Owner → typisierte, persistierte Konfiguration mit `requested/effective`, CAS-Generation, Receipt und Blockgrund → sanitisiertes `darkbot.bsc.v1` Protobuf → gemeinsames Gateway → bestehende BSC-Adapter/Store → fünf bestehende React-Reiter. Launcher und Buyer mit eigenen Enable-/Disable-Bedienelementen in `Wallets`; identische native Authority für Terminal und Frontend. F0-VAR und Native-/CLI-/Proto-/Gateway-/UI-E2E einschließlich Crash/Recovery nachweisen. Kein Project_0-Eingriff.
 
+**IST 27.10.:** technisch umgesetzt und verdrahtet (`b72bf2ed` ff., Belege `STATUS.md`); alle Schalter DISABLED.
+
 **Umsetzungsstatus:** Dieser Plantext ist eine SOLL-Vorgabe; er aktiviert nichts. Während der Umsetzung sind beide Wallets und sämtliche wirtschaftlichen Controls deaktiviert; kein echtes SIGN/ARM/SEND/BUY oder Providerkauf. Ausstehende G0.7/G0.8-Evidence blockiert nicht die technische Implementierung, bleibt aber für reale Qualifikationsaussagen offen.
 
 ---

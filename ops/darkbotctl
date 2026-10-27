@@ -628,6 +628,8 @@ _down_finish() {
   capture_running && die "Capture noch aktiv; Gateway bleibt an"
   [ -z "$(bsc_pid)" ] || die "BSC Readiness stoppt noch; Gateway bleibt aktiv"
   bsc_runtime_down
+  # An unreadable owner state already counts every switch DISABLED.
+  bsc_switches_reset || say "BSC-Schalter-Reset fehlgeschlagen (Zustand unlesbar: alle Schalter gelten als DISABLED)"
   launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL" >/dev/null 2>&1 || true
   launchctl bootout "$DOMAIN/$P0A_LABEL" >/dev/null 2>&1 || true
   _gateway_down

@@ -68,31 +68,46 @@ impl SourceId {
 }
 
 /// What the user requests: `OFF | SHADOW | LIVE` for a source, component
-/// or venue, `DISABLED | ENABLED` for a switch.
+/// or venue, `OFF | SHADOW | PAPER | LIVE` for the runtime mode,
+/// `DISABLED | ENABLED` for a switch, a whole number for the daily BUY
+/// attempt limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Off,
     Shadow,
+    Paper,
     Live,
     Disabled,
     Enabled,
+    /// BUY attempts per UTC day.
+    PerDay(u32),
 }
 
 impl Mode {
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Mode::Off => "OFF",
-            Mode::Shadow => "SHADOW",
-            Mode::Live => "LIVE",
-            Mode::Disabled => "DISABLED",
-            Mode::Enabled => "ENABLED",
+            Mode::Off => "OFF".into(),
+            Mode::Shadow => "SHADOW".into(),
+            Mode::Paper => "PAPER".into(),
+            Mode::Live => "LIVE".into(),
+            Mode::Disabled => "DISABLED".into(),
+            Mode::Enabled => "ENABLED".into(),
+            Mode::PerDay(n) => n.to_string(),
         }
     }
 
+    /// A mode name, or a plain decimal (no sign, no leading zero) for a
+    /// daily limit.
     pub fn parse(name: &str) -> Option<Mode> {
+        if !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+            return (name == "0" || !name.starts_with('0'))
+                .then(|| name.parse::<u32>().ok().map(Mode::PerDay))
+                .flatten();
+        }
         [
             Mode::Off,
             Mode::Shadow,
+            Mode::Paper,
             Mode::Live,
             Mode::Disabled,
             Mode::Enabled,
@@ -108,19 +123,25 @@ impl Mode {
 pub enum Effective {
     Off,
     Shadow,
+    /// The runtime mode PAPER: the C3 path to the PAPER sink may run.
+    Paper,
     Blocked(&'static str),
     Disabled,
     Enabled,
+    /// The daily BUY attempt limit in force.
+    PerDay(u32),
 }
 
 impl Effective {
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Effective::Off => "OFF",
-            Effective::Shadow => "SHADOW",
-            Effective::Blocked(_) => "BLOCKED",
-            Effective::Disabled => "DISABLED",
-            Effective::Enabled => "ENABLED",
+            Effective::Off => "OFF".into(),
+            Effective::Shadow => "SHADOW".into(),
+            Effective::Paper => "PAPER".into(),
+            Effective::Blocked(_) => "BLOCKED".into(),
+            Effective::Disabled => "DISABLED".into(),
+            Effective::Enabled => "ENABLED".into(),
+            Effective::PerDay(n) => n.to_string(),
         }
     }
 
@@ -136,12 +157,17 @@ impl Effective {
         match (name, reason) {
             ("OFF", None) => Some(Effective::Off),
             ("SHADOW", None) => Some(Effective::Shadow),
+            ("PAPER", None) => Some(Effective::Paper),
             ("DISABLED", None) => Some(Effective::Disabled),
             ("ENABLED", None) => Some(Effective::Enabled),
             ("BLOCKED", Some(r)) => BLOCK_REASONS
                 .into_iter()
                 .find(|k| *k == r)
                 .map(Effective::Blocked),
+            (n, None) => match Mode::parse(n) {
+                Some(Mode::PerDay(n)) => Some(Effective::PerDay(n)),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -201,7 +227,9 @@ pub fn effective(source: SourceId, requested: Mode, live: LiveGate) -> Effective
         (_, Mode::Live) => live.blocked(),
         (SourceId::Club48, Mode::Shadow) => Effective::Blocked(SOURCE_ACCESS_UNQUALIFIED),
         (_, Mode::Shadow) => Effective::Shadow,
-        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
+        (_, Mode::Off | Mode::Paper | Mode::Disabled | Mode::Enabled | Mode::PerDay(_)) => {
+            Effective::Off
+        }
     }
 }
 
@@ -247,7 +275,9 @@ pub fn component_effective(component: ComponentId, requested: Mode, live: LiveGa
         // strategy's decisions: never without its own authorization
         // (G0.7/G0.8, J).
         (_, Mode::Live) => live.blocked(),
-        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
+        (_, Mode::Off | Mode::Paper | Mode::Disabled | Mode::Enabled | Mode::PerDay(_)) => {
+            Effective::Off
+        }
     }
 }
 
@@ -283,7 +313,9 @@ pub fn venue_effective(venue: VenueId, requested: Mode, live: LiveGate) -> Effec
         (_, Mode::Live) => live.blocked(),
         (VenueId::Flap, Mode::Shadow) => Effective::Shadow,
         (_, Mode::Shadow) => Effective::Blocked(FOUR_EXECUTION_PATH_MISSING),
-        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
+        (_, Mode::Off | Mode::Paper | Mode::Disabled | Mode::Enabled | Mode::PerDay(_)) => {
+            Effective::Off
+        }
     }
 }
 
@@ -335,6 +367,26 @@ impl SwitchId {
     }
 }
 
+/// The global runtime execution mode (plan v9 §2.5), above the components:
+/// SHADOW lets Strategy C keep its PAPER ledger (no signature), PAPER also
+/// the C3 path to the PAPER sink (PAPER identity, nothing sent), OFF neither;
+/// LIVE is BLOCKED like every LIVE. REPLAY is the offline job family
+/// (`replay-proof`, `strategy-replay`), not a state of the running runtime.
+pub const RUNTIME_MODE: &str = "BSC_RUNTIME_MODE";
+/// The persisted daily limit of economic BUY attempts (plan 27.10.,
+/// `8b4721bb`): every attempt that may send counts, at the latest before its
+/// authority is consumed; the day is the UTC calendar day. 0 = none.
+pub const BUY_ATTEMPTS_PER_DAY: &str = "BSC_BUY_ATTEMPTS_PER_DAY";
+
+pub fn runtime_effective(requested: Mode, live: LiveGate) -> Effective {
+    match requested {
+        Mode::Shadow => Effective::Shadow,
+        Mode::Paper => Effective::Paper,
+        Mode::Live => live.blocked(),
+        _ => Effective::Off,
+    }
+}
+
 /// The owner's rule for a switch: effective as requested (a restart writes
 /// it DISABLED; see [`Store::restart`]).
 pub fn switch_effective(requested: Mode) -> Effective {
@@ -351,6 +403,10 @@ pub enum Entity {
     Component(ComponentId),
     Venue(VenueId),
     Switch(SwitchId),
+    /// `BSC_RUNTIME_MODE`.
+    Runtime,
+    /// `BSC_BUY_ATTEMPTS_PER_DAY`.
+    BuyLimit,
 }
 
 impl Entity {
@@ -360,10 +416,17 @@ impl Entity {
             Entity::Component(c) => c.name(),
             Entity::Venue(v) => v.name(),
             Entity::Switch(s) => s.name(),
+            Entity::Runtime => RUNTIME_MODE,
+            Entity::BuyLimit => BUY_ATTEMPTS_PER_DAY,
         }
     }
 
     pub fn parse(name: &str) -> Option<Entity> {
+        match name {
+            RUNTIME_MODE => return Some(Entity::Runtime),
+            BUY_ATTEMPTS_PER_DAY => return Some(Entity::BuyLimit),
+            _ => {}
+        }
         SourceId::parse(name)
             .map(Entity::Source)
             .or_else(|| ComponentId::parse(name).map(Entity::Component))
@@ -375,6 +438,8 @@ impl Entity {
     pub fn accepts(self, mode: Mode) -> bool {
         match self {
             Entity::Switch(_) => matches!(mode, Mode::Disabled | Mode::Enabled),
+            Entity::Runtime => matches!(mode, Mode::Off | Mode::Shadow | Mode::Paper | Mode::Live),
+            Entity::BuyLimit => matches!(mode, Mode::PerDay(_)),
             _ => matches!(mode, Mode::Off | Mode::Shadow | Mode::Live),
         }
     }
@@ -383,6 +448,8 @@ impl Entity {
     pub fn modes(self) -> &'static str {
         match self {
             Entity::Switch(_) => "DISABLED or ENABLED",
+            Entity::Runtime => "OFF, SHADOW, PAPER or LIVE",
+            Entity::BuyLimit => "a whole number of BUY attempts per UTC day (0 = none)",
             _ => "OFF, SHADOW or LIVE",
         }
     }
@@ -393,6 +460,11 @@ impl Entity {
             Entity::Component(c) => component_effective(c, requested, live),
             Entity::Venue(v) => venue_effective(v, requested, live),
             Entity::Switch(_) => switch_effective(requested),
+            Entity::Runtime => runtime_effective(requested, live),
+            Entity::BuyLimit => match requested {
+                Mode::PerDay(n) => Effective::PerDay(n),
+                _ => Effective::PerDay(0),
+            },
         }
     }
 }
@@ -463,6 +535,14 @@ pub struct SwitchMode {
     pub set_by: Option<SetBy>,
 }
 
+/// The runtime mode or the daily BUY limit of a generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Setting {
+    pub requested: Mode,
+    pub effective: Effective,
+    pub set_by: Option<SetBy>,
+}
+
 /// One generation of every source, component, venue and switch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Generation {
@@ -471,6 +551,10 @@ pub struct Generation {
     pub components: [ComponentMode; 3],
     pub venues: [VenueMode; 3],
     pub switches: [SwitchMode; 7],
+    /// `BSC_RUNTIME_MODE` (OFF initially).
+    pub runtime: Setting,
+    /// `BSC_BUY_ATTEMPTS_PER_DAY` (0 initially).
+    pub buy_limit: Setting,
     pub request_id: Option<String>,
     /// The host boot session this generation was written in (none for the
     /// initial state and generations from before switches existed).
@@ -504,6 +588,16 @@ impl Generation {
                 effective: Effective::Disabled,
                 set_by: None,
             }),
+            runtime: Setting {
+                requested: Mode::Off,
+                effective: Effective::Off,
+                set_by: None,
+            },
+            buy_limit: Setting {
+                requested: Mode::PerDay(0),
+                effective: Effective::PerDay(0),
+                set_by: None,
+            },
             request_id: None,
             boot: None,
         }
@@ -532,6 +626,16 @@ impl Generation {
             Entity::Component(c) => self.component(c).effective,
             Entity::Venue(v) => self.venue(v).effective,
             Entity::Switch(s) => self.switch(s).effective,
+            Entity::Runtime => self.runtime.effective,
+            Entity::BuyLimit => self.buy_limit.effective,
+        }
+    }
+
+    /// The daily BUY attempt limit in force.
+    pub fn buy_attempts_per_day(&self) -> u32 {
+        match self.buy_limit.effective {
+            Effective::PerDay(n) => n,
+            _ => 0,
         }
     }
 
@@ -570,6 +674,8 @@ impl Generation {
         for s in &mut self.switches {
             s.effective = switch_effective(s.requested);
         }
+        self.runtime.effective = runtime_effective(self.runtime.requested, live);
+        self.buy_limit.effective = Entity::BuyLimit.effective(self.buy_limit.requested, live);
     }
 
     fn set(&mut self, entity: Entity, requested: Mode, set_by: SetBy) {
@@ -594,6 +700,14 @@ impl Generation {
                 let at = SwitchId::ALL.iter().position(|s| *s == switch).unwrap_or(0);
                 self.switches[at].requested = requested;
                 self.switches[at].set_by = Some(set_by);
+            }
+            Entity::Runtime => {
+                self.runtime.requested = requested;
+                self.runtime.set_by = Some(set_by);
+            }
+            Entity::BuyLimit => {
+                self.buy_limit.requested = requested;
+                self.buy_limit.set_by = Some(set_by);
             }
         }
         self.rederive();
@@ -673,6 +787,24 @@ impl Generation {
                     .set(k::SET_GENERATION, by.generation);
             }
             d.push(sm::SWITCHES, e.into_nested());
+        }
+        for (id, setting) in [
+            (RUNTIME_MODE, &self.runtime),
+            (BUY_ATTEMPTS_PER_DAY, &self.buy_limit),
+        ] {
+            use sm::setting as k;
+            let mut e = Draft::new(&k::SCHEMA);
+            e.set(k::SETTING_ID, id)
+                .set(k::REQUESTED, setting.requested.name())
+                .set(k::EFFECTIVE, setting.effective.name());
+            if let Some(reason) = setting.effective.reason() {
+                e.set(k::BLOCK_REASON, reason);
+            }
+            if let Some(by) = &setting.set_by {
+                e.set(k::REQUEST_ID, by.request_id.as_str())
+                    .set(k::SET_GENERATION, by.generation);
+            }
+            d.push(sm::SETTINGS, e.into_nested());
         }
         if let Some(id) = &self.request_id {
             d.set(sm::REQUEST_ID, id.as_str());
@@ -836,6 +968,47 @@ impl Generation {
                 set_by: set_by(&row, k::REQUEST_ID, k::SET_GENERATION)?,
             };
         }
+        // The runtime mode and the daily BUY limit; a generation from
+        // before them has the runtime OFF and the limit 0.
+        let rows = if version >= 4 {
+            r.nested_all(sm::SETTINGS).map_err(e)?
+        } else {
+            Vec::new()
+        };
+        let mut seen: Vec<Entity> = Vec::new();
+        for row in rows {
+            use sm::setting as k;
+            let entity = match row.text(k::SETTING_ID).map_err(e)? {
+                RUNTIME_MODE => Entity::Runtime,
+                BUY_ATTEMPTS_PER_DAY => Entity::BuyLimit,
+                _ => return Err("unknown setting in a generation".into()),
+            };
+            if seen.contains(&entity) {
+                return Err(format!("{} appears twice", entity.name()));
+            }
+            seen.push(entity);
+            let requested = Mode::parse(row.text(k::REQUESTED).map_err(e)?)
+                .filter(|m| entity.accepts(*m))
+                .ok_or("unknown requested setting in a generation")?;
+            let derived = entity.effective(requested, live);
+            if row.text(k::EFFECTIVE).map_err(e)? != derived.name()
+                || row.opt_text(k::BLOCK_REASON).map_err(e)? != derived.reason()
+            {
+                return Err(format!(
+                    "{}: stored effective setting is not the owner's",
+                    entity.name()
+                ));
+            }
+            let setting = Setting {
+                requested,
+                effective: derived,
+                set_by: set_by(&row, k::REQUEST_ID, k::SET_GENERATION)?,
+            };
+            match entity {
+                Entity::Runtime => g.runtime = setting,
+                _ => g.buy_limit = setting,
+            }
+        }
         Ok(g)
     }
 }
@@ -857,11 +1030,13 @@ fn set_by(row: &Record, request: u16, generation: u16) -> Result<Option<SetBy>, 
 }
 
 /// A generation record of the current schema, or one written before the
-/// venues and switches (version 2) or the components (version 1) existed.
+/// runtime mode and BUY limit (version 3), the venues and switches
+/// (version 2) or the components (version 1) existed.
 fn decode_generation(bytes: &[u8]) -> Result<Record, String> {
     decode(&sm::SCHEMA, bytes)
         .or_else(|current| {
-            decode(&sm::SCHEMA_V2, bytes)
+            decode(&sm::SCHEMA_V3, bytes)
+                .or_else(|_| decode(&sm::SCHEMA_V2, bytes))
                 .or_else(|_| decode(&sm::SCHEMA_V1, bytes))
                 .map_err(|_| current)
         })
@@ -1028,7 +1203,9 @@ pub fn boot_session() -> Result<String, String> {
 
 /// The owner state darkbotctl's controller keeps (`$HOME/.darkbot/run`,
 /// its RUNDIR, `bsc-sources`): the one place a Mainnet signing or sending
-/// path reads its switches from. No environment can point it elsewhere.
+/// path reads its switches from, derived from `HOME` exactly as darkbotctl
+/// derives its RUNDIR. Another HOME reads another state (without the
+/// owner's ENABLE there, every switch DISABLED); no unset HOME passes.
 pub fn canonical_state_dir() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME")
         .filter(|h| !h.is_empty())
@@ -1100,6 +1277,116 @@ pub fn require_enabled_here(needed: &[SwitchId]) -> Result<u64, String> {
     let dir = canonical_state_dir()?;
     let boot = boot_session().map_err(|e| format!("{e}; every switch DISABLED"))?;
     require_enabled(&dir, &boot, needed)
+}
+
+/// One UTC calendar day of the BUY attempt limit (the contract's day:
+/// 00:00:00.000 UTC to the next).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuyDay {
+    /// Days since 1970-01-01 UTC.
+    pub index: u64,
+    /// `YYYY-MM-DD`.
+    pub utc: String,
+}
+
+/// Milliseconds of one UTC day.
+const DAY_MS: u64 = 86_400_000;
+
+impl BuyDay {
+    pub fn at(unix_ms: u64) -> BuyDay {
+        let index = unix_ms / DAY_MS;
+        // Civil date from days since the epoch (proleptic Gregorian).
+        let z = index as i64 + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = yoe + era * 400 + i64::from(month <= 2);
+        BuyDay {
+            index,
+            utc: format!("{year:04}-{month:02}-{day:02}"),
+        }
+    }
+}
+
+/// The daily BUY attempts of one UTC day: taken slots and the limit in
+/// force (an earlier, higher limit can leave more taken than allowed now).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuyUsage {
+    pub day: BuyDay,
+    pub used: u64,
+    pub limit: u32,
+    /// The owner generation the limit was read from.
+    pub generation: u64,
+}
+
+impl BuyUsage {
+    pub fn remaining(&self) -> u64 {
+        u64::from(self.limit).saturating_sub(self.used)
+    }
+}
+
+/// One taken slot: the attempt's place in its day.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuySlot {
+    pub day: BuyDay,
+    pub slot: u64,
+    pub limit: u32,
+}
+
+fn buy_day_dir(dir: &Path, day: &BuyDay) -> PathBuf {
+    dir.join("buy-attempts").join(&day.utc)
+}
+
+/// The slot files of one day, each with the attempt that took it; a slot
+/// file that does not decode counts as taken (never under-counted).
+fn buy_slots(day_dir: &Path) -> Result<Vec<(u64, Option<String>)>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
+    let entries = match fs::read_dir(day_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("buy attempts unreadable: {e}")),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let Some(slot) = name
+            .to_string_lossy()
+            .strip_suffix(".dbrec")
+            .and_then(|n| n.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let attempt = fs::read(entry.path())
+            .ok()
+            .and_then(|b| decode(&bs::SCHEMA, &b).ok())
+            .and_then(|r| r.text(bs::ATTEMPT_ID).ok().map(str::to_string));
+        out.push((slot, attempt));
+    }
+    Ok(out)
+}
+
+/// The BUY attempts of the UTC day of `now_ms` against the limit in force,
+/// read-only (for the status projection).
+pub fn buy_usage(dir: &Path, now_ms: u64) -> Result<BuyUsage, String> {
+    let g = current_generation(dir)?;
+    let day = BuyDay::at(now_ms);
+    let used = buy_slots(&buy_day_dir(dir, &day))?.len() as u64;
+    Ok(BuyUsage {
+        day,
+        used,
+        limit: g.buy_attempts_per_day(),
+        generation: g.generation,
+    })
+}
+
+/// [`Store::consume_buy_attempt`] on the canonical owner state.
+pub fn consume_buy_attempt_here(attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
+    Store::open(canonical_state_dir()?, KEEP_GENERATIONS)?.consume_buy_attempt(attempt_id, now_ms)
 }
 
 /// Source-mode generations the store keeps besides the current one (one
@@ -1193,6 +1480,61 @@ impl Store {
 
     fn highest(&self) -> Result<Option<u64>, String> {
         highest_generation(&self.dir)
+    }
+
+    /// Takes one slot of the daily BUY attempt limit for `attempt_id` in
+    /// the UTC day of `now_ms` (plan 27.10., `8b4721bb`): refused when the
+    /// limit in force (0 initially) is used up. The same attempt again gets
+    /// its slot (retry, crash before the caller went on). Slots are
+    /// create-new files, so concurrent attempts never share one; a lost race
+    /// or a crash can only over-count, never under-count.
+    pub fn consume_buy_attempt(&self, attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
+        use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
+        if !safe_id(attempt_id) {
+            return Err("the attempt ID is not a safe identifier".into());
+        }
+        let g = self.current()?;
+        let limit = g.buy_attempts_per_day();
+        let day = BuyDay::at(now_ms);
+        let day_dir = buy_day_dir(&self.dir, &day);
+        for d in [self.dir.join("buy-attempts"), day_dir.clone()] {
+            match fs::DirBuilder::new().mode(0o700).create(&d) {
+                Ok(()) => {}
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(format!("{}: {e}", d.display())),
+            }
+        }
+        let taken = buy_slots(&day_dir)?;
+        if let Some((slot, _)) = taken.iter().find(|(_, a)| a.as_deref() == Some(attempt_id)) {
+            return Ok(BuySlot {
+                day,
+                slot: *slot,
+                limit,
+            });
+        }
+        for slot in 0..u64::from(limit) {
+            let mut d = Draft::new(&bs::SCHEMA);
+            d.set(bs::ATTEMPT_ID, attempt_id)
+                .set(bs::DAY_UTC, day.utc.as_str())
+                .set(bs::DAY_INDEX, day.index)
+                .set(bs::SLOT, slot)
+                .set(bs::LIMIT, u64::from(limit))
+                .set(bs::GENERATION, g.generation)
+                .set(bs::PROVENANCE_TOOL, "bsc_runtime")
+                .set(bs::PROVENANCE_OBSERVED_UNIX_MS, now_ms);
+            let bytes = d.encode().map_err(|e| e.to_string())?;
+            match write_new(&day_dir.join(format!("{slot:010}.dbrec")), &bytes) {
+                Ok(()) => return Ok(BuySlot { day, slot, limit }),
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(format!("buy attempt slot not written: {e}")),
+            }
+        }
+        Err(format!(
+            "BUY_ATTEMPT_LIMIT_REACHED: {} of {limit} BUY attempts on {} (UTC) taken at generation {}",
+            taken.len().max(limit as usize),
+            day.utc,
+            g.generation
+        ))
     }
 
     /// Applies one request (or replays its receipt). `now_ms` is the record
@@ -2009,6 +2351,158 @@ mod tests {
         if g.switch(SwitchId::WalletLauncher).effective == Effective::Enabled {
             assert_eq!(g.request_id.as_deref(), Some("sw-late"));
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Plan v9 §2.5: the global runtime mode, OFF initially; SHADOW and
+    /// PAPER effective as requested, LIVE BLOCKED like every LIVE; a
+    /// generation from before it reads OFF with a daily BUY limit of 0.
+    #[test]
+    fn the_runtime_mode_is_off_initially_and_never_live() {
+        let (dir, s) = session("runtime", "boot-1");
+        let g = s.current().unwrap();
+        assert_eq!(
+            (g.runtime.effective, g.buy_attempts_per_day()),
+            (Effective::Off, 0)
+        );
+        assert_eq!(Entity::parse(RUNTIME_MODE), Some(Entity::Runtime));
+        assert!(
+            s.request("rt-bad", Entity::Runtime, Mode::Enabled, 0, 1)
+                .unwrap_err()
+                .contains("takes OFF, SHADOW, PAPER or LIVE")
+        );
+        let r = s
+            .request("rt-1", Entity::Runtime, Mode::Paper, 0, 1)
+            .unwrap();
+        assert_eq!(r.effective, Effective::Paper);
+        assert!(
+            r.line()
+                .contains("source=BSC_RUNTIME_MODE requested=PAPER effective=PAPER generation=1")
+        );
+        let r = s
+            .request("rt-2", Entity::Runtime, Mode::Live, 1, 2)
+            .unwrap();
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
+        // Survives a restart (a mode, not a permission).
+        assert_eq!(s.restart(3).unwrap().runtime.requested, Mode::Live);
+        // Stored decode: a v3 generation (before settings) reads OFF / 0.
+        let mut d = Draft::new(&sm::SCHEMA_V3);
+        d.set(sm::GENERATION, 3u64)
+            .set(sm::PROVENANCE_TOOL, "bsc_runtime")
+            .set(sm::PROVENANCE_OBSERVED_UNIX_MS, 4u64);
+        for source in SourceId::ALL {
+            let mut e = Draft::new(&sm::entry::SCHEMA);
+            e.set(sm::entry::SOURCE_ID, source.name())
+                .set(sm::entry::REQUESTED, "OFF")
+                .set(sm::entry::EFFECTIVE, "OFF");
+            d.push(sm::SOURCES, e.into_nested());
+        }
+        fs::write(
+            dir.join(format!("generations/{:020}.dbrec", 3)),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        let g = s.current().unwrap();
+        assert_eq!(
+            (g.runtime.effective, g.buy_attempts_per_day()),
+            (Effective::Off, 0)
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The contract's day is the UTC calendar day.
+    #[test]
+    fn the_buy_day_is_the_utc_calendar_day() {
+        for (ms, day) in [
+            (0, "1970-01-01"),
+            (951_782_400_000, "2000-02-29"),
+            (1_709_164_800_000, "2024-02-29"),
+            (1_709_251_199_999, "2024-02-29"),
+            (1_793_059_200_000, "2026-10-27"),
+        ] {
+            assert_eq!(BuyDay::at(ms).utc, day, "{ms}");
+        }
+        assert_eq!(BuyDay::at(DAY_MS - 1).index, 0);
+        assert_eq!(BuyDay::at(DAY_MS).index, 1);
+    }
+
+    /// Plan 27.10. (8b4721bb): the persisted daily BUY limit, 0 initially,
+    /// counts every attempt once per UTC day: refused when used up, the
+    /// same attempt again keeps its slot, a new day starts empty, a restart
+    /// keeps both the limit and the count, and decimal requests only.
+    #[test]
+    fn the_daily_buy_limit_counts_every_attempt_once_per_utc_day() {
+        let (dir, s) = session("buy-limit", "boot-1");
+        let now = 1_793_059_200_000;
+        let e = s.consume_buy_attempt("a1", now).unwrap_err();
+        assert!(
+            e.starts_with("BUY_ATTEMPT_LIMIT_REACHED: 0 of 0 BUY attempts on 2026-10-27 (UTC)"),
+            "{e}"
+        );
+        for bad in ["-1", "01", "x", "4294967296", ""] {
+            assert_eq!(Mode::parse(bad), None, "{bad}");
+        }
+        assert!(
+            s.request("bl-bad", Entity::BuyLimit, Mode::Enabled, 0, 1)
+                .is_err()
+        );
+        let r = s
+            .request("bl-1", Entity::BuyLimit, Mode::parse("2").unwrap(), 0, 1)
+            .unwrap();
+        assert!(
+            r.line()
+                .contains("source=BSC_BUY_ATTEMPTS_PER_DAY requested=2 effective=2")
+        );
+        assert_eq!(s.consume_buy_attempt("a1", now).unwrap().slot, 0);
+        assert_eq!(
+            s.consume_buy_attempt("a1", now + 5).unwrap().slot,
+            0,
+            "retry keeps its slot"
+        );
+        assert_eq!(s.consume_buy_attempt("a2", now + 6).unwrap().slot, 1);
+        let e = s.consume_buy_attempt("a3", now + 7).unwrap_err();
+        assert!(e.starts_with("BUY_ATTEMPT_LIMIT_REACHED: 2 of 2"), "{e}");
+        let usage = buy_usage(&dir, now).unwrap();
+        assert_eq!((usage.used, usage.limit, usage.remaining()), (2, 2, 0));
+        // The next UTC day starts empty.
+        assert_eq!(s.consume_buy_attempt("a3", now + DAY_MS).unwrap().slot, 0);
+        // A restart keeps the limit and the count.
+        let again = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        again.restart(now + 8).unwrap();
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 2);
+        assert_eq!(again.current().unwrap().buy_attempts_per_day(), 2);
+        // A lower limit leaves nothing remaining, never a negative count.
+        let g = again.current().unwrap().generation;
+        again
+            .request("bl-2", Entity::BuyLimit, Mode::PerDay(1), g, now + 9)
+            .unwrap();
+        let usage = buy_usage(&dir, now).unwrap();
+        assert_eq!((usage.used, usage.limit, usage.remaining()), (2, 1, 0));
+        assert!(again.consume_buy_attempt("a4", now + 10).is_err());
+        assert!(s.consume_buy_attempt("../x", now).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Concurrent attempts race for the slots: never more than the limit.
+    #[test]
+    fn concurrent_buy_attempts_never_exceed_the_limit() {
+        let (dir, s) = session("buy-race", "boot-1");
+        s.request("bl", Entity::BuyLimit, Mode::PerDay(3), 0, 1)
+            .unwrap();
+        let ok = std::thread::scope(|scope| {
+            let runs: Vec<_> = (0..8)
+                .map(|i| {
+                    let s = &s;
+                    scope.spawn(move || s.consume_buy_attempt(&format!("r{i}"), 1).is_ok())
+                })
+                .collect();
+            runs.into_iter()
+                .map(|r| r.join().unwrap())
+                .filter(|ok| *ok)
+                .count()
+        });
+        assert_eq!(ok, 3);
+        assert_eq!(buy_usage(&dir, 1).unwrap().used, 3);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1620,9 +1620,13 @@ pub fn run(
                 // Plan v9 §2.3: Flap launches reach the C3 PAPER path and
                 // Strategy C only while the Flap venue is effective SHADOW.
                 let flap_admitted = generation.venue(VenueId::Flap).effective == Effective::Shadow;
+                // Plan v9 §2.5: the global runtime mode bounds the components:
+                // SHADOW lets the strategy ledger run, PAPER also the C3 path.
+                let runtime_mode = generation.runtime.effective;
                 // Phase H: BSC_STRATEGY_C runs (SHADOW) or not; switched off,
                 // its PAPER ledger ends.
                 let strategy_on = flap_admitted
+                    && matches!(runtime_mode, Effective::Shadow | Effective::Paper)
                     && generation.component(ComponentId::StrategyC).effective == Effective::Shadow;
                 if let Some(c) = canonical.as_mut() {
                     // Each switch is journaled: a replay starts and ends its
@@ -1667,6 +1671,7 @@ pub fn run(
                 }
                 if let Some(x) = exec.as_mut() {
                     let wanted = flap_admitted
+                        && runtime_mode == Effective::Paper
                         && generation.component(ComponentId::ExecC3).effective == Effective::Shadow;
                     let follower = canonical_config
                         .as_ref()
@@ -1913,8 +1918,10 @@ pub fn run(
                     let h = match generation.source(s).effective {
                         Effective::Off
                         | Effective::Blocked(_)
+                        | Effective::Paper
                         | Effective::Disabled
-                        | Effective::Enabled => Health::Off,
+                        | Effective::Enabled
+                        | Effective::PerDay(_) => Health::Off,
                         Effective::Shadow if config.endpoint(s).is_none() => Health::Unqualified,
                         Effective::Shadow if stopping => Health::Off,
                         Effective::Shadow => {

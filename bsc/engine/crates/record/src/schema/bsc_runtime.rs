@@ -124,6 +124,34 @@ pub mod source_modes {
         };
     }
 
+    /// The runtime mode `BSC_RUNTIME_MODE` (`OFF | SHADOW | PAPER | LIVE`)
+    /// and the daily BUY attempt limit `BSC_BUY_ATTEMPTS_PER_DAY` (decimal):
+    /// requested, effective, and the request that set them.
+    pub mod setting {
+        use super::*;
+
+        pub const SETTING_ID: u16 = 1;
+        pub const REQUESTED: u16 = 2;
+        pub const EFFECTIVE: u16 = 3;
+        pub const BLOCK_REASON: u16 = 4;
+        pub const REQUEST_ID: u16 = 5;
+        pub const SET_GENERATION: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.owner-setting",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(SETTING_ID, "setting_id", Text),
+                Field::req(REQUESTED, "requested", Text),
+                Field::req(EFFECTIVE, "effective", Text),
+                Field::opt(BLOCK_REASON, "block_reason", Text),
+                Field::opt(REQUEST_ID, "request_id", Text),
+                Field::opt(SET_GENERATION, "set_generation", U64),
+            ],
+        };
+    }
+
     /// Strictly increasing; the CAS every change states.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -143,8 +171,39 @@ pub mod source_modes {
     /// switch counts only within it (a restart disables every switch).
     /// Bytes, so the host identity never leaves the reporter.
     pub const BOOT_SESSION: u16 = 9;
+    /// The runtime mode and the daily BUY limit (schema version 4).
+    pub const SETTINGS: u16 = 10;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.source-modes.v1",
+        record_type: 38,
+        schema_version: 4,
+        fields: &[
+            Field::req(GENERATION, "generation", U64),
+            Field::nested(SOURCES, "sources", Presence::Repeated, &entry::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::nested(
+                COMPONENTS,
+                "components",
+                Presence::Repeated,
+                &component::SCHEMA,
+            ),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::nested(SWITCHES, "switches", Presence::Repeated, &switch::SCHEMA),
+            Field::opt(BOOT_SESSION, "boot_session", Bytes).max(128),
+            Field::nested(SETTINGS, "settings", Presence::Repeated, &setting::SCHEMA),
+        ],
+    };
+
+    /// Generations written before the runtime mode and the daily BUY limit
+    /// (read only; the runtime is OFF and the limit 0).
+    pub const SCHEMA_V3: Schema = Schema {
         name: "darkbot.bsc.source-modes.v1",
         record_type: 38,
         schema_version: 3,
@@ -211,6 +270,46 @@ pub mod source_modes {
                 U64,
             ),
             Field::opt(REQUEST_ID, "request_id", Text),
+        ],
+    };
+}
+
+/// One consumed slot of the daily BUY attempt limit (plan 27.10.,
+/// `8b4721bb`): `buy-attempts/<UTC day>/<slot>.dbrec`, created create-new,
+/// so a slot is taken once; the same attempt again finds its slot.
+pub mod buy_attempt_slot {
+    use super::*;
+
+    pub const ATTEMPT_ID: u16 = 1;
+    /// The UTC calendar day, `YYYY-MM-DD` (the contract's day boundary).
+    pub const DAY_UTC: u16 = 2;
+    /// Days since 1970-01-01 UTC.
+    pub const DAY_INDEX: u16 = 5;
+    /// 0-based; below the limit in force when taken.
+    pub const SLOT: u16 = 6;
+    pub const LIMIT: u16 = 7;
+    /// The owner generation the limit was read from.
+    pub const GENERATION: u16 = 8;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.buy-attempt-slot.v1",
+        record_type: 64,
+        schema_version: 1,
+        fields: &[
+            Field::req(ATTEMPT_ID, "attempt_id", Text),
+            Field::req(DAY_UTC, "day_utc", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(DAY_INDEX, "day_index", U64),
+            Field::req(SLOT, "slot", U64),
+            Field::req(LIMIT, "limit", U64),
+            Field::req(GENERATION, "generation", U64),
         ],
     };
 }
@@ -1168,9 +1267,11 @@ pub mod strategy_replay {
 
 pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA,
+    &source_modes::SCHEMA_V3,
     &source_modes::SCHEMA_V2,
     &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
+    &buy_attempt_slot::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,
