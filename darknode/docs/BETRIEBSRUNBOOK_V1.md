@@ -2,15 +2,17 @@
 
 Stand: 27.10.2026. Dokument = normativer Betriebssollvertrag, **nicht** installierte Infrastruktur und **kein** bestandenes DR-/Incident-Drill. Bezieht sich auf P1.9/1.10, P5 §5d, Wallet, P8 und P9.
 
+**Verbindlicher M4-Migrations-/Hostvertrag:** [APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md](APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md). Nicht für V1 pauschal Linux/systemd verlangen. Mac mini oder Server bleiben spätere, neu zu qualifizierende Möglichkeiten.
+
 ## 1. Ownership und Prozessgrenzen
 
-Linux als V1-Ziel, dedizierter unprivilegierter systemd-Rust-Dienst, alleiniger Account-/Order-/Risk-Owner und separater signierender Key-Kontext. Public-P1-Capture, SQLite-Control-Store, L0/L1/L2-Writer, private Bitget WS/REST, Alarm-Outbox und Gateway-Reporter haben explizite Health-/Backpressure-/Shutdown-Verträge. Browser/React und Gateway-Ausfall dürfen keinen bereits gestarteten Rust-Stop-Audit oder unabhängigen Alarm stoppen. Kein zusätzlicher Trading-Owner durch Auto-Restart ohne Lock/Lease/Fencing; nur ein aktiver signierender Writer je Account.
+MacBook Apple M4 / 128 GB mit macOS ARM64 als **verbindliche Startplattform**, qualifizierter `launchd`-Rust-Dienst, alleiniger Account-/Order-/Risk-Owner und separater signierender Key-Kontext. Public-P1-Capture, SQLite-Control-Store, L0/L1/L2-Writer, private Bitget WS/REST, Alarm-Outbox und Gateway-Reporter haben explizite Health-/Backpressure-/Shutdown-Verträge. Browser/React und Gateway-Ausfall dürfen keinen bereits gestarteten Rust-Stop-Audit oder unabhängigen Alarm stoppen. Kein zusätzlicher Trading-Owner durch Auto-Restart ohne Lock/Lease/Fencing; nur ein aktiver signierender Writer je Account.
 
 **Startup:** immer UNARMED/RECONCILING, prüfen Account UID/Mode/Keys, Watchdog, Storage/Journal-Version, Clockqualität, Instrument, Strategiehash, aktive Orders/Fills/Positionen/Stops und Riskbudget, dann Readiness. Auto-READY ist nicht Auto-SIGN/LIVE. Ohne vollständigen Readback keine neuen Orders.
 
 ## 2. Secrets und Rollen
 
-systemd-creds/verschlüsselte Service-Credentials als **Designziel**, nach Host-Systemtest mit TPM-/Recovery-/Unseal-Pfad; Dienstnutzer ohne Adminrechte, restriktive FS-ACL, TLS-Zertifikatprüfung, Whitelist für Host-Egress und Secret-Dateien. Separat READ_ONLY, DEMO_WRITE, LIVE_WRITE und ADMIN/MODE_CHANGE; Withdrawal/Transfer/Brokerverwaltung nicht an den Trading-Bot geben. API-Key/Passphrase niemals in Chatlogs/Git, UI, Protobuf, Crashdump, Trace, Environmentdump oder Evidenz. Kein Klartext in normalen Backups; Secrets-Restore-Verfahren in eigenem Recovery-Credential-Pfad.
+macOS Keychain/verschlüsselte Dienst-Credentials als **zu qualifizierender V1-Mechanismus**; erst nach unbeaufsichtigtem `launchd`-Zugriff mit geprüfter ACL/Key-Restore-/Rotation; Dienstnutzer ohne Adminrechte, restriktive FS-ACL, TLS-Zertifikatprüfung, Whitelist für Host-Egress und Secret-Dateien. Separat READ_ONLY, DEMO_WRITE, LIVE_WRITE und ADMIN/MODE_CHANGE; Withdrawal/Transfer/Brokerverwaltung nicht an den Trading-Bot geben. API-Key/Passphrase niemals in Chatlogs/Git, UI, Protobuf, Crashdump, Trace, Environmentdump oder Evidenz. Kein Klartext in normalen Backups; Secrets-Restore-Verfahren in eigenem Recovery-Credential-Pfad.
 
 **Rotation:** neues Credential read-only vorqualifizieren, offene Exchange-Orders/Stops und laufenden Account-Owner sichern, Quiesce und Schlüsselwechsel ohne zwei parallel signierende Owner, Reauth/REST-WS-Readback, alte Credentials revoken; erzwungener Revoke ⇒ NO_ENTRY/HALTED/Alarm, nicht blind neu signieren. Rotationsintervall und Rollen pro Betreiber vor P9 fixieren.
 
@@ -51,7 +53,7 @@ Off-host, verschlüsselte, versionierte, per Hash/Write-Atomicity prüfbare Back
 
 - Alarms über unabhängigen Kanal tatsächlich ausgelöst und quittiert; Ursache, Zustelllatenz und Host-Ausfallkaskade dokumentiert.
 - Prozesskill, Port-/Netzsperre, Clockdrift, Gateway-down, Disk-full, Feedgap, Reconnect, Exchange-Ratelimit, Lost ACK, Hostneustart, Restore/Keywechsel/Test mit offenem Demo-Trade durchgeprüft.
-- Hostwahl und Konfiguration: CPU/IO/TLS/WS-Queue, Netzpfad/Latenz-Trace, Storage-Erschöpfung, systemd-Version/Credential-Mechanismus, Berechtigungen/SELinux/Firewall, Zeitquelle, Backup-Storage/RPO/RTO, unabhängiger Alarmdienst.
+- Hostwahl und Konfiguration: CPU/IO/TLS/WS-Queue, Netzpfad/Latenz-Trace, Storage-Erschöpfung, `launchd`-/Keychain-/Sleep-/Power-/Thermalprofil, macOS-Dateirechte/Firewall, Zeitquelle, Backup-Storage/RPO/RTO, unabhängiger Alarmdienst.
 - Vorab festlegen: zulässige Stale-/p99-/Alarmzeiten, Queue-Sizes, RateLimit-Backoff, Retention, Rollbackzeiten und messbare Pass/Fail-Grenzen. **Keine numerischen Ziele oder bestandenen Verfügbarkeiten erfinden.**
 - Logs und Fehlerberichte ohne Geheimnisse; pro Drill exakte Build-SHA, Account-UID-Kürzel, Zeitprofil/Artefakt-Hash, Uhrenqualität, Verifikationsstatus.
 

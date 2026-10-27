@@ -28,7 +28,7 @@
 | DN-D19 | **P1-Speicher:** Roh-/Normaldaten/Candle-Cache als L0/L1/L2-Binärdateien; kleine transaktionale Control-/Registry-/Gap-/Manifestdaten in SQLite; keine produktiven Redis/Parquet/ClickHouse-Pfade | FESTGELEGT; R2c/R2d offen |
 | DN-D20 | **Indikatoren:** mathematisch eigene Rust-Implementierung mit einem Live-/Replay-/Backtest-Evaluator; Python optional für unabhängige Tests, keine Skriptmigration | FESTGELEGT; Tests NOT_RUN |
 
-**P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN; Linux/systemd und verschlüsseltes Off-Host-Backup sind nun verbindliche V1-Designentscheidungen, keine bereits getesteten Hosts.
+**P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN; MacBook Apple M4 mit 128 GB RAM ist die verbindliche V1-Startplattform, `launchd`-/Keychain-/Power-/Alarm- und Off-Host-Backup-Gates sind noch NOT_RUN; Mac mini/Linux-Server sind spätere Optionen. Siehe [M4-Hostvertrag](APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md).
 
 „FESTGELEGT“ bezeichnet das **Produkt-/Architekturziel**, keinen implementierten und keinen getesteten Sachverhalt. Alle API-/Fremdcode-Behauptungen müssen vor Übernahme gegen exakte Version/Commit und Tests verifiziert werden.
 

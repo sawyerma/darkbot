@@ -18,7 +18,7 @@ Stand: 27.10.2026. Dokumentstatus: PLANUNGSVERTRAG. **Kein Code und kein Test wi
 | P8 | Fault-/Security-/Tail-Latency-/Soak-Abnahme; Kosten-OOS getrennt | P6_P7_P8_QUALIFIKATION_V1.md | alle echten Negativtests und messungsbasierten Grenzwerte |
 | P9 | ausdrücklich autorisierter Echtgeldpilot erst nach positiven Gates | P9_P10_FREIGABE_UND_FLEET_V1.md | tatsächliche Eignung, OOS-Kosten, Account-Readback und Pilot-Evidenz |
 | P10 | Fleet mit getrennten Symbolen/Risikobudgets und einem Account-Owner | P9_P10_FREIGABE_UND_FLEET_V1.md | parallele Bots, globale Limits, Korrelations-/Owner-Tests |
-| Betrieb | systemd/Linux, Keys, Backups, unabhängiger Alarm, Update/Recovery | BETRIEBSRUNBOOK_V1.md | Zielhost, SLO, Rotation, Restore, Watchdog- und Incident-Drills |
+| Betrieb | macOS `launchd` auf MacBook M4/128 GB, Keychain, Keys, Backups, unabhängiger Alarm, Update/Recovery | BETRIEBSRUNBOOK_V1.md | Zielhost, SLO, Rotation, Restore, Watchdog- und Incident-Drills |
 | Domain/Wire | DarkNode eigene Fachprotos/Topics und kontinuierlicher Feldabgleich | DN_PROTO_CONTRACT_V1.md; P0_RESEARCH_UND_VERTRAEGE_V1.md | CI, Codegen, echte Publisher-/UI-/Gateway-Goldens |
 
 **Gesamturteil:** P1/P5/Wallet/Protobuf sind bereits spezifiziert, nicht ausgeführt. Die zusätzlichen Pläne schließen die größten *fachlichen Dokumentationslücken*; sie schließen **nicht** die Gate-1-, Account-, Code- und Evidenzlücken.
@@ -27,9 +27,9 @@ Stand: 27.10.2026. Dokumentstatus: PLANUNGSVERTRAG. **Kein Code und kein Test wi
 
 **Echte externe Evidenz:** Authentifizierte Bitget-UTA-Capabilities des konkret vorgesehenen Unterkontos; One-way/Isolated-, Leverage-, Reduce-only- und Schutzorder-Readbacks; reale Gebühren-/Funding-/Fill-Parameter; Private-WS-Abbrüche und Stop-Partial-Fills; komplette USDT-Futures-Symbolliste; kein Fake-PASS.
 
-**Benutzervorgaben:** tatsächliches API-Unterkonto, spätere Demo-Order-Berechtigung, Konto-/Bot-Risikokapital, Verlust-/Drawdowngrenzen, erlaubte Strategie und gewünschter Risikohorizont, künftiger Host und signierte LIVE-Freigabe. Ohne diese Werte keine willkürlichen Defaults und keine Orders.
+**Benutzervorgaben:** tatsächliches API-Unterkonto, spätere Demo-Order-Berechtigung, Konto-/Bot-Risikokapital, Verlust-/Drawdowngrenzen, erlaubte Strategie und gewünschter Risikohorizont, exaktes M4-Submodell/macOS-/Strom-/Netzprofil und signierte LIVE-Freigabe. Ohne diese Werte keine willkürlichen Defaults und keine Orders.
 
-**Engineering-/Testentscheidungen:** Hostregion/Latenz- und Stale-Schwellen, Bitget REST-vs-privater WS-Ordertransport, exakter TP/SL-Trigger, konkrete Cloud-/Backup-/Secret-Lösung, Golden-Toleranzen und statistische Mindestkriterien: vor jeweiligen Experimenten bzw. Abnahmeläufen versionieren, anstatt nach Messergebnissen zu optimieren.
+**Engineering-/Testentscheidungen:** Hostregion/Latenz- und Stale-Schwellen, Bitget REST-vs-privater WS-Ordertransport, exakter TP/SL-Trigger, konkrete Mac-/Off-host-Backup-/Keychain-Lösung, Golden-Toleranzen und statistische Mindestkriterien: vor jeweiligen Experimenten bzw. Abnahmeläufen versionieren, anstatt nach Messergebnissen zu optimieren.
 
 ## 3. Kein neues Doppel-System
 
