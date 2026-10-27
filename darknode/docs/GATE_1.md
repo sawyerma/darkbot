@@ -139,6 +139,10 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 **Vorrang vor dem angekündigten Depth50-V5-Produktivwechsel am 05.11.2026:** 8 V5-Parserfehler in 62 Demo-Frames aus dem 60s-Lauf sichern/ursächlich prüfen, das offizielle SBE-XML-Schema pinnen, einen typisierten Decoder und Recovery anhand echter Frames qualifizieren. Solange dies fehlt, V5 **FAIL/INCONCLUSIVE**; keine produktive Readiness aus früheren 25/25 Offline-Frames ableiten. Kein SIGN/ARM/LIVE.
 
+## P5-Code-Audit / Gesamttest-Gate (27.10.2026)
+
+[P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md](P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md) enthält jetzt gepinnte Upstream-Source-/Tests für NautilusTrader, Freqtrade, Hummingbot, CCXT, Barter sowie `DN-P5-ALL-001` als einheitliches, **noch nicht implementiertes** Abnahmeprogramm mit Source-/Replay-/Public-/Private-Read-/Demo-Write-/Soak-Lanes. CCXT-Routing in Bitget ist nicht automatisch UTA V3, Barter ist kein fertiger Bitget-Connector. **Alle P5-A01..A28 NOT_RUN, P5 NOT_RUN; keine SIGN/ARM/LIVE.**
+
 ## 6. Gate 1 → Umsetzung
 
 [PHASENPLAN.md](PHASENPLAN.md) definiert die nachfolgenden Pakete. Keine Implementation im Gate-1-Dokument, keine Mock-Daten als Produktdaten, keine automatische Änderung an BSC/Project_0. Jedes Paket bindet tatsächlichen Source-Commit, Tests und Akzeptanzkriterien; bei BLOCKED kein Überspringen.
