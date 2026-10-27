@@ -9,6 +9,8 @@
     - [BscStatus](#darkbot-bsc-v1-BscStatus)
     - [BscWalletsState](#darkbot-bsc-v1-BscWalletsState)
     - [BuilderStatus](#darkbot-bsc-v1-BuilderStatus)
+    - [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit)
+    - [ControlSwitch](#darkbot-bsc-v1-ControlSwitch)
     - [DryStatus](#darkbot-bsc-v1-DryStatus)
     - [Evidence](#darkbot-bsc-v1-Evidence)
     - [GateStatus](#darkbot-bsc-v1-GateStatus)
@@ -198,6 +200,9 @@ Bound launch plan, without signatures, raw transactions or execution authority.
 | runtime_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Observed runtime context; absent until such evidence actually exists. |
 | reason | [string](#string) |  | Missing/invalid contract explanation. |
 | records | [NativeRecord](#darkbot-bsc-v1-NativeRecord) | repeated | Latest public qualification records: DRY, preflight, quote, economics, simulation, launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract. |
+| economic_controls | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | The economic switches SIGN, ARM, SEND, ATTEMPT and LIVE of the native owner; absent before its state exists. |
+| buy_attempt_limit | [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit) |  | The daily BUY attempt limit and today&#39;s use; absent before the owner state exists. |
+| runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The global runtime mode BSC_RUNTIME_MODE (OFF, SHADOW, PAPER; LIVE stays BLOCKED) in the ControlSwitch shape; absent before the owner state exists. |
 
 
 
@@ -269,6 +274,8 @@ Public wallet identity and timestamped evidence balances, never keys.
 | required_launcher_wei | [string](#string) | optional | Exact launcher funding requirement when recorded. |
 | required_buyer_wei | [string](#string) | optional | Exact buyer funding requirement when recorded. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Evidence identity makes snapshot age and provenance reviewable. |
+| launcher_control | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The launcher wallet&#39;s native ENABLE/DISABLE switch; absent before the owner state exists. |
+| buyer_control | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The buyer wallet&#39;s native ENABLE/DISABLE switch; absent before the owner state exists. |
 
 
 
@@ -291,6 +298,52 @@ Builder documentation and empirical qualification are separate observations.
 | no_merge | [string](#string) |  | Empirical qualification of noMerge effects. |
 | position_first | [string](#string) |  | Empirical qualification of positionFirst effects. |
 | inclusion | [string](#string) |  | Empirical qualification of actual inclusion. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BuyAttemptLimit"></a>
+
+### BuyAttemptLimit
+The persisted daily limit of economic BUY attempts (plan 27.10.) at the native owner and
+its use on the current UTC day; every attempt that may send takes a slot before its
+authority is consumed. A limit is never a permission to execute.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| per_day | [uint64](#uint64) |  | Attempts allowed per UTC calendar day; 0 (initially) allows none. |
+| day_utc | [string](#string) |  | The UTC calendar day counted, YYYY-MM-DD. |
+| used | [uint64](#uint64) |  | Slots taken on that day, sent or unclear attempts included. |
+| remaining | [uint64](#uint64) |  | per_day minus used, never below zero. |
+| generation | [uint64](#uint64) |  | The owner generation; the compare-and-swap of the next request. |
+| request_id | [string](#string) |  | The request that last set the limit; empty while never set. |
+| set_generation | [uint64](#uint64) | optional | The generation that request wrote. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ControlSwitch"></a>
+
+### ControlSwitch
+One native wallet or economic switch (plan 27.10.) of the bsc_runtime owner: a permission
+a Mainnet signing or sending path checks besides its own guard, V5, nonce and budget checks,
+never an action. DISABLED initially, in a missing or unreadable state and after every restart.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_ECON_SIGN, BSC_ECON_ARM, BSC_ECON_SEND, BSC_ECON_ATTEMPT or BSC_ECON_LIVE. |
+| requested | [string](#string) |  | DISABLED or ENABLED as requested; UNKNOWN when the owner state is unreadable. |
+| effective | [string](#string) |  | DISABLED, ENABLED, or BLOCKED as the owner holds it in this boot session. |
+| block_reason | [string](#string) |  | Why the effective state is not the requested one (RESET_BY_RESTART, CONTROL_STATE_INVALID). |
+| generation | [uint64](#uint64) |  | The owner generation; the compare-and-swap of the next request. |
+| request_id | [string](#string) |  | The request (or RESTART_RESET) that last set this switch; empty while never set. |
+| set_generation | [uint64](#uint64) | optional | The generation that request wrote. |
 
 
 
