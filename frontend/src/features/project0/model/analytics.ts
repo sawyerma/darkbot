@@ -81,6 +81,104 @@ export interface AnalyticsView {
   boot: BootFlowView | null;
   /** DEC-07: why the boot store was not (completely) readable; empty when read. */
   bootError: string;
+  /** DEC-16: the standing autostart approval, the newest raw-capture qualification and run. */
+  untilStopped: UntilStoppedView;
+}
+
+/** DEC-16: a standing autostart approval (in force or previewed) and the binding it was given for. */
+export interface AutostartGrantView {
+  digest: string;
+  mode: string;
+  configSha256: string;
+  binarySha256: string;
+  duration: string;
+  checkpointSeconds: bigint;
+  minimumRunwaySeconds: bigint;
+  qualificationId: string;
+  providerEvidenceId: string;
+  genesisHash: string;
+  captureSource: string;
+  rpcRps: bigint;
+  maxRequests: bigint;
+  maxTotalMib: bigint;
+  maxRuntimeSeconds: bigint;
+  expiresUnixS: bigint;
+  /** When it was granted, respectively previewed. */
+  recordedUnixS: bigint;
+}
+
+/** DEC-16: a qualification of an unbounded run; `open` names every part that did not pass. */
+export interface UntilStoppedQualificationView {
+  id: string;
+  mode: string;
+  checkpointSeconds: bigint;
+  minimumRunwaySeconds: bigint;
+  complete: boolean;
+  open: readonly string[];
+  evidenceId: string | null;
+  evidenceValidUntilUnixS: bigint | null;
+  qualifiedAtUnixS: bigint;
+}
+
+/** DEC-16: an unbounded raw capture's windows journal as far as it is written. */
+export interface UntilStoppedRunView {
+  runId: string;
+  qualificationId: string;
+  startedUnixS: bigint;
+  checkpointSeconds: bigint;
+  windows: bigint;
+  lastVerdict: string | null;
+  lastDetail: string;
+  lastEndedUnixS: bigint | null;
+  halted: string | null;
+  sealed: boolean;
+  complete: boolean;
+}
+
+export interface UntilStoppedView {
+  autostart: AutostartGrantView | null;
+  preview: AutostartGrantView | null;
+  qualification: UntilStoppedQualificationView | null;
+  run: UntilStoppedRunView | null;
+  errors: readonly string[];
+}
+
+/** DEC-16: the unbounded horizon of a boot flow (`p0ctl` and the gateway check it again). */
+export const UNTIL_STOPPED = "until-stopped";
+
+/** Whole seconds of a `p0ctl` duration (digits and s/m/h/d); null for anything else. */
+export function durationSeconds(d: string): bigint | null {
+  const m = /^([1-9]\d{0,5})([smhd])$/.exec(d.trim());
+  if (!m) return null;
+  const scale = { s: 1n, m: 60n, h: 3600n, d: 86400n }[m[2] as "s" | "m" | "h" | "d"];
+  return BigInt(m[1]!) * scale;
+}
+
+/**
+ * DEC-16: why "Until stopped" is locked for this boot (empty: it may be chosen). The start
+ * admits it again natively (RunHorizon::admit against the run and the clock); this only shows
+ * what the projection already decides: the newest raw-capture qualification, every part passed,
+ * the same window and runway, its provider evidence still fresh at `nowS`.
+ */
+export function untilStoppedBlock(v: { mode: string; window: string; runway: string; qualificationId: string; nowS: bigint },
+  q: UntilStoppedQualificationView | null): string {
+  if (v.mode !== "market") return `${v.mode}: RUN_HORIZON_UNTIL_STOPPED_GATED — its rolling windows are not built yet; only the raw capture (market) is qualifiable`;
+  if (!q) return "No qualification of the raw capture (p0ctl horizon qualify --mode market --checkpoint W --minimum-runway R)";
+  if (v.qualificationId.trim() !== q.id) return `Qualification ${v.qualificationId.trim() || "—"} is not the newest one shown (${q.id}); only that one is checked here`;
+  if (!q.complete) return `Qualification ${q.id} incomplete: ${q.open.join("; ")}`;
+  const w = durationSeconds(v.window);
+  const r = durationSeconds(v.runway);
+  if (w === null || r === null) return "Window and runway: durations (s/m/h/d)";
+  if (w !== q.checkpointSeconds || r !== q.minimumRunwaySeconds) return `Window/runway differ from the qualification (${q.checkpointSeconds} s / ${q.minimumRunwaySeconds} s)`;
+  if (q.evidenceValidUntilUnixS === null || q.evidenceValidUntilUnixS < v.nowS) return `The qualification's provider evidence is no longer fresh (${q.evidenceValidUntilUnixS ?? "unknown"}); qualify again`;
+  return "";
+}
+
+/** DEC-16: the final status of an unbounded run as its windows journal shows it. */
+export function untilStoppedRunStatus(r: UntilStoppedRunView): string {
+  if (!r.sealed) return r.halted ? `HALTING · ${r.halted} · drain and seal in progress` : "RUNNING";
+  if (r.complete) return "SEALED_COMPLETE · ordered end, every window held";
+  return `SEALED_INCOMPLETE${r.halted ? ` · HALT ${r.halted}` : " · not an ordered end"}`;
 }
 
 /** DEC-07: one step of a boot flow (NOT_RUN, QUEUED, RUNNING, INTERRUPTED, COMPLETED, FAILED,

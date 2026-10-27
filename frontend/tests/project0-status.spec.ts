@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/project0/v1/capture_pb";
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
-import { AnalyticsJobsSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
+import {
+  AnalyticsJobsSchema, AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema,
+  type AnalyticsJobs,
+} from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
@@ -13,13 +16,14 @@ const golden = (name: string) => Buffer.from(readFileSync(new URL(`../../protoco
 const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.meta.url), "utf8").trim();
 
 /** The owner and analytics topics with their golden frames (the job runner idle, so a job may start). */
-function ownerTopics(wallets = "wallets_state"): Map<TopicId, { wireName: string; payloadType: string; payload: Uint8Array }> {
+function ownerTopics(wallets = "wallets_state", edit?: (a: AnalyticsJobs) => void): Map<TopicId, { wireName: string; payloadType: string; payload: Uint8Array }> {
   const analytics = fromBinary(AnalyticsJobsSchema, golden("analytics_jobs"));
   analytics.runnerBusy = false;
   // DEC-07: the golden flow's network audit is READY now, within its 90 s TTL window.
   const now = BigInt(Math.floor(Date.now() / 1000));
   analytics.boot!.observedUnixS = now;
   analytics.boot!.expiresUnixS = now + 90n;
+  edit?.(analytics);
   return new Map([
     [TopicId.PROJECT0_LIQUIDATOR_STATE, { wireName: "project0.liquidator.state", payloadType: "darkbot.project0.v1.LiquidatorState", payload: golden("liquidator_state") }],
     [TopicId.PROJECT0_FINANCE_SUMMARY, { wireName: "project0.finance.summary", payloadType: "darkbot.project0.v1.FinanceSummary", payload: golden("finance_summary") }],
@@ -28,8 +32,9 @@ function ownerTopics(wallets = "wallets_state"): Map<TopicId, { wireName: string
   ]);
 }
 
-async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status"), wallets = "wallets_state") {
-  const extra = owner ? ownerTopics(wallets) : new Map();
+async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status"), wallets = "wallets_state",
+  edit?: (a: AnalyticsJobs) => void) {
+  const extra = owner ? ownerTopics(wallets, edit) : new Map();
   let socket: WebSocketRoute;
   let seq = 1n;
   const subscriptions = new Set<TopicId>();
@@ -424,4 +429,74 @@ test("DEC-07: the boot flow on the Capture tab — TTL, tokens and window; each 
   await expect.poll(() => sent.length).toBe(2);
   const o = fromBinary(BootOfflineCommandSchema, sent.at(-1)!.params);
   expect([sent.at(-1)!.action, o.mode, o.ttlSeconds, o.duration]).toEqual(["project0.boot.offline", "econ4h", 90n, "5h"]);
+});
+
+/** DEC-16: the Capture tab over the golden frame, its qualification complete or not, with a recording command route. */
+async function untilStoppedTab(page: Page, complete: boolean): Promise<CommandRequest[]> {
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  await feed(page, true, true, golden("system_status"), "wallets_state", (a) => {
+    const u = a.untilStopped!;
+    u.qualification!.evidenceValidUntilUnixS = now + 86_400n;
+    u.preview!.expiresUnixS = now + 3_600n;
+    if (complete) { u.qualification!.complete = true; u.qualification!.open = []; }
+  });
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    sent.push(req);
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema,
+      { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+  });
+  await tab(page, "Capture");
+  return sent;
+}
+const line = (page: Page, title: string) => page.locator(".p0-line", { hasText: title }).first();
+
+test("DEC-16: Until stopped is visible but locked with its reason; the standing approval is granted for exactly its previewed binding and revoked", async ({ page }) => {
+  const sent = await untilStoppedTab(page, false);
+  const row = (title: string) => line(page, title);
+  // econ4h has no rolling windows yet: locked with its reason, the option visible but disabled.
+  await expect(row("Until stopped")).toContainText("locked · econ4h: RUN_HORIZON_UNTIL_STOPPED_GATED");
+  await expect(page.getByLabel("Boot duration").locator("option", { hasText: "Until stopped" })).toHaveAttribute("disabled", "");
+  await page.getByLabel("Boot mode").selectOption("market");
+  await expect(row("Until stopped")).toContainText("locked · Qualification 0123456789abcdef incomplete: capacity: NOT_RUN · free disk unknown");
+  await expect(page.getByRole("button", { name: "Preview standing approval" })).toBeDisabled();
+  // The newest unbounded run ended in order; nothing left to stop.
+  await expect(row("Until stopped · status")).toContainText("SEALED_COMPLETE");
+  await expect(page.getByRole("button", { name: "Stop run · drain and seal" })).toBeDisabled();
+  // The standing approval in force and the preview, each with its whole binding and digest.
+  await expect(row("Standing autostart approval")).toContainText("in force · digest");
+  await expect(row("Preview · limits")).toContainText("maximum runtime 86400 s per autostarted run");
+  const digest = /[0-9a-f]{16}/.exec((await row("Preview · digest").textContent()) ?? "")![0];
+  await page.getByRole("button", { name: `Grant exactly this binding · ${digest}` }).click();
+  await expect(page.getByText(`Grant the standing approval ${digest}`)).toBeVisible();
+  await page.getByRole("button", { name: `Confirm grant · ${digest}` }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]!.action).toBe("project0.autostart.grant");
+  expect(fromBinary(AutostartGrantCommandSchema, sent[0]!.params).confirmDigest).toBe(digest);
+  await page.getByRole("button", { name: "Revoke standing approval" }).click();
+  await page.getByRole("button", { name: /^Confirm revoke/ }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect([sent[1]!.action, sent[1]!.params.length]).toEqual(["project0.autostart.revoke", 0]);
+});
+
+test("DEC-16: a complete qualification unlocks Until stopped — the offline preflight carries the unbounded horizon, the preview the operator's terms", async ({ page }) => {
+  const sent = await untilStoppedTab(page, true);
+  await page.getByLabel("Boot mode").selectOption("market");
+  await expect(line(page, "Until stopped")).toContainText("available · qualification 0123456789abcdef");
+  await page.getByLabel("Boot duration").selectOption("until-stopped");
+  await page.getByRole("button", { name: "Run offline preflight" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  const o = fromBinary(BootOfflineCommandSchema, sent[0]!.params);
+  expect([sent[0]!.action, o.mode, o.duration]).toEqual(["project0.boot.offline", "market", "until-stopped:3600s:86400s"]);
+  await page.getByLabel("Genesis hash").fill("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d");
+  await page.getByLabel("Autostart · maximum runtime").fill("7d");
+  await page.getByLabel("Autostart · valid for").fill("12h");
+  await page.getByRole("button", { name: "Preview standing approval" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  const p = fromBinary(AutostartPreviewCommandSchema, sent[1]!.params);
+  expect([sent[1]!.action, p.qualification, p.checkpoint, p.minimumRunway, p.maxRuntime, p.validFor, p.captureSource])
+    .toEqual(["project0.autostart.preview", "0123456789abcdef", "3600s", "86400s", "7d", "12h", "logs"]);
 });

@@ -3,9 +3,10 @@
 //! job store holds them; i128/u128 amounts stay exact decimals, unknown stays unset.
 use crate::proto::control::{SignedDecimal, UnsignedDecimal};
 use crate::proto::project0::{
-    analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, BacktestResult, BootFlow, BootStep,
-    CapitalScenario, FundingSet, JobGrid, JobParams, OptimizeResult, OptimizeScore,
-    PostCaptureResult, PostCaptureSpec, RunQualification, ShadowCounterfactual,
+    analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, AutostartGrant, BacktestResult,
+    BootFlow, BootStep, CapitalScenario, FundingSet, JobGrid, JobParams, OptimizeResult,
+    OptimizeScore, PostCaptureResult, PostCaptureSpec, RunQualification, ShadowCounterfactual,
+    UntilStopped, UntilStoppedQualification, UntilStoppedRun,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
@@ -224,6 +225,66 @@ pub fn analytics_jobs(s: &AnalyticsSnapshot) -> AnalyticsJobs {
         store_error: s.error.clone().unwrap_or_default(),
         boot: s.boot.as_ref().map(boot),
         boot_error: s.boot_error.clone().unwrap_or_default(),
+        until_stopped: Some(until_stopped(&s.until_stopped)),
+    }
+}
+
+/// DEC-16: unbounded runs, values copied as the stores hold them.
+fn until_stopped(
+    v: &darkbot_runner::orchestration::until_stopped_view::UntilStoppedView,
+) -> UntilStopped {
+    use darkbot_runner::orchestration::until_stopped_view::GrantView;
+    let grant = |g: &GrantView| AutostartGrant {
+        digest: g.digest.clone(),
+        mode: g.grant.binding.mode.clone(),
+        config_sha256: g.grant.binding.identity.runtime_config_sha256.clone(),
+        binary_sha256: g.grant.binding.binary_sha256.clone(),
+        duration: g.grant.duration.clone(),
+        checkpoint_seconds: g.grant.binding.checkpoint_seconds,
+        minimum_runway_seconds: g.grant.binding.minimum_runway_seconds,
+        qualification_id: g.grant.qualification_id.clone(),
+        provider_evidence_id: g.grant.provider_evidence_id.clone(),
+        genesis_hash: g.grant.genesis_hash.clone(),
+        capture_source: g.grant.capture_source.clone(),
+        rpc_rps: g.grant.budget.rpc_rps,
+        max_requests: g.grant.budget.max_requests,
+        max_total_mib: g.grant.budget.max_total_mib,
+        max_runtime_seconds: g.grant.max_runtime_seconds,
+        expires_unix_s: g.grant.expires_unix_s,
+        recorded_unix_s: g.recorded_unix_s,
+    };
+    UntilStopped {
+        autostart: v.autostart.as_ref().map(grant),
+        preview: v.preview.as_ref().map(grant),
+        qualification: v.qualification.as_ref().map(|q| UntilStoppedQualification {
+            id: q.id.clone(),
+            mode: q.qualification.binding.mode.clone(),
+            checkpoint_seconds: q.qualification.binding.checkpoint_seconds,
+            minimum_runway_seconds: q.qualification.binding.minimum_runway_seconds,
+            complete: q.open.is_empty(),
+            open: q.open.clone(),
+            evidence_id: q.qualification.evidence_id.clone(),
+            evidence_valid_until_unix_s: q.qualification.evidence_valid_until_unix_s,
+            qualified_at_unix_s: q.qualification.qualified_at_unix_s,
+        }),
+        run: v.run.as_ref().map(|r| UntilStoppedRun {
+            run_id: r.run_id.clone(),
+            qualification_id: r.record.qualification_id.clone(),
+            started_unix_s: r.record.started_unix_s,
+            checkpoint_seconds: r.record.binding.checkpoint_seconds,
+            windows: r.windows,
+            last_verdict: r.last.as_ref().map(|w| w.verdict.clone()),
+            last_detail: r
+                .last
+                .as_ref()
+                .map(|w| w.detail.clone())
+                .unwrap_or_default(),
+            last_ended_unix_s: r.last.as_ref().map(|w| w.ended_unix_s),
+            halted: r.halted.clone(),
+            sealed: r.sealed,
+            complete: r.complete,
+        }),
+        errors: v.errors.clone(),
     }
 }
 

@@ -2,12 +2,14 @@ import { fromBinary } from "@bufbuild/protobuf";
 import {
   AnalyticsJobsSchema,
   type AnalyticsJobs,
+  type AutostartGrant,
   type BootFlow,
   type BootStep,
   type JobParams,
   type ShadowCounterfactual,
 } from "@/core/generated/darkbot/project0/v1/analytics_pb";
-import type { BootFlowView, BootStepView, CounterfactualView, JobParamsView, AnalyticsView } from "../model/analytics";
+import type { UntilStopped } from "@/core/generated/darkbot/project0/v1/analytics_pb";
+import type { AutostartGrantView, BootFlowView, BootStepView, CounterfactualView, JobParamsView, AnalyticsView, UntilStoppedView } from "../model/analytics";
 
 /** Throws on invalid bytes, so the registry never acknowledges a broken state. */
 export function decodeAnalyticsJobs(bytes: Uint8Array): AnalyticsJobs {
@@ -99,6 +101,43 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
     })),
     boot: m.boot ? boot(m.boot) : null,
     bootError: m.bootError,
+    untilStopped: untilStopped(m.untilStopped),
+  };
+}
+
+const grant = (g: AutostartGrant | undefined): AutostartGrantView | null =>
+  g
+    ? {
+        digest: g.digest, mode: g.mode, configSha256: g.configSha256, binarySha256: g.binarySha256, duration: g.duration,
+        checkpointSeconds: g.checkpointSeconds, minimumRunwaySeconds: g.minimumRunwaySeconds, qualificationId: g.qualificationId,
+        providerEvidenceId: g.providerEvidenceId, genesisHash: g.genesisHash, captureSource: g.captureSource, rpcRps: g.rpcRps,
+        maxRequests: g.maxRequests, maxTotalMib: g.maxTotalMib, maxRuntimeSeconds: g.maxRuntimeSeconds, expiresUnixS: g.expiresUnixS,
+        recordedUnixS: g.recordedUnixS,
+      }
+    : null;
+
+/** DEC-16: unbounded runs as the stores hold them (an absent part is null). */
+function untilStopped(u: UntilStopped | undefined): UntilStoppedView {
+  const q = u?.qualification;
+  const r = u?.run;
+  return {
+    autostart: grant(u?.autostart),
+    preview: grant(u?.preview),
+    qualification: q
+      ? {
+          id: q.id, mode: q.mode, checkpointSeconds: q.checkpointSeconds, minimumRunwaySeconds: q.minimumRunwaySeconds,
+          complete: q.complete, open: [...q.open], evidenceId: q.evidenceId ?? null,
+          evidenceValidUntilUnixS: q.evidenceValidUntilUnixS ?? null, qualifiedAtUnixS: q.qualifiedAtUnixS,
+        }
+      : null,
+    run: r
+      ? {
+          runId: r.runId, qualificationId: r.qualificationId, startedUnixS: r.startedUnixS, checkpointSeconds: r.checkpointSeconds,
+          windows: r.windows, lastVerdict: r.lastVerdict ?? null, lastDetail: r.lastDetail, lastEndedUnixS: r.lastEndedUnixS ?? null,
+          halted: r.halted ?? null, sealed: r.sealed, complete: r.complete,
+        }
+      : null,
+    errors: [...(u?.errors ?? [])],
   };
 }
 

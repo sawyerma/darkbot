@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub const STORE: &str = "data/until_stopped/autostart";
+/// The previewed grant awaiting the operator's confirmation of its digest (one at a time).
+pub const PREVIEW: &str = "preview.p0j";
 /// The digest of the standing approval an autostarted capture runs under.
 pub const ENV_AUTOSTART: &str = "P0_UNTIL_STOPPED_AUTOSTART";
 /// The reason an autostarted run ends in order at its maximum runtime.
@@ -199,6 +201,48 @@ pub enum Event {
 }
 impl Payload for Event {
     const KIND: u16 = kind::UNTIL_STOPPED_AUTOSTART;
+}
+
+/// A previewed grant: the binding the operator sees before confirming its digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Preview {
+    pub grant: Grant,
+    pub previewed_unix_s: u64,
+}
+impl Payload for Preview {
+    const KIND: u16 = kind::UNTIL_STOPPED_AUTOSTART_PREVIEW;
+}
+
+/// Records `preview` as the one awaiting confirmation (a newer preview replaces it).
+pub fn put_preview(project: &Path, preview: &Preview) -> Result<(), String> {
+    let io = |e: std::io::Error| format!("AUTOSTART_STORE: {e}");
+    let dir = project.join(STORE);
+    std::fs::create_dir_all(&dir).map_err(io)?;
+    let temp = dir.join(format!(".{PREVIEW}.{}.tmp", std::process::id()));
+    let stored = journal::write_typed_value(&temp, journal::source::UNTIL_STOPPED, preview)
+        .and_then(|()| std::fs::rename(&temp, dir.join(PREVIEW)))
+        .and_then(|()| std::fs::File::open(&dir).and_then(|d| d.sync_all()))
+        .map_err(io);
+    let _ = std::fs::remove_file(&temp);
+    stored
+}
+
+/// The preview awaiting confirmation, if any.
+pub fn preview(project: &Path) -> Result<Option<Preview>, String> {
+    let path = project.join(STORE).join(PREVIEW);
+    match journal::read_typed_value(&path) {
+        Ok(p) => Ok(Some(p)),
+        Err(_) if !path.exists() => Ok(None),
+        Err(e) => Err(format!("AUTOSTART_PREVIEW_INVALID: {e}")),
+    }
+}
+
+/// Removes the confirmed (or superseded) preview.
+pub fn clear_preview(project: &Path) -> Result<(), String> {
+    match std::fs::remove_file(project.join(STORE).join(PREVIEW)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("AUTOSTART_STORE: {e}")),
+        _ => Ok(()),
+    }
 }
 
 fn path_of(project: &Path, seq: u64) -> PathBuf {

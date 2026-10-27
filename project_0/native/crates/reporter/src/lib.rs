@@ -1404,6 +1404,107 @@ mod contract_tests {
                 },
             }),
             boot_error: None,
+            until_stopped: golden_until_stopped(),
+        }
+    }
+
+    /// DEC-16: a standing approval in force, a newer preview awaiting its digest, a raw-capture
+    /// qualification with an open part and an unbounded run that ended in order.
+    fn golden_until_stopped() -> darkbot_runner::orchestration::until_stopped_view::UntilStoppedView
+    {
+        use darkbot_runner::orchestration::autostart::{Grant, WindowBudget};
+        use darkbot_runner::orchestration::until_stopped as us;
+        use darkbot_runner::orchestration::until_stopped_view::{
+            GrantView, QualificationView, RunView, UntilStoppedView,
+        };
+        let binding = us::Binding {
+            mode: "market".into(),
+            identity: darkbot_runner::orchestration::boot_audit::AuditedIdentity {
+                source_head: Some("head".into()),
+                source_dirty_sha256: None,
+                runtime_config_sha256: "c".repeat(64),
+                journal_version: 2,
+                discriminator_table_sha256: "d".repeat(64),
+                live_enabled: false,
+                submission_enabled: false,
+            },
+            binary_sha256: "b".repeat(64),
+            checkpoint_seconds: 3_600,
+            minimum_runway_seconds: 86_400,
+        };
+        let grant = Grant {
+            binding: binding.clone(),
+            operational: vec![],
+            duration: "until-stopped:1h:24h".into(),
+            qualification_id: "0123456789abcdef".into(),
+            provider_evidence_id: "89abcdef01234567".into(),
+            genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+            capture_source: "logs".into(),
+            budget: WindowBudget {
+                rpc_rps: 5,
+                max_requests: 10_000,
+                max_total_mib: 512,
+            },
+            max_runtime_seconds: 604_800,
+            expires_unix_s: 1_760_600_000,
+        };
+        let mut previewed = grant.clone();
+        previewed.max_runtime_seconds = 86_400;
+        let pass = us::Part {
+            state: us::PartState::Pass,
+            reason: "ok".into(),
+        };
+        let qualification = us::Qualification {
+            schema: us::SCHEMA,
+            binding: binding.clone(),
+            runtime: pass.clone(),
+            sk07: pass.clone(),
+            capacity: us::Part {
+                state: us::PartState::NotRun,
+                reason: "free disk unknown".into(),
+            },
+            capacity_need_bytes: None,
+            provider_budget: pass.clone(),
+            provider_evidence: pass,
+            evidence_id: Some("89abcdef01234567".into()),
+            evidence_valid_until_unix_s: Some(1_760_600_000),
+            qualified_at_unix_s: 1_760_000_000,
+        };
+        let window = darkbot_runner::orchestration::until_stopped_view::LastWindow {
+            verdict: us::CONTINUE.into(),
+            detail: "every gate held".into(),
+            ended_unix_s: 1_760_007_200,
+        };
+        UntilStoppedView {
+            autostart: Some(GrantView {
+                digest: grant.digest().unwrap(),
+                grant,
+                recorded_unix_s: 1_760_000_100,
+            }),
+            preview: Some(GrantView {
+                digest: previewed.digest().unwrap(),
+                grant: previewed,
+                recorded_unix_s: 1_760_000_200,
+            }),
+            qualification: Some(QualificationView {
+                id: "0123456789abcdef".into(),
+                qualification,
+                open: vec!["capacity: NOT_RUN · free disk unknown".into()],
+            }),
+            run: Some(RunView {
+                run_id: "market-1".into(),
+                record: us::RunRecord {
+                    binding,
+                    qualification_id: "0123456789abcdef".into(),
+                    started_unix_s: 1_760_000_000,
+                },
+                windows: 2,
+                last: Some(window),
+                halted: None,
+                sealed: true,
+                complete: true,
+            }),
+            errors: vec![],
         }
     }
 

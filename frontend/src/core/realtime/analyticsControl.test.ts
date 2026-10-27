@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
-import { BacktestJobCommandSchema, BootNetworkCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import {
+  AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootStartCommandSchema,
+  OptimizeJobCommandSchema, PostCaptureJobCommandSchema,
+} from "../generated/darkbot/project0/v1/analytics_pb";
 import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
-import { analyticsCommand, backtestCommand, bootNetworkCommand, optimizeCommand, recheck, sourceCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
+import {
+  analyticsCommand, autostartGrantCommand, autostartPreviewCommand, backtestCommand, bootNetworkCommand, bootStartCommand, optimizeCommand, recheck,
+  sourceCommand, untilStoppedDuration, useAnalyticsControl, verifyCommand, type PointInput,
+} from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
 const accepted = (phase: CommandPhase, detail = "") => new Response(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, phase, detail })));
@@ -85,5 +91,38 @@ describe("Analytics job commands", () => {
     await analyticsCommand("project0.analytics.job.cancel", { resourceId: "job-1" });
     expect(fetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toHaveLength(1);
     expect(useAnalyticsControl.getState()).toMatchObject({ busy: false, receipt: { phase: "COMPLETED", action: "project0.analytics.job.cancel" } });
+  });
+});
+
+describe("DEC-16 unbounded boot and the standing autostart approval", () => {
+  const GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+  it("an unbounded start names its qualification; a fixed one sends none", () => {
+    const flow = { flowId: "flow-1", token: "fedcba9876543210", captureSource: "logs" as const, chainVerify: "off" as const };
+    expect(untilStoppedDuration("1h", "24h")).toBe("until-stopped:1h:24h");
+    expect(untilStoppedDuration("1h", "")).toBeNull();
+    expect(untilStoppedDuration("1x", "24h")).toBeNull();
+    const missing = bootStartCommand({ ...flow, duration: "until-stopped:1h:24h" });
+    expect("problem" in missing && missing.problem).toMatch(/qualification id/);
+    const ok = bootStartCommand({ ...flow, duration: "until-stopped:1h:24h", qualification: "0123456789abcdef" });
+    if (!("params" in ok)) throw new Error(ok.problem);
+    expect(fromBinary(BootStartCommandSchema, ok.params).qualification).toBe("0123456789abcdef");
+    const fixed = bootStartCommand({ ...flow, duration: "1h", qualification: "0123456789abcdef" });
+    if (!("params" in fixed)) throw new Error(fixed.problem);
+    expect(fromBinary(BootStartCommandSchema, fixed.params).qualification).toBeUndefined();
+  });
+  it("a preview carries the typed terms; a grant only the digest the preview showed", () => {
+    const terms = { qualification: "0123456789abcdef", window: "1h", runway: "24h", genesisHash: GENESIS, maxRuntime: "7d", validFor: "30d", captureSource: "logs" as const };
+    const ok = autostartPreviewCommand(terms);
+    if (!("params" in ok)) throw new Error(ok.problem);
+    const c = fromBinary(AutostartPreviewCommandSchema, ok.params);
+    expect([c.qualification, c.checkpoint, c.minimumRunway, c.genesisHash, c.maxRuntime, c.validFor, c.captureSource])
+      .toEqual(["0123456789abcdef", "1h", "24h", GENESIS, "7d", "30d", "logs"]);
+    for (const broken of [{ qualification: "x" }, { window: "" }, { genesisHash: "0OIl" }, { maxRuntime: "" }, { validFor: "forever" }]) {
+      expect("problem" in autostartPreviewCommand({ ...terms, ...broken }), JSON.stringify(broken)).toBe(true);
+    }
+    const grant = autostartGrantCommand("89abcdef01234567");
+    if (!("params" in grant)) throw new Error(grant.problem);
+    expect(fromBinary(AutostartGrantCommandSchema, grant.params).confirmDigest).toBe("89abcdef01234567");
+    expect("problem" in autostartGrantCommand("")).toBe(true);
   });
 });

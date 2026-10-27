@@ -93,6 +93,9 @@
     - [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob)
     - [AnalyticsJobs](#darkbot-project0-v1-AnalyticsJobs)
     - [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun)
+    - [AutostartGrant](#darkbot-project0-v1-AutostartGrant)
+    - [AutostartGrantCommand](#darkbot-project0-v1-AutostartGrantCommand)
+    - [AutostartPreviewCommand](#darkbot-project0-v1-AutostartPreviewCommand)
     - [BacktestJobCommand](#darkbot-project0-v1-BacktestJobCommand)
     - [BacktestResult](#darkbot-project0-v1-BacktestResult)
     - [BootFlow](#darkbot-project0-v1-BootFlow)
@@ -112,6 +115,9 @@
     - [PostCaptureSpec](#darkbot-project0-v1-PostCaptureSpec)
     - [RunQualification](#darkbot-project0-v1-RunQualification)
     - [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual)
+    - [UntilStopped](#darkbot-project0-v1-UntilStopped)
+    - [UntilStoppedQualification](#darkbot-project0-v1-UntilStoppedQualification)
+    - [UntilStoppedRun](#darkbot-project0-v1-UntilStoppedRun)
 
 - [darkbot/project0/v1/capture.proto](#darkbot_project0_v1_capture-proto)
     - [CaptureState](#darkbot-project0-v1-CaptureState)
@@ -1606,6 +1612,7 @@ i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 | runner_error | [string](#string) |  | Why the runner state is unknown (runner_busy is then not a fact); empty when known. |
 | boot | [BootFlow](#darkbot-project0-v1-BootFlow) |  | DEC-07: the boot controller&#39;s flow (data/boot, `p0ctl boot …`) — the one with an active step, else the newest — shown on the Capture tab: this always-on feed is the controller&#39;s projection while no capture runs. Unset without a flow. |
 | boot_error | [string](#string) |  | DEC-07: why the boot store was not (completely) readable; empty when read. |
+| until_stopped | [UntilStopped](#darkbot-project0-v1-UntilStopped) |  | DEC-16: unbounded runs beside the boot flow — the standing autostart approval, the newest raw-capture qualification and the newest unbounded raw capture. |
 
 
 
@@ -1627,6 +1634,76 @@ One run directory under the project&#39;s run roots.
 | qualification | [RunQualification](#darkbot-project0-v1-RunQualification) |  | The newest post-capture qualification (A12/F-03); unset when none is recorded. |
 | modified_unix_ms | [uint64](#uint64) | optional | Directory modification time; unset when unreadable. |
 | running | [bool](#bool) |  | The runtime owner runs it now. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-AutostartGrant"></a>
+
+### AutostartGrant
+DEC-16: a standing autostart approval (&#34;Dauerfreigabe&#34;) and the binding it was given for.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| digest | [string](#string) |  | The 16-hex digest the operator confirms (over the whole binding). |
+| mode | [string](#string) |  | The run: its mode, configuration hash, executables and horizon. |
+| config_sha256 | [string](#string) |  | The run&#39;s configuration hash (runtime_config_sha256). |
+| binary_sha256 | [string](#string) |  | The executables&#39; identity (p0ctl and the capture). |
+| duration | [string](#string) |  | until-stopped:&lt;window&gt;:&lt;runway&gt; as audited. |
+| checkpoint_seconds | [uint64](#uint64) |  | The window (checkpoint) in seconds. |
+| minimum_runway_seconds | [uint64](#uint64) |  | The minimum runway in seconds. |
+| qualification_id | [string](#string) |  | The qualification the run is admitted with. |
+| provider_evidence_id | [string](#string) |  | The provider evidence the network audit of every autostart reads with. |
+| genesis_hash | [string](#string) |  | The operator&#39;s genesis pin for that network audit. |
+| capture_source | [string](#string) |  | The capture source (logs | transactions). |
+| rpc_rps | [uint64](#uint64) |  | The provider budget of one window. |
+| max_requests | [uint64](#uint64) |  | Requests per window. |
+| max_total_mib | [uint64](#uint64) |  | MiB per window. |
+| max_runtime_seconds | [uint64](#uint64) |  | The longest an autostarted run runs before it ends in order. |
+| expires_unix_s | [uint64](#uint64) |  | The last second the approval permits an autostart. |
+| recorded_unix_s | [uint64](#uint64) |  | When it was granted, respectively previewed. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-AutostartGrantCommand"></a>
+
+### AutostartGrantCommand
+DEC-16: parameters of project0.autostart.grant — the operator confirms exactly the previewed
+binding by its digest.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| confirm_digest | [string](#string) |  | The digest the preview showed. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-AutostartPreviewCommand"></a>
+
+### AutostartPreviewCommand
+DEC-16: parameters of project0.autostart.preview — the terms of a standing autostart
+approval of an unbounded raw capture; the controller binds them to the run as it would start
+now and records the preview with its digest (project0.analytics.jobs, until_stopped.preview).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| qualification | [string](#string) |  | The run&#39;s qualification id (16 hex digits). |
+| checkpoint | [string](#string) |  | The window (a duration s/m/h/d) of the qualified horizon. |
+| minimum_runway | [string](#string) |  | The minimum runway (a duration). |
+| genesis_hash | [string](#string) |  | The operator&#39;s genesis pin for the network audit of every autostart. |
+| max_runtime | [string](#string) |  | The longest an autostarted run runs (a duration). |
+| valid_for | [string](#string) |  | How long the approval permits autostarts from now (a duration). |
+| capture_source | [string](#string) |  | logs | transactions (the configured one). |
 
 
 
@@ -1761,6 +1838,7 @@ Parameters of project0.boot.start: the operator&#39;s approval of exactly this n
 | duration | [string](#string) |  | Must equal the flow&#39;s duration (`p0ctl boot start` refuses another one). |
 | capture_source | [string](#string) |  | logs | transactions |
 | chain_verify | [string](#string) |  | off | strict |
+| qualification | [string](#string) | optional | DEC-16: an unbounded flow&#39;s qualification id (16 hex digits); required for until-stopped. |
 
 
 
@@ -2012,6 +2090,75 @@ Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVA
 | scenarios | [CapitalScenario](#darkbot-project0-v1-CapitalScenario) | repeated | One entry per capital scenario. |
 | landing | [string](#string) |  | Landing status of every counterfactual execution (UNPROVEN). |
 | safety | [string](#string) |  | Safety status of every counterfactual execution (NOT_EVALUATED). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-UntilStopped"></a>
+
+### UntilStopped
+DEC-16: unbounded runs (RunHorizon::UntilStopped) as the stores hold them. Expiry and
+evidence freshness are compared with the viewer&#39;s clock; every native gate decides again at
+the start, nothing here admits a run.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| autostart | [AutostartGrant](#darkbot-project0-v1-AutostartGrant) |  | The standing autostart approval in force (p0ctl autostart grant); unset without one. |
+| preview | [AutostartGrant](#darkbot-project0-v1-AutostartGrant) |  | The previewed approval awaiting the operator&#39;s confirmation of its digest; unset without one. |
+| qualification | [UntilStoppedQualification](#darkbot-project0-v1-UntilStoppedQualification) |  | The newest qualification of the raw capture (p0ctl horizon qualify --mode market). |
+| run | [UntilStoppedRun](#darkbot-project0-v1-UntilStoppedRun) |  | The newest unbounded raw capture&#39;s windows; unset without one. |
+| errors | [string](#string) | repeated | Why a store was not readable (its part is then unset); empty when read. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-UntilStoppedQualification"></a>
+
+### UntilStoppedQualification
+DEC-16: a qualification of an unbounded run and the parts that did not pass.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | The record id (16 hex digits). |
+| mode | [string](#string) |  | econ4h | market | shadow |
+| checkpoint_seconds | [uint64](#uint64) |  | The window (checkpoint) in seconds. |
+| minimum_runway_seconds | [uint64](#uint64) |  | The minimum runway in seconds. |
+| complete | [bool](#bool) |  | Every part passed (the start still admits it against the run and the clock). |
+| open | [string](#string) | repeated | `part: STATE · reason` of every part that did not pass. |
+| evidence_id | [string](#string) | optional | The provider evidence record it qualified with. |
+| evidence_valid_until_unix_s | [uint64](#uint64) | optional | The last second its provider evidence stays fresh. |
+| qualified_at_unix_s | [uint64](#uint64) |  | When it was recorded. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-UntilStoppedRun"></a>
+
+### UntilStoppedRun
+DEC-16: an unbounded raw capture&#39;s windows journal as far as it is written.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | The run directory&#39;s name (data/market/&lt;run_id&gt;). |
+| qualification_id | [string](#string) |  | The qualification it was admitted with. |
+| started_unix_s | [uint64](#uint64) |  | When its first window opened. |
+| checkpoint_seconds | [uint64](#uint64) |  | The window (checkpoint) in seconds. |
+| windows | [uint64](#uint64) |  | Windows closed so far. |
+| last_verdict | [string](#string) | optional | The last closed window&#39;s verdict (CONTINUE, UNTIL_STOPPED_CRASH_RECOVERED or its HALT code). |
+| last_detail | [string](#string) |  | What the last window measured against its gates. |
+| last_ended_unix_s | [uint64](#uint64) | optional | When the last window closed. |
+| halted | [string](#string) | optional | The verdict that halted the run; unset while every window held. |
+| sealed | [bool](#bool) |  | The run ended: its windows journal is sealed. |
+| complete | [bool](#bool) |  | Sealed complete: an ordered end (operator stop or maximum runtime) of a run that never halted. |
 
 
 

@@ -813,6 +813,9 @@ pub struct AnalyticsSnapshot {
     pub boot: Option<crate::orchestration::boot_control::BootView>,
     /// DEC-07: why the boot store was not (completely) readable; `None` when read.
     pub boot_error: Option<String>,
+    /// DEC-16: the standing autostart approval, the newest raw-capture qualification and the
+    /// newest unbounded raw capture.
+    pub until_stopped: crate::orchestration::until_stopped_view::UntilStoppedView,
 }
 
 fn layout_of(run: &Path) -> &'static str {
@@ -875,6 +878,7 @@ pub fn projection(
         error,
         boot,
         boot_error,
+        until_stopped: crate::orchestration::until_stopped_view::projection(project),
     }
 }
 

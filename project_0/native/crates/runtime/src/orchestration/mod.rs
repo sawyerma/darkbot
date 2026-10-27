@@ -17,6 +17,7 @@ mod startup;
 #[cfg(feature = "crate_health")]
 mod state_owner;
 pub mod until_stopped;
+pub mod until_stopped_view;
 pub mod winner_tracker;
 #[cfg(feature = "crate_health")]
 pub use startup::{failure_report, run, run_id_from_env, run_with, shadow_failure_code};

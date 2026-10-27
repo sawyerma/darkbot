@@ -29,6 +29,111 @@ message AnalyticsJobs {
   BootFlow boot = 7;
   // DEC-07: why the boot store was not (completely) readable; empty when read.
   string boot_error = 8;
+  // DEC-16: unbounded runs beside the boot flow — the standing autostart approval, the newest
+  // raw-capture qualification and the newest unbounded raw capture.
+  UntilStopped until_stopped = 9;
+}
+
+// DEC-16: unbounded runs (RunHorizon::UntilStopped) as the stores hold them. Expiry and
+// evidence freshness are compared with the viewer's clock; every native gate decides again at
+// the start, nothing here admits a run.
+message UntilStopped {
+  // The standing autostart approval in force (p0ctl autostart grant); unset without one.
+  AutostartGrant autostart = 1;
+  // The previewed approval awaiting the operator's confirmation of its digest; unset without one.
+  AutostartGrant preview = 2;
+  // The newest qualification of the raw capture (p0ctl horizon qualify --mode market).
+  UntilStoppedQualification qualification = 3;
+  // The newest unbounded raw capture's windows; unset without one.
+  UntilStoppedRun run = 4;
+  // Why a store was not readable (its part is then unset); empty when read.
+  repeated string errors = 5;
+}
+
+// DEC-16: a standing autostart approval ("Dauerfreigabe") and the binding it was given for.
+message AutostartGrant {
+  // The 16-hex digest the operator confirms (over the whole binding).
+  string digest = 1;
+  // The run: its mode, configuration hash, executables and horizon.
+  string mode = 2;
+  // The run's configuration hash (runtime_config_sha256).
+  string config_sha256 = 3;
+  // The executables' identity (p0ctl and the capture).
+  string binary_sha256 = 4;
+  // until-stopped:<window>:<runway> as audited.
+  string duration = 5;
+  // The window (checkpoint) in seconds.
+  uint64 checkpoint_seconds = 6;
+  // The minimum runway in seconds.
+  uint64 minimum_runway_seconds = 7;
+  // The qualification the run is admitted with.
+  string qualification_id = 8;
+  // The provider evidence the network audit of every autostart reads with.
+  string provider_evidence_id = 9;
+  // The operator's genesis pin for that network audit.
+  string genesis_hash = 10;
+  // The capture source (logs | transactions).
+  string capture_source = 11;
+  // The provider budget of one window.
+  uint64 rpc_rps = 12;
+  // Requests per window.
+  uint64 max_requests = 13;
+  // MiB per window.
+  uint64 max_total_mib = 14;
+  // The longest an autostarted run runs before it ends in order.
+  uint64 max_runtime_seconds = 15;
+  // The last second the approval permits an autostart.
+  uint64 expires_unix_s = 16;
+  // When it was granted, respectively previewed.
+  uint64 recorded_unix_s = 17;
+}
+
+// DEC-16: a qualification of an unbounded run and the parts that did not pass.
+message UntilStoppedQualification {
+  // The record id (16 hex digits).
+  string id = 1;
+  // econ4h | market | shadow
+  string mode = 2;
+  // The window (checkpoint) in seconds.
+  uint64 checkpoint_seconds = 3;
+  // The minimum runway in seconds.
+  uint64 minimum_runway_seconds = 4;
+  // Every part passed (the start still admits it against the run and the clock).
+  bool complete = 5;
+  // `part: STATE · reason` of every part that did not pass.
+  repeated string open = 6;
+  // The provider evidence record it qualified with.
+  optional string evidence_id = 7;
+  // The last second its provider evidence stays fresh.
+  optional uint64 evidence_valid_until_unix_s = 8;
+  // When it was recorded.
+  uint64 qualified_at_unix_s = 9;
+}
+
+// DEC-16: an unbounded raw capture's windows journal as far as it is written.
+message UntilStoppedRun {
+  // The run directory's name (data/market/<run_id>).
+  string run_id = 1;
+  // The qualification it was admitted with.
+  string qualification_id = 2;
+  // When its first window opened.
+  uint64 started_unix_s = 3;
+  // The window (checkpoint) in seconds.
+  uint64 checkpoint_seconds = 4;
+  // Windows closed so far.
+  uint64 windows = 5;
+  // The last closed window's verdict (CONTINUE, UNTIL_STOPPED_CRASH_RECOVERED or its HALT code).
+  optional string last_verdict = 6;
+  // What the last window measured against its gates.
+  string last_detail = 7;
+  // When the last window closed.
+  optional uint64 last_ended_unix_s = 8;
+  // The verdict that halted the run; unset while every window held.
+  optional string halted = 9;
+  // The run ended: its windows journal is sealed.
+  bool sealed = 10;
+  // Sealed complete: an ordered end (operator stop or maximum runtime) of a run that never halted.
+  bool complete = 11;
 }
 
 // DEC-07 (N7): one boot flow — offline preflight, the operator's network approval, the network
@@ -379,6 +484,35 @@ message BootStartCommand {
   string capture_source = 4;
   // off | strict
   string chain_verify = 5;
+  // DEC-16: an unbounded flow's qualification id (16 hex digits); required for until-stopped.
+  optional string qualification = 6;
+}
+
+// DEC-16: parameters of project0.autostart.preview — the terms of a standing autostart
+// approval of an unbounded raw capture; the controller binds them to the run as it would start
+// now and records the preview with its digest (project0.analytics.jobs, until_stopped.preview).
+message AutostartPreviewCommand {
+  // The run's qualification id (16 hex digits).
+  string qualification = 1;
+  // The window (a duration s/m/h/d) of the qualified horizon.
+  string checkpoint = 2;
+  // The minimum runway (a duration).
+  string minimum_runway = 3;
+  // The operator's genesis pin for the network audit of every autostart.
+  string genesis_hash = 4;
+  // The longest an autostarted run runs (a duration).
+  string max_runtime = 5;
+  // How long the approval permits autostarts from now (a duration).
+  string valid_for = 6;
+  // logs | transactions (the configured one).
+  string capture_source = 7;
+}
+
+// DEC-16: parameters of project0.autostart.grant — the operator confirms exactly the previewed
+// binding by its digest.
+message AutostartGrantCommand {
+  // The digest the preview showed.
+  string confirm_digest = 1;
 }
 
 // Parameters (CommandRequest.params) of project0.capture.verify.start: the options of

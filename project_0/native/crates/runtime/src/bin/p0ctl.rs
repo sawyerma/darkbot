@@ -821,20 +821,21 @@ fn horizon_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const AUTOSTART_USAGE: &str = "usage: p0ctl autostart preview --qualification ID --checkpoint D --minimum-runway D --genesis-hash HASH --max-runtime D (--valid-for D | --expires-unix-s N) [--capture-source logs|transactions]
-  | p0ctl autostart grant  (the preview's options with --expires-unix-s N) --confirm DIGEST
+  | p0ctl autostart grant --confirm DIGEST   (exactly the previewed binding)
   | p0ctl autostart revoke | p0ctl autostart status | p0ctl autostart start
 DEC-16: the standing approval for the autostart of an unbounded raw capture (Dauerfreigabe),
 separate from its qualification and from LIVE (disabled): bound to the run (mode, configuration
 hash, executables, window, runway), its qualification, provider evidence, genesis pin, capture
-source, window budget, the maximum runtime of each autostarted run and its expiry; the grant
-records exactly the previewed binding (its digest). `start` (the app's autostart) runs the whole
+source, window budget, the maximum runtime of each autostarted run and its expiry; the preview
+shows that binding and its digest, and the grant records exactly it while the run still binds
+to it. `start` (the app's autostart) runs the whole
 boot flow under it - offline audit, network audit, start - and the capture admits itself under
 it. A revocation ends it at once.";
 
 /// DEC-16: `p0ctl autostart` — the standing approval of an unbounded raw capture's autostart.
 fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::orchestration::autostart::{
-        self as auto, Event, Grant, Terms, WindowBudget,
+        self as auto, Event, Grant, Preview, Terms, WindowBudget,
     };
     use darkbot_runner::orchestration::boot_control as bc;
     use darkbot_solana::runtime_config::duration_seconds;
@@ -873,11 +874,13 @@ fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             .map_err(|gaps| format!("AUTOSTART_NOT_PERMITTED: {gaps}"))
     };
     match args.first().map(String::as_str) {
-        Some(step @ ("preview" | "grant")) => {
+        Some("preview") => {
             let qid = need("--qualification")?;
             let q = until_stopped::get(project, &qid)?;
-            let (checkpoint, runway) = (need("--checkpoint")?, need("--minimum-runway")?);
-            let duration = darkbot_solana::runtime_config::until_stopped(&checkpoint, &runway)?;
+            let duration = darkbot_solana::runtime_config::until_stopped(
+                &need("--checkpoint")?,
+                &need("--minimum-runway")?,
+            )?;
             let (binding, budget) = run_of(&q.binding.mode, &duration)?;
             let expires_unix_s = match (
                 given(args, "--expires-unix-s")?,
@@ -886,14 +889,13 @@ fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 (Some(at), None) => at
                     .parse::<u64>()
                     .map_err(|_| "--expires-unix-s: unix seconds")?,
-                (None, Some(d)) if step == "preview" => now.saturating_add(duration_seconds(&d)?),
+                (None, Some(d)) => now.saturating_add(duration_seconds(&d)?),
                 _ => {
                     return Err(format!(
-                        "AUTOSTART_EXPIRY: preview takes --valid-for D or --expires-unix-s N, grant the previewed --expires-unix-s N\n{AUTOSTART_USAGE}"
+                        "AUTOSTART_EXPIRY: --valid-for D or --expires-unix-s N\n{AUTOSTART_USAGE}"
                     ))
                 }
             };
-            let (genesis, max_runtime) = (need("--genesis-hash")?, need("--max-runtime")?);
             let grant = Grant::for_run(
                 &q,
                 &qid,
@@ -902,25 +904,60 @@ fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 &duration,
                 budget,
                 Terms {
-                    genesis_hash: genesis.clone(),
+                    genesis_hash: need("--genesis-hash")?,
                     capture_source: raw_capture_source(given(args, "--capture-source")?)?,
-                    max_runtime_seconds: duration_seconds(&max_runtime)?,
+                    max_runtime_seconds: duration_seconds(&need("--max-runtime")?)?,
                     expires_unix_s,
                 },
                 now,
             )?;
             let digest = grant.digest()?;
             print!("{}", grant.terminal()?);
-            if step == "preview" {
-                println!(
-                    "AUTOSTART_PREVIEW {digest}: to grant exactly this binding: p0ctl autostart grant --qualification {qid} --checkpoint {checkpoint} --minimum-runway {runway} --genesis-hash {genesis} --max-runtime {max_runtime} --expires-unix-s {expires_unix_s} --capture-source {} --confirm {digest}",
-                    grant.capture_source
-                );
-                return Ok(true);
-            }
-            if need("--confirm")? != digest {
+            auto::put_preview(
+                project,
+                &Preview {
+                    grant,
+                    previewed_unix_s: now,
+                },
+            )?;
+            println!("AUTOSTART_PREVIEW {digest}: to grant exactly this binding: p0ctl autostart grant --confirm {digest}");
+            Ok(true)
+        }
+        Some("grant") => {
+            let confirm = need("--confirm")?;
+            let p = auto::preview(project)?.ok_or(
+                "AUTOSTART_NO_PREVIEW: preview the binding first (p0ctl autostart preview)",
+            )?;
+            let shown = p.grant.digest()?;
+            if confirm != shown {
                 return Err(format!(
-                    "AUTOSTART_CONFIRM_MISMATCH: the binding now is {digest}, not the confirmed one (preview again)"
+                    "AUTOSTART_CONFIRM_MISMATCH: the preview shows {shown}, not the confirmed one"
+                ));
+            }
+            // The previewed terms bound again to the run as it would start now: the grant is
+            // recorded only while that is exactly the binding confirmed.
+            let g = p.grant;
+            let q = until_stopped::get(project, &g.qualification_id)?;
+            let (binding, budget) = run_of(&g.binding.mode, &g.duration)?;
+            let grant = Grant::for_run(
+                &q,
+                &g.qualification_id,
+                &binding,
+                &g.operational,
+                &g.duration,
+                budget,
+                Terms {
+                    genesis_hash: g.genesis_hash.clone(),
+                    capture_source: raw_capture_source(Some(g.capture_source.clone()))?,
+                    max_runtime_seconds: g.max_runtime_seconds,
+                    expires_unix_s: g.expires_unix_s,
+                },
+                now,
+            )?;
+            let digest = grant.digest()?;
+            if digest != shown {
+                return Err(format!(
+                    "AUTOSTART_CONFIRM_MISMATCH: the run's binding changed since its preview (now {digest}); preview again"
                 ));
             }
             let replaced = auto::current(project)?
@@ -933,6 +970,7 @@ fn autostart_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     granted_unix_s: now,
                 },
             )?;
+            auto::clear_preview(project)?;
             println!(
                 "AUTOSTART_GRANTED {digest} (event {seq}){}",
                 replaced.map_or(String::new(), |r| format!("; replaces {r}"))

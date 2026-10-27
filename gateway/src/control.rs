@@ -68,7 +68,13 @@ const BOOT_NETWORK: &str = "project0.boot.network";
 const BOOT_START: &str = "project0.boot.start";
 const BOOT_CANCEL: &str = "project0.boot.cancel";
 const BOOT_ACTIONS: [&str; 4] = [BOOT_OFFLINE, BOOT_NETWORK, BOOT_START, BOOT_CANCEL];
-const JOB_ACTIONS: [&str; 10] = [
+/// DEC-16: the standing autostart approval of an unbounded raw capture (`p0ctl autostart …`):
+/// the preview of its binding, the grant confirming exactly that preview's digest, the revocation.
+const AUTOSTART_PREVIEW: &str = "project0.autostart.preview";
+const AUTOSTART_GRANT: &str = "project0.autostart.grant";
+const AUTOSTART_REVOKE: &str = "project0.autostart.revoke";
+const AUTOSTART_ACTIONS: [&str; 3] = [AUTOSTART_PREVIEW, AUTOSTART_GRANT, AUTOSTART_REVOKE];
+const JOB_ACTIONS: [&str; 13] = [
     BACKTEST_START,
     OPTIMIZE_START,
     JOB_CANCEL,
@@ -79,6 +85,9 @@ const JOB_ACTIONS: [&str; 10] = [
     BOOT_NETWORK,
     BOOT_START,
     BOOT_CANCEL,
+    AUTOSTART_PREVIEW,
+    AUTOSTART_GRANT,
+    AUTOSTART_REVOKE,
 ];
 /// Online strict verification reads the chain with the operator's provider evidence: a terminal
 /// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
@@ -226,6 +235,16 @@ fn duration_ok(s: &str) -> bool {
         && digits.bytes().all(|b| b.is_ascii_digit())
         && ["s", "m", "h", "d"].contains(&unit)
 }
+/// DEC-16: a boot flow's duration — a fixed one, or the unbounded horizon
+/// `until-stopped:<window>:<runway>` of two durations (`p0ctl` checks window <= runway).
+fn horizon_ok(s: &str) -> bool {
+    match s.strip_prefix("until-stopped:") {
+        Some(rest) => rest
+            .split_once(':')
+            .is_some_and(|(w, r)| duration_ok(w) && duration_ok(r)),
+        None => duration_ok(s),
+    }
+}
 fn capture_source_ok(s: &str) -> bool {
     s == "logs" || s == "transactions"
 }
@@ -234,8 +253,9 @@ fn capture_source_ok(s: &str) -> bool {
 /// job id is the request id; a cancel names its job as the resource.
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
-        BacktestJobCommand, BootNetworkCommand, BootOfflineCommand, BootStartCommand,
-        CapabilityControlCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
+        AutostartGrantCommand, AutostartPreviewCommand, BacktestJobCommand, BootNetworkCommand,
+        BootOfflineCommand, BootStartCommand, CapabilityControlCommand, OptimizeJobCommand,
+        PostCaptureJobCommand, SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
@@ -368,7 +388,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         BOOT_OFFLINE if req.resource_id.is_empty() => {
             let c = BootOfflineCommand::decode(req.params.as_ref()).ok()?;
             if !["econ4h", "shadow", "market"].contains(&c.mode.as_str())
-                || !duration_ok(&c.duration)
+                || !horizon_ok(&c.duration)
             {
                 return None;
             }
@@ -430,8 +450,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             let c = BootStartCommand::decode(req.params.as_ref()).ok()?;
             if !valid_job_id(&c.flow_id)
                 || !token_ok(&c.approved_token)
-                || !duration_ok(&c.duration)
+                || !horizon_ok(&c.duration)
                 || !capture_source_ok(&c.capture_source)
+                || c.qualification.as_deref().is_some_and(|q| !token_ok(q))
                 // Online strict verification needs the operator's provider evidence: a terminal
                 // action (`p0ctl boot start --chain-verify strict --provider-evidence`), as for
                 // project0.capture.verify.start.
@@ -456,8 +477,66 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                     &c.chain_verify,
                 ]
                 .map(String::from)
+                .into_iter()
+                // DEC-16: an unbounded flow starts with its qualification (`p0ctl` admits it).
+                .chain(
+                    c.qualification
+                        .into_iter()
+                        .flat_map(|q| ["--qualification".to_string(), q]),
+                )
+                .collect(),
+            )
+        }
+        AUTOSTART_PREVIEW if req.resource_id.is_empty() => {
+            let c = AutostartPreviewCommand::decode(req.params.as_ref()).ok()?;
+            if !token_ok(&c.qualification)
+                || ![
+                    &c.checkpoint,
+                    &c.minimum_runway,
+                    &c.max_runtime,
+                    &c.valid_for,
+                ]
+                .iter()
+                .all(|d| duration_ok(d))
+                || !genesis_ok(&c.genesis_hash)
+                || !capture_source_ok(&c.capture_source)
+            {
+                return None;
+            }
+            Some(
+                [
+                    "p0",
+                    "autostart",
+                    "preview",
+                    "--qualification",
+                    &c.qualification,
+                    "--checkpoint",
+                    &c.checkpoint,
+                    "--minimum-runway",
+                    &c.minimum_runway,
+                    "--genesis-hash",
+                    &c.genesis_hash,
+                    "--max-runtime",
+                    &c.max_runtime,
+                    "--valid-for",
+                    &c.valid_for,
+                    "--capture-source",
+                    &c.capture_source,
+                ]
+                .map(String::from)
                 .to_vec(),
             )
+        }
+        AUTOSTART_GRANT if req.resource_id.is_empty() => {
+            let c = AutostartGrantCommand::decode(req.params.as_ref()).ok()?;
+            token_ok(&c.confirm_digest).then(|| {
+                ["p0", "autostart", "grant", "--confirm", &c.confirm_digest]
+                    .map(String::from)
+                    .to_vec()
+            })
+        }
+        AUTOSTART_REVOKE if req.resource_id.is_empty() && req.params.is_empty() => {
+            Some(["p0", "autostart", "revoke"].map(String::from).to_vec())
         }
         BOOT_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
             ["p0", "boot", "cancel", "--flow", &req.resource_id]
@@ -1238,7 +1317,10 @@ impl Control {
             ctl.args(&args).kill_on_drop(true);
             // DEC-07: the boot controller audits the staged capture environment, as the
             // capture start does.
-            if BOOT_ACTIONS.contains(&action) || action == START {
+            if BOOT_ACTIONS.contains(&action)
+                || AUTOSTART_ACTIONS.contains(&action)
+                || action == START
+            {
                 ctl.env("DARKBOT_STAGED", "1");
             }
             ctl.output()
@@ -1263,6 +1345,12 @@ impl Control {
                     "Start approved and its worker started; the run follows in project0.analytics.jobs (boot)"
                 } else if action == BOOT_CANCEL {
                     "Stop requested from the boot step's worker; it records CANCELLED in project0.analytics.jobs (boot)"
+                } else if action == AUTOSTART_PREVIEW {
+                    "Standing approval previewed; its binding and digest follow in project0.analytics.jobs (until_stopped.preview)"
+                } else if action == AUTOSTART_GRANT {
+                    "Standing approval granted for exactly the previewed binding; project0.analytics.jobs (until_stopped.autostart)"
+                } else if action == AUTOSTART_REVOKE {
+                    "Standing approval revoked; no autostart until a new grant"
                 } else {
                     "Job recorded and its worker started; progress in project0.analytics.jobs"
                 }
@@ -1277,6 +1365,8 @@ impl Control {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
                 } else if BOOT_ACTIONS.contains(&action) || action == START {
                     "Controller outcome unknown; inspect the boot flow in project0.analytics.jobs before a new approval"
+                } else if AUTOSTART_ACTIONS.contains(&action) {
+                    "Controller outcome unknown; inspect the standing approval in project0.analytics.jobs (until_stopped) before a new request"
                 } else {
                     "Controller outcome unknown; inspect project0.analytics.jobs before a new action"
                 }
@@ -2072,6 +2162,7 @@ mod tests {
             duration: "1h".into(),
             capture_source: "logs".into(),
             chain_verify: "off".into(),
+            qualification: None,
         };
         let mut wrong = approval.clone();
         wrong.approved_token = "not-a-token".into();
@@ -2647,6 +2738,7 @@ mod tests {
                 duration: duration.into(),
                 capture_source: "transactions".into(),
                 chain_verify: verify.into(),
+                qualification: None,
             }
             .encode_to_vec()
         };
@@ -2673,6 +2765,147 @@ mod tests {
         );
         assert_eq!(job_args(&req(BOOT_CANCEL, "../x", vec![], None)), None);
         for action in BOOT_ACTIONS {
+            assert!(allowed(ProjectId::Project0 as i32, action));
+            assert!(!allowed(ProjectId::Bsc as i32, action));
+        }
+    }
+    /// DEC-16: an unbounded flow's horizon and its qualification reach `p0ctl boot`; the standing
+    /// autostart approval maps 1:1 onto `p0ctl autostart preview|grant|revoke` with typed,
+    /// checked options (the controller validates them again); anything else is refused.
+    #[test]
+    fn dec16_unbounded_boot_and_autostart_actions_map_onto_p0ctl() {
+        use crate::proto::project0::v1::{
+            AutostartGrantCommand, AutostartPreviewCommand, BootOfflineCommand, BootStartCommand,
+        };
+        let req = |action: &str, resource: &str, params: Vec<u8>| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: "12345678-1234-1234-1234-123456789abc".into(),
+            action: action.into(),
+            resource_id: resource.into(),
+            expected: None,
+            params: params.into(),
+            issued_at_unix_ns: 0,
+        };
+        let offline = |duration: &str| {
+            BootOfflineCommand {
+                mode: "market".into(),
+                ttl_seconds: None,
+                duration: duration.into(),
+            }
+            .encode_to_vec()
+        };
+        assert_eq!(
+            job_args(&req(BOOT_OFFLINE, "", offline("until-stopped:1h:24h"))).unwrap()[6..],
+            ["market", "--duration", "until-stopped:1h:24h"]
+        );
+        for bad in [
+            "until-stopped",
+            "until-stopped:1h",
+            "until-stopped:1h:",
+            "until-stopped:1x:24h",
+            "until-stopped:1h:24h:1h",
+            "inf",
+        ] {
+            assert_eq!(
+                job_args(&req(BOOT_OFFLINE, "", offline(bad))),
+                None,
+                "{bad}"
+            );
+        }
+        let start = |qualification: Option<&str>| {
+            BootStartCommand {
+                flow_id: "flow-1".into(),
+                approved_token: "fedcba9876543210".into(),
+                duration: "until-stopped:1h:24h".into(),
+                capture_source: "logs".into(),
+                chain_verify: "off".into(),
+                qualification: qualification.map(Into::into),
+            }
+            .encode_to_vec()
+        };
+        let args = job_args(&req(BOOT_START, "", start(Some("0123456789abcdef")))).unwrap();
+        assert_eq!(
+            args[args.len() - 2..],
+            ["--qualification", "0123456789abcdef"]
+        );
+        assert!(!job_args(&req(BOOT_START, "", start(None)))
+            .unwrap()
+            .contains(&"--qualification".to_string()));
+        for bad in ["0123", "0123456789ABCDEF", "../0123456789ab"] {
+            assert_eq!(
+                job_args(&req(BOOT_START, "", start(Some(bad)))),
+                None,
+                "{bad}"
+            );
+        }
+        let preview = |f: &dyn Fn(&mut AutostartPreviewCommand)| {
+            let mut c = AutostartPreviewCommand {
+                qualification: "0123456789abcdef".into(),
+                checkpoint: "1h".into(),
+                minimum_runway: "24h".into(),
+                genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+                max_runtime: "7d".into(),
+                valid_for: "30d".into(),
+                capture_source: "logs".into(),
+            };
+            f(&mut c);
+            job_args(&req(AUTOSTART_PREVIEW, "", c.encode_to_vec()))
+        };
+        assert_eq!(
+            preview(&|_| {}).unwrap(),
+            [
+                "p0",
+                "autostart",
+                "preview",
+                "--qualification",
+                "0123456789abcdef",
+                "--checkpoint",
+                "1h",
+                "--minimum-runway",
+                "24h",
+                "--genesis-hash",
+                "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+                "--max-runtime",
+                "7d",
+                "--valid-for",
+                "30d",
+                "--capture-source",
+                "logs"
+            ]
+        );
+        let broken: [&dyn Fn(&mut AutostartPreviewCommand); 6] = [
+            &|c| c.qualification = "x".into(),
+            &|c| c.checkpoint = "1x".into(),
+            &|c| c.max_runtime = String::new(),
+            &|c| c.valid_for = "until-stopped".into(),
+            &|c| c.genesis_hash = "../x".into(),
+            &|c| c.capture_source = "blocks".into(),
+        ];
+        for (i, f) in broken.iter().enumerate() {
+            assert_eq!(preview(f), None, "{i}");
+        }
+        let grant = |digest: &str| {
+            job_args(&req(
+                AUTOSTART_GRANT,
+                "",
+                AutostartGrantCommand {
+                    confirm_digest: digest.into(),
+                }
+                .encode_to_vec(),
+            ))
+        };
+        assert_eq!(
+            grant("89abcdef01234567").unwrap(),
+            ["p0", "autostart", "grant", "--confirm", "89abcdef01234567"]
+        );
+        assert_eq!(grant("89ABCDEF01234567"), None);
+        assert_eq!(
+            job_args(&req(AUTOSTART_REVOKE, "", vec![])).unwrap(),
+            ["p0", "autostart", "revoke"]
+        );
+        assert_eq!(job_args(&req(AUTOSTART_REVOKE, "x", vec![])), None);
+        assert_eq!(job_args(&req(AUTOSTART_REVOKE, "", vec![1])), None);
+        for action in AUTOSTART_ACTIONS {
             assert!(allowed(ProjectId::Project0 as i32, action));
             assert!(!allowed(ProjectId::Bsc as i32, action));
         }

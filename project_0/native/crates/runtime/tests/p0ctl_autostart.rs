@@ -138,7 +138,16 @@ fn dec16_without_a_standing_approval_an_autostart_starts_nothing() {
 fn dec16_a_standing_approval_records_exactly_its_previewed_binding_until_revoked() {
     let ctl = Ctl::new("grant");
     let qid = ctl.qualification(true);
-    let (code, out) = ctl.preview(&qid, &["--valid-for", "1h"]);
+    let expires = (now() + 3_600).to_string();
+    let fixed = ["--expires-unix-s", expires.as_str()];
+    let digest_of = |out: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix("AUTOSTART_PREVIEW "))
+            .and_then(|l| l.split(':').next())
+            .unwrap_or_else(|| panic!("{out}"))
+            .to_string()
+    };
+    let (code, out) = ctl.preview(&qid, &fixed);
     assert_eq!(code, 0, "{out}");
     for shown in [
         "mode               market",
@@ -149,39 +158,55 @@ fn dec16_a_standing_approval_records_exactly_its_previewed_binding_until_revoked
     ] {
         assert!(out.contains(shown), "{shown}\n{out}");
     }
-    let line = out
-        .lines()
-        .find_map(|l| l.strip_prefix("AUTOSTART_PREVIEW "))
-        .unwrap();
-    let digest = line.split(':').next().unwrap().to_string();
-    let grant_args: Vec<&str> = line
-        .split("p0ctl ")
-        .nth(1)
-        .unwrap()
-        .split_whitespace()
-        .collect();
+    let digest = digest_of(&out);
     assert!(
-        !ctl.project.join(autostart::STORE).exists(),
-        "a preview records nothing"
+        out.contains(&format!("p0ctl autostart grant --confirm {digest}")),
+        "{out}"
     );
-    // A grant confirms exactly the previewed binding; another digest is refused.
-    let mut wrong = grant_args.clone();
-    *wrong.last_mut().unwrap() = "0000000000000000";
-    let (code, out) = ctl.run(&wrong);
+    assert!(
+        autostart::current(&ctl.project).unwrap().is_none(),
+        "a preview grants nothing"
+    );
+    // A grant confirms exactly the preview shown: another digest, or one a newer preview
+    // replaced, is refused.
+    let grant = |d: &str| ctl.run(&["autostart", "grant", "--confirm", d]);
+    let (code, out) = grant("0000000000000000");
     assert_eq!(code, 2);
     assert!(out.contains("AUTOSTART_CONFIRM_MISMATCH"), "{out}");
-    let mut longer = grant_args.clone();
-    let at = longer.iter().position(|a| *a == "--max-runtime").unwrap();
-    longer[at + 1] = "2h";
-    let (code, out) = ctl.run(&longer);
+    let mut longer = fixed.to_vec();
+    longer.extend(["--max-runtime", "2h"]);
+    let (code, out) = ctl.run(
+        &[
+            &[
+                "autostart",
+                "preview",
+                "--qualification",
+                &qid,
+                "--checkpoint",
+                "1m",
+                "--minimum-runway",
+                "2m",
+                "--genesis-hash",
+                GENESIS,
+            ][..],
+            &longer[..],
+        ]
+        .concat(),
+    );
+    assert_eq!(code, 0, "{out}");
+    assert_ne!(digest_of(&out), digest);
+    let (code, out) = grant(&digest);
     assert_eq!(code, 2);
     assert!(out.contains("AUTOSTART_CONFIRM_MISMATCH"), "{out}");
-    let (code, out) = ctl.run(&grant_args);
+    let (code, out) = ctl.preview(&qid, &fixed);
+    assert_eq!((code, digest_of(&out)), (0, digest.clone()), "{out}");
+    let (code, out) = grant(&digest);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("AUTOSTART_GRANTED {digest}")),
         "{out}"
     );
+    assert_eq!(autostart::preview(&ctl.project), Ok(None));
     let (_, grant, _) = autostart::current(&ctl.project).unwrap().unwrap();
     assert_eq!(grant.digest().unwrap(), digest);
     let (code, out) = ctl.run(&["autostart", "status"]);

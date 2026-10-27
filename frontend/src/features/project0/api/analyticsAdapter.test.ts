@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { jobCommandBlock, jobReadableRuns } from "../model/analytics";
+import { jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -59,6 +59,37 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(jobCommandBlock({ ...idle, runnerError: "JOB_STORE_IO: denied" }, "LIVE", false)).toMatch(/unknown/);
     expect(jobCommandBlock(view, "LIVE", false)).toMatch(/running/);
     expect(jobCommandBlock(idle, "LIVE", true)).toMatch(/in progress/);
+  });
+
+  it("DEC-16: maps the standing approval, its preview, the raw-capture qualification and the unbounded run", () => {
+    const u = view.untilStopped;
+    expect(u.autostart).toMatchObject({ mode: "market", duration: "until-stopped:1h:24h", checkpointSeconds: 3600n, minimumRunwaySeconds: 86400n,
+      qualificationId: "0123456789abcdef", providerEvidenceId: "89abcdef01234567", captureSource: "logs", rpcRps: 5n, maxRequests: 10_000n,
+      maxTotalMib: 512n, maxRuntimeSeconds: 604_800n, expiresUnixS: 1_760_600_000n, recordedUnixS: 1_760_000_100n });
+    expect(u.autostart?.digest).toMatch(/^[0-9a-f]{16}$/);
+    expect(u.preview?.maxRuntimeSeconds).toBe(86_400n);
+    expect(u.preview?.digest).not.toBe(u.autostart?.digest);
+    expect(u.qualification).toMatchObject({ id: "0123456789abcdef", mode: "market", complete: false, open: ["capacity: NOT_RUN · free disk unknown"] });
+    expect(u.run).toMatchObject({ runId: "market-1", windows: 2n, lastVerdict: "CONTINUE", halted: null, sealed: true, complete: true });
+    expect(untilStoppedRunStatus(u.run!)).toMatch(/^SEALED_COMPLETE/);
+    expect(u.errors).toEqual([]);
+  });
+
+  it("DEC-16: 'Until stopped' stays locked, with its reason, until a complete fresh qualification of the same horizon", () => {
+    const q = view.untilStopped.qualification!;
+    const input = { mode: "market", window: "1h", runway: "24h", qualificationId: q.id, nowS: 1_760_000_500n };
+    expect(untilStoppedBlock(input, q)).toMatch(/incomplete: capacity: NOT_RUN/);
+    const complete = { ...q, complete: true, open: [] };
+    expect(untilStoppedBlock(input, complete)).toBe("");
+    expect(untilStoppedBlock({ ...input, mode: "econ4h" }, complete)).toMatch(/RUN_HORIZON_UNTIL_STOPPED_GATED/);
+    expect(untilStoppedBlock(input, null)).toMatch(/No qualification/);
+    expect(untilStoppedBlock({ ...input, qualificationId: "fedcba9876543210" }, complete)).toMatch(/not the newest/);
+    expect(untilStoppedBlock({ ...input, window: "30m" }, complete)).toMatch(/differ from the qualification/);
+    expect(untilStoppedBlock({ ...input, window: "3600s", runway: "1d" }, complete)).toBe("");
+    expect(untilStoppedBlock({ ...input, nowS: 1_760_600_001n }, complete)).toMatch(/no longer fresh/);
+    const halted = { ...view.untilStopped.run!, complete: false, halted: "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING" };
+    expect(untilStoppedRunStatus(halted)).toBe("SEALED_INCOMPLETE · HALT UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");
+    expect(untilStoppedRunStatus({ ...halted, sealed: false, halted: null })).toBe("RUNNING");
   });
 
   it("rejects malformed wire bytes", () => {

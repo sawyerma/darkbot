@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
 import {
-  BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, OptimizeJobCommandSchema,
+  AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema,
+  BootStartCommandSchema, OptimizeJobCommandSchema,
   PostCaptureJobCommandSchema,
 } from "../generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
@@ -16,7 +17,8 @@ import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../g
  */
 export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
   | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set"
-  | "project0.boot.offline" | "project0.boot.network" | "project0.boot.start" | "project0.boot.cancel";
+  | "project0.boot.offline" | "project0.boot.network" | "project0.boot.start" | "project0.boot.cancel"
+  | "project0.autostart.preview" | "project0.autostart.grant" | "project0.autostart.revoke";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -123,14 +125,47 @@ export function bootNetworkCommand(v: { flowId: string; token: string; genesisHa
 }
 
 /** DEC-07: the operator's approval of exactly this network token — the start of the flow's
- *  duration and capture source (online strict verification is a terminal action). */
-export function bootStartCommand(v: { flowId: string; token: string; duration: string; captureSource: "logs" | "transactions"; chainVerify: "off" }): { params: Uint8Array } | { problem: string } {
+ *  duration and capture source (online strict verification is a terminal action). DEC-16: an
+ *  unbounded flow (until-stopped) starts with its qualification id. */
+export function bootStartCommand(v: { flowId: string; token: string; duration: string; captureSource: "logs" | "transactions"; chainVerify: "off"; qualification?: string }): { params: Uint8Array } | { problem: string } {
   if (!TOKEN.test(v.token)) return { problem: "No READY network audit to approve." };
+  const unbounded = v.duration.startsWith("until-stopped:");
+  const qualification = v.qualification?.trim();
+  if (unbounded && !TOKEN.test(qualification ?? "")) return { problem: "Until stopped: the qualification id (16 hex digits) is required." };
   return {
     params: toBinary(BootStartCommandSchema, message(BootStartCommandSchema, {
       flowId: v.flowId, approvedToken: v.token, duration: v.duration, captureSource: v.captureSource, chainVerify: v.chainVerify,
+      qualification: unbounded ? qualification : undefined,
     })),
   };
+}
+
+const DURATION = /^[1-9]\d{0,5}[smhd]$/;
+/** DEC-16: a boot flow's unbounded horizon `until-stopped:<window>:<runway>`. */
+export function untilStoppedDuration(window: string, runway: string): string | null {
+  return DURATION.test(window.trim()) && DURATION.test(runway.trim()) ? `until-stopped:${window.trim()}:${runway.trim()}` : null;
+}
+
+/** DEC-16: the terms of a standing autostart approval; the controller binds them to the run and
+ *  records the preview with its digest (shown before any grant). */
+export function autostartPreviewCommand(v: { qualification: string; window: string; runway: string; genesisHash: string; maxRuntime: string; validFor: string; captureSource: "logs" | "transactions" }): { params: Uint8Array } | { problem: string } {
+  if (!TOKEN.test(v.qualification.trim())) return { problem: "Qualification: its id (16 hex digits)." };
+  if (untilStoppedDuration(v.window, v.runway) === null) return { problem: "Window and runway: durations (s/m/h/d)." };
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v.genesisHash.trim())) return { problem: "Genesis hash: the base58 Mainnet genesis pin." };
+  if (!DURATION.test(v.maxRuntime.trim())) return { problem: "Maximum runtime: a duration (s/m/h/d)." };
+  if (!DURATION.test(v.validFor.trim())) return { problem: "Valid for: a duration (s/m/h/d)." };
+  return {
+    params: toBinary(AutostartPreviewCommandSchema, message(AutostartPreviewCommandSchema, {
+      qualification: v.qualification.trim(), checkpoint: v.window.trim(), minimumRunway: v.runway.trim(), genesisHash: v.genesisHash.trim(),
+      maxRuntime: v.maxRuntime.trim(), validFor: v.validFor.trim(), captureSource: v.captureSource,
+    })),
+  };
+}
+
+/** DEC-16: the operator confirms exactly the previewed binding by its digest. */
+export function autostartGrantCommand(digest: string): { params: Uint8Array } | { problem: string } {
+  if (!TOKEN.test(digest)) return { problem: "No previewed binding to confirm." };
+  return { params: toBinary(AutostartGrantCommandSchema, message(AutostartGrantCommandSchema, { confirmDigest: digest })) };
 }
 
 /** S1-02: a data source's mode (`p0ctl source set`); the running owner applies or refuses it. */
