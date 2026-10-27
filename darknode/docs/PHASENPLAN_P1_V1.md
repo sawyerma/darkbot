@@ -5,7 +5,7 @@
 | Dokumentfeld | Wert |
 |---|---|
 | Dokument | `darknode/docs/PHASENPLAN_P1_V1.md` |
-| Version | **1.2 – Raw-Trades-first für Historie/Backtest** |
+| Version | **1.3 – Raw-Trades-first, Bar-Vertrag, T26/T27, V5-Decoder-Priorität** |
 | Stand | **27.10.2026** |
 | Status | **DRAFT · GATE 1 OFFEN · KEINE IMPLEMENTIERUNGSFREIGABE** |
 | Projekt | DarkNode im vorhandenen DarkBot-Monorepo |
@@ -297,6 +297,8 @@ flowchart TB
 
 ### P1.4 – Bitget Public SBE-/Market-Adapter (Rust)
 
+**V5-Decoder-Priorität vor 05.11.2026:** Beim längeren 60s-Demo-Lauf wurden **8 von 62** Depth50-V5-Frames vom bisherigen Python-Parser mit `ValueError('depth group')` abgewiesen. Kein Bitget-Datenverlust bewiesen. Vor produktiver V5-Verwendung fehlgeschlagene echte Frames als L0-Bytes sichern, offizielles XML-Schema samt Hash fixieren, daraus typisierten Rust-Decoder entwickeln und mit diesen Fixtures/Grenzfällen sowie längerem fehlerfreiem Demo-Capture testen. Bis dahin `P1.4 V5 = FAIL/INCONCLUSIVE`, nicht PASS. Siehe [Rohtrade-/Bar-Vertrag](P1_BAR_SCHEMA_AND_TRADE_ORDER_V1.md).
+
 **Voraussetzungen:** P1.1–1.3; R2+R6 für Decoder/Heartbeat/Library.
 
 **Lieferumfang**
@@ -337,6 +339,7 @@ flowchart TB
 **Lieferumfang**
 
 - **Verbindlich für jedes historische Backtesting: originale öffentliche Einzeltrades als Rohdaten laden, vollständig und verlustfrei in L1 speichern und die benötigten 1s-, 5s-, 10s-, 30s- und 1m-Candles selbst aggregieren. Bitget-REST-1m-Candles sind nur Referenz/Gegenprobe und dürfen nicht als Ersatz für fehlende Tickdaten in synthetische 1s-Bars zerlegt werden.** Identische Live-/Historien-Aggregationslogik.
+- **Erweiterter Bar-Vertrag:** [P1_BAR_SCHEMA_AND_TRADE_ORDER_V1.md](P1_BAR_SCHEMA_AND_TRADE_ORDER_V1.md). Neben OHLCV werden exakt komponierbare Integer-/Fixed-Point-Summen für Base-/Quotevolumen, Buy-/Sell-Mengen und -Zähler, TradeCount, Extrem-/Rand-Ereignisse und versionierte Herkunft/Quality gespeichert. Freie Schwellen, Median/Volumenprofil und beliebige Tickmuster bleiben direkte L1-Replay-Abfragen. **Eine Millisekunde mit mehreren Trades beweist keinen einzelnen Sweep.**
 - Ein inkrementeller Rust-Aggregator: Trade-Events → 1s OHLCV, Quote-Volumen, Count, Buy-/Sell-Volumen, soweit definierbar.
 - 5s/10s/30s/1m und weitere **konfigurierte** Timeframes aus derselben **qualifizierten** 1s-Schicht; einheitliche Boundary-/Watermark-/Timer-Semantik. Für die Sekunde `[t,t+1s)` werden Open/High/Low/Close/Volumen aus **allen echten Trades** berechnet. Trade-IDs und Quell-Reihenfolge erhalten, da viele Trades denselben Millisekunden-Zeitstempel besitzen.
 - L2-Binärdateien, Zeitindex, Cache-Status `OPEN/FINAL/INVALID`, Instrument-/Dataset-/Aggregator-Version.
@@ -344,7 +347,7 @@ flowchart TB
 - Late-/Out-of-Order-Fälle: unveränderlicher Live-Decision-Trail; nachträgliche Research-Rebuilds unter **neuer** Dataset-Version.
 - Atomarer Rebuild betroffener Blöcke nach Import; synchroner Engine-Feed als **typisierte Output-Schnittstelle**, noch keine Indicator-Engine.
 
-**Abnahme:** Grenzfälle 999ms/1000ms, mehrere Trades gleiche Exchange-Zeit, verspätete/duplizierte Trades, leere Sekunden, 1s→MTF; Golden-Vectors, Hash-identischer Replay für **identisches** Event-/Timer-Input; Gegenprobe gegen echte Bitget-1m-Bars mit erklärten Unterschieden. **Exit:** deterministische versionierte Candle-Kette.
+**Abnahme:** T26/T27 verpflichtend: qualifizierter Trade-Order-Key bei identischen Millisekunden, alle als komponierbar definierten 1s-Felder exakt identisch mit Direktaggregation aus denselben Rohtrades; Grenzfälle 999ms/1000ms, mehrere Trades gleiche Exchange-Zeit, verspätete/duplizierte Trades, leere Sekunden, 1s→MTF; Golden-Vectors, Hash-identischer Replay für **identisches** Event-/Timer-Input; Gegenprobe gegen echte Bitget-1m-Bars mit erklärten Unterschieden. **Exit:** deterministische versionierte Candle-Kette.
 
 ### P1.7 – Historischer Import, Coverage und Lückenreparatur
 
@@ -471,6 +474,8 @@ Die Zeitziele sind **vorläufige Gate-1-Ziele**, keine schon gemessenen Resultat
 | **T23** Replay vs Live identischer Capture | Gleiche Bar-/Qualitäts-Trace-Hashes, soweit Timerfolge identisch | P1.6 |
 | **T24** 7-Tage-Dauerlauf | Alle Datenbereiche bilanziert, Ressourcen und Latency dokumentiert | P1.10 |
 | **T25** Historische Trades selbst aggregieren | Echte historische 1-ms-Einzeltrades inkl. identischer Zeitstempel → deterministische 1s- und MTF-Candles; unvollständige Coverage gesperrt; kein 1m-Rückrechnen | P1.6/1.7 |
+| **T26** Gleichzeitige-ms-Tradereihenfolge | Echte SBE/REST-ID-Parität plus qualifizierte Reihenfolge bei gleichen Millisekunden; Sweep ist nur Indiz, keine garantierte gemeinsame Order; Unklarheit als ORDER_UNRESOLVED | P1.4/1.6/1.7 |
+| **T27** Exakte Bar-Komposition | Für jedes freigegebene komponierbare L2-Feld ergeben L1→1m direkt und L1→1s→1m dieselben Fixed-Point-Werte, Ties, Herkunft und Qualitäts-/Coverage-Marker | P1.6/1.7 |
 
 **Alte `ws_ai`-Regressionen explizit abgedeckt:** einzelner Trade aus Multi-Trade-Batch, alte Bitget-REST-Funktionssignaturen, globale Scroll-Ereignisse, doppelte History-/Live-Quellen, fehlende Durability zwischen Queue-ACK und Disk.
 
@@ -604,3 +609,4 @@ P1 kann **nur dann als PASS** gelten, wenn die Punkte D01–D08 am selben fixier
 | V1.0 | 26.10.2026 | Erstentwurf P1 Marktdatenkette |
 | **V1.1** | **27.10.2026** | Nachgewiesene Classic-V2-Historien-API/O03, V5-Live- und V4-Offline-Vertrag, R2-/K10-Termin, SQLite-Registry-Referenz, P1.9 Outbox/Watchdog/Externer Heartbeat, chrony/Uhrqualität, O13 L0-Löschung, O14 Alarmziel, Tardis-Host-Hinweis, Dokument-/Mermaid-Konsistenz |
 | **V1.2** | **27.10.2026** | Historische Rohtrades als verpflichtende Backtest-Quelle, eigener 1s-/MTF-Aggregator, T25, Diagramme und Mess-Evidenz |
+| **V1.3** | **27.10.2026** | Komponierbarer Bar-Vertrag, T26 Reihenfolge, T27 Direktaggregation=MTF, V5-Priorität/Parser-Fehler als offenes kritisches Gate |
