@@ -159,6 +159,8 @@ Bitget UTA REST Signatur: `ACCESS-SIGN = Base64(HMAC-SHA256(secret, timestamp + 
 **Primärquellen und Referenzen:** [Bitget Futures-Konto-/Margin-Guide](https://www.bitget.com/docs/uta/best-practices-guide), [Bitget UTA Rest/Subaccount-Key](https://www.bitget.com/docs/uta/rest-api), [Bitget Futuresbedingungen/Unterkonto-Margin](https://www.bitget.com/support/articles/7700532076057), [Bitget Account/Set-Leverage](https://www.bitget.com/docs/catalog/account/account-settings), [Bitget Position/liquidationPrice](https://www.bitget.com/legacy-docs/uta/trade/Get-Position), [Bitget Place-Order/Preset-SL/countdown-cancel-all](https://www.bitget.com/docs/catalog/trading/order-management), [NautilusTrader Trading States](https://nautilustrader.io/docs/latest/concepts/execution/), [Nautilus Risk limits](https://nautilustrader.io/docs/rust-api-latest/src/nautilus_live/node/config.rs.html), [Freqtrade Stoploss und emergency_exit](https://docs.freqtrade.io/en/latest/stoploss/), [Hummingbot Issue #7295](https://github.com/hummingbot/hummingbot/issues/7295).
 
 
+**Verbindliche Code-Audit- und Gesamtprüfungsreferenz:** [P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md](P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md) mit fixierten Upstream-SHAs, konkreten Source-/Testdateien, CCXT-V2-vs-UTA-Routing, Hummingbot-/Freqtrade-Regressionen und einheitlichem Testprogramm `DN-P5-ALL-001` in A–F-Lanes. **Gesamttest noch NOT_RUN; keine PASS-Vortäuschung.**
+
 ## 6. Referenzvergleich Open Source (keine produktive Dependency-Freigabe)
 
 | Projekt | Konkreter Recherche-Nutzen | Begrenzung für DarkNode |
