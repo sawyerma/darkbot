@@ -4,6 +4,21 @@
 **Initialer Audit-Checkpoint:** `4f6d47bc` mit Nachträgen bis `18474739`/D2; **Repository-Ablage 2026-10-23:** spätere D3–D6-Commits sind hinzugekommen. Vor jeder Codeänderung stets das jeweilige aktuelle HEAD/Symbol erneut prüfen. Der historische Audit-Checkpoint ist ausdrücklich kein gültiger Runtime- oder Abnahme-SHA.  
 **Origin of truth:** `bsc/docs/1_PLAN/PHASENPLAN.md` v9.1 (§5a, v8/v9/v9.1), `bsc/docs/1_PLAN/GATE0_TESTPLAN_SHORT.md`, `bsc/docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md`, `frontend/docs/FRONTEND_PHASENPLAN.md`, `frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md`, `frontend/docs/GOVERNANCE_UND_SICHERHEIT.md`, `protocol/schemas/darkbot/{control,bsc}/v1/*.proto`, native implementation and reporter.
 
+## BSC-CONTROL-ERGÄNZUNG (27.10.2026) — zwei Wallets und schaltbare Wirtschaftsmodi
+
+Diese neuere technische SOLL-Vorgabe aus dem BSC-Phasenplan ersetzt ältere Entwicklungsverbote für die Erstellung von Controls; sie ist keine tatsächliche LIVE-Aktivierung.
+
+- Die zwei gebundenen Rollen `LAUNCHER` und `BUYER` benötigen je einen **eigenständigen nativen ENABLE/DISABLE-Controller** mit Default `DISABLED`, auch bei Erststart, Restart, Recovery und fehlerhafter Persistenz.
+- Beide Controls werden auf jedem betreffenden Mainnet-SIGN-/SEND-Pfad einschließlich direkter CLI-Runner-Aufrufe durchgesetzt. Terminal und BSC-Frontend benutzen dieselbe native Autorität, nie eine Browser-only-Sperre.
+- In `BscWalletsState` sind additive, typisierte Statusfelder für beide Wallets mit `requested`, `effective`, Blockgrund, Generation und Receipt vorzusehen. Ein authentisierter, ausdrücklich allowlisteter, typisierter Control-Command muss die native CAS-/Idempotenz-Grenze bedienen. Bestehende Feldnummern/Topic-IDs und Project_0 nicht verändern.
+- Im vorhandenen BSC-`Wallets`-Panel stehen zwei getrennte Enable-/Disable-Steuerungen neben den bisherigen read-only Identitäten und Snapshot-Werten. Keine Schlüssel, Signaturen oder geheimen Daten an Protobuf/Gateway/Browser.
+- Bestehende Source-/Component-/Candidate-Steuerungen wiederverwenden, fehlende Venue-/Runtime-/Wirtschaftscontrols technisch ergänzen, alle wirtschaftlichen Modi default `DISABLED/OFF`. Die Kette Native → Protobuf/Golden → Gateway → Adapter/Store → React und der CLI-Weg müssen in echten F0-VAR- und E2E-/Negativtests nachgewiesen werden.
+- Weiterhin keine wirtschaftliche Mainnet-Aktion aus der Dokumentations-/Implementierungsarbeit ableiten. Wallet-ENABLE allein ist keine Freigabe von LIVE, SIGN oder SEND; wirtschaftliche Korrektheits-, V5-/Nonce-/Budget- und Anti-Replay-Gates bleiben bestehen.
+
+**IST vor Implementierung:** Launcher und Buyer sind im `WalletsPanel.tsx` bislang reine Anzeigen. `BscWalletsState` enthält keine getrennten Enable-Felder und `gateway/src/control.rs` keinen Wallet-Enable-Command. Dies ist `SOLL_MISSING`, nicht schon `IST_CONNECTED`. Ältere Abschnitte mit „kein neuer Wallet-Command“ beschreiben den früheren Entwicklungsumfang, nicht diesen aktuellen SOLL-Auftrag.
+
+---
+
 ## 0. Vorbemerkung und geltende Grenze
 
 Die Erfassung aller zukünftigen BSC-Sollfelder ist **F0-VAR-Dokumentation**, keine Freigabe der C1/C2-Integration. G0.7/G0.8 und die verbindliche Gate-0-Stoppregel bleiben unangetastet. Die einzige vorgelagerte GUI-Ausnahme ist die *bereits implementierte isolierte offline/shadow SELF_A/SELF_B-Auswahl*. Die v9-FOREIGN_AUTO-Ausführung, fünf Source-LIVE-Schalter, drei Venue-LIVE-Schalter und globale Wirtschaftsausführung bleiben geplante Anforderungen ohne autorisierten aktiven Controller. Nie `LIVE` im GUI gleichsetzen mit `guard approved`, `execution_ready`, `T0`-Witness oder erfolgreichem Token-Erwerb. Der Browser arbeitet nie auf dem BUY-Hotpath.
