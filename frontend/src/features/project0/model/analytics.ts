@@ -146,6 +146,15 @@ export interface UntilStoppedView {
 /** DEC-16: the unbounded horizon of a boot flow (`p0ctl` and the gateway check it again). */
 export const UNTIL_STOPPED = "until-stopped";
 
+/** DEC-16: whole seconds in their largest exact unit (d, h, m, s) — the canonical text the
+ *  controller binds an unbounded horizon by (`until-stopped:1h:1d`). */
+export function durationText(seconds: bigint): string {
+  for (const [unit, scale] of [["d", 86400n], ["h", 3600n], ["m", 60n]] as const) {
+    if (seconds % scale === 0n) return `${seconds / scale}${unit}`;
+  }
+  return `${seconds}s`;
+}
+
 /** Whole seconds of a `p0ctl` duration (digits and s/m/h/d); null for anything else. */
 export function durationSeconds(d: string): bigint | null {
   const m = /^([1-9]\d{0,5})([smhd])$/.exec(d.trim());

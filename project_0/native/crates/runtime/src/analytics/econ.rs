@@ -344,6 +344,28 @@ impl Handle {
             .max_depth
             .fetch_max(s.sent.saturating_sub(s.received), Ordering::Relaxed);
     }
+    /// DEC-16: control evidence that must reach the analytics (a window's close): offered until
+    /// `within` passes, never dropped silently; `false` (counted as a drop) if it found no room.
+    pub fn emit_control(&self, ev: Evidence, within: Duration) -> bool {
+        let deadline = std::time::Instant::now() + within;
+        let mut ev = ev;
+        loop {
+            match self.tx.try_push(ev) {
+                Ok(()) => return true,
+                Err(darkbot_common::channel::ChannelError::Full(back))
+                    if std::time::Instant::now() < deadline =>
+                {
+                    ev = back;
+                    // Room appears as the worker takes evidence; a short pause between offers.
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(_) => {
+                    self.shared.drops.fetch_add(1, Ordering::Relaxed);
+                    return false;
+                }
+            }
+        }
+    }
     pub fn start(&self, at: u64, cutoff: u64) {
         self.shared.start_ns.store(at, Ordering::Release);
         self.shared.cutoff_ns.store(cutoff, Ordering::Release);
@@ -1009,8 +1031,13 @@ impl Worker {
     /// Inside the capture window `[start, cutoff]` (the market core's `in_window`); DEC-16: an
     /// unbounded run's open window.
     fn in_window(&self, ns: u64) -> bool {
-        self.window()
-            .is_some_and(|(start, cutoff)| ns >= start && ns <= cutoff)
+        match &self.rolling {
+            // A boundary belongs to the earlier window only (the grid's rule).
+            Some(r) => self.h.window_of(ns).is_some_and(|(n, ..)| n == r.window),
+            None => self
+                .window()
+                .is_some_and(|(start, cutoff)| ns >= start && ns <= cutoff),
+        }
     }
     fn hour(&self, ns: u64) -> Option<usize> {
         self.window_hour(ns)
@@ -2227,6 +2254,22 @@ impl Worker {
     }
 
     fn run(mut self) -> Result<(), String> {
+        let taken = self.take_evidence();
+        if self.rolling.is_some() {
+            // DEC-16: an unbounded run's journals are sealed by its end, also after a failure
+            // (then incomplete, the failure its reason).
+            if let (Err(e), Some(r)) = (&taken, self.rolling.as_mut()) {
+                r.fail(e.clone());
+            }
+            let ended = self.finish_rolling();
+            return taken.and(ended);
+        }
+        taken?;
+        self.finish_fixed()
+    }
+
+    /// Takes evidence until the supervisor finishes the run (snapshots as they fall due).
+    fn take_evidence(&mut self) -> Result<(), String> {
         loop {
             if let Some(ev) = self.rx.pop_timeout(Duration::from_millis(100)) {
                 self.accept(ev)?;
@@ -2251,12 +2294,13 @@ impl Worker {
                 while let Some(ev) = self.rx.try_pop() {
                     self.accept(ev)?;
                 }
-                break;
+                return Ok(());
             }
         }
-        if self.rolling.is_some() {
-            return self.finish_rolling();
-        }
+    }
+
+    /// The fixed run's end after its evidence: canonical finalization and its reports.
+    fn finish_fixed(mut self) -> Result<(), String> {
         // The evaluation stream is complete only if no evidence was dropped before this worker.
         let complete = self.h.shared.drops.load(Ordering::Relaxed) == 0;
         self.evaluations

@@ -148,12 +148,11 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
     assert!(err.contains("RUN_MODE_OPTION_REFUSED"), "{err}");
 }
 
-/// DEC-16: an admitted unbounded econ4h start (a complete qualification of exactly this run)
-/// launches its horizon instead of stopping before the launcher: it goes on to the start's own
-/// gates — the offline audit and the network audit, none given here — exactly as a fixed run.
-/// Strict verification and a bare unbounded `--duration` are refused.
+/// DEC-16 (review M1): econ4h stays gated until its Shadow owner's windows exist (stage 3) —
+/// also with a record that claims every part passed; strict verification of an unbounded run
+/// and a bare unbounded `--duration` are refused.
 #[test]
-fn dec16_an_admitted_unbounded_econ4h_start_goes_on_to_its_start_gates() {
+fn dec16_an_unbounded_econ4h_start_stays_gated_until_stage_3() {
     use darkbot_runner::orchestration::until_stopped as us;
     let ctl = Ctl::new("launch");
     let (_, out, err) = ctl.run(&[
@@ -202,15 +201,11 @@ fn dec16_an_admitted_unbounded_econ4h_start_goes_on_to_its_start_gates() {
         args.extend(extra);
         ctl.run(&args)
     };
-    let (code, out, err) = start(&[]);
+    let (code, _, err) = start(&[]);
     assert_eq!(code, 2);
     assert!(
-        !err.contains("UNTIL_STOPPED_LAUNCHER") && !err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED"),
+        err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED") && err.contains("DEC-16 stage 3"),
         "{err}"
-    );
-    assert!(
-        err.contains("BOOT_NETWORK_AUDIT_REQUIRED") || err.contains("BOOT_AUDIT_BLOCKED"),
-        "{out}{err}"
     );
     let (code, _, err) = start(&["--chain-verify", "strict"]);
     assert_eq!(code, 2);

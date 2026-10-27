@@ -97,6 +97,17 @@ pub(super) fn prepare(
     admission: Option<crate::orchestration::boot_audit::NetworkAudit>,
 ) -> Prepared<impl FnMut() -> Result<SnapshotData, String>> {
     let operational_start = clock.now_ns();
+    // DEC-16: the Shadow runtime has no rolling windows yet (stage 3): an unbounded horizon is
+    // refused, never measured as one window.
+    if econ.is_none()
+        && crate::orchestration::until_stopped::unbounded_duration(&|k| std::env::var(k).ok())
+    {
+        return Err(format!(
+            "{}: the Shadow runtime has no rolling windows yet (DEC-16 stage 3)",
+            crate::analytics::measurement::UNTIL_STOPPED_GATED
+        )
+        .into());
+    }
     let stop_poll: fn() -> bool = if econ.is_none() {
         crate::orchestration::control::stop_requested
     } else {

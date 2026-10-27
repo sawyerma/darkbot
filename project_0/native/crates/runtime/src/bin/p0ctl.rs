@@ -359,6 +359,9 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         if options.iter().any(|a| a == "--duration") {
             return Err("--until-stopped and --duration are exclusive".into());
         }
+        if value(options, "--chain-verify").as_deref() == Some("strict") {
+            return Err("UNTIL_STOPPED_STRICT_NOT_AVAILABLE: an unbounded run is not verified window by window; start it with --chain-verify off".into());
+        }
         let need = |flag| value(options, flag).ok_or(format!("--until-stopped requires {flag} D"));
         let spec = darkbot_solana::runtime_config::until_stopped(
             &need("--checkpoint")?,
@@ -380,9 +383,6 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             &binding,
             unix_now()?,
         )?;
-        if value(options, "--chain-verify").as_deref() == Some("strict") {
-            return Err("UNTIL_STOPPED_STRICT_NOT_AVAILABLE: an unbounded run is not verified window by window; start it with --chain-verify off".into());
-        }
         // The admitted run launches exactly its horizon, its qualification beside it.
         until_stopped_qualification = value(options, "--qualification");
         admitted = until_stopped_launch(args, &spec);
@@ -1519,6 +1519,14 @@ fn start_raw_capture(
         .map_err(|_| "BOOT_CLOCK")?
         .as_secs();
     let mut command = Command::new(&ctl);
+    // Only what this start decides reaches the capture, never an inherited value.
+    for key in [
+        boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION,
+        until_stopped::ENV_RESUME,
+        darkbot_runner::orchestration::autostart::ENV_AUTOSTART,
+    ] {
+        command.env_remove(key);
+    }
     // DEC-16: an unbounded start continues the crashed run of exactly this binding and
     // qualification (never a halted or an ended one); the capture admits that again.
     let mut resumed = None;
@@ -1619,10 +1627,11 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             }
             // DEC-07: the run's duration is part of the audited configuration: the flow audits
             // and starts exactly `run start`'s resolution (X1 `start_config`).
-            let duration = need("--duration")?;
-            // DEC-16: a fixed duration or an unbounded horizon until-stopped:W:R.
-            darkbot_solana::runtime_config::horizon(&duration)
-                .map_err(|e| format!("--duration {duration}: {e}"))?;
+            // DEC-16: a fixed duration or an unbounded horizon until-stopped:W:R, in its one
+            // canonical text (the text is part of the audited configuration).
+            let given = need("--duration")?;
+            let duration = darkbot_solana::runtime_config::canonical(&given)
+                .map_err(|e| format!("--duration {given}: {e}"))?;
             let resolved =
                 boot_audit::start_config(mode, operational, &duration, &|k| std::env::var(k).ok())?;
             // The TTL and its source, as the resolution names it.
@@ -2486,6 +2495,46 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    /// DEC-16: the launch of an admitted unbounded run — the horizon flags become its
+    /// `--duration until-stopped:W:R`, every other option and every operational argument stays.
+    #[test]
+    fn dec16_an_unbounded_launch_carries_exactly_its_horizon() {
+        let args = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let spec = "until-stopped:1h:1d";
+        assert_eq!(
+            super::until_stopped_launch(
+                &args(&[
+                    "--until-stopped",
+                    "--checkpoint",
+                    "1h",
+                    "--capture-source",
+                    "logs",
+                    "--minimum-runway",
+                    "24h",
+                    "--qualification",
+                    "0123456789abcdef",
+                    "--",
+                    "--checkpoint",
+                    "x",
+                ]),
+                spec,
+            ),
+            args(&[
+                "--capture-source",
+                "logs",
+                "--duration",
+                spec,
+                "--",
+                "--checkpoint",
+                "x"
+            ])
+        );
+        assert_eq!(
+            super::until_stopped_launch(&args(&["--until-stopped", "--checkpoint", "1h"]), spec),
+            args(&["--duration", spec])
+        );
+    }
+
     use super::*;
 
     fn strings(a: &[&str]) -> Vec<String> {

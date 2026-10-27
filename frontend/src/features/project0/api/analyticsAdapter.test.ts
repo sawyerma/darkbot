@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
+import { durationText, jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -86,6 +86,8 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(untilStoppedBlock({ ...input, qualificationId: "fedcba9876543210" }, complete)).toMatch(/not the newest/);
     expect(untilStoppedBlock({ ...input, window: "30m" }, complete)).toMatch(/differ from the qualification/);
     expect(untilStoppedBlock({ ...input, window: "3600s", runway: "1d" }, complete)).toBe("");
+    // The pre-filled text is the controller's canonical one.
+    expect([durationText(3600n), durationText(86400n), durationText(90n), durationText(7200n)]).toEqual(["1h", "1d", "90s", "2h"]);
     expect(untilStoppedBlock({ ...input, nowS: 1_760_600_001n }, complete)).toMatch(/no longer fresh/);
     const halted = { ...view.untilStopped.run!, complete: false, halted: "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING" };
     expect(untilStoppedRunStatus(halted)).toBe("SEALED_INCOMPLETE · HALT UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");

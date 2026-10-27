@@ -275,6 +275,15 @@ fn dec16_an_unbounded_start_names_the_crashed_run_it_continues() {
         us::RollingWindows::start(&market.join("crashed"), binding.clone(), &qid, now(), 0)
             .unwrap(),
     );
+    drop(
+        darkbot_runner::storage::segments::SegmentedWriter::create(
+            &market
+                .join("crashed")
+                .join(darkbot_runner::market_observer::MARKET_JOURNAL),
+            0,
+        )
+        .unwrap(),
+    );
     let calls = ctl.project.join("calls.log");
     let launcher = ctl.project.join("ok-ctl");
     std::fs::write(

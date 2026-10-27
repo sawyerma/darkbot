@@ -121,8 +121,22 @@ pub fn resumable(root: &Path, binding: &us::Binding, qualification_id: &str) -> 
                 && r.halted.is_none()
                 && &r.record.binding == binding
                 && r.record.qualification_id == qualification_id
+                && unsealed(
+                    &root
+                        .join(&r.run_id)
+                        .join(crate::market_observer::MARKET_JOURNAL),
+                )
         })
         .map(|r| r.run_id)
+}
+
+/// Whether the chain at `first` exists and was never sealed (a capture that ended sealed it).
+fn unsealed(first: &Path) -> bool {
+    let Ok(mut r) = crate::storage::segments::ChainReader::open(first) else {
+        return false;
+    };
+    while let Ok(Some(_)) = r.next_frame() {}
+    !r.sealed
 }
 
 /// The newest run under `root` with a windows journal, read as far as it is written.
@@ -223,6 +237,7 @@ mod tests {
         };
         let id = us::put(&d, &q).unwrap();
         let mut econ = qualified(&binding(60, 120));
+        econ.binding.mode = "econ4h".into();
         econ.qualified_at_unix_s += 1;
         us::put(&d, &econ).unwrap();
         let grant = Grant {
@@ -269,11 +284,21 @@ mod tests {
         let r = v.run.unwrap();
         assert_eq!((r.run_id.as_str(), r.windows, r.sealed), ("r1", 0, false));
         assert_eq!(r.record.qualification_id, id);
-        // Never ended, never halted, admitted as exactly this run: a start continues it.
+        // Never ended, never halted, admitted as exactly this run: a start continues it — not
+        // without its market journal, nor once that was sealed.
         let market = d.join("data/market");
+        assert_eq!(resumable(&market, &b, &id), None, "no market journal");
+        let journal = run.join(crate::market_observer::MARKET_JOURNAL);
+        let mut sealed = crate::storage::segments::SegmentedWriter::create(&journal, 0).unwrap();
+        sealed.seal(false).unwrap();
+        assert_eq!(resumable(&market, &b, &id), None, "a sealed market journal");
+        std::fs::remove_file(&journal).unwrap();
+        drop(crate::storage::segments::SegmentedWriter::create(&journal, 0).unwrap());
         assert_eq!(resumable(&market, &b, &id), Some("r1".into()));
         assert_eq!(resumable(&market, &b, "fedcba9876543210"), None);
-        assert_eq!(resumable(&market, &binding(60, 120), &id), None);
+        let mut other = b.clone();
+        other.binary_sha256 = "other".into();
+        assert_eq!(resumable(&market, &other, &id), None);
         // Granted: in force; a closed window that halted, then the seal.
         autostart::record(
             &d,

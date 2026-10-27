@@ -21,6 +21,9 @@ pub const PREVIEW: &str = "preview.p0j";
 pub const ENV_AUTOSTART: &str = "P0_UNTIL_STOPPED_AUTOSTART";
 /// The reason an autostarted run ends in order at its maximum runtime.
 pub const MAX_RUNTIME: &str = "UNTIL_STOPPED_MAX_RUNTIME";
+/// The reason an autostarted run ends in order once its standing approval is no longer in force
+/// (revoked, replaced or suspended): checked at every window boundary.
+pub const ENDED: &str = "UNTIL_STOPPED_AUTOSTART_ENDED";
 
 /// The provider budget of one window the grant was given for (the run's configuration).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +201,13 @@ pub enum Event {
         flow_id: String,
         started_unix_s: u64,
     },
+    /// An autostarted run under the grant `digest` halted (`verdict`): the grant is suspended —
+    /// no further autostart until the operator grants again.
+    Suspended {
+        digest: String,
+        verdict: String,
+        suspended_unix_s: u64,
+    },
 }
 impl Payload for Event {
     const KIND: u16 = kind::UNTIL_STOPPED_AUTOSTART;
@@ -311,8 +321,8 @@ pub fn record(project: &Path, event: &Event) -> Result<u64, String> {
     stored.map(|()| seq)
 }
 
-/// The grant in force (`seq`, grant, granted at): the last grant or revocation decides — a
-/// revocation ends it; uses never change it.
+/// The grant in force (`seq`, grant, granted at): the last grant, revocation or suspension
+/// decides — a revocation or a HALT's suspension ends it; uses never change it.
 pub fn current(project: &Path) -> Result<Option<(u64, Grant, u64)>, String> {
     for (seq, event) in events(project)?.into_iter().rev() {
         match event {
@@ -320,7 +330,7 @@ pub fn current(project: &Path) -> Result<Option<(u64, Grant, u64)>, String> {
                 grant,
                 granted_unix_s,
             } => return Ok(Some((seq, *grant, granted_unix_s))),
-            Event::Revoked { .. } => return Ok(None),
+            Event::Revoked { .. } | Event::Suspended { .. } => return Ok(None),
             Event::Used { .. } => {}
         }
     }
@@ -328,6 +338,22 @@ pub fn current(project: &Path) -> Result<Option<(u64, Grant, u64)>, String> {
 }
 
 /// The grant in force whose digest is `digest` (an autostart names the grant it runs under).
+/// Suspends the grant `digest` after its autostarted run halted (`verdict`), if still in force.
+pub fn suspend(project: &Path, digest: &str, verdict: &str, now: u64) -> Result<(), String> {
+    if in_force(project, digest).is_err() {
+        return Ok(());
+    }
+    record(
+        project,
+        &Event::Suspended {
+            digest: digest.into(),
+            verdict: verdict.into(),
+            suspended_unix_s: now,
+        },
+    )
+    .map(|_| ())
+}
+
 pub fn in_force(project: &Path, digest: &str) -> Result<Grant, String> {
     let (_, grant, _) =
         current(project)?.ok_or("AUTOSTART_NOT_GRANTED: no standing approval in force")?;

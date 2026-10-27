@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import { analyticsCommand, autostartGrantCommand, autostartPreviewCommand, bootNetworkCommand, bootOfflineCommand, bootStartCommand, untilStoppedDuration, useAnalyticsControl } from "@/core/realtime/analyticsControl";
 import { captureButtons, captureCommand, useCaptureControl } from "@/core/realtime/captureControl";
-import { UNTIL_STOPPED, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
+import { UNTIL_STOPPED, durationText, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
 import type { AnalyticsView, AutostartGrantView, BootFlowView } from "../model/analytics";
 import type { ParameterView } from "../model/status";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
@@ -58,7 +58,9 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   const [qualificationInput, setQualification] = useState("");
   const [maxRuntime, setMaxRuntime] = useState("");
   const [validFor, setValidFor] = useState("");
-  const [armed, setArmed] = useState<"grant" | "revoke" | "stop" | null>(null);
+  const [armed, setArmed] = useState<"revoke" | "stop" | null>(null);
+  // The grant confirmation belongs to exactly the digest it was armed for.
+  const [armedGrant, setArmedGrant] = useState<string | null>(null);
   const capture = useCaptureControl();
   const [nowS, setNow] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
   useEffect(() => {
@@ -67,8 +69,8 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   }, []);
   const blocked = busy ? "Command in progress" : !live ? "Boot controller projection not current" : "";
   // DEC-16: the window, runway and qualification default to the newest raw-capture qualification.
-  const windowValue = windowInput || (q ? `${q.checkpointSeconds}s` : "");
-  const runwayValue = runwayInput || (q ? `${q.minimumRunwaySeconds}s` : "");
+  const windowValue = windowInput || (q ? durationText(q.checkpointSeconds) : "");
+  const runwayValue = runwayInput || (q ? durationText(q.minimumRunwaySeconds) : "");
   const qualificationId = qualificationInput || (q?.id ?? "");
   const untilWhy = untilStoppedBlock({ mode, window: windowValue, runway: runwayValue, qualificationId, nowS }, q);
   const unbounded = duration === UNTIL_STOPPED;
@@ -105,7 +107,7 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   const granted = live ? until?.autostart ?? null : null;
   const previewCmd = autostartPreviewCommand({ qualification: qualificationId, window: windowValue, runway: runwayValue, genesisHash: genesis, maxRuntime, validFor, captureSource: source });
   const previewWhy = mode !== "market" ? "The app autostarts the raw capture (mode market) only" : untilWhy || ("problem" in previewCmd ? previewCmd.problem : "");
-  const grantCmd = autostartGrantCommand(preview?.digest ?? "");
+  const grantCmd = autostartGrantCommand(armedGrant ?? preview?.digest ?? "");
   return <Section title="Boot audit and start" aside={<span className="p0-quiet">{flow ? `flow ${flow.flowId.slice(0, 8)} · ${flow.mode}` : "no flow"}</span>}>
     <DetailRow title="TTL · registry" value={ttl ? `${ttl.value} s · ${ttl.minimum}…${ttl.maximum} s · ${ttl.source} · fixed per flow, changes between runs` : "unknown (no system status); the controller checks the bounds"}/>
     <div className="p0-formgrid">
@@ -175,10 +177,10 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
     {preview ? <>
       <GrantRows g={preview} nowS={nowS} prefix="Preview"/>
       <div className="p0-actions"><button className="p0-primary" disabled={blocked !== "" || "problem" in grantCmd} title={blocked || ("problem" in grantCmd ? grantCmd.problem : undefined)}
-        onClick={() => setArmed("grant")}>Grant exactly this binding · {preview.digest}</button></div>
-      {armed === "grant" ? <><Notice>Grant the standing approval {preview.digest}: autostarts of exactly the run above ({preview.mode}, {preview.duration}, config {preview.configSha256.slice(0, 12)}), its qualification, provider evidence, genesis pin and window budget, each for at most {String(preview.maxRuntimeSeconds)} s, until {utc(preview.expiresUnixS)} UTC. Every autostart still runs the offline audit, the network audit and the start; LIVE stays disabled.</Notice>
-        <div className="p0-actions"><button className="p0-primary" onClick={() => { setArmed(null); if ("params" in grantCmd) void analyticsCommand("project0.autostart.grant", { params: grantCmd.params }); }}>Confirm grant · {preview.digest}</button>
-          <button className="p0-secondary" onClick={() => setArmed(null)}>Cancel</button></div></> : null}
+        onClick={() => setArmedGrant(preview.digest)}>Grant exactly this binding · {preview.digest}</button></div>
+      {armedGrant === preview.digest ? <><Notice>Grant the standing approval {preview.digest}: autostarts of exactly the run above ({preview.mode}, {preview.duration}, config {preview.configSha256.slice(0, 12)}), its qualification, provider evidence, genesis pin and window budget, each for at most {String(preview.maxRuntimeSeconds)} s, until {utc(preview.expiresUnixS)} UTC. Every autostart still runs the offline audit, the network audit and the start; LIVE stays disabled.</Notice>
+        <div className="p0-actions"><button className="p0-primary" onClick={() => { setArmedGrant(null); if ("params" in grantCmd) void analyticsCommand("project0.autostart.grant", { params: grantCmd.params }); }}>Confirm grant · {preview.digest}</button>
+          <button className="p0-secondary" onClick={() => setArmedGrant(null)}>Cancel</button></div></> : null}
     </> : null}
     {live && until?.errors.length ? until.errors.map(e => <DetailRow key={`u${e}`} title="Until stopped · store" value={e}/>) : null}
     {receipt && BOOT_ACTIONS.has(receipt.action) ? <Notice><span data-testid="p0-boot-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""}</span></Notice> : null}

@@ -490,7 +490,8 @@ test("DEC-16: a complete qualification unlocks Until stopped — the offline pre
   await page.getByRole("button", { name: "Run offline preflight" }).click();
   await expect.poll(() => sent.length).toBe(1);
   const o = fromBinary(BootOfflineCommandSchema, sent[0]!.params);
-  expect([sent[0]!.action, o.mode, o.duration]).toEqual(["project0.boot.offline", "market", "until-stopped:3600s:86400s"]);
+  // The canonical text the qualification binds (largest exact units).
+  expect([sent[0]!.action, o.mode, o.duration]).toEqual(["project0.boot.offline", "market", "until-stopped:1h:1d"]);
   await page.getByLabel("Genesis hash").fill("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d");
   await page.getByLabel("Autostart · maximum runtime").fill("7d");
   await page.getByLabel("Autostart · valid for").fill("12h");
@@ -498,5 +499,5 @@ test("DEC-16: a complete qualification unlocks Until stopped — the offline pre
   await expect.poll(() => sent.length).toBe(2);
   const p = fromBinary(AutostartPreviewCommandSchema, sent[1]!.params);
   expect([sent[1]!.action, p.qualification, p.checkpoint, p.minimumRunway, p.maxRuntime, p.validFor, p.captureSource])
-    .toEqual(["project0.autostart.preview", "0123456789abcdef", "3600s", "86400s", "7d", "12h", "logs"]);
+    .toEqual(["project0.autostart.preview", "0123456789abcdef", "1h", "1d", "7d", "12h", "logs"]);
 });

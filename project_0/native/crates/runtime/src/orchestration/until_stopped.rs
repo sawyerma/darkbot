@@ -561,6 +561,18 @@ pub struct Rolling {
     pub max_runtime_seconds: Option<u64>,
     /// The crashed run this start continues (its run id; `until_stopped_view::resumable`).
     pub resume: Option<String>,
+    /// The standing approval (its digest) an autostarted run runs under.
+    pub autostart: Option<String>,
+}
+
+/// DEC-16: whether the run's `--duration` (`P0_MEASUREMENT_DURATION`) is an unbounded horizon.
+pub fn unbounded_duration(get: &dyn Fn(&str) -> Option<String>) -> bool {
+    get("P0_MEASUREMENT_DURATION").is_some_and(|d| {
+        matches!(
+            darkbot_solana::runtime_config::horizon(&d),
+            Ok(darkbot_solana::runtime_config::Horizon::UntilStopped { .. })
+        )
+    })
 }
 
 /// DEC-16: the crashed unbounded run an approved start continues (its run id), decided by the
@@ -1025,7 +1037,7 @@ pub(crate) mod tests {
 
     pub(crate) fn binding(checkpoint_seconds: u64, minimum_runway_seconds: u64) -> Binding {
         Binding {
-            mode: "econ4h".into(),
+            mode: "market".into(),
             identity: AuditedIdentity {
                 source_head: Some("head".into()),
                 source_dirty_sha256: Some("dirty".into()),
@@ -1071,6 +1083,18 @@ pub(crate) mod tests {
         d
     }
 
+    /// DEC-16 (review M1): an unbounded `--duration` is recognised (the Shadow runtime refuses it).
+    #[test]
+    fn dec16_an_unbounded_duration_is_recognised() {
+        let with = |d: &'static str| {
+            move |k: &str| (k == "P0_MEASUREMENT_DURATION").then(|| d.to_string())
+        };
+        assert!(unbounded_duration(&with("until-stopped:1h:1d")));
+        assert!(!unbounded_duration(&with("4h")));
+        assert!(!unbounded_duration(&with("until-stopped")));
+        assert!(!unbounded_duration(&|_| None));
+    }
+
     /// DEC-16: `RunHorizon::admit` admits an unbounded run only with its complete
     /// qualification bound to exactly this run; every gap is named.
     #[test]
@@ -1113,7 +1137,12 @@ pub(crate) mod tests {
             f(&mut current);
             gated(&q, &current, 1_500)
         };
-        assert!(drifted(&|c| c.mode = "market".into()).contains("drift: mode"));
+        // Another mode: drifted — and econ4h, whose Shadow owner has no windows yet, gated as such.
+        let econ = drifted(&|c| c.mode = "econ4h".into());
+        assert!(
+            econ.contains("drift: mode") && econ.contains("DEC-16 stage 3"),
+            "{econ}"
+        );
         assert!(
             drifted(&|c| c.identity.runtime_config_sha256 = "other".into())
                 .contains("drift: runtime_config")
@@ -1302,7 +1331,8 @@ pub(crate) mod tests {
     fn dec16_qualify_records_every_part_and_stays_gated_without_rolling_windows() {
         let d = temp("qualify");
         let c = darkbot_solana::runtime_config::RuntimeConfig::default();
-        let b = binding(3_600, 86_400);
+        let mut b = binding(3_600, 86_400);
+        b.mode = "econ4h".into();
         let q = qualify(
             b.clone(),
             &c,

@@ -1915,8 +1915,8 @@ pub(crate) fn rolling_admission(
     }
     // An autostarted capture runs under its standing approval: exactly this run with its
     // qualification and window budget, unexpired, for at most its maximum runtime.
-    let max_runtime_seconds = match autostart {
-        None => None,
+    let (max_runtime_seconds, autostart) = match autostart {
+        None => (None, None),
         Some(digest) => {
             let refuse = |why: String| {
                 crate::console::line(why);
@@ -1931,7 +1931,7 @@ pub(crate) fn rolling_admission(
             grant
                 .permits(&binding, &super::autostart::WindowBudget::of(&config), now)
                 .map_err(refuse)?;
-            Some(grant.max_runtime_seconds)
+            (Some(grant.max_runtime_seconds), Some(digest))
         }
     };
     Ok(super::until_stopped::Rolling {
@@ -1941,6 +1941,7 @@ pub(crate) fn rolling_admission(
         config,
         max_runtime_seconds,
         resume,
+        autostart,
     })
 }
 

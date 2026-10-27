@@ -909,6 +909,7 @@ mod supervise_tests {
             config,
             max_runtime_seconds: None,
             resume: None,
+            autostart: None,
         });
         let market = crate::market_observer::MarketConfig::from_lookup(&get, now_s).unwrap();
         let run = cfg.run_dir.clone();

@@ -95,6 +95,13 @@ impl RunHorizon {
         {
             gaps.push("the run names another horizon".to_string());
         }
+        // DEC-16: a mode whose runtime runs no rolling windows stays gated whatever a record says.
+        if !crate::orchestration::until_stopped::ROLLING_MODES.contains(&current.mode.as_str()) {
+            gaps.push(format!(
+                "the {} runtime's Shadow owner has no windows yet (DEC-16 stage 3)",
+                current.mode
+            ));
+        }
         match qualification {
             None => gaps.push("no qualification (p0ctl horizon qualify)".into()),
             Some(q) => gaps.extend(q.gaps(current, now)),

@@ -871,11 +871,9 @@ fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
             1002,
         )
     };
-    let admitted = rolling_for(&econ_env).unwrap();
-    assert_eq!(
-        (admitted.binding, admitted.qualification_id.as_str()),
-        (econ_binding, econ.as_str())
-    );
+    // Its own complete record still does not admit it: its Shadow owner has no windows yet.
+    assert_eq!(rolling_for(&econ_env).err(), Some(gated));
+    let _ = econ_binding;
     for (key, value) in [
         (auto::ENV_AUTOSTART, "0123456789abcdef"),
         (us::ENV_RESUME, "crashed"),

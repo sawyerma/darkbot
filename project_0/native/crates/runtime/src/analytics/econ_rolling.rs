@@ -65,6 +65,10 @@ pub(super) struct RollingState {
 }
 
 impl RollingState {
+    /// The worker failed: the run ends incomplete with this reason (the first one stays).
+    pub fn fail(&mut self, why: String) {
+        self.halted.get_or_insert(why);
+    }
     pub fn create(paths: &crate::run_layout::RunPaths) -> Result<Self, String> {
         Ok(Self {
             window: 1,
@@ -180,7 +184,14 @@ impl Worker {
             .map(|r| r.window)
             .ok_or("ECON_WINDOW_NOT_ROLLING")?;
         if window != open {
-            return Err(format!("ECON_WINDOW_ORDER: closed {window}, open {open}"));
+            // Never measured on: the run stops and ends incomplete with this reason.
+            let why = format!("ECON_WINDOW_ORDER: closed {window}, open {open}");
+            crate::console::line(why.clone());
+            if let Some(r) = self.rolling.as_mut() {
+                r.fail(why);
+            }
+            self.h.shared.request_abort();
+            return Ok(());
         }
         while self.snapshots < SNAPSHOT_COUNT {
             let i = self.snapshots + 1;

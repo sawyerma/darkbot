@@ -2447,6 +2447,9 @@ fn r1_capture_run_end_to_end_over_a_loopback_websocket() {
     )
     .unwrap();
     let run_dir = cfg.run_dir.clone();
+    // The run's own bounds: readiness, its window, its drain (never a guess of the host's speed).
+    let budget =
+        Duration::from_secs(cfg.ready_timeout_secs + cfg.duration_secs + cfg.drain_timeout_secs);
     let started = Instant::now();
     let result = super::capture::run(cfg);
     let ended = Instant::now();
@@ -2460,8 +2463,8 @@ fn r1_capture_run_end_to_end_over_a_loopback_websocket() {
         "the session is closed before the run returns"
     );
     assert!(
-        ended - started < Duration::from_secs(1 + 5),
-        "within the window and the drain budget: {:?}",
+        ended - started < budget,
+        "within the readiness, window and drain budgets: {:?}",
         ended - started
     );
     let chain = crate::storage::segments::verify_chain(&run_dir.join(MARKET_JOURNAL)).unwrap();
@@ -2998,11 +3001,13 @@ struct Unbounded {
 /// DEC-16: an unbounded raw capture of 1-s windows (2-s runway) against a loopback WebSocket,
 /// with provider evidence in the controller's store; `max_runtime_seconds` as an autostarted
 /// run's standing approval sets it. `crashed` lays down the run as a killed capture leaves it
-/// (both journals unsealed) and starts it again to continue `(resume id, evidence kept)`.
+/// (both journals unsealed) and starts it again to continue `(resume id, evidence kept)`;
+/// `autostart` runs it under a standing approval in force in the project's store.
 fn unbounded_capture(
     tag: &str,
     max_runtime_seconds: Option<u64>,
     crashed: Option<(&str, bool)>,
+    autostart: bool,
 ) -> Unbounded {
     use crate::orchestration::provider_evidence::{self as pe, ProviderEvidence, ProviderProof};
     use crate::orchestration::until_stopped as us;
@@ -3095,7 +3100,7 @@ fn unbounded_capture(
     };
     let file = root.join("evidence.p0j");
     crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
-    pe::import(&project, &file).unwrap();
+    let evidence_id = pe::import(&project, &file).unwrap();
     let mut rolling = us::Rolling {
         project: project.clone(),
         binding: us::tests::binding(1, 2),
@@ -3103,7 +3108,32 @@ fn unbounded_capture(
         config,
         max_runtime_seconds,
         resume: None,
+        autostart: None,
     };
+    if autostart {
+        use crate::orchestration::autostart as auto;
+        let grant = auto::Grant {
+            binding: rolling.binding.clone(),
+            operational: vec![],
+            duration: "until-stopped:1s:2s".into(),
+            qualification_id: rolling.qualification_id.clone(),
+            provider_evidence_id: evidence_id,
+            genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+            capture_source: "logs".into(),
+            budget: auto::WindowBudget::of(&rolling.config),
+            max_runtime_seconds: max_runtime_seconds.unwrap_or(3_600),
+            expires_unix_s: unix_now_s().unwrap() + 3_600,
+        };
+        rolling.autostart = Some(grant.digest().unwrap());
+        auto::record(
+            &project,
+            &auto::Event::Granted {
+                grant: Box::new(grant),
+                granted_unix_s: unix_now_s().unwrap(),
+            },
+        )
+        .unwrap();
+    }
     let out = root.join("out").to_string_lossy().to_string();
     let cfg = MarketConfig::from_lookup(
         &env_of(&[
@@ -3196,7 +3226,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
         root,
         project,
         run_dir,
-    } = unbounded_capture("halt", None, None);
+    } = unbounded_capture("halt", None, None, false);
     let windows = run_dir.join(us::WINDOWS_JOURNAL);
     let verdicts = || window_verdicts(&run_dir);
     let waiting = Instant::now();
@@ -3246,7 +3276,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
 #[test]
 fn dec16_an_autostarted_capture_ends_in_order_at_its_maximum_runtime() {
     use crate::orchestration::until_stopped as us;
-    let u = unbounded_capture("max_runtime", Some(3), None);
+    let u = unbounded_capture("max_runtime", Some(3), None, true);
     let result = u.capture.join().unwrap();
     u.server.join().unwrap();
     assert_eq!(
@@ -3311,7 +3341,7 @@ fn market_rows(run_dir: &std::path::Path) -> Vec<super::rows::MarketCoverage> {
 fn dec16_a_crashed_unbounded_capture_continues_the_same_run() {
     use crate::orchestration::provider_evidence as pe;
     use crate::orchestration::until_stopped as us;
-    let u = unbounded_capture("resume", None, Some(("unbounded", true)));
+    let u = unbounded_capture("resume", None, Some(("unbounded", true)), false);
     // Ordered by the journals, never by timing: once a continued window held and the stream is
     // ready, the evidence goes and the next window halts the run.
     let streaming = || {
@@ -3382,7 +3412,7 @@ fn dec16_a_crashed_unbounded_capture_continues_the_same_run() {
 #[test]
 fn dec16_a_crashed_run_whose_interrupted_window_fails_halts_before_any_read() {
     use crate::orchestration::until_stopped as us;
-    let u = unbounded_capture("resume_halt", None, Some(("unbounded", false)));
+    let u = unbounded_capture("resume_halt", None, Some(("unbounded", false)), false);
     assert_eq!(
         u.capture.join().unwrap(),
         Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into())
@@ -3407,7 +3437,7 @@ fn dec16_a_crashed_run_whose_interrupted_window_fails_halts_before_any_read() {
     );
     drop(u.server);
     let _ = fs::remove_dir_all(&u.root);
-    let other = unbounded_capture("resume_drift", None, Some(("another-run", true)));
+    let other = unbounded_capture("resume_drift", None, Some(("another-run", true)), false);
     let refused = other.capture.join().unwrap().unwrap_err();
     assert!(
         refused.starts_with("UNTIL_STOPPED_RESUME_DRIFT"),
@@ -3415,6 +3445,146 @@ fn dec16_a_crashed_run_whose_interrupted_window_fails_halts_before_any_read() {
     );
     drop(other.server);
     let _ = fs::remove_dir_all(&other.root);
+}
+
+/// Waits (ordered by the journal) until `n` windows held.
+fn held_windows(u: &Unbounded, n: usize) {
+    use crate::orchestration::until_stopped as us;
+    let waiting = Instant::now();
+    while window_verdicts(&u.run_dir)
+        .iter()
+        .filter(|w| w.verdict == us::CONTINUE)
+        .count()
+        < n
+    {
+        assert!(
+            waiting.elapsed() < Duration::from_secs(30) && !u.capture.is_finished(),
+            "{:?}",
+            window_verdicts(&u.run_dir)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// DEC-16: an autostarted run goes on only while its standing approval is in force: revoked,
+/// it ends in order at its next window boundary — every window held, the windows journal sealed
+/// complete.
+#[test]
+fn dec16_an_autostarted_capture_ends_in_order_once_its_approval_ends() {
+    use crate::orchestration::{autostart as auto, until_stopped as us};
+    let u = unbounded_capture("revoked", None, None, true);
+    held_windows(&u, 1);
+    auto::record(
+        &u.project,
+        &auto::Event::Revoked {
+            revoked_unix_s: unix_now_s().unwrap(),
+        },
+    )
+    .unwrap();
+    let result = u.capture.join().unwrap();
+    u.server.join().unwrap();
+    assert_eq!(
+        result,
+        Err(format!("MARKET_CAPTURE_INCOMPLETE: {}", auto::ENDED))
+    );
+    let all = window_verdicts(&u.run_dir);
+    assert!(all.iter().all(|w| w.verdict == us::CONTINUE), "{all:?}");
+    let chain =
+        crate::storage::segments::verify_chain(&u.run_dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    assert!(chain.sealed && chain.complete, "{chain:?}");
+    let _ = fs::remove_dir_all(&u.root);
+}
+
+/// DEC-16: a HALT of an autostarted run suspends its standing approval — no further autostart
+/// until the operator grants again.
+#[test]
+fn dec16_an_autostarted_capture_that_halts_suspends_its_approval() {
+    use crate::orchestration::{autostart as auto, provider_evidence as pe};
+    let u = unbounded_capture("suspend", None, None, true);
+    held_windows(&u, 1);
+    fs::remove_dir_all(u.project.join(pe::STORE)).unwrap();
+    assert_eq!(
+        u.capture.join().unwrap(),
+        Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into())
+    );
+    u.server.join().unwrap();
+    assert_eq!(auto::current(&u.project), Ok(None));
+    let events = auto::events(&u.project).unwrap();
+    assert!(
+        matches!(events.last(), Some((_, auto::Event::Suspended { verdict, .. }))
+            if verdict == "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING"),
+        "{events:?}"
+    );
+    let _ = fs::remove_dir_all(&u.root);
+}
+
+/// DEC-16 (review H1): an unbounded capture's stop is its ordered end only with its drain
+/// complete, its ingress quiescent and nothing failed; otherwise the failure is the result and
+/// its windows journal is not complete. A fixed capture's operator stop stays as it was.
+#[test]
+fn dec16_an_ordered_end_needs_a_complete_drain_and_nothing_failed() {
+    use super::capture::{capture_end, ended_in_order};
+    let config = |duration: &str| {
+        MarketConfig::from_lookup(
+            &env_of(&[
+                ("P0_WS_URL", "ws://127.0.0.1:1"),
+                (
+                    "P0_PROGRAM_ID",
+                    darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+                ),
+                ("P0_MARKET_SOURCE", "logs"),
+                ("P0_MARKET_DURATION_SECS", duration),
+            ]),
+            unix_now_s().unwrap(),
+        )
+        .unwrap()
+    };
+    let (unbounded, fixed) = (config("until-stopped"), config("60"));
+    let ok = Ok(());
+    let stop = "OPERATOR_STOP";
+    let end = |cfg: &MarketConfig, write: Option<&str>, ingress: Option<&str>, drained: bool| {
+        capture_end(cfg, &ok, stop, true, write, ingress, drained)
+    };
+    assert_eq!(
+        end(&unbounded, None, None, true),
+        Err("MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP".into())
+    );
+    assert_eq!(
+        end(&unbounded, Some("disk full"), None, true),
+        Err("market evidence write failed: disk full".into())
+    );
+    assert_eq!(
+        end(&unbounded, None, Some("WSS_SESSION_FAILED"), true),
+        Err("MARKET_CAPTURE_INCOMPLETE: WSS_SESSION_FAILED".into())
+    );
+    assert_eq!(
+        end(&unbounded, None, None, false),
+        Err("MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE".into())
+    );
+    assert_eq!(
+        end(&fixed, Some("disk full"), None, false),
+        Err("MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP".into()),
+        "a fixed capture's stop is unchanged"
+    );
+    assert!(ended_in_order(stop, true, None, None, &ok));
+    assert!(ended_in_order(
+        crate::orchestration::autostart::MAX_RUNTIME,
+        true,
+        None,
+        None,
+        &ok
+    ));
+    assert!(!ended_in_order(stop, false, None, None, &ok));
+    assert!(!ended_in_order(stop, true, Some("w"), None, &ok));
+    assert!(!ended_in_order(stop, true, None, Some("i"), &ok));
+    assert!(!ended_in_order(
+        stop,
+        true,
+        None,
+        None,
+        &Err("NOT_QUIESCENT".into())
+    ));
+    assert!(!ended_in_order("UNTIL_STOPPED_HALT", true, None, None, &ok));
 }
 
 /// DEC-16: the unbounded StreamReady is an appended variant — a bounded one is encoded exactly as

@@ -881,8 +881,35 @@ pub fn horizon(s: &str) -> Result<Horizon, String> {
 
 /// The canonical horizon of an unbounded run with this window and runway.
 pub fn until_stopped(checkpoint: &str, minimum_runway: &str) -> Result<String, String> {
-    let spec = format!("{UNTIL_STOPPED}:{checkpoint}:{minimum_runway}");
-    horizon(&spec).map(|_| spec)
+    canonical(&format!("{UNTIL_STOPPED}:{checkpoint}:{minimum_runway}"))
+}
+
+/// DEC-16: the one text of a horizon the audited configuration binds (its text is part of the
+/// configuration hash): a fixed duration as given; an unbounded horizon with each duration in
+/// its largest exact unit (`until-stopped:3600s:24h` → `until-stopped:1h:1d`), so every
+/// spelling of the same horizon names the same configuration.
+pub fn canonical(s: &str) -> Result<String, String> {
+    match horizon(s)? {
+        Horizon::Fixed { .. } => Ok(s.to_string()),
+        Horizon::UntilStopped {
+            checkpoint_seconds,
+            minimum_runway_seconds,
+        } => Ok(format!(
+            "{UNTIL_STOPPED}:{}:{}",
+            duration_text(checkpoint_seconds),
+            duration_text(minimum_runway_seconds)
+        )),
+    }
+}
+
+/// Whole seconds in their largest exact unit (d, h, m, s).
+pub fn duration_text(seconds: u64) -> String {
+    for (unit, scale) in [("d", 86_400), ("h", 3_600), ("m", 60)] {
+        if seconds.is_multiple_of(scale) {
+            return format!("{}{unit}", seconds / scale);
+        }
+    }
+    format!("{seconds}s")
 }
 
 /// The one duration parser of Project_0 (operational config, MeasurementPlan, `p0ctl`):
@@ -2390,7 +2417,15 @@ mod tests {
                 minimum_runway_seconds: 86400
             })
         );
-        assert_eq!(until_stopped("1h", "24h").unwrap(), "until-stopped:1h:24h");
+        // DEC-16 (review M2): one canonical text per horizon.
+        assert_eq!(until_stopped("1h", "24h").unwrap(), "until-stopped:1h:1d");
+        assert_eq!(until_stopped("3600s", "1d").unwrap(), "until-stopped:1h:1d");
+        assert_eq!(
+            canonical("until-stopped:90s:150m").unwrap(),
+            "until-stopped:90s:150m"
+        );
+        assert_eq!(canonical("4h").unwrap(), "4h");
+        assert!(canonical("until-stopped:2h:1h").is_err());
         for (bad, code) in [
             (
                 "until-stopped:2h:1h",

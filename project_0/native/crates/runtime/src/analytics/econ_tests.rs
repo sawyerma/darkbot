@@ -5407,6 +5407,8 @@ fn dec16_an_unbounded_run_measures_its_windows_one_after_another() {
     assert!(sealed(&first));
     // The waiting evaluation opened window 2; one from window 1 now is late.
     assert_eq!(w.evaluation_counts.iter().sum::<u64>(), 1);
+    // The boundary instant belongs to window 1 only.
+    assert!(!w.in_window(1 + width) && w.in_window(2 + width));
     w.accept(shadow_at(2_000_000_000)).unwrap();
     assert_eq!(
         w.evaluation_counts.iter().sum::<u64>(),
@@ -5414,14 +5416,6 @@ fn dec16_an_unbounded_run_measures_its_windows_one_after_another() {
         "never attributed back"
     );
     assert_ne!(w.reports.path, first);
-    let order = w
-        .accept(Evidence::WindowClosed {
-            window: 5,
-            boundary_ns: 9,
-            verdict: "CONTINUE".into(),
-        })
-        .unwrap_err();
-    assert!(order.starts_with("ECON_WINDOW_ORDER"), "{order}");
     w.accept(Evidence::WindowClosed {
         window: 2,
         boundary_ns: 1 + 2 * width,
@@ -5483,4 +5477,57 @@ fn dec16_an_unbounded_run_measures_its_windows_one_after_another() {
         "no run-level ECON report"
     );
     let _ = std::fs::remove_dir_all(run_dir);
+}
+
+/// DEC-16 (review M3): a window close out of order is never measured on — the run stops and
+/// ends incomplete with that reason, its journals sealed.
+#[test]
+fn dec16_a_window_close_out_of_order_stops_the_run_incomplete() {
+    let mut w = rolling_worker();
+    w.accept(Evidence::WindowClosed {
+        window: 2,
+        boundary_ns: 9,
+        verdict: "CONTINUE".into(),
+    })
+    .unwrap();
+    assert!(w.h.shared.abort.load(Ordering::Acquire));
+    let paths = w.h.cfg.paths();
+    let run_dir = w.h.cfg.run_dir.clone();
+    let end = w.finish_rolling().unwrap_err();
+    assert!(end.contains("ECON_WINDOW_ORDER: closed 2, open 1"), "{end}");
+    let path = paths.snapshot(ECON_WINDOWS_JOURNAL);
+    let chain = crate::storage::segments::verify_chain(&path).unwrap();
+    assert!(chain.sealed && !chain.complete, "{chain:?}");
+    let _ = std::fs::remove_dir_all(run_dir);
+}
+
+/// DEC-16 (review M3): control evidence is offered until its bound and never dropped silently —
+/// a full queue takes it once room appears, else it is counted as a drop and reported.
+#[test]
+fn dec16_control_evidence_reaches_the_analytics_or_is_reported() {
+    let (tx, rx) = bounded("test-econ-control", 4);
+    let h = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg: config(),
+    };
+    let window = |n: u64| Evidence::WindowClosed {
+        window: n,
+        boundary_ns: n,
+        verdict: "CONTINUE".into(),
+    };
+    while h.emit_control(window(0), Duration::ZERO) {}
+    assert_eq!(h.shared.drops.load(Ordering::Relaxed), 1);
+    assert!(!h.emit_control(window(1), Duration::from_millis(5)));
+    assert_eq!(h.shared.drops.load(Ordering::Relaxed), 2);
+    // The worker takes one item later and stays (a gone worker refuses everything).
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        let took = rx.try_pop().is_some();
+        (took, rx)
+    });
+    assert!(h.emit_control(window(2), Duration::from_secs(10)));
+    assert!(worker.join().unwrap().0);
+    assert_eq!(h.shared.drops.load(Ordering::Relaxed), 2);
 }
