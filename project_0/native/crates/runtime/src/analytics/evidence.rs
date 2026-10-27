@@ -243,6 +243,46 @@ pub enum OwnerEvidence {
     Diagnostic(String),
     /// F1: bounded simulation logs of a failed candidate.
     SimulationFailure(Box<super::record::SimulationFailureRecord>),
+    /// DEC-16: one window of an unbounded run.
+    Window(OwnerWindow),
+}
+
+/// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
+/// at a window's end (carried into the next window: no drain at a boundary).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerCounters {
+    /// Account updates applied.
+    pub updates: u64,
+    pub ingress_overflow: u64,
+    /// Candidates the owner allocated.
+    pub candidates: u64,
+    pub winner_watch_resolved: u64,
+    pub winner_watch_expired: u64,
+    /// In flight at the window's end.
+    pub winner_watch_open: u64,
+    pub remote_winner_queue: u64,
+    pub remote_projection_queue: u64,
+    pub detect_queue: u64,
+    pub lane_queue: u64,
+    pub blockhash_parked: u64,
+}
+
+/// DEC-16 (kind `OWNER_WINDOW`): one window of an unbounded Shadow owner run, the last event of
+/// the window's evidence segment; the run's last window carries how the run ended. Counters are
+/// the run's own, never reset: a window's counts are the difference to the previous record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerWindow {
+    pub window: u64,
+    pub started_unix_s: u64,
+    pub ended_unix_s: u64,
+    /// Nanoseconds of the window the owner was tradable-ready.
+    pub ready_ns: u64,
+    /// `None` at the window's boundary; the run's end (its stop or failure) for its last window.
+    pub end: Option<String>,
+    pub counters: OwnerCounters,
+}
+impl Payload for OwnerWindow {
+    const KIND: u16 = journal::kind::OWNER_WINDOW;
 }
 /// One encoded owner event: kind, payload version, bytes and frame provenance.
 struct Encoded {
@@ -278,6 +318,7 @@ impl OwnerEvidence {
                 Encoded::of(&OwnerDiagnostic { line: line.clone() }, None, None)
             }
             Self::SimulationFailure(v) => Encoded::of(v.as_ref(), v.rx_slot, None),
+            Self::Window(v) => Encoded::of(v, None, None),
         }
     }
 }

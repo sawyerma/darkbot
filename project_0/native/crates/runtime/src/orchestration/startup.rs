@@ -196,7 +196,45 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
             None => e.into(),
         });
     }
-    run_shadow(clock, None, admission.map_err(refused)?)
+    let admission = admission.map_err(refused)?;
+    let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
+    let rolling = admit_unbounded("shadow", &args, now_s)?;
+    run_shadow(clock, None, admission, rolling)
+}
+
+/// DEC-16: the admission of an unbounded run of `mode` (`P0_MEASUREMENT_DURATION`
+/// `until-stopped:W:R`) exactly as its start was admitted — its qualification bound to this
+/// launch's identity and executables; `None` for a bounded run.
+fn admit_unbounded(
+    mode: &str,
+    args: &[String],
+    now_s: u64,
+) -> Result<Option<super::until_stopped::Rolling>, String> {
+    let get = |k: &str| std::env::var(k).ok();
+    if !super::until_stopped::unbounded_duration(&get) {
+        return Ok(None);
+    }
+    let horizon = darkbot_solana::runtime_config::horizon(
+        &get("P0_MEASUREMENT_DURATION")
+            .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?,
+    )?;
+    let project =
+        get("P0_PROJECT_DIR").ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
+    let identity = super::boot_audit::launched_identity(
+        std::path::Path::new(&project),
+        super::boot_audit::SafetyFlags::from_env(),
+        args,
+        &get,
+    )?;
+    Ok(Some(super::boot_audit::rolling_admission(
+        &get,
+        mode,
+        horizon,
+        identity,
+        super::boot_audit::runtime_binary_identity()?,
+        &|| Ok(darkbot_solana::runtime_config::active().clone()),
+        now_s,
+    )?))
 }
 
 /// The Shadow owner of an econ run has ended. An owner error (e.g. an `OwnerTerminal` such as
@@ -258,28 +296,7 @@ fn run_econ4h(
     // DEC-16: an unbounded run admits itself again, exactly as its start was admitted (its
     // qualification bound to this identity and these executables).
     if cfg.unbounded && admission.is_ok() {
-        let get = |k: &str| std::env::var(k).ok();
-        let horizon = darkbot_solana::runtime_config::horizon(
-            &get("P0_MEASUREMENT_DURATION")
-                .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?,
-        )?;
-        let project = get("P0_PROJECT_DIR")
-            .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
-        let identity = super::boot_audit::launched_identity(
-            std::path::Path::new(&project),
-            super::boot_audit::SafetyFlags::from_env(),
-            args,
-            &get,
-        )?;
-        cfg.rolling = Some(super::boot_audit::rolling_admission(
-            &get,
-            "econ4h",
-            horizon,
-            identity,
-            super::boot_audit::runtime_binary_identity()?,
-            &|| Ok(darkbot_solana::runtime_config::active().clone()),
-            now_s,
-        )?);
+        cfg.rolling = admit_unbounded("econ4h", args, now_s)?;
     }
     let mut market = market_observer::MarketConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
     if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
@@ -287,7 +304,7 @@ fn run_econ4h(
     }
     let owner = admission.map(|admission| {
         move |handle: econ::Handle| {
-            run_shadow(clock, Some(handle), admission).map_err(|e| {
+            run_shadow(clock, Some(handle), admission, None).map_err(|e| {
                 let report = failure_report(e.as_ref());
                 crate::console::line(format!("C0_E1_SHADOW_FAILED category={report}"));
                 report

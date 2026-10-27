@@ -80,6 +80,16 @@ impl ShadowOwner {
                 return false;
             }
         }
+        // DEC-16: an unbounded Shadow run's windows (the first opens at the first tradable READY).
+        if self.windows.is_some() {
+            let ready = self.st.run_state().is_tradable() && !self.program_upgrade_latched;
+            #[cfg(feature = "crate_health")]
+            let ready = ready && self.threshold_ready;
+            if !self.until_stopped_tick(ready) {
+                return false;
+            }
+        }
+        let rolling = self.windows.is_some();
         if let Some(window) = &mut self.operational_window {
             let ready = self.st.run_state().is_tradable() && !self.program_upgrade_latched;
             #[cfg(feature = "crate_health")]
@@ -88,15 +98,22 @@ impl ShadowOwner {
                 self.clock.now_ns().saturating_sub(self.operational_start),
                 ready,
             ) {
-                Ok(true) => return false,
+                // An unbounded run keeps only the bootstrap budget: it ends by its stop.
+                Ok(true) if !rolling => return false,
                 Err(reason) => {
                     self.operational_failure = Some(reason);
                     return false;
                 }
-                Ok(false) => {}
+                Ok(_) => {}
             }
         }
-        if self.shutdown.is_requested() || (self.stop_poll)() {
+        if self.shutdown.is_requested() {
+            return false;
+        }
+        if (self.stop_poll)() {
+            if let Some(w) = &mut self.windows {
+                w.request_stop(crate::orchestration::until_stopped::OPERATOR_STOP);
+            }
             return false;
         }
         if self.halt.is_raised() {

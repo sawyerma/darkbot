@@ -91,6 +91,7 @@ mod sources;
 mod status;
 mod sweep;
 mod telemetry;
+mod windows;
 
 mod metrics;
 mod status_view;
@@ -322,6 +323,8 @@ pub(super) struct ShadowOwner {
     ledger: ShadowLedger,
     winner_tracker: WinnerTracker,
     evidence: OwnerEvidenceWriter,
+    /// DEC-16: the rolling windows of an unbounded Shadow run (`None`: a bounded run).
+    windows: Option<windows::OwnerWindows>,
     counts: [u64; 6],
     last_reported_update_total: u64,
     bootstrap_probe_done: bool,
@@ -358,8 +361,9 @@ pub(super) fn run_shadow(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
     admission: Option<super::boot_audit::NetworkAudit>,
+    rolling: Option<super::until_stopped::Rolling>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ, admission)?;
+    let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ, admission, rolling)?;
     let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
         loop {
             owner.evidence.check()?;
@@ -389,15 +393,34 @@ pub(super) fn run_shadow(
             }
             owner.telemetry();
         }
+        // DEC-16 (D-7): an unbounded Shadow run stopped in order drains its winner watches.
+        if owner
+            .windows
+            .as_ref()
+            .and_then(|w| w.stop_reason())
+            .is_some_and(super::until_stopped::ordered_reason)
+        {
+            owner.drain_watches()?;
+        }
         Ok(())
     })();
+    // DEC-16: a HALT or a failed window of an unbounded run is the run's result.
+    let outcome = outcome.and_then(|()| match owner.windows.as_ref().map(|w| w.result()) {
+        Some(Err(code)) => Err(Box::new(OwnerTerminal(code)) as Box<dyn std::error::Error>),
+        _ => Ok(()),
+    });
     if outcome.is_err() {
         owner.shutdown.request();
         owner.ingress_session.request();
     }
     // Review E4: the final status carries how the run ended (published by `finish`).
     owner.end_result = Some(match &outcome {
-        Ok(()) => "RUN_COMPLETE",
+        // An unbounded run ends by its stop, never by a completed duration.
+        Ok(()) => owner
+            .windows
+            .as_ref()
+            .and_then(|w| w.stop_reason())
+            .unwrap_or("RUN_COMPLETE"),
         Err(e) => super::startup::shadow_failure_code(e.as_ref()),
     });
     // Every exit, including errors, joins and drains the evidence writer.

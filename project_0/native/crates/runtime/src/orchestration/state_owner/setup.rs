@@ -91,23 +91,52 @@ fn configured_sources(
     })
 }
 
+/// DEC-16: an unbounded Shadow run runs only admitted with its rolling windows — never measured
+/// as one window (`get`: the run's environment; an econ run's windows are its supervisor's).
+pub(super) fn refuse_unadmitted_unbounded(
+    econ: bool,
+    rolling: bool,
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    if !econ && !rolling && crate::orchestration::until_stopped::unbounded_duration(get) {
+        return Err(format!(
+            "{}: an unbounded Shadow run starts only admitted with its rolling windows",
+            crate::analytics::measurement::UNTIL_STOPPED_GATED
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod dec16_admission_tests {
+    /// DEC-16: an unbounded Shadow start without its admitted rolling windows is refused before
+    /// anything is read; a bounded one, an admitted one and an econ run's owner are not.
+    #[test]
+    fn dec16_an_unadmitted_unbounded_shadow_start_is_refused() {
+        let unbounded =
+            |k: &str| (k == "P0_MEASUREMENT_DURATION").then(|| "until-stopped:1h:1d".to_string());
+        let bounded = |k: &str| (k == "P0_MEASUREMENT_DURATION").then(|| "4h".to_string());
+        let err = super::refuse_unadmitted_unbounded(false, false, &unbounded).unwrap_err();
+        assert!(
+            err.starts_with(crate::analytics::measurement::UNTIL_STOPPED_GATED),
+            "{err}"
+        );
+        assert!(super::refuse_unadmitted_unbounded(false, true, &unbounded).is_ok());
+        assert!(super::refuse_unadmitted_unbounded(true, false, &unbounded).is_ok());
+        assert!(super::refuse_unadmitted_unbounded(false, false, &bounded).is_ok());
+    }
+}
+
 pub(super) fn prepare(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
     admission: Option<crate::orchestration::boot_audit::NetworkAudit>,
+    rolling: Option<crate::orchestration::until_stopped::Rolling>,
 ) -> Prepared<impl FnMut() -> Result<SnapshotData, String>> {
     let operational_start = clock.now_ns();
-    // DEC-16: the Shadow runtime has no rolling windows yet (stage 3): an unbounded horizon is
-    // refused, never measured as one window.
-    if econ.is_none()
-        && crate::orchestration::until_stopped::unbounded_duration(&|k| std::env::var(k).ok())
-    {
-        return Err(format!(
-            "{}: the Shadow runtime has no rolling windows yet (DEC-16 stage 3)",
-            crate::analytics::measurement::UNTIL_STOPPED_GATED
-        )
-        .into());
-    }
+    refuse_unadmitted_unbounded(econ.is_some(), rolling.is_some(), &|k| {
+        std::env::var(k).ok()
+    })?;
     let stop_poll: fn() -> bool = if econ.is_none() {
         crate::orchestration::control::stop_requested
     } else {
@@ -692,16 +721,38 @@ pub(super) fn prepare(
     // (`<record>.mt0.p0j`), so runs sharing one directory never collide.
     let mt0_default = journal_path.with_extension("mt0.p0j");
     let census_journal = journal_path.clone();
-    let evidence = OwnerEvidenceWriter::start(
-        journal_path,
-        recovery_path,
-        crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
-        Duration::from_millis(
-            darkbot_solana::runtime_config::active()
-                .limits
-                .owner_evidence_sync_ms,
-        ),
-    )?;
+    let run_dir = journal_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
+    // DEC-16: an unbounded run's owner journals are segment chains (sealed per window and at
+    // the segment size); the MT0 journal follows the window the owner opened.
+    let segment_bytes = operational.econ_segment_mib * crate::storage::budget::MIB;
+    let mt0_window = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let evidence_sync = Duration::from_millis(
+        darkbot_solana::runtime_config::active()
+            .limits
+            .owner_evidence_sync_ms,
+    );
+    let evidence = match &rolling {
+        None => OwnerEvidenceWriter::start(
+            journal_path,
+            recovery_path,
+            crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
+            evidence_sync,
+        )?,
+        Some(_) => {
+            OwnerEvidenceWriter::start_rolling(
+                journal_path,
+                recovery_path,
+                crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
+                evidence_sync,
+                segment_bytes,
+                false,
+            )?
+            .0
+        }
+    };
 
     let counts = [0u64; 6];
     let last_reported_update_total = 0u64; // [FIX-81]
@@ -881,11 +932,21 @@ pub(super) fn prepare(
         Err(_) => mt0_default,
     };
     std::fs::create_dir_all(mt0_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let mt0_journal = match &rolling {
+        None => crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
+        Some(_) => crate::analytics::mt0_journal::Mt0Journal::rolling(
+            &mt0_path,
+            segment_bytes,
+            mt0_window.clone(),
+            false,
+        )?,
+    };
     let mt0_reporter = darkbot_common::mt0::spawn_reporter(
         Duration::from_secs(operational.mt0_interval_seconds),
         shutdown.clone(),
-        crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
+        mt0_journal,
     )?;
+    let windows = rolling.map(|r| super::windows::OwnerWindows::new(r, run_dir, mt0_window));
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
     let Fe04Owner {
@@ -1134,6 +1195,7 @@ pub(super) fn prepare(
         ledger,
         winner_tracker,
         evidence,
+        windows,
         counts,
         last_reported_update_total,
         bootstrap_probe_done,

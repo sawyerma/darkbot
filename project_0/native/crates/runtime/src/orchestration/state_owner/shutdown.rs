@@ -79,6 +79,18 @@ impl ShadowOwner {
         if let Some(line) = self.bootstrap_probe_line() {
             owner_log!(self, "{line}");
         }
+        // DEC-16: an unbounded run's open window ends with the run (its record carries the end).
+        let mut until_stopped = self.windows.take();
+        if let Some(w) = until_stopped.as_mut() {
+            let counters = self.owner_counters();
+            let now_s = (self.clock.unix_ns(self.clock.now_ns()) / 1_000_000_000) as u64;
+            w.end(
+                self.end_result.unwrap_or("RUN_END"),
+                now_s,
+                &mut self.evidence,
+                counters,
+            );
+        }
         // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
         let final_summary = self.ledger.finish();
         let evidence_result = self.evidence.finish(Some(final_summary));
@@ -98,12 +110,42 @@ impl ShadowOwner {
                 .shutdown_seconds,
         );
         let ingress_quiescent = self.ingress_session.stop_and_join(shutdown_budget);
-        if self.econ.is_some() || self.operational_window.is_some() {
-            self.remote.wait_stopped(shutdown_budget)?;
+        let remote = if self.econ.is_some() || self.operational_window.is_some() {
+            self.remote.wait_stopped(shutdown_budget)
+        } else {
+            Ok(())
+        };
+        // A bounded run ends on a failed worker stop here; an unbounded one seals its windows first.
+        if until_stopped.is_none() {
+            remote.clone()?;
         }
         // Final MT0 snapshot, seal and join; a lost snapshot makes the run's evidence INCOMPLETE.
         // It is reported last, so it never hides an evidence or operational failure.
         let mt0_complete = self.mt0_reporter.finish();
+        // DEC-16: the windows journal is complete only for an ordered end — workers stopped,
+        // ingress quiescent, every journal sealed (open winner watches are counted, D-7).
+        if let Some(w) = until_stopped {
+            let write_error = evidence_result
+                .as_ref()
+                .err()
+                .map(|e| e.0)
+                .or((!mt0_complete).then_some("MT0_EVIDENCE_INCOMPLETE"))
+                .or(observer.as_ref().err().map(|_| "SOURCE_OBSERVER_FAILED"));
+            let quiescent = if ingress_quiescent {
+                Ok(())
+            } else {
+                Err("INGRESS_NOT_QUIESCENT".to_string())
+            };
+            let in_order = crate::orchestration::until_stopped::ended_in_order(
+                w.reason(),
+                remote.is_ok(),
+                write_error,
+                None,
+                &quiescent,
+            );
+            w.finish(in_order);
+        }
+        remote?;
         evidence_result?;
         observer?;
         if let Some(reason) = self.operational_failure.take() {

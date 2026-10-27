@@ -575,6 +575,23 @@ pub fn unbounded_duration(get: &dyn Fn(&str) -> Option<String>) -> bool {
     })
 }
 
+/// DEC-16: the bytes an unbounded run's journals hold below `run_dir` (every `.p0j` file,
+/// continuation segments included): the data its rolling runway is measured by.
+pub fn run_bytes(run_dir: &Path) -> u64 {
+    std::fs::read_dir(run_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => run_bytes(&e.path()),
+            Ok(t) if t.is_file() && e.path().extension().is_some_and(|x| x == "p0j") => {
+                e.metadata().map_or(0, |m| m.len())
+            }
+            _ => 0,
+        })
+        .sum()
+}
+
 /// DEC-16: the crashed unbounded run an approved start continues (its run id), decided by the
 /// controller and admitted again by the capture.
 pub const ENV_RESUME: &str = "P0_UNTIL_STOPPED_RESUME";
@@ -1445,7 +1462,7 @@ pub(crate) mod tests {
     }
 
     /// FREE_ONLY evidence for the configured endpoint that covers `run`'s runway.
-    fn evidence_for(
+    pub(crate) fn evidence_for(
         c: &darkbot_solana::runtime_config::RuntimeConfig,
         run: &Binding,
         measured: f64,

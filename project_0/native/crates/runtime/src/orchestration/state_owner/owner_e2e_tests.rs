@@ -264,6 +264,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             Duration::from_millis(250),
         )
         .unwrap(),
+        windows: None,
         counts: [0; 6],
         last_reported_update_total: 0,
         bootstrap_probe_done: true,
@@ -4461,4 +4462,73 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         .apply_capability_control(4, request(4, "LIVE", "OFF"));
     assert_eq!(f.owner.sources.capabilities.live_requested, "OFF");
     cleanup(f);
+}
+
+/// DEC-16 (D-4, D-7): the real owner pass of an unbounded Shadow run opens its first window at
+/// the first tradable READY; the operator's stop ends the owner loop with that reason, the
+/// winner watches drain, and `finish` ends the run in order — the open window's record carries
+/// the stop and the windows journal is sealed complete.
+#[test]
+fn dec16_the_operator_stop_ends_an_unbounded_shadow_run_in_order() {
+    use crate::orchestration::until_stopped as us;
+    let mut f = fixture("dec16_stop");
+    let mut b = us::tests::binding(60, 120);
+    b.mode = "shadow".into();
+    let rolling = us::Rolling {
+        project: f.dir.clone(),
+        binding: b,
+        qualification_id: "0123456789abcdef".into(),
+        config: darkbot_solana::runtime_config::RuntimeConfig::default(),
+        max_runtime_seconds: None,
+        resume: None,
+        autostart: None,
+    };
+    let mt0 = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    f.owner.windows = Some(super::windows::OwnerWindows::new(
+        rolling,
+        f.dir.clone(),
+        mt0.clone(),
+    ));
+    assert!(f.owner.lifecycle(), "not ready: no window yet");
+    assert!(!f.dir.join(us::WINDOWS_JOURNAL).exists());
+    mt5_ready(&mut f, &[]);
+    f.owner.threshold_ready = true;
+    assert!(f.owner.lifecycle());
+    assert!(
+        f.dir.join(us::WINDOWS_JOURNAL).exists(),
+        "window 1 opens at the first ready"
+    );
+    assert_eq!(mt0.load(std::sync::atomic::Ordering::Acquire), 1);
+    f.owner.stop_poll = || true;
+    assert!(!f.owner.lifecycle(), "the stop ends the loop");
+    assert_eq!(
+        f.owner.windows.as_ref().and_then(|w| w.stop_reason()),
+        Some(us::OPERATOR_STOP)
+    );
+    f.owner.drain_watches().unwrap();
+    f.owner.end_result = Some(us::OPERATOR_STOP);
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut r =
+        crate::storage::segments::ChainReader::open(&dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    while r.next_frame().unwrap().is_some() {}
+    assert!(
+        r.sealed && r.complete,
+        "an ordered end completes the windows journal"
+    );
+    let mut e =
+        crate::storage::segments::ChainReader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut ends = Vec::new();
+    while let Some(frame) = e.next_frame().unwrap() {
+        if frame.kind == crate::analytics::journal::kind::OWNER_WINDOW {
+            ends.push(
+                frame
+                    .typed::<crate::analytics::evidence::OwnerWindow>()
+                    .unwrap()
+                    .end,
+            );
+        }
+    }
+    assert_eq!(ends, [Some(us::OPERATOR_STOP.to_string())]);
+    let _ = std::fs::remove_dir_all(dir);
 }
