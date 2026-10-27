@@ -65,9 +65,11 @@ try:
     journal=h.WORK/'run/bsc-runtime/journal'
     runs=lambda: sorted(p.name for p in journal.iterdir() if p.is_dir())
     status=lambda: subprocess.run([str(h.ROOT/'bsc/engine/target/debug/dbrec_show'),str(h.WORK/'run/bsc-runtime/status.dbrec')],capture_output=True,text=True).stdout
-    # The browser test left C2 BLOCKED (requested LIVE): SHADOW again, so its owner runs and checkpoints.
+    # The browser test left C2 and Strategy C BLOCKED (requested LIVE): SHADOW again, so the owner runs
+    # and checkpoints, and the restarted run is the one the strategy replay below takes.
     gen=int(subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources')],capture_output=True,text=True,check=True).stdout.splitlines()[0].split('=')[1])
     h.run('bsc','source','request','BSC_STATE_C2','SHADOW',str(gen),'e2e-c2-crash')
+    h.run('bsc','source','request','BSC_STRATEGY_C','SHADOW',str(gen+1),'e2e-strategy-crash')
     for _ in range(60):
         if 'state.checkpoint_writes' in status() and 'state.checkpoint_writes = 0' not in status(): break
         time.sleep(1)
@@ -80,6 +82,11 @@ try:
             restored=next((l for l in status().splitlines() if l.startswith('state.checkpoint_restore')),'')
             if 'RESTORED' in restored: break
     assert len(runs())>len(before) and 'RESTORED' in restored, (before, runs(), restored)
+    # Strategy C runs in the restarted run before it is stopped (the replay below needs its switch).
+    for _ in range(30):
+        if 'strategy.state = "SHADOW"' in status(): break
+        time.sleep(1)
+    assert 'strategy.state = "SHADOW"' in status(), status()
     print('PASS runtime crash: launchd restart, new run', runs()[-1], restored, flush=True)
     # Phase H: the finished run replays through Strategy C to exactly its journaled outputs.
     h.run('down')
