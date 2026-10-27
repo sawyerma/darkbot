@@ -829,7 +829,11 @@ mod tests {
         };
         let git = Git::new(PathBuf::from(&repo), "origin");
         let claim = consume(&git, &binding(8), "child").unwrap();
-        std::fs::write(Path::new(&repo).join("CONSUMED"), claim.consumed_commit()).unwrap();
+        // Written whole, then renamed: the parent never reads a created but
+        // still empty marker (a flake under load, Paket 8 regression).
+        let tmp = Path::new(&repo).join("CONSUMED.tmp");
+        std::fs::write(&tmp, claim.consumed_commit()).unwrap();
+        std::fs::rename(&tmp, Path::new(&repo).join("CONSUMED")).unwrap();
         std::thread::sleep(Duration::from_secs(60));
     }
 
