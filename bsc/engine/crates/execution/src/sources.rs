@@ -631,6 +631,24 @@ impl Generation {
         }
     }
 
+    /// Whether this generation (naming `request_id`) is that request's
+    /// change: the entity holds the requested mode, and for a venue, switch
+    /// or setting it was set by this request in this generation.
+    fn applied(&self, request_id: &str, entity: Entity, requested: Mode) -> bool {
+        let set_here = |by: &Option<SetBy>| {
+            by.as_ref()
+                .is_some_and(|b| b.request_id == request_id && b.generation == self.generation)
+        };
+        self.requested_of(entity) == requested
+            && match entity {
+                Entity::Venue(v) => set_here(&self.venue(v).set_by),
+                Entity::Switch(s) => set_here(&self.switch(s).set_by),
+                Entity::Runtime => set_here(&self.runtime.set_by),
+                Entity::BuyLimit => set_here(&self.buy_limit.set_by),
+                Entity::Source(_) | Entity::Component(_) => true,
+            }
+    }
+
     /// The requested mode of any entity.
     pub fn requested_of(&self, entity: Entity) -> Mode {
         match entity {
@@ -1227,7 +1245,8 @@ pub fn boot_session() -> Result<String, String> {
 }
 
 /// The account home of this process's real user from the user database
-/// (macOS directory services, Linux `/etc/passwd`), read once; never `$HOME`.
+/// (macOS directory services, Linux `/etc/passwd` only: an account known
+/// only through NSS is refused, fail-closed), read once; never `$HOME`.
 pub fn account_home() -> Result<PathBuf, String> {
     static HOME: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     HOME.get_or_init(|| {
@@ -1567,10 +1586,10 @@ impl Store {
     /// or a crash can only over-count, never under-count.
     pub fn consume_buy_attempt(&self, attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
         use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
-        // The G0.7 runner's attempt ID rule (the slot files are named by
-        // their number, the ID is only their content).
+        // The G0.7 runner's attempt ID rule, exactly (the slot files are
+        // named by their number, the ID is only their content).
         if !(1..=128).contains(&attempt_id.len())
-            || attempt_id.starts_with(['.', '-'])
+            || attempt_id.starts_with('.')
             || !attempt_id
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
@@ -1668,7 +1687,7 @@ impl Store {
         if current.request_id.as_deref() == Some(request_id) {
             // Crash recovery: the generation names this request, the receipt
             // was lost; only the same payload is that request.
-            if current.requested_of(entity) != requested {
+            if !current.applied(request_id, entity, requested) {
                 return Err("the request ID already belongs to another request".into());
             }
             receipt.outcome = "APPLIED";
@@ -1707,7 +1726,7 @@ impl Store {
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                     let now = self.current()?;
                     if now.request_id.as_deref() == Some(request_id)
-                        && now.requested_of(entity) == requested
+                        && now.applied(request_id, entity, requested)
                     {
                         receipt.outcome = "APPLIED";
                     }
@@ -2609,6 +2628,12 @@ mod tests {
                 .unwrap_err()
                 .contains("another request")
         );
+        // Another entity that happens to hold the mode is not this request.
+        assert!(
+            s.request("x", SwitchId::Arm, Mode::Disabled, 0, 2)
+                .unwrap_err()
+                .contains("another request")
+        );
         let r = s.request("x", SwitchId::Send, Mode::Enabled, 0, 3).unwrap();
         assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
         let outcomes: Vec<&str> = std::thread::scope(|scope| {
@@ -2636,11 +2661,28 @@ mod tests {
         s.request("bl", Entity::BuyLimit, Mode::PerDay(3), 0, 1)
             .unwrap();
         assert!(s.consume_buy_attempt("g07.attempt_1-a", 1).is_ok());
-        for bad in ["", ".x", "-x", "a/b", &"a".repeat(129)] {
+        assert!(s.consume_buy_attempt("-x", 1).is_ok(), "G0.7 takes it");
+        for bad in ["", ".x", "a/b", &"a".repeat(129)] {
             assert!(s.consume_buy_attempt(bad, 1).is_err(), "{bad}");
         }
         assert!(s.consume_buy_attempt(&"a".repeat(128), 1).is_ok());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review 27.10. pass 2: the legitimate path. The account home from
+    /// the user database is this test process's HOME (when set), and the
+    /// canonical owner state lies under it.
+    #[test]
+    fn the_canonical_state_is_under_the_account_home() {
+        let home = account_home().unwrap();
+        assert!(home.is_absolute() && home.is_dir(), "{}", home.display());
+        if let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+            assert_eq!(PathBuf::from(h), home);
+        }
+        assert_eq!(
+            canonical_state_dir().unwrap(),
+            home.join(".darkbot/run/bsc-sources")
+        );
     }
 
     /// A generation whose stored effective mode claims more than the rule

@@ -791,3 +791,19 @@ fn the_q5a_probe_refuses_without_the_send_switch() {
     assert!(!evidence.exists(), "no evidence file reserved");
     std::fs::remove_dir_all(&home).unwrap();
 }
+
+/// Plan 27.10.: the Q5A probe requires BSC_ECON_SEND before it reserves its
+/// evidence file or opens any connection (the process test above only
+/// reaches the HOME refusal).
+#[test]
+fn the_q5a_probe_requires_the_send_switch_before_any_egress() {
+    let source = include_str!("../src/bin/u5_tls_qualify.rs");
+    let run = &source[source.find("fn run()").unwrap()..];
+    let send = run.find("SwitchId::Send").unwrap();
+    for later in ["OpenOptions::new()", "run_provider(", "TlsEndpoint"] {
+        if let Some(at) = run.find(later) {
+            assert!(send < at, "{later}");
+        }
+    }
+    assert!(run[..send + 200].contains("nothing sent"));
+}
