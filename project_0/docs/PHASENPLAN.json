@@ -3,9 +3,9 @@
   "snapshot_date": "2026-10-16",
   "source": {
     "path": "project_0/docs/PHASENPLAN.md",
-    "git_blob_sha": "7c3ae1fa0b642fb2e322b851e68f9ed013f73f24",
+    "git_blob_sha": "e56469a2b85e7bd6ce3d706c0ac161d8f4973310",
     "as_of_code_commit": null,
-    "line_count": 5277,
+    "line_count": 5696,
     "authority": "Markdown is canonical; JSON is a compact navigation/status snapshot, not a substitute for evidence or a LIVE qualification.",
     "code_commit_lookup": "git log -1 --format=%H -- project_0/docs/evidence/OPERATIONS_CONFIG_20261014"
   },
@@ -18,7 +18,7 @@
   },
   "priority_contract": {
     "policy": "FIRST_REALIZED_PROFIT",
-    "interpretation": "Only delivery priority and the scope of one authorized safe pilot change. No original mandatory development item, performance research, acceptance or safety gate is deleted or made optional.",
+    "interpretation": "REV.1.0 user decision 2026-10-27: complete all previously mandatory final-product code, native controller/UI and offline CI before full economic/value-bearing tests. Earlier first-pilot-before-full-build priority is superseded only as to order; all safety gates remain. REV.2.0/3.0 cover only additional non-mandatory K optimizations with evidenced benefit.",
     "financial_target": "Earliest evidenced positive CUMULATIVE REALIZED NET PNL after fees, tips, failed attempts, capital/asset exit and previous own losses; profitability never guaranteed.",
     "initial_scope": "One qualified funding/execution class, one wallet, persistently reserved single-flight attempt, explicit separate user authorization, immediate auto-HALT.",
     "same_core": "Reuse current Project_0 Rust State/Health/Sizing/Economics/Builder/Submission/Reconciliation. No second execution engine, parallel verifier or strategy rewrite.",
@@ -338,5 +338,12 @@
     "phase_gate": "JFI_01_TO_05_OPEN",
     "reference": "PHASENPLAN.md lines 5263-5277",
     "jupiter_exception": "JFI-02: only route.rs /swap/v2/build HTTP wire encode/decode into concrete validated Rust types; no JSON behind the adapter; no other REST JSON APIs"
+  },
+  "revision_policy_20261027": {
+    "authority": "PHASENPLAN.md REV-markers inserted at relevant headings; BUGS.md remains code-status authority",
+    "rev_1_0": "All previously mandatory complete Project_0 product (full Race, Geyser, Jito, JIT, H0, C0-E1, P6-MT/M4, P7/p(win)/P4B, multi-wallet, frontend, DEC-01..16, safety, P8/P9 and all K capability investigations): finish code and offline acceptance before economic/real-money test; already implemented work unchanged",
+    "rev_2_0": "Only newly optional, measurement-justified enhancements such as further SIMD/PGO/route caches, optional speculative no-fee pre-execution sources",
+    "rev_3_0": "Only optional high-complexity productive specialized extensions, e.g. raw shred/validator, Direct TPU QUIC, fully local router and kernel/NIC work after proof of value",
+    "safety": "No real mainnet, paid provider, signing, submission, LIVE or long-duration permission created; external gates remain NOT_RUN/BLOCKED until authorized"
   }
 }
