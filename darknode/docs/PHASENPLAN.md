@@ -1,6 +1,6 @@
 # DarkNode – Verbindlicher Phasenplan (Planungsbaseline)
 
-**Version:** 0.6 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** P1/P2- und UX-Konsistenz, automatisierte Protobuf-Feldpflege, M1-Durchstich, P5-Betriebssicherheit (nur Planung, keine Implementierung)  
+**Version:** 0.7 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** P1/P2- und UX-Konsistenz, automatisierte Protobuf-Feldpflege, M1-Durchstich, P5-Betriebssicherheit (nur Planung, keine Implementierung)  
 **Scope:** `darknode/` mit eigenem Rust-Owner; ein vorhandenes DarkBot-Frontend/Gateway; Bitget als initiale einzige Exchange. Kein LIVE, kein Deploy und keine Implementation durch diesen Dokumentations-Commit.  
 **Maßstab:** Jede Phase ist erst fertig, wenn ihre Nachweise am festen Commit reproduzierbar sind. **P0–P10** sind Umsetzungsphasen **nach** dem vorgeschalteten Research-**GATE 1**.
 
@@ -8,7 +8,7 @@
 
 **[PLANUNGSABNAHME_V1.md](PLANUNGSABNAHME_V1.md)** ist die zentrale Vollständigkeits- und Evidenzmatrix. Vor Implementierung gelten zusätzlich die Detailverträge [P0 Research/Schnittstellen](P0_RESEARCH_UND_VERTRAEGE_V1.md), [P2–P4 Handover/Graph/Backtest](P2_P3_P4_DETAILVERTRAG_V1.md), [P5 Order-State/Crash](P5_ORDER_STATE_UND_CRASH_MATRIX_V1.md), [P6–P8 Demo/UI/Fault-Abnahme](P6_P7_P8_QUALIFIKATION_V1.md), [P9–P10 LIVE/Fleet](P9_P10_FREIGABE_UND_FLEET_V1.md) und [24/7-Betriebsrunbook](BETRIEBSRUNBOOK_V1.md). Bestehende **P1 V1.3, P5 V1.5, Wallet- und DN-PROTO-Verträge** bleiben maßgeblich für ihre jeweiligen Detailfragen. Die ergänzenden Verträge sind **SOLL/NOT_RUN**, keine bestätigten Laufzeitbelege. Keine Freigabe durch Dokumentation.
 
-**Verbindlicher Start-Host:** [APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md](APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md). M4/128GB MacBook zuerst; bewährte BSC-/Project_0-Rust-Techniken quellcodebasiert übernehmen, nicht deren Trading-/Latenzregeln. Mac mini/Server nur spätere Optionen.
+**Verbindliche M4-Architektur und Evidenz-Anrechnung:** [APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md V1.1](APPLE_SILICON_M4_HOST_UND_OPTIMIERUNG_V1.md). Auf **Mac16,6/M4 Max/128 GiB** gilt die belegte **BSC-C1.6-Topologie/Host-PASS**-Evidenz ohne doppelte Benchmarks. **Project_0 §P6-MT.12** liefert den festen Startentwurf: 1 Owner, Ingress getrennt, Remote-I/O 1–2 Threads, FAST-CPU 2, Writer 1, BULK nur bei Bedarf; QoS USER_INITIATED/UTILITY, keine P-/E-Affinitätsbehauptung, FAST-Ausbau erst bei Queue-p99-Verletzung **und** >70 % FAST-Last. Alle BSC/P0-Hardware-/Rust-Tests anrechnen; neu prüfen nur DarkNode-spezifische Bitget-Signal-/Intent-/Fill-/Stop-/Reconcile-/Unattended-Risiken. Mac mini/Server später.
 
 ## 0. Erfolgsdefinition und Reihenfolge
 
