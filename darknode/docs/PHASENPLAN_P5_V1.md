@@ -1,6 +1,6 @@
-# DarkNode – PHASENPLAN P5 V1.0: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
+# DarkNode – PHASENPLAN P5 V1.1: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
 
-**Stand:** 27.10.2026 · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
+**Stand:** 27.10.2026 · **Revision V1.1:** S0–S7 / P5-A13–A28 · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
 **Projektkonvention:** Im Gesamtplan [PHASENPLAN.md](PHASENPLAN.md) bezeichnet **P3 die Indikator-/Graph-Engine**; die private Bitget-Anbindung ist **P5**. Diese Datei konkretisiert ausschließlich P5, ohne die bestehenden P0–P10-IDs umzudeuten. P1 bleibt öffentliche Marktdaten/Rohtrade-Aufzeichnung und 1s-/MTF-Aggregation.
 
 ## 1. Verifizierter Dokumentationsstand vs. echter Nachweis
@@ -24,7 +24,14 @@ flowchart TB
     UI["Bestehendes DarkBot Protobuf-Gateway / Graphite UI"] -.-> CONTROL["Versionierte Steuerung/Parametrierung"]
     CONTROL -.-> OWNER
     INTENT --> OWNER["P5: EIN Rust Position-/Risk-/Order-Owner"]
-    OWNER --> GUARD{"P5 Gates: Account/Mode/Leverage, Budget, Fees, Stop, Position, Time/Feed"}
+    ACCOUNT["S0: Bot-Unterkonto/Isolated-Kapitalbasis"] -.-> OWNER
+    OWNER --> RISK["S1: Nominal/Menge und globale Exposure"]
+    RISK --> GUARD{"S2/S7: Hebel/Mode/Position/Liquidation/Feed/Clock"}
+    OWNER -.-> STOP["S3: Preset-SL + Position/Stop-Readback"]
+    STOP -.-> OWNER
+    OWNER -.-> HALT{"S5: ACTIVE / REDUCING / HALTED"}
+    HALT -->|"separat und begrenzt"| EMERG["EMERGENCY_RECOVERY: nur risikomindernder Close"]
+    EMERG -.-> REC
     GUARD -->|"NO / UNKNOWN"| HOLD["NO_ENTRY / RECOVERING"]
     GUARD -->|"nur nach separater Freigabe"| JOURNAL[("Durable Order-Intent + clientOid + Audit")]
     JOURNAL --> AUTH["Signer + API-Key Vault, serverseitig"]
@@ -85,6 +92,73 @@ Bitget UTA REST Signatur: `ACCESS-SIGN = Base64(HMAC-SHA256(secret, timestamp + 
 5. Key-Rechte nur in Infrastruktur; `ARM`/`LIVE` separate, auditierte, manuelle Autorisierungen, niemals automatisch durch positives Backtesting. Demo darf erst nach entsprechender Freigabe signierte Testorders ausführen; dieser Research-Auftrag sendet **keine** Order.
 6. Bei REST/WS-Unstimmigkeiten, Neustart, verlorener Orderantwort, Teilfill, Fremdorder oder Subaccount-Änderung zuerst REST-Snapshot + WS private-Stream korrelieren, lokale Reservationen gegen Exchange-Positionsautorität reconciliieren. Fehlt Evidenz: `UNKNOWN` / `RECOVERING`.
 
+
+## 5a. VERBINDLICH: Unabhängige Schutzschichten S0–S7 (P5 V1.1)
+
+**Abnahmestatus aller Schichten: NOT_RUN.** Jede Schicht muss unabhängig von erfolgreichem Backtest/Frontend/Exchange-ACK wirken. Keine Signatur, ARM-/LIVE-Freigabe oder Demo-Order durch diese Planung. Referenzverhalten aus Open Source begründet Prüfungen, ist kein Beweis für den Bitget-Account.
+
+### S0 – Kapitalbasis isolieren, aber keinen garantierten Verlustdeckel behaupten
+
+- Bevorzugt ein **reguläres, API-fähiges Bitget-Unterkonto** ausschließlich für DarkNode mit begrenztem Bestand; keine automatischen Transfers oder weiteren Trading-Owner. Bitgets API-Key-Dokumentation bestätigt eigenständige Unterkonto-Schlüssel, und die Futures-Bedingungen beschreiben voneinander getrennte Margin-Anforderungen der Unterkonten. **Nicht** mit Bitgets Spezialprodukt „bot trading sub-account“ gleichsetzen, für das eine Supportseite API-Trading ausschließt. Konto-Typ und tatsächliche Befugnisse im Demo verifizieren.
+- **Isolated Margin** nur wenn tatsächlich unterstützt/ausgelesen und explizit konfiguriert; Cross ohne separate Freigabe sperren. Keine Aussage „schlimmster Fall ist garantiert die hinterlegte Margin“: Gebühren, Slippage, Liquidationsmechanismen, Nachschusssituationen und kontobezogene Sonderregeln separat prüfen.
+- Key nur mit erforderlichen **Lese-/Trade-Rechten**, IP-Allowlist und **keinen Auszahlungs-, Transfer- oder Key-Admin-Rechten**, soweit Bitget die Berechtigungen granular anbietet; Management-Schreibrechte für Hebel/Mode nach Möglichkeit separater administrativer Pfad. **Kein Withdrawal-Recht verhindert nicht Verluste durch missbräuchliche Trades.**
+- Kapital- und Exposure-Limits pro Bot **und** konto-/UID-global, unabhängig von der Strategie, auch wenn später mehrere Bots denselben Kontostand teilen.
+
+### S1 – Nominal-/Mengen-Risiko VOR jeder Order
+
+- Harte Obergrenzen für **Nominalwert (Positions-Notional)**, Base-Menge, offene Gesamt-Exposure einschließlich noch nicht bestätigter und bereits übermittelter Orders, Zahl der Positionen, Orderrate, Tages-/Gesamtverlust. **Nicht** ausschließlich Margin als Risikomaß verwenden. Hebel beeinflusst Marginanforderung, darf die autorisierte Position niemals vergrößern.
+- Risk-Preflight aus verifizierten Instrumentdaten: Futures-Symbol/Status, Preis- und Mengenstep, Min/Max, Kontokapital/Reservations, Fees, Funding, Spread/Slippage, Public/Private-Feed- und Uhrqualität, Margin-/Hold-Mode, Stopverfügbarkeit. Preis × Menge mit Fixed-Point/Decimal und korrekter Futures-Einheit; keine Float-Rundungs-/Overflow-Bypässe.
+- Kein Node-Graph, GUI-Command, API-Reconnect oder Testmodus kann ein höheres Limit oder einen Risk-Bypass setzen. Jede Limitänderung versioniert, nachvollziehbar, separat autorisiert.
+
+### S2 – Falscher Hebel / Liquidationsprüfung
+
+1. Modus/Leverage/Position/Orders lesen. **Set-Leverage/Mode nur bei nachweislich FLAT und ohne offene oder UNKNOWN Orders**, mit gesonderter Zustimmung, nicht bei laufender Position.
+2. Reihenfolge: **`GET /api/v3/account/pre-set-leverage` → `POST /api/v3/account/set-leverage` → `GET /api/v3/account/settings`** (danach Ist-Werte ggf. zusätzlich in `/api/v3/position/current-position`). Hebel, `marginMode`, `holdMode`, `posSide`, `symbol` und tatsächlich aktiver Account müssen exakt zum Soll passen; sonst neue Entries `HALTED`.
+3. Nach jedem echten Fill/Partial-Fill und bei Margin-/Markpreisdrift: Bitget-Position mit `liquidationPrice`, `markPrice`, `mmr`, `leverage` und `marginMode` lesen. `liquidationPrice` ist laut Bitget **geschätzt**, 0/negativ hat eigene Bedeutung; kein garantierter Exit-Preis. Long-SL mit qualifiziertem Puffer **oberhalb**, Short-SL **unterhalb** der Liquidationsregion (inkl. Mark-/Last-Trigger, Kosten und Liquidations-/Slippage-Unsicherheit).
+4. Stop zu nah an Liquidation / Preis unbekannt / Hebel falsch → `NO_ENTRY`; kontrollierte risikomindernde Verkleinerung oder Schließung je freigegebener Notfallpolicy. Niemals ungeprüft Margin nachschießen.
+
+### S3 – Stop als serverseitig *bestätigter* Zustand
+
+- Bitget unterstützt für Futures **Preset-`stoploss`** bei `POST /api/v3/trade/place-order` mit `slTriggerBy`, `slOrderType`. Ziel: initialen Schutz mit Entry anfordern. **Keine Behauptung**, der Stop sei bereits bei jedem Fill garantiert wirksam oder skaliere automatisch bei Partial-Fill. Dies ist pro UTA-Mode/Entry-Typ ein verpflichtender Demo-Nachweis.
+- Nach **jedem Fill/Partial-Fill**: tatsächlich an der Börse vorhandenen Schutz aus privaten WS-/REST-Order-/Strategy-Order-Daten auslesen, verifizieren: Side, Position, Restmenge, Triggerbasis (Mark/Market), Triggerpreis, Markt-/Limit-Ausführung, Status. `STOP_REQUESTED` ≠ `STOP_CONFIRMED`. Deadline wird anhand gemessener Testdaten festgelegt.
+- Fehlender/gelöschter/unpassender Stop → `PROTECTION_UNKNOWN`, neue Entries sperren, eindeutig korrelierten Ersatz-Stop versuchen. Scheitert die Schutzherstellung: **kontrollierter Emergency-Close** nur über bestätigte Restposition und gültige Close-/reduce-only-Semantik (One-way versus Hedge unterscheiden). Scheitert dieser oder bleibt Sendestatus unbekannt → `EMERGENCY_UNKNOWN/HALTED` + persistenter Alarm; kein wiederholtes Market-Senden ohne Exchange-Reconciliation.
+- Nach Reconnect, Neustart, Fremdänderung und periodisch Stop-Existenz/mengenmäßig vollständigen Schutz erneut kontrollieren. Emergency-Marktorder ist keine Fill-/Verlustgarantie; Stop-Limit kann bei Gap nicht ausführen.
+
+### S4 – Signale, Cancel/Timeout, späte Fills, keine Doppelorder
+
+- Vor Send persistenter/fsycnter `clientOid`-Intent und vollständige Requestidentität. Getrennte States: `INTENT_COMMITTED/SENT/ACK/NEW/PARTIAL/FILLED/CANCEL_PENDING/CANCELED/REJECTED/UNKNOWN`. Ein lokales `FAILED` oder Timeout beweist **nicht**, dass Bitget nichts ausgeführt hat.
+- Timeout, Storno-Fehler, verlorenes ACK, Neustart → `UNKNOWN`; zuerst private Order-/Fill-/Positions-Reconciliation sowie `clientOid`-/`orderId`-Lookup, **niemals blind eine neue Order/Close-Order** senden.
+- Signal verschwindet nach Market-Send: laufende Order/Fills samt Stop weiter behandeln, nicht „nicht passiert“ annehmen. Bei offener Limit-Entry Storno anfordern und Rest-Fills bis zum nachweislichen Endstatus schützen.
+- **Hummingbot-Regressionsfall:** PositionExecutor/Hyperliquid Issue #7295 beschreibt `FAILED close → late FILL → duplicate close`. Identität einer fehlgeschlagenen Close-Order bis abschließend geklärtem Exchange-Zustand erhalten, späte Fills unabhängig vom bisherigen lokalen Fehlerstatus verbuchen; kein zweiter Close bei noch unbekanntem ersten. **Referenzbug, nicht bei Bitget schon gemessen.**
+
+### S5 – Getrennte Risk-States und autorisierte Notfallaktion
+
+| Zustand | Neue/erhöhende Orders | Storno/Readback | Risk-reduzierende Orders |
+|---|---|---|---|
+| `ACTIVE` | Nur nach vollem Risk-Gate | JA | JA |
+| `REDUCING` | **NEIN** | JA | JA, nur für bestätigte vorhandene Position/Menge |
+| `HALTED` | **NEIN** | JA | **Nicht über normalen Orderpfad** |
+| `EMERGENCY_RECOVERY` | **NEIN** | JA | Enger, journalisierter, deduplizierter Not-Exit nach bestätigter Menge |
+
+- NautilusTrader definiert `HALTED` als **Cancels/Queries-only**. Deshalb sind **„Handel stoppen“** und **„Position kontrolliert schließen“** getrennte, explizit auditierte Operationen. Emergency ist kein allgemeiner Risk-Bypass: kein Entry/Flip, maximal bestätigte Restposition, richtige One-way/Hedge-Semantik, Dedup/Requery vor Retry.
+- Stale Feed, Uhrdrift, Tagesverlust → mindestens `NO_ENTRY`; `REDUCING` nur wenn sichere Positionsautorität vorhanden; bei Unklarheit `HALTED/RECOVERING`. Rückkehr `ACTIVE` nur nach frischem Konto-/Position-/Stop-Readback, keine Freigabe allein durch Ping.
+- Not-Aus/Alarm im bestehenden DarkBot Frontend sowie **autonome** Watchdogs/outbox/externer Heartbeat gemäß P1.9; Browserausfall beeinträchtigt nicht Stopprüfung oder Recovery.
+
+### S6 – Börsen-Totmannschalter standardmäßig OFF
+
+- Bitget dokumentiert **`POST /api/v3/trade/countdown-cancel-all`**, `countdown=5..60` Sekunden (`0` deaktiviert), 1 Request/s/UID; **separate Freischaltung über Bitget Business Development nötig**. Gilt für UTA, nicht Classic.
+- Bitget schreibt **alle offenen Orders stornieren**. **Ungeklärt**, ob die konkret verwendeten Preset-TP/SL-/Strategy-Schutzorders mitbetroffen sind. Deshalb `DEFAULT=OFF`. Erst nach autorisiertem Demo-Test mit offenen Entries, TP/SL, Teilfills und ausbleibendem Heartbeat darf über Aktivierung entschieden werden. **Löscht es Schutzorders oder ist Abdeckung unklar, muss es OFF bleiben.**
+
+### S7 – Start-/Drift-Gate
+
+- Zu Boot, Reconnect und Konfigurationsänderungen prüfen: Unterkonto/UID/Keys/Allowlist, echte Exchange-/Account- und Hold-/Margin-Modi, Futures-Symbol/Precision, Ist/Soll-Hebel, Eigen-/Fremdorders und Fills, reale Position inkl. Liquidation, Schutzorders, Equity/Reservations und Public-/Private-Feed/Clock. Nicht passende oder fehlende Werte → **kein Entry**, aber bestehende Exposure weiterhin aktiv überwachen.
+- Änderungen in der Bitget-App und im Account trotz laufendem Bot erkannt/geloggt; keine auto-ARM-/auto-LIVE-Aktivierung, keine Scheinfreigabe aus lokalem State. Einzige autoritative Position bleibt Bitget, journalbasierter Restart-Reconcile verpflichtend.
+
+**Vertragliche Grenzen:** Unterkonto/Isolated mindern Kontorisiken, garantieren nicht einen exakten maximalen Endverlust; Key ohne Withdrawal verhindert keine verlustträchtigen Tradeaktionen; Liquidations-/Stop-Preise sowie Market-Exits garantieren keine Fills. Kein Demo-PASS ohne echten Bitget-Nachweis am qualifizierten Account/Mode.
+
+**Primärquellen und Referenzen:** [Bitget Futures-Konto-/Margin-Guide](https://www.bitget.com/docs/uta/best-practices-guide), [Bitget UTA Rest/Subaccount-Key](https://www.bitget.com/docs/uta/rest-api), [Bitget Futuresbedingungen/Unterkonto-Margin](https://www.bitget.com/support/articles/7700532076057), [Bitget Account/Set-Leverage](https://www.bitget.com/docs/catalog/account/account-settings), [Bitget Position/liquidationPrice](https://www.bitget.com/legacy-docs/uta/trade/Get-Position), [Bitget Place-Order/Preset-SL/countdown-cancel-all](https://www.bitget.com/docs/catalog/trading/order-management), [NautilusTrader Trading States](https://nautilustrader.io/docs/latest/concepts/execution/), [Nautilus Risk limits](https://nautilustrader.io/docs/rust-api-latest/src/nautilus_live/node/config.rs.html), [Freqtrade Stoploss und emergency_exit](https://docs.freqtrade.io/en/latest/stoploss/), [Hummingbot Issue #7295](https://github.com/hummingbot/hummingbot/issues/7295).
+
+
 ## 6. Referenzvergleich Open Source (keine produktive Dependency-Freigabe)
 
 | Projekt | Konkreter Recherche-Nutzen | Begrenzung für DarkNode |
@@ -112,6 +186,22 @@ Bitget UTA REST Signatur: `ACCESS-SIGN = Base64(HMAC-SHA256(secret, timestamp + 
 | P5-A10 | Secrets/IP-Allowlist, keine Withdrawal-Rechte, kein Frontend-Key, getrenntes Demo/Live, SBE-Hot-Path ohne interne JSON-Verträge | NOT_RUN |
 | P5-A11 | Echtes Risiko-/Kontobudget je Bot, globale UID-Exposures, Liquidations-/Funding-/Fee-Deltas, Kill-/Emergency-Policies | NOT_RUN |
 | P5-A12 | Demo-Reconciliation bis bestätigtem FLAT ohne unbestätigten Schutz-/Restorderzustand | NOT_RUN |
+| P5-A13 | API-fähiges echtes Bot-Unterkonto, getrennte Mittel, keine automatischen Transfers, Rechte/IP/Keys/Isolated dokumentiert; Verlustgrenzen ohne falsche Margin-Garantie | NOT_RUN |
+| P5-A14 | Nominal-/Mengen-/Bot-/UID-Limits vor jeder Order inklusive offener/UNKNOWN/Partial Exposure und Hebelabweichung – nie nur Margin; Graph/Gateway kann Risk nicht umgehen | NOT_RUN |
+| P5-A15 | FLAT ohne offene Orders: pre-set-leverage → set-leverage → settings/Position readback; falscher Hebel/Mode/PosSide blockiert Entry und meldet HALTED | NOT_RUN |
+| P5-A16 | Nach jedem Fill Bitget-Liquidationspreis/Markpreis/MMR/Leverage prüfen, konservativen Long-/Short-Stop-Puffer validieren; zu wenig Puffer → sichere Verkleinerung/Not-Exit statt stiller READY | NOT_RUN |
+| P5-A17 | Preset-SL am Entry in realer Demo für One-way/Hedge/isolated/cross/Market/Limit; Server-Schutzstatus und Trigger nach realem Fill nachgewiesen, nicht nur ACK | NOT_RUN |
+| P5-A18 | Teilfill: Stopmenge exakt gegen bestätigte Position verifiziert; Zeit bis wirksamen Schutz und mögliches ungeschütztes Intervall real gemessen, keine Sofortwirkung behauptet | NOT_RUN |
+| P5-A19 | Stop fehlt/wird abgelehnt/manuell gelöscht: UNKNOWN → qualifizierter Ersatzstop → wenn nötig kontrollierter Emergency-Close → FLAT/Reconcile oder UNKNOWN+Alarm, keine ungeprüften Wiederholungen | NOT_RUN |
+| P5-A20 | Periodischer und Reconnect-/Restart-Stop-Audit mit REST+Private WS erkennt falsche Menge/Trigger, externe Löschung/Neuanlage und Positionsänderung | NOT_RUN |
+| P5-A21 | Hummingbot-Race-Regression: FAILED Close/Timeout → Late Fill → kein zweiter Close; persistierte clientOid und echter Exchange-Status vor Retry | NOT_RUN |
+| P5-A22 | Signalende nach Market-Send bzw. Cancel-Pending bei Limit mit Late Partial Fill: ACK/Fills/Stop bleiben verfolgt; Cancelfehler bleibt UNKNOWN | NOT_RUN |
+| P5-A23 | ACTIVE/REDUCING/HALTED plus enger EMERGENCY_RECOVERY-Pfad: HALTED normale Orderdeny; Emergency reduziert nur belegte Restmenge, kein Entry/Flip/Bypass | NOT_RUN |
+| P5-A24 | GUI-HALT vs Emergency-Close getrennt; Browser/Gateway down beeinträchtigt autonomen Stop-Audit/Alarm nicht; ACTIVE nur nach vollem Readback | NOT_RUN |
+| P5-A25 | Bitget countdown-cancel-all erst bei genehmigtem Zugang und wenn Demo-Test bei Host-/Heartbeat-Ausfall Schutz-TP/SL/Strategy unangetastet belegt; sonst DEFAULT OFF | NOT_RUN |
+| P5-A26 | Kaltstart und Account-/App-Drift: Key/Account/Mode/Hebel/Symbol/Orders/Fills/Position/Stops/Clock/WS validiert, jede Abweichung blockiert Entry | NOT_RUN |
+| P5-A27 | Crash-/Netzsplit an Persistenz-/Send-/ACK-/Fill-Grenzen inkl. externer Orders und Positionsänderung: kein Phantom-FLAT, kein doppelter Fill/Close | NOT_RUN |
+| P5-A28 | Stop-Limit bei Preisgap, Mark/Market-Trigger, Funding, Liquidation, Gebühren/Slippage – fail-closed und keine behauptete Fill-Garantie | NOT_RUN |
 
 **Gate:** Keine der dokumentierten privaten P5-Endpunkte wurde im Nutzer-Account abgefragt oder beschriebenen Mutationsfälle ausgeführt. Dokumentationsinventar **VERIFIED_DOC**, funktionale Konto-/Order-Nachweise **NOT_RUN**. P5 bleibt NOT_RUN; Gate 1 bleibt OPEN. Kein SIGN/ARM/LIVE.
 
