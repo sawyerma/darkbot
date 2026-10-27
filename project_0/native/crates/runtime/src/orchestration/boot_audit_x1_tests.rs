@@ -653,8 +653,10 @@ fn dec07_a_raw_capture_is_admitted_only_to_its_market_flow() {
     .into();
     let current = || Ok(fixture_identity());
     let binary = || Ok("binary".to_string());
+    let config = || Ok(darkbot_solana::runtime_config::RuntimeConfig::default());
     let admit_at = |env: &HashMap<&str, String>, now: u64| {
-        market_admission_with(&|k| env.get(k).cloned(), &current, &binary, now)
+        market_admission_with(&|k| env.get(k).cloned(), &current, &binary, &config, now)
+            .map(|a| a.record)
     };
     let admit = |env: &HashMap<&str, String>| admit_at(env, 1002);
     // The capture's own clock: inside the record's TTL (1000..1060) and not before its approval.
@@ -693,12 +695,107 @@ fn dec07_a_raw_capture_is_admitted_only_to_its_market_flow() {
     assert_eq!(admit(&late), Err("BOOT_NETWORK_EXPIRED"));
     let other = || Ok("other-binary".to_string());
     assert_eq!(
-        market_admission_with(&|k| full.get(k).cloned(), &current, &other, 1002),
+        market_admission_with(&|k| full.get(k).cloned(), &current, &other, &config, 1002)
+            .map(|a| a.record),
         Err("BOOT_IDENTITY_DRIFT")
     );
     assert!(
         !path.with_extension("admitted").exists(),
         "a refusal consumes nothing"
     );
+    let _ = std::fs::remove_dir_all(d);
+}
+
+/// DEC-16: an unbounded raw capture (`until-stopped:W:R`, the capture `until-stopped`) is
+/// admitted only by `RunHorizon::admit` with its stored qualification bound to exactly it; the
+/// admission hands its windows their binding, qualification and configuration.
+#[test]
+fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
+    use crate::orchestration::until_stopped::{self as us, Part, PartState, Qualification};
+    let d = temp("market_until_stopped");
+    let n = network_record_fixture(vec![]);
+    let path = d.join("network.p0j");
+    let mut w = journal::Writer::create(&path).unwrap();
+    w.append_typed(journal::Provenance::default(), &n).unwrap();
+    w.seal(true).unwrap();
+    let binding = us::Binding {
+        mode: MARKET_MODE.into(),
+        identity: fixture_identity(),
+        binary_sha256: "binary".into(),
+        checkpoint_seconds: 60,
+        minimum_runway_seconds: 120,
+    };
+    let pass = Part {
+        state: PartState::Pass,
+        reason: "ok".into(),
+    };
+    let complete = Qualification {
+        schema: us::SCHEMA,
+        binding: binding.clone(),
+        runtime: pass.clone(),
+        sk07: pass.clone(),
+        capacity: pass.clone(),
+        capacity_need_bytes: Some(1),
+        provider_budget: pass.clone(),
+        provider_evidence: pass.clone(),
+        evidence_id: None,
+        evidence_valid_until_unix_s: Some(5_000),
+        qualified_at_unix_s: 1_000,
+    };
+    let id = us::put(&d, &complete).unwrap();
+    let full: HashMap<&str, String> = [
+        ("P0_MODE", "market".to_string()),
+        (ENV_NETWORK_AUDIT, path.display().to_string()),
+        (
+            ENV_NETWORK_AUDIT_TOKEN,
+            n.audit.readiness_token[..16].to_string(),
+        ),
+        (ENV_NETWORK_AUDIT_APPROVED_AT, "1001".into()),
+        ("P0_MEASUREMENT_DURATION", "until-stopped:1m:2m".into()),
+        ("P0_MARKET_DURATION_SECS", "until-stopped".into()),
+        ("P0_MARKET_SOURCE", "logs".into()),
+        ("P0_PROJECT_DIR", d.display().to_string()),
+        (ENV_UNTIL_STOPPED_QUALIFICATION, id.clone()),
+    ]
+    .into();
+    let current = || Ok(fixture_identity());
+    let binary = || Ok("binary".to_string());
+    let config = || Ok(darkbot_solana::runtime_config::RuntimeConfig::default());
+    let admit = |env: &HashMap<&str, String>| {
+        let admitted =
+            market_admission_with(&|k| env.get(k).cloned(), &current, &binary, &config, 1002);
+        let _ = std::fs::remove_file(path.with_extension("admitted"));
+        admitted
+    };
+    let rolling = admit(&full).unwrap().rolling.unwrap();
+    assert_eq!(
+        (&rolling.binding, rolling.qualification_id.as_str()),
+        (&binding, id.as_str())
+    );
+    assert_eq!(rolling.project, d);
+    let gated = crate::analytics::measurement::UNTIL_STOPPED_GATED;
+    let mut without = full.clone();
+    without.remove(ENV_UNTIL_STOPPED_QUALIFICATION);
+    assert_eq!(admit(&without).err(), Some(gated));
+    let mut fixed = full.clone();
+    fixed.insert("P0_MARKET_DURATION_SECS", "60".into());
+    assert_eq!(admit(&fixed).err(), Some("BOOT_IDENTITY_DRIFT"));
+    // Another window than the qualification's, and an open part: gated.
+    let mut other = full.clone();
+    other.insert("P0_MEASUREMENT_DURATION", "until-stopped:30s:2m".into());
+    assert_eq!(admit(&other).err(), Some(gated));
+    let mut open = complete.clone();
+    open.runtime = Part {
+        state: PartState::NotRun,
+        reason: "no rolling windows".into(),
+    };
+    let mut gaps = full.clone();
+    gaps.insert(ENV_UNTIL_STOPPED_QUALIFICATION, us::put(&d, &open).unwrap());
+    assert_eq!(admit(&gaps).err(), Some(gated));
+    // A fixed capture is admitted as before, without rolling windows.
+    let mut bounded = full.clone();
+    bounded.insert("P0_MEASUREMENT_DURATION", "1m".into());
+    bounded.insert("P0_MARKET_DURATION_SECS", "60".into());
+    assert!(admit(&bounded).unwrap().rolling.is_none());
     let _ = std::fs::remove_dir_all(d);
 }

@@ -418,3 +418,104 @@ fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
     assert!(err.contains("BOOT_PROVIDER_EVIDENCE_ID_COLLISION"), "{err}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// DEC-16: an unbounded raw-capture flow (`until-stopped:W:R`): the offline step records it, the
+/// start needs its qualification (missing or unknown: refused before any worker), and the start
+/// worker runs the capture `until-stopped` admitted with exactly that qualification.
+#[test]
+fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualification() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = std::env::temp_dir().join(format!("p0ctl_boot_unbounded_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("data")).unwrap();
+    let run = |args: &[&str], ctl: Option<&std::path::Path>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_p0ctl"));
+        cmd.env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("P0_MARKET_SOURCE", "logs")
+            .arg("--project")
+            .arg(&d)
+            .args(args);
+        if let Some(ctl) = ctl {
+            cmd.env("DARKBOT_CTL", ctl);
+        }
+        let out = cmd.output().unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let horizon = "until-stopped:1m:2m";
+    let (code, err) = run(
+        &[
+            "boot",
+            "offline",
+            "--flow",
+            "u1",
+            "--mode",
+            "market",
+            "--duration",
+            horizon,
+        ],
+        None,
+    );
+    assert!(code == 0 || code == 2, "{err}");
+    assert_eq!(
+        boot_control::status(&d, "u1").unwrap().flow.duration,
+        horizon
+    );
+    let start = |extra: &[&str]| {
+        let mut args = vec![
+            "boot",
+            "start",
+            "--flow",
+            "u1",
+            "--approve",
+            "0123456789abcdef",
+        ];
+        args.extend(extra);
+        run(&args, None)
+    };
+    let (code, err) = start(&[]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("UNTIL_STOPPED_QUALIFICATION_REQUIRED"),
+        "{err}"
+    );
+    let (code, err) = start(&["--qualification", "0123456789abcdef"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("UNTIL_STOPPED_QUALIFICATION_UNKNOWN"), "{err}");
+    // The start worker (internal `boot run`) with a recording launcher.
+    let calls = d.join("calls.log");
+    let ctl = d.join("ok-ctl");
+    std::fs::write(
+        &ctl,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$*\" \"$P0_MEASUREMENT_DURATION\" \"$P0_UNTIL_STOPPED_QUALIFICATION\" >> '{}'; echo 'Capture gestartet pid=1 dauer=until-stopped launch=l9'\n",
+            calls.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&ctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (code, err) = run(
+        &[
+            "boot",
+            "run",
+            "--flow",
+            "u1",
+            "--step",
+            "START",
+            "--approve",
+            "0123456789abcdef",
+            "--qualification",
+            "fedcba9876543210",
+        ],
+        Some(&ctl),
+    );
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap().trim(),
+        format!("capture start until-stopped|{horizon}|fedcba9876543210")
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}

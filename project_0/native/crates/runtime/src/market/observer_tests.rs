@@ -2986,3 +2986,172 @@ fn a01_source_health_reconnects_reach_the_capture_projection() {
         .unwrap();
     assert_eq!(s.transport.unwrap().reconnects, 2);
 }
+
+/// DEC-16: an unbounded raw capture (`until-stopped`, admitted with its rolling binding) against
+/// a loopback WebSocket rolls its windows: each boundary seals a market segment and journals the
+/// window's verdict; while its gates hold the capture goes on, and the first window that finds
+/// no valid provider evidence halts it — drained, sealed INCOMPLETE, the run result names the
+/// HALT. Ordered by the journal, never by timing: the evidence goes once a window held.
+#[test]
+fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_gate() {
+    use crate::orchestration::provider_evidence::{self as pe, ProviderEvidence, ProviderProof};
+    use crate::orchestration::until_stopped as us;
+    use std::time::{Duration, Instant};
+    use tungstenite::Message;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut ws = tungstenite::accept(stream).unwrap();
+        let (mut acked, mut slot_subscription, mut slot) = (0, None, 1_000u64);
+        loop {
+            match ws.read() {
+                Ok(Message::Text(text)) => {
+                    let request: Value = serde_json::from_str(&text).unwrap();
+                    let id = request["id"].as_u64().unwrap();
+                    if request["method"] == "slotSubscribe" {
+                        slot_subscription = Some(id);
+                    }
+                    acked += 1;
+                    let ack = json!({"jsonrpc": "2.0", "id": id, "result": id});
+                    if ws.send(Message::Text(ack.to_string())).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => break,
+            }
+            if let (2, Some(subscription)) = (acked, slot_subscription) {
+                slot += 1;
+                let notification = json!({"jsonrpc": "2.0", "method": "slotNotification",
+                    "params": {"subscription": subscription,
+                        "result": {"slot": slot, "parent": slot - 1, "root": slot - 2}}});
+                if ws.send(Message::Text(notification.to_string())).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let root = std::env::temp_dir().join(format!(
+        "dec16_capture_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s().unwrap())
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let config = darkbot_solana::runtime_config::RuntimeConfig {
+        rpc_endpoints: vec!["https://rpc.invalid".into()],
+        ..Default::default()
+    };
+    // Provider evidence covering the 2-s runway of 1-s windows, in the controller's store.
+    let evidence = ProviderEvidence {
+        providers: vec![ProviderProof {
+            policy: "FREE_ONLY".into(),
+            passed: true,
+            provider_binding: crate::analytics::journal::hex(
+                &solana_sdk::hash::hash(b"https://rpc.invalid").to_bytes(),
+            ),
+            measured_at_unix_s: unix_now_s().unwrap() as f64,
+            evidence_sha256: Some("a".repeat(64)),
+            allowed_rps: config.limits.rpc_rps as f64,
+            available_calls: config.limits.max_requests * 2,
+        }],
+        wss_provider_binding: None,
+        wss_free_only: true,
+        archive_qualified: false,
+        source_sha256: "s".into(),
+    };
+    let file = root.join("evidence.p0j");
+    crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
+    pe::import(&project, &file).unwrap();
+    let rolling = us::Rolling {
+        project: project.clone(),
+        binding: us::tests::binding(1, 2),
+        qualification_id: "0123456789abcdef".into(),
+        config,
+    };
+    let out = root.join("out").to_string_lossy().to_string();
+    let cfg = MarketConfig::from_lookup(
+        &env_of(&[
+            ("P0_WS_URL", url.as_str()),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+            ),
+            ("P0_MARKET_SOURCE", "logs"),
+            ("P0_MARKET_OUT_DIR", out.as_str()),
+            ("P0_MARKET_RUN_ID", "unbounded"),
+            ("P0_MARKET_DURATION_SECS", "until-stopped"),
+            ("P0_MARKET_READY_TIMEOUT_SECS", "10"),
+            ("P0_MARKET_DRAIN_TIMEOUT_SECS", "5"),
+            ("P0_MARKET_HEARTBEAT_SECS", "1"),
+        ]),
+        unix_now_s().unwrap(),
+    )
+    .unwrap();
+    let run_dir = cfg.run_dir.clone();
+    let capture = std::thread::spawn(move || {
+        super::capture::run_published(cfg, Clock::try_new().unwrap(), None, None, Some(rolling))
+    });
+    let windows = run_dir.join(us::WINDOWS_JOURNAL);
+    let verdicts = || -> Vec<us::WindowCheck> {
+        let Ok(mut r) = crate::storage::segments::ChainReader::open(&windows) else {
+            return Vec::new();
+        };
+        let mut seen = Vec::new();
+        while let Ok(Some(f)) = r.next_frame() {
+            if f.kind == crate::analytics::journal::kind::UNTIL_STOPPED_WINDOW {
+                seen.push(f.typed().unwrap());
+            }
+        }
+        seen
+    };
+    let waiting = Instant::now();
+    while verdicts().is_empty() {
+        assert!(
+            waiting.elapsed() < Duration::from_secs(30),
+            "no window closed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        verdicts()[0].verdict,
+        us::CONTINUE,
+        "{}",
+        verdicts()[0].detail
+    );
+    fs::remove_dir_all(project.join(pe::STORE)).unwrap();
+    let result = capture.join().unwrap();
+    server.join().unwrap();
+    assert_eq!(
+        result,
+        Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into())
+    );
+    let all = verdicts();
+    let (last, held) = all.split_last().unwrap();
+    assert_eq!(last.verdict, "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");
+    assert!(held.iter().all(|w| w.verdict == us::CONTINUE), "{all:?}");
+    for (i, w) in all.iter().enumerate() {
+        assert_eq!(w.window, i as u64 + 1);
+        // Each boundary sealed a market segment, re-verified by its window.
+        let sealed = w.sealed.as_ref().unwrap();
+        assert!(run_dir.join(&sealed.file).is_file(), "{}", sealed.file);
+    }
+    let chain = crate::storage::segments::verify_chain(&windows).unwrap();
+    assert!(
+        chain.sealed && !chain.complete,
+        "a HALT never completes the run: {chain:?}"
+    );
+    let market = crate::storage::segments::verify_chain(&run_dir.join(MARKET_JOURNAL)).unwrap();
+    assert!(market.segments as usize > all.len() && market.sealed && !market.complete);
+    let _ = fs::remove_dir_all(&root);
+}

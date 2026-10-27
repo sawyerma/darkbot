@@ -185,6 +185,16 @@ struct Pending {
 enum Msg {
     Frame(Pending),
     Seal(bool),
+    /// DEC-16: a rolling window's boundary — write the admitted frames, rotate, reply.
+    Rotate(std::sync::mpsc::SyncSender<io::Result<Rotated>>),
+}
+
+/// DEC-16: the segment a window boundary sealed and the journal's size after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rotated {
+    pub sealed: std::path::PathBuf,
+    pub root_sha256: [u8; 32],
+    pub bytes: u64,
 }
 
 /// Reserved bytes of one frame: the encoded payload plus its copy in the batch buffer (payload
@@ -390,6 +400,46 @@ impl MarketJournalWorker {
         }
     }
 
+    /// DEC-16: a rolling window's boundary: every frame admitted so far is written, the current
+    /// segment sealed and its successor linked; waits at most the stall budget for the writer.
+    pub fn rotate_window(&mut self) -> io::Result<Rotated> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let deadline = Instant::now()
+            .checked_add(self.stall_budget)
+            .ok_or_else(|| io::Error::other("MARKET_WRITER_STALL_INVALID"))?;
+        let (reply, answer) = std::sync::mpsc::sync_channel(1);
+        let tx = self
+            .tx
+            .as_ref()
+            .ok_or_else(|| io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?;
+        let mut msg = Msg::Rotate(reply);
+        loop {
+            match tx.try_push(msg) {
+                Ok(()) => break,
+                Err(ChannelError::Disconnected(_)) => {
+                    return Err(self
+                        .failed()
+                        .unwrap_or_else(|| io::Error::other("MARKET_WRITER_GONE")))
+                }
+                Err(ChannelError::Full(back)) => {
+                    msg = back;
+                    if Instant::now() >= deadline {
+                        return Err(io::Error::other("MARKET_WRITER_QUEUE_STALLED"));
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+        answer
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| {
+                self.failed()
+                    .unwrap_or_else(|| io::Error::other("MARKET_WRITER_ROTATE_STALLED"))
+            })?
+    }
+
     /// Writes every admitted frame, seals (manifest + sync) and stops the writer.
     pub fn seal(mut self, complete: bool) -> io::Result<Sealed> {
         self.finish(complete)
@@ -456,6 +506,7 @@ fn write_loop(
     let mut first_pending: Option<Instant> = None;
     let mut last_sync = Instant::now();
     let mut seal = None;
+    let mut rotate: Option<std::sync::mpsc::SyncSender<io::Result<Rotated>>> = None;
     #[cfg(test)]
     std::thread::sleep(cfg.hold_first);
     loop {
@@ -468,6 +519,7 @@ fn write_loop(
                 batch.push(f);
             }
             Ok(Some(Msg::Seal(complete))) => seal = Some(complete),
+            Ok(Some(Msg::Rotate(reply))) => rotate = Some(reply),
             Ok(None) => {}
             // Closed without a seal request: the owner vanished; seal INCOMPLETE.
             Err(()) => seal = Some(false),
@@ -483,11 +535,14 @@ fn write_loop(
             cfg.sync_interval,
         );
         let due = first_pending.is_some_and(|t| t.elapsed() >= cfg.flush_interval);
-        // Under backlog keep collecting from the queue up to the adaptive batch size.
-        if depth > 0 && batch.len() < batch_limit && seal.is_none() {
+        // Under backlog keep collecting from the queue up to the adaptive batch size (a window
+        // boundary arrives after every frame admitted before it: the queue is in order).
+        if depth > 0 && batch.len() < batch_limit && seal.is_none() && rotate.is_none() {
             continue;
         }
-        if !batch.is_empty() && (batch.len() >= cfg.batch_frames || due || seal.is_some()) {
+        if !batch.is_empty()
+            && (batch.len() >= cfg.batch_frames || due || seal.is_some() || rotate.is_some())
+        {
             #[cfg(test)]
             if cfg.fail_at_batch == Some(m.batches) {
                 return Err(io::Error::other("injected write failure"));
@@ -530,6 +585,25 @@ fn write_loop(
                 last_sync = Instant::now();
             }
             m.segments = writer.segments();
+        }
+        if let Some(reply) = rotate.take() {
+            // DEC-16: the window's frames are written; the boundary seals their segment.
+            let rotated = writer.rotate_now().map(|sealed| Rotated {
+                sealed: super::segments::segment_path(writer.first(), sealed.index),
+                root_sha256: sealed.root_sha256,
+                bytes: writer.bytes(),
+            });
+            let failed = rotated
+                .as_ref()
+                .err()
+                .map(|e| io::Error::new(e.kind(), e.to_string()));
+            m.syncs += 2;
+            last_sync = Instant::now();
+            m.segments = writer.segments();
+            let _ = reply.send(rotated);
+            if let Some(e) = failed {
+                return Err(e);
+            }
         }
         if seal.is_none() && last_sync.elapsed() >= cfg.sync_interval && !sync_due && m.frames > 0 {
             m.deferred_syncs += 1;
@@ -890,6 +964,55 @@ mod tests {
             }
         }
         assert_eq!(seqs, (0..200).collect::<Vec<_>>());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a window boundary writes every frame admitted before it into the segment it
+    /// seals (its reply names that segment and its sealed root) and the next frames into the
+    /// successor; the chain replays all of them in order.
+    #[test]
+    fn dec16_a_window_boundary_seals_exactly_the_frames_before_it() {
+        let d = dir("window");
+        let mut c = cfg(64 * MIB);
+        c.segment_bytes = 0;
+        c.stall_budget = Duration::from_secs(10);
+        let path = d.join("market.p0j");
+        let mut w = MarketJournalWorker::start(&path, c).unwrap();
+        let submit = |w: &mut MarketJournalWorker, range: std::ops::Range<u64>| {
+            for i in range {
+                let p = Provenance {
+                    source_seq: i,
+                    ..Default::default()
+                };
+                w.submit(p, &row(i)).unwrap();
+            }
+        };
+        submit(&mut w, 0..30);
+        let rotated = w.rotate_window().unwrap();
+        assert_eq!(rotated.sealed, path);
+        let mut sealed = journal::Reader::open(&rotated.sealed).unwrap();
+        let mut seqs = Vec::new();
+        while let Some(f) = sealed.next_frame().unwrap() {
+            if f.kind != journal::MANIFEST && f.kind != journal::kind::SEGMENT_NEXT {
+                seqs.push(f.provenance.source_seq);
+            }
+        }
+        assert_eq!(seqs, (0..30).collect::<Vec<_>>());
+        assert!(sealed.sealed && sealed.root() == rotated.root_sha256);
+        assert_eq!(
+            rotated.bytes,
+            std::fs::metadata(&path).unwrap().len()
+                + std::fs::metadata(super::super::segments::segment_path(&path, 2))
+                    .unwrap()
+                    .len()
+        );
+        submit(&mut w, 30..40);
+        w.seal(true).unwrap();
+        let chain = super::super::segments::verify_chain(&path).unwrap();
+        assert_eq!(
+            (chain.segments, chain.events, chain.complete),
+            (2, 40, true)
+        );
         std::fs::remove_dir_all(d).unwrap();
     }
 }

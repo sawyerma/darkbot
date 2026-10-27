@@ -268,6 +268,10 @@ impl SegmentedWriter {
     pub fn segments(&self) -> u32 {
         self.index
     }
+    /// The chain's first segment (its name).
+    pub fn first(&self) -> &Path {
+        &self.first
+    }
     /// Bytes of all segments written so far.
     pub fn bytes(&self) -> u64 {
         self.sealed_bytes + self.writer.position()

@@ -1759,7 +1759,7 @@ pub const BOOT_ADMISSION_CONSUMED: &str = "BOOT_ADMISSION_CONSUMED";
 /// a record BOOT_AUDIT_REQUIRED.
 pub fn market_admission(
     get: &dyn Fn(&str) -> Option<String>,
-) -> Result<NetworkAudit, &'static str> {
+) -> Result<MarketAdmission, &'static str> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "BOOT_CLOCK")?
@@ -1772,35 +1772,98 @@ pub fn market_admission(
             launched_identity(Path::new(&project), SafetyFlags::from_env(), &[], get)
         },
         &runtime_binary_identity,
+        &|| {
+            let horizon = get("P0_MEASUREMENT_DURATION")
+                .ok_or_else(|| "BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION".to_string())?;
+            start_config(MARKET_MODE, &[], &horizon, get).map(|r| r.config)
+        },
         now,
     )
 }
 
-/// `market_admission` with the identity and the executables of the running capture.
+/// DEC-16: the qualification an unbounded raw capture is admitted with (its id in the store).
+pub const ENV_UNTIL_STOPPED_QUALIFICATION: &str = "P0_UNTIL_STOPPED_QUALIFICATION";
+
+/// An admitted raw capture: its approved network record and, for an unbounded run, what its
+/// rolling windows check against.
+#[derive(Clone, Debug)]
+pub struct MarketAdmission {
+    pub record: NetworkAudit,
+    pub rolling: Option<super::until_stopped::Rolling>,
+}
+
+/// `market_admission` with the identity, the executables and the configuration of the running
+/// capture. DEC-16: an unbounded horizon (`until-stopped:W:R`, the capture `until-stopped`) is
+/// admitted only by `RunHorizon::admit` with its qualification
+/// (`P0_UNTIL_STOPPED_QUALIFICATION`) bound to exactly this capture.
 pub(crate) fn market_admission_with(
     get: &dyn Fn(&str) -> Option<String>,
     current: &dyn Fn() -> Result<AuditedIdentity, String>,
     binary: &dyn Fn() -> Result<String, String>,
+    config: &dyn Fn() -> Result<darkbot_solana::runtime_config::RuntimeConfig, String>,
     now: u64,
-) -> Result<NetworkAudit, &'static str> {
+) -> Result<MarketAdmission, &'static str> {
+    use darkbot_solana::runtime_config::{horizon, Horizon, UNTIL_STOPPED};
     if get("P0_MODE").as_deref() != Some(MARKET_MODE)
         || get(ENV_NETWORK_AUDIT).is_none_or(|v| v.is_empty())
     {
         return Err(BOOT_AUDIT_REQUIRED);
     }
     let audited = get("P0_MEASUREMENT_DURATION").ok_or(BOOT_AUDIT_REQUIRED)?;
-    let seconds = darkbot_solana::runtime_config::duration_seconds(&audited)
-        .map_err(|_| BOOT_AUDIT_REQUIRED)?;
-    if get("P0_MARKET_DURATION_SECS").and_then(|v| v.parse::<u64>().ok()) != Some(seconds) {
+    let horizon = horizon(&audited).map_err(|_| BOOT_AUDIT_REQUIRED)?;
+    let market = get("P0_MARKET_DURATION_SECS");
+    let same = match horizon {
+        Horizon::Fixed { seconds } => market.and_then(|v| v.parse::<u64>().ok()) == Some(seconds),
+        Horizon::UntilStopped { .. } => market.as_deref() == Some(UNTIL_STOPPED),
+    };
+    if !same {
         return Err("BOOT_IDENTITY_DRIFT");
     }
-    let record = admission_record(get, current, binary).map_err(|e| admission_code(&e))?;
+    let identity = current().map_err(|e| admission_code(&e))?;
+    let record =
+        admission_record(get, &|| Ok(identity.clone()), binary).map_err(|e| admission_code(&e))?;
     let approved_at = get(ENV_NETWORK_AUDIT_APPROVED_AT)
         .and_then(|v| v.parse::<u64>().ok())
         .ok_or(BOOT_AUDIT_REQUIRED)?;
     if approved_at > now || !record.within_ttl(now) {
         return Err("BOOT_NETWORK_EXPIRED");
     }
+    let rolling = match horizon {
+        Horizon::Fixed { .. } => None,
+        Horizon::UntilStopped {
+            checkpoint_seconds,
+            minimum_runway_seconds,
+        } => {
+            let gated = crate::analytics::measurement::UNTIL_STOPPED_GATED;
+            let refuse = |why: String| {
+                crate::console::line(format!("{gated}: {why}"));
+                gated
+            };
+            let id = get(ENV_UNTIL_STOPPED_QUALIFICATION)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| {
+                    refuse("no qualification (P0_UNTIL_STOPPED_QUALIFICATION)".into())
+                })?;
+            let project = PathBuf::from(get("P0_PROJECT_DIR").ok_or(BOOT_AUDIT_REQUIRED)?);
+            let q = super::until_stopped::get(&project, &id).map_err(refuse)?;
+            let binding = super::until_stopped::Binding {
+                mode: MARKET_MODE.into(),
+                identity,
+                binary_sha256: binary().map_err(|e| admission_code(&e))?,
+                checkpoint_seconds,
+                minimum_runway_seconds,
+            };
+            crate::analytics::measurement::RunHorizon::of(horizon)
+                .admit(Some(&q), &binding, now)
+                .map_err(refuse)?;
+            Some(super::until_stopped::Rolling {
+                project,
+                binding,
+                qualification_id: id,
+                config: config().map_err(|_| "BOOT_IDENTITY_DRIFT")?,
+            })
+        }
+    };
     // Once: the approval is consumed beside its record before any read (a relaunch of the same
     // job, or its values copied, is refused).
     let path = std::path::PathBuf::from(get(ENV_NETWORK_AUDIT).ok_or(BOOT_AUDIT_REQUIRED)?);
@@ -1821,7 +1884,7 @@ pub(crate) fn market_admission_with(
         .write_all(format!("pid={} admitted_unix_s={now}\n", std::process::id()).as_bytes())
         .and_then(|()| marker.sync_all())
         .map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
-    Ok(record)
+    Ok(MarketAdmission { record, rolling })
 }
 
 /// The same identity seen from the runtime (X1): `p0ctl` next to the running executable.

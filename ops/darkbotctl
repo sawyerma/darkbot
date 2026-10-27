@@ -236,7 +236,8 @@ write_capture_plist() {
   # the boot admission of the approved record the capture admits itself to (DEC-07).
   for k in P0_WS_URL P0_MARKET_READY_TIMEOUT_SECS P0_REPORT_MIN_INTERVAL_MS \
            P0_MODE P0_MEASUREMENT_DURATION P0_PROJECT_DIR \
-           P0_NETWORK_AUDIT P0_NETWORK_AUDIT_TOKEN P0_NETWORK_AUDIT_APPROVED_AT; do
+           P0_NETWORK_AUDIT P0_NETWORK_AUDIT_TOKEN P0_NETWORK_AUDIT_APPROVED_AT \
+           P0_UNTIL_STOPPED_QUALIFICATION; do
     if [ -n "${!k:-}" ]; then extra="$extra$(plist_env "$k" "${!k}")"$'\n'; fi
   done
   ( umask 077; cat > "$CAPTURE_PLIST" <<EOF

@@ -24,7 +24,7 @@ pub const SCHEMA: u32 = 1;
 pub const STORE: &str = "data/until_stopped";
 /// The modes whose runtime runs rolling windows (DEC-16 stage 2: econ4h and market; stage 3:
 /// the Shadow owner). A mode outside stays gated whatever else is qualified.
-pub const ROLLING_MODES: &[&str] = &[];
+pub const ROLLING_MODES: &[&str] = &["market"];
 /// The modes an unbounded run may be qualified for.
 pub const MODES: &[&str] = &["econ4h", "market", "shadow"];
 
@@ -429,7 +429,7 @@ pub fn qualify(
         Part::of(
             PartState::NotRun,
             format!(
-                "the {} runtime has no rolling windows yet (DEC-16 stage 2: econ4h, market; stage 3: shadow)",
+                "the {} runtime has no rolling windows yet (DEC-16 stage 2: econ4h; stage 3: shadow)",
                 binding.mode
             ),
         )
@@ -546,6 +546,16 @@ pub fn get(project: &Path, id: &str) -> Result<Qualification, String> {
         return Err("UNTIL_STOPPED_QUALIFICATION_CHANGED".into());
     }
     Ok(q)
+}
+
+/// What an admitted unbounded run's rolling windows check against: its project (the stores),
+/// its binding, its qualification and its resolved configuration.
+#[derive(Clone, Debug)]
+pub struct Rolling {
+    pub project: PathBuf,
+    pub binding: Binding,
+    pub qualification_id: String,
+    pub config: darkbot_solana::runtime_config::RuntimeConfig,
 }
 
 /// The verdict of a window whose gates all held.

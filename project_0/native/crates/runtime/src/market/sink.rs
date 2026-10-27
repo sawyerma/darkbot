@@ -158,6 +158,14 @@ impl JournalSink {
         self.rows += 1;
         Ok(())
     }
+    /// DEC-16: a rolling window's boundary: the admitted rows are written and their segment
+    /// sealed (`MarketJournalWorker::rotate_window`).
+    pub fn rotate_window(&mut self) -> std::io::Result<crate::storage::writer::Rotated> {
+        self.writer
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("MARKET_JOURNAL_ALREADY_FINISHED"))?
+            .rotate_window()
+    }
     /// SK-05 live lane state for the terminal (`None` once sealed).
     pub fn storage_status(&mut self) -> Option<crate::storage::writer::StorageStatus> {
         self.writer.as_mut().map(|w| w.status())

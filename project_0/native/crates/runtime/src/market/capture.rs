@@ -329,14 +329,15 @@ pub fn run_from_env_with(
     // DEC-07: a standalone raw capture reads Mainnet only admitted to its approved boot flow
     // (mode market); every other start (autostart, terminal, an unapproved command) ends here,
     // before any read.
-    if let Err(code) =
-        crate::orchestration::boot_audit::market_admission(&|k| std::env::var(k).ok())
-    {
-        return refuse_start(code, status_tap.as_ref());
-    }
+    let admitted =
+        match crate::orchestration::boot_audit::market_admission(&|k| std::env::var(k).ok()) {
+            Ok(admitted) => admitted,
+            Err(code) => return refuse_start(code, status_tap.as_ref()),
+        };
     let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), clock_unix_s(&clock))?;
     before_start(&cfg.run_id, &cfg.run_dir)?;
-    run_embedded_with(cfg, clock, None, status_tap)
+    // DEC-16: an unbounded capture rolls its windows under its admission.
+    run_published(cfg, clock, None, status_tap, admitted.rolling)
 }
 
 pub fn run(cfg: MarketConfig) -> Result<(), String> {
@@ -375,13 +376,23 @@ pub fn run_embedded_with(
     econ: Option<crate::analytics::econ::Handle>,
     status_tap: Option<StatusTap>,
 ) -> Result<(), String> {
+    run_published(cfg, clock, econ, status_tap, None)
+}
+
+pub(crate) fn run_published(
+    cfg: MarketConfig,
+    clock: Clock,
+    econ: Option<crate::analytics::econ::Handle>,
+    status_tap: Option<StatusTap>,
+    rolling: Option<crate::orchestration::until_stopped::Rolling>,
+) -> Result<(), String> {
     if let Some(tap) = &status_tap {
         tap.publish_operational(crate::status_tap::operational_snapshot());
         tap.publish_phase(|p| p.phase = CapturePhase::WaitingForStream);
     }
     // One terminal publication for every return path, including initialization and
     // evidence-write failures before the capture loop begins.
-    let result = run_embedded_inner(cfg, clock, econ, status_tap.clone());
+    let result = run_embedded_inner(cfg, clock, econ, status_tap.clone(), rolling);
     if let Some(tap) = &status_tap {
         tap.publish_phase(|p| {
             p.phase = CapturePhase::Ended;
@@ -396,11 +407,52 @@ pub fn run_embedded_with(
     result
 }
 
+/// DEC-16: one rolling window's boundary of an unbounded capture: its segment sealed, its
+/// provider window ended, its gates re-checked against the newest qualifying evidence.
+fn roll_window(
+    windows: &mut crate::orchestration::until_stopped::RollingWindows,
+    rolling: &crate::orchestration::until_stopped::Rolling,
+    sink: &mut JournalSink,
+    cfg: &MarketConfig,
+    now_s: u64,
+) -> Result<crate::orchestration::until_stopped::WindowCheck, String> {
+    use crate::orchestration::until_stopped as us;
+    let rotated = sink.rotate_window().map_err(|e| e.to_string())?;
+    let provider = darkbot_solana::provider::shared().roll_window();
+    let next_end = now_s.saturating_add(rolling.binding.checkpoint_seconds);
+    let check = windows
+        .close(
+            &rolling.config,
+            cfg.source.as_str(),
+            us::Measured {
+                now: now_s,
+                bytes: rotated.bytes,
+                run_volume: &cfg.run_dir,
+                environment: crate::storage::preflight::environment(&cfg.run_dir),
+                provider,
+                evidence: us::newest_evidence(
+                    &rolling.project,
+                    &rolling.config,
+                    &rolling.binding,
+                    next_end,
+                ),
+                sealed: Some((&rotated.sealed, rotated.root_sha256)),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    crate::console::line(format!(
+        "[UNTIL_STOPPED] window={} verdict={} {}",
+        check.window, check.verdict, check.detail
+    ));
+    Ok(check)
+}
+
 fn run_embedded_inner(
     cfg: MarketConfig,
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
     status_tap: Option<StatusTap>,
+    rolling: Option<crate::orchestration::until_stopped::Rolling>,
 ) -> Result<(), String> {
     let process_started = clock_unix_s(&clock);
     fs::create_dir_all(&cfg.run_dir)
@@ -517,6 +569,7 @@ fn run_embedded_inner(
     let mut last_flush = Instant::now();
     let mut stop_reason = "TIMER";
     let mut write_error: Option<String> = None;
+    let mut windows: Option<crate::orchestration::until_stopped::RollingWindows> = None;
 
     // ---- phase 1: CAPTURE (no RPC) ----
     loop {
@@ -572,6 +625,25 @@ fn run_embedded_inner(
         if window.is_some_and(|(_, cutoff)| clock.now_ns() >= cutoff) {
             break;
         }
+        // DEC-16: an unbounded capture's window boundary; its first HALT stops the capture.
+        if let (Some(w), Some(r)) = (windows.as_mut(), &rolling) {
+            let now_s = clock_unix_s(&clock);
+            if w.due(now_s) {
+                match roll_window(w, r, &mut sink, &cfg, now_s) {
+                    Ok(check) if check.verdict == crate::orchestration::until_stopped::CONTINUE => {
+                    }
+                    Ok(_) => {
+                        stop_reason = "UNTIL_STOPPED_HALT";
+                        break;
+                    }
+                    Err(e) => {
+                        write_error = Some(e);
+                        stop_reason = "WRITE_ERROR";
+                        break;
+                    }
+                }
+            }
+        }
         if ingress.as_ref().is_some_and(|t| t.is_finished()) {
             if let Err(e) = core.coverage(
                 &mut sink,
@@ -597,6 +669,18 @@ fn run_embedded_inner(
                 window = Some((t_rx_ns, cutoff));
                 ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
                 core.start_observation(t_rx_ns, cutoff);
+                if let Some(r) = &rolling {
+                    windows = Some(
+                        crate::orchestration::until_stopped::RollingWindows::start(
+                            &cfg.run_dir,
+                            r.binding.clone(),
+                            &r.qualification_id,
+                            clock_unix_s(&clock),
+                            0,
+                        )
+                        .map_err(|e| format!("UNTIL_STOPPED_WINDOWS: {e}"))?,
+                    );
+                }
                 if let Some(tap) = &status_tap {
                     tap.publish_phase(|p| {
                         p.phase = CapturePhase::Capture;
@@ -828,6 +912,13 @@ fn run_embedded_inner(
         finished_unix_s: clock_unix_s(&clock),
     };
     let (summary, report, write_error) = finish_capture(&cfg, &mut core, &mut sink, outcome)?;
+    // DEC-16: the windows journal ends with the capture (complete only for an operator stop of a
+    // run that never halted).
+    if let Some(w) = windows.take() {
+        if let Err(e) = w.finish(stop_reason == "OPERATOR_STOP") {
+            crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
+        }
+    }
     // D8: the session was asked to stop; its thread is joined within the drain budget. One still
     // alive afterwards is reported, never declared quiescent (the journal is INCOMPLETE then,
     // since its drain did not complete).

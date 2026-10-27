@@ -1066,9 +1066,9 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow|market] --duration D [-- OPERATIONAL_ARGS...]
+const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow|market] --duration D|until-stopped:W:R [-- OPERATIONAL_ARGS...]
   | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence RECORD_ID|FILE.p0j [--capture-source logs|transactions]
-  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence RECORD_ID|FILE.p0j]
+  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence RECORD_ID|FILE.p0j] [--qualification ID (an until-stopped flow)]
   | p0ctl boot evidence import FILE.p0j
   | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]
 The flow's duration, mode and operational arguments are fixed at its offline step and its capture
@@ -1148,8 +1148,14 @@ fn start_raw_capture(
     flow: &darkbot_runner::orchestration::boot_control::BootFlow,
     record: &str,
     token: &str,
+    qualification: Option<String>,
 ) -> Result<Option<String>, String> {
-    let seconds = darkbot_solana::runtime_config::duration_seconds(&flow.duration)?;
+    use darkbot_solana::runtime_config::{horizon, Horizon, UNTIL_STOPPED};
+    // DEC-16: an unbounded flow runs the capture until stopped, admitted with its qualification.
+    let length = match horizon(&flow.duration)? {
+        Horizon::Fixed { seconds } => seconds.to_string(),
+        Horizon::UntilStopped { .. } => UNTIL_STOPPED.to_string(),
+    };
     let ctl = std::env::var_os("DARKBOT_CTL")
         .map(PathBuf::from)
         .unwrap_or_else(|| project.join("ops/darkbotctl"));
@@ -1163,8 +1169,12 @@ fn start_raw_capture(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "BOOT_CLOCK")?
         .as_secs();
-    let out = Command::new(&ctl)
-        .args(["capture", "start", &seconds.to_string()])
+    let mut command = Command::new(&ctl);
+    if let Some(id) = &qualification {
+        command.env(boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION, id);
+    }
+    let out = command
+        .args(["capture", "start", &length])
         .env(boot_audit::ENV_NETWORK_AUDIT, record)
         .env(boot_audit::ENV_NETWORK_AUDIT_TOKEN, token)
         .env(
@@ -1233,7 +1243,8 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             // DEC-07: the run's duration is part of the audited configuration: the flow audits
             // and starts exactly `run start`'s resolution (X1 `start_config`).
             let duration = need("--duration")?;
-            darkbot_solana::runtime_config::duration_seconds(&duration)
+            // DEC-16: a fixed duration or an unbounded horizon until-stopped:W:R.
+            darkbot_solana::runtime_config::horizon(&duration)
                 .map_err(|e| format!("--duration {duration}: {e}"))?;
             let resolved =
                 boot_audit::start_config(mode, operational, &duration, &|k| std::env::var(k).ok())?;
@@ -1324,6 +1335,25 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                         ));
                     }
                 }
+                // DEC-16: an unbounded flow starts only with its qualification, admitted here
+                // first (the started runtime admits itself again before any read).
+                let horizon = darkbot_solana::runtime_config::horizon(&s.flow.duration)?;
+                if let darkbot_solana::runtime_config::Horizon::UntilStopped { .. } = horizon {
+                    let id = given(options, "--qualification")?.ok_or(
+                        "UNTIL_STOPPED_QUALIFICATION_REQUIRED: an unbounded flow starts with --qualification ID (p0ctl horizon qualify)",
+                    )?;
+                    let q = until_stopped::get(project, &id)?;
+                    let (binding, _) = until_stopped::binding(
+                        project,
+                        &s.flow.mode,
+                        &s.flow.operational,
+                        &s.flow.duration,
+                        &|k| std::env::var(k).ok(),
+                        &boot_audit::binary_identity_for,
+                    )?;
+                    RunHorizon::of(horizon).admit(Some(&q), &binding, unix_now()?)?;
+                    worker_args.extend(["--qualification".to_string(), id]);
+                }
                 let verify = given(options, "--chain-verify")?.unwrap_or_else(|| "off".into());
                 worker_args.extend(["--chain-verify".to_string(), verify.clone()]);
                 match verify.as_str() {
@@ -1397,7 +1427,48 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                         }
                     }
                     if raw {
-                        return start_raw_capture(project, flow, &record, &token);
+                        return start_raw_capture(
+                            project,
+                            flow,
+                            &record,
+                            &token,
+                            given(options, "--qualification")?,
+                        );
+                    }
+                    // DEC-16: an unbounded runtime run starts through run start --until-stopped
+                    // (RunHorizon::admit with its qualification).
+                    if let Some(rest) = flow
+                        .duration
+                        .strip_prefix(darkbot_solana::runtime_config::UNTIL_STOPPED)
+                        .and_then(|r| r.strip_prefix(':'))
+                    {
+                        let (checkpoint, runway) = rest
+                            .split_once(':')
+                            .ok_or("RUN_HORIZON_UNTIL_STOPPED_FORM")?;
+                        let mut call: Vec<String> = [
+                            "--mode",
+                            &flow.mode,
+                            "--until-stopped",
+                            "--checkpoint",
+                            checkpoint,
+                            "--minimum-runway",
+                            runway,
+                            "--network-audit",
+                            &record,
+                            "--mainnet-approved",
+                            &token,
+                        ]
+                        .map(String::from)
+                        .to_vec();
+                        if let Some(id) = given(options, "--qualification")? {
+                            call.extend(["--qualification".into(), id]);
+                        }
+                        call.push("--".into());
+                        call.extend(flow.operational.iter().cloned());
+                        return match run_start(project, &call)? {
+                            true => Ok(None),
+                            false => Err("RUN_ENDED_UNSUCCESSFUL".into()),
+                        };
                     }
                     let mode = RunMode::of(&["--mode".to_string(), flow.mode.clone()])?;
                     let now = std::time::SystemTime::now()
