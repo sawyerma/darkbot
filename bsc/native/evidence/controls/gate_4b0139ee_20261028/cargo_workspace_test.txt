@@ -1,0 +1,1910 @@
+   Compiling darkbot-bsc-execution v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution)
+   Compiling darkbot-bsc-qualification v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/qualification)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.26s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_execution-fdeb30842915b705)
+
+running 229 tests
+test acceptance_guard::tests::frozen_hash_is_unarmed_or_sha256 ... ok
+test attempt_authority::tests::claim_holder_child ... ignored, run only as the child process of the kill test
+test acceptance_guard::tests::sha256_vector ... ok
+test acceptance_guard::tests::legacy_hashes_bind_imports_and_native_inputs_alike ... ok
+test acceptance_guard::tests::the_guard_needs_the_consumed_attempt_authority_of_this_attempt_and_contract ... ok
+test acceptance_guard::tests::the_v5_runtime_needs_the_current_proof_of_the_bound_record_and_candidate ... ok
+test canonical_join::tests::the_class_is_decided_against_the_block_time_never_the_fetch ... ok
+test canonical_join::tests::only_the_reorg_window_is_kept ... ok
+test canonical_join::tests::launches_join_after_the_delay_and_a_reorg_takes_them_out_again ... ok
+test canonical_join::tests::the_fetch_lag_is_signed_and_unknown_without_a_clock ... ok
+test builder_policy::tests::the_oldest_source_bounds_the_age_and_imports_or_future_fetches_are_never_fresh ... ok
+test bundle_wire::tests::the_wire_bodies_are_golden_and_a_deviating_projection_is_refused ... ok
+test capture_quality::tests::a_native_source_lost_inside_the_window_is_not_clean ... ok
+test capture_quality::tests::an_empty_capture_window_is_not_clean ... ok
+test chain_follower::tests_follow::a_provider_side_refusal_is_retried_then_carried_with_its_reason ... ok
+test chain_follower::tests_follow::a_real_launch_block_through_the_whole_path ... ok
+test chain_follower::tests_follow::an_unverifiable_launch_transaction_never_stalls_the_follower ... ok
+test chain_follower::tests_follow::nonce_facts_of_the_watched_senders_at_due_blocks ... ok
+test capture_quality::tests::quality_and_acceptance_name_what_they_miss ... ok
+test chain_follower::tests_launches::a_classic_launch_of_the_second_pair_matches ... ok
+test chain_follower::tests_launches::a_four_launch_whose_derived_token_differs_is_a_mismatch ... ok
+test chain_follower::tests_follow::resume_after_the_last_applied_window ... ok
+test chain_follower::tests_launches::a_reverted_launch_call_is_reported_and_no_other_failed_transaction ... ok
+test chain_follower::tests_launches::block_ms_of_the_fixture_headers ... ok
+test chain_follower::tests_launches::failed_receipts_and_other_contracts_are_not_launches ... ok
+test chain_follower::tests_launches::flap_block_with_one_launch_and_no_external_buy ... ok
+test chain_follower::tests_launches::block_transactions_are_bound_cross_checked_and_verified ... ok
+test chain_follower::tests_launches::four_block_launch_has_token_and_creator_but_no_buy_count ... ok
+test chain_follower::tests_launches::malformed_words_are_unknown_never_guessed ... ok
+test chain_follower::tests_launches::flap_block_with_two_launches_and_one_external_buy ... ok
+test chain_follower::tests_launches::restriction_logs_are_terms_or_refused ... ok
+test chain_follower::tests_launches::venue_topics_are_the_keccak_of_their_signatures ... ok
+test chain_follower::tests_live::live_dataseed_follows_consecutive_canonical_blocks ... ignored, network: follows BSC Mainnet at bsc-dataseed.bnbchain.org for ~30 s
+test chain_follower::tests_wire::block_shapes ... ok
+test chain_follower::tests_wire::content_length_and_chunked_bodies ... ok
+test chain_follower::tests_wire::envelope_id_and_errors ... ok
+test chain_follower::tests_wire::framing_violations_are_typed ... ok
+test chain_follower::tests_wire::host_and_target_come_from_the_normalized_url ... ok
+test chain_follower::tests_wire::limits_and_endpoint_are_refused_before_any_connect ... ok
+test chain_follower::tests_wire::mix_hash_milliseconds ... ok
+test chain_follower::tests_wire::non_200_statuses_are_returned_without_their_body ... ok
+test chain_follower::tests_wire::quantities_and_data_are_canonical_lowercase ... ok
+test chain_follower::tests_wire::receipt_and_log_shapes ... ok
+test chain_follower::tests_wire::request_bodies_are_fixed_templates ... ok
+test chain_follower::tests_wire::request_is_one_post_with_host_and_length ... ok
+test chain_follower::tests_wire::size_bound_and_early_end ... ok
+test g04_census::tests::a_negative_fetch_lag_marks_the_local_clock_suspect ... ok
+test chain_follower::tests_launches::openfour_block_launch_has_token_creator_and_a_derived_pending_token ... ok
+test g04_census::tests::continuity_counts_the_connected_time_inside_the_window ... ok
+test chain_follower::tests_follow::follows_reorgs_gaps_and_faults_in_exact_order ... ok
+test g04_census::tests::criteria_inputs_count_connected_scope_and_actionable_per_venue ... ok
+test g04_census::tests::flap_trades_and_trade_gaps_are_counted ... ok
+test g04_census::tests::a_sealed_run_reads_with_its_own_payload_bound ... ok
+test g04_census::tests::four_verdicts_replay_from_the_canonical_record ... ok
+test g04_census::tests::openfour_launches_replay_with_the_four_family ... ok
+test g04_census::tests::percentiles_need_their_sample_count ... ok
+test g04_census::tests::per_venue_actionability_reverts_and_unincluded_sightings_are_counted ... ok
+test attempt_authority::tests::an_unreachable_or_lost_authority_blocks ... ok
+test attempt_authority::tests::a_git_child_holding_its_output_open_ends_at_the_deadline ... ok
+test g04_census::tests::ingress_drops_and_damaged_records_are_counted_and_invalid_time_is_not ... ok
+test g04_census::tests::running_unparsed_and_between_window_coverage_are_explicit ... ok
+test g04_census::tests::short_and_unknown_venue_launch_records_are_unparsed ... ok
+test g04_criteria::tests::a_criteria_file_is_strict ... ok
+test g04_criteria::tests::an_incomplete_campaign_is_not_evaluable ... ok
+test g04_criteria::tests::each_venue_is_rated_by_its_share_and_lead ... ok
+test g04_criteria::tests::the_committed_proposal_parses_and_evaluates_nothing ... ok
+test ingress::tests::a_flap_launch_is_the_c1_scope_and_nothing_else ... ok
+test g04_criteria::tests::the_verdict_record_round_trips ... ok
+test ingress::tests::first_full_sightings_and_venue_targets_are_told_apart ... ok
+test ingress::tests::an_unfrozen_openfour_preset_has_no_pending_token ... ok
+test ingress::tests::health_is_derived_from_the_counters_never_assumed ... ok
+test ingress::tests::memory_is_bounded_and_counters_cover_every_event ... ok
+test ingress::tests::the_first_verified_full_sighting_wins_and_duplicates_never_count_twice ... ok
+test ingress::tests::four_launches_are_sightings_of_their_venue ... ok
+test launch_path::tests::a_consistent_snapshot_checks_and_every_defect_fails ... ok
+test g04_census::tests::the_first_external_buy_of_a_launch_block_is_placed ... ok
+test launch_path::tests::drift_reports_a_changed_code_or_an_upgraded_proxy_and_fails_on_read_errors ... ok
+test launch_path::tests::contradictions_with_the_preflight_or_unbound_selectors_fail ... ok
+test launch_path::tests::only_an_unchanged_chain_yields_the_current_proof_of_the_bound_record ... ok
+test launch_path::tests::the_real_snapshot_of_the_frozen_a_dry_checks_against_its_preflight ... ok
+test paper::tests::a_created_identity_loads_privately_and_never_twice ... ok
+test paper::tests::the_sink_counts_handoffs_in_order ... ok
+test paper::tests::the_sink_module_has_no_transport ... ok
+test paper_exec::tests::a_configuration_that_cannot_admit_is_refused_at_arming ... ok
+test paper::tests::exposed_malformed_or_misplaced_identities_are_refused ... ok
+test paper::tests::a_path_back_into_the_repository_is_refused_before_creation ... ok
+test g04_census::tests::the_census_replays_classes_scope_coverage_and_window_states ... ok
+test attempt_authority::tests::a_panic_after_the_cas_keeps_it_consumed ... ok
+test paper_exec::tests::a_refused_sell_after_its_approval_can_still_close_the_position ... ok
+test paper_exec::tests::a_nonce_is_taken_again_only_when_nothing_was_disclosed ... ok
+test paper_exec::tests::a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch ... ok
+test paper_exec::tests::a_path_left_out_does_not_take_the_sender ... ok
+test paper_exec::tests::a_strategy_entry_and_exit_reach_the_sink ... ok
+test paper_exec::tests::no_module_with_paper_bytes_reaches_a_transport ... ok
+test paper_exec::tests::a_strategy_entry_needs_a_snapshot_and_room_in_its_cap ... ok
+test chain_follower::tests_follow::stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound ... ok
+test paper_exec::tests::no_exit_without_a_held_buy ... ok
+test qualification_capture::tests::a_clock_fault_is_unknown_never_time_zero ... ok
+test qualification_capture::tests::prearmed_capture_finishes_with_integrity_manifest ... ok
+test paper_exec::tests::refusals_are_counted_at_their_stage ... ok
+test paper_exec::tests::the_pool_keeps_one_session_cap_and_one_buy_per_token ... ok
+test paper_exec::tests::the_same_session_arms_again_with_a_new_fence ... ok
+test rpc_wire::tests::errors_never_show_the_endpoint ... ok
+test paper_exec::tests::c3_and_the_strategy_share_one_nonce_sequence ... ok
+test rpc_wire::tests::every_rpc_transport_posts_through_stdin ... ok
+test rpc_wire::tests::the_config_escapes_and_refuses_control_characters ... ok
+test attempt_authority::tests::a_kill_between_the_cas_and_the_barrier_keeps_it_consumed ... ok
+test runtime::exec::tests::a_runtime_pass_reaches_the_sink_and_the_journal ... ignored, the 1 ms transport start limit needs a release build
+test runtime::exec::tests::a_used_identity_is_refused ... ok
+test runtime::exec::tests::a_strategy_action_reaches_the_sink_only_when_armed ... ok
+test replay_proof::tests::a_clean_run_proves_its_replay_identity ... ok
+test runtime::state::tests::a_confirmed_nonce_fact_reconciles_the_quarantined_own_account ... ok
+test runtime::exec::tests::the_paper_path_waits_probes_and_fails_closed ... ok
+test rpc_wire::tests::neither_url_nor_request_reach_argv_and_a_failure_is_redacted ... ok
+test runtime::state::tests::switching_on_and_off_checkpoints_and_the_next_start_restores ... ok
+test runtime::state::tests::watched_accounts_parse_exactly ... ok
+test runtime::state::tests::without_watched_senders_the_state_is_coherent_on_an_anchored_head ... ok
+test replay_proof::tests::venues_requires_only_venue_addressed_launches ... ok
+test runtime::exec::tests::an_armed_path_takes_a_launch_to_the_sink_and_disarms_on_drift ... ok
+test chain_follower::tests_follow::a_gap_after_a_failed_reorg_starts_at_the_fork_point ... ok
+test runtime::tests::the_config_is_strict ... ok
+test attempt_authority::tests::a_no_op_push_never_counts_as_a_won_swap_and_claims_are_unique ... ok
+test runtime::state::tests::the_owner_follows_checkpoints_and_restores_its_window ... ok
+test runtime_journal::tests::a_budget_below_the_largest_record_is_refused ... ok
+test runtime_journal::tests::canonical_payloads_have_their_fixed_layout ... ok
+test runtime_journal::tests::every_four_verdict_byte_reads_back ... ok
+test runtime_journal::tests::every_venue_byte_reads_back ... ok
+test runtime_journal::tests::a_full_queue_loses_visibly_never_silently ... ok
+test runtime::tests::a_drifted_four_deployment_proves_no_token ... ok
+test runtime_journal::tests::the_capture_scope_keeps_what_it_names ... ok
+test runtime::tests::a_too_deep_reorg_never_counts_heights_before_the_window ... ok
+test runtime_journal::tests::a_failed_writer_is_reported_and_its_manifest_still_written ... ok
+test runtime_strategy::tests::a_launch_from_its_records_is_decided_and_entered ... ok
+test runtime_strategy::tests::a_refused_log_is_data_incomplete ... ok
+test runtime_strategy::tests::an_entry_is_placed_against_the_foreign_buys ... ok
+test runtime_journal::tests::ingress_drops_make_the_run_incomplete ... ok
+test runtime_strategy::tests::records_decode_to_their_inputs ... ok
+test attempt_authority::tests::concurrent_consumers_have_exactly_one_winner ... ok
+test runtime_strategy::tests::the_creator_policy_is_exact ... ok
+test runtime::tests::canonical_events_join_into_status_journal_and_census ... ok
+test runtime_strategy::tests::the_status_section_encodes ... ok
+test runtime_strategy::tests::the_untracked_reason_keeps_the_term ... ok
+test runtime_journal::tests::sightings_and_transitions_replay_in_order_with_their_payloads ... ok
+test replay_proof::tests::the_replay_holds_the_runtime_decisions ... ok
+test runtime_strategy::tests::the_action_takes_the_complete_blocks_curve ... ok
+test attempt_authority::tests::a_failed_return_push_is_settled_by_what_the_remote_holds ... ok
+test runtime_strategy::tests::only_frozen_gas_evidence_is_read ... ok
+test runtime_strategy::tests::a_paper_buy_replaces_its_shadow_position ... ok
+test runtime_strategy::tests::a_journaled_run_replays_exactly ... ok
+test sources::tests::a_generation_from_before_components_reads_with_them_off ... ok
+test sources::tests::a_lost_receipt_is_recovered_from_the_generation ... ok
+test sources::tests::a_missing_unreadable_or_tampered_state_refuses_every_switch ... ok
+test sources::tests::a_request_applies_with_its_generation_and_is_idempotent ... ok
+test sources::tests::a_stale_generation_is_refused_and_the_state_survives_a_restart ... ok
+test replay_proof::tests::a_counter_or_segment_that_does_not_replay_fails ... ok
+test sources::tests::a_live_reason_reads_the_live_switch_of_this_boot ... ok
+test sources::tests::a_replay_as_an_unchanged_source_is_not_the_request ... ok
+test sources::tests::the_buy_day_is_the_utc_calendar_day ... ok
+test sources::tests::a_tampered_generation_is_refused ... ok
+test sources::tests::the_canonical_state_is_under_the_account_home ... ok
+test sources::tests::a_switch_never_outlives_its_boot_session ... ok
+test sources::tests::init_puts_generation_zero_on_file_once ... ok
+test sources::tests::concurrent_writers_of_one_generation_have_one_winner ... ok
+test sources::tests::the_owner_never_makes_a_source_live ... ok
+test sources::tests::a_restart_disables_every_switch_and_keeps_the_modes ... ok
+test sources::tests::the_c2_component_is_switchable_and_never_operationally_live ... ok
+test sources::tests::receipts_are_recovered_only_for_the_same_request ... ok
+test sources::tests::concurrent_buy_attempts_never_exceed_the_limit ... ok
+test sources::tests::switch_requests_and_a_restart_race_on_the_generation ... ok
+test startup::tests::complete_startup_validates_and_loads_secrets_once_without_debug_leakage ... ok
+test startup::tests::configuration_fails_closed_on_chain_generation_endpoint_capacity_and_budget ... ok
+test startup::tests::generation_limits_are_rejected_for_all_four_startup_fields ... ok
+test attempt_authority::tests::only_one_checkout_or_host_ever_consumes_a_granted_authority ... ok
+test sources::tests::the_runtime_mode_is_off_initially_and_never_live ... ok
+test sources::tests::the_exec_component_is_paper_only_and_never_live ... ok
+test startup::tests::generation_revocation_invalidates_authorization_without_mutating_old_snapshot ... ok
+test startup::tests::independently_observed_nonce_funding_and_checkpoint_fail_closed ... ok
+test attempt_authority::tests::a_return_needs_this_claim_no_marker_and_a_clear_remote ... ok
+test startup::tests::slippage_boundaries_match_buy_policy ... ok
+test sources::tests::the_daily_limit_takes_the_runners_attempt_ids ... ok
+test startup::tests::the_session_cap_is_explicit_and_covers_one_intent ... ok
+test submission::release_tests::a_binding_reports_what_it_is_bound_to ... ok
+test submission::release_tests::a_release_over_bound_transports_reports_the_qualified_send_time ... ok
+test submission::release_tests::a_release_response_is_bound_to_its_request ... ok
+test startup::tests::provider_targets_are_built_only_from_validated_loaded_material ... ok
+test startup::tests::durable_fence_arms_once_and_every_restart_is_quarantined ... ok
+test startup::tests::missing_or_wrong_secret_never_arms_startup ... ok
+test startup::tests::revocation_and_cold_start_fence_are_serialized ... ok
+test submission::tls::qualification::tests::both_measured_provider_profiles_pass ... ok
+test submission::tls::qualification::tests::implementation_endpoint_policy_and_target_mismatches_fail_closed ... ok
+test submission::tls::qualification::tests::only_the_two_direct_builder_capabilities_can_inherit_q5a ... ok
+test submission::tls::qualification::tests::peer_generation_tls_cipher_and_alpn_mismatches_fail_closed ... ok
+test submission::release_tests::rotating_the_qualification_retires_the_transports_made_under_the_old_one ... ok
+test submission::tls::qualification::tests::q5a_identity_is_pinned_and_generation_is_nonzero ... ok
+test submission::release_tests::the_same_qualified_plan_over_plain_transports_stays_diagnostic ... ok
+test sources::tests::the_strategy_component_is_paper_only_and_never_live ... ok
+test startup::tests::terminal_generation_revokes_irreversibly_under_concurrency ... ok
+test venue_probe::tests::a_wrong_chain_fails_before_any_other_read ... ok
+test venue_probe::tests::a_matching_deployment_validates_with_the_witnessed_terms ... ok
+test venue_probe::tests::a_version_drift_is_observed_and_refused_by_validate ... ok
+test venue_probe::tests::an_implementation_change_is_observed_and_refused_by_validate ... ok
+test venue_probe::tests::live_dataseed_probe_of_the_current_deployment ... ignored, network: read-only probe of the Flap Portal at bsc-dataseed.bnbchain.org
+test venue_probe::tests::live_four_deployment_is_the_frozen_one ... ignored, network: read-only probe of the Four.meme contracts at bsc-dataseed.bnbchain.org
+test venue_probe::tests::only_the_canonical_abi_string_is_accepted ... ok
+test venue_probe::tests::the_frozen_selectors_and_slots_are_their_derivations ... ok
+test sources::tests::the_wallet_switches_are_independent_and_disabled_initially ... ok
+test wss::tests_live::live_publicnode_pending_transactions_verify ... ignored, network: subscribes to a public BSC WebSocket endpoint for ~20 s
+test wss::tests_session::configuration_is_refused_before_any_connect ... ok
+test venue_probe::tests::a_reorg_during_the_reads_or_a_missing_code_fails_closed ... ok
+test venue_probe::tests::every_state_read_is_pinned_and_nothing_falls_back_to_latest ... ok
+test venue_probe::tests::an_rpc_error_fails_closed_and_nothing_is_read_after_it ... ok
+test venue_probe::tests::the_four_drift_guard_names_every_difference ... ok
+test sources::tests::the_daily_buy_limit_counts_every_attempt_once_per_utc_day ... ok
+test wss::tests_verify::hex_quantities_and_data_are_strict ... ok
+test startup::tests::signer_file_encoding_is_panic_free_and_redacted ... ok
+test wss::tests_verify::unsupported_pre_eip155_missing_and_malformed_are_rejected ... ok
+test sources::tests::the_venues_are_switchable_and_four_has_no_path_yet ... ok
+test venue_probe::tests::malformed_hex_fails_closed ... ok
+test submission::release_tests::a_transport_bound_to_something_else_is_refused_before_the_admission ... ok
+test venue_probe::tests::values_outside_their_abi_or_storage_type_fail_closed ... ok
+test wss::tests_verify::real_bsc_transactions_verify_and_bind_every_reported_field ... ok
+test sources::tests::a_switch_enables_nothing_else ... ok
+test wss::tests_verify::every_single_field_tamper_is_rejected ... ok
+test g04_census::tests::segmented_runs_are_read_across_segments_and_sealed_by_their_manifest ... ok
+test attempt_authority::tests::the_remote_qualification_runs_the_production_operations_and_leaves_nothing ... ok
+test wss::tests_session::events_backoff_reconnect_and_stop_follow_the_wire ... ok
+test runtime::tests::an_idle_runtime_writes_its_status_and_stops_cleanly ... ok
+test capture_preflight::tests::rates_come_from_the_newest_sealed_run_and_qualify_a_fitting_run ... ok
+test wss::tests_session::provider_faults_are_classified_and_stop_ends_the_backoff ... ok
+
+test result: ok. 223 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 5.75s
+
+     Running unittests src/bin/bsc_runtime.rs (target/debug/deps/bsc_runtime-89442dfee0bef75e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06a_dry_handoff.rs (target/debug/deps/g06a_dry_handoff-bf0b2d278ddaf78e)
+
+running 29 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test tests::only_the_exact_local_consumers_receive_a_salt_and_only_signers_keep_keys ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+
+     Running unittests src/bin/g06a_preflight_record.rs (target/debug/deps/g06a_preflight_record-94e29d8708e375d7)
+
+running 33 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test coverage::tests::coverage_extends_only_contiguously_from_the_same_canonical_end ... ok
+test coverage::tests::the_trie_root_matches_the_reference_vectors ... ok
+test coverage::tests::a_header_is_bound_by_its_hash_and_the_bloom_has_no_false_negative ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test coverage::tests::receipts_must_rebuild_the_root_and_hide_no_upgrade ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test tests::a_source_is_named_by_host_only ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running unittests src/bin/g07_acceptance_contract.rs (target/debug/deps/g07_acceptance_contract-ab94ec9d51f8187c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g07_attempt_authority.rs (target/debug/deps/g07_attempt_authority-649a2a4a40083c55)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g07_builder_probe/main.rs (target/debug/deps/g07_builder_probe-f4cf7f5a8d2fe313)
+
+running 37 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test plan::tests::answers_are_classified_with_specific_phrases_first ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test plan::tests::the_g07_shape_cases_are_exactly_what_g07_sends ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test tests::a_failed_evidence_write_stops_the_run_before_the_next_case ... ok
+test plan::tests::each_variant_changes_only_what_it_names ... ok
+test tests::every_case_is_persisted_right_after_it_is_sent ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test plan::tests::throwaway_accounts_are_fixed_distinct_and_never_the_g07_wallets ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test tests::binary_report_round_trip_and_integrity ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test plan::tests::the_plan_is_deterministic_and_binds_each_case_and_its_worked_example ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test plan::tests::every_case_has_its_own_non_executable_transactions ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+
+     Running unittests src/bin/g07_candidate/main.rs (target/debug/deps/g07_candidate-4760a959dda99910)
+
+running 38 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test tests::profile_a_reproduces_the_frozen_token_calldata_and_signed_hashes ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test tests::switching_is_refused_while_armed_or_with_attempt_state ... ok
+test tests::the_public_mirror_passes_readiness_only_for_the_v5_candidate ... ok
+test tests::stale_generation_tampering_and_missing_candidates_fail_closed ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test tests::profile_b_draws_a_fresh_vanity_salt_with_the_pinned_create2 ... ok
+test tests::the_runner_takes_the_salt_only_from_the_selected_candidate ... ok
+test tests::only_a_passing_requalification_of_exactly_the_candidate_qualifies_it ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+test tests::a_gui_request_is_only_applied_by_the_native_store ... ok
+test tests::candidate_b_survives_a_restart_and_is_never_rerolled ... ok
+test tests::a_switch_invalidates_readiness_bound_to_the_other_candidate ... ok
+
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+
+     Running unittests src/bin/g07_mainnet_self_launch_buy/main.rs (target/debug/deps/g07_mainnet_self_launch_buy-dae428046ce108d0)
+
+running 35 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test t5_abort_tests::the_return_needs_the_journaled_abort_and_the_released_latch ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test tests::evidence_round_trips_and_needs_every_required_field ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test tests::the_checked_fields_are_exactly_what_g08_reads ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test tests::evidence_encode_failure_preserves_the_last_binary_record ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test t5_abort_tests::a_released_marker_keeps_the_latch_and_the_authority ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+test t5_abort_tests::the_release_gate_needs_the_spent_claim_and_every_sender ... ok
+test t5_abort_tests::every_pre_egress_stop_returns_the_authority_only_with_a_durable_journal ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.17s
+
+     Running unittests src/bin/g07_pre_live_readiness.rs (target/debug/deps/g07_pre_live_readiness-799b5765e7171286)
+
+running 33 tests
+test builder_submission::tests::header_value_rejects_empty_and_control_characters ... ok
+test builder_submission::tests::bundle_bodies_are_the_documented_wire_format ... ok
+test chain_reads::tests::head_milliseconds_come_from_mix_hash_and_must_match_the_reported_value ... ok
+test builder_submission::tests::builder_answers_are_decoded_into_typed_outcomes ... ok
+test chain_reads::tests::rpc_endpoint_keeps_path_and_query_and_rejects_what_it_cannot_frame ... ok
+test chain_reads::tests::an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback ... ok
+test chain_reads::tests::window_refuses_stale_regressed_reorged_or_unjudgeable_heads ... ok
+test chain_reads::tests::window_is_send_head_plus_two_with_the_48club_second_after_head_plus_two ... ok
+test chain_reads::tests::every_preflight_state_read_is_pinned_to_one_canonical_block ... ok
+test chain_reads::tests::the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails ... ok
+test inputs::tests::attempt_id_is_a_single_safe_path_component ... ok
+test builder_submission::tests::http_parsing_waits_for_complete_bodies_and_never_panics_on_lengths ... ok
+test inputs::key_regression::key_parse_is_redacted_and_matches_synthetic_signer ... ok
+test readiness_tests::every_drifted_deployment_field_is_reported_with_both_values ... ok
+test inputs::key_regression::startup_clears_all_key_names_before_success_or_error ... ok
+test chain_reads::tests::child_processes_see_only_path ... ok
+test readiness_tests::a_contradiction_stops_and_a_missing_precondition_blocks ... ok
+test readiness_tests::pass_read_only_is_reachable_without_claiming_outcomes_or_live_authority ... ok
+test readiness_tests::offline_errors_duplicates_and_missing_risk_disclosures_cannot_pass ... ok
+test transactions::signer_parity::g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles ... ok
+test inputs::tests::an_evidence_name_that_cannot_be_staged_is_refused_without_leftovers ... ok
+test readiness_tests::missing_or_nonpassing_technical_checks_always_block ... ok
+test inputs::tests::private_dirs_refuse_symlinks_on_the_way_open_modes_and_dot_dot ... ok
+test inputs::tests::native_and_imported_builder_policy_keep_schema_and_gas_guards ... ok
+test inputs::tests::evidence_target_must_be_new_in_a_private_directory ... ok
+test inputs::tests::a_foreign_file_at_the_evidence_path_is_never_replaced_or_removed ... ok
+test inputs::tests::evidence_is_private_and_replaced_atomically_without_leftovers ... ok
+test builder_submission::tests::liveness_refuses_unfinished_closed_or_garbage_peers_and_restores_blocking_mode ... ok
+test inputs::tests::latch_admits_one_start_per_attempt_with_private_modes ... ok
+test inputs::tests::a_crash_or_failed_write_never_destroys_the_previous_evidence ... ok
+test inputs::root_regression::latch_requires_safe_main_root_and_absent_real_state ... ok
+test inputs::tests::release_renames_the_latch_and_removes_only_this_runs_empty_placeholder ... ok
+test builder_submission::tests::a_trickling_builder_response_ends_at_the_absolute_deadline ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests/acceptance_guard.rs (target/debug/deps/acceptance_guard-db3dbc6269e3e640)
+
+running 18 tests
+test contract_paths_are_the_binary_config_contracts ... ok
+test any_other_contract_path_is_rejected ... ok
+test guard_is_compiled_unarmed ... ok
+test explicit_attempt_identity_and_individual_dry_flags_fail_closed ... ok
+test guard_proofs_come_only_from_their_checks ... ok
+test a_tampered_contract_does_not_decode ... ok
+test unarmed_guard_refuses_a_fully_matching_context_before_reading ... ok
+test only_the_v5_path_can_authorize_and_v4_is_superseded ... ok
+test committed_contract_is_reproduced_from_its_source_and_binds_the_import ... ok
+test the_v5_contract_binds_the_runtime_gates_with_their_compiled_values ... ok
+test a_v5_whose_runtime_gate_values_differ_from_the_code_refuses ... ok
+test a_dry_projection_other_than_the_compiled_bundle_semantics_makes_no_v5 ... ok
+test the_guard_itself_binds_local_simulation_economics_and_portal_upgrade ... ok
+test a_secret_salt_v5_binds_its_own_run_and_only_the_private_cross_check ... ok
+test the_guard_itself_binds_the_v5_launch_path_and_refuses_every_deviation ... ok
+test a_missing_manipulated_stale_or_contradictory_snapshot_or_candidate_makes_no_v5 ... ok
+test v4_binds_native_inputs_without_and_imports_with_legacy_hashes ... ok
+test v5_binds_the_launch_path_and_candidate_and_supersedes_the_v4_proposal ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/c3_paper_latency.rs (target/debug/deps/c3_paper_latency-95bd6c6681a54432)
+
+running 1 test
+test c3_paper_path_latency ... ignored, C3 latency measurement; run in release
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/dispatch.rs (target/debug/deps/dispatch-2e81f8a7d84648f2)
+
+running 29 tests
+test a_response_to_another_request_moves_nothing ... ok
+test a_delayed_response_does_not_hold_back_the_other_adapter ... ok
+test a_failed_flush_after_the_write_is_unknown ... ok
+test a_deadline_passing_after_the_admission_stops_the_lane_without_disclosure ... ok
+test a_response_in_pieces_is_pending_until_complete ... ok
+test a_plan_for_another_buy_fails_before_any_write ... ok
+test a_time_from_another_clock_is_no_start ... ok
+test a_deadline_passed_before_the_admission_consumes_nothing ... ok
+test a_failed_write_after_the_permit_is_unknown_even_with_nothing_accepted ... ok
+test an_acknowledgement_is_not_an_inclusion ... ok
+test a_rejection_is_not_proof_of_non_execution ... ok
+test an_unreadable_response_changes_no_submission_state ... ok
+test a_partial_write_is_unknown_and_stops_everything ... ok
+test local_geth_sends_the_raw_buy_and_its_send_time_is_deferred_to_c1 ... ok
+test boundaries_are_measured_but_no_unqualified_one_is_a_send_time ... ok
+test no_second_economic_admission ... ok
+test fan_out_sends_the_same_buy_bytes_nonce_and_hash ... ok
+test frames_and_adapters_must_be_the_plans_before_the_admission ... ok
+test the_plans_final_check_runs_before_the_admission ... ok
+test a_late_write_check_writes_nothing_and_is_unknown ... ok
+test the_egress_lane_takes_no_builder_slot ... ok
+test local_geth_commits_the_raw_buy_to_the_egress_lane ... ok
+test the_permit_releases_the_buy_and_the_frame_gives_it_back ... ok
+test no_ready_connection_consumes_no_admission ... ok
+test the_real_request_carries_the_authorization_and_the_request_id ... ok
+test nothing_is_retried_after_an_unknown_submission ... ok
+test the_write_check_is_the_last_clock_read_before_the_first_write ... ok
+test a_late_pre_permit_check_after_another_adapter_was_sent_leaves_no_permit ... ok
+test a_connection_that_is_not_ready_is_skipped_and_leaves_no_permit ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/egress_latency.rs (target/debug/deps/egress_latency-6569175d2c04eff0)
+
+running 1 test
+test egress_queue_commit_latency ... ignored, Phase I egress measurement; run in release
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f_ingest_latency.rs (target/debug/deps/f_ingest_latency-fd27e295b46d6a43)
+
+running 1 test
+test f_ingest_latency ... ignored, Phase F ingest latency measurement; run in release
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/flap_fastlane_roundtrip.rs (target/debug/deps/flap_fastlane_roundtrip-16c64ca3fbe116c1)
+
+running 1 test
+test fastlane_and_journal_bytes_decode_like_the_original ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/four_fastlane_roundtrip.rs (target/debug/deps/four_fastlane_roundtrip-9c746670b12616c5)
+
+running 1 test
+test fastlane_and_journal_bytes_decode_like_the_original ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/framing.rs (target/debug/deps/framing-f25c3eabb7d88bb5)
+
+running 7 tests
+test the_launch_is_sent_as_given_and_before_the_buy ... ok
+test timestamps_are_written_only_when_the_plan_sets_them ... ok
+test blockrazor_gets_no_merge_only_when_planned_and_never_position_first ... ok
+test club48_request_carries_exactly_the_birth_entry_envelope ... ok
+test local_geth_frame_is_only_the_slot_of_the_raw_buy ... ok
+test framing_refuses_what_the_plan_does_not_carry ... ok
+test the_authorization_never_shows_in_the_inspectable_request ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/g06a_ab_parity.rs (target/debug/deps/g06a_ab_parity-afc88b9927ac56f7)
+
+running 5 tests
+test no_g06a_evidence_schema_has_a_raw_bytes_field ... ok
+test a_salt_is_the_public_deterministic_one_and_never_a_secret ... ok
+test the_signing_algorithm_of_a_is_byte_identical ... ok
+test every_frozen_a_evidence_record_matches_its_manifest ... ok
+test no_g06a_evidence_record_holds_signed_transaction_bytes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/g06a_dry_handoff.rs (target/debug/deps/g06a_dry_handoff-34614c229cc7ba2d)
+
+running 8 tests
+test the_handoff_source_never_reads_keys_rpc_or_writes_the_salt ... ok
+test the_switch_check_never_honors_a_state_under_another_home ... ok
+test prepare_refuses_an_r0_record_not_closed_at_its_own_preflight_or_incoherent ... ok
+test only_the_allowlisted_consumer_gets_the_salt_and_only_signers_keep_keys ... ok
+test a_sign_run_is_archived_privately_and_restored_bit_identical_only_at_its_bound_path ... ok
+test prepare_binds_only_a_coherent_r0_record_and_the_candidate_and_verify_hands_it_to_a_new_private_dir ... ok
+test archive_refuses_unlisted_changed_linked_or_open_files_raw_bytes_wallet_keys_and_the_b_salt ... ok
+test a_wrong_stale_or_foreign_candidate_consumer_or_preflight_stops_before_the_consumer ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.71s
+
+     Running tests/g07_attempt_authority.rs (target/debug/deps/g07_attempt_authority-cc472be183a57ae3)
+
+running 1 test
+test only_an_approved_v5_is_granted_once_and_the_runner_binding_consumes_it_once ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+     Running tests/g07_builder_probe.rs (target/debug/deps/g07_builder_probe-18f63c8e9f90b59b)
+
+running 6 tests
+test a_live_probe_needs_the_send_switch_before_any_read ... ok
+test a_failed_evidence_write_stops_sending_and_keeps_the_latch ... ok
+test approval_precedes_every_read_latch_and_connection ... ok
+test the_probe_never_touches_the_g07_wallets_or_signed_bytes ... ok
+test the_dry_run_needs_nothing_sends_nothing_and_is_deterministic ... ok
+test a_live_run_refuses_without_the_matching_approval ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests/g07_candidate.rs (target/debug/deps/g07_candidate-9c9d1882b03737d1)
+
+running 4 tests
+test the_candidate_sources_have_no_network_key_signing_or_send_path ... ok
+test outside_a_main_checkout_nothing_is_created ... ok
+test a_runtime_request_is_recorded_without_a_repository_and_applied_natively ... ok
+test a_and_b_are_managed_offline_without_leaking_the_b_salt ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running tests/g07_no_send.rs (target/debug/deps/g07_no_send-6c63e5d50188f9b2)
+
+running 18 tests
+test a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc ... ok
+test guard_refusal_is_terminal_before_any_builder_connection ... ok
+test a_crash_anywhere_after_the_authority_is_consumed_never_releases_the_attempt ... ok
+test key_cleanup_precedes_every_external_or_concurrent_startup_boundary ... ok
+test the_bound_builder_policy_is_fresh_at_the_release_boundary ... ok
+test senders_write_only_past_the_gate_with_a_ticket_of_the_spent_authority ... ok
+test bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm ... ok
+test the_launch_path_is_re_verified_before_signing_and_the_latch_and_bound_by_the_guard ... ok
+test child_processes_are_spawned_only_with_a_cleared_environment ... ok
+test the_native_switches_gate_signing_the_authority_and_the_send ... ok
+test token_evidence_and_latch_precede_the_guard ... ok
+test the_bundle_semantics_have_one_native_definition_and_the_runner_checks_the_dry_projection ... ok
+test one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_unsent ... ok
+test nothing_after_the_release_can_panic ... ok
+test refuses_without_explicit_send_authorization ... ok
+test retired_free_journal_path_is_refused ... ok
+test any_other_authorization_value_is_refused ... ok
+test refuses_without_frozen_dry_evidence ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/g07_readiness.rs (target/debug/deps/g07_readiness-1f8779e55277638f)
+
+running 9 tests
+test unexpected_argument_refuses_before_reads_or_network ... ok
+test readiness_binary_is_decodable_and_has_no_execution_authority ... ok
+test without_a_v5_contract_readiness_is_blocked_and_never_invokes_rpc ... ok
+test bound_inputs_are_exactly_the_files_the_v5_contract_binds ... ok
+test offline_readiness_evaluates_the_v5_bindings_without_rpc ... ok
+test a_snapshot_without_its_checkout_never_reads_a_foreign_work_tree ... ok
+test a_rebound_but_stale_or_contradictory_launch_path_or_candidate_binding_fails_closed ... ok
+test an_active_or_widened_v5_and_wrong_input_hashes_fail_closed ... ok
+test a_gui_snapshot_reads_the_latch_and_the_shared_authority_of_its_checkout ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests/hotpath_alloc.rs (target/debug/deps/hotpath_alloc-b9a45acc5748b8ad)
+
+running 1 test
+test the_dispatch_of_a_two_builder_bundle_allocates_nothing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/release.rs (target/debug/deps/release-6962e0cc1a159de6)
+
+running 3 tests
+test the_release_entry_point_takes_only_qualified_types ... ok
+test the_frozen_records_give_no_qualified_plan ... ok
+test qualified_records_over_fake_transports_give_no_qualified_send_time ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/responses.rs (target/debug/deps/responses-adc799767e64d18a)
+
+running 7 tests
+test http_status_classification_ignores_complete_body_contents ... ok
+test a_body_that_is_not_a_plain_answer_is_a_protocol_failure ... ok
+test only_a_response_to_this_request_counts ... ok
+test an_incomplete_response_waits_and_an_oversize_one_fails ... ok
+test only_a_bundle_hash_is_an_acknowledgement ... ok
+test result_and_error_are_classified ... ok
+test the_body_must_be_framed_exactly_once ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runtime_signal.rs (target/debug/deps/runtime_signal-021064d403cc3220)
+
+running 1 test
+test sigterm_is_a_clean_stop_with_a_committed_journal ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.55s
+
+     Running tests/strategy_paper_latency.rs (target/debug/deps/strategy_paper_latency-11a412d8281c4954)
+
+running 1 test
+test strategy_paper_path_latency ... ignored, Phase I latency measurement; run in release
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tls.rs (target/debug/deps/tls-b7462bb05d10df6a)
+
+running 31 tests
+test an_untrusted_issuer_is_refused ... ok
+test a_certificate_for_another_name_is_refused ... ok
+test a_server_that_only_speaks_h2_is_refused ... ok
+test a_server_without_alpn_is_taken_as_http11 ... ok
+test a_reconnect_makes_a_new_generation_and_retires_the_old_facts ... ok
+test endpoints_tokens_and_policies_are_validated ... ok
+test a_malformed_response_makes_the_connection_stale_and_maintenance_replaces_it ... ok
+test a_tls_transport_never_reports_a_qualified_send_time ... ok
+test no_credential_in_debug_output_or_errors ... ok
+test backpressure_before_the_permit_skips_without_disclosure ... ok
+test nothing_listening_is_a_connect_failure ... ok
+test the_implementation_id_names_the_pinned_rustls ... ok
+test a_dispatch_over_tls_hands_off_and_a_complete_response_makes_it_ready_again ... ok
+test end_of_stream_without_a_response_disconnects ... ok
+test the_tls_output_buffer_is_sized_above_the_plaintext_limit ... ok
+test trust_anchors_are_required_and_the_mozilla_roots_are_built_in ... ok
+test a_request_larger_than_the_transport_takes_is_refused_before_the_admission ... ok
+test both_builders_receive_the_same_bytes_over_tls ... ok
+test the_last_check_lies_between_tls_preparation_and_the_first_socket_write ... ok
+test the_owner_connects_outside_any_dispatch_and_is_ready_only_after_the_handshake ... ok
+test a_disconnected_transport_is_skipped_and_only_maintenance_reconnects ... ok
+test a_late_check_after_tls_preparation_writes_nothing_to_the_wire ... ok
+test maintenance_keeps_a_warm_connection ... ok
+test no_second_request_while_a_response_is_outstanding ... ok
+test maintenance_finds_a_peer_that_closed_an_idle_connection ... ok
+test a_fragmented_response_is_pending_until_complete ... ok
+test an_idle_connection_is_not_eligible ... ok
+test an_overdue_response_gives_the_connection_up_in_maintenance ... ok
+test a_handshake_that_never_completes_times_out ... ok
+test backpressure_after_the_permit_is_unknown ... ok
+test a_peer_that_closed_before_the_write_makes_it_unknown ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.07s
+
+     Running tests/transport.rs (target/debug/deps/transport-385b436b78303044)
+
+running 2 tests
+test a_diagnostic_stream_transport_writes_through_and_only_records_its_state ... ok
+test the_monotonic_clock_does_not_go_back ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_geth_ipc-cc8ac5a2930f0df3)
+
+running 128 tests
+test host::tests::qos_class_names_and_raw_values_round_trip ... ok
+test host::tests::qos_on_a_permanent_thread_is_applied_or_explicitly_unsupported ... ok
+test host::tests::apple_performance_levels_and_caches_are_recorded ... ok
+test host::tests::a_host_without_sysctl_degrades_explicitly ... ok
+test host::tests::preimage_strings_are_escaped ... ok
+test host::tests::profile_p_is_refused_not_downgraded_without_parallel_builders ... ok
+test host::tests::the_hint_follows_topology_and_qualifies_nothing ... ok
+test host::tests::the_recorded_c19_host_keeps_its_fingerprint_0xfc5501a8 ... ok
+test host::tests::the_report_is_reproducible_for_the_same_host ... ok
+test host::tests::the_host_report_captures_this_host_without_guessing ... ok
+test host::tests::the_host_profile_record_is_typed_reproducible_and_keeps_the_id ... ok
+test hot0::tests::oversize_and_empty_buys_are_refused ... ok
+test hot0::tests::a_faulted_chain_lane_refuses_admission ... ok
+test hot0::tests::a_sealed_lane_ends_without_a_fault ... ok
+test hot0::tests::e72_a_contiguous_head_history_with_a_reorg_keeps_admission ... ok
+test hot0::tests::the_dedup_window_is_bounded_and_counts_evictions ... ok
+test hot0::tests::a_reorg_record_decodes_on_the_borrowed_bytes ... ok
+test ingress::tests::a_consumer_error_never_passes ... ok
+test ingress::tests::a_corrupt_or_quarantined_txpool_lane_never_passes ... ok
+test ingress::tests::a_false_negative_never_passes ... ok
+test ingress::tests::a_foreign_record_on_a_peer_lane_never_passes ... ok
+test ingress::tests::a_foreign_record_on_the_txpool_lane_never_passes ... ok
+test ingress::tests::a_peer_observation_after_the_txpool_acceptance_is_a_false_negative ... ok
+test ingress::tests::a_peer_observation_before_or_at_the_txpool_acceptance_is_observed ... ok
+test ingress::tests::a_recorded_txpool_quarantine_reason_never_passes ... ok
+test ingress::tests::a_sealed_txpool_lane_that_is_not_bound_never_passes ... ok
+test hot0::tests::e72_head_reset_and_loss_gaps_decode_and_stay_broken ... ok
+test ingress::tests::a_txpool_record_with_a_nonzero_peer_never_passes ... ok
+test ingress::tests::a_txpool_record_with_nonzero_aux_never_passes ... ok
+test ingress::tests::an_open_txpool_producer_window_never_passes ... ok
+test ingress::tests::an_invalid_peer_record_never_passes ... ok
+test ingress::tests::an_unread_txpool_record_never_passes ... ok
+test ingress::tests::ingress_aux_and_times_follow_the_c14_wire_semantics ... ok
+test ingress::tests::interop_c14_rust_phase_1 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::interop_c14_rust_phase_2 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::every_supported_envelope_yields_destination_and_calldata ... ok
+test ingress::tests::malformed_and_unsupported_envelopes_are_explicit ... ok
+test ingress::tests::missing_txpool_producer_counters_never_pass ... ok
+test hot0::tests::chain_evidence_is_serviced_before_peer_records ... ok
+test ingress::tests::only_completely_closed_and_drained_evidence_can_yield_pass ... ok
+test hot0::tests::a_noisy_lane_does_not_starve_another_lane ... ok
+test hot0::tests::an_admitted_launch_is_copied_once_and_survives_slot_reuse ... ok
+test ingress::tests::producer_counters_that_disagree_with_the_lane_never_pass ... ok
+test ingress::tests::records_outside_the_c14_contract_are_invalid_evidence ... ok
+test ingress::tests::the_audit_judges_every_kind_of_txpool_record ... ok
+test ingress::tests::the_earliest_peer_observation_wins ... ok
+test ingress::tests::the_lane_plan_matches_the_geth_plan ... ok
+test ingress::tests::the_observation_window_is_bounded ... ok
+test ingress::tests::the_scope_mirror_is_the_golden_committed_launch_scope ... ok
+test hot0::tests::a_closing_lane_is_drained_acknowledged_and_unlisted ... ok
+test ingress::tests::txpool_lane_drops_and_oversize_refusals_never_pass ... ok
+test hot0::tests::a_launch_seen_on_several_peer_lanes_is_decided_once ... ok
+test ingress::tests::the_scope_passes_every_committed_launch_and_filters_buy ... ok
+test ingress::tests::txpool_producer_clock_errors_never_pass ... ok
+test ingress::tests::txpool_producer_refusals_never_pass ... ok
+test ingress::tests::txpool_records_read_but_not_judged_never_pass ... ok
+test hot0::tests::records_outside_the_peer_contract_are_released_undecided ... ok
+test ingress::tests::txpool_producer_serialize_errors_never_pass ... ok
+test ingress::tests::undecodable_txpool_records_never_pass ... ok
+test outbound::tests::the_lane_plan_matches_the_geth_overlay ... ok
+test hot0::tests::idle_polls_discover_lanes_bound_later ... ok
+test hot0::tests::an_intent_is_sealed_once_and_released_explicitly ... ok
+test hot0::tests::a_chain_gap_record_refuses_admission ... ok
+test hot0::tests::a_corrupt_peer_lane_is_retired_and_the_others_continue ... ok
+test ingress::tests::a_consumer_error_during_poll_is_invalid_evidence ... ok
+test protocol_v2::c15_tests::a_lane_set_reads_several_lanes_through_one_mapping ... ok
+test outbound::tests::evidence_that_contradicts_itself_is_refused ... ok
+test protocol_v2::c15_tests::a_corrupt_record_is_refused_and_never_released ... ok
+test ingress::tests::poll_on_empty_sealed_lanes_returns_nothing_without_error ... ok
+test protocol_v2::c15_tests::a_sealed_lane_delivers_its_records_and_then_ends ... ok
+test ingress::tests::only_shutdown_closes_the_txpool_observation_window ... ok
+test hot0::tests::round_robin_starts_after_the_last_successful_lane ... ok
+test protocol_v2::c15_tests::a_held_slot_cannot_be_reused_and_a_released_slot_can ... ok
+test outbound::tests::the_egress_lane_is_written_only_against_a_consumed_permit ... ok
+test ingress::tests::a_txpool_backlog_left_by_poll_is_incomplete_until_drained ... ok
+test protocol_v2::c15_tests::a_visible_commit_change_under_the_guard_quarantines_and_is_not_released ... ok
+test protocol_v2::c15_tests::copy_payload_copies_once_and_refuses_a_small_buffer ... ok
+test protocol_v2::c15_tests::the_guard_stays_correct_across_wraparound ... ok
+test outbound::tests::handoff_evidence_decodes_and_keeps_its_provenance ... ok
+test protocol_v2::tests::an_empty_closing_lane_drains_at_once ... ok
+test protocol_v2::tests::crc32c_standard_and_cross_language_vectors ... ok
+test protocol_v2::c15_tests::dropping_the_guard_releases_the_record ... ok
+test protocol_v2::tests::double_bind_is_rejected_without_side_effects ... ok
+test protocol_v2::tests::a_stale_lease_never_acts_on_a_reused_lane_even_with_the_same_owner ... ok
+test ingress::tests::poll_judges_a_peer_record_drained_late_by_its_timestamp ... ok
+test ingress::tests::poll_reads_a_sealed_lane_to_its_end_without_error ... ok
+test protocol_v2::c15_tests::the_borrowed_record_is_exactly_the_published_record ... ok
+test protocol_v2::tests::close_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::tests::an_unread_record_prevents_reuse_until_it_is_consumed ... ok
+test protocol_v2::tests::arena_roundtrip_wrap_and_directory_validation ... ok
+test protocol_v2::tests::a_wrong_arena_or_lane_generation_is_rejected ... ok
+test protocol_v2::tests::interop_rust_phase_1 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test protocol_v2::tests::interop_rust_phase_2 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test protocol_v2::tests::a_write_after_close_quarantines_the_lane ... ok
+test protocol_v2::tests::a_record_of_another_epoch_quarantines_the_lane_once ... ok
+test protocol_v2::tests::an_undefined_lifecycle_state_quarantines_even_an_empty_lane ... ok
+test protocol_v2::tests::full_lane_never_overwrites_unread_records ... ok
+test protocol_v2::tests::free_peer_lane_refuses_publish_and_wrong_generation_is_quarantined ... ok
+test protocol_v2::tests::lane_epoch_exhaustion_fails_closed ... ok
+test protocol_v2::tests::peer_lane_lifecycle_rejects_wrong_owner_and_wrong_state ... ok
+test protocol_v2::tests::lifecycle_free_bound_closing_drained_free_and_second_bind ... ok
+test protocol_v2::tests::peer_lane_lifecycle_requires_drain_before_reuse ... ok
+test protocol_v2::tests::churn_keeps_epochs_monotonic_owners_apart_and_sequences_continuous ... ok
+test protocol_v2::tests::role_lease_child_holder ... ignored, helper process of role_lease_is_released_when_the_holder_process_dies
+test protocol_v2::tests::publish_while_free_is_rejected_and_writes_nothing ... ok
+test protocol_v2::tests::publish_after_close_is_rejected ... ok
+test protocol_v2::tests::header_and_payload_corruption_are_both_detected ... ok
+test protocol_v2::tests::release_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::tests::release_before_the_drain_is_rejected ... ok
+test hot0::tests::e72_unreported_head_changes_refuse_admission ... ok
+test protocol_v2::tests::e63_a_lane_has_one_producer_and_one_consumer_per_process ... ok
+test protocol_v2::tests::shutdown_refuses_binds_and_publishes_while_live_handles_stay_valid ... ok
+test wire::tests::record_kinds_are_the_wire_numbers ... ok
+test protocol_v2::tests::records_outside_a_binding_quarantine_as_late_writes_without_counting_corruption ... ok
+test protocol_v2::tests::quarantine_is_terminal_and_a_restart_quarantines_the_old_generation ... ok
+test protocol_v2::tests::e75_linked_lock_files_are_refused_and_never_truncated ... ok
+test protocol_v2::tests::the_pool_never_takes_bound_closing_or_quarantined_lanes ... ok
+test protocol_v2::tests::the_pool_binds_only_free_lanes_and_reports_exhaustion_without_waiting ... ok
+test protocol_v2::tests::independent_lanes_support_parallel_single_producers ... ok
+test protocol_v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles ... ok
+test protocol_v2::tests::slots_of_an_earlier_binding_are_never_accepted_after_reuse ... ok
+test protocol_v2::tests::existing_arenas_are_detected_never_attached_and_never_overwritten ... ok
+test protocol_v2::tests::the_pool_bounds_must_match_the_arena ... ok
+test protocol_v2::tests::independent_peer_lanes_cycle_concurrently ... ok
+test protocol_v2::tests::role_lease_is_released_when_the_holder_process_dies ... ok
+test protocol_v2::tests::e75_untrusted_directories_and_arena_links_fail_closed ... ok
+test protocol_v2::tests::every_structural_defect_quarantines_once_and_is_never_skipped ... ok
+test trust::tests::directory_and_file_rules_fail_closed ... ok
+
+test result: ok. 123 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/c15_hot0_alloc.rs (target/debug/deps/c15_hot0_alloc-172bbb9ff92fa543)
+
+running 1 test
+test the_hot0_receive_path_allocates_nothing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/c18_stress.rs (target/debug/deps/c18_stress-2785bbe6818706a1)
+
+running 8 tests
+test oversize_records_are_refused_with_evidence ... ok
+test a_wrong_generation_is_refused_by_every_endpoint ... ok
+test a_stalled_consumer_causes_counted_refusals_and_no_overwrite ... ok
+test torn_and_corrupt_records_are_never_accepted ... ok
+test consumer_and_producer_restarts_keep_the_sequence ... ok
+test lane_churn_never_reuses_a_lane_before_its_drain ... ok
+test hot0_accounts_for_every_record_under_burst_and_background_load ... ok
+test simultaneous_peer_producers_lose_nothing_and_keep_lane_order ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_journal-1d6f392e3774dd5a)
+
+running 35 tests
+test recorder::cursor_tests::the_byte_budget_bounds_the_queue_and_its_losses_are_gaps ... ok
+test format::write_failure_tests::validation_errors_do_not_poison_but_counters_never_saturate ... ok
+test recorder::cursor_tests::single_loss_is_emitted_before_the_following_success ... ok
+test format::write_failure_tests::failed_sync_and_second_frame_never_certify_a_complete_segment ... ok
+test recorder::cursor_tests::bound_zero_cursor_reports_initial_loss_and_exhaustion_never_wraps ... ok
+test format::write_failure_tests::every_partial_write_and_flush_failure_is_terminal ... ok
+test span_tests::legacy_gap_bytes_are_unchanged_and_v2_must_not_mix_versions ... ok
+test storage::budget::tests::the_budget_admits_up_to_its_maximum_and_releases_on_drop ... ok
+test span_tests::empty_oversize_disconnected_and_exclusive_handoffs_do_not_invent_loss ... ok
+test storage::metrics::tests::the_watermark_only_moves_forward_and_a_failure_sticks ... ok
+test span_tests::invalid_spans_duplicates_and_corrupt_tails_are_rejected ... ok
+test span_tests::full_queue_gaps_roundtrip_in_order_including_trailing_losses ... ok
+test storage::preflight::tests::a_run_that_fits_is_qualified_with_its_bytes_and_backlog ... ok
+test storage::preflight::tests::each_resource_blocks_and_names_itself ... ok
+test tests::an_owned_payload_moves_into_the_record ... ok
+test tests::corruption_and_truncation_fail_closed ... ok
+test tests::crc32_matches_the_standard_vector ... ok
+test tests::journal_roundtrip_preserves_exact_records_and_manifest ... ok
+test tests::manifest_hash_is_over_exact_journal_bytes ... ok
+test tests::oversize_payload_is_refused_before_sequence_consumption ... ok
+test tests::reader_enforces_payload_bound_before_allocating_payload ... ok
+test tests::recorder_never_waits_and_overflow_is_counted_with_sequence ... ok
+test tests::sequence_gaps_are_rejected_by_writer_and_replay ... ok
+test tests::sha256_matches_the_standard_vector ... ok
+test storage::segments::tests::a_run_directory_is_created_once ... ok
+test storage::writer::tests::a_zero_sync_bound_is_refused ... ok
+test storage::run::tests::a_segment_sealed_after_the_listing_is_still_read ... ok
+test format::write_failure_tests::file_commit_matches_bytes_and_rejects_modified_or_unreadable_file ... ok
+test storage::writer::tests::an_idle_writer_syncs_by_time_and_a_seal_is_durable ... ok
+test storage::segments::tests::an_interrupted_segment_is_recovered_up_to_its_last_frame ... ok
+test storage::writer::tests::the_worker_writes_seals_and_reports_a_complete_run ... ok
+test storage::run::tests::a_sealed_run_reads_as_one_sequence_with_the_seal_hashes ... ok
+test storage::segments::tests::segments_rotate_seal_and_recover_complete ... ok
+test tests::sha256_matches_independent_vectors_at_every_padding_boundary_and_streamed ... ok
+test storage::run::tests::missing_torn_and_discontinuous_runs_are_refused ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_legacy_import-2cedfd0d083d2d92)
+
+running 3 tests
+test tests::conversion_refuses_what_it_cannot_represent_exactly ... ok
+test tests::an_unmapped_leaf_or_another_hash_stops_the_import ... ok
+test tests::the_committed_import_is_reproduced_byte_for_byte ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/g07_legacy_import-9d6c72b16af04213)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_qualification-b1db8bcfdef45fb2)
+
+running 49 tests
+test c1_common::tests::no_samples_is_stated ... ok
+test c1_common::tests::max_is_reported_and_a_miss_starts_at_exactly_one_millisecond ... ok
+test c1_common::tests::arguments_and_hex_parse_strictly ... ok
+test c1_hook_path::tests::a_launch_seen_before_its_handoff_is_excluded_not_measured ... ok
+test c1_common::tests::extreme_percentiles_need_enough_samples ... ok
+test c1_hook_path::tests::mainnet_and_incomparable_clocks_are_refused ... ok
+test c1_latency::tests::a_consistent_run_yields_the_fixed_window ... ok
+test c1_latency::tests::a_failed_peer_is_a_partial_handoff_not_a_missing_sample ... ok
+test c1_latency::tests::a_gap_a_moved_window_and_a_reordered_boundary_fail ... ok
+test c1_latency::tests::missing_evidence_is_an_integrity_failure ... ok
+test c1_latency::tests::the_go_snapshot_is_read_strictly ... ok
+test c1_latency::tests::first_each_and_all_handoffs_are_separate_measurements ... ok
+test c1_hook_path::tests::sources_are_compared_and_misses_are_counted ... ok
+test status::projection::ordering_tests::latest_keeps_native_millisecond_order_and_operational_paths ... ok
+test c1_latency::tests::the_report_record_is_typed_and_states_its_rules ... ok
+test c1_hook_path::tests::the_launches_record_is_built_by_the_command_line ... ok
+test status::tests::an_oversized_topic_is_declared_too_large_and_the_next_topic_still_arrives ... ok
+test status::tests::a_completed_blocked_readiness_run_is_a_stopped_process_not_a_failure ... ok
+test status::tests::a_g08_record_without_its_g07_evidence_is_unbound ... ok
+test status::tests::c1_gates_are_projected_from_the_freeze_record ... ok
+test status::gui_readiness::tests::a_sealed_result_passes_the_import_gate_and_every_deviation_is_refused ... ok
+test status::tests::candidate_state_is_projected_only_from_a_verified_public_mirror ... ok
+test status::tests::legacy_builder_json_is_never_status_input_and_the_probe_is_native ... ok
+test status::tests::public_text_never_exports_endpoints_or_credentials ... ok
+test status::tests::g08_and_g07_belong_together_only_with_the_same_attempt_and_g07_hash ... ok
+test status::tests::native_records_carry_public_leaves_with_kind_and_unit_but_never_a_salt ... ok
+test status::tests::a_live_reason_of_an_earlier_boot_is_projected_as_it_holds_now ... ok
+test status::tests::read_only_projection_and_golden_frames ... ok
+test status::tests::readiness_is_current_only_for_the_selected_candidate_and_unknown_status_never_passes ... ok
+test status::tests::the_g04_gate_shows_the_criteria_state_or_the_verdict ... ok
+test status::tests::the_g08_gate_carries_the_chain_outcome_and_the_evidence_integrity ... ok
+test status::tests::the_reporter_refuses_a_socket_directory_another_user_could_write_or_redirect ... ok
+test status::tests::every_projected_record_family_reaches_its_topic_with_all_public_required_leaves ... ok
+test status::tests::without_a_clock_the_builder_refresh_counts_as_expired ... ok
+test status::tests::the_latest_c19_evidence_is_projected_from_binary_records ... ok
+test status::tests::the_runtime_mode_and_the_daily_buy_limit_are_projected_typed ... ok
+test status::tests::the_source_modes_reach_monitoring_from_their_native_owner ... ok
+test status::tests::the_wallet_and_economic_switches_are_projected_typed ... ok
+test c1_freeze::tests::a_later_gate_cannot_be_accepted_before_an_earlier_one ... ok
+test c1_freeze::tests::complete_inputs_are_ready_and_bind_every_artifact ... ok
+test c1_freeze::tests::a_template_is_never_evidence ... ok
+test c1_freeze::tests::source_change_detected_even_if_git_is_told_to_ignore_it ... ok
+test c1_freeze::tests::loopback_cannot_qualify_c19_for_freeze ... ok
+test c1_freeze::tests::the_binding_changes_with_any_bound_file ... ok
+test c1_freeze::tests::source_binding_refuses_missing_head_dirty_and_missing_hash ... ok
+test c1_freeze::tests::the_inputs_are_built_by_subcommands_in_gate_order ... ok
+test c1_freeze::tests::missing_or_unaccepted_inputs_leave_it_incomplete ... ok
+test c1_freeze::tests::the_command_line_freezes_only_complete_inputs_and_verifies_them ... ok
+test status::tests::a_frame_larger_than_the_socket_buffer_arrives_whole ... ok
+
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
+
+     Running unittests src/bin/bsc-status-reporter.rs (target/debug/deps/bsc_status_reporter-79eb56045d8b6bb3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/c19_report.rs (target/debug/deps/c19_report-8e329a1b47ce6a6d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/c19b_report.rs (target/debug/deps/c19b_report-a7342425833f42a2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/c1_freeze.rs (target/debug/deps/c1_freeze-5780a6f4cbb0001a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g01_flap_econ.rs (target/debug/deps/g01_flap_econ-b13834b38ebef31b)
+
+running 19 tests
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test tests::live_reconfirmation_against_the_free_rpc ... ignored, live read-only BSC RPC and the local EVM toolset
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test tests::local_evm_lines_decode_or_stay_absent ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test tests::node_results_decode_and_a_revert_is_not_success ... ok
+test tests::the_exemption_witness_needs_the_layout_slot_and_a_changed_fee ... ok
+test tests::the_committed_g06a_launch_and_quote_reproduce_offline ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+
+test result: ok. 18 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g01_flap_freeze.rs (target/debug/deps/g01_flap_freeze-31e9e3ad388154e9)
+
+running 25 tests
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test abi::tests::calldata_that_is_not_a_launch_or_trade_is_refused ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test abi::tests::the_signature_extractor_expands_structs_enums_and_arrays ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test abi::tests::selectors_and_topics_equal_the_independently_known_values ... ok
+test tests::live_freeze_against_the_free_rpc ... ignored, live read-only BSC RPC and Sourcify
+test tests::one_implementation_needs_both_slots_and_no_upgrade_log ... ok
+test tests::json_stays_inside_the_common_edge ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+test tests::the_archived_implementation_dispatcher_holds_the_frozen_selectors ... ok
+test tests::frozen_signatures_are_declared_by_both_archived_iportal_sources ... ok
+test tests::the_census_classifies_calls_with_the_production_decoder ... ok
+test tests::the_archived_gate0_launch_reproduces_offline ... ok
+test tests::an_empty_observation_is_unknown_and_its_record_round_trips ... ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/bin/g01_four_freeze.rs (target/debug/deps/g01_four_freeze-cbc8a5f5bb6f7cf0)
+
+running 25 tests
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test abi::tests::calldata_that_is_not_a_create_call_is_refused ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test abi::tests::selectors_and_topics_equal_the_independently_known_values ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test tests::live_freeze_against_the_free_rpc ... ignored, live read-only BSC RPC and Sourcify
+test tests::utc_stamps_are_civil_time ... ok
+test tests::a_secret_file_is_never_read_as_rpc_config ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+test tests::json_stays_inside_the_edge ... ok
+test tests::the_archived_classic_launch_reproduces_its_token_offline ... ok
+test tests::frozen_signatures_agree_with_the_archived_abis_and_reference ... ok
+test tests::an_exhausted_scan_states_its_real_coverage ... ok
+test tests::an_empty_family_is_unknown_and_its_record_round_trips ... ok
+test tests::archived_implementation_dispatchers_hold_the_frozen_selectors ... ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/bin/g02_flap_executed.rs (target/debug/deps/g02_flap_executed-898faa118499ed8e)
+
+running 14 tests
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g02_flap_launch_profiles.rs (target/debug/deps/g02_flap_launch_profiles-bed84790e471fbbd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g02_flap_parity.rs (target/debug/deps/g02_flap_parity-6c461cae2b774e21)
+
+running 14 tests
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g02_gas_evidence.rs (target/debug/deps/g02_gas_evidence-4859ac5a5ddc76d1)
+
+running 14 tests
+test common::edge::tests::a_get_answer_splits_into_body_and_status ... ok
+test common::bytecode::tests::a_clone_runtime_names_its_template_and_create2_is_alloys ... ok
+test common::edge::tests::hosts_never_carry_paths_queries_or_credentials ... ok
+test common::bytecode::tests::the_dispatcher_sweep_finds_push4_and_short_pushes_only ... ok
+test common::edge::tests::every_state_read_names_one_canonical_block_by_hash ... ok
+test common::edge::tests::a_wrong_chain_is_refused ... ok
+test common::edge::tests::a_revert_is_an_outcome_and_a_missing_trie_node_an_error ... ok
+test common::edge::tests::tuple_signatures_are_canonical ... ok
+test common::edge::tests::sourcify_answers_decode_or_fail ... ok
+test common::edge::tests::simulation_and_estimates_are_pinned_and_unsigned ... ok
+test common::edge::tests::a_storage_layout_names_its_variable_or_nothing ... ok
+test common::edge::tests::a_full_block_carries_only_its_own_transactions ... ok
+test common::edge::tests::an_unpinned_answer_is_refused ... ok
+test common::tests::json_stays_inside_the_common_edge ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06a_builder_policy_record.rs (target/debug/deps/g06a_builder_policy_record-ca37fd775d7dda0b)
+
+running 4 tests
+test tests::dates_are_utc_calendar_days ... ok
+test tests::a_48club_page_that_may_state_a_requirement_stops ... ok
+test tests::the_blockrazor_floor_is_read_from_its_rule_and_never_assumed ... ok
+test tests::the_policy_scope_text_names_no_portal_version ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06a_native_bnb_quote.rs (target/debug/deps/g06a_native_bnb_quote-aabaa6a2639e683c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g06a_requal_check.rs (target/debug/deps/g06a_requal_check-e96b16da8852c654)
+
+running 5 tests
+test tests::the_pinned_a_signed_hashes_are_the_frozen_dry_hashes ... ok
+test tests::utf8_status_details_are_byte_bounded_and_preserve_stop ... ok
+test tests::an_unreadable_or_foreign_record_is_unusable_input ... ok
+test tests::a_secret_salt_b_run_qualifies_only_as_its_own_candidate ... ok
+test tests::consistent_requalification_records_pass_and_every_defect_stops ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests src/bin/g06a_self_launch_bundle.rs (target/debug/deps/g06a_self_launch_bundle-7f9943a348cfbf97)
+
+running 4 tests
+test budget_regression::frozen_cap_and_overflow_fail_closed ... ok
+test tests::projection_bodies_are_the_g07_wire_format ... ok
+test tests::the_native_switches_are_checked_before_the_first_signature ... ok
+test tests::keys_are_read_once_and_cleared_before_parsing ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g08_mainnet_verify.rs (target/debug/deps/g08_mainnet_verify-8fa18e4de4b2dcd9)
+
+running 27 tests
+test tests::a_cost_above_the_frozen_attempt_bound_is_a_stop ... ok
+test tests::a_transport_failure_keeps_its_cause_and_is_never_permanent ... ok
+test tests::acquisition_requires_buy_event_and_net_transfer_to_exact_buyer ... ok
+test tests::bounded_rpc_recovery_and_receipt_errors_are_distinct_from_null ... ok
+test tests::a_competitor_is_a_successful_buy_strictly_between_launch_and_ours ... ok
+test tests::a_real_v5_26_tax_token_buy_receipt_is_attributable ... ok
+test tests::invalid_ordering_window_is_unknown_without_rpc ... ok
+test tests::an_expiry_observation_is_recorded_but_never_resolves_the_attempt ... ok
+test tests::receipt_gas_cost_uses_effective_price_then_signed_price ... ok
+test tests::receipt_set_requires_exact_canonical_membership_and_unique_logs ... ok
+test tests::the_chain_outcome_and_the_evidence_integrity_are_separate_dimensions ... ok
+test tests::routed_portal_events_are_detected_without_top_level_portal_destination ... ok
+test tests::chain_capture_payloads_are_typed_records ... ok
+test tests::only_a_complete_canonical_capture_reports_a_first_external_buy ... ok
+test tests::the_history_qualification_needs_every_required_depth ... ok
+test tests::the_signed_transaction_at_the_receipt_index_is_judged_by_its_signed_content ... ok
+test tests::the_verdict_matrix_separates_unresolved_stop_adapt_and_pass ... ok
+test tests::transaction_index_lookup_is_bounded ... ok
+test tests::the_first_external_buy_skips_the_launch_ours_and_failed_receipts ... ok
+test tests::the_first_external_buy_follows_the_canonical_index_not_the_rpc_order ... ok
+test wire::tests::request_bodies_are_fixed_templates ... ok
+test wire::tests::historical_state_reads_are_pinned_to_a_canonical_block_hash ... ok
+test tests::unqualified_tax_mismatches_are_distinct_from_proven_identity_failure ... ok
+test wire::tests::receipts_and_blocks_decode_with_optional_fields ... ok
+test wire::tests::responses_decode_into_typed_values_or_fail ... ok
+test tests::atomic_write_replaces_the_whole_file ... ok
+test tests::every_terminal_verdict_is_durable_and_write_errors_fail_closed ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/bin/g08_producer_timing.rs (target/debug/deps/g08_producer_timing-b2ec836141196aa2)
+
+running 6 tests
+test tests::a_remaining_uncertainty_below_an_unbracketable_component_gives_no_verdict ... ok
+test tests::strict_boundary_accepts_999999_and_rejects_1000000 ... ok
+test tests::remaining_uncertainty_is_added_once ... ok
+test tests::uncertainty_overflow_gives_no_verdict ... ok
+test tests::broken_or_overlapping_brackets_give_no_verdict ... ok
+test tests::uncertainty_turns_a_sub_ms_bracket_into_fail ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g_economics_snapshot.rs (target/debug/deps/g_economics_snapshot-57f622238ef43aae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/g_quote_latency.rs (target/debug/deps/g_quote_latency-8734b84e4c7d55e7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/u5_tls_qualify.rs (target/debug/deps/u5_tls_qualify-796e15a1cdea611d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/economics_snapshot.rs (target/debug/deps/economics_snapshot-fb69907a8d5dbf1a)
+
+running 2 tests
+test the_newest_frozen_snapshot_is_this_trees ... ok
+test a_frozen_snapshot_verifies_only_against_its_files ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/g08_binary_records.rs (target/debug/deps/g08_binary_records-c386e564ff8e5ae5)
+
+running 5 tests
+test g08_reads_exactly_the_twelve_g07_fields ... ok
+test serde_json_occurs_only_inside_the_rpc_wire_boundary ... ok
+test timing_requires_writable_output_before_reporting_a_verdict ... ok
+test producer_timing_reads_and_writes_binary_records ... ok
+test producer_timing_refuses_foreign_or_legacy_inputs_without_output ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/g08_reads_g07_evidence.rs (target/debug/deps/g08_reads_g07_evidence-f8e849016d669c40)
+
+running 4 tests
+test g08_records_unresolved_for_a_never_sent_attempt_on_a_real_rpc ... ignored, network: real read-only BSC RPC, about four minutes of receipt polling
+test a_late_unresolved_abort_records_the_receipts_already_resolved ... ok
+test g08_refuses_defective_g07_evidence_before_any_rpc ... ok
+test g08_reads_final_and_provisional_g07_evidence_up_to_its_first_rpc ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/js_dbrec_parity.rs (target/debug/deps/js_dbrec_parity-ee66749214e4327f)
+
+running 5 tests
+test both_ethereumjs_tools_set_exactly_their_schema_fields ... ok
+test the_private_cross_check_records_only_the_salt_commitment_and_executes_nothing_remotely ... ok
+test javascript_encodes_byte_identical_native_records ... ok
+test javascript_decodes_the_preflight_and_refuses_tampered_records ... ok
+test the_secret_carrying_tools_keep_the_salt_calldata_and_created_addresses_local ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/loopback.rs (target/debug/deps/loopback-5b4cc36884307eab)
+
+running 6 tests
+test an_untrusted_certificate_fails_the_connection ... ok
+test without_an_authorization_only_the_handshake_is_measured ... ok
+test a_closed_connection_ends_the_series_without_repair ... ok
+test a_refused_authorization_keeps_the_connection_and_is_reported_as_such ... ok
+test a_run_measures_every_sample_over_one_connection_and_reconnects_explicitly ... ok
+test the_authorization_is_sent_and_never_recorded ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/offline.rs (target/debug/deps/offline-fe946d263bb7afd1)
+
+running 28 tests
+test a_complete_answer_keeps_the_connection_and_anything_else_ends_it ... ok
+test a_failed_connection_fails ... ok
+test a_handed_off_sample_without_its_timing_is_never_a_pass ... ok
+test a_missing_authorization_measures_the_handshake_only_and_stays_incomplete ... ok
+test a_failure_outweighs_incompleteness ... ok
+test a_reconnect_probe_belongs_to_its_new_connection ... ok
+test a_run_that_meets_every_rule_passes ... ok
+test a_single_slow_handoff_fails_even_below_p99 ... ok
+test a_handoff_of_one_millisecond_fails_and_one_nanosecond_less_does_not ... ok
+test a_build_flag_with_an_unexpected_value_is_never_accepted ... ok
+test a_skip_or_an_unknown_anywhere_fails ... ok
+test every_gap_in_the_identity_leaves_the_run_incomplete ... ok
+test json_escapes_and_renders_deterministically ... ok
+test fewer_measured_samples_or_another_workload_is_incomplete ... ok
+test no_percentile_hides_a_maximum_miss ... ok
+test percentiles_are_nearest_rank_and_the_limit_itself_is_a_miss ... ok
+test sha256_is_the_standard_one ... ok
+test every_reconnect_must_advance_retire_and_probe ... ok
+test the_api_scope_is_reported_beside_the_transport_verdict ... ok
+test the_measured_series_must_stay_on_one_connection ... ok
+test every_handoff_must_be_complete_and_consistent ... ok
+test the_probe_is_framed_like_the_runner_frames_a_bundle ... ok
+test the_probe_carries_no_transaction_and_a_last_block_of_zero ... ok
+test the_q5a_probe_requires_the_send_switch_before_any_egress ... ok
+test timestamps_are_rfc3339_utc ... ok
+test the_overall_verdict_needs_both_builders_to_pass ... ok
+test the_evidence_binds_identity_workload_and_verdict_and_holds_no_secret ... ok
+test the_q5a_probe_refuses_without_the_send_switch ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/provenance_clock.rs (target/debug/deps/provenance_clock-c4c3c10fc1c8b231)
+
+running 1 test
+test no_provenance_clock_falls_back_to_zero ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_record-62ac65dd838d5e61)
+
+running 17 tests
+test js::tests::js_schema_module_is_current ... ok
+test tests::decimal_conversion_is_exact_and_canonical ... ok
+test tests::encoding_enforces_the_schema ... ok
+test schema::c1_qualification::table::tests::tables_round_trip_and_fail_closed ... ok
+test tests::observed_unix_ms_refuses_a_clock_before_the_epoch ... ok
+test schema::g07_candidate::tests::the_salt_record_is_well_formed_but_never_generically_decodable ... ok
+test schema::bsc_c3_latency::tests::a_c3_latency_record_round_trips ... ok
+test tests::round_trip_is_canonical_and_golden ... ok
+test schema::bsc_capture::tests::a_run_manifest_round_trips ... ok
+test schema::bsc_flap_econ::tests::an_econ_record_round_trips ... ok
+test schema::g07::contract_versions::v4_is_unchanged_and_v5_extends_it_field_for_field ... ok
+test tests::decoding_fails_closed ... ok
+test tests::text_must_be_utf8_and_required_fields_present ... ok
+test schema::bsc_four_freeze::tests::a_family_record_round_trips ... ok
+test schema::bsc_flap_freeze::tests::a_flap_record_round_trips ... ok
+test tests::every_schema_is_well_formed ... ok
+test schema::bsc_flap_econ::tests::the_v1_record_decodes_and_v2_round_trips ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/dbrec_compare.rs (target/debug/deps/dbrec_compare-e19a4e077e3f32fe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/dbrec_js_schemas.rs (target/debug/deps/dbrec_js_schemas-9aec8d583ba68d05)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/dbrec_show.rs (target/debug/deps/dbrec_show-874cbe3b9f40efbe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_trading-7e3cf658d06d53cd)
+
+running 323 tests
+test chain_state::engine::tests::bench_hot_sender_block_apply ... ignored
+test chain_state::engine::tests::coherent_follows_the_head_and_refusals ... ok
+test chain_state::engine::tests::candidates_per_nonce_overflow_is_counted_and_makes_the_sender_unknown ... ok
+test chain_state::engine::tests::earlier_sighting_applied_later_is_the_first_seen ... ok
+test chain_state::engine::checkpoint::tests::empty_checkpoint_restores_an_unanchored_state ... ok
+test chain_state::engine::tests::gap_makes_every_sender_unknown_and_non_final_txs_uncertain ... ok
+test chain_state::engine::tests::consumed_nonce_consumed_again_is_a_conflict ... ok
+test chain_state::engine::tests::finality_after_depth_confirmations_is_proven_once ... ok
+test chain_state::engine::tests::canonical_effects_exist_without_any_pending_observation ... ok
+test chain_state::engine::tests::discontinuous_block_still_passes_its_own_checks ... ok
+test chain_state::engine::tests::earliest_first_seen_is_kept_and_a_later_sighting_never_overwrites_it ... ok
+test chain_state::engine::tests::eip7702_reorg_fallback_accepts_the_valid_new_chain_block ... ok
+test chain_state::engine::checkpoint::tests::overflowed_transactions_are_kept_in_the_checkpoint ... ok
+test chain_state::engine::tests::candidate_consumed_unseen_gets_no_snapshot ... ok
+test chain_state::engine::tests::fact_resolutions_follow_the_fact_block ... ok
+test chain_state::engine::tests::block_not_extending_the_head_is_a_discontinuity_and_re_anchors ... ok
+test chain_state::engine::tests::eip7702_nonce_jump_within_a_block_is_applied_and_following_continues ... ok
+test chain_state::engine::tests::gap_not_right_after_the_head_is_applied_and_reported ... ok
+test chain_state::engine::tests::identity_mismatch_is_a_conflict_and_changes_nothing ... ok
+test chain_state::engine::tests::gap_then_truthful_nonce_fact_resolves_the_own_sender ... ok
+test chain_state::engine::tests::integer_bounds_never_wrap ... ok
+test chain_state::engine::tests::late_pending_after_inclusion_never_rewrites_the_inclusion ... ok
+test chain_state::engine::tests::limits_are_validated ... ok
+test chain_state::engine::tests::malformed_and_oversize_blocks_are_refused ... ok
+test chain_state::engine::tests::later_inclusion_resolves_lower_nonces_with_its_block_as_evidence ... ok
+test chain_state::engine::tests::nonce_below_the_known_next_nonce_is_refused_only_against_a_held_consumption ... ok
+test chain_state::engine::tests::nonce_fact_at_an_older_block_accounts_for_later_inclusions ... ok
+test chain_state::engine::tests::nonce_discontinuity_is_reported_and_makes_a_watched_sender_unknown ... ok
+test chain_state::engine::tests::nonce_fact_proves_an_uncertain_tx_was_orphaned ... ok
+test chain_state::engine::tests::nonce_fact_with_a_pending_candidate_does_not_reconcile ... ok
+test chain_state::engine::tests::nonce_fact_resolves_consumed_nonces_explicitly ... ok
+test chain_state::engine::tests::nonce_skip_after_the_fact_block_reconciles_only_with_a_later_fact ... ok
+test chain_state::engine::tests::observation_order_alone_never_marks_a_candidate_replaced ... ok
+test chain_state::engine::tests::orphaning_a_final_block_inside_the_window_proves_the_orphan ... ok
+test chain_state::engine::tests::proofs_and_replacements_only_for_watched_senders ... ok
+test chain_state::engine::tests::refused_double_inclusion_is_followed_by_a_re_anchor ... ok
+test chain_state::engine::tests::refused_reorg_is_followed_by_a_re_anchor ... ok
+test chain_state::engine::tests::reorg_below_the_retained_window_is_handled_as_too_deep ... ok
+test chain_state::engine::tests::reorg_not_matching_the_retained_chain_is_refused ... ok
+test chain_state::engine::tests::reorg_too_deep_makes_every_sender_and_the_snapshot_unknown_until_reconciled ... ok
+test chain_state::engine::tests::reorg_returns_orphaned_txs_to_candidates_and_proves_orphans ... ok
+test chain_state::engine::tests::retained_is_the_window_ascending ... ok
+test chain_state::engine::tests::reverted_tx_consumes_the_nonce ... ok
+test chain_state::engine::tests::restart_quarantine_holds_until_a_matching_nonce_fact_reconciles ... ok
+test chain_state::engine::tests::settled_tx_reappearing_after_a_too_deep_reorg_does_not_stall_the_owner ... ok
+test chain_state::engine::tests::settled_records_are_evicted_before_overflow ... ok
+test chain_state::engine::tests::several_candidates_per_sender_nonce_are_all_kept ... ok
+test chain_state::engine::tests::sighting_epoch_gates_snapshots_after_a_dropped_chain ... ok
+test chain_state::engine::tests::snapshot_identity_changes_with_every_effect ... ok
+test chain_state::engine::tests::stale_pending_below_the_known_nonce_is_counted_not_held ... ok
+test chain_state::engine::tests::the_canonical_snapshot_follows_every_applied_block ... ok
+test chain_state::engine::tests::too_deep_then_moved_tip_re_anchors_and_follows ... ok
+test chain_state::engine::tests::tx_included_in_two_blocks_without_reorg_is_a_conflict ... ok
+test chain_state::engine::tests::uncertain_tx_included_again_is_orphaned_then_included ... ok
+test chain_state::engine::tests::tx_table_overflow_is_counted_and_makes_the_sender_unknown ... ok
+test chain_state::engine::tests::watched_overflow_blocks_reconciliation_until_the_lost_nonce_is_consumed ... ok
+test chain_state::engine::tests::uncertain_tx_replaced_by_another_canonical_tx ... ok
+test chain_state::engine::tests::watched_sender_is_unknown_until_its_first_nonce_fact_never_zero ... ok
+test chain_state::input::tests::every_input_round_trips ... ok
+test chain_state::engine::checkpoint::tests::checkpoint_round_trip_restores_the_window_quarantined ... ok
+test chain_state::input::tests::gap_layout_is_fixed_little_endian ... ok
+test chain_state::input::tests::oversized_counts_are_refused_before_allocation ... ok
+test chain_state::input::tests::trailing_bytes_are_refused ... ok
+test chain_state::input::tests::unknown_version_tag_and_status_are_refused ... ok
+test economics::fees::tests::combined_rate_of_one_hundred_percent_is_rejected ... ok
+test chain_state::input::tests::every_truncation_is_refused ... ok
+test chain_state::engine::checkpoint::tests::restored_state_follows_the_checkpoint_head_and_re_anchors_otherwise ... ok
+test economics::fees::tests::g03_fixture_tax_exceeds_one_percent_floor_by_one ... ok
+test chain_state::engine::checkpoint::tests::resealed_malformed_checkpoints_are_refused ... ok
+test economics::fees::tests::native_fixture_splits_evenly ... ok
+test economics::fees::tests::zero_tax_and_zero_amount ... ok
+test economics::arith::tests::overflow_underflow_and_zero_divisor_are_errors ... ok
+test economics::arith::tests::rounding_direction_is_exact ... ok
+test economics::arith::tests::widened_product_does_not_wrap ... ok
+test economics::fees::tests::maximum_amount_does_not_wrap ... ok
+test economics::flap::doge_v3::tests::arithmetic_rejects_bad_state_without_panic ... ok
+test economics::flap::doge_v3::tests::deadline_equality_passes_and_one_second_later_is_rejected ... ok
+test economics::flap::doge_v3::tests::scope_check_binds_extension_mode_and_price ... ok
+test economics::flap::doge_v3::tests::g03_fixture_reproduces_every_recorded_value ... ok
+test economics::flap::native_curve20::parity_tests::sell_and_buy_fee_rounding_differ_where_witnessed ... ok
+test economics::flap::native_curve20::tests::a_buy_above_the_holding_allowance_is_refused ... ok
+test economics::flap::native_curve20::tests::a_buy_reaching_the_dex_threshold_is_refused ... ok
+test economics::flap::native_curve20::tests::a_priced_token_is_only_a_scoped_token ... ok
+test economics::flap::native_curve20::tests::a_migrated_token_is_not_quoted ... ok
+test economics::flap::native_curve20::tests::curve20_starts_at_zero_supply ... ok
+test economics::flap::native_curve20::tests::admitted_minimum_is_positive_and_never_exceeds_the_expected_output ... ok
+test economics::flap::native_curve20::tests::g06a_001_bnb_initial_buy_vector ... ok
+test economics::flap::doge_v3::tests::every_deviation_from_the_witnessed_execution_is_refused ... ok
+test economics::flap::native_curve20::tests::admitted_buy_reproduces_the_evm_crosscheck ... ok
+test economics::flap::native_curve20::tests::inconsistent_or_extreme_state_is_an_error_not_a_panic ... ok
+test economics::flap::native_curve20::tests::g07_0001_bnb_testnet_acquisition_vector ... ok
+test economics::flap::native_curve20::tests::unsupported_and_unwitnessed_branches_are_rejected ... ok
+test economics::flap::native_curve20::tests::launch_a_cannot_be_combined_with_the_snapshot_of_launch_b ... ok
+test economics::flap::native_curve20::tests::only_the_crosschecked_amount_is_admitted ... ok
+test economics::flap::native_curve20::tests::policy_of_another_generation_is_not_admitted ... ok
+test economics::flap::native_curve20::tests::only_the_fresh_state_of_matching_generation_and_terms_is_qualified ... ok
+test economics::flap::native_curve20::tests::second_buy_continues_from_the_first_buys_state ... ok
+test economics::flap::position::tests::a_round_trip_is_the_sum_of_its_quoted_and_network_parts ... ok
+test economics::flap::doge_v3::tests::scope_check_binds_every_fixture_field ... ok
+test economics::network::tests::a_nonce_lifecycle_charges_its_one_inclusion_once ... ok
+test economics::policy::tests::an_exit_policy_refuses_what_could_not_sell ... ok
+test economics::policy::tests::invalid_values_are_rejected ... ok
+test economics::flap::position::tests::a_refused_quote_or_missing_gas_evidence_fails_closed ... ok
+test economics::policy::tests::valid_policy_keeps_its_values_and_generation ... ok
+test economics::slippage::tests::golden_minimums_at_100_bps ... ok
+test economics::network::tests::realized_cost_is_gas_used_times_effective_price_for_success_and_revert ... ok
+test economics::flap::native_curve20::parity_tests::buy_and_sell_equal_the_portal_quote_at_the_same_state ... ok
+test economics::flap::position::tests::a_migrated_token_has_no_exit ... ok
+test economics::slippage::tests::maximum_quote_does_not_wrap ... ok
+test economics::slippage::tests::slippage_bounds_0_1_and_9999_bps ... ok
+test economics::slippage::tests::ten_thousand_bps_and_above_have_no_admissible_minimum ... ok
+test economics::slippage::tests::zero_quote_and_zero_rounded_minimum_are_rejected ... ok
+test economics::network::tests::counterfactual_cost_uses_the_class_evidence_or_fails_closed ... ok
+test economics::snapshot::tests::the_scope_is_explicit_and_four_is_not_priced ... ok
+test economics::network::tests::the_evidence_parser_checks_every_line ... ok
+test economics::snapshot::tests::the_manifest_binds_every_file ... ok
+test economics::snapshot::tests::every_economics_source_is_bound_or_excluded ... ok
+test economics::flap::native_curve20::parity_tests::executed_trades_v2_equal_the_local_quote_at_their_pre_state ... ok
+test economics::flap::native_curve20::parity_tests::executed_trades_equal_the_local_quote_at_their_pre_state ... ok
+test intent::tests::conflicting_evidence_outranks_an_earlier_reason_but_not_a_quarantine ... ok
+test intent::tests::capacity_and_nonce_exhaustion_fail_closed ... ok
+test economics::network::tests::the_flap_gas_sample_holds_every_class ... ok
+test economics::flap::native_curve20::parity_tests::v3_parity_holds_and_the_scope_refuses_what_differs ... ok
+test economics::flap::native_curve20::parity_tests::curve_admission_is_the_parity_quote ... ok
+test economics::flap::native_curve20::parity_tests::v2_parity_holds_under_the_holding_cap_and_launches_set_none ... ok
+test intent::tests::evidence_for_another_chain_or_sender_is_ignored ... ok
+test intent::tests::conflicting_preparation_is_rejected ... ok
+test intent::tests::duplicate_before_and_after_resolution_never_consumes_a_nonce ... ok
+test intent::tests::external_halt_stops_admission_and_keeps_the_first_reason ... ok
+test intent::tests::bytes_are_released_only_by_a_successfully_consumed_permit ... ok
+test intent::tests::an_unknown_submission_keeps_its_reservation ... ok
+test intent::tests::a_permit_is_consumed_exactly_once ... ok
+test intent::tests::crash_between_permits_cannot_continue_the_fan_out ... ok
+test intent::tests::failed_write_is_unknown_halts_and_suppresses_unstarted_permits ... ok
+test intent::tests::fan_out_uses_one_nonce_and_identical_bytes_for_every_adapter ... ok
+test intent::tests::in_process_stop_without_disclosure_resumes_at_the_same_nonce ... ok
+test intent::tests::foreign_transaction_on_a_lane_nonce_is_replaced_and_stops_the_lane ... ok
+test intent::tests::only_the_newest_undisclosed_intent_can_be_withdrawn ... ok
+test intent::tests::repeated_evidence_of_a_foreign_transaction_ignores_its_status ... ok
+test intent::tests::quarantined_lane_offers_no_operation_that_admits_again ... ok
+test intent::tests::plan_costs_must_match_the_prepared_intent_and_cannot_overflow ... ok
+test intent::tests::inclusion_finality_and_reorg_transitions ... ok
+test intent::tests::repeated_evidence_with_another_transaction_or_block_is_conflicting ... ok
+test intent::tests::reversed_ack_order_and_ack_never_confirm_the_intent ... ok
+test intent::tests::revert_consumes_the_nonce_and_stops_the_lane ... ok
+test chain_state::engine::tests::inclusion_visits_only_open_records_of_its_sender ... ok
+test intent::tests::tickets_cannot_cross_sender_or_chain_lanes ... ok
+test intent::tests::rejection_leaves_the_intent_unresolved_and_late_execution_is_kept ... ok
+test signer::tests::debug_output_never_contains_key_material ... ok
+test signer::tests::eip155_specification_example_signs_byte_exact ... ok
+test intent::tests::preparation_binds_sender_nonce_and_token_of_the_ticket ... ok
+test signer::tests::g06_fixture_first_envelope_is_byte_exact ... ok
+test signer::tests::high_s_signature_is_rejected ... ok
+test signer::tests::invalid_secret_and_zero_scalars_are_errors ... ok
+test intent::tests::wrong_hash_at_the_permit_never_reaches_a_writer ... ok
+test intent::tests::stale_preparation_is_not_dispatched_and_must_be_prepared_again ... ok
+test intent::tests::too_small_scratch_is_refused_and_the_intent_stays_reserved ... ok
+test signer::tests::golden_mainnet_buy_recovers_its_canonical_sender ... ok
+test strategy::book::tests::a_shadow_replays_or_stops_tracking ... ok
+test strategy::book::tests::the_price_is_the_virtual_reserve_ratio ... ok
+test strategy::book::tests::trades_replay_exactly_or_stop_tracking ... ok
+test strategy::book::tests::unsupported_terms_migration_and_gaps_stop_tracking ... ok
+test strategy::engine_tests::a_busy_slot_discards_for_good ... ok
+test strategy::engine_tests::a_creator_sale_after_the_fill_exits_first ... ok
+test signer::tests::sign_legacy_replaces_the_buffer_and_leaves_it_empty_on_error ... ok
+test strategy::engine_tests::a_failing_filter_rejects ... ok
+test strategy::engine_tests::a_creator_sale_before_the_fill_cancels_or_lands ... ok
+test strategy::engine_tests::a_skipped_fill_block_cancels_and_frees_the_slot ... ok
+test intent::tests::reversed_preparation_cannot_bypass_an_unready_or_unresolved_head ... ok
+test strategy::engine_tests::an_unsupported_launch_is_not_tracked ... ok
+test strategy::engine_tests::a_passing_launch_enters_and_exits_at_the_target ... ok
+test strategy::engine_tests::gaps_fail_closed ... ok
+test strategy::engine_tests::tx_lands_then_exits_on_the_creators_earlier_sale ... ok
+test strategy::features::tests::missing_bases_are_null ... ok
+test strategy::features::tests::t0_of_a_launch_without_a_purchase_is_the_empty_curve ... ok
+test strategy::features::tests::the_concentration_rounds_each_share_first ... ok
+test strategy::features::tests::the_window_features_follow_the_trades ... ok
+test strategy::filters::tests::null_fails_bounds_are_inclusive_and_a_gap_is_incomplete ... ok
+test signer::tests::wrong_parity_or_tampered_field_does_not_recover_the_sender ... ok
+test strategy::filters::tests::rules_parse_exactly_and_refuse_deviations ... ok
+test strategy::fixed::tests::bounds_parse_exactly_or_not_at ... ok
+test strategy::fixed::tests::ratios_round_half_to_even_once ... ok
+test strategy::engine_tests::the_exit_fills_after_the_trades_of_its_block ... ok
+test submission_policy::tests::a_documented_gas_price_rule_is_never_recorded_as_no_rule ... ok
+test intent::tests::wrong_hash_or_resolved_intent_releases_no_bytes ... ok
+test submission_policy::tests::a_property_the_profile_does_not_require_never_blocks ... ok
+test submission_policy::tests::a_required_property_must_be_stated_and_qualified ... ok
+test submission_policy::tests::adapter_table_binds_every_index_and_kind_once ... ok
+test strategy::engine_tests::timeout_and_stop ... ok
+test submission_policy::tests::blockrazor_builder_record_matches_the_frozen_scope ... ok
+test submission_policy::tests::blockrazor_rpc_is_a_different_capability_and_enables_nothing ... ok
+test intent::tests::repeated_inclusion_evidence_must_repeat_the_execution_result ... ok
+test submission_policy::tests::bundle_form_and_pre_submission_are_separate_capabilities ... ok
+test submission_policy::tests::club48_record_matches_the_frozen_scope ... ok
+test submission_policy::tests::blockrazor_rpc_is_never_admitted_in_place_of_the_builder ... ok
+test submission_policy::tests::documented_is_not_qualified_for_any_frozen_record ... ok
+test submission_policy::tests::enabled_is_not_qualified_for_any_feature_of_a_frozen_record ... ok
+test submission_policy::tests::a_required_option_must_be_enabled_on_the_adapter ... ok
+test submission_policy::tests::birth_entry_profile_fixes_the_club48_envelope ... ok
+test submission_policy::tests::every_record_keeps_the_three_explicit_facts ... ok
+test submission_policy::tests::expiry_before_the_first_write_is_not_a_disclosure ... ok
+test submission_policy::tests::a_feature_the_plan_does_not_use_never_blocks_a_release ... ok
+test submission_policy::tests::final_check_enforces_the_tight_block_window ... ok
+test submission_policy::tests::a_used_timestamp_bound_must_be_qualified ... ok
+test submission_policy::tests::final_check_refuses_stale_state_and_passed_bounds ... ok
+test submission_policy::tests::lifecycle_is_recorded_explicitly_and_not_guessed ... ok
+test intent::tests::restart_from_every_phase_is_quarantined_and_cannot_be_released ... ok
+test submission_policy::tests::local_geth_record_is_single_buy_with_deferred_boundary ... ok
+test submission_policy::tests::mainnet_records_are_refused_for_another_chain ... ok
+test intent::tests::preallocated_scratch_never_grows_across_preparations ... ok
+test submission_policy::tests::no_frozen_adapter_counts_for_a_release_yet ... ok
+test submission_policy::tests::full_dispatch_check_accepts_exactly_head_to_head_plus_two ... ok
+test submission_policy::tests::controlled_self_launch_charges_the_own_launch_cost ... ok
+test submission_policy::tests::nothing_revokes_bytes_that_may_have_left ... ok
+test submission_policy::tests::one_adapter_expired_unstarted_while_another_disclosed ... ok
+test submission_policy::tests::every_budget_component_and_the_total_are_enforced ... ok
+test submission_policy::tests::plan_binds_the_one_economic_identity ... ok
+test submission_policy::tests::no_per_buy_gas_floor_is_invented_for_blockrazor ... ok
+test submission_policy::tests::provider_block_window_is_at_most_two_blocks_beyond_the_head ... ok
+test submission_policy::tests::every_feature_a_release_plan_uses_must_be_qualified ... ok
+test submission_policy::tests::provider_evidence_is_frozen_and_pinned ... ok
+test submission_policy::tests::local_deadline_and_provider_validity_are_separate_bounds ... ok
+test submission_policy::tests::provider_payment_without_a_carrier_is_refused ... ok
+test submission_policy::tests::own_launch_facts_are_read_from_its_signed_bytes ... ok
+test submission_policy::tests::release_grade_qualifies_features_explicitly ... ok
+test intent::tests::the_session_cap_admits_exactly_its_intents_and_refuses_the_next ... ok
+test submission_policy::tests::provider_default_merging_is_refused_where_the_profile_requires_no_merge ... ok
+test submission_policy::tests::plan_is_bound_to_exactly_the_dispatch_of_the_intent_lane ... ok
+test submission_policy::tests::reorg_exposure_is_not_a_provider_rebroadcast_or_public_fallback ... ok
+test submission_policy::tests::release_plan_exists_only_when_every_selected_adapter_is_established ... ok
+test submission_policy::tests::public_full_launch_fans_one_intent_out_and_charges_no_launch_cost ... ok
+test submission_policy::tests::the_block_bound_says_nothing_about_elapsed_time ... ok
+test submission_policy::tests::transaction_references_are_made_from_and_checked_against_bytes ... ok
+test submission_policy::tests::transport_deadline_cannot_be_wider_than_the_profile_allows ... ok
+test submission_policy::tests::transport_deadline_is_strict_and_bound_to_its_clock ... ok
+test submission_policy::tests::own_launch_must_be_on_the_buy_chain_and_call_the_buy_portal ... ok
+test transactions::legacy::tests::decoder_rejects_other_transaction_forms ... ok
+test transactions::legacy::tests::eip155_specification_example_signing_payload ... ok
+test submission_policy::tests::the_signed_buy_has_no_time_bound_of_its_own ... ok
+test transactions::legacy::tests::encode_signed_appends_and_reports_chain_id_overflow_without_writing ... ok
+test transactions::legacy::tests::golden_mainnet_buy_decodes_to_the_same_fields ... ok
+test transactions::legacy::tests::length_bounds_cover_the_golden_transaction_and_the_widest_fields ... ok
+test transactions::legacy::tests::golden_mainnet_buy_signing_hash_raw_bytes_and_tx_hash ... ok
+test transactions::legacy::tests::short_signature_scalars_are_encoded_without_leading_zeros ... ok
+test venues::flap::abi::exit_tests::the_approval_is_the_witnessed_call ... ok
+test venues::flap::abi::exit_tests::the_sell_is_the_witnessed_call ... ok
+test venues::flap::abi::tests::buy_calldata_matches_the_canonical_mainnet_transaction ... ok
+test venues::flap::abi::tests::buy_decoder_rejects_everything_but_the_canonical_native_form ... ok
+test venues::flap::abi::tests::buy_encoder_rejects_zero_amounts ... ok
+test venues::flap::abi::tests::accepted_launches_reencode_to_identical_bytes ... ok
+test venues::flap::abi::tests::extension_tuple_of_the_doge_launch ... ok
+test venues::flap::abi::tests::captured_native_launches_decode_field_exact ... ok
+test venues::flap::abi::tests::historical_doge_launch_decodes_field_exact ... ok
+test venues::flap::abi::tests::non_canonical_layouts_are_rejected ... ok
+test venues::flap::abi::tests::oversize_wrong_selector_and_truncation_are_rejected ... ok
+test submission_policy::tests::provider_validity_is_inclusive ... ok
+test venues::flap::abi::tests::unknown_token_version_decodes_but_is_not_supported ... ok
+test venues::flap::address::tests::deployer_padded_to_32_bytes_is_the_recorded_wrong_address ... ok
+test venues::flap::abi::tests::value_types_with_dirty_high_bits_are_rejected ... ok
+test venues::flap::address::tests::wrong_implementation_init_code_or_deployer_yields_another_address ... ok
+test venues::flap::address::tests::eip1014_published_vectors ... ok
+test submission_policy::tests::unsupported_option_fails_closed ... ok
+test submission_policy::tests::modes_are_admitted_only_where_the_record_enables_them ... ok
+test venues::flap::binding::tests::expectation_requires_matching_code_and_policy_generation ... ok
+test submission_policy::tests::launch_kind_must_fit_the_mode ... ok
+test submission_policy::tests::release_plan_requires_the_profile_envelope_and_enabled_pre_submission ... ok
+test submission_policy::tests::self_launch_bundle_is_not_sent_before_the_launch_without_the_capability ... ok
+test venues::flap::binding::tests::prepared_buy_is_refused_after_any_snapshot_change ... ok
+test venues::flap::decoder_tests::a_decode_only_deployment_admits_nothing ... ok
+test venues::flap::binding::tests::value_and_calldata_amount_must_agree ... ok
+test venues::flap::decoder_tests::a_reverted_receipt_is_never_decoded ... ok
+test venues::flap::binding::tests::admitted_buy_signs_and_binds_end_to_end ... ok
+test venues::flap::decoder_tests::an_unknown_token_version_is_decoded_as_found_and_refused ... ok
+test venues::flap::decoder_tests::flap_decoder_latency ... ignored, latency measurement; run in release
+test venues::flap::decoder_tests::every_topic_and_selector_is_keccak_of_its_verified_signature ... ok
+test submission_policy::tests::the_launch_must_be_the_pending_candidate ... ok
+test venues::flap::binding::tests::foreign_calldata_and_malformed_bytes_are_rejected ... ok
+test intent::tests::eight_thousand_signals_yield_one_thousand_contiguous_reservations ... ok
+test venues::flap::decoder_tests::foreign_unknown_and_malformed_logs_fail_closed ... ok
+test venues::flap::decoder_tests::the_predicted_token_is_the_canonical_one_and_only_for_taxed_v3 ... ok
+test venues::flap::decoder_tests::frozen_portal_calls_and_pending_launches_are_recognized ... ok
+test venues::flap::binding::tests::the_production_builder_signs_exactly_the_admitted_buy ... ok
+test venues::flap::deployment::tests::current_constants_match_the_flap_refreeze ... ok
+test venues::flap::deployment::tests::captured_pending_launches_predict_the_tax_token_suffix ... ok
+test venues::flap::deployment::tests::every_deviation_of_the_live_deployment_is_rejected ... ok
+test venues::flap::deployment::tests::historical_and_simulated_mainnet_tokens_are_reproduced ... ok
+test venues::flap::deployment::tests::mainnet_constants_match_the_recorded_evidence ... ok
+test venues::flap::deployment::tests::token_creation_code_and_hash_match_the_recorded_evidence ... ok
+test venues::flap::deployment::tests::matching_live_deployment_validates_and_carries_its_generation ... ok
+test venues::flap::decoder_tests::launch_buy_and_sell_events_decode_field_exact ... ok
+test venues::flap::decoder_tests::the_same_bytes_always_decode_the_same ... ok
+test venues::flap::decoder_tests::other_destinations_unknown_and_unwitnessed_calls_fail_closed ... ok
+test venues::flap::profile::tests::doge_launch_is_recognised_and_disabled ... ok
+test venues::flap::profile::tests::captured_foreign_launches_decode_but_are_not_admissible ... ok
+test venues::flap::profile::tests::salt_selects_the_token_and_nothing_else_is_free ... ok
+test venues::flap::profile::tests::unwitnessed_beneficiary_and_metadata_fail_closed ... ok
+test venues::flap::decoder_tests::every_frozen_portal_log_decodes_as_its_event ... ok
+test venues::flap::profile::tests::witnessed_native_launch_is_classified_through_its_calldata ... ok
+test venues::flap::decoder_tests::unwitnessed_events_are_unsupported ... ok
+test venues::flap::profile::tests::every_bound_field_fails_closed ... ok
+test venues::fourmeme::decoder_tests::four_decoder_latency ... ignored, latency measurement; run in release
+test venues::fourmeme::decoder_tests::every_selector_and_topic_is_keccak_of_its_signature ... ok
+test venues::flap::binding::tests::the_exit_signs_and_binds_its_approval_and_sell ... ok
+test venues::flap::binding::tests::every_bound_field_is_enforced ... ok
+test venues::fourmeme::decoder_tests::destination_and_selector_decide_first ... ok
+test venues::fourmeme::decoder_tests::every_fixture_log_is_classified ... ok
+test venues::fourmeme::deployment::tests::the_frozen_derivation_reproduces_the_freeze ... ok
+test venues::fourmeme::deployment::tests::the_second_classic_pair_reproduces_its_launches ... ok
+test venues::fourmeme::decoder_tests::malformed_and_unwitnessed_events_fail_closed ... ok
+test venues::fourmeme::decoder_tests::a_reverted_receipt_is_never_decoded ... ok
+test venues::fourmeme::decoder_tests::the_same_bytes_decode_the_same_way ... ok
+test intent::tests::unresolved_head_blocks_every_prepared_follower_and_is_counted ... ok
+test venues::fourmeme::decoder_tests::flap_and_four_share_inputs_without_crosstalk ... ok
+test venues::fourmeme::decoder_tests::every_fixture_call_decodes_and_agrees_with_its_event ... ok
+test venues::fourmeme::decoder_tests::pre_execution_token_address_is_proven_or_unknown ... ok
+test venues::fourmeme::decoder_tests::unwitnessed_layouts_are_refused ... ok
+test venues::fourmeme::decoder_tests::malformed_input_fails_closed ... ok
+test chain_state::engine::checkpoint::tests::every_corruption_and_truncation_is_refused ... ok
+test intent::tests::sixty_four_intents_dispatch_in_nonce_order_with_unique_hashes ... ok
+test chain_state::engine::tests::replay_of_the_journal_yields_identical_state_and_outputs ... ok
+test signer::tests::reserved_buffers_never_grow_while_signing ... ok
+test venues::flap::binding::tests::two_hundred_fifty_six_final_envelopes_bind_sender_nonce_portal_and_token ... ok
+test signer::tests::signed_envelopes_are_canonical_low_s_and_recover_the_signer ... ok
+
+test result: ok. 320 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 2.62s
+
+     Running tests/c14_prefilter_scope.rs (target/debug/deps/c14_prefilter_scope-38eb1e9e2f6a332b)
+
+running 1 test
+test the_c14_prefilter_scope_is_the_committed_launch_scope ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/test_support.rs (target/debug/deps/test_support-66b1dc79990c3e47)
+
+running 2 tests
+test a_dependent_crate_can_build_synthetic_capability_records ... ok
+test a_dependent_crate_can_arm_a_lane_for_its_tests ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_tx_encoding-f4e622cea345e468)
+
+running 8 tests
+test rlp::tests::decoder_rejects_non_canonical_and_truncated_strings ... ok
+test rlp::tests::ethereum_reference_vectors ... ok
+test rlp::tests::integer_decoder_rejects_leading_zero_and_overflow ... ok
+test rlp::tests::short_long_boundary_at_55_and_56_bytes ... ok
+test rlp::tests::uint_be_strips_leading_zeros_like_gate0_rlp_u256 ... ok
+test rlp::tests::list_decoder_is_exact ... ok
+test rlp::tests::integers_are_canonical_and_round_trip ... ok
+test rlp::tests::writers_match_reference_and_declared_lengths ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rlp_differential.rs (target/debug/deps/rlp_differential-a239325262b916d9)
+
+running 2 tests
+test encoders_agree_with_alloy_rlp ... ok
+test decoder_agrees_with_alloy_rlp_and_never_panics ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+   Doc-tests darkbot_bsc_execution
+
+running 2 tests
+test crates/execution/src/submission/send.rs - submission::send::dispatch_release (line 589) - compile ... ok
+test crates/execution/src/attempt_authority.rs - attempt_authority::Claim (line 469) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 12 tests
+test crates/execution/src/launch_path.rs - launch_path::CurrentProof (line 235) - compile fail ... ok
+test crates/execution/src/attempt_authority.rs - attempt_authority::Claim (line 452) - compile fail ... ok
+test crates/execution/src/acceptance_guard.rs - acceptance_guard::WitnessSourceProof (line 130) - compile fail ... ok
+test crates/execution/src/acceptance_guard.rs - acceptance_guard::CapturePrearmedProof (line 67) - compile fail ... ok
+test crates/execution/src/attempt_authority.rs - attempt_authority::Claim (line 490) - compile fail ... ok
+test crates/execution/src/acceptance_guard.rs - acceptance_guard::DryPassProof (line 45) - compile fail ... ok
+test crates/execution/src/launch_path.rs - launch_path::Bound (line 206) - compile fail ... ok
+test crates/execution/src/acceptance_guard.rs - acceptance_guard::AttemptAuthorityProof (line 90) - compile fail ... ok
+test crates/execution/src/attempt_authority.rs - attempt_authority::Claim (line 482) - compile fail ... ok
+test crates/execution/src/submission/send.rs - submission::send::dispatch_release (line 548) - compile fail ... ok
+test crates/execution/src/submission/send.rs - submission::send::dispatch_release (line 568) - compile fail ... ok
+test crates/execution/src/attempt_authority.rs - attempt_authority::Claim (line 460) - compile fail ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.33s
+
+all doctests ran in 3.60s; merged doctests compilation took 1.12s
+   Doc-tests darkbot_bsc_geth_ipc
+
+running 1 test
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 97) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 78) - compile fail ... ok
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 86) - compile fail ... ok
+test crates/geth_ipc/src/hot0.rs - hot0::Hot0Poller (line 850) - compile fail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+all doctests ran in 1.80s; merged doctests compilation took 1.11s
+   Doc-tests darkbot_bsc_journal
+
+running 1 test
+test crates/journal/src/recorder.rs - recorder::Recorder::try_record (line 122) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+   Doc-tests darkbot_bsc_legacy_import
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_bsc_qualification
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_bsc_record
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests darkbot_bsc_trading
+
+running 2 tests
+test crates/trading/src/intent/mod.rs - intent::EgressWrite (line 432) - compile fail ... ok
+test crates/trading/src/intent/mod.rs - intent::EgressWrite (line 424) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+   Doc-tests darkbot_bsc_tx_encoding
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0

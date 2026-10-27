@@ -1,0 +1,125 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_gateway-369369e2c7ecb928)
+
+running 53 tests
+test config::tests::a_non_loopback_bind_needs_the_explicit_opt_in ... ok
+test control::tests::a_missing_gateway_clock_admits_nothing_and_observes_nothing ... ok
+test config::tests::the_cookie_is_secure_only_behind_https_origins ... ok
+test config::tests::the_command_window_follows_the_configured_liveness_and_retention_covers_twice_it ... ok
+test control::tests::a_candidate_request_takes_only_a_fixed_profile_and_the_generation ... ok
+test config::feed_tests::the_analytics_feed_owns_its_topic_and_the_main_feed_the_rest ... ok
+test control::tests::bsc_commands_are_strictly_read_only ... ok
+test control::tests::dec07_boot_actions_map_onto_p0ctl_boot_and_refuse_malformed_requests ... ok
+test control::tests::dec16_unbounded_boot_and_autostart_actions_map_onto_p0ctl ... ok
+test control::tests::only_a_source_change_carries_the_configuration_version_cas ... ok
+test control::tests::rejects_path_ids_and_redacts_provider_credentials ... ok
+test control::tests::a_completed_blocked_readiness_run_is_stopped_not_failed ... ok
+test control::tests::a_ledger_of_open_intents_refuses_a_new_one_and_drops_nothing ... ok
+test control::tests::the_binary_ledger_record_round_trips_and_refuses_damage ... ok
+test control::tests::a_full_ledger_archives_the_oldest_receipt_which_still_replays_and_conflicts ... ok
+test control::tests::a_source_request_reaches_the_native_owner_and_returns_its_receipt ... ok
+test control::tests::dec07_a_raw_capture_start_needs_its_boot_approval ... ok
+test engine::liveness_tests::a_too_large_notice_marks_only_its_topic_and_the_next_state_restores_it ... ok
+test engine::liveness_tests::a_too_large_topic_is_never_ok_across_detach_and_recovers_after_reattach ... ok
+test control::tests::a_candidate_request_dispatches_one_fixed_native_command ... ok
+test engine::liveness_tests::an_oversized_state_is_a_topic_error_and_keeps_the_source_attached ... ok
+test control::tests::analytics_job_commands_dispatch_the_p0ctl_job_options ... ok
+test engine::liveness_tests::the_exact_engine_frame_bound_admits_the_largest_frame_and_refuses_one_byte_more ... ok
+test engine::trust_boundary_tests::engine_feeds_cannot_spoof_gateway_or_cross_project_topics ... ok
+test feeds::unix_socket::peer_tests::only_the_gateway_user_may_feed ... ok
+test feeds::unix_socket::tests::a_hello_declares_only_owned_topics ... ok
+test http::cache_tests::index_is_revalidated_and_hashed_assets_are_immutable ... ok
+test hub::tests::detached_overlay_keeps_generation_and_seq_and_is_seen_by_new_subscriber ... ok
+test hub::tests::ordering_rules ... ok
+test hub::tests::rejects_unavailable_and_oversized ... ok
+test lifecycle::tests::process_exit_and_operator_stop_are_distinct ... ok
+test overview::tests::overview_without_engines_is_honest ... ok
+test overview::tests::project0_live_authorization_comes_only_from_a_current_effective_record ... ok
+test schema_id_guard::schema_id_is_a_bare_sha256 ... ok
+test session::tests::bounded_session ... ok
+test session::tests::the_session_cookie_is_secure_exactly_when_requested ... ok
+test topics::tests::ids_are_unique_and_wire_names_match_numbering ... ok
+test ws::slot_tests::client_slots_never_exceed_the_limit ... ok
+test control::tests::a_damaged_ledger_record_refuses_instead_of_running_again ... ok
+test control::tests::the_archive_keeps_the_newest_receipts_and_drops_only_its_oldest ... ok
+test engine::liveness_tests::silence_turns_stale_then_detached_and_heartbeats_alone_restore_nothing ... ok
+test control::tests::the_wallet_venue_and_economic_switches_reach_the_one_native_owner ... ok
+test control::tests::an_archived_receipt_replays_after_a_restart_and_other_bytes_conflict ... ok
+test engine::liveness_tests::an_auxiliary_feed_keeps_its_topics_apart_from_the_project_source ... ok
+test control::tests::a_legacy_json_receipt_replays_and_is_replaced_by_its_binary_form ... ok
+test control::tests::open_intents_survive_a_restart_and_are_never_dispatched_again ... ok
+test control::tests::a_command_whose_receipt_left_the_archive_is_never_executed_again ... ok
+test control::tests::new_commands_run_in_any_stamp_order_within_the_clock_window_and_never_outside ... ok
+test control::tests::after_its_retention_a_reused_id_with_a_new_time_is_a_new_intent ... ok
+test control::tests::the_retired_through_mark_survives_restarts_and_crashes_fail_closed ... ok
+test control::tests::a_browser_clock_beyond_the_window_is_refused_regardless_of_archiving ... ok
+test control::tests::stamps_at_the_upper_clock_bound_never_block_current_commands ... ok
+test control::tests::within_its_retention_a_request_id_never_runs_twice ... ok
+
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.66s
+
+     Running unittests src/main.rs (target/debug/deps/darkbot_gateway-198232439fb28b82)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/control_goldens.rs (target/debug/deps/control_goldens-4128416197d45523)
+
+running 1 test
+test control_protocol_golden_bytes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/feed_config.rs (target/debug/deps/feed_config-056177e350cf5d6b)
+
+running 1 test
+test one_generic_feed_list_and_reject_duplicates ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/p0_reporter_e2e.rs (target/debug/deps/p0_reporter_e2e-f5e0cb4f352ffdfd)
+
+running 1 test
+test ipc_state_detach_and_reconnect ... ignored, requires external p0-reporter-fixture binary
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/unix_feed.rs (target/debug/deps/unix_feed-92c5d38450bf4c4c)
+
+running 2 tests
+test mismatched_schema_never_publishes_project0_data ... ok
+test real_socket_publishes_project0_and_detaches_after_close ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/ws_integration.rs (target/debug/deps/ws_integration-6c4c7439710de7ff)
+
+running 18 tests
+test every_response_carries_the_content_security_policy ... ok
+test session_bootstrap_and_cross_site_rejection ... ok
+test accepted_handshake_and_topics ... ok
+test an_oversized_frame_from_the_client_closes_the_connection ... ok
+test detached_overlay_persists_for_new_subscriber ... ok
+test event_topics_and_state_cursors_are_refused ... ok
+test an_oversized_state_is_frame_too_large_until_the_next_valid_state_on_the_same_subscription ... ok
+test a_reconnecting_browser_gets_frame_too_large_never_the_older_value_then_the_recovery ... ok
+test incompatible_major_rejected_and_compatible_minor_schema_accepted ... ok
+test cookie_origin_host_guards ... ok
+test subscription_and_latest_generation ... ok
+test detached_is_pushed_to_an_existing_subscriber_with_the_same_generation_and_seq ... ok
+test unavailable_topic_rejected ... ok
+test reconnect_gets_latest ... ok
+test coalescing_at_watch_boundary ... ok
+test a_client_that_never_answers_heartbeats_is_closed ... ok
+test a_client_that_stops_reading_is_evicted_and_never_blocks_publishing ... ok
+test a_stalled_client_on_a_flapping_too_large_topic_is_evicted_while_a_reader_recovers ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.52s
+
+   Doc-tests darkbot_gateway
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

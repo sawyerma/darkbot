@@ -1,0 +1,61 @@
+..................
+----------------------------------------------------------------------
+Ran 18 tests in 38.448s
+
+OK
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 0.080s
+
+OK
+✔ both keys are taken once and every key variable is gone, also on a missing key (0.867166ms)
+✔ the simulation never reads a key elsewhere and drops its signers after signing (0.175458ms)
+✔ plan 27.10.: the native switches are asked after the keys left the environment, before any signer (278.701917ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 286.174208
+✔ without local creations the created address reaches the provider (the leak) (6.296291ms)
+✔ with local creations nothing about the created address leaves the process (1.230958ms)
+✔ the egress guard refuses private values and remote execution before sending (0.479791ms)
+✔ the private cross-check sends no remote execution and no private value (178.449708ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 188.236292
+✔ local simulation refuses another block than the preflight before any state read (156.788625ms)
+✔ the simulation pins the preflight block before its first state read (0.192ms)
+✔ the cross-check reads every state word pinned to the preflight block hash (208.433375ms)
+✔ the state pin and the canonical re-check refuse another block (0.428333ms)
+✔ every local EVM tool re-checks its block right before writing evidence (0.447125ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 368.668959
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 1.588s
+
+OK
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.676s
+
+OK
+BSC snapshot synced: 1 public files; source 18f6c70bbcc22628006a77d92271df93f2868912-dirty
+BSC snapshot synced: 4 public files; source 334e49232330d59deafd8928d57051a534d749c2-dirty
+BSC snapshot synced: 4 public files; source 334e49232330d59deafd8928d57051a534d749c2-dirty
+BSC snapshot synced: 6 public files; source 18f6c70bbcc22628006a77d92271df93f2868912-dirty
+BSC snapshot synced: 3 public files; source 393b8acbbd085bf90cd12c3c44d181ea80109dc9-dirty
