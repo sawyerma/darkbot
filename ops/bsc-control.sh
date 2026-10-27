@@ -123,12 +123,15 @@ bsc_candidate_request() {
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/g07_candidate" request "$1" \
     --expect-generation "$2" --request-id "$3" --rundir "$RUNDIR" --snapshot "$BSC_ROOT"
 }
-# Source modes (plan §5a.2, order V2 §5): the native owner applies or refuses
-# one request with its generation as the CAS and prints the receipt; a
-# requested LIVE is recorded and stays BLOCKED. Nothing here signs or sends.
+# Source, component and venue modes (plan §5a.2, v9 §2, order V2 §5) and the
+# wallet and economic switches (plan 27.10.): the native owner applies or
+# refuses one request with its generation as the CAS and prints the receipt;
+# a requested LIVE is recorded and stays BLOCKED, an ENABLED switch is a
+# permission only. Nothing here signs or sends. The same command the GUI uses.
+BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|LIVE|DISABLED|ENABLED <generation> <request_id>; bsc source show"
 bsc_source_request() {
-  [ "$#" -eq 4 ] || die "bsc source request <SOURCE_ID> OFF|SHADOW|LIVE <generation> <request_id>"
-  case "$2" in OFF|SHADOW|LIVE) ;; *) die "unknown source mode" ;; esac
+  [ "$#" -eq 4 ] || die "$BSC_REQUEST_USAGE"
+  case "$2" in OFF|SHADOW|LIVE|DISABLED|ENABLED) ;; *) die "unknown mode" ;; esac
   case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \
@@ -138,7 +141,9 @@ cmd_bsc() {
   case "${1:-}" in
     source) case "${2:-}" in
       request) locked bsc_source_request "${@:3}" ;;
-      *) die "bsc source request <SOURCE_ID> OFF|SHADOW|LIVE <generation> <request_id>" ;;
+      show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source show --state "$RUNDIR/bsc-sources" ;;
+      *) die "$BSC_REQUEST_USAGE" ;;
     esac ;;
     candidate) case "${2:-}" in
       request) locked bsc_candidate_request "${@:3}" ;;
@@ -153,7 +158,7 @@ cmd_bsc() {
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
       locked bsc_sync ;;
     reporter) locked bsc_reporter_up ;;
-    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request" ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request | show" ;;
   esac
 }
 

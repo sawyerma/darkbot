@@ -1,8 +1,10 @@
 //! The native configuration of the BSC runtime (C0/C1, plan §5a.2, order V2
-//! §5): the five signal sources, each with the mode the user requested
-//! (`OFF | SHADOW | LIVE`) and the mode the native owner made effective
-//! (`OFF | SHADOW | BLOCKED`, with its reason). One record per generation;
-//! every request leaves one receipt.
+//! §5): the five signal sources, the runtime components and the three venues,
+//! each with the mode the user requested (`OFF | SHADOW | LIVE`) and the mode
+//! the native owner made effective (`OFF | SHADOW | BLOCKED`, with its
+//! reason), and the wallet and economic switches (plan 27.10.,
+//! `DISABLED | ENABLED`). One record per generation; every request leaves
+//! one receipt.
 
 use crate::{Field, Kind::*, Presence, Schema};
 
@@ -60,6 +62,68 @@ pub mod source_modes {
         };
     }
 
+    /// One venue of a generation (plan v9 §2.3): `FLAP`, `FOUR_CLASSIC`,
+    /// `OPENFOUR`, each `OFF | SHADOW | LIVE` like a source.
+    pub mod venue {
+        use super::*;
+
+        /// `BSC_VENUE_FLAP`, `BSC_VENUE_FOUR_CLASSIC`, `BSC_VENUE_OPENFOUR`.
+        pub const VENUE_ID: u16 = 1;
+        pub const REQUESTED: u16 = 2;
+        pub const EFFECTIVE: u16 = 3;
+        pub const BLOCK_REASON: u16 = 4;
+        /// The request that last set this venue (none while never requested).
+        pub const REQUEST_ID: u16 = 5;
+        /// The generation that request wrote.
+        pub const SET_GENERATION: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.venue-mode",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(VENUE_ID, "venue_id", Text),
+                Field::req(REQUESTED, "requested", Text),
+                Field::req(EFFECTIVE, "effective", Text),
+                Field::opt(BLOCK_REASON, "block_reason", Text),
+                Field::opt(REQUEST_ID, "request_id", Text),
+                Field::opt(SET_GENERATION, "set_generation", U64),
+            ],
+        };
+    }
+
+    /// One wallet or economic switch of a generation (plan 27.10.):
+    /// `DISABLED | ENABLED`, DISABLED initially and after every restart.
+    pub mod switch {
+        use super::*;
+
+        /// `BSC_WALLET_LAUNCHER`, `BSC_WALLET_BUYER`, `BSC_ECON_SIGN`,
+        /// `BSC_ECON_ARM`, `BSC_ECON_SEND`, `BSC_ECON_ATTEMPT`, `BSC_ECON_LIVE`.
+        pub const SWITCH_ID: u16 = 1;
+        pub const REQUESTED: u16 = 2;
+        pub const EFFECTIVE: u16 = 3;
+        /// Why a requested ENABLED is not effective (a restart reset).
+        pub const BLOCK_REASON: u16 = 4;
+        /// The request (or restart reset) that last set this switch.
+        pub const REQUEST_ID: u16 = 5;
+        /// The generation that request wrote.
+        pub const SET_GENERATION: u16 = 6;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.control-switch",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(SWITCH_ID, "switch_id", Text),
+                Field::req(REQUESTED, "requested", Text),
+                Field::req(EFFECTIVE, "effective", Text),
+                Field::opt(BLOCK_REASON, "block_reason", Text),
+                Field::opt(REQUEST_ID, "request_id", Text),
+                Field::opt(SET_GENERATION, "set_generation", U64),
+            ],
+        };
+    }
+
     /// Strictly increasing; the CAS every change states.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -70,8 +134,45 @@ pub mod source_modes {
     /// The switchable components; a generation written before a component
     /// existed has it OFF (the initial state, nothing ever requested).
     pub const COMPONENTS: u16 = 6;
+    /// The venues; a generation written before them has every venue OFF.
+    pub const VENUES: u16 = 7;
+    /// The wallet and economic switches; a generation written before them
+    /// has every switch DISABLED.
+    pub const SWITCHES: u16 = 8;
+    /// The host boot session this generation was written in: an ENABLED
+    /// switch counts only within it (a restart disables every switch).
+    /// Bytes, so the host identity never leaves the reporter.
+    pub const BOOT_SESSION: u16 = 9;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.source-modes.v1",
+        record_type: 38,
+        schema_version: 3,
+        fields: &[
+            Field::req(GENERATION, "generation", U64),
+            Field::nested(SOURCES, "sources", Presence::Repeated, &entry::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::nested(
+                COMPONENTS,
+                "components",
+                Presence::Repeated,
+                &component::SCHEMA,
+            ),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::nested(SWITCHES, "switches", Presence::Repeated, &switch::SCHEMA),
+            Field::opt(BOOT_SESSION, "boot_session", Bytes).max(128),
+        ],
+    };
+
+    /// Generations written before the venues and switches (read only; their
+    /// venues are OFF and their switches DISABLED).
+    pub const SCHEMA_V2: Schema = Schema {
         name: "darkbot.bsc.source-modes.v1",
         record_type: 38,
         schema_version: 2,
@@ -1067,6 +1168,7 @@ pub mod strategy_replay {
 
 pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA,
+    &source_modes::SCHEMA_V2,
     &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
     &runtime_status::SCHEMA,

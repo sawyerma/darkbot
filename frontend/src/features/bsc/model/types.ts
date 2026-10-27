@@ -14,6 +14,8 @@ export interface BscStatusView {
  dry?:{evidence?:Evidence;dryId:string;state:string;parameters:PublicField[];validForCurrentPortal?:boolean};
  jobs:{job:string;state:string;launchId:string;resultCode:string;startedUnixS:bigint;endedUnixS:bigint;controllerAvailable?:boolean}[]; warnings:string[];
 }
-export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contractFields:PublicField[];runtimeFields:PublicField[];reason:string;records:NativeRecordView[]}
+/** One native wallet or economic switch (plan 27.10.): a permission, never an action. */
+export interface ControlSwitchView {id:string;requested:string;effective:string;blockReason:string;generation:bigint;requestId:string;setGeneration?:bigint}
+export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contractFields:PublicField[];runtimeFields:PublicField[];reason:string;records:NativeRecordView[];economicControls:ControlSwitchView[]}
 export interface BscMonitoringView {state:string;evidence?:Evidence;results:PublicField[];records:NativeRecordView[]}
-export interface BscWalletsView {expectedAddress:string;walletStatus:string;launcherAddress:string;buyerAddress:string;chainId?:bigint;launcherBalanceWei?:string;buyerBalanceWei?:string;observedBlock?:bigint;observedUnixS:bigint;source:string;requiredLauncherWei?:string;requiredBuyerWei?:string;evidence?:Evidence}
+export interface BscWalletsView {expectedAddress:string;walletStatus:string;launcherAddress:string;buyerAddress:string;chainId?:bigint;launcherBalanceWei?:string;buyerBalanceWei?:string;observedBlock?:bigint;observedUnixS:bigint;source:string;requiredLauncherWei?:string;requiredBuyerWei?:string;evidence?:Evidence;launcherControl?:ControlSwitchView;buyerControl?:ControlSwitchView}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKEND_UNAVAILABLE, NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, runtimeView, sourceControlView } from "./sources";
+import { BACKEND_UNAVAILABLE, NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, VENUE_IDS, runtimeView, sourceControlView } from "./sources";
 import type { NativeRecordView } from "./types";
 
 const record = (generation: string, rows: [string, string, string, string?][]): NativeRecordView => ({
@@ -44,6 +44,33 @@ describe("BSC component control (C2 state)", () => {
   it("an unknown or repeated component makes the record invalid", () => {
     expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_X", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
     expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_C2", "OFF", "OFF"], ["BSC_STATE_C2", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+  });
+});
+
+const withVenues = (base: NativeRecordView, rows: [string, string, string, string?, string?][]): NativeRecordView => ({
+  ...base, fields: [...base.fields, ...rows.flatMap(([id, requested, effective, reason, by], i) => [
+    { name: `venues[${i}].venue_id`, value: id, kind: 7, unit: "" },
+    { name: `venues[${i}].requested`, value: requested, kind: 7, unit: "" },
+    { name: `venues[${i}].effective`, value: effective, kind: 7, unit: "" },
+    ...(reason ? [{ name: `venues[${i}].block_reason`, value: reason, kind: 7, unit: "" }] : []),
+    ...(by ? [{ name: `venues[${i}].request_id`, value: by, kind: 7, unit: "" }, { name: `venues[${i}].set_generation`, value: "7", kind: 2, unit: "" }] : []),
+  ])],
+});
+
+describe("BSC venue control (plan v9 §2.3)", () => {
+  it("shows the owner's venue modes with the request that set each", () => {
+    const v = sourceControlView([withVenues(record("8", all()), [["BSC_VENUE_FLAP", "SHADOW", "SHADOW", undefined, "req-1"], ["BSC_VENUE_FOUR_CLASSIC", "SHADOW", "BLOCKED", "FOUR_EXECUTION_PATH_MISSING"], ["BSC_VENUE_OPENFOUR", "LIVE", "BLOCKED", "ECONOMIC_LIVE_DISABLED"]])]);
+    expect(v.venues.map(r => r.id)).toEqual([...VENUE_IDS]);
+    expect(v.venues[0]).toMatchObject({ requested: "SHADOW", effective: "SHADOW", receipt: "req-1 @ generation 7" });
+    expect(v.venues[1]).toMatchObject({ effective: "BLOCKED", blockReason: "FOUR_EXECUTION_PATH_MISSING", receipt: "never requested" });
+    expect(v.venues[2]).toMatchObject({ requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_DISABLED" });
+  });
+  it("a generation from before the venues names none: NOT_RECORDED, never assumed", () => {
+    expect(sourceControlView([record("1", all())]).venues[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
+  });
+  it("an unknown or repeated venue makes the record invalid", () => {
+    expect(sourceControlView([withVenues(record("1", all()), [["BSC_VENUE_X", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+    expect(sourceControlView([withVenues(record("1", all()), [["BSC_VENUE_FLAP", "OFF", "OFF"], ["BSC_VENUE_FLAP", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
   });
 });
 

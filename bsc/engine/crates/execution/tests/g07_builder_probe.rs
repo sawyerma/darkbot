@@ -30,8 +30,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// C1 runtime WSS dependencies in Cargo.lock (was afe825e3…).
 /// C1 binary evidence: record/geth-ipc lines in Cargo.lock (was 19078cc4…).
 /// Runtime SIGTERM handling: signal-hook in Cargo.lock (was 1207890f…).
+/// Plan 27.10.: a live probe needs the native SEND switch (was 3a9dc0da…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "3a9dc0da0a1a3b1d5d8dbc6930f3b0f8d9e2ab60e24790781c03fd2e092a2d6e";
+const PINNED_PLAN_SHA256: &str = "331cec21c688bb5437e271076ae49dd4a486a44a427b98af9b88cb416f4aa9c6";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);
@@ -131,6 +132,19 @@ fn approval_precedes_every_read_latch_and_connection() {
     assert!(send < build && build < alive && alive < write);
     assert_eq!(MAIN.matches("rpc_balance(").count(), 1);
     assert_eq!(MAIN.matches("rpc_pending_nonce(").count(), 1);
+}
+
+/// Plan 27.10.: a live probe needs BSC_ECON_SEND before its first read.
+#[test]
+fn a_live_probe_needs_the_send_switch_before_any_read() {
+    let pos = |needle: &str| {
+        MAIN.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle:?}"))
+    };
+    let send = pos("SwitchId::Send,");
+    let root = pos("assert_repository_root();");
+    let first_read = pos("rpc_balance(account)");
+    assert!(root < send && send < first_read);
 }
 
 #[test]

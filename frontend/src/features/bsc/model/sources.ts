@@ -10,11 +10,13 @@ export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
 export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
 /** Switchable runtime components of the same native owner (C2 state, ...). */
 export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC", "BSC_STRATEGY_C"] as const;
+/** The venues of the same owner (plan v9 §2.3): Flap admits to the C3 PAPER path and Strategy C. */
+export const VENUE_IDS = ["BSC_VENUE_FLAP", "BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"] as const;
 /** A component the owner's record does not name yet (a generation from before it existed). */
 export const NOT_RECORDED = "NOT_RECORDED";
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
-export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string }
+export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string; receipt?: string }
 /** The canonical chain follower (G0.4 denominator); absent when not configured. */
 export interface CanonicalView { state: string; head: string; headAgeMs: string; chain: string; launches: string; join: string }
 /** The C2 chain-state owner (component BSC_STATE_C2 effective SHADOW); absent while it does not run. */
@@ -25,7 +27,7 @@ export interface CaptureView { state: string; detail: string }
 /** Strategy C (component BSC_STRATEGY_C effective SHADOW): a PAPER ledger on canonical Flap events, never signed or sent. */
 export interface StrategyView { state: string; detail: string; decisions: string; paper: string }
 export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView; capture?: CaptureView; strategy?: StrategyView }
-export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; runtime: RuntimeView }
+export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; venues: SourceRow[]; runtime: RuntimeView }
 
 /** Rewrites a runtime status may miss before it is STALE. */
 export const STALE_AFTER_INTERVALS = 3;
@@ -104,6 +106,7 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
     available: false, reason, generation: 0n, runtime,
     rows: SOURCE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", ...healthOf(id) })),
     components: COMPONENT_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", health: "", counters: "" })),
+    venues: VENUE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", health: "", counters: "" })),
   });
   const record = records.find(r => r.schema === SOURCE_SCHEMA);
   if (!record) return unavailable(BACKEND_UNAVAILABLE);
@@ -130,5 +133,16 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
       blockReason: f.get(`components[${i}].block_reason`) ?? "", health: "", counters: "" });
   }
   const components = COMPONENT_IDS.map(id => found.get(id) ?? { id, requested: NOT_RECORDED, effective: NOT_RECORDED, blockReason: "", health: "", counters: "" });
-  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!), components };
+  // The venues with the request that last set each (its receipt); a generation from before them names none.
+  const venues = new Map<string, SourceRow>();
+  for (let i = 0; f.has(`venues[${i}].venue_id`); i++) {
+    const id = f.get(`venues[${i}].venue_id`) ?? "";
+    if (!(VENUE_IDS as readonly string[]).includes(id) || venues.has(id)) return unavailable("BACKEND_INVALID");
+    const by = f.get(`venues[${i}].request_id`);
+    venues.set(id, { id, requested: f.get(`venues[${i}].requested`) ?? "UNKNOWN", effective: f.get(`venues[${i}].effective`) ?? "UNKNOWN",
+      blockReason: f.get(`venues[${i}].block_reason`) ?? "", health: "", counters: "",
+      receipt: by ? `${by} @ generation ${f.get(`venues[${i}].set_generation`) ?? "?"}` : "never requested" });
+  }
+  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!), components,
+    venues: VENUE_IDS.map(id => venues.get(id) ?? { id, requested: NOT_RECORDED, effective: NOT_RECORDED, blockReason: "", health: "", counters: "" }) };
 }

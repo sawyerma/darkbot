@@ -16,6 +16,7 @@ use darkbot_bsc_execution::{
     acceptance_guard::{LiveGuardContext, V5_RELATIVE_PATH, verify_live_authorization},
     attempt_authority,
     qualification_capture::{CaptureSession, CaptureSummary},
+    sources::{SwitchId, require_enabled_here},
 };
 use darkbot_bsc_record::Value as RecordValue;
 use schema::g07::evidence;
@@ -24,6 +25,17 @@ use std::str::FromStr;
 use std::sync::mpsc;
 
 const CAPTURE_WINDOW_NS: u64 = 15_000_000_000;
+/// Plan 27.10.: the native switches an attempt needs, each ENABLED in the
+/// owner state of this boot session: checked before the transactions are
+/// signed, before the attempt authority is consumed and before the send head.
+const ATTEMPT_SWITCHES: [SwitchId; 6] = [
+    SwitchId::WalletLauncher,
+    SwitchId::WalletBuyer,
+    SwitchId::Sign,
+    SwitchId::Arm,
+    SwitchId::Send,
+    SwitchId::Attempt,
+];
 /// Longest idle time of a prewarmed builder connection before the release.
 const MAX_BUILDER_IDLE: Duration = Duration::from_secs(5);
 /// Longest wait for the journal writer to append the records of the release.
@@ -117,6 +129,10 @@ fn main() {
     // environment/filesystem/record checks; no TLS, subprocess, capture worker
     // or head poller has started. Remove key ENV before any of those boundaries.
     let (launcher_key, buyer_key) = unsafe { take_startup_keys() };
+    // The switches before anything is signed (their boot-session read is a
+    // child process, so only now that no key is left in the environment).
+    require_enabled_here(&ATTEMPT_SWITCHES)
+        .unwrap_or_else(|e| panic!("G0.7 refused by the native switches: {e}"));
     let launcher = signer_address(&launcher_key);
     let buyer = signer_address(&buyer_key);
     assert_ne!(
@@ -299,6 +315,9 @@ fn main() {
     // BSC-005: the one shared attempt authority, taken atomically on the
     // checkout's origin before the local latch. A missing, foreign or
     // consumed authority or an unreachable remote stops here.
+    // Nothing is consumed while a switch was disabled since the signing.
+    require_enabled_here(&ATTEMPT_SWITCHES)
+        .unwrap_or_else(|e| panic!("G0.7 refused by the native switches: {e}"));
     let authority_git = attempt_authority::Git::origin();
     let claim_note: String = format!("{boot_id}/{}/{}", std::process::id(), unix_time_ms())
         .chars()
@@ -554,6 +573,11 @@ fn main() {
         pre_egress_abort(capture, &capture_clock, unsent, "journal prewarm", &e)
     }
 
+    // The last switch check before egress: a DISABLE since the guard stops
+    // here, byte-free (no queued attempt outlives it).
+    if let Err(e) = require_enabled_here(&ATTEMPT_SWITCHES) {
+        pre_egress_abort(capture, &capture_clock, unsent, "native switches", &e)
+    }
     // The send head is the next block, read as soon as the endpoint has it:
     // the bundle expiry comes from it, not from the preflight head read seconds
     // earlier.

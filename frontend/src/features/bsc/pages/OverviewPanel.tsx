@@ -1,12 +1,13 @@
 import { Line, Section } from "@/shared/ui/graphite/Rows";
 import { Notice } from "@/shared/ui/graphite/Notice";
-import { selectStatus, useBscStore } from "../store/bscStore";
+import { selectLaunch, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
 import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
 import { SECTIONS } from "../model/placement";
 import { checkStatus } from "../model/checks";
 import type { BscTab } from "../BscPage";
 import { runtimeView } from "../model/sources";
 import { useNativeRecords } from "./useNativeRecords";
+import { economicRows, summary, switchRow } from "../model/switches";
 
 const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
 const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
@@ -17,6 +18,9 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
   const job = s?.jobs.find(j => j.job === "readiness");
   const r = s?.readiness;
   const runtime = runtimeView(useNativeRecords(), Date.now()).view;
+  const { projection: w } = useBscStore(selectWallets);
+  const { projection: launch } = useBscStore(selectLaunch);
+  const walletSwitches = [switchRow("BSC_WALLET_LAUNCHER", w?.launcherControl), switchRow("BSC_WALLET_BUYER", w?.buyerControl)];
   return <>
     <Section title={title(1)}>
       <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />
@@ -39,6 +43,8 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <Line label="Execution ready" value={s?.guard?.executionReady === undefined ? "UNKNOWN" : String(s.guard.executionReady)} />
       <Line label="Current contract" value={s?.guard?.contractPresent ? s.guard.contractPath : "No active V5 contract"} />
       <Line label="LIVE" value={<ValueState state={s?.liveState} />} />
+      <Line label="Wallet switches" value={summary(walletSwitches)} hint="Native permissions; switch them in Wallets. DISABLED initially and after every restart" />
+      <Line label="Economic switches" value={summary(economicRows(launch?.economicControls))} hint="Native permissions; switch them in Launch / BUY. None of them is LIVE or an approval" />
     </Section>
     <Section title={title(4)}>
       <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: read-only observation of the effective SHADOW sources; no build, signature or send exists`} />

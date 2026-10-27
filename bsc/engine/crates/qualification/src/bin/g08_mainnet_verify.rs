@@ -569,7 +569,9 @@ mod wire {
                 compressed: false,
             },
         )
-        .map_err(|_| format!("curl {method}: transport failure"))?;
+        // The wire's own cause (curl's exit code and its URL-redacted
+        // message) stays in the error: E2E 27.10. lost it.
+        .map_err(|e| format!("curl {method}: {}", e.strip_prefix("curl: ").unwrap_or(&e)))?;
         response(method, &out)
     }
 
@@ -979,7 +981,9 @@ fn bounded_error(text: &str) -> &str {
 }
 
 fn permanent_read_error(error: &str) -> bool {
-    ["invalid", "decode", "missing result", "removed", "wrong chain", "required", "error -32600", "error -32601", "error -32602"].iter().any(|needle| error.contains(needle))
+    // A transport failure is never permanent, whatever curl's message says.
+    !error.contains(": transport failure (exit ")
+        && ["invalid", "decode", "missing result", "removed", "wrong chain", "required", "error -32600", "error -32601", "error -32602"].iter().any(|needle| error.contains(needle))
 }
 
 /// At most three attempts; each wire call has a 5s curl limit, plus 2*100ms.
@@ -2042,6 +2046,17 @@ mod tests {
                 .contains("no transaction")
         );
         assert!(signed_tx_at(&block_with(by_hash.clone()), 4, B256::ZERO, &by_hash).is_err());
+    }
+
+    #[test]
+    fn a_transport_failure_keeps_its_cause_and_is_never_permanent() {
+        let wire = "curl eth_getTransactionReceipt: transport failure (exit Some(35)): curl: (35) invalid TLS record";
+        assert!(!permanent_read_error(wire));
+        let mut calls = 0;
+        let error = poll_receipt::<u8>(|| { calls += 1; Err(wire.into()) }, || {}, Instant::now() + Duration::from_secs(60), 5).unwrap_err();
+        assert_eq!(calls, 3, "three transport failures, not one permanent one");
+        assert!(error.contains("exit Some(35)") && error.contains("(35) invalid TLS record"), "{error}");
+        assert!(permanent_read_error("invalid JSON-RPC response for eth_chainId: x"));
     }
 
     #[test]

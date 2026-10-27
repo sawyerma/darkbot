@@ -1,5 +1,6 @@
 use super::{census, wire::bsc::*};
 use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH};
+use darkbot_bsc_execution::sources::{RESET_BY_RESTART, SwitchId};
 use darkbot_bsc_record::{self as record, Kind, Presence, Record, Schema, Value, schema};
 use std::{
     collections::HashMap,
@@ -604,6 +605,51 @@ fn candidate_fields(
     (out, binding)
 }
 
+/// The wallet and economic switches of the native owner state in `dir` as
+/// they hold in this boot session (an ENABLED switch from an earlier boot
+/// reads BLOCKED RESET_BY_RESTART); none before the owner's `init`, every
+/// switch BLOCKED CONTROL_STATE_INVALID when the state does not decode.
+fn control_switches(dir: &Path) -> Option<Vec<ControlSwitch>> {
+    if !dir.join("generations").is_dir() {
+        return None;
+    }
+    let boot = darkbot_bsc_execution::sources::boot_session().ok();
+    Some(
+        match darkbot_bsc_execution::sources::current_generation(dir) {
+            Ok(g) => SwitchId::ALL
+                .iter()
+                .map(|id| {
+                    let s = g.switch(*id);
+                    let now = g.switch_now(*id, boot.as_deref());
+                    ControlSwitch {
+                        id: id.name().into(),
+                        requested: s.requested.name().into(),
+                        effective: now.name().into(),
+                        block_reason: now.reason().unwrap_or_default().into(),
+                        generation: g.generation,
+                        request_id: s
+                            .set_by
+                            .as_ref()
+                            .map(|b| b.request_id.clone())
+                            .unwrap_or_default(),
+                        set_generation: s.set_by.as_ref().map(|b| b.generation),
+                    }
+                })
+                .collect(),
+            Err(_) => SwitchId::ALL
+                .iter()
+                .map(|id| ControlSwitch {
+                    id: id.name().into(),
+                    requested: "UNKNOWN".into(),
+                    effective: "BLOCKED".into(),
+                    block_reason: "CONTROL_STATE_INVALID".into(),
+                    ..Default::default()
+                })
+                .collect(),
+        },
+    )
+}
+
 pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     let mut paths = Vec::new();
     for dir in [
@@ -1076,6 +1122,24 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         Ok(None) => {}
         Err(_) if !sources.exists() => {}
         Err(_) => warnings.push("SOURCE_MODES_INVALID".into()),
+    }
+    // Plan 27.10.: the wallet switches on Wallets, the economic ones on
+    // Launch / BUY, typed and as they hold in this boot session.
+    if let Some(controls) = control_switches(&sources) {
+        if controls
+            .iter()
+            .any(|c| c.requested == "ENABLED" && c.block_reason == RESET_BY_RESTART)
+        {
+            warnings.push("CONTROL_SWITCHES_RESET_BY_RESTART".into());
+        }
+        let wallet = |id: SwitchId| controls.iter().find(|c| c.id == id.name()).cloned();
+        wallets.launcher_control = wallet(SwitchId::WalletLauncher);
+        wallets.buyer_control = wallet(SwitchId::WalletBuyer);
+        launch.economic_controls = controls
+            .iter()
+            .filter(|c| !c.id.starts_with("BSC_WALLET_"))
+            .cloned()
+            .collect();
     }
     // The running runtime's own status (health and counters per source).
     let runtime_status = rundir.join("bsc-runtime/status.dbrec");

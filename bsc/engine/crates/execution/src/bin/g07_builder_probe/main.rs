@@ -65,6 +65,13 @@ fn main() {
     let rpc_endpoint =
         parse_rpc_endpoint(&req_env("BSC_MAINNET_RPC_HTTPS")).unwrap_or_else(|e| panic!("{e}"));
     assert_repository_root();
+    // Plan 27.10.: every Mainnet bundle submission needs BSC_ECON_SEND
+    // ENABLED in the native owner state of this boot session (the probe
+    // signs with throwaway accounts only, so no wallet switch).
+    darkbot_bsc_execution::sources::require_enabled_here(&[
+        darkbot_bsc_execution::sources::SwitchId::Send,
+    ])
+    .unwrap_or_else(|e| panic!("probe refused by the native switches: {e}; nothing sent"));
 
     // Non-executability, read-only: the throwaway accounts hold nothing and
     // have sent nothing.

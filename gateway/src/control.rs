@@ -50,6 +50,30 @@ const BSC_SOURCE_IDS: [&str; 8] = [
     "BSC_STRATEGY_C",
 ];
 const BSC_SOURCE_MODES: [&str; 3] = ["OFF", "SHADOW", "LIVE"];
+/// Plan v9 §2.3: a venue's admission mode at the same native owner.
+const BSC_VENUE: &str = "bsc.venue.mode.set";
+const BSC_VENUE_IDS: [&str; 3] = [
+    "BSC_VENUE_FLAP",
+    "BSC_VENUE_FOUR_CLASSIC",
+    "BSC_VENUE_OPENFOUR",
+];
+/// Plan 27.10.: the launcher's and the buyer's native ENABLE/DISABLE switch, with the
+/// owner generation as `wallet_policy_version` CAS. A permission, never a signature or send.
+const BSC_WALLET: &str = "bsc.wallet.set";
+const BSC_WALLET_IDS: [&str; 2] = ["BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER"];
+/// Plan 27.10.: the economic switches SIGN, ARM, SEND, ATTEMPT and LIVE at the same owner;
+/// each is a permission its Mainnet path checks besides its own guard, never an action.
+const BSC_ECONOMIC: &str = "bsc.economic.set";
+const BSC_ECONOMIC_IDS: [&str; 5] = [
+    "BSC_ECON_SIGN",
+    "BSC_ECON_ARM",
+    "BSC_ECON_SEND",
+    "BSC_ECON_ATTEMPT",
+    "BSC_ECON_LIVE",
+];
+const BSC_SWITCH_MODES: [&str; 2] = ["DISABLED", "ENABLED"];
+/// Every request the native mode/switch owner (`bsc_runtime source request`) takes.
+const BSC_OWNER_ACTIONS: [&str; 4] = [BSC_SOURCE, BSC_VENUE, BSC_WALLET, BSC_ECONOMIC];
 /// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
 const BACKTEST_START: &str = "project0.analytics.backtest.start";
 const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
@@ -101,7 +125,8 @@ fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
         && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
-            && [BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_SOURCE].contains(&action))
+            && ([BSC_START, BSC_STOP, BSC_CANDIDATE].contains(&action)
+                || BSC_OWNER_ACTIONS.contains(&action)))
 }
 /// The only accepted candidate request: a fixed profile as resource and the
 /// selection generation of the last applied status as `profile_version` CAS.
@@ -119,15 +144,29 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
     }
 }
 
-/// The only accepted source request: `<SOURCE_ID>:<MODE>` from the fixed sets as resource and
-/// the generation of the displayed native state as `config_version` CAS; no parameters.
+/// The only accepted owner request: `<ID>:<MODE>` from the action's fixed sets as resource and
+/// the generation of the displayed native state as CAS (`wallet_policy_version` for a wallet,
+/// `config_version` otherwise); no parameters.
 fn source_request(req: &CommandRequest) -> Option<(&'static str, &'static str, u64)> {
+    let (ids, modes): (&[&'static str], &[&'static str]) = match req.action.as_str() {
+        BSC_SOURCE => (&BSC_SOURCE_IDS, &BSC_SOURCE_MODES),
+        BSC_VENUE => (&BSC_VENUE_IDS, &BSC_SOURCE_MODES),
+        BSC_WALLET => (&BSC_WALLET_IDS, &BSC_SWITCH_MODES),
+        BSC_ECONOMIC => (&BSC_ECONOMIC_IDS, &BSC_SWITCH_MODES),
+        _ => return None,
+    };
     let (id, mode) = req.resource_id.split_once(':')?;
-    let id = BSC_SOURCE_IDS.into_iter().find(|s| *s == id)?;
-    let mode = BSC_SOURCE_MODES.into_iter().find(|m| *m == mode)?;
-    match req.expected.as_ref()?.version? {
-        expected_version::Version::ConfigVersion(generation) if req.params.is_empty() => {
+    let id = ids.iter().copied().find(|s| *s == id)?;
+    let mode = modes.iter().copied().find(|m| *m == mode)?;
+    if !req.params.is_empty() {
+        return None;
+    }
+    match (req.action.as_str(), req.expected.as_ref()?.version?) {
+        (BSC_WALLET, expected_version::Version::WalletPolicyVersion(generation)) => {
             Some((id, mode, generation))
+        }
+        (BSC_SOURCE | BSC_VENUE | BSC_ECONOMIC, expected_version::Version::ConfigVersion(g)) => {
+            Some((id, mode, g))
         }
         _ => None,
     }
@@ -974,10 +1013,10 @@ impl Control {
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop and the offline BSC candidate request are available",
+                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop, the offline BSC candidate request and the BSC owner's source, venue, wallet and economic switches are available",
             );
         }
-        let source = if req.action == BSC_SOURCE {
+        let source = if BSC_OWNER_ACTIONS.contains(&req.action.as_str()) {
             match source_request(req) {
                 Some(s) => Some(s),
                 None => {
@@ -985,7 +1024,12 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
+                        match req.action.as_str() {
+                            BSC_WALLET => "Wallet request takes exactly <BSC_WALLET_LAUNCHER|BSC_WALLET_BUYER>:<DISABLED|ENABLED> and the wallet_policy_version generation",
+                            BSC_ECONOMIC => "Economic request takes exactly <BSC_ECON_SIGN|ARM|SEND|ATTEMPT|LIVE>:<DISABLED|ENABLED> and the config_version generation",
+                            BSC_VENUE => "Venue request takes exactly <BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR>:<OFF|SHADOW|LIVE> and the config_version generation",
+                            _ => "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
+                        },
                     )
                 }
             }
@@ -1448,7 +1492,7 @@ impl Control {
         if self.persist(id, &record).is_err() {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
-        tracing::info!(request_id=%id, phase=record.phase, "bsc source request");
+        tracing::info!(request_id=%id, phase=record.phase, source, mode, "bsc owner request");
         CommandResponse {
             phase: record.phase,
             detail: record.detail,
@@ -2587,6 +2631,194 @@ mod tests {
         // The mark of the removed receipt is durable; its exact replay is refused, never run.
         assert_eq!(retired_through(&dir.join("commands")), Ok(Some(1_000)));
         assert!(control.load(&uuid(2 * CAPACITY)).unwrap().is_some());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// Plan 27.10.: the wallet, venue and economic switches are three more allowlisted actions
+    /// of the same native owner: fixed IDs, their own modes, the wallet one with the
+    /// `wallet_policy_version` CAS; each dispatches exactly `darkbotctl bsc source request`.
+    #[tokio::test]
+    async fn the_wallet_venue_and_economic_switches_reach_the_one_native_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let request =
+            |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
+                project: ProjectId::Bsc as i32,
+                request_id: "32345678-1234-1234-1234-123456789abc".into(),
+                action: action.into(),
+                resource_id: resource.into(),
+                expected: v.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                params: Default::default(),
+                issued_at_unix_ns: crate::overview::unix_ns_now(),
+            };
+        use expected_version::Version::{ConfigVersion, ProfileVersion, WalletPolicyVersion};
+        for (action, resource, v, parsed) in [
+            (
+                BSC_WALLET,
+                "BSC_WALLET_LAUNCHER:ENABLED",
+                WalletPolicyVersion(3),
+                Some(("BSC_WALLET_LAUNCHER", "ENABLED", 3)),
+            ),
+            (
+                BSC_WALLET,
+                "BSC_WALLET_BUYER:DISABLED",
+                WalletPolicyVersion(4),
+                Some(("BSC_WALLET_BUYER", "DISABLED", 4)),
+            ),
+            (
+                BSC_WALLET,
+                "BSC_WALLET_BUYER:DISABLED",
+                ConfigVersion(4),
+                None,
+            ),
+            (
+                BSC_WALLET,
+                "BSC_WALLET_BUYER:LIVE",
+                WalletPolicyVersion(4),
+                None,
+            ),
+            (
+                BSC_WALLET,
+                "BSC_ECON_SEND:ENABLED",
+                WalletPolicyVersion(4),
+                None,
+            ),
+            (
+                BSC_ECONOMIC,
+                "BSC_ECON_SEND:ENABLED",
+                ConfigVersion(5),
+                Some(("BSC_ECON_SEND", "ENABLED", 5)),
+            ),
+            (
+                BSC_ECONOMIC,
+                "BSC_WALLET_BUYER:ENABLED",
+                ConfigVersion(5),
+                None,
+            ),
+            (BSC_ECONOMIC, "BSC_ECON_SEND:SHADOW", ConfigVersion(5), None),
+            (
+                BSC_ECONOMIC,
+                "BSC_ECON_SEND:ENABLED",
+                ProfileVersion(5),
+                None,
+            ),
+            (
+                BSC_VENUE,
+                "BSC_VENUE_FLAP:SHADOW",
+                ConfigVersion(6),
+                Some(("BSC_VENUE_FLAP", "SHADOW", 6)),
+            ),
+            (BSC_VENUE, "BSC_VENUE_FLAP:ENABLED", ConfigVersion(6), None),
+            (BSC_SOURCE, "BSC_VENUE_FLAP:SHADOW", ConfigVersion(6), None),
+            (
+                BSC_SOURCE,
+                "BSC_WALLET_BUYER:ENABLED",
+                ConfigVersion(6),
+                None,
+            ),
+        ] {
+            assert_eq!(
+                source_request(&request(action, resource, Some(v))),
+                parsed,
+                "{action} {resource}"
+            );
+        }
+        let mut with_params = request(
+            BSC_WALLET,
+            "BSC_WALLET_BUYER:ENABLED",
+            Some(WalletPolicyVersion(1)),
+        );
+        with_params.params = vec![1].into();
+        assert_eq!(source_request(&with_params), None);
+        for action in [BSC_VENUE, BSC_WALLET, BSC_ECONOMIC] {
+            assert!(allowed(ProjectId::Bsc as i32, action));
+            assert!(!allowed(ProjectId::Project0 as i32, action));
+        }
+
+        let dir = std::env::temp_dir().join(format!("gw-switch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        // A fake owner: applies an ENABLED request at generation 3, refuses anything else stale.
+        fs::write(
+            &ctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nif [ \"$6\" = 3 ]; then echo \"outcome=APPLIED source=$4 requested=$5 effective=$5 generation=4 request_id=$7\"; else echo \"outcome=REJECTED_STALE source=$4 requested=$5 effective=DISABLED generation=4 request_id=$7\"; exit 2; fi\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let req = request(
+            BSC_WALLET,
+            "BSC_WALLET_LAUNCHER:ENABLED",
+            Some(WalletPolicyVersion(3)),
+        );
+        let applied = control.execute(&req).await;
+        assert_eq!(
+            (applied.status, applied.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            applied.detail
+        );
+        assert!(applied
+            .detail
+            .starts_with("outcome=APPLIED source=BSC_WALLET_LAUNCHER requested=ENABLED"));
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "bsc\nsource\nrequest\nBSC_WALLET_LAUNCHER\nENABLED\n3\n32345678-1234-1234-1234-123456789abc\n"
+        );
+        // The same request again: the stored receipt, no second dispatch.
+        fs::remove_file(&log).unwrap();
+        assert_eq!(
+            control.execute(&req).await.phase,
+            CommandPhase::Completed as i32
+        );
+        assert!(!log.exists());
+        // A stale generation is the owner's refusal: a failed receipt, nothing switched.
+        let mut stale = request(
+            BSC_ECONOMIC,
+            "BSC_ECON_SEND:ENABLED",
+            Some(ConfigVersion(2)),
+        );
+        stale.request_id = "42345678-1234-1234-1234-123456789abc".into();
+        let refused = control.execute(&stale).await;
+        assert_eq!(
+            (refused.status, refused.phase),
+            (CommandStatus::Accepted as i32, CommandPhase::Failed as i32)
+        );
+        assert!(
+            refused.detail.starts_with("outcome=REJECTED_STALE"),
+            "{}",
+            refused.detail
+        );
+        // A malformed one never reaches the owner.
+        fs::remove_file(&log).unwrap();
+        let mut bad = request(
+            BSC_WALLET,
+            "BSC_WALLET_LAUNCHER:LIVE",
+            Some(WalletPolicyVersion(3)),
+        );
+        bad.request_id = "52345678-1234-1234-1234-123456789abc".into();
+        let rejected = control.execute(&bad).await;
+        assert_eq!(rejected.status, CommandStatus::Rejected as i32);
+        assert_eq!(
+            rejected.reject_reason,
+            CommandRejectReason::InvalidParams as i32
+        );
+        assert!(!log.exists());
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

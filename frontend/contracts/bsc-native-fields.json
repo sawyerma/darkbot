@@ -5,10 +5,360 @@
     "record_type": 38,
     "required_gate": "READ_ONLY_OBSERVATION",
     "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "generation",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "sources[].source_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "sources[].requested",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "sources[].effective",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "sources[].block_reason",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "_provenance.tool",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "_provenance.observed_unix_ms",
+    "type": "U64",
+    "unit": "unix_milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "request_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "components[].component_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "components[].requested",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "components[].effective",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "components[].block_reason",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].venue_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].requested",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].effective",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].block_reason",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].request_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "venues[].set_generation",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].switch_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].requested",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].effective",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].block_reason",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].request_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "switches[].set_generation",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
+    "schema_version": 3,
+    "sensitivity": "BINARY_EXCLUDED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
+    "symbol": "boot_session",
+    "type": "Bytes",
+    "unit": "bytes"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 38,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.source-modes.v1",
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "generation",
     "type": "U64",
     "unit": "integer"
@@ -22,7 +372,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -36,7 +386,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].requested",
     "type": "Text",
     "unit": "text"
@@ -50,7 +400,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].effective",
     "type": "Text",
     "unit": "text"
@@ -64,7 +414,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].block_reason",
     "type": "Text",
     "unit": "text"
@@ -78,7 +428,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -92,7 +442,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -106,7 +456,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "request_id",
     "type": "Text",
     "unit": "text"
@@ -120,7 +470,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "components[].component_id",
     "type": "Text",
     "unit": "text"
@@ -134,7 +484,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "components[].requested",
     "type": "Text",
     "unit": "text"
@@ -148,7 +498,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "components[].effective",
     "type": "Text",
     "unit": "text"
@@ -162,7 +512,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "components[].block_reason",
     "type": "Text",
     "unit": "text"
@@ -176,7 +526,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "generation",
     "type": "U64",
     "unit": "integer"
@@ -190,7 +540,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -204,7 +554,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].requested",
     "type": "Text",
     "unit": "text"
@@ -218,7 +568,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].effective",
     "type": "Text",
     "unit": "text"
@@ -232,7 +582,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].block_reason",
     "type": "Text",
     "unit": "text"
@@ -246,7 +596,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -260,7 +610,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -274,7 +624,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "request_id",
     "type": "Text",
     "unit": "text"
@@ -288,7 +638,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "request_id",
     "type": "Text",
     "unit": "text"
@@ -302,7 +652,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "source_id",
     "type": "Text",
     "unit": "text"
@@ -316,7 +666,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "requested",
     "type": "Text",
     "unit": "text"
@@ -330,7 +680,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "expected_generation",
     "type": "U64",
     "unit": "integer"
@@ -344,7 +694,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "outcome",
     "type": "Text",
     "unit": "text"
@@ -358,7 +708,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "generation",
     "type": "U64",
     "unit": "integer"
@@ -372,7 +722,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "effective",
     "type": "Text",
     "unit": "text"
@@ -386,7 +736,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "block_reason",
     "type": "Text",
     "unit": "text"
@@ -400,7 +750,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -414,7 +764,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "generation",
     "type": "U64",
     "unit": "integer"
@@ -428,7 +778,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -442,7 +792,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].effective",
     "type": "Text",
     "unit": "text"
@@ -456,7 +806,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].health",
     "type": "Text",
     "unit": "text"
@@ -470,7 +820,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].connects",
     "type": "U64",
     "unit": "integer"
@@ -484,7 +834,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].disconnects",
     "type": "U64",
     "unit": "integer"
@@ -498,7 +848,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].rate_limited",
     "type": "U64",
     "unit": "integer"
@@ -512,7 +862,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].full",
     "type": "U64",
     "unit": "integer"
@@ -526,7 +876,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].hash_only",
     "type": "U64",
     "unit": "integer"
@@ -540,7 +890,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].rejected",
     "type": "U64",
     "unit": "integer"
@@ -554,7 +904,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].dropped",
     "type": "U64",
     "unit": "integer"
@@ -568,7 +918,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].duplicates",
     "type": "U64",
     "unit": "integer"
@@ -582,7 +932,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].first_any",
     "type": "U64",
     "unit": "integer"
@@ -596,7 +946,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].first_full",
     "type": "U64",
     "unit": "integer"
@@ -610,7 +960,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].launch_sightings",
     "type": "U64",
     "unit": "integer"
@@ -624,7 +974,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].launch_first",
     "type": "U64",
     "unit": "integer"
@@ -638,7 +988,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "sources[].last_event_age_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -652,7 +1002,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -666,7 +1016,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -680,7 +1030,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -694,7 +1044,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "launches",
     "type": "U64",
     "unit": "integer"
@@ -708,7 +1058,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_REPO_RELATIVE_PATH_ONLY",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journal_path",
     "type": "Text",
     "unit": "text"
@@ -722,7 +1072,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journal_records",
     "type": "U64",
     "unit": "integer"
@@ -736,7 +1086,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journal_lost",
     "type": "U64",
     "unit": "integer"
@@ -750,7 +1100,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "mode",
     "type": "Text",
     "unit": "text"
@@ -764,7 +1114,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].state",
     "type": "Text",
     "unit": "text"
@@ -778,7 +1128,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].head",
     "type": "U64",
     "unit": "block_number"
@@ -792,7 +1142,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].head_age_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -806,7 +1156,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].blocks",
     "type": "U64",
     "unit": "integer"
@@ -820,7 +1170,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -834,7 +1184,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].resyncs",
     "type": "U64",
     "unit": "integer"
@@ -848,7 +1198,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].rpc_errors",
     "type": "U64",
     "unit": "integer"
@@ -862,7 +1212,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].rate_limited",
     "type": "U64",
     "unit": "integer"
@@ -876,7 +1226,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].flap_launches",
     "type": "U64",
     "unit": "integer"
@@ -890,7 +1240,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_launches",
     "type": "U64",
     "unit": "integer"
@@ -904,7 +1254,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].orphaned_launches",
     "type": "U64",
     "unit": "integer"
@@ -918,7 +1268,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].seen_full_before",
     "type": "U64",
     "unit": "integer"
@@ -932,7 +1282,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].seen_hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -946,7 +1296,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].seen_after",
     "type": "U64",
     "unit": "integer"
@@ -960,7 +1310,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].missed",
     "type": "U64",
     "unit": "integer"
@@ -974,7 +1324,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].external_buys",
     "type": "U64",
     "unit": "integer"
@@ -988,7 +1338,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].buys_unknown",
     "type": "U64",
     "unit": "integer"
@@ -1002,7 +1352,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -1016,7 +1366,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].c1_scope_launches",
     "type": "U64",
     "unit": "integer"
@@ -1030,7 +1380,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].c1_scope_full_before",
     "type": "U64",
     "unit": "integer"
@@ -1044,7 +1394,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -1058,7 +1408,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].waiting",
     "type": "U64",
     "unit": "integer"
@@ -1072,7 +1422,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].head_fetch_lag_ms",
     "type": "I64",
     "unit": "milliseconds"
@@ -1086,7 +1436,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].tx_unverifiable",
     "type": "U64",
     "unit": "integer"
@@ -1100,7 +1450,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].tx_answer_refused",
     "type": "U64",
     "unit": "integer"
@@ -1114,7 +1464,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].backfill_blocks",
     "type": "U64",
     "unit": "count"
@@ -1128,7 +1478,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].backfill_launches",
     "type": "U64",
     "unit": "integer"
@@ -1142,7 +1492,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_pending_decoded",
     "type": "U64",
     "unit": "integer"
@@ -1156,7 +1506,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_pending_unknown",
     "type": "U64",
     "unit": "integer"
@@ -1170,7 +1520,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_pending_mismatch",
     "type": "U64",
     "unit": "integer"
@@ -1184,7 +1534,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_actionable",
     "type": "U64",
     "unit": "integer"
@@ -1198,7 +1548,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].reverted_launches",
     "type": "U64",
     "unit": "integer"
@@ -1212,7 +1562,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_deployment",
     "type": "Text",
     "unit": "text"
@@ -1226,7 +1576,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "canonical[].four_pending_candidate",
     "type": "U64",
     "unit": "integer"
@@ -1240,7 +1590,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "status_interval_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -1254,7 +1604,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].head",
     "type": "U64",
     "unit": "block_number"
@@ -1268,7 +1618,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].coherent",
     "type": "Bool",
     "unit": "boolean"
@@ -1282,7 +1632,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].watched",
     "type": "U64",
     "unit": "integer"
@@ -1296,7 +1646,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].retained_blocks",
     "type": "U64",
     "unit": "count"
@@ -1310,7 +1660,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].held_txs",
     "type": "U64",
     "unit": "integer"
@@ -1324,7 +1674,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].held_candidates",
     "type": "U64",
     "unit": "integer"
@@ -1338,7 +1688,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].held_uncertain",
     "type": "U64",
     "unit": "integer"
@@ -1352,7 +1702,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].held_senders",
     "type": "U64",
     "unit": "integer"
@@ -1366,7 +1716,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].unknown_senders",
     "type": "U64",
     "unit": "integer"
@@ -1380,7 +1730,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].quarantined_senders",
     "type": "U64",
     "unit": "integer"
@@ -1394,7 +1744,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].inputs",
     "type": "U64",
     "unit": "integer"
@@ -1408,7 +1758,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].effects",
     "type": "U64",
     "unit": "integer"
@@ -1422,7 +1772,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].pending_observations",
     "type": "U64",
     "unit": "integer"
@@ -1436,7 +1786,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].repeat_sightings",
     "type": "U64",
     "unit": "integer"
@@ -1450,7 +1800,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].earlier_first_seen",
     "type": "U64",
     "unit": "integer"
@@ -1464,7 +1814,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].late_sightings",
     "type": "U64",
     "unit": "integer"
@@ -1478,7 +1828,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].stale_pending",
     "type": "U64",
     "unit": "integer"
@@ -1492,7 +1842,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].competing_candidates",
     "type": "U64",
     "unit": "integer"
@@ -1506,7 +1856,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].blocks",
     "type": "U64",
     "unit": "integer"
@@ -1520,7 +1870,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].included",
     "type": "U64",
     "unit": "integer"
@@ -1534,7 +1884,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reverted",
     "type": "U64",
     "unit": "integer"
@@ -1548,7 +1898,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].replaced",
     "type": "U64",
     "unit": "integer"
@@ -1562,7 +1912,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -1576,7 +1926,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reorgs_beyond_window",
     "type": "U64",
     "unit": "integer"
@@ -1590,7 +1940,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reorgs_too_deep",
     "type": "U64",
     "unit": "integer"
@@ -1604,7 +1954,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].unmatched_orphaned_blocks",
     "type": "U64",
     "unit": "count"
@@ -1618,7 +1968,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].orphaned_txs",
     "type": "U64",
     "unit": "integer"
@@ -1632,7 +1982,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].gaps",
     "type": "U64",
     "unit": "integer"
@@ -1646,7 +1996,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].uncertain_marked",
     "type": "U64",
     "unit": "integer"
@@ -1660,7 +2010,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].finalized_blocks",
     "type": "U64",
     "unit": "count"
@@ -1674,7 +2024,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].finalized_txs",
     "type": "U64",
     "unit": "integer"
@@ -1688,7 +2038,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].nonce_facts",
     "type": "U64",
     "unit": "nonce"
@@ -1702,7 +2052,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].ignored_nonce_facts",
     "type": "U64",
     "unit": "nonce"
@@ -1716,7 +2066,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reconciliations",
     "type": "U64",
     "unit": "integer"
@@ -1730,7 +2080,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].reconciliation_refusals",
     "type": "U64",
     "unit": "integer"
@@ -1744,7 +2094,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].quarantines",
     "type": "U64",
     "unit": "integer"
@@ -1758,7 +2108,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].conflicts",
     "type": "U64",
     "unit": "integer"
@@ -1772,7 +2122,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].refused_inputs",
     "type": "U64",
     "unit": "integer"
@@ -1786,7 +2136,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].overflow_txs",
     "type": "U64",
     "unit": "integer"
@@ -1800,7 +2150,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].overflow_candidates",
     "type": "U64",
     "unit": "integer"
@@ -1814,7 +2164,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].evicted",
     "type": "U64",
     "unit": "integer"
@@ -1828,7 +2178,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].restored_blocks",
     "type": "U64",
     "unit": "count"
@@ -1842,7 +2192,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].checkpoint_restore",
     "type": "Text",
     "unit": "text"
@@ -1856,7 +2206,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].checkpoint_writes",
     "type": "U64",
     "unit": "integer"
@@ -1870,7 +2220,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].checkpoint_errors",
     "type": "U64",
     "unit": "integer"
@@ -1884,7 +2234,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].last_conflict",
     "type": "Text",
     "unit": "text"
@@ -1898,7 +2248,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].discontinuities",
     "type": "U64",
     "unit": "integer"
@@ -1912,7 +2262,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].consumed_not_seen",
     "type": "U64",
     "unit": "integer"
@@ -1926,7 +2276,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].consumed_unattributed",
     "type": "U64",
     "unit": "integer"
@@ -1940,7 +2290,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].resolutions_reverted",
     "type": "U64",
     "unit": "integer"
@@ -1954,7 +2304,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].last_refused",
     "type": "Text",
     "unit": "text"
@@ -1968,7 +2318,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "state[].resolved_by_later_inclusion",
     "type": "U64",
     "unit": "integer"
@@ -1982,7 +2332,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].state",
     "type": "Text",
     "unit": "text"
@@ -1996,7 +2346,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].reason",
     "type": "Text",
     "unit": "text"
@@ -2010,7 +2360,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].paper_sender",
     "type": "Text",
     "unit": "text"
@@ -2024,7 +2374,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].portal_version",
     "type": "Text",
     "unit": "text"
@@ -2038,7 +2388,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].probe_block",
     "type": "U64",
     "unit": "block_number"
@@ -2052,7 +2402,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].lanes_armed",
     "type": "U64",
     "unit": "integer"
@@ -2066,7 +2416,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].lanes_left",
     "type": "U64",
     "unit": "integer"
@@ -2080,7 +2430,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].launches",
     "type": "U64",
     "unit": "integer"
@@ -2094,7 +2444,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].handoffs",
     "type": "U64",
     "unit": "integer"
@@ -2108,7 +2458,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_not_decoded",
     "type": "U64",
     "unit": "integer"
@@ -2122,7 +2472,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_profile",
     "type": "U64",
     "unit": "integer"
@@ -2136,7 +2486,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_no_snapshot",
     "type": "U64",
     "unit": "integer"
@@ -2150,7 +2500,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_admission",
     "type": "U64",
     "unit": "integer"
@@ -2164,7 +2514,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_intent",
     "type": "U64",
     "unit": "integer"
@@ -2178,7 +2528,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_lanes_exhausted",
     "type": "U64",
     "unit": "integer"
@@ -2192,7 +2542,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_lane",
     "type": "U64",
     "unit": "integer"
@@ -2206,7 +2556,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_build",
     "type": "U64",
     "unit": "integer"
@@ -2220,7 +2570,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].latency_samples",
     "type": "U64",
     "unit": "integer"
@@ -2234,7 +2584,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].latency_p50_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2248,7 +2598,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].latency_p99_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2262,7 +2612,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].latency_max_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2276,7 +2626,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_duplicate_token",
     "type": "U64",
     "unit": "integer"
@@ -2290,7 +2640,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_session_cap",
     "type": "U64",
     "unit": "integer"
@@ -2304,7 +2654,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_plan",
     "type": "U64",
     "unit": "integer"
@@ -2318,7 +2668,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_deadline",
     "type": "U64",
     "unit": "integer"
@@ -2332,7 +2682,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refused_dispatch",
     "type": "U64",
     "unit": "integer"
@@ -2346,7 +2696,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].session_spent_wei",
     "type": "U256",
     "unit": "wei"
@@ -2360,7 +2710,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].paper_balance_wei",
     "type": "U256",
     "unit": "wei"
@@ -2374,7 +2724,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].probes",
     "type": "U64",
     "unit": "integer"
@@ -2388,7 +2738,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].disarm_errors",
     "type": "U64",
     "unit": "integer"
@@ -2402,7 +2752,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_intents",
     "type": "U64",
     "unit": "integer"
@@ -2416,7 +2766,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_handoffs",
     "type": "U64",
     "unit": "integer"
@@ -2430,7 +2780,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_refused",
     "type": "U64",
     "unit": "integer"
@@ -2444,7 +2794,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_lanes_left",
     "type": "U64",
     "unit": "integer"
@@ -2458,7 +2808,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_spent_wei",
     "type": "U256",
     "unit": "wei"
@@ -2472,7 +2822,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_refusals",
     "type": "Text",
     "unit": "text"
@@ -2486,7 +2836,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_next_nonce",
     "type": "U64",
     "unit": "nonce"
@@ -2500,7 +2850,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].strategy_nonce_gap",
     "type": "Bool",
     "unit": "boolean"
@@ -2514,7 +2864,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_REPO_RELATIVE_PATH_ONLY",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].sender_paths",
     "type": "Text",
     "unit": "text"
@@ -2528,7 +2878,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exec[].refusals",
     "type": "Text",
     "unit": "text"
@@ -2542,7 +2892,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].records",
     "type": "U64",
     "unit": "count"
@@ -2556,7 +2906,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2570,7 +2920,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -2584,7 +2934,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].segments_sealed",
     "type": "U64",
     "unit": "integer"
@@ -2598,7 +2948,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].syncs",
     "type": "U64",
     "unit": "integer"
@@ -2612,7 +2962,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].durable_sequence",
     "type": "U64",
     "unit": "integer"
@@ -2626,7 +2976,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].budget_max_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2640,7 +2990,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].budget_in_use_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2654,7 +3004,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].budget_peak_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2668,7 +3018,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].budget_refused",
     "type": "U64",
     "unit": "integer"
@@ -2682,7 +3032,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].write_errors",
     "type": "U64",
     "unit": "integer"
@@ -2696,7 +3046,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "capture[].state",
     "type": "Text",
     "unit": "text"
@@ -2710,7 +3060,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].state",
     "type": "Text",
     "unit": "text"
@@ -2724,7 +3074,7 @@
     "schema_version": 19,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].reason",
     "type": "Text",
     "unit": "text"
@@ -2738,7 +3088,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].followed",
     "type": "U64",
     "unit": "integer"
@@ -2752,7 +3102,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].launches",
     "type": "U64",
     "unit": "integer"
@@ -2766,7 +3116,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].passed",
     "type": "U64",
     "unit": "integer"
@@ -2780,7 +3130,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].rejected",
     "type": "U64",
     "unit": "integer"
@@ -2794,7 +3144,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].data_incomplete",
     "type": "U64",
     "unit": "integer"
@@ -2808,7 +3158,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].not_tracked",
     "type": "U64",
     "unit": "integer"
@@ -2822,7 +3172,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].slot_limit",
     "type": "U64",
     "unit": "integer"
@@ -2836,7 +3186,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].creator_sold",
     "type": "U64",
     "unit": "integer"
@@ -2850,7 +3200,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].entered",
     "type": "U64",
     "unit": "integer"
@@ -2864,7 +3214,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].cancelled",
     "type": "U64",
     "unit": "integer"
@@ -2878,7 +3228,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].exits_creator_sell",
     "type": "U64",
     "unit": "integer"
@@ -2892,7 +3242,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].exits_target",
     "type": "U64",
     "unit": "integer"
@@ -2906,7 +3256,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].exits_stop",
     "type": "U64",
     "unit": "integer"
@@ -2920,7 +3270,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].exits_timeout",
     "type": "U64",
     "unit": "integer"
@@ -2934,7 +3284,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].gains",
     "type": "U64",
     "unit": "integer"
@@ -2948,7 +3298,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].losses",
     "type": "U64",
     "unit": "integer"
@@ -2962,7 +3312,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].gain_wei",
     "type": "U256",
     "unit": "wei"
@@ -2976,7 +3326,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].loss_wei",
     "type": "U256",
     "unit": "wei"
@@ -2990,7 +3340,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].unresolved",
     "type": "U64",
     "unit": "integer"
@@ -3004,7 +3354,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].observation_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -3018,7 +3368,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].max_open",
     "type": "U64",
     "unit": "integer"
@@ -3032,7 +3382,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].input_wei",
     "type": "U256",
     "unit": "wei"
@@ -3046,7 +3396,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].trades",
     "type": "U64",
     "unit": "integer"
@@ -3060,7 +3410,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].terms",
     "type": "U64",
     "unit": "integer"
@@ -3074,7 +3424,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].migrations",
     "type": "U64",
     "unit": "integer"
@@ -3088,7 +3438,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].incomplete",
     "type": "U64",
     "unit": "integer"
@@ -3102,7 +3452,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].open",
     "type": "U64",
     "unit": "integer"
@@ -3116,7 +3466,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].paper_unarmed",
     "type": "U64",
     "unit": "integer"
@@ -3130,7 +3480,7 @@
     "schema_version": 19,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "strategy[].paper_unpriced",
     "type": "U64",
     "unit": "wei"
@@ -3144,7 +3494,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -3158,7 +3508,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -3172,7 +3522,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -3186,7 +3536,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3200,7 +3550,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -3214,7 +3564,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -3228,7 +3578,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -3242,7 +3592,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "starts",
     "type": "U64",
     "unit": "integer"
@@ -3256,7 +3606,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journaled",
     "type": "U64",
     "unit": "integer"
@@ -3270,7 +3620,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "replayed",
     "type": "U64",
     "unit": "integer"
@@ -3284,7 +3634,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "first_difference",
     "type": "U64",
     "unit": "integer"
@@ -3298,7 +3648,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "config_match",
     "type": "Bool",
     "unit": "boolean"
@@ -3312,7 +3662,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "launches",
     "type": "U64",
     "unit": "integer"
@@ -3326,7 +3676,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "passed",
     "type": "U64",
     "unit": "integer"
@@ -3340,7 +3690,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "rejected",
     "type": "U64",
     "unit": "integer"
@@ -3354,7 +3704,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "data_incomplete",
     "type": "U64",
     "unit": "integer"
@@ -3368,7 +3718,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "not_tracked",
     "type": "U64",
     "unit": "integer"
@@ -3382,7 +3732,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "slot_limit",
     "type": "U64",
     "unit": "integer"
@@ -3396,7 +3746,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "creator_sold",
     "type": "U64",
     "unit": "integer"
@@ -3410,7 +3760,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "entered",
     "type": "U64",
     "unit": "integer"
@@ -3424,7 +3774,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "cancelled",
     "type": "U64",
     "unit": "integer"
@@ -3438,7 +3788,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_creator_sell",
     "type": "U64",
     "unit": "integer"
@@ -3452,7 +3802,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_target",
     "type": "U64",
     "unit": "integer"
@@ -3466,7 +3816,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_stop",
     "type": "U64",
     "unit": "integer"
@@ -3480,7 +3830,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_timeout",
     "type": "U64",
     "unit": "integer"
@@ -3494,7 +3844,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gains",
     "type": "U64",
     "unit": "integer"
@@ -3508,7 +3858,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "losses",
     "type": "U64",
     "unit": "integer"
@@ -3522,7 +3872,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gain_wei",
     "type": "U256",
     "unit": "wei"
@@ -3536,7 +3886,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "loss_wei",
     "type": "U256",
     "unit": "wei"
@@ -3550,7 +3900,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "unresolved",
     "type": "U64",
     "unit": "integer"
@@ -3564,7 +3914,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "trades",
     "type": "U64",
     "unit": "integer"
@@ -3578,7 +3928,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "terms",
     "type": "U64",
     "unit": "integer"
@@ -3592,7 +3942,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "migrations",
     "type": "U64",
     "unit": "integer"
@@ -3606,7 +3956,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "incomplete",
     "type": "U64",
     "unit": "integer"
@@ -3620,7 +3970,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -3634,7 +3984,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -3648,7 +3998,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -3662,7 +4012,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3676,7 +4026,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -3690,7 +4040,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -3704,7 +4054,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -3718,7 +4068,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "starts",
     "type": "U64",
     "unit": "integer"
@@ -3732,7 +4082,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journaled",
     "type": "U64",
     "unit": "integer"
@@ -3746,7 +4096,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "replayed",
     "type": "U64",
     "unit": "integer"
@@ -3760,7 +4110,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "first_difference",
     "type": "U64",
     "unit": "integer"
@@ -3774,7 +4124,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "config_match",
     "type": "Bool",
     "unit": "boolean"
@@ -3788,7 +4138,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "launches",
     "type": "U64",
     "unit": "integer"
@@ -3802,7 +4152,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "passed",
     "type": "U64",
     "unit": "integer"
@@ -3816,7 +4166,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "rejected",
     "type": "U64",
     "unit": "integer"
@@ -3830,7 +4180,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "data_incomplete",
     "type": "U64",
     "unit": "integer"
@@ -3844,7 +4194,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "not_tracked",
     "type": "U64",
     "unit": "integer"
@@ -3858,7 +4208,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "slot_limit",
     "type": "U64",
     "unit": "integer"
@@ -3872,7 +4222,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "creator_sold",
     "type": "U64",
     "unit": "integer"
@@ -3886,7 +4236,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "entered",
     "type": "U64",
     "unit": "integer"
@@ -3900,7 +4250,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "cancelled",
     "type": "U64",
     "unit": "integer"
@@ -3914,7 +4264,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_creator_sell",
     "type": "U64",
     "unit": "integer"
@@ -3928,7 +4278,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_target",
     "type": "U64",
     "unit": "integer"
@@ -3942,7 +4292,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_stop",
     "type": "U64",
     "unit": "integer"
@@ -3956,7 +4306,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_timeout",
     "type": "U64",
     "unit": "integer"
@@ -3970,7 +4320,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gains",
     "type": "U64",
     "unit": "integer"
@@ -3984,7 +4334,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "losses",
     "type": "U64",
     "unit": "integer"
@@ -3998,7 +4348,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gain_wei",
     "type": "U256",
     "unit": "wei"
@@ -4012,7 +4362,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "loss_wei",
     "type": "U256",
     "unit": "wei"
@@ -4026,7 +4376,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "unresolved",
     "type": "U64",
     "unit": "integer"
@@ -4040,7 +4390,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "trades",
     "type": "U64",
     "unit": "integer"
@@ -4054,7 +4404,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "terms",
     "type": "U64",
     "unit": "integer"
@@ -4068,7 +4418,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "migrations",
     "type": "U64",
     "unit": "integer"
@@ -4082,7 +4432,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "incomplete",
     "type": "U64",
     "unit": "integer"
@@ -4096,7 +4446,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "open_at_end",
     "type": "U64",
     "unit": "integer"
@@ -4110,7 +4460,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -4124,7 +4474,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -4138,7 +4488,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -4152,7 +4502,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -4166,7 +4516,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -4180,7 +4530,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -4194,7 +4544,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -4208,7 +4558,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "starts",
     "type": "U64",
     "unit": "integer"
@@ -4222,7 +4572,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "journaled",
     "type": "U64",
     "unit": "integer"
@@ -4236,7 +4586,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "replayed",
     "type": "U64",
     "unit": "integer"
@@ -4250,7 +4600,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "first_difference",
     "type": "U64",
     "unit": "integer"
@@ -4264,7 +4614,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "config_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4278,7 +4628,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "launches",
     "type": "U64",
     "unit": "integer"
@@ -4292,7 +4642,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "passed",
     "type": "U64",
     "unit": "integer"
@@ -4306,7 +4656,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "rejected",
     "type": "U64",
     "unit": "integer"
@@ -4320,7 +4670,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "data_incomplete",
     "type": "U64",
     "unit": "integer"
@@ -4334,7 +4684,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "not_tracked",
     "type": "U64",
     "unit": "integer"
@@ -4348,7 +4698,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "slot_limit",
     "type": "U64",
     "unit": "integer"
@@ -4362,7 +4712,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "creator_sold",
     "type": "U64",
     "unit": "integer"
@@ -4376,7 +4726,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "entered",
     "type": "U64",
     "unit": "integer"
@@ -4390,7 +4740,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "cancelled",
     "type": "U64",
     "unit": "integer"
@@ -4404,7 +4754,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_creator_sell",
     "type": "U64",
     "unit": "integer"
@@ -4418,7 +4768,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_target",
     "type": "U64",
     "unit": "integer"
@@ -4432,7 +4782,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_stop",
     "type": "U64",
     "unit": "integer"
@@ -4446,7 +4796,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "exits_timeout",
     "type": "U64",
     "unit": "integer"
@@ -4460,7 +4810,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gains",
     "type": "U64",
     "unit": "integer"
@@ -4474,7 +4824,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "losses",
     "type": "U64",
     "unit": "integer"
@@ -4488,7 +4838,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "gain_wei",
     "type": "U256",
     "unit": "wei"
@@ -4502,7 +4852,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "loss_wei",
     "type": "U256",
     "unit": "wei"
@@ -4516,7 +4866,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "unresolved",
     "type": "U64",
     "unit": "integer"
@@ -4530,7 +4880,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "trades",
     "type": "U64",
     "unit": "integer"
@@ -4544,7 +4894,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "terms",
     "type": "U64",
     "unit": "integer"
@@ -4558,7 +4908,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "migrations",
     "type": "U64",
     "unit": "integer"
@@ -4572,7 +4922,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "incomplete",
     "type": "U64",
     "unit": "integer"
@@ -4586,7 +4936,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "open_at_end",
     "type": "U64",
     "unit": "integer"
@@ -4600,7 +4950,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_EXTERNAL_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].source",
     "type": "Text",
     "unit": "text"
@@ -4614,7 +4964,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].token",
     "type": "Address",
     "unit": "EVM_address"
@@ -4628,7 +4978,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].decided_block",
     "type": "U64",
     "unit": "block_number"
@@ -4642,7 +4992,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].decided_unix_us",
     "type": "U64",
     "unit": "integer"
@@ -4656,7 +5006,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].eligible_block",
     "type": "U64",
     "unit": "block_number"
@@ -4670,7 +5020,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].lead_us",
     "type": "I64",
     "unit": "signed_integer"
@@ -4684,7 +5034,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].buys_before",
     "type": "U64",
     "unit": "integer"
@@ -4698,7 +5048,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].buys_in_eligible",
     "type": "U64",
     "unit": "integer"
@@ -4712,7 +5062,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].first_buy_gap_blocks",
     "type": "U64",
     "unit": "count"
@@ -4726,7 +5076,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions[].time_lower_bound",
     "type": "Bool",
     "unit": "boolean"
@@ -4740,7 +5090,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions_next_block",
     "type": "U64",
     "unit": "block_number"
@@ -4754,7 +5104,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions_contested",
     "type": "U64",
     "unit": "integer"
@@ -4768,7 +5118,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_runtime.rs",
-    "source_sha": "0078764ef82ebe58fcd34999578e067b27db6b2410d87008de979eb2b0ef5e38",
+    "source_sha": "b3c3eca199e18e68e288c07b432573e934e66fa1c4ed51b694b8a9409986036b",
     "symbol": "positions_unknown",
     "type": "U64",
     "unit": "integer"

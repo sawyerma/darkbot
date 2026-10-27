@@ -8,7 +8,13 @@
 //! g06a_dry_handoff verify --prepare <prepare_dir> --frozen <frozen_dir> --out <new sign_dir>
 //! g06a_dry_handoff archive --sign bsc/.local/g06a_sign/<run> --to <private dir>
 //! g06a_dry_handoff restore --from <archive>/<run> --expect <SUMS_SHA256>
+//! g06a_dry_handoff controls --require <SWITCH_ID>...
 //! ```
+//!
+//! `controls` (plan 27.10.) is the native switch check the DRY harness runs
+//! before any wallet key leaves its scope: exit 0 only if every named
+//! wallet/economic switch is ENABLED in the canonical owner state of this
+//! boot session (`sources::require_enabled_here`), else STOP (exit 2).
 //!
 //! `archive` / `restore` (BSC-006): see `g06a_dry_handoff/archive.rs`.
 //!
@@ -433,6 +439,28 @@ fn exec_salt(args: &[String]) -> Result<i32, String> {
     Ok(status.code().unwrap_or(1))
 }
 
+/// The wallet and economic switches a DRY SIGN needs, checked natively.
+fn controls(args: &[String]) -> Result<i32, String> {
+    use darkbot_bsc_execution::sources::{SwitchId, require_enabled_here};
+    let [flag, ids @ ..] = args else {
+        return Err("controls --require <SWITCH_ID>...".into());
+    };
+    if flag != "--require" || ids.is_empty() {
+        return Err("controls --require <SWITCH_ID>...".into());
+    }
+    let needed = ids
+        .iter()
+        .map(|id| SwitchId::parse(id).ok_or(format!("{id} is not a switch")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let generation = require_enabled_here(&needed)?;
+    writeln!(
+        std::io::stdout().lock(),
+        "controls=ENABLED generation={generation}"
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(0)
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
@@ -442,7 +470,8 @@ fn main() {
         Some("verify") => verify(&args[1..]),
         Some("archive") => archive::archive(&args[1..]),
         Some("restore") => archive::restore(&args[1..]),
-        _ => Err("usage: g06a_dry_handoff selection | exec-salt | prepare | verify | archive | restore (see the source header)".into()),
+        Some("controls") => controls(&args[1..]),
+        _ => Err("usage: g06a_dry_handoff selection | exec-salt | prepare | verify | archive | restore | controls (see the source header)".into()),
     };
     match result {
         Ok(code) => std::process::exit(code),

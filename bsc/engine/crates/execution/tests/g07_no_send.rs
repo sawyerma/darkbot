@@ -356,6 +356,32 @@ fn child_processes_are_spawned_only_with_a_cleared_environment() {
     assert!(!chain_reads.contains("child_command(\"node\")"));
 }
 
+/// Plan 27.10.: the native switches are checked after the keys left the
+/// environment and before the signing, again before the attempt authority
+/// is consumed, and once more (byte-free) before the send head; the switch
+/// set is both wallets, SIGN, ARM, SEND and ATTEMPT.
+#[test]
+fn the_native_switches_gate_signing_the_authority_and_the_send() {
+    let check = "require_enabled_here(&ATTEMPT_SWITCHES)";
+    let at: Vec<usize> = SOURCE.match_indices(check).map(|(i, _)| i).collect();
+    assert_eq!(at.len(), 3, "{at:?}");
+    let keys = pos("unsafe { take_startup_keys() }");
+    let sign = pos("let launch = sign_legacy(");
+    let authority = pos("let authority = attempt_authority::consume(");
+    let send_head = pos("head_poller.next_head(HEAD_TRANSITION_TIMEOUT)");
+    let guard = pos("let authorized = verify_live_authorization(");
+    assert!(keys < at[0] && at[0] < sign);
+    assert!(sign < at[1] && at[1] < authority);
+    assert!(guard < at[2] && at[2] < send_head);
+    assert!(SOURCE[at[2]..send_head].contains("pre_egress_abort(capture, &capture_clock, unsent, \"native switches\", &e)"));
+    let set = &SOURCE[pos("const ATTEMPT_SWITCHES")..];
+    let set = &set[..set.find("];").unwrap()];
+    for id in ["WalletLauncher", "WalletBuyer", "Sign", "Arm", "Send", "Attempt"] {
+        assert!(set.contains(&format!("SwitchId::{id},")), "{id}");
+    }
+    assert!(!set.contains("SwitchId::Live"));
+}
+
 #[test]
 fn key_cleanup_precedes_every_external_or_concurrent_startup_boundary() {
     let source = include_str!("../src/bin/g07_mainnet_self_launch_buy/main.rs");

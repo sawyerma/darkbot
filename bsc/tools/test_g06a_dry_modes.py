@@ -66,6 +66,8 @@ verify) [ "$(val verify)" = "refuse" ] && { echo "STOP: the R0 record is not the
   printf 'token=%s\nsalt_commitment=%s\n' "$(val token)" "$(val commitment)" > "$o/candidate.dbrec"
   to=$(grep '^scanned_to_block=' "$p/portal_upgrade.dbrec" | cut -d= -f2)
   printf 'profile=%s\ncandidate_id={id}\ngeneration=4\nr0_to_block=%s\n' "$(val selected)" "$to";;
+controls) [ "$(val controls)" = refuse ] && { echo "STOP: CONTROL_DISABLED at generation 0: BSC_WALLET_LAUNCHER DISABLED" >&2; exit 2; }
+  echo "controls=ENABLED generation=3";;
 *) exit 2;;
 esac
 """,
@@ -290,6 +292,35 @@ class Full(unittest.TestCase):
         # BSC-002: the simulation reads exactly the preflight block by hash.
         sim = [c for c in w.calls() if c[0] == "node" and "simulate.cjs" in c[1][0]][0]
         self.assertIn("DARKBOT_G06A_SEND_HEAD_HASH=0x%064x" % 129400000, sim[2])
+
+
+class Controls(unittest.TestCase):
+    """Plan 27.10.: a signing mode asks the native owner first; refused
+    switches stop it before the key file, a signer or a build output."""
+
+    def test_refused_switches_stop_full_and_sign_before_any_key(self):
+        for mode in ("--full", "--sign"):
+            w = World({"controls": "refuse"}, FULL_SECRETS)
+            self.addCleanup(w.close)
+            args = [mode] + (["/nonexistent"] if mode == "--sign" else [])
+            out = w.run(*args, env={"DARKBOT_G06A_SIGN": "YES", "BSC_MAINNET_RPC_HTTPS": RPC})
+            self.assertNotEqual(out.returncode, 0, out.stdout + out.stderr)
+            self.assertIn("native switches refuse a Mainnet wallet signature", out.stderr)
+            names = [c[0] for c in w.calls()]
+            self.assertIn("g06a_dry_handoff", names)
+            self.assertNotIn("secrets", names, mode)
+            self.assertNotIn("g06a_self_launch_bundle", names, mode)
+            self.assertNotIn("node", names, mode)
+            self.assertFalse(any("PRIVATE_KEY=" in env for _, _, env in w.calls()), mode)
+            self.assertEqual([a for t, a, _ in w.calls() if t == "g06a_dry_handoff"][0],
+                             ["controls", "--require", "BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER", "BSC_ECON_SIGN"])
+
+    def test_prepare_never_asks_for_switches(self):
+        w = World({"controls": "refuse"}, FULL_SECRETS)
+        self.addCleanup(w.close)
+        out = w.run("--prepare", env={"BSC_MAINNET_RPC_HTTPS": RPC})
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse(any(a[:1] == ["controls"] for t, a, _ in w.calls() if t == "g06a_dry_handoff"))
 
 
 def assert_keys_read_only_for_the_signers(test, calls):

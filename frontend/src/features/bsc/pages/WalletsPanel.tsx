@@ -7,6 +7,17 @@ import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
 import { formatNative } from "../model/format";
+import { switchRow, type SwitchRow } from "../model/switches";
+import { SwitchActions } from "../SwitchActions";
+
+/** One wallet switch: effective state, what was requested, why, the CAS generation and the setting request. */
+function SwitchLines({ row }: { row: SwitchRow }) {
+  return <>
+    <Line label={`${row.label} switch`} value={<ValueState state={row.effective} />}
+      hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${row.hint}; DISABLED initially and after every restart`} />
+    <Line label={`${row.label} switch generation`} value={row.available ? row.generation.toString() : row.reason} hint={`Native owner generation (CAS) · last set by ${row.receipt}`} />
+  </>;
+}
 
 const wei = (v: string | undefined) => v === undefined ? "UNKNOWN" : formatNative(v, "wei");
 
@@ -18,14 +29,20 @@ export function WalletsPanel() {
   const { projection: w } = useBscStore(selectWallets);
   const { projection: s } = useBscStore(selectStatus);
   const records = useNativeRecords();
+  const launcher = switchRow("BSC_WALLET_LAUNCHER", w?.launcherControl);
+  const buyer = switchRow("BSC_WALLET_BUYER", w?.buyerControl);
   return <>
     <Line label="Wallet source quality" value={<ValueState state={quality} />} hint="bsc.wallets.state transport" />
     <PlacedSection panel="wallets" section={1} records={records}>
       <Line label="Expected address" value={w?.expectedAddress || "—"} />
       <Line label="Launcher" value={w?.launcherAddress || "—"} />
+      <SwitchLines row={launcher} />
+      <SwitchActions rows={[launcher]} testId="bsc-wallet-launcher" action="bsc.wallet.set" />
     </PlacedSection>
     <PlacedSection panel="wallets" section={2} records={records}>
       <Line label="Buyer" value={w?.buyerAddress || "—"} />
+      <SwitchLines row={buyer} />
+      <SwitchActions rows={[buyer]} testId="bsc-wallet-buyer" action="bsc.wallet.set" />
     </PlacedSection>
     <PlacedSection panel="wallets" section={3} records={records}>
       <Line label="Launcher balance" value={wei(w?.launcherBalanceWei)} hint="Historical snapshot, not a live balance" />
@@ -46,6 +63,6 @@ export function WalletsPanel() {
       <Line label="Balance observed" value={timestamp(w?.observedUnixS)} />
       <EvidenceRows evidence={w?.evidence} />
     </PlacedSection>
-    <Notice>Balances are historical snapshots, not a live balance reader. No transfers or wallet mutations are available.</Notice>
+    <Notice>Balances are historical snapshots, not a live balance reader. No transfers or wallet mutations are available. The two wallet switches are native permissions of the bsc_runtime owner (the same as darkbotctl bsc source request): every Mainnet signing or sending path checks them, also when started in a terminal; ENABLED alone signs and sends nothing.</Notice>
   </>;
 }

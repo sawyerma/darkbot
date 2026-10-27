@@ -12,6 +12,17 @@ import { MISSING_INTEGRATION, candidateControlView } from "../model/candidate";
 import { labelOf } from "../model/placement";
 import { CandidateActions } from "../CandidateActions";
 import { useCandidateControl } from "@/core/realtime/candidateControl";
+import { economicRows, type SwitchRow } from "../model/switches";
+import { SwitchActions } from "../SwitchActions";
+
+/** The economic switches of one section, with what each permits and the request that set it. */
+function EconomicSwitches({ rows, testId }: { rows: SwitchRow[]; testId: string }) {
+  return <>
+    {rows.map(row => <Line key={row.id} label={`${row.label} switch`} value={<ValueState state={row.effective} />}
+      hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${row.hint} · generation ${row.available ? row.generation.toString() : row.reason} · last set by ${row.receipt}`} />)}
+    <SwitchActions rows={rows} testId={testId} action="bsc.economic.set" />
+  </>;
+}
 
 const flag = (v: boolean | undefined) => v === undefined ? "UNKNOWN" : String(v);
 
@@ -28,6 +39,8 @@ export function LaunchBuyPanel() {
   const mirror = (launch?.runtimeFields ?? []).map(f => ({ name: labelOf(f.name, ""), value: f.value || "—", hint: f.name }));
   const r = status?.readiness;
   const g = status?.guard;
+  const economic = economicRows(launch?.economicControls);
+  const pick = (...ids: string[]) => economic.filter(row => ids.includes(row.id));
   return <>
     <Line label="Plan source quality" value={<ValueState state={quality} />} hint="bsc.launch.state transport" />
     <PlacedSection panel="launch" section={1} records={records}>
@@ -57,11 +70,13 @@ export function LaunchBuyPanel() {
       <Line label="Contract SHA-256" value={g?.contractSha256 || "—"} />
       <Line label="Contract note" value={launch?.reason || "—"} />
       <EvidenceRows evidence={launch?.evidence} />
+      <EconomicSwitches rows={pick("BSC_ECON_SIGN", "BSC_ECON_ARM", "BSC_ECON_LIVE")} testId="bsc-economic-authorization" />
     </PlacedSection>
     <PlacedSection panel="launch" section={6} records={records} />
     <PlacedSection panel="launch" section={7} records={records}>
       <Line label="Attempt ID" value={g?.attemptId || "—"} />
       <Line label="Maximum attempts" value={g?.maxAttempts?.toString() ?? "UNKNOWN"} />
+      <EconomicSwitches rows={pick("BSC_ECON_SEND", "BSC_ECON_ATTEMPT")} testId="bsc-economic-attempt" />
     </PlacedSection>
     <PlacedSection panel="launch" section={8} records={records}>
       <ReadinessActions />
@@ -72,6 +87,6 @@ export function LaunchBuyPanel() {
       <EvidenceRows evidence={r?.evidence} />
       <FilteredEvidence rows={r?.checks} label="Filter readiness checks" />
     </PlacedSection>
-    <Notice>BUY control is not implemented. DRY, arm, probe and send remain unavailable. Filters only change the displayed fields; signed limits and execution rules remain bound to native evidence.</Notice>
+    <Notice>No action here signs, arms, probes or sends. The economic switches are native permissions of the bsc_runtime owner (the same as darkbotctl bsc source request), DISABLED initially and after every restart; the G0.7 attempt needs both wallets, SIGN, ARM, SEND and Attempt ENABLED besides the compiled guard, the V5 contract and the attempt authority. Filters only change the displayed fields; signed limits and execution rules remain bound to native evidence.</Notice>
   </>;
 }

@@ -493,6 +493,16 @@ fn main() {
 
     // SAFETY: single-threaded main; no thread or child process exists.
     let (launcher_key, buyer_key) = unsafe { take_keys() };
+    // Plan 27.10.: Mainnet wallet signatures need the LAUNCHER and BUYER
+    // wallets and SIGN ENABLED in the native owner state of this boot
+    // session; otherwise nothing is signed. Checked once the keys are out
+    // of the environment (its boot-session read is a child process).
+    darkbot_bsc_execution::sources::require_enabled_here(&[
+        darkbot_bsc_execution::sources::SwitchId::WalletLauncher,
+        darkbot_bsc_execution::sources::SwitchId::WalletBuyer,
+        darkbot_bsc_execution::sources::SwitchId::Sign,
+    ])
+    .unwrap_or_else(|refusal| panic!("DRY SIGN refused: {refusal}"));
     let launcher = signer_address(&launcher_key);
     let buyer = signer_address(&buyer_key);
     let wallets_distinct = launcher != buyer;

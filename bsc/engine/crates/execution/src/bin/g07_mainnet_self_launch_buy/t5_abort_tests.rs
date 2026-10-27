@@ -161,7 +161,7 @@ fn renamed_latch(base: &Path, attempt_id: &str, outcome: &str) -> PathBuf {
 fn every_pre_egress_stop_returns_the_authority_only_with_a_durable_journal() {
     let base = private_dir("t5-stages");
     let stages = pre_egress_stages();
-    assert_eq!(stages.len(), 14, "{stages:?}");
+    assert_eq!(stages.len(), 15, "{stages:?}");
     assert!(JOURNAL_STAGES.iter().all(|j| stages.iter().any(|s| s == j)));
     for (n, stage) in stages.iter().enumerate() {
         let mut a = armed(&base, n as u8);

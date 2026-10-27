@@ -1017,9 +1017,10 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
     );
     assert_eq!(field("sources[1].requested").as_deref(), Some("LIVE"));
     assert_eq!(field("sources[1].effective").as_deref(), Some("BLOCKED"));
+    // The first missing condition: the global economic LIVE switch.
     assert_eq!(
         field("sources[1].block_reason").as_deref(),
-        Some("ECONOMIC_LIVE_NOT_AUTHORIZED")
+        Some("ECONOMIC_LIVE_DISABLED")
     );
     // The running runtime's status record reaches monitoring as well.
     {
@@ -1338,6 +1339,109 @@ fn the_g04_gate_shows_the_criteria_state_or_the_verdict() {
             "NOT_EVALUABLE".into(),
             vec!["CAMPAIGN_RUNNING".into(), "COVERAGE_BELOW_MINIMUM".into()]
         )
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Plan 27.10.: the two wallet switches reach Wallets and the five economic
+/// ones Launch / BUY, typed: requested, effective in this boot session,
+/// block reason, generation (CAS) and the request that set them. Absent
+/// before the owner's state exists; BLOCKED when it does not decode; an
+/// ENABLED switch of an earlier boot reads BLOCKED RESET_BY_RESTART.
+#[test]
+fn the_wallet_and_economic_switches_are_projected_typed() {
+    use darkbot_bsc_execution::sources::{Mode, Store, SwitchId, boot_session};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-switches-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let run = root.join("run");
+    fs::create_dir_all(&run).unwrap();
+    let s = projection::project(&root, &run);
+    assert_eq!(s.wallets.launcher_control, None);
+    assert!(s.launch.economic_controls.is_empty());
+    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    store.restart(1).unwrap();
+    let s = projection::project(&root, &run);
+    let launcher = s.wallets.launcher_control.clone().unwrap();
+    assert_eq!(
+        (
+            launcher.id.as_str(),
+            launcher.requested.as_str(),
+            launcher.effective.as_str(),
+            launcher.generation
+        ),
+        ("BSC_WALLET_LAUNCHER", "DISABLED", "DISABLED", 0)
+    );
+    assert_eq!(
+        s.launch
+            .economic_controls
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "BSC_ECON_SIGN",
+            "BSC_ECON_ARM",
+            "BSC_ECON_SEND",
+            "BSC_ECON_ATTEMPT",
+            "BSC_ECON_LIVE"
+        ]
+    );
+    store
+        .request("e2e-buyer", SwitchId::WalletBuyer, Mode::Enabled, 0, 2)
+        .unwrap();
+    let s = projection::project(&root, &run);
+    let buyer = s.wallets.buyer_control.clone().unwrap();
+    assert_eq!(
+        (
+            buyer.effective.as_str(),
+            buyer.request_id.as_str(),
+            buyer.set_generation,
+            buyer.generation
+        ),
+        ("ENABLED", "e2e-buyer", Some(1), 1)
+    );
+    assert_eq!(
+        s.wallets.launcher_control.unwrap().effective,
+        "DISABLED",
+        "independent"
+    );
+    // The same state in another boot session: BLOCKED, never ENABLED.
+    let other = Store::open_in_session(
+        run.join("bsc-sources"),
+        8,
+        Ok(format!("{}-other", boot_session().unwrap())),
+    )
+    .unwrap();
+    other
+        .request("e2e-other", SwitchId::Send, Mode::Enabled, 1, 3)
+        .unwrap();
+    let s = projection::project(&root, &run);
+    let send = s
+        .launch
+        .economic_controls
+        .iter()
+        .find(|c| c.id == "BSC_ECON_SEND")
+        .unwrap();
+    assert_eq!(
+        (send.effective.as_str(), send.block_reason.as_str()),
+        ("BLOCKED", "RESET_BY_RESTART")
+    );
+    assert_eq!(s.wallets.buyer_control.unwrap().effective, "DISABLED");
+    assert!(
+        s.status
+            .warnings
+            .contains(&"CONTROL_SWITCHES_RESET_BY_RESTART".to_string())
+    );
+    // A state that does not decode: every switch BLOCKED, never ENABLED.
+    fs::write(
+        run.join(format!("bsc-sources/generations/{:020}.dbrec", 3)),
+        b"torn",
+    )
+    .unwrap();
+    let s = projection::project(&root, &run);
+    let launcher = s.wallets.launcher_control.unwrap();
+    assert_eq!(
+        (launcher.effective.as_str(), launcher.block_reason.as_str()),
+        ("BLOCKED", "CONTROL_STATE_INVALID")
     );
     fs::remove_dir_all(&root).unwrap();
 }

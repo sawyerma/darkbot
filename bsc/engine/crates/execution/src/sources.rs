@@ -1,10 +1,21 @@
-//! The native owner of the five BSC signal sources (plan §5a.2, order V2
-//! §5): each source has a user-requested mode `OFF | SHADOW | LIVE` and the
-//! mode this owner makes effective. No build of this program authorizes
-//! economic LIVE, so [`Effective`] has no LIVE at all: a requested LIVE is
-//! `BLOCKED` (`ECONOMIC_LIVE_NOT_AUTHORIZED`), and a source whose access is
-//! not qualified is `BLOCKED` even in SHADOW. Health is the runtime's, not
-//! this configuration's.
+//! The native owner of the BSC runtime's switches (plan §5a.2, v9 §2,
+//! order V2 §5, plan decision 27.10.): the five signal sources, the runtime
+//! components and the three venues, each with a user-requested mode
+//! `OFF | SHADOW | LIVE` and the mode this owner makes effective, and the
+//! wallet and economic switches `DISABLED | ENABLED`. No build of this
+//! program authorizes economic LIVE, so [`Effective`] has no LIVE at all: a
+//! requested LIVE is `BLOCKED` (`ECONOMIC_LIVE_DISABLED` while the global
+//! economic LIVE switch is off, `ECONOMIC_LIVE_NOT_AUTHORIZED` once it is
+//! on), and a source whose access is not qualified is `BLOCKED` even in
+//! SHADOW. Health is the runtime's, not this configuration's.
+//!
+//! The switches are permissions, never actions: an ENABLED switch makes
+//! nothing sign or send. Every Mainnet signing or sending path checks the
+//! switches it needs ([`require_enabled_here`]) besides its own guard, V5,
+//! nonce, budget and attempt checks. Every switch is DISABLED initially, in
+//! a missing or unreadable state, and after every restart: an ENABLED
+//! switch counts only within the host boot session it was written in, and
+//! a restart of the owner ([`Store::restart`]) writes them DISABLED.
 //!
 //! State: one binary record per generation, `generations/<n>.dbrec`, created
 //! create-new: two writers of the same next generation cannot both succeed,
@@ -20,6 +31,7 @@ use std::fs;
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// The five independently switchable inputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,12 +67,15 @@ impl SourceId {
     }
 }
 
-/// What the user requests.
+/// What the user requests: `OFF | SHADOW | LIVE` for a source, component
+/// or venue, `DISABLED | ENABLED` for a switch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Off,
     Shadow,
     Live,
+    Disabled,
+    Enabled,
 }
 
 impl Mode {
@@ -69,23 +84,33 @@ impl Mode {
             Mode::Off => "OFF",
             Mode::Shadow => "SHADOW",
             Mode::Live => "LIVE",
+            Mode::Disabled => "DISABLED",
+            Mode::Enabled => "ENABLED",
         }
     }
 
     pub fn parse(name: &str) -> Option<Mode> {
-        [Mode::Off, Mode::Shadow, Mode::Live]
-            .into_iter()
-            .find(|m| m.name() == name)
+        [
+            Mode::Off,
+            Mode::Shadow,
+            Mode::Live,
+            Mode::Disabled,
+            Mode::Enabled,
+        ]
+        .into_iter()
+        .find(|m| m.name() == name)
     }
 }
 
 /// What the owner makes of a request. There is no LIVE: nothing in this
-/// program can make a source economically live.
+/// program can make a source, component or venue economically live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effective {
     Off,
     Shadow,
     Blocked(&'static str),
+    Disabled,
+    Enabled,
 }
 
 impl Effective {
@@ -94,6 +119,8 @@ impl Effective {
             Effective::Off => "OFF",
             Effective::Shadow => "SHADOW",
             Effective::Blocked(_) => "BLOCKED",
+            Effective::Disabled => "DISABLED",
+            Effective::Enabled => "ENABLED",
         }
     }
 
@@ -103,22 +130,78 @@ impl Effective {
             _ => None,
         }
     }
+
+    /// A stored effective mode and its reason, if this owner can write it.
+    fn parse(name: &str, reason: Option<&str>) -> Option<Effective> {
+        match (name, reason) {
+            ("OFF", None) => Some(Effective::Off),
+            ("SHADOW", None) => Some(Effective::Shadow),
+            ("DISABLED", None) => Some(Effective::Disabled),
+            ("ENABLED", None) => Some(Effective::Enabled),
+            ("BLOCKED", Some(r)) => BLOCK_REASONS
+                .into_iter()
+                .find(|k| *k == r)
+                .map(Effective::Blocked),
+            _ => None,
+        }
+    }
 }
 
 pub const ECONOMIC_LIVE_NOT_AUTHORIZED: &str = "ECONOMIC_LIVE_NOT_AUTHORIZED";
+/// A requested LIVE while the global economic LIVE switch is not ENABLED:
+/// the first missing condition (plan v9 §2.5).
+pub const ECONOMIC_LIVE_DISABLED: &str = "ECONOMIC_LIVE_DISABLED";
 /// C2 may only run operationally after a real G0.8 acquisition PASS and the
 /// evaluated G0.4 measurement (PHASENPLAN §10 offline override).
 pub const C2_OPERATIONAL_NOT_AUTHORIZED: &str = "C2_OPERATIONAL_NOT_AUTHORIZED";
 pub const SOURCE_ACCESS_UNQUALIFIED: &str = "SOURCE_ACCESS_UNQUALIFIED";
+/// Four.meme Classic and OpenFour are recognized and decoded (Phase E), but
+/// no economics or execution path exists for them (G/C3 after the G0.1
+/// Four contract freeze): there is nothing to evaluate in SHADOW.
+pub const FOUR_EXECUTION_PATH_MISSING: &str = "FOUR_EXECUTION_PATH_MISSING";
+/// A switch ENABLED in an earlier boot session: every restart disables it.
+pub const RESET_BY_RESTART: &str = "RESET_BY_RESTART";
+const BLOCK_REASONS: [&str; 6] = [
+    ECONOMIC_LIVE_NOT_AUTHORIZED,
+    ECONOMIC_LIVE_DISABLED,
+    C2_OPERATIONAL_NOT_AUTHORIZED,
+    SOURCE_ACCESS_UNQUALIFIED,
+    FOUR_EXECUTION_PATH_MISSING,
+    RESET_BY_RESTART,
+];
+/// The request ID a restart reset of the switches records.
+pub const RESTART_RESET: &str = "RESTART_RESET";
+
+/// What a requested LIVE meets: the global economic LIVE switch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveGate {
+    /// `BSC_ECON_LIVE` is not ENABLED.
+    Disabled,
+    /// `BSC_ECON_LIVE` is ENABLED; no economic LIVE executor is authorized.
+    Enabled,
+    /// A generation written before the switch existed (read only).
+    Legacy,
+}
+
+impl LiveGate {
+    fn blocked(self) -> Effective {
+        match self {
+            LiveGate::Disabled => Effective::Blocked(ECONOMIC_LIVE_DISABLED),
+            LiveGate::Enabled | LiveGate::Legacy => {
+                Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
+            }
+        }
+    }
+}
 
 /// The owner's rule. 48Club's auction feed needs credentials and an
 /// eligibility nobody proved, so it is BLOCKED even in SHADOW (plan §5a.2).
-pub fn effective(source: SourceId, requested: Mode) -> Effective {
+pub fn effective(source: SourceId, requested: Mode, live: LiveGate) -> Effective {
     match (source, requested) {
-        (_, Mode::Off) => Effective::Off,
-        (_, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
+        (_, Mode::Live) => live.blocked(),
         (SourceId::Club48, Mode::Shadow) => Effective::Blocked(SOURCE_ACCESS_UNQUALIFIED),
         (_, Mode::Shadow) => Effective::Shadow,
+        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
     }
 }
 
@@ -156,24 +239,118 @@ impl ComponentId {
 
 /// The owner's rule for a component: SHADOW runs it without any economic
 /// effect; LIVE (operational use of its state) is never effective here.
-pub fn component_effective(component: ComponentId, requested: Mode) -> Effective {
+pub fn component_effective(component: ComponentId, requested: Mode, live: LiveGate) -> Effective {
     match (component, requested) {
-        (_, Mode::Off) => Effective::Off,
         (_, Mode::Shadow) => Effective::Shadow,
         (ComponentId::StateC2, Mode::Live) => Effective::Blocked(C2_OPERATIONAL_NOT_AUTHORIZED),
-        // LIVE would sign and send economically: never without its own
-        // authorization (G0.7/G0.8, J).
-        (ComponentId::ExecC3, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
-        // LIVE would trade on the strategy's decisions: the same block.
-        (ComponentId::StrategyC, Mode::Live) => Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED),
+        // LIVE would sign and send economically (C3) or trade on the
+        // strategy's decisions: never without its own authorization
+        // (G0.7/G0.8, J).
+        (_, Mode::Live) => live.blocked(),
+        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
     }
 }
 
-/// Anything this owner switches: a source or a component.
+/// The venues (plan v9 §2.3), each admitted independently: a candidate is
+/// evaluated only where its venue is effective SHADOW.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VenueId {
+    Flap,
+    FourClassic,
+    OpenFour,
+}
+
+impl VenueId {
+    pub const ALL: [VenueId; 3] = [VenueId::Flap, VenueId::FourClassic, VenueId::OpenFour];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            VenueId::Flap => "BSC_VENUE_FLAP",
+            VenueId::FourClassic => "BSC_VENUE_FOUR_CLASSIC",
+            VenueId::OpenFour => "BSC_VENUE_OPENFOUR",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<VenueId> {
+        Self::ALL.into_iter().find(|v| v.name() == name)
+    }
+}
+
+/// The owner's rule for a venue: SHADOW admits Flap launches to the C3
+/// PAPER path and Strategy C; Four.meme has no path to admit to yet.
+pub fn venue_effective(venue: VenueId, requested: Mode, live: LiveGate) -> Effective {
+    match (venue, requested) {
+        (_, Mode::Live) => live.blocked(),
+        (VenueId::Flap, Mode::Shadow) => Effective::Shadow,
+        (_, Mode::Shadow) => Effective::Blocked(FOUR_EXECUTION_PATH_MISSING),
+        (_, Mode::Off | Mode::Disabled | Mode::Enabled) => Effective::Off,
+    }
+}
+
+/// The wallet and economic switches (plan decision 27.10.): permissions a
+/// Mainnet signing or sending path needs besides its own authorities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwitchId {
+    /// The launcher wallet may sign/send on Mainnet.
+    WalletLauncher,
+    /// The buyer wallet may sign/send on Mainnet.
+    WalletBuyer,
+    /// Mainnet wallet signatures (DRY SIGN, the G0.7 attempt).
+    Sign,
+    /// Use of an armed acceptance guard (the compiled V5 hash).
+    Arm,
+    /// Mainnet submission (the G0.7 release to the builders).
+    Send,
+    /// Consuming the one-attempt authority of a G0.7 attempt.
+    Attempt,
+    /// Global economic LIVE: the first condition of any requested LIVE.
+    Live,
+}
+
+impl SwitchId {
+    pub const ALL: [SwitchId; 7] = [
+        SwitchId::WalletLauncher,
+        SwitchId::WalletBuyer,
+        SwitchId::Sign,
+        SwitchId::Arm,
+        SwitchId::Send,
+        SwitchId::Attempt,
+        SwitchId::Live,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SwitchId::WalletLauncher => "BSC_WALLET_LAUNCHER",
+            SwitchId::WalletBuyer => "BSC_WALLET_BUYER",
+            SwitchId::Sign => "BSC_ECON_SIGN",
+            SwitchId::Arm => "BSC_ECON_ARM",
+            SwitchId::Send => "BSC_ECON_SEND",
+            SwitchId::Attempt => "BSC_ECON_ATTEMPT",
+            SwitchId::Live => "BSC_ECON_LIVE",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<SwitchId> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+}
+
+/// The owner's rule for a switch: effective as requested (a restart writes
+/// it DISABLED; see [`Store::restart`]).
+pub fn switch_effective(requested: Mode) -> Effective {
+    match requested {
+        Mode::Enabled => Effective::Enabled,
+        _ => Effective::Disabled,
+    }
+}
+
+/// Anything this owner switches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entity {
     Source(SourceId),
     Component(ComponentId),
+    Venue(VenueId),
+    Switch(SwitchId),
 }
 
 impl Entity {
@@ -181,6 +358,8 @@ impl Entity {
         match self {
             Entity::Source(s) => s.name(),
             Entity::Component(c) => c.name(),
+            Entity::Venue(v) => v.name(),
+            Entity::Switch(s) => s.name(),
         }
     }
 
@@ -188,12 +367,32 @@ impl Entity {
         SourceId::parse(name)
             .map(Entity::Source)
             .or_else(|| ComponentId::parse(name).map(Entity::Component))
+            .or_else(|| VenueId::parse(name).map(Entity::Venue))
+            .or_else(|| SwitchId::parse(name).map(Entity::Switch))
     }
 
-    pub fn effective(self, requested: Mode) -> Effective {
+    /// Whether `mode` is a request this entity takes.
+    pub fn accepts(self, mode: Mode) -> bool {
         match self {
-            Entity::Source(s) => effective(s, requested),
-            Entity::Component(c) => component_effective(c, requested),
+            Entity::Switch(_) => matches!(mode, Mode::Disabled | Mode::Enabled),
+            _ => matches!(mode, Mode::Off | Mode::Shadow | Mode::Live),
+        }
+    }
+
+    /// The modes this entity takes, for a refusal.
+    pub fn modes(self) -> &'static str {
+        match self {
+            Entity::Switch(_) => "DISABLED or ENABLED",
+            _ => "OFF, SHADOW or LIVE",
+        }
+    }
+
+    pub fn effective(self, requested: Mode, live: LiveGate) -> Effective {
+        match self {
+            Entity::Source(s) => effective(s, requested, live),
+            Entity::Component(c) => component_effective(c, requested, live),
+            Entity::Venue(v) => venue_effective(v, requested, live),
+            Entity::Switch(_) => switch_effective(requested),
         }
     }
 }
@@ -207,6 +406,18 @@ impl From<SourceId> for Entity {
 impl From<ComponentId> for Entity {
     fn from(c: ComponentId) -> Self {
         Entity::Component(c)
+    }
+}
+
+impl From<VenueId> for Entity {
+    fn from(v: VenueId) -> Self {
+        Entity::Venue(v)
+    }
+}
+
+impl From<SwitchId> for Entity {
+    fn from(s: SwitchId) -> Self {
+        Entity::Switch(s)
     }
 }
 
@@ -226,17 +437,48 @@ pub struct SourceMode {
     pub effective: Effective,
 }
 
-/// One generation of all five sources and every component.
+/// The request (or restart reset) that last set a venue or switch, and the
+/// generation it wrote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetBy {
+    pub request_id: String,
+    pub generation: u64,
+}
+
+/// One venue of a generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VenueMode {
+    pub venue: VenueId,
+    pub requested: Mode,
+    pub effective: Effective,
+    pub set_by: Option<SetBy>,
+}
+
+/// One switch of a generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwitchMode {
+    pub switch: SwitchId,
+    pub requested: Mode,
+    pub effective: Effective,
+    pub set_by: Option<SetBy>,
+}
+
+/// One generation of every source, component, venue and switch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Generation {
     pub generation: u64,
     pub sources: [SourceMode; 5],
     pub components: [ComponentMode; 3],
+    pub venues: [VenueMode; 3],
+    pub switches: [SwitchMode; 7],
     pub request_id: Option<String>,
+    /// The host boot session this generation was written in (none for the
+    /// initial state and generations from before switches existed).
+    pub boot: Option<String>,
 }
 
 impl Generation {
-    /// Generation 0: every source OFF (nothing was ever requested).
+    /// Generation 0: everything OFF and DISABLED (nothing was ever requested).
     pub fn initial() -> Self {
         Generation {
             generation: 0,
@@ -250,7 +492,20 @@ impl Generation {
                 requested: Mode::Off,
                 effective: Effective::Off,
             }),
+            venues: VenueId::ALL.map(|venue| VenueMode {
+                venue,
+                requested: Mode::Off,
+                effective: Effective::Off,
+                set_by: None,
+            }),
+            switches: SwitchId::ALL.map(|switch| SwitchMode {
+                switch,
+                requested: Mode::Disabled,
+                effective: Effective::Disabled,
+                set_by: None,
+            }),
             request_id: None,
+            boot: None,
         }
     }
 
@@ -258,40 +513,109 @@ impl Generation {
         self.components[ComponentId::ALL.iter().position(|c| *c == id).unwrap_or(0)]
     }
 
-    /// The effective mode of any entity.
+    pub fn source(&self, id: SourceId) -> SourceMode {
+        self.sources[SourceId::ALL.iter().position(|s| *s == id).unwrap_or(0)]
+    }
+
+    pub fn venue(&self, id: VenueId) -> &VenueMode {
+        &self.venues[VenueId::ALL.iter().position(|v| *v == id).unwrap_or(0)]
+    }
+
+    pub fn switch(&self, id: SwitchId) -> &SwitchMode {
+        &self.switches[SwitchId::ALL.iter().position(|s| *s == id).unwrap_or(0)]
+    }
+
+    /// The effective mode of any entity, as stored.
     pub fn effective_of(&self, entity: Entity) -> Effective {
         match entity {
             Entity::Source(s) => self.source(s).effective,
             Entity::Component(c) => self.component(c).effective,
+            Entity::Venue(v) => self.venue(v).effective,
+            Entity::Switch(s) => self.switch(s).effective,
         }
     }
 
-    fn set(&mut self, entity: Entity, requested: Mode) {
+    /// The effective state of a switch in the boot session `boot`: ENABLED
+    /// only within the session it was written in, never across a restart.
+    pub fn switch_now(&self, id: SwitchId, boot: Option<&str>) -> Effective {
+        match self.switch(id).effective {
+            Effective::Enabled if boot.is_none() || self.boot.as_deref() != boot => {
+                Effective::Blocked(RESET_BY_RESTART)
+            }
+            other => other,
+        }
+    }
+
+    fn live_gate(&self) -> LiveGate {
+        if self.switch(SwitchId::Live).requested == Mode::Enabled {
+            LiveGate::Enabled
+        } else {
+            LiveGate::Disabled
+        }
+    }
+
+    /// Every effective mode from the requested ones (the LIVE reasons depend
+    /// on the global economic LIVE switch).
+    fn rederive(&mut self) {
+        let live = self.live_gate();
+        for s in &mut self.sources {
+            s.effective = effective(s.source, s.requested, live);
+        }
+        for c in &mut self.components {
+            c.effective = component_effective(c.component, c.requested, live);
+        }
+        for v in &mut self.venues {
+            v.effective = venue_effective(v.venue, v.requested, live);
+        }
+        for s in &mut self.switches {
+            s.effective = switch_effective(s.requested);
+        }
+    }
+
+    fn set(&mut self, entity: Entity, requested: Mode, set_by: SetBy) {
         match entity {
             Entity::Source(source) => {
                 let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
-                self.sources[at] = SourceMode {
-                    source,
-                    requested,
-                    effective: effective(source, requested),
-                };
+                self.sources[at].requested = requested;
             }
             Entity::Component(component) => {
                 let at = ComponentId::ALL
                     .iter()
                     .position(|c| *c == component)
                     .unwrap_or(0);
-                self.components[at] = ComponentMode {
-                    component,
-                    requested,
-                    effective: component_effective(component, requested),
-                };
+                self.components[at].requested = requested;
+            }
+            Entity::Venue(venue) => {
+                let at = VenueId::ALL.iter().position(|v| *v == venue).unwrap_or(0);
+                self.venues[at].requested = requested;
+                self.venues[at].set_by = Some(set_by);
+            }
+            Entity::Switch(switch) => {
+                let at = SwitchId::ALL.iter().position(|s| *s == switch).unwrap_or(0);
+                self.switches[at].requested = requested;
+                self.switches[at].set_by = Some(set_by);
             }
         }
+        self.rederive();
     }
 
-    pub fn source(&self, id: SourceId) -> SourceMode {
-        self.sources[SourceId::ALL.iter().position(|s| *s == id).unwrap_or(0)]
+    /// Whether any switch is requested ENABLED.
+    pub fn any_enabled(&self) -> bool {
+        self.switches.iter().any(|s| s.requested == Mode::Enabled)
+    }
+
+    /// Every ENABLED switch DISABLED by the restart reset of `generation`.
+    fn reset_switches(&mut self, generation: u64) {
+        for s in &mut self.switches {
+            if s.requested == Mode::Enabled {
+                s.requested = Mode::Disabled;
+                s.set_by = Some(SetBy {
+                    request_id: RESTART_RESET.into(),
+                    generation,
+                });
+            }
+        }
+        self.rederive();
     }
 
     fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
@@ -320,8 +644,44 @@ impl Generation {
             }
             d.push(sm::COMPONENTS, e.into_nested());
         }
+        for v in &self.venues {
+            use sm::venue as k;
+            let mut e = Draft::new(&k::SCHEMA);
+            e.set(k::VENUE_ID, v.venue.name())
+                .set(k::REQUESTED, v.requested.name())
+                .set(k::EFFECTIVE, v.effective.name());
+            if let Some(reason) = v.effective.reason() {
+                e.set(k::BLOCK_REASON, reason);
+            }
+            if let Some(by) = &v.set_by {
+                e.set(k::REQUEST_ID, by.request_id.as_str())
+                    .set(k::SET_GENERATION, by.generation);
+            }
+            d.push(sm::VENUES, e.into_nested());
+        }
+        for s in &self.switches {
+            use sm::switch as k;
+            let mut e = Draft::new(&k::SCHEMA);
+            e.set(k::SWITCH_ID, s.switch.name())
+                .set(k::REQUESTED, s.requested.name())
+                .set(k::EFFECTIVE, s.effective.name());
+            if let Some(reason) = s.effective.reason() {
+                e.set(k::BLOCK_REASON, reason);
+            }
+            if let Some(by) = &s.set_by {
+                e.set(k::REQUEST_ID, by.request_id.as_str())
+                    .set(k::SET_GENERATION, by.generation);
+            }
+            d.push(sm::SWITCHES, e.into_nested());
+        }
         if let Some(id) = &self.request_id {
             d.set(sm::REQUEST_ID, id.as_str());
+        }
+        if let Some(boot) = &self.boot {
+            d.set(
+                sm::BOOT_SESSION,
+                darkbot_bsc_record::Value::Bytes(boot.as_bytes().to_vec()),
+            );
         }
         d.encode().map_err(|e| e.to_string())
     }
@@ -329,7 +689,54 @@ impl Generation {
     fn decode(bytes: &[u8]) -> Result<Self, String> {
         let r = decode_generation(bytes)?;
         let e = |x: darkbot_bsc_record::RecordError| x.0;
-        let mut sources = Generation::initial().sources;
+        let version = r.schema().schema_version;
+        let mut g = Generation::initial();
+        g.generation = r.u64(sm::GENERATION).map_err(e)?;
+        g.request_id = r.opt_text(sm::REQUEST_ID).map_err(e)?.map(str::to_string);
+        // The switches first: the LIVE reasons of every other entry depend
+        // on the global economic LIVE switch. A generation from before the
+        // switches existed has them DISABLED and its LIVE reason unchanged.
+        let live = if version >= 3 {
+            let mut seen: Vec<SwitchId> = Vec::new();
+            for row in r.nested_all(sm::SWITCHES).map_err(e)? {
+                use sm::switch as k;
+                let switch = SwitchId::parse(row.text(k::SWITCH_ID).map_err(e)?)
+                    .ok_or("unknown switch in a generation")?;
+                if seen.contains(&switch) {
+                    return Err(format!("{} appears twice", switch.name()));
+                }
+                seen.push(switch);
+                let requested = Mode::parse(row.text(k::REQUESTED).map_err(e)?)
+                    .filter(|m| Entity::Switch(switch).accepts(*m))
+                    .ok_or("unknown requested switch state in a generation")?;
+                let stored = Effective::parse(
+                    row.text(k::EFFECTIVE).map_err(e)?,
+                    row.opt_text(k::BLOCK_REASON).map_err(e)?,
+                );
+                if stored != Some(switch_effective(requested)) {
+                    return Err(format!(
+                        "{}: stored effective state is not the owner's",
+                        switch.name()
+                    ));
+                }
+                let at = SwitchId::ALL.iter().position(|s| *s == switch).unwrap_or(0);
+                g.switches[at] = SwitchMode {
+                    switch,
+                    requested,
+                    effective: switch_effective(requested),
+                    set_by: set_by(&row, k::REQUEST_ID, k::SET_GENERATION)?,
+                };
+            }
+            g.boot = r
+                .opt_bytes(sm::BOOT_SESSION)
+                .map_err(e)?
+                .map(|b| String::from_utf8(b.to_vec()))
+                .transpose()
+                .map_err(|_| "the boot session is not text")?;
+            g.live_gate()
+        } else {
+            LiveGate::Legacy
+        };
         let rows = r.nested_all(sm::SOURCES).map_err(e)?;
         if rows.len() != 5 {
             return Err("a generation names exactly the five sources".into());
@@ -338,8 +745,9 @@ impl Generation {
             let source = SourceId::parse(row.text(sm::entry::SOURCE_ID).map_err(e)?)
                 .ok_or("unknown source in a generation")?;
             let requested = Mode::parse(row.text(sm::entry::REQUESTED).map_err(e)?)
+                .filter(|m| Entity::Source(source).accepts(*m))
                 .ok_or("unknown requested mode in a generation")?;
-            let derived = effective(source, requested);
+            let derived = effective(source, requested, live);
             // The stored effective mode must be this owner's rule, never more.
             if row.text(sm::entry::EFFECTIVE).map_err(e)? != derived.name()
                 || row.opt_text(sm::entry::BLOCK_REASON).map_err(e)? != derived.reason()
@@ -350,16 +758,15 @@ impl Generation {
                 ));
             }
             let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
-            sources[at] = SourceMode {
+            g.sources[at] = SourceMode {
                 source,
                 requested,
                 effective: derived,
             };
         }
         // A generation from before a component existed has it OFF.
-        let mut components = Generation::initial().components;
         let mut seen: Vec<ComponentId> = Vec::new();
-        let rows = if r.schema().schema_version >= 2 {
+        let rows = if version >= 2 {
             r.nested_all(sm::COMPONENTS).map_err(e)?
         } else {
             Vec::new()
@@ -373,8 +780,9 @@ impl Generation {
             }
             seen.push(component);
             let requested = Mode::parse(row.text(k::REQUESTED).map_err(e)?)
+                .filter(|m| Entity::Component(component).accepts(*m))
                 .ok_or("unknown requested mode in a generation")?;
-            let derived = component_effective(component, requested);
+            let derived = component_effective(component, requested, live);
             if row.text(k::EFFECTIVE).map_err(e)? != derived.name()
                 || row.opt_text(k::BLOCK_REASON).map_err(e)? != derived.reason()
             {
@@ -387,26 +795,76 @@ impl Generation {
                 .iter()
                 .position(|c| *c == component)
                 .unwrap_or(0);
-            components[at] = ComponentMode {
+            g.components[at] = ComponentMode {
                 component,
                 requested,
                 effective: derived,
             };
         }
-        Ok(Generation {
-            generation: r.u64(sm::GENERATION).map_err(e)?,
-            sources,
-            components,
-            request_id: r.opt_text(sm::REQUEST_ID).map_err(e)?.map(str::to_string),
-        })
+        // A generation from before the venues existed has every venue OFF.
+        let mut seen: Vec<VenueId> = Vec::new();
+        let rows = if version >= 3 {
+            r.nested_all(sm::VENUES).map_err(e)?
+        } else {
+            Vec::new()
+        };
+        for row in rows {
+            use sm::venue as k;
+            let venue = VenueId::parse(row.text(k::VENUE_ID).map_err(e)?)
+                .ok_or("unknown venue in a generation")?;
+            if seen.contains(&venue) {
+                return Err(format!("{} appears twice", venue.name()));
+            }
+            seen.push(venue);
+            let requested = Mode::parse(row.text(k::REQUESTED).map_err(e)?)
+                .filter(|m| Entity::Venue(venue).accepts(*m))
+                .ok_or("unknown requested mode in a generation")?;
+            let derived = venue_effective(venue, requested, live);
+            if row.text(k::EFFECTIVE).map_err(e)? != derived.name()
+                || row.opt_text(k::BLOCK_REASON).map_err(e)? != derived.reason()
+            {
+                return Err(format!(
+                    "{}: stored effective mode is not the owner's",
+                    venue.name()
+                ));
+            }
+            let at = VenueId::ALL.iter().position(|v| *v == venue).unwrap_or(0);
+            g.venues[at] = VenueMode {
+                venue,
+                requested,
+                effective: derived,
+                set_by: set_by(&row, k::REQUEST_ID, k::SET_GENERATION)?,
+            };
+        }
+        Ok(g)
     }
 }
 
-/// A generation record of the current schema, or one written before
-/// components existed (schema version 1).
+/// The optional (request, generation) of a venue or switch row: both or none.
+fn set_by(row: &Record, request: u16, generation: u16) -> Result<Option<SetBy>, String> {
+    let e = |x: darkbot_bsc_record::RecordError| x.0;
+    match (
+        row.opt_text(request).map_err(e)?,
+        row.opt_u64(generation).map_err(e)?,
+    ) {
+        (Some(request_id), Some(generation)) => Ok(Some(SetBy {
+            request_id: request_id.into(),
+            generation,
+        })),
+        (None, None) => Ok(None),
+        _ => Err("a request and its generation are recorded together".into()),
+    }
+}
+
+/// A generation record of the current schema, or one written before the
+/// venues and switches (version 2) or the components (version 1) existed.
 fn decode_generation(bytes: &[u8]) -> Result<Record, String> {
     decode(&sm::SCHEMA, bytes)
-        .or_else(|current| decode(&sm::SCHEMA_V1, bytes).map_err(|_| current))
+        .or_else(|current| {
+            decode(&sm::SCHEMA_V2, bytes)
+                .or_else(|_| decode(&sm::SCHEMA_V1, bytes))
+                .map_err(|_| current)
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -414,7 +872,7 @@ fn decode_generation(bytes: &[u8]) -> Result<Record, String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     pub request_id: String,
-    /// The source or component requested.
+    /// The source, component, venue or switch requested.
     pub entity: Entity,
     pub requested: Mode,
     pub expected_generation: u64,
@@ -466,12 +924,21 @@ impl Receipt {
         let r = decode(&rc::SCHEMA, bytes).map_err(|e| e.to_string())?;
         let e = |x: darkbot_bsc_record::RecordError| x.0;
         let entity = Entity::parse(r.text(rc::SOURCE_ID).map_err(e)?).ok_or("unknown source")?;
-        let requested = Mode::parse(r.text(rc::REQUESTED).map_err(e)?).ok_or("unknown mode")?;
+        let requested = Mode::parse(r.text(rc::REQUESTED).map_err(e)?)
+            .filter(|m| entity.accepts(*m))
+            .ok_or("unknown mode")?;
         let outcome = match r.text(rc::OUTCOME).map_err(e)? {
             "APPLIED" => "APPLIED",
             "REJECTED_STALE" => "REJECTED_STALE",
             _ => return Err("unknown receipt outcome".into()),
         };
+        // The effective mode as recorded then (its LIVE reason depended on
+        // the generation the request met).
+        let effective = Effective::parse(
+            r.text(rc::EFFECTIVE).map_err(e)?,
+            r.opt_text(rc::BLOCK_REASON).map_err(e)?,
+        )
+        .ok_or("unknown effective mode in a receipt")?;
         Ok(Receipt {
             request_id: r.text(rc::REQUEST_ID).map_err(e)?.to_string(),
             entity,
@@ -479,7 +946,7 @@ impl Receipt {
             expected_generation: r.u64(rc::EXPECTED_GENERATION).map_err(e)?,
             outcome,
             generation: r.u64(rc::GENERATION).map_err(e)?,
-            effective: entity.effective(requested),
+            effective,
         })
     }
 }
@@ -489,6 +956,8 @@ pub struct Store {
     dir: PathBuf,
     /// Generations kept besides the current one (older ones are pruned).
     keep: u64,
+    /// The host boot session every write is stamped with.
+    boot: Result<String, String>,
 }
 
 /// A request ID is a single safe path component (the gateway's UUIDs fit).
@@ -525,11 +994,129 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fs::File::open(dir)?.sync_all()
 }
 
+/// The host's boot session, read once per process: macOS
+/// `kern.bootsessionuuid`, Linux `/proc/sys/kernel/random/boot_id`. It
+/// changes with every boot, so an ENABLED switch never outlives a restart.
+pub fn boot_session() -> Result<String, String> {
+    static BOOT: OnceLock<Result<String, String>> = OnceLock::new();
+    BOOT.get_or_init(|| {
+        let raw = if cfg!(target_os = "macos") {
+            std::process::Command::new("/usr/sbin/sysctl")
+                .env_clear()
+                .args(["-n", "kern.bootsessionuuid"])
+                .output()
+                .map_err(|e| format!("boot session: {e}"))
+                .and_then(|o| {
+                    if o.status.success() {
+                        Ok(String::from_utf8_lossy(&o.stdout).into_owned())
+                    } else {
+                        Err("boot session: sysctl refused".into())
+                    }
+                })?
+        } else {
+            fs::read_to_string("/proc/sys/kernel/random/boot_id")
+                .map_err(|e| format!("boot session: {e}"))?
+        };
+        let boot = raw.trim();
+        if boot.is_empty() || boot.len() > 128 || !boot.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err("boot session: not a host boot identifier".into());
+        }
+        Ok(boot.to_string())
+    })
+    .clone()
+}
+
+/// The owner state darkbotctl's controller keeps (`$HOME/.darkbot/run`,
+/// its RUNDIR, `bsc-sources`): the one place a Mainnet signing or sending
+/// path reads its switches from. No environment can point it elsewhere.
+pub fn canonical_state_dir() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .ok_or("HOME is not set: no switch state, every switch DISABLED")?;
+    Ok(PathBuf::from(home).join(".darkbot/run/bsc-sources"))
+}
+
+/// The generation on file in `dir` without creating anything: the initial
+/// one (everything DISABLED) when there is none.
+pub fn current_generation(dir: &Path) -> Result<Generation, String> {
+    match fs::symlink_metadata(dir.join("generations")) {
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Generation::initial()),
+        Err(e) => return Err(e.to_string()),
+        Ok(m) if !m.is_dir() => return Err("generations is not a real directory".into()),
+        Ok(_) => {}
+    }
+    match highest_generation(dir)? {
+        None => Ok(Generation::initial()),
+        Some(n) => {
+            let bytes = fs::read(dir.join("generations").join(format!("{n:020}.dbrec")))
+                .map_err(|e| e.to_string())?;
+            let g = Generation::decode(&bytes)?;
+            if g.generation != n {
+                return Err(format!(
+                    "generation file {n} holds generation {}",
+                    g.generation
+                ));
+            }
+            Ok(g)
+        }
+    }
+}
+
+/// Refused unless every switch in `needed` is ENABLED in the generation on
+/// file in `dir` and was written in the boot session `boot`. Returns the
+/// generation checked. A missing, unreadable or foreign state refuses: every
+/// switch is DISABLED then.
+pub fn require_enabled(dir: &Path, boot: &str, needed: &[SwitchId]) -> Result<u64, String> {
+    let g = current_generation(dir)
+        .map_err(|e| format!("CONTROL_STATE_UNREADABLE: {e}; every switch DISABLED"))?;
+    let off: Vec<String> = needed
+        .iter()
+        .filter_map(|id| match g.switch_now(*id, Some(boot)) {
+            Effective::Enabled => None,
+            other => Some(format!(
+                "{} {}{}",
+                id.name(),
+                other.name(),
+                other
+                    .reason()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default()
+            )),
+        })
+        .collect();
+    if off.is_empty() {
+        Ok(g.generation)
+    } else {
+        Err(format!(
+            "CONTROL_DISABLED at generation {}: {}",
+            g.generation,
+            off.join(", ")
+        ))
+    }
+}
+
+/// [`require_enabled`] on the canonical owner state of this boot session.
+pub fn require_enabled_here(needed: &[SwitchId]) -> Result<u64, String> {
+    let dir = canonical_state_dir()?;
+    let boot = boot_session().map_err(|e| format!("{e}; every switch DISABLED"))?;
+    require_enabled(&dir, &boot, needed)
+}
+
 /// Source-mode generations the store keeps besides the current one (one
 /// value for every caller; Paket 8 review L5).
 pub const KEEP_GENERATIONS: u64 = 64;
 impl Store {
     pub fn open(dir: impl Into<PathBuf>, keep: u64) -> Result<Self, String> {
+        Self::open_in_session(dir, keep, boot_session())
+    }
+
+    /// A store whose writes are stamped with the boot session `boot`
+    /// (tests simulate a restart with another session).
+    pub fn open_in_session(
+        dir: impl Into<PathBuf>,
+        keep: u64,
+        boot: Result<String, String>,
+    ) -> Result<Self, String> {
         let dir = dir.into();
         for d in [dir.clone(), dir.join("generations"), dir.join("receipts")] {
             match fs::DirBuilder::new().mode(0o700).create(&d) {
@@ -541,33 +1128,25 @@ impl Store {
                 return Err(format!("{} is not a real directory", d.display()));
             }
         }
-        Ok(Store { dir, keep })
+        Ok(Store { dir, keep, boot })
     }
 
     fn generation_path(&self, n: u64) -> PathBuf {
         self.dir.join("generations").join(format!("{n:020}.dbrec"))
     }
 
-    /// The highest generation on file, or generation 0 when there is none.
-    pub fn current(&self) -> Result<Generation, String> {
-        match self.highest()? {
-            None => Ok(Generation::initial()),
-            Some(n) => {
-                let bytes = fs::read(self.generation_path(n)).map_err(|e| e.to_string())?;
-                let g = Generation::decode(&bytes)?;
-                if g.generation != n {
-                    return Err(format!(
-                        "generation file {n} holds generation {}",
-                        g.generation
-                    ));
-                }
-                Ok(g)
-            }
-        }
+    fn boot(&self) -> Result<&str, String> {
+        self.boot.as_deref().map_err(|e| e.clone())
     }
 
-    /// Writes generation 0 (every source OFF) unless a generation exists:
-    /// from then on the owner's state is on file for the status projection.
+    /// The highest generation on file, or generation 0 when there is none.
+    pub fn current(&self) -> Result<Generation, String> {
+        current_generation(&self.dir)
+    }
+
+    /// Writes generation 0 (everything OFF and DISABLED) unless a generation
+    /// exists: from then on the owner's state is on file for the status
+    /// projection.
     pub fn init(&self, now_ms: u64) -> Result<Generation, String> {
         let current = self.current()?;
         if self.highest()?.is_none() {
@@ -578,6 +1157,38 @@ impl Store {
             }
         }
         self.current()
+    }
+
+    /// The owner's start (darkbotctl start/restart, the runtime's start or
+    /// its crash restart): [`Store::init`], then every ENABLED switch
+    /// DISABLED in a new generation (`RESTART_RESET`). Sources, components
+    /// and venues keep their modes.
+    pub fn restart(&self, now_ms: u64) -> Result<Generation, String> {
+        let boot = self.boot()?.to_string();
+        let mut current = self.init(now_ms)?;
+        // Each lost race means another writer advanced; then again.
+        while current.any_enabled() {
+            let mut next = current.clone();
+            next.generation = current
+                .generation
+                .checked_add(1)
+                .ok_or("generation exhausted")?;
+            next.request_id = Some(RESTART_RESET.into());
+            next.reset_switches(next.generation);
+            next.boot = Some(boot.clone());
+            match write_new(
+                &self.generation_path(next.generation),
+                &next.encode(now_ms)?,
+            ) {
+                Ok(()) => {
+                    self.prune(next.generation);
+                    return Ok(next);
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => current = self.current()?,
+                Err(e) => return Err(format!("restart reset not written: {e}")),
+            }
+        }
+        Ok(current)
     }
 
     fn highest(&self) -> Result<Option<u64>, String> {
@@ -597,6 +1208,9 @@ impl Store {
         let entity: Entity = entity.into();
         if !safe_id(request_id) {
             return Err("the request ID is not a safe identifier".into());
+        }
+        if !entity.accepts(requested) {
+            return Err(format!("{} takes {}", entity.name(), entity.modes()));
         }
         let receipt_path = self
             .dir
@@ -633,13 +1247,26 @@ impl Store {
             // Crash recovery: the generation names this request, the receipt was lost.
             receipt.outcome = "APPLIED";
         } else if current.generation == expected_generation {
+            let boot = self.boot()?.to_string();
             let mut next = current.clone();
             next.generation = current
                 .generation
                 .checked_add(1)
                 .ok_or("generation exhausted")?;
             next.request_id = Some(request_id.into());
-            next.set(entity, requested);
+            // A switch ENABLED in another boot session never carries over.
+            if current.boot.as_deref() != Some(boot.as_str()) {
+                next.reset_switches(next.generation);
+            }
+            next.boot = Some(boot);
+            next.set(
+                entity,
+                requested,
+                SetBy {
+                    request_id: request_id.into(),
+                    generation: next.generation,
+                },
+            );
             match write_new(
                 &self.generation_path(next.generation),
                 &next.encode(now_ms)?,
@@ -747,8 +1374,14 @@ mod tests {
         let (dir, s) = store("c2");
         let c2 = ComponentId::StateC2;
         assert_eq!(Entity::parse("BSC_STATE_C2"), Some(Entity::Component(c2)));
-        assert_eq!(component_effective(c2, Mode::Off), Effective::Off);
-        assert_eq!(component_effective(c2, Mode::Shadow), Effective::Shadow);
+        assert_eq!(
+            component_effective(c2, Mode::Off, LiveGate::Disabled),
+            Effective::Off
+        );
+        assert_eq!(
+            component_effective(c2, Mode::Shadow, LiveGate::Disabled),
+            Effective::Shadow
+        );
         let r = s.request("c2-1", c2, Mode::Shadow, 0, 1).unwrap();
         assert!(r.applied());
         assert_eq!(
@@ -799,10 +1432,7 @@ mod tests {
         assert_eq!(r.effective, Effective::Shadow);
         let r = s.request("e-3", exec, Mode::Live, 2, 3).unwrap();
         assert!(r.applied());
-        assert_eq!(
-            r.effective,
-            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
-        );
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
         assert!(
             r.line()
                 .contains("source=BSC_EXEC requested=LIVE effective=BLOCKED")
@@ -883,10 +1513,7 @@ mod tests {
         assert_eq!(r.effective, Effective::Shadow);
         let r = s.request("s-3", strategy, Mode::Live, 3, 4).unwrap();
         assert!(r.applied());
-        assert_eq!(
-            r.effective,
-            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
-        );
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
         assert!(
             r.line()
                 .contains("source=BSC_STRATEGY_C requested=LIVE effective=BLOCKED")
@@ -942,18 +1569,22 @@ mod tests {
     #[test]
     fn the_owner_never_makes_a_source_live() {
         for s in SourceId::ALL {
-            assert_eq!(effective(s, Mode::Off), Effective::Off);
+            assert_eq!(effective(s, Mode::Off, LiveGate::Disabled), Effective::Off);
             assert_eq!(
-                effective(s, Mode::Live),
+                effective(s, Mode::Live, LiveGate::Disabled),
+                Effective::Blocked(ECONOMIC_LIVE_DISABLED)
+            );
+            assert_eq!(
+                effective(s, Mode::Live, LiveGate::Enabled),
                 Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
             );
         }
         assert_eq!(
-            effective(SourceId::PublicNode, Mode::Shadow),
+            effective(SourceId::PublicNode, Mode::Shadow, LiveGate::Disabled),
             Effective::Shadow
         );
         assert_eq!(
-            effective(SourceId::Club48, Mode::Shadow),
+            effective(SourceId::Club48, Mode::Shadow, LiveGate::Disabled),
             Effective::Blocked(SOURCE_ACCESS_UNQUALIFIED)
         );
     }
@@ -985,10 +1616,7 @@ mod tests {
         let r = s
             .request("req-2", SourceId::PublicNode, Mode::Live, 1, 4)
             .unwrap();
-        assert_eq!(
-            r.effective,
-            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
-        );
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
         let g = s.current().unwrap();
         assert_eq!(g.generation, 2);
         assert_eq!(g.source(SourceId::PublicNode).requested, Mode::Live);
@@ -1060,6 +1688,327 @@ mod tests {
         fs::remove_file(dir.join("receipts/x.dbrec")).unwrap();
         let r = s.request("x", SourceId::Geth, Mode::Shadow, 0, 2).unwrap();
         assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn session(tag: &str, boot: &str) -> (PathBuf, Store) {
+        let dir = std::env::temp_dir().join(format!("bsc-switch-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let s = Store::open_in_session(&dir, 8, Ok(boot.into())).unwrap();
+        (dir, s)
+    }
+
+    /// Plan 27.10.: LAUNCHER and BUYER are independent switches, DISABLED
+    /// initially, taking only DISABLED or ENABLED; each records the request
+    /// that set it.
+    #[test]
+    fn the_wallet_switches_are_independent_and_disabled_initially() {
+        let (dir, s) = session("wallets", "boot-1");
+        let g = s.current().unwrap();
+        for id in SwitchId::ALL {
+            assert_eq!(g.switch(id).requested, Mode::Disabled);
+            assert_eq!(g.switch(id).effective, Effective::Disabled);
+        }
+        for m in [Mode::Off, Mode::Shadow, Mode::Live] {
+            let e = s
+                .request("w-bad", SwitchId::WalletLauncher, m, 0, 1)
+                .unwrap_err();
+            assert!(e.contains("takes DISABLED or ENABLED"), "{e}");
+        }
+        assert!(
+            s.request("w-bad2", SourceId::Drpc, Mode::Enabled, 0, 1)
+                .unwrap_err()
+                .contains("takes OFF, SHADOW or LIVE")
+        );
+        let r = s
+            .request("w-1", SwitchId::WalletLauncher, Mode::Enabled, 0, 1)
+            .unwrap();
+        assert_eq!((r.outcome, r.effective), ("APPLIED", Effective::Enabled));
+        assert!(r.line().contains(
+            "source=BSC_WALLET_LAUNCHER requested=ENABLED effective=ENABLED generation=1"
+        ));
+        let g = s.current().unwrap();
+        assert_eq!(
+            g.switch(SwitchId::WalletLauncher).set_by,
+            Some(SetBy {
+                request_id: "w-1".into(),
+                generation: 1
+            })
+        );
+        assert_eq!(
+            g.switch(SwitchId::WalletBuyer).effective,
+            Effective::Disabled
+        );
+        assert_eq!(g.boot.as_deref(), Some("boot-1"));
+        assert_eq!(
+            require_enabled(&dir, "boot-1", &[SwitchId::WalletLauncher]),
+            Ok(1)
+        );
+        let refused = require_enabled(
+            &dir,
+            "boot-1",
+            &[SwitchId::WalletLauncher, SwitchId::WalletBuyer],
+        )
+        .unwrap_err();
+        assert!(
+            refused.contains("BSC_WALLET_BUYER DISABLED")
+                && !refused.contains("BSC_WALLET_LAUNCHER"),
+            "{refused}"
+        );
+        let r = s
+            .request("w-2", SwitchId::WalletLauncher, Mode::Disabled, 1, 2)
+            .unwrap();
+        assert_eq!(r.effective, Effective::Disabled);
+        assert!(require_enabled(&dir, "boot-1", &[SwitchId::WalletLauncher]).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An ENABLED wallet or economic switch makes nothing else effective:
+    /// a requested LIVE stays BLOCKED; the global LIVE switch only names
+    /// the next missing condition.
+    #[test]
+    fn a_switch_enables_nothing_else() {
+        let (dir, s) = session("nothing-else", "boot-1");
+        let mut g = 0;
+        for id in SwitchId::ALL {
+            if id == SwitchId::Live {
+                continue;
+            }
+            s.request(&format!("e-{g}"), id, Mode::Enabled, g, 1)
+                .unwrap();
+            g += 1;
+        }
+        let r = s
+            .request("exec-live", ComponentId::ExecC3, Mode::Live, g, 2)
+            .unwrap();
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
+        let r = s
+            .request("flap-live", VenueId::Flap, Mode::Live, g + 1, 3)
+            .unwrap();
+        assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
+        let now = s.current().unwrap();
+        assert!(now.sources.iter().all(|m| m.effective == Effective::Off));
+        s.request("live-on", SwitchId::Live, Mode::Enabled, g + 2, 4)
+            .unwrap();
+        let now = s.current().unwrap();
+        assert_eq!(
+            now.component(ComponentId::ExecC3).effective,
+            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
+        );
+        assert_eq!(
+            now.venue(VenueId::Flap).effective,
+            Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED)
+        );
+        // The receipt of the earlier LIVE request keeps the reason it met.
+        let again = s
+            .request("exec-live", ComponentId::ExecC3, Mode::Live, g, 5)
+            .unwrap();
+        assert_eq!(again.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
+        s.request("live-off", SwitchId::Live, Mode::Disabled, g + 3, 6)
+            .unwrap();
+        assert_eq!(
+            s.current()
+                .unwrap()
+                .component(ComponentId::ExecC3)
+                .effective,
+            Effective::Blocked(ECONOMIC_LIVE_DISABLED)
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Plan v9 §2.3: Flap is admitted in SHADOW; Four.meme has no path to
+    /// admit to, so its SHADOW is BLOCKED with that reason.
+    #[test]
+    fn the_venues_are_switchable_and_four_has_no_path_yet() {
+        let (dir, s) = session("venues", "boot-1");
+        assert_eq!(
+            Entity::parse("BSC_VENUE_FLAP"),
+            Some(Entity::Venue(VenueId::Flap))
+        );
+        let r = s.request("v-1", VenueId::Flap, Mode::Shadow, 0, 1).unwrap();
+        assert_eq!(r.effective, Effective::Shadow);
+        for (i, v) in [VenueId::FourClassic, VenueId::OpenFour]
+            .into_iter()
+            .enumerate()
+        {
+            let r = s
+                .request(&format!("v-four-{i}"), v, Mode::Shadow, 1 + i as u64, 2)
+                .unwrap();
+            assert_eq!(r.effective, Effective::Blocked(FOUR_EXECUTION_PATH_MISSING));
+        }
+        let g = s.current().unwrap();
+        assert_eq!(g.venue(VenueId::Flap).effective, Effective::Shadow);
+        assert_eq!(
+            g.venue(VenueId::OpenFour).set_by,
+            Some(SetBy {
+                request_id: "v-four-1".into(),
+                generation: 3
+            })
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Plan 27.10.: every restart disables the switches; sources, components
+    /// and venues keep their modes; a restart with nothing ENABLED writes
+    /// nothing.
+    #[test]
+    fn a_restart_disables_every_switch_and_keeps_the_modes() {
+        let (dir, s) = session("restart", "boot-1");
+        s.request("r-1", SourceId::PublicNode, Mode::Shadow, 0, 1)
+            .unwrap();
+        s.request("r-2", SwitchId::WalletBuyer, Mode::Enabled, 1, 2)
+            .unwrap();
+        s.request("r-3", SwitchId::Send, Mode::Enabled, 2, 3)
+            .unwrap();
+        let g = s.restart(4).unwrap();
+        assert_eq!(g.generation, 4);
+        assert_eq!(g.request_id.as_deref(), Some(RESTART_RESET));
+        assert!(!g.any_enabled());
+        assert_eq!(
+            g.switch(SwitchId::WalletBuyer).set_by,
+            Some(SetBy {
+                request_id: RESTART_RESET.into(),
+                generation: 4
+            })
+        );
+        assert_eq!(g.source(SourceId::PublicNode).effective, Effective::Shadow);
+        assert_eq!(s.restart(5).unwrap().generation, 4, "nothing to reset");
+        // A stale request from before the restart changes nothing.
+        let stale = s
+            .request("r-old", SwitchId::WalletBuyer, Mode::Enabled, 3, 6)
+            .unwrap();
+        assert_eq!(stale.outcome, "REJECTED_STALE");
+        assert!(require_enabled(&dir, "boot-1", &[SwitchId::WalletBuyer]).is_err());
+        // A first start writes generation 0 and nothing else.
+        let (fresh, f) = session("restart-fresh", "boot-1");
+        assert_eq!(f.restart(1).unwrap(), Generation::initial());
+        assert!(current_record(&fresh).unwrap().is_some());
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(fresh).unwrap();
+    }
+
+    /// An ENABLED switch counts only in the boot session it was written in:
+    /// after a reboot nobody restarted the owner for, it is refused, and the
+    /// next write carries it over DISABLED.
+    #[test]
+    fn a_switch_never_outlives_its_boot_session() {
+        let (dir, s) = session("boot", "boot-1");
+        s.request("b-1", SwitchId::WalletLauncher, Mode::Enabled, 0, 1)
+            .unwrap();
+        assert_eq!(
+            require_enabled(&dir, "boot-1", &[SwitchId::WalletLauncher]),
+            Ok(1)
+        );
+        let e = require_enabled(&dir, "boot-2", &[SwitchId::WalletLauncher]).unwrap_err();
+        assert!(e.contains("BLOCKED (RESET_BY_RESTART)"), "{e}");
+        assert_eq!(
+            s.current()
+                .unwrap()
+                .switch_now(SwitchId::WalletLauncher, None),
+            Effective::Blocked(RESET_BY_RESTART)
+        );
+        let after = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        after
+            .request("b-2", SourceId::Drpc, Mode::Shadow, 1, 2)
+            .unwrap();
+        let g = after.current().unwrap();
+        assert_eq!(
+            g.switch(SwitchId::WalletLauncher).effective,
+            Effective::Disabled
+        );
+        assert_eq!(g.boot.as_deref(), Some("boot-2"));
+        assert!(require_enabled(&dir, "boot-2", &[SwitchId::WalletLauncher]).is_err());
+        // Without a boot session nothing can be written.
+        let blind = Store::open_in_session(&dir, 8, Err("no boot".into())).unwrap();
+        assert!(
+            blind
+                .request("b-3", SwitchId::WalletLauncher, Mode::Enabled, 2, 3)
+                .is_err()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A missing state is everything DISABLED; an unreadable or tampered one
+    /// refuses every switch.
+    #[test]
+    fn a_missing_unreadable_or_tampered_state_refuses_every_switch() {
+        let missing = std::env::temp_dir().join(format!("bsc-switch-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&missing);
+        let e = require_enabled(&missing, "boot-1", &[SwitchId::Sign]).unwrap_err();
+        assert!(e.contains("BSC_ECON_SIGN DISABLED"), "{e}");
+        assert!(!missing.exists(), "a check creates nothing");
+        let (dir, s) = session("tampered", "boot-1");
+        s.request("t-1", SwitchId::Sign, Mode::Enabled, 0, 1)
+            .unwrap();
+        // Stored ENABLED for a requested DISABLED: not the owner's.
+        let mut g = s.current().unwrap();
+        g.generation = 2;
+        g.switches[2].requested = Mode::Disabled;
+        let mut bytes = g.encode(2).unwrap();
+        fs::write(dir.join(format!("generations/{:020}.dbrec", 2)), &bytes).unwrap();
+        let e = require_enabled(&dir, "boot-1", &[SwitchId::Sign]).unwrap_err();
+        assert!(e.starts_with("CONTROL_STATE_UNREADABLE"), "{e}");
+        assert!(e.contains("BSC_ECON_SIGN: stored effective state"), "{e}");
+        // A torn file refuses as well.
+        bytes.truncate(bytes.len() / 2);
+        fs::write(dir.join(format!("generations/{:020}.dbrec", 2)), &bytes).unwrap();
+        assert!(
+            require_enabled(&dir, "boot-1", &[SwitchId::Sign])
+                .unwrap_err()
+                .starts_with("CONTROL_STATE_UNREADABLE")
+        );
+        assert!(
+            s.request("t-2", SwitchId::Sign, Mode::Enabled, 2, 3)
+                .is_err()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Concurrent switch requests and a restart reset race on the CAS: one
+    /// writer per generation, and a reset is never lost.
+    #[test]
+    fn switch_requests_and_a_restart_race_on_the_generation() {
+        let (dir, s) = session("switch-race", "boot-1");
+        let outcomes: Vec<&str> = std::thread::scope(|scope| {
+            let runs: Vec<_> = (0..6)
+                .map(|i| {
+                    let s = &s;
+                    scope.spawn(move || {
+                        s.request(
+                            &format!("sw{i}"),
+                            SwitchId::WalletBuyer,
+                            Mode::Enabled,
+                            0,
+                            1,
+                        )
+                        .unwrap()
+                        .outcome
+                    })
+                })
+                .collect();
+            runs.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        assert_eq!(outcomes.iter().filter(|o| **o == "APPLIED").count(), 1);
+        std::thread::scope(|scope| {
+            let s = &s;
+            let reset = scope.spawn(move || s.restart(2).unwrap());
+            let enable = scope.spawn(move || {
+                s.request("sw-late", SwitchId::WalletLauncher, Mode::Enabled, 1, 2)
+                    .unwrap()
+            });
+            reset.join().unwrap();
+            enable.join().unwrap();
+        });
+        let g = s.current().unwrap();
+        // The reset ran after (or instead of) every ENABLE it met.
+        assert!(
+            !g.switch(SwitchId::WalletBuyer)
+                .effective
+                .eq(&Effective::Enabled)
+        );
+        if g.switch(SwitchId::WalletLauncher).effective == Effective::Enabled {
+            assert_eq!(g.request_id.as_deref(), Some("sw-late"));
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

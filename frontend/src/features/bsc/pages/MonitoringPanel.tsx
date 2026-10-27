@@ -9,16 +9,19 @@ import { PlacedSection } from "./PlacedSection";
 /** What each switchable component does (its owner's rule shows in the effective mode). */
 const COMPONENT_HINTS: Record<string, string> = {
   BSC_STATE_C2: "C2 canonical/pending state owner; SHADOW observes only, LIVE stays BLOCKED until G0.8 PASS and evaluated G0.4",
-  BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink (PAPER identity, never sent), LIVE stays BLOCKED (economic LIVE not authorized)",
-  BSC_STRATEGY_C: "Strategy C on canonical Flap events; SHADOW keeps a PAPER ledger (nothing signed or sent), LIVE stays BLOCKED (economic LIVE not authorized)",
+  BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink for Flap launches while BSC_VENUE_FLAP is SHADOW (PAPER identity, never sent), LIVE stays BLOCKED (economic LIVE)",
+  BSC_STRATEGY_C: "Strategy C on canonical Flap events while BSC_VENUE_FLAP is SHADOW; SHADOW keeps a PAPER ledger (nothing signed or sent), LIVE stays BLOCKED (economic LIVE)",
 };
 import { useNativeRecords } from "./useNativeRecords";
 import { sourceControlView } from "../model/sources";
 import { SourceActions } from "../SourceActions";
 
-// The planned venues (BSC plan v9): no native venue owner yet (phases D/E).
-const VENUES = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
-const FUTURE = "No native venue owner before phases D/E; requested/effective modes stay disabled";
+/** What each venue's mode does at the native owner (plan v9 §2.3). */
+const VENUE_HINTS: Record<string, string> = {
+  BSC_VENUE_FLAP: "SHADOW admits Flap launches to the C3 PAPER path and Strategy C (with BSC_EXEC / BSC_STRATEGY_C SHADOW); OFF admits none; LIVE stays BLOCKED",
+  BSC_VENUE_FOUR_CLASSIC: "Recognized and decoded (Phase E); no economics or execution path to admit to yet (FOUR_EXECUTION_PATH_MISSING); LIVE stays BLOCKED",
+  BSC_VENUE_OPENFOUR: "Recognized and decoded (Phase E); no economics or execution path to admit to yet (FOUR_EXECUTION_PATH_MISSING); LIVE stays BLOCKED",
+};
 
 /** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing. */
 export function MonitoringPanel() {
@@ -41,7 +44,9 @@ export function MonitoringPanel() {
       <SourceActions view={sources} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={2} records={records}>
-      {VENUES.map(id => <Line key={id} label={id} value={<ValueState state="FUTURE_PHASE_BLOCKED" />} hint={FUTURE} />)}
+      {sources.venues.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
+        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${VENUE_HINTS[row.id] ?? ""}${row.receipt ? ` · last set by ${row.receipt}` : ""}`} />)}
+      <SourceActions view={sources} rows={sources.venues} testId="bsc-venue" action="bsc.venue.mode.set" />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={3} records={records}>
       <Line label="Builder documentation fetched" value={timestamp(b?.refreshObservedUnixS)} />

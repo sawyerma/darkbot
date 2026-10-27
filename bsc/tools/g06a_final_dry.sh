@@ -110,6 +110,13 @@ DARKBOT_G06A_BUY_VALUE_WEI="1000000000000"
 DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI="50000000"
 
 HANDOFF="$ENGINE/target/debug/g06a_dry_handoff"
+# Plan 27.10.: a mode that signs reads the wallet keys only while the native
+# owner has BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER and BSC_ECON_SIGN ENABLED in
+# this boot session (the signer checks them again itself).
+if [[ "$MODE" != PREPARE ]]; then
+  run "$HANDOFF" controls --require BSC_WALLET_LAUNCHER BSC_WALLET_BUYER BSC_ECON_SIGN \
+    || die "the native switches refuse a Mainnet wallet signature: enable BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER and BSC_ECON_SIGN (darkbotctl bsc source request or the Wallets / Launch tabs)"
+fi
 ref() { printf '%s\n' "$CANDIDATE_REF" | run awk -F= -v k="$1" '$1 == k { print $2 }'; }
 if [[ "$MODE" == PREPARE ]]; then
   # The selected candidate's public reference (store-verified); B's salt

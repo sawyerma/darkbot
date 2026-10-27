@@ -38,7 +38,7 @@ use crate::runtime_journal::{
     paper_handoff_payload, pending_launch_payload, reorg_payload, resync_payload,
     source_event_payload, trade_gap_payload, window_payload,
 };
-use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
+use crate::sources::{ComponentId, Effective, Generation, SourceId, Store, VenueId};
 use crate::wss::endpoint::Endpoint;
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
 use darkbot_bsc_geth_ipc::protocol_v2::CLOCK_ID_MONOTONIC;
@@ -1531,7 +1531,9 @@ pub fn run(
     let mut next_four = Instant::now();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
-    let mut generation = store.current()?;
+    // The owner's start (and launchd's crash restart): every wallet and
+    // economic switch DISABLED before anything runs (plan 27.10.).
+    let mut generation = store.restart(started_ms)?;
     // Strategy C's frozen gas evidence; refused, the strategy cannot run
     // (its status says why).
     let strategy_gas = config.strategy.gas(repo_root);
@@ -1615,10 +1617,13 @@ pub fn run(
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
                 generation = store.current()?;
+                // Plan v9 §2.3: Flap launches reach the C3 PAPER path and
+                // Strategy C only while the Flap venue is effective SHADOW.
+                let flap_admitted = generation.venue(VenueId::Flap).effective == Effective::Shadow;
                 // Phase H: BSC_STRATEGY_C runs (SHADOW) or not; switched off,
                 // its PAPER ledger ends.
-                let strategy_on =
-                    generation.component(ComponentId::StrategyC).effective == Effective::Shadow;
+                let strategy_on = flap_admitted
+                    && generation.component(ComponentId::StrategyC).effective == Effective::Shadow;
                 if let Some(c) = canonical.as_mut() {
                     // Each switch is journaled: a replay starts and ends its
                     // engine at the same record.
@@ -1661,8 +1666,8 @@ pub fn run(
                     )?;
                 }
                 if let Some(x) = exec.as_mut() {
-                    let wanted =
-                        generation.component(ComponentId::ExecC3).effective == Effective::Shadow;
+                    let wanted = flap_admitted
+                        && generation.component(ComponentId::ExecC3).effective == Effective::Shadow;
                     let follower = canonical_config
                         .as_ref()
                         .map(|c| (c.endpoint.as_str(), &c.limits));
@@ -1906,7 +1911,10 @@ pub fn run(
                     let mut st = core.stats(s);
                     st.dropped += dropped[i].load(Ordering::Relaxed);
                     let h = match generation.source(s).effective {
-                        Effective::Off | Effective::Blocked(_) => Health::Off,
+                        Effective::Off
+                        | Effective::Blocked(_)
+                        | Effective::Disabled
+                        | Effective::Enabled => Health::Off,
                         Effective::Shadow if config.endpoint(s).is_none() => Health::Unqualified,
                         Effective::Shadow if stopping => Health::Off,
                         Effective::Shadow => {

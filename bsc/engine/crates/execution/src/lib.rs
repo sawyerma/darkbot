@@ -52,8 +52,10 @@ pub mod attempt_authority;
 /// Built only with the `g07-mainnet` feature.
 #[cfg(feature = "g07-mainnet")]
 pub mod qualification_capture;
-/// The native owner of the five signal sources' modes (C0/C1, order V2 §5).
-#[cfg(feature = "runtime")]
+/// The native owner of the source, component and venue modes and of the
+/// wallet and economic switches (C0/C1, order V2 §5, plan 27.10.); the G0.7
+/// tools check their switches through it.
+#[cfg(any(feature = "runtime", feature = "g07-mainnet"))]
 pub mod sources;
 /// The native WSS pending-transaction source adapter (verified full txs).
 #[cfg(feature = "runtime")]

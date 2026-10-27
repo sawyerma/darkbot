@@ -5,7 +5,9 @@
 //! bsc_runtime run --sources <dir> --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime source init --state <dir>
 //! bsc_runtime source show --state <dir>
-//! bsc_runtime source request <SOURCE_OR_COMPONENT_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
+//! bsc_runtime source request <SOURCE_COMPONENT_OR_VENUE_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
+//! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
+//! bsc_runtime control require <SWITCH_ID>...
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
@@ -48,12 +50,21 @@
 //! prints its receipt as one line; the same request again prints the same
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
+//!
+//! `source init` is the owner's start (darkbotctl start and restart): it
+//! writes generation 0 once and DISABLES every ENABLED wallet and economic
+//! switch (plan 27.10.); `run` does the same at its start.
+//!
+//! `control require` is the check a Mainnet signing or sending path runs
+//! before it touches a wallet key: exit 0 only if every named switch is
+//! ENABLED in the canonical owner state (`$HOME/.darkbot/run/bsc-sources`)
+//! of this boot session, else it prints the refusal and exits 2.
 
 use darkbot_bsc_execution::runtime::{
     RuntimeConfig, journal_max_payload, preflight_setup, run as run_runtime, stop_file,
     write_census,
 };
-use darkbot_bsc_execution::sources::{Entity, KEEP_GENERATIONS, Mode, Store};
+use darkbot_bsc_execution::sources::{Entity, KEEP_GENERATIONS, Mode, Store, SwitchId};
 use darkbot_bsc_execution::{capture_preflight, capture_quality, g04_criteria, replay_proof};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
@@ -256,14 +267,31 @@ fn run(args: &[String]) -> Result<bool, String> {
         }
         [area, cmd, rest @ ..] if area == "source" && cmd == "init" => {
             let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
-            let g = store.init(darkbot_bsc_record::observed_now()?)?;
+            let g = store.restart(darkbot_bsc_record::observed_now()?)?;
             println!("generation={}", g.generation);
             Ok(true)
+        }
+        [area, cmd, ids @ ..] if area == "control" && cmd == "require" && !ids.is_empty() => {
+            let needed = ids
+                .iter()
+                .map(|id| SwitchId::parse(id).ok_or(format!("{id} is not a switch")))
+                .collect::<Result<Vec<_>, _>>()?;
+            match darkbot_bsc_execution::sources::require_enabled_here(&needed) {
+                Ok(generation) => {
+                    println!("controls=ENABLED generation={generation}");
+                    Ok(true)
+                }
+                Err(refusal) => {
+                    println!("controls=REFUSED {refusal}");
+                    Ok(false)
+                }
+            }
         }
         [area, cmd, rest @ ..] if area == "source" && cmd == "show" => {
             let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
             let g = store.current()?;
             println!("generation={}", g.generation);
+            let boot = darkbot_bsc_execution::sources::boot_session().ok();
             let rows = g
                 .sources
                 .iter()
@@ -272,7 +300,20 @@ fn run(args: &[String]) -> Result<bool, String> {
                     g.components
                         .iter()
                         .map(|c| (c.component.name(), c.requested, c.effective)),
-                );
+                )
+                .chain(
+                    g.venues
+                        .iter()
+                        .map(|v| (v.venue.name(), v.requested, v.effective)),
+                )
+                .chain(g.switches.iter().map(|s| {
+                    (
+                        s.switch.name(),
+                        s.requested,
+                        g.switch_now(s.switch, boot.as_deref()),
+                    )
+                }))
+                .collect::<Vec<_>>();
             for (name, requested, effective) in rows {
                 println!(
                     "{} requested={} effective={}{}",
@@ -288,8 +329,11 @@ fn run(args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {
-            let source = Entity::parse(source).ok_or("unknown source or component ID")?;
-            let mode = Mode::parse(mode).ok_or("the mode is OFF, SHADOW or LIVE")?;
+            let source =
+                Entity::parse(source).ok_or("unknown source, component, venue or switch ID")?;
+            let mode = Mode::parse(mode)
+                .filter(|m| source.accepts(*m))
+                .ok_or(format!("{} takes {}", source.name(), source.modes()))?;
             let expected = flag(rest, "--expect-generation")?
                 .parse::<u64>()
                 .map_err(|_| "--expect-generation is an unsigned integer")?;
@@ -299,7 +343,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | control require SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

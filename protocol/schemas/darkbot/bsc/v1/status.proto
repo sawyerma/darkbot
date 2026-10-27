@@ -214,6 +214,26 @@ message BscStatus {
   // Time of the explicit source snapshot sync, never evidence freshness.
   uint64 data_as_of_unix_s = 12;
 }
+// One native wallet or economic switch (plan 27.10.) of the bsc_runtime owner: a permission
+// a Mainnet signing or sending path checks besides its own guard, V5, nonce and budget checks,
+// never an action. DISABLED initially, in a missing or unreadable state and after every restart.
+message ControlSwitch {
+  // Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_ECON_SIGN, BSC_ECON_ARM,
+  // BSC_ECON_SEND, BSC_ECON_ATTEMPT or BSC_ECON_LIVE.
+  string id = 1;
+  // DISABLED or ENABLED as requested; UNKNOWN when the owner state is unreadable.
+  string requested = 2;
+  // DISABLED, ENABLED, or BLOCKED as the owner holds it in this boot session.
+  string effective = 3;
+  // Why the effective state is not the requested one (RESET_BY_RESTART, CONTROL_STATE_INVALID).
+  string block_reason = 4;
+  // The owner generation; the compare-and-swap of the next request.
+  uint64 generation = 5;
+  // The request (or RESTART_RESET) that last set this switch; empty while never set.
+  string request_id = 6;
+  // The generation that request wrote.
+  optional uint64 set_generation = 7;
+}
 // Bound launch plan, without signatures, raw transactions or execution authority.
 message BscLaunchState {
   // True only if the current V5 contract is present and valid.
@@ -229,6 +249,9 @@ message BscLaunchState {
   // Latest public qualification records: DRY, preflight, quote, economics, simulation,
   // launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract.
   repeated NativeRecord records = 6;
+  // The economic switches SIGN, ARM, SEND, ATTEMPT and LIVE of the native owner; absent
+  // before its state exists.
+  repeated ControlSwitch economic_controls = 7;
 }
 // Read-only G0.8 results; submission acknowledgement is not acquisition.
 message BscMonitoringState {
@@ -269,4 +292,8 @@ message BscWalletsState {
   optional string required_buyer_wei = 12;
   // Evidence identity makes snapshot age and provenance reviewable.
   Evidence evidence = 13;
+  // The launcher wallet's native ENABLE/DISABLE switch; absent before the owner state exists.
+  ControlSwitch launcher_control = 14;
+  // The buyer wallet's native ENABLE/DISABLE switch; absent before the owner state exists.
+  ControlSwitch buyer_control = 15;
 }
