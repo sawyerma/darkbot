@@ -133,6 +133,12 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 **Gate 1 darf erst nach tatsächlicher Evidenz auf ACCEPTED wechseln.** Dieses Dokument beantwortet die Produkt- und High-Level-Architekturfrage, nicht alle kontospezifischen Bitget-, Paritäts- oder Recovery-Fragen.
 
+## P1-Revisionsstatus und V5-Priorität (27.10.2026)
+
+**P1-Phasenplan Revision V1.3** liegt aus Gründen stabiler interner Pfade weiterhin unter [`PHASENPLAN_P1_V1.md`](PHASENPLAN_P1_V1.md). Verbindlicher [komponierbarer Bar-/Trade-Order-Vertrag](P1_BAR_SCHEMA_AND_TRADE_ORDER_V1.md) ergänzt P1.6 und die Tests T26/T27. T25–T27 sowie die Rust-P1-Module sind **NOT_RUN**, nicht als technische `BLOCKED`-Defekte zu deklarieren.
+
+**Vorrang vor dem angekündigten Depth50-V5-Produktivwechsel am 05.11.2026:** 8 V5-Parserfehler in 62 Demo-Frames aus dem 60s-Lauf sichern/ursächlich prüfen, das offizielle SBE-XML-Schema pinnen, einen typisierten Decoder und Recovery anhand echter Frames qualifizieren. Solange dies fehlt, V5 **FAIL/INCONCLUSIVE**; keine produktive Readiness aus früheren 25/25 Offline-Frames ableiten. Kein SIGN/ARM/LIVE.
+
 ## 6. Gate 1 → Umsetzung
 
 [PHASENPLAN.md](PHASENPLAN.md) definiert die nachfolgenden Pakete. Keine Implementation im Gate-1-Dokument, keine Mock-Daten als Produktdaten, keine automatische Änderung an BSC/Project_0. Jedes Paket bindet tatsächlichen Source-Commit, Tests und Akzeptanzkriterien; bei BLOCKED kein Überspringen.
