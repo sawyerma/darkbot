@@ -18,6 +18,12 @@
 
 **V5-Befund:** Längerer 60-s-Demo-Depth50-Test mit **8 Parserfehlern bei 62 Frames** – Decoder **nicht** als qualifiziert betrachten; das betrifft nicht die nachgewiesene historische Trade-REST-Funktion.
 
+## Private Futures-Steuerung (P5; nur dokumentiert, kein Account-/Ordertest)
+
+**Verbindlicher [P5-Detailplan](PHASENPLAN_P5_V1.md).** UTA V3: `https://api.bitget.com` mit signierten `/api/v3/account/*`, `/api/v3/trade/*`, `/api/v3/position/*`; private WS `wss://ws.bitget.com/v3/ws/private` mit `account`/`order`/`fill`/`position`/`strategy-order`. Hebel `POST /api/v3/account/set-leverage`, Kontoparameter `GET /api/v3/account/settings`, Order `POST /api/v3/trade/place-order`, Strategy-/Schutzorders über die passenden dokumentierten UTA-Orderarten. **Noch nicht per Demo-/Account-Test verifiziert.** Kein SIGN/ARM/LIVE.
+
+**Gesamte Futures-Coinliste:** `GET /api/v3/market/instruments?category=USDT-FUTURES` **ohne Symbolfilter**; noch **NOT_RUN**. Der bisherige Instruments-Test umfasste nur BTCUSDT.
+
 ## Öffentliche Basisadressen
 
 | Transport | Adresse | Nachweis |
