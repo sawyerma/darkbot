@@ -22,8 +22,9 @@ pub const SCHEMA: u32 = 1;
 /// The controller's store of qualifications, content-addressed like the provider evidence:
 /// `<id>.p0j`, the id the first 16 hex digits of the record's SHA-256.
 pub const STORE: &str = "data/until_stopped";
-/// The modes whose runtime runs rolling windows (DEC-16 stage 2: econ4h and market; stage 3:
-/// the Shadow owner). A mode outside stays gated whatever else is qualified.
+/// The modes whose runtime runs rolling windows. A mode outside stays gated whatever else is
+/// qualified: econ4h measures its windows (DEC-16 stage 2) but stays gated until its Shadow
+/// owner's windows exist (stage 3: owner windows, drains, owner journals).
 pub const ROLLING_MODES: &[&str] = &["market"];
 /// The modes an unbounded run may be qualified for.
 pub const MODES: &[&str] = &["econ4h", "market", "shadow"];
@@ -429,7 +430,7 @@ pub fn qualify(
         Part::of(
             PartState::NotRun,
             format!(
-                "the {} runtime has no rolling windows yet (DEC-16 stage 2: econ4h; stage 3: shadow)",
+                "the {} runtime's Shadow owner has no windows yet (DEC-16 stage 3: owner windows, drains, owner journals)",
                 binding.mode
             ),
         )

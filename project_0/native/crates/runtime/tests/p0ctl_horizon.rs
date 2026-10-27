@@ -147,3 +147,107 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
     assert_eq!(code, 2);
     assert!(err.contains("RUN_MODE_OPTION_REFUSED"), "{err}");
 }
+
+/// DEC-16: an admitted unbounded econ4h start (a complete qualification of exactly this run)
+/// launches its horizon instead of stopping before the launcher: it goes on to the start's own
+/// gates — the offline audit and the network audit, none given here — exactly as a fixed run.
+/// Strict verification and a bare unbounded `--duration` are refused.
+#[test]
+fn dec16_an_admitted_unbounded_econ4h_start_goes_on_to_its_start_gates() {
+    use darkbot_runner::orchestration::until_stopped as us;
+    let ctl = Ctl::new("launch");
+    let (_, out, err) = ctl.run(&[
+        "horizon",
+        "qualify",
+        "--mode",
+        "econ4h",
+        "--checkpoint",
+        "1h",
+        "--minimum-runway",
+        "24h",
+    ]);
+    let open = out
+        .lines()
+        .find_map(|l| l.strip_prefix("UNTIL_STOPPED_QUALIFICATION "))
+        .and_then(|l| l.split_whitespace().next())
+        .unwrap_or_else(|| panic!("{out}{err}"))
+        .to_string();
+    // The fixture completes the open parts (the gating under test, never a production path).
+    let mut q = us::get(&ctl.project, &open).unwrap();
+    let pass = us::Part {
+        state: us::PartState::Pass,
+        reason: "fixture".into(),
+    };
+    (
+        q.runtime,
+        q.capacity,
+        q.provider_budget,
+        q.provider_evidence,
+    ) = (pass.clone(), pass.clone(), pass.clone(), pass);
+    q.evidence_id = Some("0123456789abcdef".into());
+    q.evidence_valid_until_unix_s = Some(u64::MAX / 2);
+    let id = us::put(&ctl.project, &q).unwrap();
+    let start = |extra: &[&str]| {
+        let mut args = vec![
+            "run",
+            "start",
+            "--until-stopped",
+            "--checkpoint",
+            "1h",
+            "--minimum-runway",
+            "24h",
+            "--qualification",
+            &id,
+        ];
+        args.extend(extra);
+        ctl.run(&args)
+    };
+    let (code, out, err) = start(&[]);
+    assert_eq!(code, 2);
+    assert!(
+        !err.contains("UNTIL_STOPPED_LAUNCHER") && !err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED"),
+        "{err}"
+    );
+    assert!(
+        err.contains("BOOT_NETWORK_AUDIT_REQUIRED") || err.contains("BOOT_AUDIT_BLOCKED"),
+        "{out}{err}"
+    );
+    let (code, _, err) = start(&["--chain-verify", "strict"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("UNTIL_STOPPED_STRICT_NOT_AVAILABLE"), "{err}");
+    let (code, _, err) = ctl.run(&["run", "start", "--duration", "until-stopped:1h:24h"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("RUN_HORIZON_UNTIL_STOPPED:"), "{err}");
+}
+
+/// DEC-16: the plan compiler of an unbounded run compiles the plan of its window and names its
+/// runway as the capacity horizon; a fixed run's capacity horizon is its duration.
+#[test]
+fn dec16_the_plan_compiler_plans_the_window_and_names_the_runway() {
+    let dir = std::env::temp_dir().join(format!("p0_plan_unbounded_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let plan = |duration: &str, args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_p0-measurement-plan"))
+            .env_clear()
+            .env("P0_MEASUREMENT_DURATION", duration)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let file = dir.join("plan.p0j");
+    let path = file.to_string_lossy().to_string();
+    assert_eq!(plan("until-stopped:1h:24h", &["--out", &path]), "3600");
+    assert_eq!(plan("until-stopped:1h:24h", &["--runway"]), "86400");
+    assert_eq!(plan("4h", &["--runway"]), "14400");
+    let stored: darkbot_runner::analytics::measurement::MeasurementPlan =
+        darkbot_runner::analytics::journal::read_typed_value(&file).unwrap();
+    assert_eq!(stored.duration_seconds, 3600);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -255,12 +255,15 @@ mkdir -p "$CAPTURE_DIR"
 # JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
 P0_ECON_DURATION_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$CAPTURE_DIR/measurement_plan.p0j")" || exit 2
 export P0_ECON_DURATION_SECS P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j"
-echo "Capture: ${P0_ECON_DURATION_SECS}s; separate bootstrap, drain and verification budgets in the measurement plan"
+# DEC-16: an unbounded run (until-stopped:W:R) measures windows of W until its stop; its capacity
+# preflight covers its minimum runway R (a fixed run: its duration).
+CAPACITY_SECS="$("$BIN_DIR/p0-measurement-plan" --runway)" || exit 2
+echo "Capture: ${P0_ECON_DURATION_SECS}s (capacity horizon ${CAPACITY_SECS}s); separate bootstrap, drain and verification budgets in the measurement plan"
 # SK-06 capacity preflight (native): measured lane rates of the newest sealed earlier runs, a write
 # and sync probe on this volume, OS memory/CPU, operational budgets and the verifier budget of the
 # selected chain-verify mode. A capture longer than 600 s starts only when QUALIFIED; the native
 # report capture/capacity_preflight.p0j is the record.
-"$BIN_DIR/p0-capacity" --duration "$P0_ECON_DURATION_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE" \
+"$BIN_DIR/p0-capacity" --duration "$CAPACITY_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE" \
   --basis-root "$P0_ECON_OUT_DIR" --exclude-run "$RUN_DIR" --chain-verify "$CHAIN_VERIFY" ${CAPACITY_VERIFY[@]+"${CAPACITY_VERIFY[@]}"} \
   | tee "$LOG_DIR/capacity_preflight.txt" || {
   echo "Capacity preflight: start not allowed (report: $LOG_DIR/capacity_preflight.txt). Nothing was deleted." >&2; exit 2;

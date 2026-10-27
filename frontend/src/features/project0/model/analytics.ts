@@ -162,7 +162,7 @@ export function durationSeconds(d: string): bigint | null {
  */
 export function untilStoppedBlock(v: { mode: string; window: string; runway: string; qualificationId: string; nowS: bigint },
   q: UntilStoppedQualificationView | null): string {
-  if (v.mode !== "market") return `${v.mode}: RUN_HORIZON_UNTIL_STOPPED_GATED — its rolling windows are not built yet; only the raw capture (market) is qualifiable`;
+  if (v.mode !== "market") return `${v.mode}: RUN_HORIZON_UNTIL_STOPPED_GATED — the Shadow owner's windows come with DEC-16 stage 3; only the raw capture (market) is qualifiable now`;
   if (!q) return "No qualification of the raw capture (p0ctl horizon qualify --mode market --checkpoint W --minimum-runway R)";
   if (v.qualificationId.trim() !== q.id) return `Qualification ${v.qualificationId.trim() || "—"} is not the newest one shown (${q.id}); only that one is checked here`;
   if (!q.complete) return `Qualification ${q.id} incomplete: ${q.open.join("; ")}`;

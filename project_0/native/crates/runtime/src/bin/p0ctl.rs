@@ -303,6 +303,35 @@ fn launch_plan(args: &[String]) -> Result<(RunMode, Vec<String>), String> {
     Ok((mode, launcher_args))
 }
 
+/// DEC-16: the launch of an admitted unbounded run — its options without the horizon flags and
+/// with `--duration until-stopped:W:R`, its operational arguments unchanged.
+fn until_stopped_launch(args: &[String], spec: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = args.iter();
+    let mut in_options = true;
+    while let Some(a) = it.next() {
+        if in_options {
+            match a.as_str() {
+                "--until-stopped" => continue,
+                "--checkpoint" | "--minimum-runway" | "--qualification" => {
+                    it.next();
+                    continue;
+                }
+                "--" => {
+                    out.extend(["--duration".to_string(), spec.to_string()]);
+                    in_options = false;
+                }
+                _ => {}
+            }
+        }
+        out.push(a.clone());
+    }
+    if in_options {
+        out.extend(["--duration".to_string(), spec.to_string()]);
+    }
+    out
+}
+
 /// Set by `run start` for its launcher child only: `run start` and `capture.sh econ4h` refuse to
 /// run inside a launcher, so `run start` -> `capture.sh econ4h-launcher` can never recurse.
 const LAUNCH_MARKER: &str = "P0_CTL_LAUNCH_RUN_ID";
@@ -320,11 +349,13 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         println!("{RUN_START_USAGE}");
         return Ok(true);
     }
-    let (mode, launcher_args) = launch_plan(args)?;
+    let (mode, _) = launch_plan(args)?;
     // STARTUP §3 / DEC-16: an unbounded run is a typed horizon, never a huge duration; it is
     // admitted only by `RunHorizon::admit` with its complete qualification bound to exactly this
     // run (`--qualification ID`, p0ctl horizon qualify), and then still needs its approvals.
-    if options.iter().any(|a| a == "--until-stopped") {
+    let mut until_stopped_qualification = None;
+    let admitted;
+    let args = if options.iter().any(|a| a == "--until-stopped") {
         if options.iter().any(|a| a == "--duration") {
             return Err("--until-stopped and --duration are exclusive".into());
         }
@@ -349,8 +380,18 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             &binding,
             unix_now()?,
         )?;
-        return Err("UNTIL_STOPPED_LAUNCHER: the econ4h launcher runs no rolling windows yet (DEC-16 stage 2)".into());
-    }
+        if value(options, "--chain-verify").as_deref() == Some("strict") {
+            return Err("UNTIL_STOPPED_STRICT_NOT_AVAILABLE: an unbounded run is not verified window by window; start it with --chain-verify off".into());
+        }
+        // The admitted run launches exactly its horizon, its qualification beside it.
+        until_stopped_qualification = value(options, "--qualification");
+        admitted = until_stopped_launch(args, &spec);
+        &admitted
+    } else {
+        args
+    };
+    let options = args.split(|a| a == "--").next().unwrap_or(&[]);
+    let (mode, launcher_args) = launch_plan(args)?;
     if options
         .iter()
         .filter(|a| *a == "--mainnet-approved")
@@ -365,8 +406,17 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         _ => return Err("exactly one --duration".into()),
     }
     let duration = value(options, "--duration").ok_or("--duration requires a value")?;
-    darkbot_solana::runtime_config::duration_seconds(&duration)
-        .map_err(|e| format!("--duration {duration}: {e}"))?;
+    // DEC-16: an unbounded horizon only as the launch of an admitted --until-stopped run.
+    match darkbot_solana::runtime_config::horizon(&duration)
+        .map_err(|e| format!("--duration {duration}: {e}"))?
+    {
+        darkbot_solana::runtime_config::Horizon::Fixed { .. } => {}
+        darkbot_solana::runtime_config::Horizon::UntilStopped { .. }
+            if until_stopped_qualification.is_some() => {}
+        darkbot_solana::runtime_config::Horizon::UntilStopped { .. } => {
+            return Err(format!("RUN_HORIZON_UNTIL_STOPPED: --duration {duration} starts only as --until-stopped --checkpoint W --minimum-runway R --qualification ID"))
+        }
+    }
     if let Some(mode @ ("index" | "crosscheck")) = value(options, "--chain-verify").as_deref() {
         return Err(format!("CHAIN_VERIFY_{mode}_BLOCKED: the index/crosscheck verifier exists only as the pinned Python reader, which writes JSON evidence (JFI-03); use --chain-verify strict or off"));
     }
@@ -444,7 +494,11 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     let network_record =
         std::fs::canonicalize(&network_path).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
     control::install_stop_handler()?;
-    let mut child = Command::new(project.join("scripts/capture.sh"))
+    let mut launcher = Command::new(project.join("scripts/capture.sh"));
+    if let Some(id) = &until_stopped_qualification {
+        launcher.env(boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION, id);
+    }
+    let mut child = launcher
         .arg(mode.launcher())
         .args(&launcher_args)
         .env("P0_RUNTIME_LOCK", &lock)
