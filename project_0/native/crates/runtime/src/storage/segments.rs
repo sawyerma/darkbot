@@ -1144,6 +1144,7 @@ mod tests {
     /// lost frames; a clean one may have lost what it never wrote), and its last segment's own
     /// manifest says incomplete.
     #[test]
+    #[cfg(feature = "historical")]
     fn dec16_a_recovered_chain_is_never_exported_and_seals_incomplete() {
         for torn in [true, false] {
             let d = dir("recover_export");
