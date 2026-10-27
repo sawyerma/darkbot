@@ -1,5 +1,9 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## Verbindliches Messregister (27.10.2026)
+
+**Eine zentrale PASS/FAIL/OPEN-Matrix:** [BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md](BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md). Enthält historische Teilmessungen, konkrete Belegpfade, tatsächlich fehlende BUY-/SELL-/Timing-/Kosten-/Safety-Qualifikationen sowie den ereignisgesteuerten 1+bis-zu-10-Versuchsplan. Dieser Verweis ersetzt keine einzelnen Originalbelege und erteilt keine Mainnet-Freigabe.
+
 ## Ergänzter verbindlicher Arbeitsauftrag (27.10.2026) — Wallet-/Wirtschaftscontrols
 
 `PHASENPLAN.md` verlangt jetzt die vollständige technische Schaltbarkeit einschließlich **LAUNCHER** und **BUYER** mit zwei voneinander unabhängigen nativen `ENABLE/DISABLE`-Controls, Initial-/Recovery-Default jeweils `DISABLED`, identischer Terminal-/Frontend-Autorität und vollständigem Native→Protobuf→Gateway→BSC-Wallets-Panel-Rundweg. Alle wirtschaftlichen Controls initial `DISABLED/OFF`, keine automatische Freigabe anderer Modi. Technische Implementierung und nichtwirtschaftliche E2E-Abnahme sind vor G0.7/G0.8 erlaubt; deren reale Erwerbs-/Timing-Evidence bleibt ausstehend.
