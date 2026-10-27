@@ -192,3 +192,230 @@
 6. Im `STATUS.md` den jeweils aktuellen Stand und den **Link auf dieses eine Messregister** pflegen. Ein zweites konkurrierendes PASS/FAIL-Register vermeiden.
 
 **Gesamtstatus am 27.10.2026:** **TECHNISCHE TEILNACHWEISE = PASS/FAIL wie oben; ECHTER BUY = OPEN; ECHTER SELL = OPEN; REALISIERTER NETTOERTRAG = OPEN; PHYSISCHES <1-ms-ZIEL = OPEN.** Keine Mainnet-Freigabe durch diesen Plan.
+
+
+## 8. Vollständigkeitsprüfung – versionierte Testquellen und Evidence-Archive (27.10.2026)
+
+**Git-Tree-Stand:** `b72bf2ed4bdfb12b372d72ed26bb2272663119c2`; `4220` Einträge; `truncated=false`. Diese Inventur deckt alle durch ihre Namenskonvention erkennbaren, **aktuell versionierten** Testdateien und die drei BSC-Evidence-Wurzeln ab, nicht automatisch jede `#[cfg(test)]`-Funktion, jeden historischen ungetrackten Mac-Lauf oder jeden gelöschten älteren Commit. **Quellcode vorhanden ≠ Test ausgeführt ≠ PASS.**
+
+### 8.1 Testdateien (Dateiebene)
+
+**123 erkannte Testquellen.** Klassifizierung: `SOURCE_PRESENT`. Projektspezifische `frontend/project0`-Tests sind als Shared/Projekt_0-Abgrenzung mit aufgeführt, **nicht** als BSC-Fach-PASS.
+
+- `bsc/engine/crates/execution/tests/acceptance_guard.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/c3_paper_latency.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/common/mod.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/dispatch.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/egress_latency.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/f_ingest_latency.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/flap_fastlane_roundtrip.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/four_fastlane_roundtrip.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/framing.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g06a_ab_parity.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g06a_dry_handoff.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g07_attempt_authority.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g07_builder_probe.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g07_candidate.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g07_no_send.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/g07_readiness.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/hotpath_alloc.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/release.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/responses.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/runtime_signal.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/strategy_paper_latency.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/support/requalification.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/tls.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/tls_support/mod.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/execution/tests/transport.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/geth_ipc/tests/c15_hot0_alloc.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/geth_ipc/tests/c18_stress.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/economics_snapshot.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/g08_binary_records.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/g08_reads_g07_evidence.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/js_dbrec_parity.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/loopback.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/offline.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/provenance_clock.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/support/mod.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/trading/tests/c14_prefilter_scope.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/trading/tests/test_support.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/tx_encoding/tests/rlp_differential.rs` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/chain_v2_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/fastlane_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/ingress_fixtures_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/ingress_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/outbound_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/stress_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/trust_test.go` — SOURCE_PRESENT
+- `bsc/geth/overlay/darkbot/fastlane/v2_test.go` — SOURCE_PRESENT
+- `bsc/tools/test_g06a_dry_modes.py` — SOURCE_PRESENT
+- `bsc/tools/test_g06a_key_hygiene.cjs` — SOURCE_PRESENT
+- `bsc/tools/test_g06a_private_mode.cjs` — SOURCE_PRESENT
+- `bsc/tools/test_g06a_shell_scope.py` — SOURCE_PRESENT
+- `bsc/tools/test_g06a_state_pin.cjs` — SOURCE_PRESENT
+- `bsc/tools/test_readiness_job.py` — SOURCE_PRESENT
+- `bsc/tools/test_status_sync.py` — SOURCE_PRESENT
+- `frontend/src/core/realtime/GatewayConnection.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/TopicState.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/TopicSubscriptions.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/analyticsControl.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/candidateControl.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/captureCommand.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/captureControl.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/control-golden.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/readinessControl.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/api/bsc-golden.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/candidate.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/checks.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/placement.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/reportFilters.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/sources.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/bsc/model/switches.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/overview/api/overview-golden.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/overview/model/lifecycle.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/overview/model/overviewRows.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/api/analyticsAdapter.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/api/ownerAdapter.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/api/panelTopics.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/api/project0Adapter.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/api/project0ViewAdapter.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/model/capturePreview.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/model/contracts.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/model/statusFormat.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/model/statusSelectors.test.ts` — SOURCE_PRESENT
+- `frontend/src/features/project0/model/streamFreshness.test.ts` — SOURCE_PRESENT
+- `frontend/tests/bsc.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/code-split.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/overview-f7-ovr.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/overview.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/project0-backend.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/project0-status.spec.ts` — SOURCE_PRESENT
+- `frontend/tests/visual/p0-tabs.spec.ts` — SOURCE_PRESENT
+- `gateway/tests/control_goldens.rs` — SOURCE_PRESENT
+- `gateway/tests/feed_config.rs` — SOURCE_PRESENT
+- `gateway/tests/p0_reporter_e2e.rs` — SOURCE_PRESENT
+- `gateway/tests/unix_feed.rs` — SOURCE_PRESENT
+- `gateway/tests/ws_integration.rs` — SOURCE_PRESENT
+- `ops/tests/bsc_control_browser.mjs` — SOURCE_PRESENT
+- `ops/tests/bsc_control_test.py` — SOURCE_PRESENT
+- `ops/tests/control_browser.mjs` — SOURCE_PRESENT
+- `ops/tests/control_test.py` — SOURCE_PRESENT
+- `ops/tests/lifecycle_browser.mjs` — SOURCE_PRESENT
+- `ops/tests/lifecycle_test.py` — SOURCE_PRESENT
+- `ops/tests/stop_all_partial_browser.mjs` — SOURCE_PRESENT
+- `ops/tests/stop_all_partial_test.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/__init__.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-27-g01/decode_flap_v6_fixture.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-27-g01/sources/submitted_keccak_under_test.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/audit_existing_rpc_config.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_flap_intervening.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_modules.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_pool_source.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_sources.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_tree.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/keccak_audit.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/probe_flap_archive.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/read_flap_archive_once.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/read_rpc.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/trace_flap_g02.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/update_gate0_master.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_g02.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_g02_economics.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_intervening.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/write_g02_economics_report.py` — SOURCE_PRESENT
+- `prestudy/bsc/evidence/tests/test_bsc_profile_fail_fast.py` — SOURCE_PRESENT
+- `prestudy/bsc/references/production-plan-reference/unit1-reference/bsc/native/crates/darkbot-wire/tests/rlp_differential.rs` — SOURCE_PRESENT
+
+### 8.2 Archivierte Gate-0-Programme und Messwerkzeuge
+
+**26 historische ausführbare Quellen**, kein aktueller Produktionspass:
+
+- `prestudy/bsc/experiments/gate0/src/bin/g03.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_e2e_local.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_ipc.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_local.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_remote_e2e.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_remote_e2e_stability.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g05_remote_transport.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g06_concurrency.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g06_flap_pending_decode.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g06a_48club_floor_probe.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g06a_presigned_handoff_transport.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g06a_target_handoff.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g07_testnet_birth_buy.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/src/bin/g07_testnet_buy.rs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/analyze_g04_coverage_v2.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/collect_g03_activation.py` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/g06_capture_flap_actionable_pending.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/g06_capture_flap_exact_scope_pending.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/g06_quicknode_full_pending.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/probe_g04_coverage_v2.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/probe_g04_quicknode.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/probe_sequence.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/run_g05_48club_stability.py` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/run_g05_blockrazor_stability.py` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/verify_g03.cjs` — HISTORICAL_SOURCE
+- `prestudy/bsc/experiments/gate0/tools/verify_g04_probe.cjs` — HISTORICAL_SOURCE
+
+### 8.3 Evidence-Quellen je Archivfamilie
+
+**1571 versionierte Roh-/Reportdateien** unter `bsc/native/evidence/`, `prestudy/bsc/evidence/` und `prestudy/bsc/experiments/gate0/evidence/`. Keine Vermischung von Roh-RPC-Responses und tatsächlich bestandenen Testfällen.
+
+| Pfad | Versionierte Dateien | Nachweisstatus |
+|---|---:|---|
+| `bsc/native/evidence/c1` | 163 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/c3` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/f` | 7 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g` | 10 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g01` | 11 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g04` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g06` | 5 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g06a` | 42 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/g07` | 15 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/h` | 22 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/i` | 4 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/p8` | 51 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `bsc/native/evidence/q5a` | 3 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/docs/BSC_PHASE_B_OPTIONAL_CLEANUP_DRAFT.md` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/docs/phase_a` | 32 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/docs/reviews` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/native/SHA256SUMS.txt` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/native/SHA256SUMS.unit5-core-overlay.txt` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/__init__.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0` | 7 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-27-g01` | 259 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-probe` | 5 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-probe-retry` | 21 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-witness` | 5 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-archive-witness-quicknode-153754` | 659 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-economics` | 73 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/2026-09-28-g02-latency-offline` | 2 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/audit_existing_rpc_config.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/audit_flap_trade_bytecode.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/classify_flap_hotpath.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_flap_intervening.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_modules.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_pool_source.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_sources.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/collect_g02_tree.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/decode_flap_economics.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/GATE0_G01_READONLY_RUN_2026-09-28.md` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/keccak_audit.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/measure_flap_offline_latency.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/probe_flap_archive.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/read_flap_archive_once.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/read_rpc.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/replay_flap_evm.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/trace_flap_g02.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/update_gate0_master.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_archive_witness.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_g02_economics.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_g02.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_intervening.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/verify_flap_semantic_replay.cjs` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/write_g02_economics_report.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/README.md` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/evidence/tests/test_bsc_profile_fail_fast.py` | 1 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+| `prestudy/bsc/experiments/gate0/evidence` | 142 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
+
+**Offene Vollständigkeitsgrenze:** Nicht versionierte Laufdaten (`~/.darkbot`, `bsc/.local`, `bsc/data`, `~/Library/Logs/DarkBot`), alte Git-History-/Reflog-Commits und private CI-/Claude-Ausgaben lassen sich aus einem aktuellen GitHub-Tree nicht vollständig rekonstruieren. Bis dahin gilt `ALL_HISTORIC_RUNS_VERIFIED=NO`. `LOCAL_PASS` bleibt an den ursprünglichen SHA/Scope gebunden.
