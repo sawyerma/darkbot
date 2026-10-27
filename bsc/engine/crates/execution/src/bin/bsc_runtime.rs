@@ -7,7 +7,7 @@
 //! bsc_runtime source show --state <dir>
 //! bsc_runtime source request <SOURCE_COMPONENT_OR_VENUE_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
-//! bsc_runtime control require <SWITCH_ID>...
+//! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
@@ -57,8 +57,10 @@
 //!
 //! `control require` is the check a Mainnet signing or sending path runs
 //! before it touches a wallet key: exit 0 only if every named switch is
-//! ENABLED in the canonical owner state (`$HOME/.darkbot/run/bsc-sources`)
-//! of this boot session, else it prints the refusal and exits 2.
+//! ENABLED in the canonical owner state (`.darkbot/run/bsc-sources` under
+//! the account home; a different `HOME` is refused) of this boot session,
+//! else it prints the refusal and exits 2. `--state DIR` checks another
+//! owner state instead (diagnosis only; no Mainnet path reads it).
 
 use darkbot_bsc_execution::runtime::{
     RuntimeConfig, journal_max_payload, preflight_setup, run as run_runtime, stop_file,
@@ -271,12 +273,32 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("generation={}", g.generation);
             Ok(true)
         }
-        [area, cmd, ids @ ..] if area == "control" && cmd == "require" && !ids.is_empty() => {
+        [area, cmd, rest @ ..] if area == "control" && cmd == "require" && !rest.is_empty() => {
+            // `--state DIR` checks that owner state (a diagnosis, e.g. of an
+            // isolated test run); without it the canonical one every Mainnet
+            // path reads.
+            let (state, ids) = match rest {
+                [flag, dir, ids @ ..] if flag == "--state" => (Some(dir), ids),
+                ids => (None, ids),
+            };
+            if ids.is_empty() {
+                return Err("control require [--state DIR] SWITCH_ID...".into());
+            }
             let needed = ids
                 .iter()
                 .map(|id| SwitchId::parse(id).ok_or(format!("{id} is not a switch")))
                 .collect::<Result<Vec<_>, _>>()?;
-            match darkbot_bsc_execution::sources::require_enabled_here(&needed) {
+            let checked = match state {
+                Some(dir) => darkbot_bsc_execution::sources::boot_session().and_then(|boot| {
+                    darkbot_bsc_execution::sources::require_enabled(
+                        std::path::Path::new(dir),
+                        &boot,
+                        &needed,
+                    )
+                }),
+                None => darkbot_bsc_execution::sources::require_enabled_here(&needed),
+            };
+            match checked {
                 Ok(generation) => {
                     println!("controls=ENABLED generation={generation}");
                     Ok(true)
@@ -366,7 +388,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | control require SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

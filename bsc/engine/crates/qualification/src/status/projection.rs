@@ -158,6 +158,14 @@ fn native_leaves(
         if name.contains("journal_error") || name.starts_with("preflight[]") {
             continue;
         }
+        // Plan 27.10.: the owner's switches and settings travel typed
+        // (ControlSwitch / BuyAttemptLimit, with the boot-session rule); the
+        // raw leaves could show an ENABLED of an earlier boot.
+        if top.name == schema::bsc_runtime::source_modes::SCHEMA.name
+            && (name.starts_with("switches[]") || name.starts_with("settings[]"))
+        {
+            continue;
+        }
         match (v, f.nested) {
             (Value::Nested(inner), Some(nested)) => native_leaves(
                 top,
@@ -1165,8 +1173,11 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                     request_id,
                     set_generation,
                 });
-                if let Ok(usage) =
-                    darkbot_bsc_execution::sources::buy_usage(&sources, now() * 1_000)
+                // Without a clock there is no "today": the limit is shown
+                // without a day rather than for 1970-01-01.
+                let today = clock_s().map(|s| s * 1_000);
+                if let Some(Ok(usage)) =
+                    today.map(|ms| darkbot_bsc_execution::sources::buy_usage(&sources, ms))
                 {
                     let (request_id, set_generation) = set_by(&g.buy_limit);
                     launch.buy_attempt_limit = Some(BuyAttemptLimit {

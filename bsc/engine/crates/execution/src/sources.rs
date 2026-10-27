@@ -631,6 +631,18 @@ impl Generation {
         }
     }
 
+    /// The requested mode of any entity.
+    pub fn requested_of(&self, entity: Entity) -> Mode {
+        match entity {
+            Entity::Source(s) => self.source(s).requested,
+            Entity::Component(c) => self.component(c).requested,
+            Entity::Venue(v) => self.venue(v).requested,
+            Entity::Switch(s) => self.switch(s).requested,
+            Entity::Runtime => self.runtime.requested,
+            Entity::BuyLimit => self.buy_limit.requested,
+        }
+    }
+
     /// The daily BUY attempt limit in force.
     pub fn buy_attempts_per_day(&self) -> u32 {
         match self.buy_limit.effective {
@@ -1169,6 +1181,19 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fs::File::open(dir)?.sync_all()
 }
 
+/// Creates `d` (0700) unless it exists; a new directory is made durable in
+/// its parent, so a slot or generation written into it survives power loss.
+fn create_durable_dir(d: &Path) -> Result<(), String> {
+    match fs::DirBuilder::new().mode(0o700).create(d) {
+        Ok(()) => d
+            .parent()
+            .map_or(Ok(()), |p| fs::File::open(p).and_then(|f| f.sync_all()))
+            .map_err(|e| format!("{}: {e}", d.display())),
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(format!("{}: {e}", d.display())),
+    }
+}
+
 /// The host's boot session, read once per process: macOS
 /// `kern.bootsessionuuid`, Linux `/proc/sys/kernel/random/boot_id`. It
 /// changes with every boot, so an ENABLED switch never outlives a restart.
@@ -1201,16 +1226,70 @@ pub fn boot_session() -> Result<String, String> {
     .clone()
 }
 
+/// The account home of this process's real user from the user database
+/// (macOS directory services, Linux `/etc/passwd`), read once; never `$HOME`.
+pub fn account_home() -> Result<PathBuf, String> {
+    static HOME: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    HOME.get_or_init(|| {
+        let run = |program: &str, args: &[&str]| {
+            std::process::Command::new(program)
+                .env_clear()
+                .args(args)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .ok_or(format!("account home: {program} refused"))
+        };
+        let home = if cfg!(target_os = "macos") {
+            let uid = run("/usr/bin/id", &["-u"])?;
+            let entry = run(
+                "/usr/bin/dscacheutil",
+                &["-q", "user", "-a", "uid", uid.trim()],
+            )?;
+            entry
+                .lines()
+                .find_map(|l| l.strip_prefix("dir: "))
+                .map(str::to_string)
+        } else {
+            let status = fs::read_to_string("/proc/self/status")
+                .map_err(|e| format!("account home: {e}"))?;
+            let uid = status
+                .lines()
+                .find_map(|l| l.strip_prefix("Uid:"))
+                .and_then(|l| l.split_whitespace().next())
+                .ok_or("account home: no real uid")?
+                .to_string();
+            let passwd =
+                fs::read_to_string("/etc/passwd").map_err(|e| format!("account home: {e}"))?;
+            passwd.lines().find_map(|l| {
+                let f: Vec<&str> = l.split(':').collect();
+                (f.len() >= 7 && f[2] == uid).then(|| f[5].to_string())
+            })
+        }
+        .filter(|h| h.starts_with('/'))
+        .ok_or("account home: not in the user database")?;
+        Ok(PathBuf::from(home.trim()))
+    })
+    .clone()
+}
+
 /// The owner state darkbotctl's controller keeps (`$HOME/.darkbot/run`,
 /// its RUNDIR, `bsc-sources`): the one place a Mainnet signing or sending
-/// path reads its switches from, derived from `HOME` exactly as darkbotctl
-/// derives its RUNDIR. Another HOME reads another state (without the
-/// owner's ENABLE there, every switch DISABLED); no unset HOME passes.
+/// path reads its switches and its daily BUY limit from. It lies under the
+/// account home from the user database; a `HOME` naming another directory
+/// is refused, so no self-made state elsewhere (written by the owner CLI
+/// with another `--state`) is ever honored instead of the one the GUI and
+/// `darkbotctl bsc source show` display.
 pub fn canonical_state_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .filter(|h| !h.is_empty())
-        .ok_or("HOME is not set: no switch state, every switch DISABLED")?;
-    Ok(PathBuf::from(home).join(".darkbot/run/bsc-sources"))
+    let home = account_home()?;
+    match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        Some(h) if Path::new(&h) != home => Err(format!(
+            "HOME is not the account home {}: the switches are read only from the account's owner state",
+            home.display()
+        )),
+        _ => Ok(home.join(".darkbot/run/bsc-sources")),
+    }
 }
 
 /// The generation on file in `dir` without creating anything: the initial
@@ -1274,7 +1353,8 @@ pub fn require_enabled(dir: &Path, boot: &str, needed: &[SwitchId]) -> Result<u6
 
 /// [`require_enabled`] on the canonical owner state of this boot session.
 pub fn require_enabled_here(needed: &[SwitchId]) -> Result<u64, String> {
-    let dir = canonical_state_dir()?;
+    let dir = canonical_state_dir()
+        .map_err(|e| format!("CONTROL_STATE_UNREADABLE: {e}; every switch DISABLED"))?;
     let boot = boot_session().map_err(|e| format!("{e}; every switch DISABLED"))?;
     require_enabled(&dir, &boot, needed)
 }
@@ -1386,7 +1466,8 @@ pub fn buy_usage(dir: &Path, now_ms: u64) -> Result<BuyUsage, String> {
 
 /// [`Store::consume_buy_attempt`] on the canonical owner state.
 pub fn consume_buy_attempt_here(attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
-    Store::open(canonical_state_dir()?, KEEP_GENERATIONS)?.consume_buy_attempt(attempt_id, now_ms)
+    let dir = canonical_state_dir().map_err(|e| format!("BUY_ATTEMPT_LIMIT_UNREADABLE: {e}"))?;
+    Store::open(dir, KEEP_GENERATIONS)?.consume_buy_attempt(attempt_id, now_ms)
 }
 
 /// Source-mode generations the store keeps besides the current one (one
@@ -1406,11 +1487,7 @@ impl Store {
     ) -> Result<Self, String> {
         let dir = dir.into();
         for d in [dir.clone(), dir.join("generations"), dir.join("receipts")] {
-            match fs::DirBuilder::new().mode(0o700).create(&d) {
-                Ok(()) => {}
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(format!("{}: {e}", d.display())),
-            }
+            create_durable_dir(&d)?;
             if !fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir()) {
                 return Err(format!("{} is not a real directory", d.display()));
             }
@@ -1490,19 +1567,22 @@ impl Store {
     /// or a crash can only over-count, never under-count.
     pub fn consume_buy_attempt(&self, attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
         use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
-        if !safe_id(attempt_id) {
-            return Err("the attempt ID is not a safe identifier".into());
+        // The G0.7 runner's attempt ID rule (the slot files are named by
+        // their number, the ID is only their content).
+        if !(1..=128).contains(&attempt_id.len())
+            || attempt_id.starts_with(['.', '-'])
+            || !attempt_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Err("the attempt ID is not a valid attempt identifier".into());
         }
         let g = self.current()?;
         let limit = g.buy_attempts_per_day();
         let day = BuyDay::at(now_ms);
         let day_dir = buy_day_dir(&self.dir, &day);
         for d in [self.dir.join("buy-attempts"), day_dir.clone()] {
-            match fs::DirBuilder::new().mode(0o700).create(&d) {
-                Ok(()) => {}
-                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(format!("{}: {e}", d.display())),
-            }
+            create_durable_dir(&d)?;
         }
         let taken = buy_slots(&day_dir)?;
         if let Some((slot, _)) = taken.iter().find(|(_, a)| a.as_deref() == Some(attempt_id)) {
@@ -1586,7 +1666,11 @@ impl Store {
             effective: current.effective_of(entity),
         };
         if current.request_id.as_deref() == Some(request_id) {
-            // Crash recovery: the generation names this request, the receipt was lost.
+            // Crash recovery: the generation names this request, the receipt
+            // was lost; only the same payload is that request.
+            if current.requested_of(entity) != requested {
+                return Err("the request ID already belongs to another request".into());
+            }
             receipt.outcome = "APPLIED";
         } else if current.generation == expected_generation {
             let boot = self.boot()?.to_string();
@@ -1618,9 +1702,15 @@ impl Store {
                     receipt.generation = next.generation;
                     receipt.effective = next.effective_of(entity);
                 }
-                // Another writer took this generation first: stale.
+                // Another writer took this generation first: stale, unless it
+                // was this very request (an identical twin, e.g. CLI and GUI).
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                     let now = self.current()?;
+                    if now.request_id.as_deref() == Some(request_id)
+                        && now.requested_of(entity) == requested
+                    {
+                        receipt.outcome = "APPLIED";
+                    }
                     receipt.generation = now.generation;
                     receipt.effective = now.effective_of(entity);
                 }
@@ -2503,6 +2593,53 @@ mod tests {
         });
         assert_eq!(ok, 3);
         assert_eq!(buy_usage(&dir, 1).unwrap().used, 3);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review 27.10. L4: a lost receipt is recovered only for the same
+    /// payload; an identical twin request that loses the generation race
+    /// still reports APPLIED.
+    #[test]
+    fn receipts_are_recovered_only_for_the_same_request() {
+        let (dir, s) = session("receipt-recovery", "boot-1");
+        s.request("x", SwitchId::Send, Mode::Enabled, 0, 1).unwrap();
+        fs::remove_file(dir.join("receipts/x.dbrec")).unwrap();
+        assert!(
+            s.request("x", SwitchId::Send, Mode::Disabled, 0, 2)
+                .unwrap_err()
+                .contains("another request")
+        );
+        let r = s.request("x", SwitchId::Send, Mode::Enabled, 0, 3).unwrap();
+        assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
+        let outcomes: Vec<&str> = std::thread::scope(|scope| {
+            let runs: Vec<_> = (0..6)
+                .map(|_| {
+                    let s = &s;
+                    scope.spawn(move || {
+                        s.request("twin", SwitchId::Arm, Mode::Enabled, 1, 4)
+                            .unwrap()
+                            .outcome
+                    })
+                })
+                .collect();
+            runs.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        assert!(outcomes.iter().all(|o| *o == "APPLIED"), "{outcomes:?}");
+        assert_eq!(s.current().unwrap().generation, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review 27.10. L6: the daily limit takes the G0.7 runner's attempt IDs.
+    #[test]
+    fn the_daily_limit_takes_the_runners_attempt_ids() {
+        let (dir, s) = session("attempt-ids", "boot-1");
+        s.request("bl", Entity::BuyLimit, Mode::PerDay(3), 0, 1)
+            .unwrap();
+        assert!(s.consume_buy_attempt("g07.attempt_1-a", 1).is_ok());
+        for bad in ["", ".x", "-x", "a/b", &"a".repeat(129)] {
+            assert!(s.consume_buy_attempt(bad, 1).is_err(), "{bad}");
+        }
+        assert!(s.consume_buy_attempt(&"a".repeat(128), 1).is_ok());
         fs::remove_dir_all(dir).unwrap();
     }
 

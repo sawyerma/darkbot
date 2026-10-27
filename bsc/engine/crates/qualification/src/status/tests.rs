@@ -1431,6 +1431,19 @@ fn the_wallet_and_economic_switches_are_projected_typed() {
             .warnings
             .contains(&"CONTROL_SWITCHES_RESET_BY_RESTART".to_string())
     );
+    // The raw switch and setting leaves never travel (typed only).
+    let raw = s
+        .monitoring
+        .records
+        .iter()
+        .find(|r| r.schema == "darkbot.bsc.source-modes.v1")
+        .unwrap();
+    assert!(raw.fields.iter().any(|f| f.name.starts_with("sources[")));
+    assert!(
+        !raw.fields
+            .iter()
+            .any(|f| f.name.starts_with("switches[") || f.name.starts_with("settings["))
+    );
     // A state that does not decode: every switch BLOCKED, never ENABLED.
     fs::write(
         run.join(format!("bsc-sources/generations/{:020}.dbrec", 3)),

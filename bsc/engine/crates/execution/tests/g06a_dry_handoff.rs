@@ -1104,17 +1104,27 @@ fn hex_bytes(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Plan 27.10.: the DRY harness's native switch check, run as the terminal
-/// runs it, against a real owner state at `$HOME/.darkbot/run/bsc-sources`:
-/// refused while a needed switch is DISABLED, while the state is missing and
-/// for an ENABLE of an earlier boot session; accepted only with every
-/// needed switch ENABLED in this session.
+/// Plan 27.10. (review 27.10. M1): the DRY harness's native switch check,
+/// run as a terminal runs it, honors only the owner state under the
+/// account home. A self-made state with every needed switch ENABLED under
+/// another HOME (written by the owner's own API, as the CLI could with
+/// another `--state`) is refused, never read.
 #[test]
-fn the_switch_check_reads_the_canonical_owner_state_of_this_boot() {
+fn the_switch_check_never_honors_a_state_under_another_home() {
     use darkbot_bsc_execution::sources::{Mode, Store, SwitchId};
     let home = std::env::temp_dir().join(format!("g06a-switch-home-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(home.join(".darkbot/run")).unwrap();
+    let store = Store::open(home.join(".darkbot/run/bsc-sources"), 8).unwrap();
+    store.restart(1).unwrap();
+    for (g, id) in [SwitchId::WalletLauncher, SwitchId::WalletBuyer, SwitchId::Sign]
+        .into_iter()
+        .enumerate()
+    {
+        store
+            .request(&format!("t-{g}"), id, Mode::Enabled, g as u64, 2)
+            .unwrap();
+    }
     let check = |ids: &[&str]| {
         Command::new(HANDOFF)
             .env_clear()
@@ -1125,65 +1135,14 @@ fn the_switch_check_reads_the_canonical_owner_state_of_this_boot() {
             .output()
             .unwrap()
     };
-    let needed = ["BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER", "BSC_ECON_SIGN"];
-    // No owner state at all: every switch DISABLED.
-    let out = check(&needed);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("BSC_WALLET_LAUNCHER DISABLED"));
-    let state = home.join(".darkbot/run/bsc-sources");
-    std::fs::create_dir_all(home.join(".darkbot/run")).unwrap();
-    let store = Store::open(&state, 8).unwrap();
-    store.restart(1).unwrap();
-    let mut g = 0;
-    for id in [SwitchId::WalletLauncher, SwitchId::WalletBuyer] {
-        store
-            .request(&format!("t-{g}"), id, Mode::Enabled, g, 2)
-            .unwrap();
-        g += 1;
-    }
-    // SIGN still DISABLED: refused, and only SIGN is named.
-    let out = check(&needed);
+    let out = check(&["BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER", "BSC_ECON_SIGN"]);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(2), "{err}");
     assert!(
-        err.contains("BSC_ECON_SIGN DISABLED") && !err.contains("BSC_WALLET"),
+        err.contains("CONTROL_STATE_UNREADABLE: HOME is not the account home"),
         "{err}"
     );
-    store
-        .request("t-sign", SwitchId::Sign, Mode::Enabled, g, 3)
-        .unwrap();
-    let out = check(&needed);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout),
-        format!("controls=ENABLED generation={}\n", g + 1)
-    );
-    // A write in another boot session carries every ENABLED switch over
-    // DISABLED; switches ENABLED in that session never count in this one.
-    let other = Store::open_in_session(&state, 8, Ok("an-earlier-boot".into())).unwrap();
-    let mut n = g + 1;
-    for id in [SwitchId::WalletLauncher, SwitchId::WalletBuyer, SwitchId::Sign] {
-        other
-            .request(&format!("t-old-{n}"), id, Mode::Enabled, n, 4)
-            .unwrap();
-        if n == g + 1 {
-            let carried = Store::open_in_session(&state, 8, Ok("an-earlier-boot".into()))
-                .unwrap()
-                .current()
-                .unwrap();
-            assert_eq!(carried.switch(SwitchId::WalletBuyer).requested, Mode::Disabled);
-        }
-        n += 1;
-    }
-    let out = check(&needed);
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(err.contains("BSC_ECON_SIGN BLOCKED (RESET_BY_RESTART)"), "{err}");
+    assert!(out.stdout.is_empty());
     // An unknown switch name is refused before anything is read.
     assert_eq!(check(&["BSC_WALLET_OTHER"]).status.code(), Some(2));
     std::fs::remove_dir_all(&home).unwrap();

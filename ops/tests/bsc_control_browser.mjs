@@ -194,11 +194,12 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> (await stateLine().innerText()).includes('NOT_RUNNING'),'C2 owner stopped on LIVE→BLOCKED');
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  // Plan 27.10.: the two independent native wallet switches (Wallets) and the economic switches (Launch / BUY),
- // DISABLED initially; enabled for this test and disabled again. A terminal runner's check
- // (`bsc_runtime control require`, the library every Mainnet path calls) reads the same owner state:
- // HOME/.darkbot/run is this isolated run directory here.
+ // DISABLED initially; enabled for this test and disabled again. The native check every Mainnet path calls
+ // (`bsc_runtime control require`) reads this isolated owner state explicitly (`--state`); the runners
+ // themselves read only the account's state, and a HOME pointing at this one is refused (below).
  mkdirSync(`${dir}/home/.darkbot`,{recursive:true});symlinkSync(`${dir}/run`,`${dir}/home/.darkbot/run`);
- const requireSwitches=(...ids)=>{try{return {code:0,out:execFileSync(`${dir}/app/current/bsc_runtime`,['control','require',...ids],{env:{PATH:'/usr/bin:/bin',HOME:`${dir}/home`},encoding:'utf8'})};}catch(e){return {code:e.status,out:String(e.stdout)};}};
+ const check=(args,env)=>{try{return {code:0,out:execFileSync(`${dir}/app/current/bsc_runtime`,['control','require',...args],{env,encoding:'utf8'})};}catch(e){return {code:e.status,out:String(e.stdout)};}};
+ const requireSwitches=(...ids)=>check(['--state',`${dir}/run/bsc-sources`,...ids],{PATH:'/usr/bin:/bin'});
  const switchLine=label=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+label+'$')})}).first();
  // The effective state badge itself (the hint text names DISABLED in any case).
  const switchState=async label=>(await switchLine(label).locator('.bsc-state').innerText()).trim();
@@ -218,6 +219,8 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  assert.equal(await switchState('Buyer wallet switch'),'DISABLED','Buyer independent: still DISABLED');
  r=requireSwitches('BSC_WALLET_LAUNCHER');assert(r.code===0&&r.out.includes('controls=ENABLED'),'terminal runner sees the GUI ENABLE: '+JSON.stringify(r));
  r=requireSwitches('BSC_WALLET_LAUNCHER','BSC_WALLET_BUYER');assert(r.code===2&&r.out.includes('BSC_WALLET_BUYER DISABLED')&&!r.out.includes('BSC_WALLET_LAUNCHER DISABLED'),'buyer still refused: '+JSON.stringify(r));
+ // Review 27.10. M1: a runner whose HOME points at this (ENABLED) state still refuses: only the account's state counts.
+ r=check(['BSC_WALLET_LAUNCHER'],{PATH:'/usr/bin:/bin',HOME:`${dir}/home`});assert(r.code===2&&r.out.includes('HOME is not the account home'),'foreign HOME refused: '+JSON.stringify(r));
  // Terminal → GUI: the same owner request from darkbotctl reaches the Wallets tab with its request id.
  execFileSync(`${root}/ops/darkbotctl`,['bsc','source','request','BSC_WALLET_BUYER','ENABLED',String(await gen()),'e2e-cli-buyer'],{env:process.env,encoding:'utf8'});
  await until(async()=> (await switchState('Buyer wallet switch'))==='ENABLED','CLI ENABLE of the buyer pushed');
@@ -332,5 +335,5 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the terminal runner check on the same state (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the native check on the same state, a foreign HOME refused (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

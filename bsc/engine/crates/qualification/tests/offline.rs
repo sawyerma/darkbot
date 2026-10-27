@@ -781,9 +781,10 @@ fn the_q5a_probe_refuses_without_the_send_switch() {
         .unwrap();
     assert_eq!(out.status.code(), Some(3));
     let err = String::from_utf8_lossy(&out.stderr);
+    // A HOME other than the account home is never the switch state.
     assert!(
-        err.contains("refused by the native switches: CONTROL_DISABLED")
-            && err.contains("BSC_ECON_SEND DISABLED")
+        err.contains("refused by the native switches: CONTROL_STATE_UNREADABLE")
+            && err.contains("HOME is not the account home")
             && err.contains("nothing sent"),
         "{err}"
     );

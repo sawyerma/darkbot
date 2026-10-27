@@ -71,3 +71,9 @@ export function buyLimitRow(l: BuyAttemptLimitView | undefined): BuyLimitRow {
 export function limitInputOk(text: string): boolean {
   return /^(0|[1-9][0-9]{0,9})$/.test(text) && BigInt(text) <= 4294967295n;
 }
+
+/** A mode button is locked while the switch already holds that mode; an ENABLED of an earlier boot
+ *  (effective BLOCKED RESET_BY_RESTART) can be requested again in this boot. */
+export function modeHeld(row: SwitchRow, mode: string): boolean {
+  return row.requested === mode && !(row.effective === "BLOCKED" && row.blockReason === "RESET_BY_RESTART");
+}

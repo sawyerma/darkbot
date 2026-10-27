@@ -891,6 +891,26 @@ mod tests {
         assert!(source.rfind("&buyer_key,").unwrap() < dropped);
     }
 
+    /// Plan 27.10. (review 27.10. L9): the native switch check (both
+    /// wallets and SIGN, refusal = panic before any signature) sits after
+    /// the keys left the environment and before the first signature.
+    #[test]
+    fn the_native_switches_are_checked_before_the_first_signature() {
+        let source = include_str!("g06a_self_launch_bundle.rs");
+        let source = &source[..source.find(concat!("#[cfg(test)]\n", "mod tests")).unwrap()];
+        let main = &source[source.find("fn main()").unwrap()..];
+        let keys = main.find("unsafe { take_keys() }").unwrap();
+        let check = main.find("require_enabled_here(&[").unwrap();
+        let first_sign = main.find("sign_legacy(").unwrap();
+        assert!(keys < check && check < first_sign);
+        let call = &main[check..first_sign];
+        for id in ["WalletLauncher", "WalletBuyer", "Sign"] {
+            assert!(call.contains(&format!("SwitchId::{id},")), "{id}");
+        }
+        assert!(call.contains("panic!(\"DRY SIGN refused: {refusal}\")"));
+        assert_eq!(main.matches("require_enabled_here(").count(), 1);
+    }
+
     /// The projection bodies are byte-identical to G0.7's golden wire format
     /// (crates/execution .../builder_submission.rs).
     #[test]

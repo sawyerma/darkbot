@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ECONOMIC_SWITCHES, SWITCHES_UNAVAILABLE, buyLimitRow, economicRows, limitInputOk, summary, switchRow } from "./switches";
+import { ECONOMIC_SWITCHES, SWITCHES_UNAVAILABLE, buyLimitRow, economicRows, limitInputOk, modeHeld, summary, switchRow } from "./switches";
 import type { ControlSwitchView } from "./types";
 
 const sw = (id: string, over: Partial<ControlSwitchView> = {}): ControlSwitchView =>
@@ -41,5 +41,11 @@ describe("BSC wallet and economic switches (plan 27.10.)", () => {
     expect(row).toMatchObject({ available: true, summary: "1 of 3 used on 2026-10-27 (UTC) · 2 remaining", receipt: "lim @ generation 8" });
     for (const ok of ["0", "10", "4294967295"]) expect(limitInputOk(ok)).toBe(true);
     for (const bad of ["", "-1", "01", "1.5", "x", "4294967296", " 3"]) expect(limitInputOk(bad)).toBe(false);
+  });
+  it("an ENABLED of an earlier boot can be requested again; a held mode is locked", () => {
+    const held = switchRow("BSC_WALLET_BUYER", sw("BSC_WALLET_BUYER", { requested: "ENABLED", effective: "ENABLED" }));
+    expect([modeHeld(held, "ENABLED"), modeHeld(held, "DISABLED")]).toEqual([true, false]);
+    const reset = switchRow("BSC_WALLET_BUYER", sw("BSC_WALLET_BUYER", { requested: "ENABLED", effective: "BLOCKED", blockReason: "RESET_BY_RESTART" }));
+    expect([modeHeld(reset, "ENABLED"), modeHeld(reset, "DISABLED")]).toEqual([false, false]);
   });
 });
