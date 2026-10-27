@@ -39,6 +39,84 @@
 
 **Gesamteinordnung:** Zahlreiche **lokale** Teilmessungen PASS; **kein realer G0.7 Mainnet-Kauf**, **kein echter G0.8 Token-Erwerbs-/Ordering-/Kosten-PASS**, **kein realer SELL**, **kein belegter Netto-LIVE-Profit**, **kein original-bezeugtes physisches `T_buy−T0 <1 ms`**.
 
+## 2a. Softwaretest- und Integrationsinventar – nachträglich vollständig nachgetragen (27.10.2026)
+
+**Korrektur zum Erstentwurf:** Die Abschnitte M01–M18 erfassen schwerpunktmäßig *physikalische Messwerte und Markt-/PAPER-Ergebnisse*. Sie sind **kein vollständiges Verzeichnis aller durchgeführten Softwaretests**. Claude hat erheblich mehr getestet. Die folgende Tabelle erfasst die in den bestehenden `STATUS.md`-, `EVIDENCE.md`-, Phase-Gate- und Evidence-Verzeichnissen **konkret dokumentierten Testpakete**. In diesem Dokument bedeutet `LOCAL_PASS` **„auf dem bezeichneten historischen Commit mit PASS protokolliert“**, nicht „von diesem read-only GitHub-Audit erneut auf dem Nutzer-Mac ausgeführt“. `INTEGRATION_PASS` schließt tatsächliche übergreifende Prozesse ein; `RELEASE_PASS` den gebauten Kandidaten. `REVIEW_PASS` ist eine separate Reviewentscheidung. `PASS` ist nie vom historischen Commit auf den neuesten Commit vererbbar.
+
+**Wesentliche Referenzen:**
+- [`STATUS.md`](STATUS.md), Fortschritt Pakete 0–9, Gate 0, „Technische Gesamtbetriebsabnahme“ und „Release-Kandidat“.
+- [`EVIDENCE.md`](../3_BEWEISE/EVIDENCE.md), Protokolle R1–R8 (§4), R9–R13 (§6), C1.5–C1.9/Go-Rust-Interop (§7).
+- [`GATE0_TESTPLAN_SHORT.md`](GATE0_TESTPLAN_SHORT.md), G0.1–G0.8 und historischer DRY.
+- [`bsc/native/evidence/c1/`](../../native/evidence/c1/), insbesondere `c1-10-gates-20261026T003339Z/{common-rust.txt,go-common.txt,interop.txt,c1-*.txt}` und `c1-10-freeze-818525b1/`.
+- [`bsc/native/evidence/p8/recovery_1793074269302/README.md`](../../native/evidence/p8/recovery_1793074269302/README.md), der tatsächlich gestartete Release-Kandidat `8f26b02a`.
+- [`bsc/native/evidence/h/live_strategy_1793049942243/README.md`](../../native/evidence/h/live_strategy_1793049942243/README.md), Replays und PAPER-Wirtschaft.
+- [`ops/tests/bsc_control_test.py`](../../../ops/tests/bsc_control_test.py), reale Gateway/Reporter/Browser-E2E-Kette, enthält vor dem Browser einen **ignored, einzeln gestarteten, externen G0.8-RPC-Test**.
+
+### 2a.1 Aktueller dokumentierter Referenz-Release – **SHA `8f26b02a`** (Paket 8/9, 27.10.)
+
+| Test-ID | Testgruppe / tatsächlich dokumentierter Umfang | Ergebnis | Status auf `8f26b02a` | Originalquelle / Vorbehalt |
+|---|---|---|---|---|
+| T01 | Rust **gesamter BSC-Engine-Workspace**, `cargo test --offline --no-fail-fast --workspace --all-features` | **84 Suiten; 1.339 PASS, 0 FAIL, 22 ignored** | **LOCAL_PASS** | STATUS Gesamtbetriebsabnahme §Tests; 22 ignored = **NOT_RUN**, nicht 22 PASS |
+| T02 | Gateway `cargo test` | **74 PASS** | **LOCAL_PASS** | STATUS §Tests; zählt getrennt von BSC Rust-Workspace |
+| T03 | Frontend/Vitest | **113 PASS** | **LOCAL_PASS** | STATUS §Tests; nicht mit Playwright vermischen |
+| T04 | BSC Browser-E2E im Debug-Profil, echte isolierte Native/Reporter/Gateway/React-Pfade | **1 kompletter Durchlauf PASS** | **INTEGRATION_PASS** | STATUS §Integration, [E2E-Harness](../../../ops/tests/bsc_control_test.py), keine globale Mainnet-LIVE-Ausführung |
+| T05 | BSC Browser-E2E im Release-Profil mit `darkbotctl build`-Artefakten | **2 komplette Durchläufe PASS** | **INTEGRATION_PASS** | STATUS §Integration; der Harness hat zusätzlich einen read-only G0.8-RPC-Schritt, der separat fehlgehen kann |
+| T06 | F0-VAR öffentliches BSC-Feld-/Datenflussinventar | **2.603 geprüfte Felder, PASS** | **INTEGRATION_PASS** | STATUS §Integration. **Felder sind nicht 2.603 einzelne Testfälle** |
+| T07 | Release-Build `ops/darkbotctl build`, Frontend, Gateway, BSC-Artefakte | **Build PASS** | **RELEASE_PASS** | STATUS §Release; vollständige Manifest-/Schema-/Binary-SHAs gelistet |
+| T08 | `python3 ops/release_manifest.py`: Release-Identität und Koordination | **PASS** | **RELEASE_PASS** | STATUS §Release-Build/Manifest; historischer SHA `8f26b02a`, kein erneuter Build auf Dokumentations-HEAD |
+| T09 | Rust `clippy -D warnings` (im tatsächlich bezeichneten Scope: runtime ohne Features) und Build-Checks | **PASS** | **LOCAL_PASS** | STATUS §Tests; ausdrücklich keine Behauptung „alle denkbaren Feature-Kombinationen Clippy-PASS“ |
+| T10 | Live-**read-only SHADOW**-Runtime mit echter öffentlicher WSS-Quelle und nativer PAPER-Identity | gestartet, 150 s Run vor kontrolliertem Kill; zweiter 150 s Run geordnet beendet | **INTEGRATION_PASS** (definierter Start-/Stop-Scope) | `p8/recovery_1793074269302/README.md`; nicht Mainnet-LIVE |
+| T11 | `SIGKILL` → launchd Restart → C2-Checkpoint/64 Blöcke RESTORED | **PASS** | **INTEGRATION_PASS** | `p8/recovery_1793074269302/`, neuer Run nach Kill, State wiederhergestellt |
+| T12 | Erfolgreich beendeter Restart-Run: `replay-proof`, `capture-quality`, `strategy-replay` | Replay PASS, Capture **CLEAN**, Strategy Replay **3/3 PASS** | **INTEGRATION_PASS** | Phase-F-`CLEAN/MET` **nicht** erfüllt, weil native geth-Quelle fehlte |
+| T13 | Erwartete Negativfälle im durch `SIGKILL` abgebrochenen ursprünglichen Run | replay-proof **FAIL**, capture **NOT_CLEAN**, Strategy **INCOMPLETE**, Census **UNTERMINATED** | **FAIL_EXPECTED / korrekt erkannt** | Kein Fehler des Neustart-Tests; **den gekillten Run niemals als CLEAN/PASS darstellen** |
+| T14 | Four-Drift/Classic im restarted Release-Run | Drift Guard `MATCH`, **3 Classic-Kandidaten**; Token ableitbar/actionable **nicht** behauptet; C3 `DEPLOYMENT_DRIFT` | **INTEGRATION_PASS** für korrektes Fail-closed | `p8/recovery_1793074269302/README.md`; kein Four-BUY |
+| T15 | Unabhängiger Gesamt-Review Paket 8 | Durchgang 1 **FAIL**, Durchgang 2 PASS, Durchgang 3 **PASS** (H1/M1/M2/LOW-Funde korrigiert) | **REVIEW_PASS** (nach Fixes) | STATUS §Reviewer; Details bei `b6035809`, behobene Commits in STATUS |
+| T16 | Release-Kandidat Paket 9: Status READ_ONLY/SHADOW/PAPER | „TECHNISCH FERTIG — EXTERNAL_BLOCKED“ laut STATUS | **RELEASE_PASS** nur für diesen Betriebs-Scope | Kein `READY_FOR_LIVE` und **keine** G0.7/G0.8/Mainnet-Exekution nachgewiesen |
+
+### 2a.2 Ältere, zusätzliche Testserien – **historisch separat**, keine Summierung mit T01–T16
+
+| Test-ID | Datum/Commit oder Serie | Prüfung | Dokumentiertes Ergebnis | Status und Beleg |
+|---|---|---|---|---|
+| T17 | R1–R8, 16.10. | BSC-Rust-Workspace mit G0.7-Feature, `--no-fail-fast` | **426 PASS, 0 FAIL, 5 ignored** | **LOCAL_PASS** · `EVIDENCE.md` §4 T6 |
+| T18 | R9–R13, 16.10. | Regressionslauf nach Umbenennung und Modulgrenzen, zwei Läufe | jeweils **426 PASS, 0 FAIL, 5 ignored** | **LOCAL_PASS** · `EVIDENCE.md` §6 U1/U3 |
+| T19 | R1–R8, Nachtest `cargo fmt` | Runner/Qualifier/Fastlane-Regression | **154 PASS, 0 FAIL** | **LOCAL_PASS** · `EVIDENCE.md` §4 T8 |
+| T20 | R1–R8 | Offline-Smoke: Quote, DRY-Konfiguration, G0.7/G0.8-No-Input-Rejection und Shell-Guards | **17/17 PASS** | **LOCAL_PASS** · `EVIDENCE.md` §4 T9 |
+| T21 | R1–R8 | Gespeicherte DRY-Quote-Byte-Parität + Default | **8/8 PASS** | **LOCAL_PASS** · `EVIDENCE.md` §4 T3 |
+| T22 | R9–R13 | C1-Qualifikationstools `python3 -m unittest test_c1_qualification_tools` | **20/20 PASS** | **LOCAL_PASS** · `EVIDENCE.md` §6 U2 |
+| T23 | R1–R8 | G0.7 Guard-/No-Send-Lib-Fokus | 20+6, später 21+6+4 PASS nach jeweiligem Stand | **LOCAL_PASS** · `EVIDENCE.md` §4 T2/T4; historisch unterschiedliche Testversionen |
+| T24 | C1 Wire V2 Rev2, 16.10. | `geth_ipc`: Unit/Doctest, C1.5 Allocation, C1.8 Stress | Lib **122 PASS / 5 ignored**, Allocation 1, Stress 8, Doctests 1+2 PASS | **LOCAL_PASS** · `EVIDENCE.md` §7 C1-T1/T5/T8 |
+| T25 | C1 Wire V2 Rev2, 16.10. | **Go `-race`** nur DarkBot Fastlane-Overlay, Pin `cdb7548b` | **86 PASS, 0 FAIL, 5 SKIP** | **LOCAL_PASS** · `EVIDENCE.md` §7 C1-T2; SKIP nicht PASS |
+| T26 | C1 §7 | Rust↔Go Lifecycle- und Ingress-Interop `c13` / `c14` vor und nach Modulzerlegung | **beide PASS**, vor/nach | **INTEGRATION_PASS** · `EVIDENCE.md` §7 C1-T3/4/6/7; Gate-Protokoll `c1-10-gates-20261026T003339Z/interop.txt` zeigt Exit 0 |
+| T27 | C1 §7 | Vollständige frühe Workspace-Regression **nach** C1-Integration | **479 PASS, 0 FAIL, 5 ignored** | **LOCAL_PASS** · `EVIDENCE.md` §7 C1-T9 |
+| T28 | C1 Wire V2 §7 | Binäre HOT0-Codegen-/ABI-Vergleichbarkeit bei Modulzerlegung | **98/98 Crate-Funktionen instruktionsidentisch**, 53 API-Elemente unverändert | **LOCAL_PASS** (Maschinencode-Vergleich) · `EVIDENCE.md` §7 |
+| T29 | C1.9b Testnet | Gepinnter geth / ETH/68 Hook, `AcceptTxs` Testnet-spezifisch | **1/1 kontrollierter Launch erfasst**, 0 misses, 0 invalid records, 0 lane faults; Analyzer PASS | **INTEGRATION_PASS** auf **Chapel Chain 97** · `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md` und Gate-0-Testplan, **kein Mainnet-Ingress-PASS** |
+| T30 | C1.10, `818525b1` Freeze | Finale C1.5–C1.9 Go/geth-/Rust-/Interop-/fmt-/Clippy-Gates und Build-Identität | **Phase-Gate PASS / FROZEN**; gezielte Prüflogs mit Exitcodes versioniert | **REVIEW_PASS + LOCAL_PASS** · `STATUS.md` Paket 3; `c1-10-gates-20261026T003339Z/` und `c1-10-freeze-818525b1/` |
+| T31 | Gepinnter upstream geth Race-Vergleich | Breite Upstream-Race-Suites `./eth`, `./eth/protocols/eth` | **FAIL auf aktuellem und sauberem Pin**, dokumentiert u.a. 55 vs. 51 Race-Warnungen | **FAIL_BASELINE_PRESENT**, **nicht racefrei** und **nicht als behobener DarkBot-Defekt** bewerten · `GATE0_TESTPLAN_SHORT.md`, `EVIDENCE.md`/C1-Review |
+| T32 | 17.10. historischer G0.7/G0.8-M1–M8-Abgleich | Binärer Codec/Import, Guard/No-Send, Builder-Probe, Readiness, Verifier, Timing, Binär-Kompatibilität | **129 gezielte PASS, 0 FAIL**, Teile erneut getestet (spätere Berichte ebenfalls) | **LOCAL_PASS** · `STATUS.md` „Current checkpoint“ 17.10.; nicht echter BUY |
+| T33 | 16.10. G0.7-Härtung | Runner-Lib, Binary, acceptance guard, g07_no_send, echte G0.8-Binary-Kompatibilität | **21/21 + 20/20 + 6/6 + 10/10 + 2/2 PASS**, unabhängig dokumentierte Regressionen | **LOCAL_PASS** · `STATUS.md` §2a, `g07_no_send.rs`, `acceptance_guard.rs`; **ältere Testversion** |
+| T34 | G0.6a DRY-1…DRY-4 | Binding von zwei Wallet-Rollen, Signaturbytes, lokale EVM-Simulation, Economics, Nonces und Null-Egress | **DRY PASS** | **LOCAL_PASS** · `GATE0_TESTPLAN_SHORT.md` und `STATUS.md`; neu qualifizieren bei relevanter Portal-/V5-Änderung |
+| T35 | G0.6a Shell-/Secrets-Provenienz | `test_g06a_dry_modes.py`, `test_g06a_key_hygiene.cjs`, `test_g06a_private_mode.cjs`, `test_g06a_shell_scope.py`, `test_g06a_state_pin.cjs` | Testdateien/gezielte Fixes vorhanden; **keine konsolidierte Einzel-PASS-Zahl** in aktuellem STATUS | **OPEN / COUNTS_UNVERIFIED**, bis Claude exakte Exitcodes/SHA dem Paket zuordnet; nicht 0 und nicht erfunden PASS |
+| T36 | G0.7 Native Readiness | V5-/Nonce-/Gas-/State-/Deployment-/Clock-/Budget-Check, `PASS_READ_ONLY` / `BLOCKED` / `STOP` getrennt | Historische read-only PASS- und aktuelle BLOCKED/STOP-Zustände dokumentiert | **LOCAL_PASS** für Guard-/Status-Differenzierung; **OPEN** für eine aktuelle grüne Mainnet-Readiness des neuen Versuchs · `STATUS.md` |
+| T37 | G0.8 Verifier gegen externe Historie | `g08_binary_records`, `g08_reads_g07_evidence`, `provenance_clock`, `js_dbrec_parity` | Testgruppen **im Repository vorhanden**, G0.8-Archiv-Qualifikation am 27.10. im STATUS `QUALIFIED` | **LOCAL_PASS** für dokumentierte interne Regressionen, **OPEN** für konkreten G0.7-Echtdurchlauf; einmalig `--ignored`-Real-RPC-Test ist **nicht** Teil des pauschalen 1.339-PASS |
+| T38 | Gateway-Commands / Source-Modes | Typisierte `bsc.readiness.start/stop`, Candidate und `bsc.source.mode.set`; Generation, Validierung, request/effective, Refusal | Bestandteil Gateway-74 und BSC-E2E, eigene Rust-Tests in `gateway/src/control.rs` vorhanden | **LOCAL_PASS / INTEGRATION_PASS** (bestehender Control-Scope) · Wallet-/Economy-Controls noch **OPEN** |
+| T39 | BSC Frontend-QA | BSC Status/Feldrendering, Readiness-/Candidate-/Source-Reiter und No-Polling-Integration | Bestandteil Frontend-113 / E2E und F0-VAR, historisch bestanden | **LOCAL_PASS / INTEGRATION_PASS**; **Wallet-Enable-Schalter noch nicht enthalten**, daher OPEN für neue UI |
+| T40 | Phase-Gates C2, C3, D, E | Native-State/Reorg/Recovery, C3 PAPER, Flap-Decoder, Four-Decoder | C2 PASS `f427cfa1`, C3 `cb9813c6`, D `d01ebd44`, E `531ddfcc` | **REVIEW_PASS** für eingefrorene technische Scopes · `STATUS.md` Pakete 4/5; Four verifiziertes ABI für Live weiter OPEN |
+| T41 | Phase-Gates F, G, H, I | Journal/Replay, Economics, Strategy SHADOW, PAPER/Transport | F PASS `88cc92b6`; G PASS `5e862699`; H PASS `2d4c5503`; I PASS `3b6275e9` + `bfc239e6` | **REVIEW_PASS** für technische Scopes · `STATUS.md` Pakete 6/7; externe LIVE-Voraussetzungen offen |
+| T42 | Phase F native Capture und Journal | Read-only WSS-Replay, Segmentierung, Recovery, Qualitätsklassifikation | E2E laut STATUS `baf5f0fa` PASS; Raw Evidence unter `bsc/native/evidence/f/live_capture_1793023912198/` | **INTEGRATION_PASS** (beobachteter Scope), **EXTERNAL_BLOCKED** Mainnet-geth/30-min native-Capture |
+| T43 | Phase H 60-min Strategy SHADOW | Marktdaten, reproduzierbare Strategy-Entscheidungen | **201/201 Replay-Ausgaben PASS**, 192 Launches; 3 geschlossene PAPER-Positionen, **3/3 Verlust** | **LOCAL_PASS** Replay / **FAIL** Gewinn-Scope · `h/live_strategy_1793049942243/README.md` |
+| T44 | G0.6 gleichzeitige PAPER-Launches, `BSC_C3_LATENCY_BURST` | k=1,2,4,8 künstlich gleichzeitige Launches, kein echter BUY | p99 letzte Position 258/521/1020/2020 µs; 4er- und 8er-Schwelle verletzt | **LOCAL_PASS** reproduzierbarer Test / **FAIL** synthetisches Ziel bei k≥4 · `g06/README.md` |
+| T45 | P8 CPU/RSS 60 min | Read-only SHADOW Release-Runtime 720 Samples | Ø16,3 % eines Kerns; RSS 148→451 MB | **LOCAL_PASS** Beobachtung / **OPEN** echte Dauerlauf- und Produktionshardwarequalifikation · `p8/perf_runtime_60min_20261027/README.md` |
+| T46 | BSC P8 Runtime Restart + Browser-/Journal-Verkettung | Launchd restart / neuer Run / C2 RESTORED / Strategy-Replay nach Browser-E2E | PASS dokumentiert am Release-SHA | **INTEGRATION_PASS** · `STATUS.md` + `ops/tests/bsc_control_test.py` |
+| T47 | Anschließend berichtete zwei rote Browser-E2E-Läufe | Fehlerort und Fehlerlogs derzeit **nicht** dem Testregister zugeordnet | **nicht nachgewiesen behoben** | **OPEN / REPRODUCE**; der reale RPC-`--ignored`-Prestep kann vor dem Browser scheitern. Kein unbelegtes „RPC-Last“ oder „Browser-Bug“ behaupten |
+| T48 | Neue Wallet- und wirtschaftliche Enable-/Disable-Controls + Tageslimit | Neues Auftragspaket 27.10., nicht Bestandteil des Release-Standes `8f26b02a` | **kein neuer Testbericht** | **NOT_RUN / OPEN** bis neuer nativer/CLI/Protobuf/Gateway/Frontend-Release-SHA und Abnahme |
+| T49 | **Echter G0.7/Mainnet-BUY, G0.8-Akquisition, reales SELL, Profit und T0-Witness** | Wirtschaftlicher Produktionsnachweis | **kein Mainnet-BUY / keine echte Verkaufskette / kein T0-Witness** | **NOT_RUN / EXTERNAL_BLOCKED**, keinesfalls durch lokale PASS-Zahlen ersetzen |
+
+**Kontrollsumme und Nicht-Doppelzählung:** T01 (**1.339**) umfasst die Rust-Suites seines spezifischen Commits; die älteren 426er/479er, G0.7-Guard-Suiten und C1-Fokus-Tests sind überwiegend **wiederholte/überschneidende Testfälle anderer Revisionen**. Sie dürfen **nicht** zu „mehreren Tausend einzigartigen Tests“ addiert werden. T02 (**74 Gateway**) und T03 (**113 Frontend**) sind zusätzliche getrennte Suiten. T04/T05 sind **drei ganze Browser-Durchläufe**, nicht drei einzelne Assertionen. T06 sind **2.603 Datenfelder**, keine 2.603 Tests. `ignored`, `SKIP`, `NOT_RUN`, fehlende Logs und bisherige negative Testfälle bleiben ausdrücklich sichtbar.
+
+**Was noch fehlt, um dieses Testinventar als wirklich vollständig und aktuell abzunehmen:** Claude muss für die *neuesten* Quelländerungen alle vorhandenen lokalen Test- und CI-Ausgaben einschließlich der 22 `ignored`, externen RPC-Smokes, separaten Python-/Node-Tests, Native-/Gateway-/Frontend-E2E und neuen Wallet-/Limit-Controls gegen den **gleichen finalen Git- und Release-SHA** abgleichen. Pro Testfamilie exakt `command, cwd, exit_code, count_pass, count_fail, count_ignored, run_id, git_sha, binary_sha, config_sha, evidence_path, status` aufnehmen. Auf dem neueren Dokumentations-HEAD ohne solche Läufe **kein automatisch geerbter PASS**.
+
+---
+
 ## 3. Fehlende Messungen – verbindliche PASS/FAIL/OPEN-Matrix
 
 | ID | Konkrete Messung / Daten je Versuch | Ziel / PASS-Kriterium | Stand | Was genau noch gemacht werden muss |
