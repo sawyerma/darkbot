@@ -6,6 +6,15 @@
 
 # DarkBot — Project 0 — Produktions-Phasenplan v4.5.2 (First Realized Profit)
 
+> **VERBINDLICHE REVISIONSEINTEILUNG (Nutzer, 27.10.2026) — REV.1.0 / REV.2.0 / REV.3.0.** Die REV-Markierungen gelten ausschließlich für noch offene Restarbeit. Bereits implementierter oder `OFFLINE_VERIFIED` Code bleibt vollständig erhalten; kein Rückbau, keine Neuentwicklung erledigter Funktionen.
+
+> **REV.1.0 = gesamtes bisher verbindliches Endprodukt vor Wirtschaftlichkeits-/Echtgeldnachweis.** Long-Tail UND Race im selben Rust-Core; S1-RACE/Binary-Geyser, Jito Single/Bundle/gRPC/Prewarm, alle Fundingklassen inkl. JIT-ExactIn, komplette C0-E1/H0/P7/p(win)/P4B, P6-MT/M4, Multi-Wallet/Reservierungen/Inventory/Rebalancing, DEC-01…16, Frontend/CLI/Gateway/Protobuf und P8/P9 mit Safe-LIVE, langem Dauerbetrieb und finalisiertem Netto-PnL bleiben REV.1.0-Pflicht. Die frühere Reihenfolge 'First Profit vor Gesamtfertigstellung' in §§0.6/7/13 und PHASENPLAN.json ist insoweit durch die neue Nutzerentscheidung ersetzt; ihre fachlichen Safety- und Abnahmekriterien bleiben bestehen.
+
+> **REV.2.0 = zusätzliche optionale Optimierungen** wie weitergehendes CPU-/SIMD-/PGO-/Cache-/Routing-/Provider-/Region-Tuning oder ein neuer spekulativer kostenloser Pre-Execution-Sensor nach messbarem Nutzen. **REV.3.0 = optionale hochkomplexe Spezialtechnik** wie eigener Raw-Shred-/Validator-Stack, Direct-TPU-/Leader-/QUIC-Spezialpfad, eigener zusätzlicher lokaler DEX-Router oder Kernel-/NIC-Spezialisierung. Bereits vorhandene Implementierungen bleiben erhalten.
+
+> **Alle bislang verpflichtenden K-Capability-Untersuchungen gehören REV.1.0 an; lediglich der bedingte neue produktive Spezialausbau ist REV.2.0/3.0.** Fachlich notwendige technische Vorabmessungen (z. B. C0-MO vor der evidenzbasierten MT6–MT10-Promotion) bleiben gültige Gates, nicht vorweggenommene Wirtschaftlichkeits- oder LIVE-Freigaben. Ohne echte Genehmigung und Evidence bleiben Mainnet-/Provider-/FREE_ONLY-/LIVE-/Signier-/Geld-/Langlaufaktionen NOT_RUN/BLOCKED; niemals PASS fingieren. `PHASENPLAN.md` bleibt fachliche Autorität, `BUGS.md` Statusautorität.
+
+
 > **VERBINDLICHER SPEICHERVERTRAG (16.10.2026; verschärft):** Project_0 nutzt intern im gesamten produktiven System ausschließlich native/typisierte Rust-Daten und binäre Ereignisse, Protokolle, Journale und Übergaben. JSON ist ausschließlich am unmittelbar notwendigen externen Solana-JSON-RPC-/WSS-Protokollrand zulässig; kein JSON-Value, JSON-Encode/Decode oder JSON-Text als produktives internes Datenmodell, Zwischenformat, Control-/Evidence-Format oder Primär-/Sekundärspeicher. Historische Beweise bleiben unverändert erhalten. Details und Vorrangregel am Dokumentende unter „Bindender JSON-FREE-INTERNAL-Vertrag“. Umsetzung und Qualifikation sind OFFEN; keine LIVE-Freigabe.
 
 > **VERBINDLICH: NUR PRIORITÄT UND ERSTER PILOTUMFANG GEÄNDERT (2026-10-13).** v4.5.2 **streicht, optionalisiert und verwirft keine** ursprünglich verpflichtende Phase, Capability oder Abnahme aus v4.5/v4.5.1. Race/Binary-Geyser, Prepared TX, Jito Single/Bundle/gRPC, Prewarm und Race-Benchmarks, JIT-ExactIn und alle Fundingklassen, vollständige Markt-/Chain-Qualifikation (C0-E1/Index/Strict), H0/Winner/Konkurrenz/P7/P4B, P6-MT/M4, persistente atomare Multi-Asset-/SOL-/Fee-/Tip-/Rent-Reservierungen, Inventar-Rebalancing, P8/P9, K-Mess-/Entscheidungsphase und Frontend **bleiben verbindlicher Entwicklungsumfang**. Profit-First verkürzt nur den für **einen** sicheren LIVE-Pilot benötigten Critical Path; kein Gate und keine LIVE-Freigabe werden dadurch vorweggenommen. Extern unmögliche kostenlose Fähigkeiten bleiben mit Evidence `EXTERNAL_BLOCKED`, nicht `DONE` oder gestrichen. Experimentelle K-Technik muss untersucht werden; ein Deployment ist weiterhin an Machbarkeit, wirtschaftliche Evidence, Safety und FREE_ONLY gebunden.
@@ -923,6 +932,8 @@ Landing Evidence:
 
 # 7. Gesamtphasenplan — FIRST PROFIT vor Ausbau
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Ältere First-Profit-vor-Vollausbau-Reihenfolge ersetzt; REV.1.0 umfasst alle bisher verpflichtenden Produktanforderungen.
+
 ```text
   BASELINE + TARGETED MARKET EVIDENCE
   P0/P1A + C0/H0 für genau eine belegte Mainnet-Opportunity
@@ -958,6 +969,8 @@ Diese Darstellung ist eine **Priorisierung und Scope-Abgrenzung**, kein Ersatz d
 ---
 
 # PHASE P0 — REFERENZ-, REUSE- UND LIZENZSTUDIE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -1140,6 +1153,8 @@ project_0/docs/evidence/P0_LICENSE_MATRIX.md
 
 # PHASE P1A — CURRENT MAINNET FREEZE
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Exakt feststellen, was **jetzt tatsächlich deployed** ist.
@@ -1195,6 +1210,8 @@ project_0/docs/manifests/CURRENT_MAINNET.md
 ---
 
 # PHASE P1B — UPCOMING 0.1.12 FREEZE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Status
 
@@ -1311,6 +1328,8 @@ project_0/docs/manifests/UPCOMING_0_1_12.md
 
 # PHASE C0 — MARKET- UND ACCOUNT-CENSUS
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Vor LIVE und vor unnötigem Aufwand quantitativ kennen:
@@ -1398,6 +1417,8 @@ project_0/docs/evidence/C0_MARKET_CENSUS.md
 ---
 
 # TRACK H0 — HISTORICAL LIQUIDATION INTELLIGENCE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -1535,6 +1556,8 @@ project_0/docs/evidence/H0_LIQUIDATIONS.md
 
 # PHASE S0 — FINAL NATIVE FOUNDATION
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Finales Rust-Fundament für Solana/Project 0 schaffen.
@@ -1593,6 +1616,8 @@ PASS nur wenn:
 
 # PHASE S1 — FINAL SOLANA INGRESS
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Eine provider-austauschbare Rust-Ingress-Schicht bauen, die zwei klar getrennte Production-Rollen unterstützt:
@@ -1629,6 +1654,8 @@ Nach dem Source-Adapter arbeiten die latency-kritischen Rust-Komponenten nur mit
 
 ## S1.2 RACE PRIMARY — `BinaryGeyserSource`
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 Yellowstone-/Geyser-kompatibler binärer Race-Production-Adapter.
 
 ```text
@@ -1655,6 +1682,8 @@ Mindestens:
 
 ### Race Source Gate
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 Race-LIVE ist nur erlaubt, wenn ein **Mainnet**-Binary-Source qualifiziert ist:
 
 - vollständige benötigte Daten;
@@ -1675,6 +1704,8 @@ Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 
 ### S1-08 FREE_ONLY-Binary-Quelle: verbindlicher Capability- und Abnahmevertrag (2026-10-22)
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 **Eigener Client, kein zweiter Bot:** `BinaryGeyserSource` wird als adapterneutrale Rust-Implementierung von `darkbot-solana::ingress::IngressSource` gebaut. Vorhandene `IngressEvent`-Typen, Canonical Owner, Provider-Budgets, Gap/Recovery und binäres Journal nutzen. Ein selbst programmierter gRPC-Client ist kein selbst betriebener validatornaher Geyser-Server und garantiert keinen schnelleren Upstream. Ein eigener Validator bleibt K/Infrastructure-Option, nicht Voraussetzung.
 
 **Erster FREE_ONLY-Mainnet-Kandidat:** PublicNode Yellowstone-gRPC (`https://solana.publicnode.com/`, laut Anbieter kostenloser API-Token). Tatsächlicher Zugang für benötigte Accounts, Transactions, Slots, Roots, Filter und Laufzeit-/Datenrate ist **NOT_RUN**, nicht S1-RACE PASS. Andere nachweislich kostenlose Binary-Feeds bleiben austauschbar. Keine automatische Paid-Alternative.
@@ -1688,6 +1719,8 @@ Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 **S1-RACE-Gate bleibt strikt:** Verbindliche Mainnet-Belege für komplette relevante State-/TX-/Slot-/Root-Daten, Freshness, Bank/Fork, v0/v1, Gap/Recovery und p50/p95/p99/Source-Kosten. Quellen auf derselben Hardware nur über nachweisbar gleiche Signatur/Slot/Account/Fork-Ereignisse und monotone Empfangszeit vergleichen. Unvergleichbare Werte als UNKNOWN, keine Anbieter-Benchmarkzahlen als eigener PASS. Ein kurzer Capability-Smoke ist kein Race- oder Vollmarkt-PASS. Fehlt eine dauerhaft brauchbare kostenlose Quelle: `EXTERNAL_BLOCKED`, Long-Tail/Premium bleibt unabhängig.
 
 ## S1.3 LONG-TAIL/PREMIUM PRODUCTION — `WsRpcControlSource`
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 `WsRpcControlSource` ist für folgende Rollen Production-zulässig:
 
@@ -1871,6 +1904,8 @@ Tickets:
 ---
 # PHASE S2 — FINAL CANONICAL SOLANA STATE
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Korrekter fork-aware Solana-State im RAM.
@@ -1946,6 +1981,8 @@ PASS nur wenn:
 
 # PHASE S3 — FINAL SOLANA EXECUTION CORE
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Den **kleinsten finalen Production-Execution-Core** bauen, der Long-Tail/Premium bis LIVE tragen kann und später Race-Adapter ohne Rewrite aufnehmen kann.
@@ -1996,9 +2033,13 @@ build
 
 ## S3.R — RACE EXTENSIONS — Vorbereitungen parallel erlaubt; Race-Promotion nur nach `S1-RACE PASS`
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 **Zweistufiger Gate-Vertrag v4.5.1:** Unabhängig von `S1-RACE PASS` dürfen FREE_ONLY-Zugangs-/Capability-Prüfung für Jito (ohne bezahlten Vertrag), Offline-Adapter-/Parser-/Serialization-Tests, Mock-Benchmarks, Prewarm-Design, deterministische Bench-Harnesses und kontrollierte read-only Netzwerkdiagnostik parallel laufen. Keine LIVE-Submission, keine echten kostenpflichtigen Requests, keine vorgezogene Race-Primary-Promotion. Produktiver Race-gRPC-/Prewarm-Einsatz, echte Race-Benchmarks unter Mainnet-Last und Race-LIVE bleiben an `S1-RACE PASS` und die bestehenden Submission-/Safety-Gates gebunden. Diese Tickets blockieren P2/P3/P4A/P5/T/P8-LT nicht.
 
 ### `JitoGrpcSubmitter`
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 **Vorarbeit vor `S1-RACE PASS`:** Kostenlosen Zugang/Capability prüfen, Adapter gegen lokale Fixtures/Mocks bauen und dessen API-/Encoding-/Version-/Tip-Semantik offline testen. **Produktive Race-Integration und echte Landingqualifikation erst nach `S1-RACE PASS`.**
 
@@ -2015,6 +2056,8 @@ Qualifikation:
 
 ### Race Prewarm Manager
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 Offline-/Mock-Design und lokale Worker-/Reconnection-Tests sind vor `S1-RACE PASS` parallel erlaubt. Erst nach `S1-RACE PASS` als realer produktiver Race-Prewarm:
 - Jito gRPC connections;
 - block-engine region state;
@@ -2022,6 +2065,8 @@ Offline-/Mock-Design und lokale Worker-/Reconnection-Tests sind vor `S1-RACE PAS
 - keine Handshakes/DNS nach Trigger.
 
 ### Race Submission Benchmark
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 Vergleicht zunächst:
 
@@ -2091,6 +2136,8 @@ Tickets RACE — `requires: S1-RACE PASS`:
 
 ---
 # PHASE S4 — CORE PARITY + PERFORMANCE BASELINE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -2183,6 +2230,8 @@ Race wird später auf demselben Core freigeschaltet; kein zweiter Health-/Econom
 
 ---
 # PHASE P2 — FINAL PROJECT-0 STATE ENGINE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -2310,6 +2359,8 @@ PASS nur wenn:
 ---
 
 # PHASE P3 — FINAL PROJECT-0 HEALTH ENGINE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -2449,6 +2500,8 @@ STOP
 ---
 
 # PHASE P4A — DETERMINISTIC PROFIT ENGINE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -2603,6 +2656,8 @@ Jede unterstützte Opportunity deterministisch und reproduzierbar bewertet.
 
 # PHASE P5 — FINAL RECEIVERSHIP EXECUTION PLANNER
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Aus einer wirtschaftlichen Opportunity einen exakt protocol-gültigen TX-Plan erzeugen.
@@ -2649,6 +2704,8 @@ Danach kein:
 - sonstiger Program Call.
 
 ## Routing
+
+> **REV.1.0 / REV.2.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Verpflichtende Routing-/JIT-/Exit-Pfade REV.1.0; zusätzliche Routen-/Quote-Cache-Feinoptimierung REV.2.0, komplett eigener zusätzlicher lokaler DEX-Router nur mit Messbeleg REV.3.0.
 
 Alle Pfade von Anfang an architektonisch vorhanden:
 
@@ -2776,6 +2833,8 @@ Jede unterstützte Klasse:
 
 # PHASE T — TAGGER
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Unhealthy, noch nicht wirtschaftliche Accounts früh markieren und denselben Account später automatisch bei `t_profitable` verarbeiten.
@@ -2826,6 +2885,8 @@ Kein kostenloser Fantasy-Wert.
 ---
 
 # PHASE P6 — FULL PRODUCTION SHADOW
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -2925,6 +2986,8 @@ Finaler Code erkennt, bewertet, plant und misst beide Opportunity-Klassen vollst
 
 
 ## C0-MO — UNFILTERED LIVE MARKET ECONOMICS (Evidence-Subgate)
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 **Status:** IMPLEMENTED (Code), MAINNET-LAUF AUSSTEHEND. Kein wirtschaftlicher PASS ohne realen Lauf im Measurement Ledger.
 
@@ -3391,6 +3454,8 @@ Konkurrierende Candidates dürfen nicht beide als executable gezählt werden, we
 
 ### P6-MT.12 Apple-M4 Runtime
 
+> **REV.1.0 / REV.2.0 – Revisionsmarkierung für den noch offenen Rest:** Volle Pflicht-M4-Laufzeit- und Latenz-Gates REV.1.0; zusätzliche nicht vertraglich geforderte Mikrooptimierung erst bei Messbedarf REV.2.0.
+
 Keine feste Kernzahl.
 
 Startup-Evidence:
@@ -3539,6 +3604,8 @@ pending over 10 min              drainfähig
 Aktivierte Dominance-/Fee-Gates verlangen jeweils 0 Violations/Mismatches.
 
 ### P6-MT.16 Umsetzungstickets
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Alle MT0–MT13-Fachaufgaben bleiben REV.1.0; Mess-/Promotion-Gates ohne externe Evidence bleiben BLOCKED, nicht als Code-Abkürzung gestrichen.
 
 Verbindliche Reihenfolge:
 
@@ -3730,6 +3797,8 @@ LIVE gesperrt
 
 # PHASE P7 — COMPETITION + PROVIDER ECONOMICS
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Aus echten Daten bestimmen, was zusätzlichen Profit erzeugt.
@@ -3774,6 +3843,8 @@ Im aktiven **FREE_ONLY**-Betrieb **nicht einsetzen**. Auch ein positiver `increm
 
 ## p(win)
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 Erst jetzt aus echten Daten:
 
 ```text
@@ -3802,6 +3873,8 @@ Versioniert und Holdout-/Forward-validiert.
 ---
 
 # PHASE P4B — PROBABILISTIC PROFIT OPTIMIZER
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -3843,6 +3916,8 @@ Nur Forward-/Shadow-validierte Policy darf LIVE.
 ---
 
 # PHASE P8 — CONTROLLED LIVE
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ## Ziel
 
@@ -3925,6 +4000,8 @@ Kein künstliches sechsmonatiges Warten.
 
 # PHASE P9 — PRODUCTION LIVE
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## Ziel
 
 Dauerhaft maximalen nachhaltigen realisierten Netto-Profit erzielen.
@@ -3986,6 +4063,8 @@ entfernen / downgraden
 
 # PHASE K — MEASURED CONTINUOUS OPTIMIZATION
 
+> **REV.1.0 / REV.2.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Die bisher verpflichtende K-Untersuchung ist REV.1.0; zusätzliche produktive Beschleunigung nur nach belegtem Bedarf in REV.2.0/3.0.
+
 K bedeutet **kein Rewrite**.
 
 K optimiert denselben finalen Code.
@@ -4004,6 +4083,8 @@ prüfen, in dieser Reihenfolge:
 6. **erst danach pre-execution / Shred / Deshred** bezüglich realer kostenloser Source-Capability untersuchen, wenn Geyser nicht reicht; fehlende freie Capability bleibt BLOCKED.
 
 ### K-INGRESS-PRE — `SubscribeDeshred` Sensor
+
+> **REV.1.0 / REV.2.0 – Revisionsmarkierung für den noch offenen Rest:** Capability-/Wirtschaftlichkeitsprüfung REV.1.0; optionale produktive spekulative Sensoranbindung bei erwiesenem Zusatznutzen REV.2.0.
 
 **BELEGT:** Yellowstone beschreibt `SubscribeDeshred` als separaten Stream für pre-execution Transactions. Der Server rekonstruiert Entries aus eingehenden Shreds und streamt decodierte Transactions, bevor Replay sie ausgeführt hat.
 
@@ -4049,6 +4130,8 @@ Nur bei messbarem Netto-Mehrwert.
 
 ### K-INGRESS-PRE FREE_ONLY-Alternativen: PublicNode Deshred und LocalShred Lite (2026-10-22)
 
+> **REV.1.0 / REV.2.0 – Revisionsmarkierung für den noch offenen Rest:** Kostenlose Provider-/Safety-/Wirkungsprüfung REV.1.0; optionaler zusätzlicher LocalShred-/UDP-Sensor nach GO REV.2.0.
+
 **Rangfolge (Tickets `K-02` und `K-02b`):** (1) Nach S1-Adapter-/Offline-Arbeit `SubscribeDeshred` am kostenlosen PublicNode-Yellowstone-Zugang auf tatsächliche Freischaltung/Filter/ALT/Quoten prüfen. (2) Als unabhängige Alternative `LocalShred Lite` von DedicatedNodes (`https://www.dedicatednodes.io/localshred/`) prüfen: laut Anbieter kostenlos, kein DedicatedNodes-Server erforderlich, Amsterdam als Ausgangspunkt; Zugang/Whitelist, Verfügbarkeit, Limits und Latenz noch NICHT QUALIFIZIERT. Anbieter-eigene Millisekundenwerte sind keine Project_0-Evidence.
 
 **Netz:** UDP-Shreds setzen real erreichbare öffentliche Empfänger-IPv4, funktionierenden UDP-Port, NAT-/Router-/Firewall-Konfiguration und eine Anbieter-Freischaltung voraus; eine per HTTP sichtbare öffentliche IPv4 genügt als Beweis nicht. Lokale vorhandene Hardware zuerst; kein automatisch gebuchter VPS, Business-Vertrag, Paid-Feed oder Hosting. Eigene Validatorinfrastruktur bleibt eine separate kosten-/messungsgebundene K-Entscheidung.
@@ -4059,9 +4142,13 @@ Nur bei messbarem Netto-Mehrwert.
 
 ### K-INGRESS-RAW
 
+> **REV.1.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Pflichtuntersuchung/Stop-or-Go REV.1.0; eigener Raw-Shred-/Validator-Stack nur als optionaler Spezialausbau nach Messbeleg REV.3.0.
+
 Raw Shred Delivery / eigener validatornaher Deshred-Pfad bleibt noch eine Stufe später. Erst wenn Geyser **und** ein verfügbarer pre-execution Sensor nachweislich Ingress-Limit sind, wird eigener Shred-/Validator-Stack erwogen.
 
 ## CPU
+
+> **REV.1.0 / REV.2.0 – Revisionsmarkierung für den noch offenen Rest:** Alle P6-MT-/Hotpath-Gates REV.1.0; darüber hinausgehendes PGO/SIMD/Cache-/ISA-Tuning nur mit Bedarf REV.2.0.
 
 Die grundlegende Runtime-/Parallelarchitektur ist **kein K-Thema mehr**; sie muss bereits über **P6-MT PASS** qualifiziert sein.
 
@@ -4081,6 +4168,8 @@ Profiling
 Kein zweiter Parallel-Core und keine nachträgliche Runtime-Neuentwicklung in K.
 
 ## Routing
+
+> **REV.1.0 / REV.2.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Verpflichtende Routing-/JIT-/Exit-Pfade REV.1.0; zusätzliche Routen-/Quote-Cache-Feinoptimierung REV.2.0, komplett eigener zusätzlicher lokaler DEX-Router nur mit Messbeleg REV.3.0.
 
 Wenn `LOSS_REASON = ROUTING`:
 
@@ -4103,6 +4192,8 @@ Aktuell ist in den geprüften Referenzen **kein lokaler Router belegt**. Ein sol
 
 ## Submission
 
+> **REV.1.0 / REV.2.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Verbindliche RPC/Jito/Race-Ausführung REV.1.0; zusätzliche Region-/Redundanzoptimierung REV.2.0, eigene nicht verpflichtende TPU-/NIC-Spezialtechnik REV.3.0.
+
 Wenn `LOSS_REASON = SUBMISSION/TIP`:
 
 1. Jito gRPC / Region / Tip / Bundle Policy optimieren;
@@ -4110,6 +4201,8 @@ Wenn `LOSS_REASON = SUBMISSION/TIP`:
 3. erst danach Direct TPU QUIC prüfen.
 
 ### K-SUB-TPU — `DirectTpuQuicSubmitter`
+
+> **REV.1.0 / REV.3.0 – Revisionsmarkierung für den noch offenen Rest:** Verbindliche SWQoS-/Stake-/Kosten-/Nutzenprüfung REV.1.0; eigens betriebener Direct-TPU-QUIC-Produktivpfad nur bei belegtem Vorteil REV.3.0.
 
 **BELEGT:** Agave `tpu-client-next` kann QUIC-Verbindungen zu kommenden Leader-TPUs cachen/vorwärmen.
 
@@ -4163,7 +4256,11 @@ Keine ideologische Bindung.
 
 # 8. Verbindliche Ticket-Reihenfolge
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 ## First-Profit-Tickets — höchste Produktpriorität (scope FE-00…FE-07)
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 ```text
 FE-00  Existing 5h offline report, verfügbare reale Kandidaten / FREE_ONLY-Zugang, NO_ECONOMIC_GO
@@ -4583,6 +4680,8 @@ Erst nach dieser Prüfung darf v4.4 die autoritative v4.2 ersetzen.
 
 # 13. Verbindlicher Start — FIRST PROFIT RELEASE TRAIN (13.10.2026)
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Technische FE-/Safety-/Profit-Gates bleiben erhalten, aber Pilot erst nach vollständiger REV.1.0-Software- und Offline-Abnahme.
+
 **Nur der nachweislich kürzeste sichere Weg zur ersten positiven kumulierten realisierten Netto-Bilanz hat Produktpriorität.** Bereits implementierte Module bleiben erhalten. Keine neue GUI, kein zweiter Bot, kein Pfadwechsel ohne Messbeleg. Die folgenden Tickets erhalten im Ledger eigene PASS/PARTIAL/OPEN/NOT_RUN-Gates und Commit-/Fixture-/Chain-Evidence.
 
 | Schritt | Verbindliche Arbeit | Abnahme / Stop |
@@ -4633,6 +4732,8 @@ v4.5.2 ändert nur Reihenfolge/Pilotumfang; die mit P6-MT-v2 eingefrorene v4.5/v
 ---
 
 ## C0-E1 — 4H ECONOMIC / CAPITAL / COMPETITION / RACE ATTRIBUTION
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 **Status (2026-10-08): C0-E1 LOCAL INTEGRATION / BOTH BUILDS AND WORKSPACE TEST SUITES PASS; DIFFERENTIAL CLIPPY AND MAINNET SMOKE OPEN.**
 
@@ -5197,6 +5298,8 @@ Vier Klassen: CLASSIC (`lending_account_liquidate`), RECEIVERSHIP (`start_liquid
 
 #### L.2 P4: Strict aus Capture-Finalizer lösen, Verification als eigene Schicht
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 Aktuell ruft `market_observer::finish_capture()` bei regulärem Abschluss `full_reconciliation_phase()` fest auf; `econ.rs` bindet den bisherigen technischen PASS an Kanonik. Trennung ist zwingend: **Capture inkl. Drain/Gap/Raw Evidence → optional Post-Capture Chain-Verification → Normalisierung/Report → getrennte Masterqualifikation**. `off` schaltet historischen RPC-Abgleich ab, **nicht** notwendige Evidence-Sicherung oder Capture-Finalisierung. Qualifikationsachsen: Capture-Clock, Live-Coverage/Transport, Verification, Economics, Trading/LIVE und C0-E1 Master.
 
 - `off`: Verification `NOT_RUN`; kein Chain-Beweis.
@@ -5366,6 +5469,8 @@ Ownership: darkbot-common besitzt Channel-/Config-Primitiven, darkbot-solana die
 
 ### F0-P0UI – Graphite V0 Bestandsabgleich und verbindliche Native-/Protocol-Feldverweise (2026-10-23)
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
+
 **Ergänzung, KEIN neues Frontend/Phasenmodell:** Fachlicher Owner bleibt **dieser** Project_0-Phasenplan; UI-Phasen F0–F8, Graphite-Freeze und Wire gehören weiterhin zum bestehenden [Frontend-Master](../../frontend/docs/FRONTEND_PHASENPLAN.md) und [Wire V1.3](../../frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md). Aktuelle zeilen-/quellengestützte F0-P0UI-Matrix: [Frontend Code Map §10](../../frontend/docs/PROJECT_0_CODE_MAP.md#10-revalidierung-2026-10-23--aktueller-reactprotocolnative-abgleich). Sie ersetzt veraltete **IST-Snapshots**, nicht historische Evidence oder dieses Phasengate. Fünf bestehende Project_0-Reiter **Overview / Liquidator / Capture / Analytics / Wallets** und Graphite V7/V0 einschließlich Wallets **Balances / Send / Auto-Sweep** unverändert behalten; nur Inhalte/Controls in diesen Komponenten präzisieren. Keine zusätzliche Navigation, kein zweiter Store/Control-Client je Aktion und kein BSC-Codeumbau.
 
 **Unveränderliche fachliche Native-Mappings für F0-VAR/F7 (jeweils UI-Label, Kontrolltyp, tatsächlicher Rust-Owner/Variablenname, physikalische Einheit, Provenienz und Gate per Matrix):**
@@ -5391,6 +5496,8 @@ Ownership: darkbot-common besitzt Channel-/Config-Primitiven, darkbot-solana die
 ---
 
 ### P0-PROD-CTRL — ULTRA-VERBINDLICHER Vollimplementierungs-, Schalter- und Frontend-Rundwegvertrag (2026-10-25)
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Nur bisher OFFENE Restarbeit dieses bereits verbindlichen Fachabschnitts; vorhandene Code-/Evidenz-PASS bleiben erhalten, echte externe Gates bleiben separat.
 
 **HÖCHSTE VERBINDLICHKEIT FÜR PROJECT_0 – AB SOFORT.** Die folgenden Regeln P0-PROD-CTRL-01 bis -12 sind harte phasenübergreifende MUSS-Abnahmekriterien für alle verpflichtenden Project_0-Funktionen (P0–P9, S0–S4, C0-MO/C0-E1, P4A-JIT, Jito, Race, P6-MT/LT, FE-00–FE-07, P8-RES/INV, JFI, PERSIST, SK und F0-P0UI/F6/F7). Sie ergänzen und verschärfen JFI-01–05, PERSIST-01–05 und F0-P0UI. **Bei älteren widersprechenden Aussagen über produktive Mock-/Legacy-Ersatzwege, nur vorbereitete Schalter oder CLI-only-Abnahme geht dieser neuere Vertrag vor.** Alle übrigen fachlichen Anforderungen, FREE_ONLY-, Safety-, LIVE-, Signier-, Submit- und Nutzerfreigabegates bleiben unverändert. **Diese Norm ist ein Auftrag, kein behaupteter CODE-, LOCAL_PASS-, QUALIFIED- oder LIVE-Nachweis.**
 
@@ -5466,6 +5573,8 @@ Ein stale/missing CachedBlockhash wird **vor** `plans_with_health` erkannt: kein
 
 ### DEC-02 — P7-03/V2-15 Simulation: **A, gebundene Wiederverwendung**
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** TEILWEISE laut BUGS.md: aktuelle echte Simulation-/State-Kontextbindung bis zum Handoff.
+
 Nur der **identische Wire-Digest der exakt signierten `SignedPayload`-Bytes einschließlich sämtlicher Signaturen, deren Reihenfolge und Submission-Pfad** legitimiert die Wiederverwendung; ein **Message-Hash allein reicht ausdrücklich nicht**. **Bundle nur mit tatsächlicher Bundle-Simulation** derselben gebundenen Payload. Nur das typisierte `SimResult::Ok` aus einem echten `SimulatedPayload`-Token ist verwendbar, nie Failed/Unavailable/Deadline; `exact_signed_payload_simulated` **aus dem Token ableiten, nie als Literal**. Kontext-Slot ≥ Intent-State-Slot, gleiche State-/Program-/Lookup-Generation, kein Gap/Recovery/ProgramData-Drift seit Simulation, gültiger Blockhash und **Alter ≤ `max_state_age_ms` der Approval** beim Handoff. Bei Verletzung Neusimulation nur mit Budget/Deadline oder fail-closed ohne neu entstehenden Hold. Ein bestehender Pipeline-/FE-04-Admission-Owner, keine zweite Simulation ohne Grund; pro Bindungsbedingung Negative-/Mutationstests und genau eine Simulation im positiven Wiederverwendungsfall.
 
 ### DEC-03 — P7-02 Non-Landing: **B negativ + C immer als kanonische Gegenprüfung; positive Sichtung ist Veto**
@@ -5488,6 +5597,8 @@ Sämtliche 24 Owner-Parameter und verbleibende Doppeldefaults in `RuntimeConfig/
 
 ### DEC-06 — FS-C08/V2-13: **A, OFF/OBSERVE/ACTIVE + sicherer Hot-Change**
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** OFFEN laut BUGS.md: Threshold-Modus, sicherer Hot-Change und voller UI-/CLI-/Journal-Rundweg.
+
 OFF: vorhandener Sweep autoritativ. OBSERVE: Sweep bleibt autoritativ; Threshold berechnet auf **derselben belegten State-/Input-Revision** parallel ohne zweite Candidate-Admission und persistiert Treffer-/Fehltreffer-/Latenz-/CPU-Differenzen. **OBSERVE darf den Sweep nicht verlangsamen**: separater Worker auf unveränderlichem State oder nachgewiesenes hartes CPU-/Owner-Zeitbudget; bei Budgetmangel nur OBSERVE sampeln, Sweep nicht bremsen; Owner-Blockzeit messen und anzeigen. ACTIVE: Threshold über **eine gemeinsame Repeat-/Admission-Policy**, nur Promotion **aus belegtem OBSERVE**, mit komplettem Index, Quiescence-/Generation-Barriere, qualifiziertem **Gate 0 fehlende Kandidaten**, festgelegtem CPU-/Health-/Queue-Budget und weiterlaufenden Stichproben-Gegenproben in ACTIVE. **Bis zum fertigen Index-Bootstrap, auch nach Recovery/Neustart: `requested` getrennt erhalten, `effective = SWEEP`, `block_reason = INDEX_BOOTSTRAP`. Ein einziger belegter Fehltreffer der Sweep-Stichprobe in ACTIVE muss automatisch auf SWEEP zurückschalten und einen typisierten Alarm-Record auslösen.** Bei Gap, unvollständiger Revision oder Budgetüberschreitung sichere Refusal/Fallback, keine verlorenen oder doppelt eingereihten Candidates. Native CAS, Policy-Version, dauerhafte Receipts, Restart-/Reconnect-Recovery. **Liquidator-Reiter**: requested/effective/qualification, Misses, Lanes, p50/p95/p99 und Fallbacks. Threshold ACTIVE autorisiert **kein** LIVE-Trading.
 
 ### DEC-07 — N7: **A, integrierter Doctor→Audit→Start mit konfigurierbarer TTL**
@@ -5497,6 +5608,8 @@ Gemeinsamer nativer Controller für CLI und **Capture-Reiter**; umfangreiche lok
 **Nutzerentscheidung 26.10.2026:** Boot-Status auf Topic 15 im Capture-Reiter; Rohdaten-Capture = Boot-Modus `market`; jeder Mainnet-lesende Start (Rohdaten-Capture, `project0.capture.start`, Autostart, `p0-longtail` direkt) nur mit zugelassenem Record, nativ (`BOOT_AUDIT_REQUIRED`); Provider-Evidence per Record-ID; GUI-Start vorerst nur Chain-Verification `off` (DEC-08). Status: OFFLINE_VERIFIED `65059ed6` (BUGS §22.5).
 
 ### DEC-08 — C0-E1/JFI: **A, INDEX/CROSSCHECK/STRICT nativ aus einer Engine**
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** OFFEN laut BUGS.md: gesamter native INDEX/CROSSCHECK/STRICT-Verifier mit Jobs, Reports, Controller und Frontend.
 
 Ein gemeinsamer nativer Signature-Historical-Reader für INDEX, CROSSCHECK und historischen Winner-Consumer mit Paging, Dedup, 429/Backoff, Budget/Bytes/RPS, Cursor, bounded Journal-Checkpoints, Resume; **kein zweiter Parser**, vorhandene `chain.rs`-/`market_truth.rs`-Klassifizierung wiederverwenden. INDEX = qualifizierter historischer Signatur-/TX-Index, CROSSCHECK = zweite **unabhängig** qualifizierte FREE_ONLY-Quelle, STRICT = vollständige finalisierte kanonische Block-/Parent-/Skip-Proofs. Native `.p0j` Spec/Attempt/Result/Resume, `p0ctl` und Controller-/Protobuf-/Gateway-/Capture-/Analytics-Rundweg für **alle** Modi `off|index|crosscheck|strict`. Bestehende produktive `index`-/`crosscheck`-Codeblockade **als Arbeitsauftrag entfernen**, aber erst nach realen E2E-Tests als aktiv darstellen. **Vor Entfernung der Python-Produktivabhängigkeit ein gepinntes Paritäts-Gate** gegen den historischen A4-Bestand (berichtete 2.917 Quellen – Umfang erst am Pin nachweisen) samt echter positiven/negativen Fixtures. Python ggf. historisch isoliert read-only, keine Löschung bestehender Proofs. Separate typisierte Providerbudgets. Keine Ergebnis-Hochstufung: INDEX_VERIFIED < CROSSCHECK_VERIFIED < CANONICAL_VERIFIED; C0_E1_MASTER_PASS erst mit zusätzlichen harten Capture-/Economics-Gates. 429/Pruning/UNKNOWN → INCOMPLETE+Resume.
 
@@ -5518,6 +5631,8 @@ Typisierte Rejection-/Loss- und native `message_hash`-Identität, harte **konfig
 
 ### DEC-13 — FS-F-09/FE-04/FE-06: **JA, Admission voll erreichbar und LIVE weiter gesperrt**
 
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** TEILWEISE laut BUGS.md: DEC-13b echte Owner→FE-04-Admission/Settlement/Exit/Wallets bis zum LIVE-gateten Pfad.
+
 Vorhandenen echten one-shot `reserve→validate→submit→settle/recover`-Pfad als einen nativen Controller-Consumer und kompletten Liquidator-/Wallets-Protobuf-Rundweg verdrahten, nicht nur als aufrufbare Tests. **Gilt für Versuch und Exit. Die In-Run-Admission gibt die eigene `check()`-Reservierung ausschließlich über das durable Journal-Settlement frei (BUGS C3-Rest), ohne eine zweite RAM-Freigabe oder doppelte Kapitalbuchung.** Persistente atomare Single-Flight-Holds, maximal zulässige Gebühren, Idempotenz, Replay, Crash, UNKNOWN, finalisierte Token-/Lamport-Deltas und harte Stop-/HALT-Gates nachweisen. **Ohne separate FE-06-Freigabe keine werttragende Signierung/Submission**; durch negativen Loopback-/Gateway-Test belegen. Keine neue eigenständige Admission-Engine.
 
 ### DEC-14 — BUGS als kanonische Statusautorität, Ursprungsreviews erhalten
@@ -5529,6 +5644,8 @@ Alle stabilen IDs inkl. Unter-IDs/Querverweise aus `bugs_b.md`, `fehlstellen_v1.
 Jede arbeitende Session ein eigener Worktree/Index; bei gleichzeitigen Sessions höchstens ein Integrations-/Push-Owner für **main**, ansonsten ggf. detached Worktrees **ohne neue Branches**. Vor Übernahme fetch Remote-Main/Commit/Tree, kontrolliert nur eigene Änderungen auf aktuellen Stand integrieren, Tests auf resultierendem Commit, ausschließlich Fast-Forward; kein Force-Push, bei Konflikt STOP. Projektfremde BSC-Fachänderungen nicht anfassen; notwendige gemeinsam genutzte Proto-/Gateway-/Frontend-Dateien gezielt, ohne BSC-Produktlogik umzuschreiben.
 
 ### DEC-16 — Dauerbetrieb `UntilStopped`: **jetzt vollständig bauen** (Nutzerentscheidung 26.10.2026)
+
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Stufe 1/2 sind bereits OFFLINE_VERIFIED und bleiben unverändert; offener Rest Stufe 3 Shadow-Owner, Drains, Journale, Recovery und Gates.
 
 Dauerbetrieb `UntilStopped` (24/7) jetzt vollständig entwickeln, nach DEC-07 und vor DEC-06; keine neue Architektur, kein späterer Neuaufbau. `RunHorizon::admit()` bleibt der zentrale Admission-Prüfpunkt, aber nicht das einzige Gate; die bestehende Sperre wird nicht pauschal entfernt. Qualifikationen als typisierte, persistente, identitätsgebundene Nachweise: SK-07-Segmentierung und Recovery, rollierende Kapazität, Providerbudgets, verfügbare Provider-Evidence. Ohne vollständige Qualifikation `RUN_HORIZON_UNTIL_STOPPED_GATED`; mit ihr grundsätzlich zulässig, aber nur mit den Netzwerk-, Start- und Betriebsfreigaben. Ressourcen-, Provider- und Integritätsgates bleiben im Betrieb wirksam, Verstoß ⇒ sicherer HALT. Offline-Tests beider Fälle inkl. Crash, Restart, Recovery, Ressourcenerschöpfung; reale Mainnet-Qualifikation `NOT_RUN`/`BLOCKED_EXTERNAL`. Qualifizierter Dauerbetrieb ist **keine** Erlaubnis für unbeaufsichtigte Neustarts und **keine** LIVE-Freigabe.
 
