@@ -3,6 +3,18 @@
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-25 (latest binding offline C0–I implementation, technical DoD, network/market and G0.7 safety; historical v9.1/v9/v8 preserved)
 
+## AKTUELLE NUTZERENTSCHEIDUNG (27.10.2026) — MAXIMAL 2H G0.4, DANACH EREIGNIS- UND LIMITGESTEUERTE BUY/SELL-VERSUCHE
+
+Diese Entscheidung hat Vorrang vor den älteren sieben Kalendertagen aus G0.4/V10-8 und den hier bislang nur vorgeschlagenen Zeit-/Stichprobenschwellen, soweit sie als **Wartepflicht vor gezielten Käufen** verstanden werden. Für die erste rein lesende explorative Source-/Mempool-Sichtung reichen **maximal 2 Stunden**, danach geordneter Stopp. Eine fixe Mindestmessdauer entfällt. Ist das bestehende read-only-G0.4-Capture bereits über 2 Stunden aktiv, über den vorhandenen nativen Stop-Mechanismus **geordnet beenden** und Journal/Hashes/Rohdaten unverändert sichern, nicht killen oder neu schreiben. Diese Git-Änderung beendet einen bereits laufenden Prozess nicht automatisch.
+
+**Die Messung dient nur der technischen Früh-Sichtbarkeit und Quellenqualität**, nicht dem Nachweis eines profitablen Coins. Zu wenig Stichprobe => `NOT_EVALUABLE/UNKNOWN`, niemals erfundener Coverage-/Markt-PASS. Die unverändert archivierten alten Kriterien und historischen Rohdaten bleiben lesbar; 7-Tage-Census und die in `g04_criteria.env` nur `PROPOSED` Schwellen sind nach dieser Entscheidung **keine obligatorische Vorbedingung** eines einzelnen kontrollierten G0.7-BUY-Versuchs.
+
+**Handelssteuerung statt Pflichtlaufzeit:** Spätere Tests sind **ereignisgesteuerte, gezielte BUY- und – sobald nativ qualifiziert – SELL-Versuche**, ohne festes Stunden-/Tagesfenster für die Botlaufzeit. Statt eines Zeit-Stopps einen **typisierten, über Terminal UND Frontend auf denselben Native-Owner gerouteten konfigurierbaren Tageshöchstwert** für neue wirtschaftliche BUY-Versuche vorsehen, zum Beispiel `max_buy_attempts_per_day=10`. Dieser Grenzwert zählt *alle* freigegebenen wirtschaftlichen BUY-Versuche einschließlich gesendeter/unklarer Versuche, nicht nur erfolgreiche Tokenkäufe; der genaue Tageswechsel (Zeitzone) wird eindeutig im Vertrag angegeben. Dauerhafter atomarer Zähler mit Crash-/Restart-/Retry-/Idempotenztests und sichtbarem Verbrauch/Restbudget. Der Tageshöchstwert ist **keine automatische Ausführungsfreigabe** und kein Ziel, zehn Trades zu erzwingen. **Default: keine wirtschaftlichen Versuche erlaubt**, bis die notwendigen nativen Wallet-/LIVE-/Attempt-Controls ausdrücklich und für den jeweiligen Test gültig aktiviert sind. G0.7 bleibt zunächst ein individuell freigegebener, begrenzter Versuch; weitere reale Versuche benötigen ihre jeweiligen aktuellen Freigaben.
+
+**Pro Versuch automatisch erfassen:** Hash-/Full-/Actionable-Quellenzeiten der verfügbaren Ingress-Verbindungen, unabhängig abgeleitete Tokenadresse, Quote, Nonce, Entscheidung, T_ready/T_queue/T_send, Canonical-Inclusion, tatsächlicher Token-Zufluss und Kosten. Bei einem qualifizierten SELL zusätzlich Exit, Netto-PnL und Gebühren auf derselben gebundenen Positionsidentität. Vorher keine Profitabilitätsbehauptung. Physisches T_buy-T0 ohne Original-Producer-Witness weiter `UNKNOWN`. Technische Anbieter-/Profil-Qualifikation, Anti-Replay, Budget, STOP und Wallet-`DISABLED` bleiben intakt.
+
+---
+
 ## NEUESTE NUTZERENTSCHEIDUNG (27.10.2026) — BSC-WALLET-CONTROLS UND TECHNISCHE SCHALTBARKEIT
 
 Diese Entscheidung ist für die weitere **technische Implementierung** aktueller als ältere Entwicklungsstopps. Alle BSC-Funktionen, auch die technisch vorbereitete Phase J und ihre Controls, dürfen ohne echten Mainnet-BUY vollständig implementiert, integriert und mit Testidentitäten geprüft werden. Historische Gate-0-Evidence und wirtschaftliche Korrektheitsprüfungen bleiben erhalten.
