@@ -5,6 +5,7 @@ use super::payload::{self, OwnerDiagnostic, Payload};
 use super::{record::OpportunityRecord, shadow_ledger::DaySummary};
 use crate::execution::pending::ReconcileRecord;
 use crate::market::winner::{RaceOutcome, Winner, WinnerIdentity};
+use crate::storage::segments::{self, SegmentedWriter};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::borrow::Cow;
@@ -300,8 +301,36 @@ impl From<&'static str> for EvidenceFailure {
         Self(code)
     }
 }
+/// DEC-16: the segment of the owner evidence a window's boundary sealed, as its writer sealed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RotatedSegment {
+    pub sealed: PathBuf,
+    pub root_sha256: [u8; 32],
+    /// Bytes of the whole chain after the rotation.
+    pub bytes: u64,
+}
+/// The answer to a rotation request ([`OwnerEvidenceWriter::rotate`]).
+pub type Rotation = mpsc::Receiver<Result<RotatedSegment, &'static str>>;
+
+/// What the owner hands its evidence writer, in order: an event, or a window boundary.
+// The event is the hot path: boxing it would allocate per event, while the bounded queue holds
+// events of this size anyway; a rotation is one message per window.
+#[allow(clippy::large_enum_variant)]
+enum Msg {
+    Event(OwnerEvidence),
+    Rotate(mpsc::Sender<Result<RotatedSegment, &'static str>>),
+}
+impl Msg {
+    fn into_event(self) -> Option<OwnerEvidence> {
+        match self {
+            Self::Event(e) => Some(e),
+            Self::Rotate(_) => None,
+        }
+    }
+}
+
 pub struct OwnerEvidenceWriter {
-    tx: Option<mpsc::SyncSender<OwnerEvidence>>,
+    tx: Option<mpsc::SyncSender<Msg>>,
     terminal: Option<mpsc::Sender<Terminal>>,
     worker: Option<JoinHandle<Result<(), &'static str>>>,
     failed: Arc<AtomicBool>,
@@ -320,8 +349,43 @@ impl OwnerEvidenceWriter {
     ) -> std::io::Result<Self> {
         Self::start_with(Writer::create(&path)?, recovery, capacity, sync_interval)
     }
+    /// DEC-16: the owner evidence of an unbounded run, a segment chain sealed at every window
+    /// boundary ([`Self::rotate`]) and at `max_segment_bytes`; `recover` continues the chain of
+    /// the crashed run a start resumes (SK-07 recovery), never a sealed one.
+    pub fn start_rolling(
+        path: PathBuf,
+        recovery: PathBuf,
+        capacity: usize,
+        sync_interval: Duration,
+        max_segment_bytes: u64,
+        recover: bool,
+    ) -> std::io::Result<(Self, Option<segments::Recovered>)> {
+        let (journal, recovered) = if recover {
+            let (journal, how) = SegmentedWriter::recover(&path, max_segment_bytes)?;
+            (journal, Some(how))
+        } else {
+            (SegmentedWriter::create(&path, max_segment_bytes)?, None)
+        };
+        Ok((
+            Self::spawn(journal, recovery, capacity, sync_interval)?,
+            recovered,
+        ))
+    }
     pub(crate) fn start_with(
         journal: Writer,
+        recovery: PathBuf,
+        capacity: usize,
+        sync_interval: Duration,
+    ) -> std::io::Result<Self> {
+        Self::spawn(
+            SegmentedWriter::of(journal, 0)?,
+            recovery,
+            capacity,
+            sync_interval,
+        )
+    }
+    fn spawn(
+        journal: SegmentedWriter,
         recovery: PathBuf,
         capacity: usize,
         sync_interval: Duration,
@@ -389,14 +453,38 @@ impl OwnerEvidenceWriter {
             self.admission_error = Some(e.0);
             return Err(e);
         }
-        let failure = match self.tx.as_ref().expect("checked open").try_send(event) {
+        let failure = match self
+            .tx
+            .as_ref()
+            .expect("checked open")
+            .try_send(Msg::Event(event))
+        {
             Ok(()) => return Ok(()),
-            Err(mpsc::TrySendError::Full(event)) => ("OWNER_EVIDENCE_OVERFLOW", event),
-            Err(mpsc::TrySendError::Disconnected(event)) => ("OWNER_EVIDENCE_DISCONNECTED", event),
+            Err(mpsc::TrySendError::Full(m)) => ("OWNER_EVIDENCE_OVERFLOW", m),
+            Err(mpsc::TrySendError::Disconnected(m)) => ("OWNER_EVIDENCE_DISCONNECTED", m),
         };
         self.admission_error = Some(failure.0);
-        self.refused = Some(failure.1);
+        self.refused = failure.1.into_event();
         Err(failure.0.into())
+    }
+    /// DEC-16: a window's boundary — the writer seals the open segment after every event emitted
+    /// before this call and answers with the sealed segment. Never blocks the owner: a full queue
+    /// closes admission like any evidence (`OWNER_EVIDENCE_OVERFLOW`).
+    pub fn rotate(&mut self) -> Result<Rotation, EvidenceFailure> {
+        self.check()?;
+        let (reply, rotation) = mpsc::channel();
+        let code = match self
+            .tx
+            .as_ref()
+            .expect("checked open")
+            .try_send(Msg::Rotate(reply))
+        {
+            Ok(()) => return Ok(rotation),
+            Err(mpsc::TrySendError::Full(_)) => "OWNER_EVIDENCE_OVERFLOW",
+            Err(mpsc::TrySendError::Disconnected(_)) => "OWNER_EVIDENCE_DISCONNECTED",
+        };
+        self.admission_error = Some(code);
+        Err(code.into())
     }
     /// Owner diagnostics go through the same bounded queue; the writer journals the line and
     /// only then prints it. A full queue closes admission like any other evidence.
@@ -443,7 +531,7 @@ impl Drop for OwnerEvidenceWriter {
 }
 
 struct Sink {
-    journal: Writer,
+    journal: SegmentedWriter,
     recovery: PathBuf,
     recovery_writer: Option<Writer>,
     failed: Arc<AtomicBool>,
@@ -483,6 +571,11 @@ impl Sink {
             }
         };
         self.store(encoded);
+        // DEC-16: an unbounded run's segment also ends at its size (between frames).
+        if !self.io_failed && self.journal.rotate_if_due().is_err() {
+            self.io_failed = true;
+            self.failed.store(true, Ordering::Release);
+        }
         // The console copy of an owner diagnostic, after its frame; non-blocking (M2): a blocked
         // stderr drops console lines, never evidence.
         if let OwnerEvidence::Diagnostic(line) = event {
@@ -493,7 +586,7 @@ impl Sink {
         let offset = self.journal.position();
         let p = Provenance {
             source: journal::source::OWNER,
-            source_seq: self.journal.next_seq(),
+            source_seq: self.journal.events(),
             slot: e.slot,
             rx_ns: e.rx_ns,
             ..Default::default()
@@ -526,6 +619,24 @@ impl Sink {
             }
         }
     }
+    /// DEC-16: seals the open segment at a window's boundary (every earlier event is in it).
+    fn rotate(&mut self) -> Result<RotatedSegment, &'static str> {
+        if self.io_failed {
+            return Err("OWNER_EVIDENCE_WRITER_FAILED");
+        }
+        match self.journal.rotate_now() {
+            Ok(sealed) => Ok(RotatedSegment {
+                sealed: segments::segment_path(self.journal.first(), sealed.index),
+                root_sha256: sealed.root_sha256,
+                bytes: self.journal.bytes(),
+            }),
+            Err(_) => {
+                self.io_failed = true;
+                self.failed.store(true, Ordering::Release);
+                Err("OWNER_EVIDENCE_ROTATE_FAILED")
+            }
+        }
+    }
     fn finish(mut self, incomplete: bool) -> Result<(), &'static str> {
         if let Some(w) = &mut self.recovery_writer {
             if w.seal(false).is_err() {
@@ -545,10 +656,10 @@ impl Sink {
     }
 }
 fn run_writer(
-    journal: Writer,
+    journal: SegmentedWriter,
     recovery: PathBuf,
     signal: Arc<AtomicBool>,
-    rx: mpsc::Receiver<OwnerEvidence>,
+    rx: mpsc::Receiver<Msg>,
     terminal_rx: mpsc::Receiver<Terminal>,
     sync_interval: Duration,
     syncs: Arc<AtomicU64>,
@@ -566,7 +677,11 @@ fn run_writer(
     let mut next_sync = Instant::now() + sync_interval;
     loop {
         match rx.recv_timeout(next_sync.saturating_duration_since(Instant::now())) {
-            Ok(event) => sink.write(event),
+            Ok(Msg::Event(event)) => sink.write(event),
+            Ok(Msg::Rotate(reply)) => {
+                // The owner may have stopped waiting (its window failed); the result stays here.
+                let _ = reply.send(sink.rotate());
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }

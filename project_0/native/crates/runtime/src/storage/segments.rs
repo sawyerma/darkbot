@@ -179,9 +179,13 @@ pub struct SegmentedWriter {
 impl SegmentedWriter {
     /// Creates the first segment (never overwrites). `max_segment_bytes == 0` disables rotation.
     pub fn create(first: &Path, max_segment_bytes: u64) -> io::Result<Self> {
+        Self::of(Writer::create(first)?, max_segment_bytes)
+    }
+    /// The chain whose first segment `writer` has just created.
+    pub(crate) fn of(writer: Writer, max_segment_bytes: u64) -> io::Result<Self> {
         Ok(Self {
-            first: first.into(),
-            writer: Writer::create(first)?,
+            first: writer.path.clone(),
+            writer,
             index: 1,
             set_id: journal::random16()?,
             events_current: 0,
@@ -268,6 +272,19 @@ impl SegmentedWriter {
     pub fn segments(&self) -> u32 {
         self.index
     }
+    /// DEC-16: whether the chain was continued after a crash (its seal is never complete).
+    pub fn recovered(&self) -> bool {
+        self.recovered
+    }
+    /// Event frames of the whole chain so far (every segment, a crashed one's readable ones).
+    pub fn events(&self) -> u64 {
+        self.events_sealed + self.events_current
+    }
+    /// The current segment's writer, for tests that write historical frames.
+    #[cfg(all(test, feature = "historical"))]
+    pub(crate) fn test_writer(&mut self) -> &mut Writer {
+        &mut self.writer
+    }
     /// The chain's first segment (its name).
     pub fn first(&self) -> &Path {
         &self.first
@@ -287,6 +304,18 @@ impl SegmentedWriter {
         let n = self.writer.append_batch(frames)?;
         self.events_current += n;
         Ok(n)
+    }
+    /// One raw event frame (`Writer::append`: `payload` from `payload::encode`).
+    pub(crate) fn append(
+        &mut self,
+        kind: u16,
+        schema: u16,
+        p: Provenance,
+        payload: &[u8],
+    ) -> io::Result<journal::Appended> {
+        let appended = self.writer.append(kind, schema, p, payload)?;
+        self.events_current += 1;
+        Ok(appended)
     }
     /// One typed event frame; returns the segment it landed in with its position there.
     pub fn append_typed<P: Payload>(

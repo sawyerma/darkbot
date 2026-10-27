@@ -4,19 +4,46 @@
 //! form the econ reports carry; its JSON row exists only as the explicit offline view
 //! (`Mt0Telemetry::legacy_json`). Historical schema-1 value-tree frames stay readable.
 use super::econ::Mt0Telemetry;
-use super::journal::{self, Provenance, Writer};
+use super::journal::{self, Provenance};
+use crate::storage::segments::SegmentedWriter;
 use darkbot_common::mt0::{Snapshot, SnapshotSink};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct Mt0Journal {
-    writer: Writer,
+    writer: SegmentedWriter,
     lost: bool,
+    /// DEC-16: the window the owner opened last, and the window this journal's segment is for.
+    rotate: Option<(Arc<AtomicU64>, u64)>,
 }
 impl Mt0Journal {
     pub fn create(path: &Path) -> std::io::Result<Self> {
         Ok(Self {
-            writer: Writer::create(path)?,
+            writer: SegmentedWriter::create(path, 0)?,
             lost: false,
+            rotate: None,
+        })
+    }
+    /// DEC-16: the MT0 journal of an unbounded run, a segment chain sealed at the first snapshot
+    /// after each window boundary the owner announces in `window` (the window it opened) and at
+    /// `max_segment_bytes`; `recover` continues the chain of the crashed run a start resumes.
+    pub fn rolling(
+        path: &Path,
+        max_segment_bytes: u64,
+        window: Arc<AtomicU64>,
+        recover: bool,
+    ) -> std::io::Result<Self> {
+        let writer = if recover {
+            SegmentedWriter::recover(path, max_segment_bytes)?.0
+        } else {
+            SegmentedWriter::create(path, max_segment_bytes)?
+        };
+        let open = window.load(Ordering::Acquire);
+        Ok(Self {
+            writer,
+            lost: false,
+            rotate: Some((window, open)),
         })
     }
 }
@@ -26,9 +53,19 @@ impl SnapshotSink for Mt0Journal {
         if self.lost {
             return false;
         }
+        if let Some((window, segment_for)) = &mut self.rotate {
+            let open = window.load(Ordering::Acquire);
+            if open > *segment_for {
+                if self.writer.rotate_now().is_err() {
+                    self.lost = true;
+                    return false;
+                }
+                *segment_for = open;
+            }
+        }
         let provenance = Provenance {
             source: journal::source::MT0,
-            source_seq: self.writer.next_seq(),
+            source_seq: self.writer.events(),
             rx_ns: Some(mono_ns),
             unix_ns: Some(unix_ns),
             ..Default::default()
@@ -36,13 +73,15 @@ impl SnapshotSink for Mt0Journal {
         let stored = self
             .writer
             .append_typed(provenance, &Mt0Telemetry::from(snapshot))
-            .is_ok();
+            .is_ok()
+            && self.writer.rotate_if_due().is_ok();
         self.lost |= !stored;
         stored
     }
-    /// A lost snapshot seals the journal INCOMPLETE; a failed seal is reported, never hidden.
+    /// A lost snapshot seals the journal INCOMPLETE; a failed seal is reported, never hidden. A
+    /// chain continued after a crash is never complete (DEC-16).
     fn finish(&mut self, complete: bool) -> bool {
-        let complete = complete && !self.lost;
+        let complete = complete && !self.lost && !self.writer.recovered();
         self.writer.seal(complete).is_ok() && complete
     }
 }
@@ -130,6 +169,7 @@ mod tests {
         let mut sink = Mt0Journal::create(&path).unwrap();
         assert!(sink.store(7, 8, &snapshot));
         sink.writer
+            .test_writer()
             .test_append_historical(journal::kind::MT0_SNAPSHOT, &historical)
             .unwrap();
         assert!(sink.finish(true));
@@ -144,6 +184,50 @@ mod tests {
             typed.typed::<Mt0Telemetry>().unwrap(),
             Mt0Telemetry::from(&snapshot)
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// DEC-16: an unbounded run's MT0 journal seals its segment at the first snapshot after the
+    /// owner opened the next window, so each window's snapshots stand in their own sealed
+    /// segment; after a crash the chain continues (never complete) and a sealed one is refused.
+    #[test]
+    fn dec16_mt0_rotates_at_the_first_snapshot_after_a_boundary_and_recovers() {
+        let dir = dir();
+        let path = dir.join("mt0.p0j");
+        let window = Arc::new(AtomicU64::new(1));
+        let none = darkbot_common::mt0::HistSnapshot::default();
+        let snapshot = darkbot_common::mt0::MT0.snapshot(1, 2, &none);
+        let mut sink = Mt0Journal::rolling(&path, 0, window.clone(), false).unwrap();
+        assert!(sink.store(10, 1, &snapshot));
+        assert!(sink.store(11, 2, &snapshot));
+        window.store(2, Ordering::Release);
+        assert!(sink.store(12, 3, &snapshot));
+        let unix = |path: &Path| {
+            let mut r = journal::Reader::open(path).unwrap();
+            let mut at = Vec::new();
+            while let Some(f) = r.next_frame().unwrap() {
+                if f.kind == journal::kind::MT0_SNAPSHOT {
+                    at.push(f.provenance.unix_ns.unwrap());
+                }
+            }
+            (at, r.sealed)
+        };
+        assert_eq!(unix(&path), (vec![10, 11], true), "window 1 alone, sealed");
+        // A crash: the process ends without sealing.
+        drop(sink);
+        let mut again = Mt0Journal::rolling(&path, 0, window.clone(), true).unwrap();
+        assert!(again.store(13, 4, &snapshot));
+        assert!(!again.finish(true), "a recovered chain is never complete");
+        let mut chain = crate::storage::segments::ChainReader::open(&path).unwrap();
+        let mut at = Vec::new();
+        while let Some(f) = chain.next_frame().unwrap() {
+            if f.kind == journal::kind::MT0_SNAPSHOT {
+                at.push(f.provenance.unix_ns.unwrap());
+            }
+        }
+        assert_eq!(at, [10, 11, 12, 13]);
+        assert!(chain.sealed && !chain.complete);
+        assert!(Mt0Journal::rolling(&path, 0, window, true).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

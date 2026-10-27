@@ -46,7 +46,7 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
     let worker = std::thread::spawn(move || {
         worker_gate.wait();
         run_writer(
-            journal,
+            crate::storage::segments::SegmentedWriter::of(journal, 0).unwrap(),
             recovery,
             signal,
             rx,
@@ -694,5 +694,146 @@ fn owner_evidence_sync_failure_is_sticky() {
     assert_eq!(w.check().unwrap_err().0, "OWNER_EVIDENCE_WRITER_FAILED");
     assert!(w.diagnostic("after".into()).is_err());
     assert!(w.finish(None).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn diagnostics(chain: &std::path::Path) -> (Vec<String>, bool, bool) {
+    let mut r = crate::storage::segments::ChainReader::open(chain).unwrap();
+    let mut lines = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        if f.kind == journal::kind::OWNER_DIAGNOSTIC {
+            lines.push(f.typed::<payload::OwnerDiagnostic>().unwrap().line);
+        }
+    }
+    (lines, r.sealed, r.complete)
+}
+
+/// DEC-16: a window's boundary seals the owner evidence's open segment after exactly the events
+/// emitted before it — an event emitted right after lands in the next segment — and the chain
+/// reads every event once, in order.
+#[test]
+fn dec16_an_owner_window_boundary_seals_exactly_the_events_before_it() {
+    let dir = directory();
+    let path = dir.join("events.p0j");
+    let (mut w, recovered) = OwnerEvidenceWriter::start_rolling(
+        path.clone(),
+        dir.join("recovery.p0j"),
+        8,
+        std::time::Duration::from_secs(60),
+        0,
+        false,
+    )
+    .unwrap();
+    assert!(recovered.is_none());
+    w.diagnostic("before-1".into()).unwrap();
+    w.diagnostic("before-2".into()).unwrap();
+    let rotation = w.rotate().unwrap();
+    w.diagnostic("after".into()).unwrap();
+    let sealed = rotation
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap()
+        .unwrap();
+    assert_eq!(sealed.sealed, path);
+    let mut r = journal::Reader::open(&sealed.sealed).unwrap();
+    let mut lines = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        if f.kind == journal::kind::OWNER_DIAGNOSTIC {
+            lines.push(f.typed::<payload::OwnerDiagnostic>().unwrap().line);
+        }
+    }
+    assert!(r.sealed);
+    assert_eq!(r.root(), sealed.root_sha256);
+    assert_eq!(lines, ["before-1", "before-2"]);
+    w.finish(None).unwrap();
+    let (all, sealed, complete) = diagnostics(&path);
+    assert_eq!(all, ["before-1", "before-2", "after"]);
+    assert!(sealed && complete);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// DEC-16: an unbounded run's owner evidence also ends a segment at its size; the chain stays one
+/// journal in order.
+#[test]
+fn dec16_owner_evidence_rotates_at_its_segment_size_and_reads_as_one_chain() {
+    let dir = directory();
+    let path = dir.join("events.p0j");
+    let (mut w, _) = OwnerEvidenceWriter::start_rolling(
+        path.clone(),
+        dir.join("recovery.p0j"),
+        8,
+        std::time::Duration::from_secs(60),
+        1,
+        false,
+    )
+    .unwrap();
+    for line in ["a", "b", "c"] {
+        w.diagnostic(line.into()).unwrap();
+    }
+    w.finish(None).unwrap();
+    let (all, sealed, complete) = diagnostics(&path);
+    assert_eq!(all, ["a", "b", "c"]);
+    assert!(sealed && complete);
+    assert!(crate::storage::segments::segment_path(&path, 3).exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// DEC-16: the owner evidence of a crashed unbounded run continues its own chain (SK-07 recovery,
+/// never complete afterwards); a sealed chain is never continued and a new start never
+/// overwrites one.
+#[test]
+fn dec16_owner_evidence_continues_its_chain_after_a_crash() {
+    let dir = directory();
+    let path = dir.join("events.p0j");
+    let recovery = dir.join("recovery.p0j");
+    let start = |recover| {
+        OwnerEvidenceWriter::start_rolling(
+            path.clone(),
+            recovery.clone(),
+            8,
+            std::time::Duration::from_secs(60),
+            0,
+            recover,
+        )
+    };
+    let mut crashed = crate::storage::segments::SegmentedWriter::create(&path, 0).unwrap();
+    crashed
+        .append_typed(
+            Provenance::default(),
+            &payload::OwnerDiagnostic {
+                line: "crashed".into(),
+            },
+        )
+        .unwrap();
+    crashed.sync().unwrap();
+    drop(crashed);
+    assert!(
+        start(false).is_err(),
+        "a run's evidence is never overwritten"
+    );
+    let (mut w, recovered) = start(true).unwrap();
+    assert!(matches!(
+        recovered,
+        Some(crate::storage::segments::Recovered::Crash { segment: 1, .. })
+    ));
+    w.diagnostic("continued".into()).unwrap();
+    w.finish(None).unwrap();
+    let (all, sealed, complete) = diagnostics(&path);
+    assert_eq!(all, ["crashed", "continued"]);
+    assert!(sealed && !complete, "a recovered chain is never complete");
+    assert!(start(true).is_err(), "a sealed chain is never continued");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// DEC-16: a window's rotation request never blocks the owner: on a full queue it is refused
+/// like any evidence and admission closes (the run's window then fails, never waits).
+#[test]
+fn dec16_a_rotation_request_on_a_full_queue_closes_admission_without_blocking() {
+    let dir = directory();
+    let (mut w, gate) = paused(&dir, false);
+    w.emit(event("queued")).unwrap();
+    assert_eq!(w.rotate().unwrap_err().0, "OWNER_EVIDENCE_OVERFLOW");
+    assert_eq!(w.check().unwrap_err().0, "OWNER_EVIDENCE_OVERFLOW");
+    gate.wait();
+    assert_eq!(w.finish(None).unwrap_err().0, "OWNER_EVIDENCE_OVERFLOW");
     std::fs::remove_dir_all(dir).unwrap();
 }
