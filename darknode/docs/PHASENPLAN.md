@@ -4,6 +4,8 @@
 **Scope:** `darknode/` mit eigenem Rust-Owner; ein vorhandenes DarkBot-Frontend/Gateway; Bitget als initiale einzige Exchange. Kein LIVE, kein Deploy und keine Implementation durch diesen Dokumentations-Commit.  
 **Maßstab:** Jede Phase ist erst fertig, wenn ihre Nachweise am festen Commit reproduzierbar sind. **P0–P10** sind Umsetzungsphasen **nach** dem vorgeschalteten Research-**GATE 1**.
 
+**Zentrales verbindliches Test- und Ergebnisprotokoll:** [TESTPROTOKOLL.md](TESTPROTOKOLL.md). Sämtliche bestehenden und künftig neu hinzugefügten DarkNode-Test-IDs, ihre aktuellen Zustände `PASS/FAIL/OPEN/NOT_RUN/BLOCKED`, echte Ergebnisse, SHA-/Artefakt-Nachweise und append-only Runhistorie werden dort gepflegt. **Kein Paket- oder Phasen-PASS ohne Registereintrag und echte Evidenz.** BSC-/Project_0-Testergebnisse dürfen nur ausdrücklich mit `REUSED_EVIDENCE` übernommen werden.
+
 ## Verbindliche Detailverträge und Planungsvollständigkeit
 
 **[PLANUNGSABNAHME_V1.md](PLANUNGSABNAHME_V1.md)** ist die zentrale Vollständigkeits- und Evidenzmatrix. Vor Implementierung gelten zusätzlich die Detailverträge [P0 Research/Schnittstellen](P0_RESEARCH_UND_VERTRAEGE_V1.md), [P2–P4 Handover/Graph/Backtest](P2_P3_P4_DETAILVERTRAG_V1.md), [P5 Order-State/Crash](P5_ORDER_STATE_UND_CRASH_MATRIX_V1.md), [P6–P8 Demo/UI/Fault-Abnahme](P6_P7_P8_QUALIFIKATION_V1.md), [P9–P10 LIVE/Fleet](P9_P10_FREIGABE_UND_FLEET_V1.md) und [24/7-Betriebsrunbook](BETRIEBSRUNBOOK_V1.md). Bestehende **P1 V1.3, P5 V1.5, Wallet- und DN-PROTO-Verträge** bleiben maßgeblich für ihre jeweiligen Detailfragen. Die ergänzenden Verträge sind **SOLL/NOT_RUN**, keine bestätigten Laufzeitbelege. Keine Freigabe durch Dokumentation.

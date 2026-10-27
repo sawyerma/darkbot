@@ -2,6 +2,8 @@
 
 Stand: 27.10.2026. Dokumentstatus: PLANUNGSVERTRAG. **Kein Code und kein Test wird durch diese Datei als implementiert oder bestanden ausgegeben.** Maßgeblich ist der Gesamtphasenplan; P1 und P5 haben ihre bestehenden detaillierten Pläne.
 
+**Verbindliche Ergebnisübersicht und Historie:** [TESTPROTOKOLL.md](TESTPROTOKOLL.md). Diese Planungsabnahme beschreibt nur die Soll-/Ist-Gaps; sie ist **kein** zweites Test-Ergebnisregister.
+
 ## 1. Wahrheitstabelle: Planung ≠ Laufzeitnachweis
 
 | Bereich | Fachliche Soll-Spezifikation | Verbindliche Hauptreferenz | Zur Laufzeit noch nachzuweisen |
