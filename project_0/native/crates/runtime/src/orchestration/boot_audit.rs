@@ -1830,65 +1830,15 @@ pub(crate) fn market_admission_with(
     }
     let rolling = match horizon {
         Horizon::Fixed { .. } => None,
-        Horizon::UntilStopped {
-            checkpoint_seconds,
-            minimum_runway_seconds,
-        } => {
-            let gated = crate::analytics::measurement::UNTIL_STOPPED_GATED;
-            let refuse = |why: String| {
-                crate::console::line(format!("{gated}: {why}"));
-                gated
-            };
-            let id = get(ENV_UNTIL_STOPPED_QUALIFICATION)
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| {
-                    refuse("no qualification (P0_UNTIL_STOPPED_QUALIFICATION)".into())
-                })?;
-            let project = PathBuf::from(get("P0_PROJECT_DIR").ok_or(BOOT_AUDIT_REQUIRED)?);
-            let q = super::until_stopped::get(&project, &id).map_err(refuse)?;
-            let binding = super::until_stopped::Binding {
-                mode: MARKET_MODE.into(),
-                identity,
-                binary_sha256: binary().map_err(|e| admission_code(&e))?,
-                checkpoint_seconds,
-                minimum_runway_seconds,
-            };
-            crate::analytics::measurement::RunHorizon::of(horizon)
-                .admit(Some(&q), &binding, now)
-                .map_err(refuse)?;
-            let config = config().map_err(|_| "BOOT_IDENTITY_DRIFT")?;
-            // An autostarted capture runs under its standing approval: exactly this run with its
-            // qualification and window budget, unexpired, for at most its maximum runtime.
-            let max_runtime_seconds = match get(super::autostart::ENV_AUTOSTART)
-                .filter(|v| !v.is_empty())
-            {
-                None => None,
-                Some(digest) => {
-                    let refuse = |why: String| {
-                        crate::console::line(why);
-                        "AUTOSTART_NOT_PERMITTED"
-                    };
-                    let grant = super::autostart::in_force(&project, &digest).map_err(refuse)?;
-                    if grant.qualification_id != id {
-                        return Err(refuse(
-                            "AUTOSTART_NOT_PERMITTED: the run names another qualification".into(),
-                        ));
-                    }
-                    grant
-                        .permits(&binding, &super::autostart::WindowBudget::of(&config), now)
-                        .map_err(refuse)?;
-                    Some(grant.max_runtime_seconds)
-                }
-            };
-            Some(super::until_stopped::Rolling {
-                project,
-                binding,
-                qualification_id: id,
-                config,
-                max_runtime_seconds,
-                resume: get(super::until_stopped::ENV_RESUME).filter(|v| !v.is_empty()),
-            })
-        }
+        Horizon::UntilStopped { .. } => Some(rolling_admission(
+            get,
+            MARKET_MODE,
+            horizon,
+            identity,
+            binary().map_err(|e| admission_code(&e))?,
+            &|| config().map_err(|_| "BOOT_IDENTITY_DRIFT"),
+            now,
+        )?),
     };
     // Once: the approval is consumed beside its record before any read (a relaunch of the same
     // job, or its values copied, is refused).
@@ -1911,6 +1861,87 @@ pub(crate) fn market_admission_with(
         .and_then(|()| marker.sync_all())
         .map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
     Ok(MarketAdmission { record, rolling })
+}
+
+/// DEC-16: the admission of an unbounded run of `mode` (horizon `until-stopped:W:R`): its
+/// qualification (`P0_UNTIL_STOPPED_QUALIFICATION`) bound to exactly this run — identity,
+/// executables, window, runway — admitted by `RunHorizon::admit`; for the raw capture also the
+/// standing approval it autostarts under and the crashed run it continues. Every other mode
+/// refuses both (its autostart and its continuation after a crash do not exist).
+pub(crate) fn rolling_admission(
+    get: &dyn Fn(&str) -> Option<String>,
+    mode: &str,
+    horizon: darkbot_solana::runtime_config::Horizon,
+    identity: AuditedIdentity,
+    binary_sha256: String,
+    config: &dyn Fn() -> Result<darkbot_solana::runtime_config::RuntimeConfig, &'static str>,
+    now: u64,
+) -> Result<super::until_stopped::Rolling, &'static str> {
+    let darkbot_solana::runtime_config::Horizon::UntilStopped {
+        checkpoint_seconds,
+        minimum_runway_seconds,
+    } = horizon
+    else {
+        return Err(BOOT_AUDIT_REQUIRED);
+    };
+    let gated = crate::analytics::measurement::UNTIL_STOPPED_GATED;
+    let refuse = |why: String| {
+        crate::console::line(format!("{gated}: {why}"));
+        gated
+    };
+    let id = get(ENV_UNTIL_STOPPED_QUALIFICATION)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| refuse("no qualification (P0_UNTIL_STOPPED_QUALIFICATION)".into()))?;
+    let project = PathBuf::from(get("P0_PROJECT_DIR").ok_or(BOOT_AUDIT_REQUIRED)?);
+    let q = super::until_stopped::get(&project, &id).map_err(refuse)?;
+    let binding = super::until_stopped::Binding {
+        mode: mode.into(),
+        identity,
+        binary_sha256,
+        checkpoint_seconds,
+        minimum_runway_seconds,
+    };
+    crate::analytics::measurement::RunHorizon::of(horizon)
+        .admit(Some(&q), &binding, now)
+        .map_err(refuse)?;
+    let config = config()?;
+    let autostart = get(super::autostart::ENV_AUTOSTART).filter(|v| !v.is_empty());
+    let resume = get(super::until_stopped::ENV_RESUME).filter(|v| !v.is_empty());
+    if mode != MARKET_MODE && (autostart.is_some() || resume.is_some()) {
+        crate::console::line(format!(
+            "{gated}: {mode} has no autostart and no continuation after a crash"
+        ));
+        return Err(gated);
+    }
+    // An autostarted capture runs under its standing approval: exactly this run with its
+    // qualification and window budget, unexpired, for at most its maximum runtime.
+    let max_runtime_seconds = match autostart {
+        None => None,
+        Some(digest) => {
+            let refuse = |why: String| {
+                crate::console::line(why);
+                "AUTOSTART_NOT_PERMITTED"
+            };
+            let grant = super::autostart::in_force(&project, &digest).map_err(refuse)?;
+            if grant.qualification_id != id {
+                return Err(refuse(
+                    "AUTOSTART_NOT_PERMITTED: the run names another qualification".into(),
+                ));
+            }
+            grant
+                .permits(&binding, &super::autostart::WindowBudget::of(&config), now)
+                .map_err(refuse)?;
+            Some(grant.max_runtime_seconds)
+        }
+    };
+    Ok(super::until_stopped::Rolling {
+        project,
+        binding,
+        qualification_id: id,
+        config,
+        max_runtime_seconds,
+        resume,
+    })
 }
 
 /// The same identity seen from the runtime (X1): `p0ctl` next to the running executable.

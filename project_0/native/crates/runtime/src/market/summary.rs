@@ -347,7 +347,8 @@ pub fn finalize(
     let econ = match &core.econ {
         Some(h) => Some((
             h.cfg.plan.clone(),
-            match h.cutoff() {
+            // DEC-16: an unbounded run has windows, not one capture window.
+            match h.cutoff().filter(|_| !h.rolling()) {
                 Some(cutoff) => Some(h.cfg.plan.capture_window(
                     h.clock,
                     cutoff - h.cfg.plan.duration_seconds * crate::analytics::measurement::NS,

@@ -430,6 +430,19 @@ impl MeasurementPlan {
             + b.enrichment_seconds
             + b.shutdown_grace_seconds
     }
+    /// DEC-16: what an unbounded run may take after its stop — its owners drain, the capture
+    /// finishes its phases, the process shuts down (the owner budget without bootstrap, stream
+    /// readiness and the capture itself, which has no fixed length).
+    pub fn after_capture_budget_seconds(&self) -> u64 {
+        let b = &self.budgets;
+        b.shadow_drain_seconds
+            + b.market_drain_seconds
+            + b.quiescence_grace_seconds
+            + b.strict_seconds
+            + b.gap_seconds
+            + b.enrichment_seconds
+            + b.shutdown_grace_seconds
+    }
     pub fn capture_window(&self, clock: Clock, start: u64) -> Result<CaptureWindow, String> {
         let cutoff = self.cutoff(start)?;
         Ok(CaptureWindow {

@@ -60,6 +60,8 @@ pub(super) struct RollingState {
     late: u64,
     journal: crate::storage::segments::SegmentedWriter,
     counters_at_open: [u64; 3],
+    /// The verdict that halted the run (a closed window's checks).
+    halted: Option<String>,
 }
 
 impl RollingState {
@@ -75,6 +77,7 @@ impl RollingState {
             )
             .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?,
             counters_at_open: [0; 3],
+            halted: None,
         })
     }
 }
@@ -184,9 +187,14 @@ impl Worker {
             self.write_snapshot(i, false)?;
             self.snapshots = i;
         }
+        let held = verdict == crate::orchestration::until_stopped::CONTINUE;
+        let closed = verdict.clone();
         self.end_window(WindowStatus::Closed { verdict }, boundary_ns)?;
         let paths = self.h.cfg.paths();
         let r = self.rolling.as_mut().ok_or("ECON_WINDOW_NOT_ROLLING")?;
+        if !held {
+            r.halted = Some(closed);
+        }
         r.window += 1;
         self.reports = report_journal(&paths, r.window)?;
         let waiting = std::mem::take(&mut r.pending);
@@ -296,7 +304,11 @@ impl Worker {
         let ordered = shared.operator_stop.load(Ordering::Acquire)
             && !shared.market_failed.load(Ordering::Acquire)
             && !shared.shadow_failed.load(Ordering::Acquire);
-        let reason = if ordered {
+        let halted = self.rolling.as_ref().and_then(|r| r.halted.clone());
+        let ordered = ordered && halted.is_none();
+        let reason = if let Some(verdict) = &halted {
+            verdict.as_str()
+        } else if ordered {
             "OPERATOR_STOP"
         } else if shared.market_failed.load(Ordering::Acquire) {
             "MARKET_FAILED"
@@ -306,7 +318,10 @@ impl Worker {
             "ABORTED"
         };
         let complete = ordered && shared.drops.load(Ordering::Relaxed) == 0;
+        let reason = reason.to_string();
         if let Some((start, end)) = self.window() {
+            // A run that ended before its window's end ends that window now.
+            let end = end.min(self.h.clock.now_ns().max(start));
             let due = self
                 .h
                 .cfg
@@ -319,7 +334,7 @@ impl Worker {
             }
             self.end_window(
                 WindowStatus::Partial {
-                    reason: reason.into(),
+                    reason: reason.clone(),
                 },
                 end,
             )?;
@@ -341,6 +356,10 @@ impl Worker {
             "C0_E1_UNTIL_STOPPED_END reason={reason} windows={} complete={complete}; windows stay provisional (no canonical finalization)",
             r.window
         ));
-        Ok(())
+        if ordered {
+            Ok(())
+        } else {
+            Err(format!("C0_E1_UNTIL_STOPPED_INCOMPLETE: {reason}"))
+        }
     }
 }

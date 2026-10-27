@@ -191,7 +191,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
     let clock = Clock::try_new().map_err(refused)?;
     if mode == "econ4h" {
         let code = admission.as_ref().err().copied();
-        return run_econ4h(admission, clock).map_err(|e| match code {
+        return run_econ4h(admission, clock, &args).map_err(|e| match code {
             Some(code) => refused(code),
             None => e.into(),
         });
@@ -249,11 +249,38 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
 fn run_econ4h(
     admission: Result<Option<super::boot_audit::NetworkAudit>, &'static str>,
     clock: Clock,
+    args: &[String],
 ) -> Result<(), String> {
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
     let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
-    let cfg = econ::EconConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
+    let mut cfg = econ::EconConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
+    // DEC-16: an unbounded run admits itself again, exactly as its start was admitted (its
+    // qualification bound to this identity and these executables).
+    if cfg.unbounded && admission.is_ok() {
+        let get = |k: &str| std::env::var(k).ok();
+        let horizon = darkbot_solana::runtime_config::horizon(
+            &get("P0_MEASUREMENT_DURATION")
+                .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?,
+        )?;
+        let project = get("P0_PROJECT_DIR")
+            .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
+        let identity = super::boot_audit::launched_identity(
+            std::path::Path::new(&project),
+            super::boot_audit::SafetyFlags::from_env(),
+            args,
+            &get,
+        )?;
+        cfg.rolling = Some(super::boot_audit::rolling_admission(
+            &get,
+            "econ4h",
+            horizon,
+            identity,
+            super::boot_audit::runtime_binary_identity()?,
+            &|| Ok(darkbot_solana::runtime_config::active().clone()),
+            now_s,
+        )?);
+    }
     let mut market = market_observer::MarketConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
     if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
         market.ws_url = url;
@@ -275,9 +302,23 @@ fn run_econ4h(
 /// phase journal. `owner` is the Shadow owner (`run_shadow` in production).
 pub(crate) fn run_econ4h_with<S>(
     cfg: crate::analytics::econ::EconConfig,
+    market: crate::market::observer::MarketConfig,
+    clock: Clock,
+    owner: Result<S, &'static str>,
+) -> Result<(), String>
+where
+    S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
+{
+    run_econ4h_stopped_by(cfg, market, clock, owner, &super::control::stop_requested)
+}
+
+/// `run_econ4h_with` with the operator stop `stop` (production: the process's stop signal).
+pub(crate) fn run_econ4h_stopped_by<S>(
+    cfg: crate::analytics::econ::EconConfig,
     mut market: crate::market::observer::MarketConfig,
     clock: Clock,
     owner: Result<S, &'static str>,
+    stop: &dyn Fn() -> bool,
 ) -> Result<(), String>
 where
     S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
@@ -291,7 +332,12 @@ where
             crate::analytics::measurement::UNTIL_STOPPED_GATED
         ));
     }
-    market.duration_secs = cfg.plan.duration_seconds;
+    // DEC-16: an unbounded run's capture has no fixed length (its windows are the plan's).
+    market.duration_secs = if cfg.unbounded {
+        0
+    } else {
+        cfg.plan.duration_seconds
+    };
     market.ready_timeout_secs = cfg.plan.budgets.stream_ready_seconds;
     market.drain_timeout_secs = cfg.plan.budgets.market_drain_seconds;
     market.enrich.phase_max_secs = cfg.plan.budgets.enrichment_seconds;
@@ -303,7 +349,7 @@ where
     let paths = handle.cfg.paths();
     // Every exit after BOOTSTRAP seals the phase journal and renders its JSONL view.
     let result = match owner {
-        Ok(owner) => supervise(handle, analytics, market, clock, timeout, owner),
+        Ok(owner) => supervise(handle, analytics, market, clock, timeout, owner, stop),
         Err(code) => refuse_before_owners(handle, analytics, clock, code),
     };
     let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
@@ -359,6 +405,7 @@ fn supervise<S>(
     clock: Clock,
     timeout: u64,
     owner: S,
+    stop: &dyn Fn() -> bool,
 ) -> Result<(), String>
 where
     S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
@@ -383,6 +430,17 @@ where
         .name("econ-market".into())
         .spawn(move || {
             let result = market_observer::run_embedded(market, clock, Some(market_handle.clone()));
+            // DEC-16: an unbounded run's capture ends by its stop; that end is the ordered one.
+            let result = match result {
+                Err(e)
+                    if market_handle.cfg.unbounded
+                        && market_handle.cutoff().is_some()
+                        && e == "MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP" =>
+                {
+                    Ok(())
+                }
+                other => other,
+            };
             if result.is_err() {
                 market_handle
                     .shared
@@ -397,7 +455,11 @@ where
             result
         })
         .map_err(|e| e.to_string())?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
+    // DEC-16: an unbounded run has no deadline while it runs — only after its stop or abort,
+    // for what follows the capture.
+    let after = Duration::from_secs(handle.cfg.plan.after_capture_budget_seconds());
+    let mut deadline =
+        (!handle.cfg.unbounded).then(|| std::time::Instant::now() + Duration::from_secs(timeout));
     // Report state transitions instead of repeating a finished Shadow state
     // throughout the (potentially long) finalized block reconciliation.
     let mut last_status = None;
@@ -423,13 +485,23 @@ where
             }
             last_status = Some(status);
         }
-        if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire)
-        {
+        if stop() && !handle.shared.operator_stop.load(Ordering::Acquire) {
             handle.shared.operator_stop.store(true, Ordering::Release);
-            handle.shared.abort.store(true, Ordering::Release);
-            crate::console::line("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false".into());
+            if handle.cfg.unbounded {
+                // DEC-16: the stop of an unbounded run is its cutoff: admission closes, the
+                // Shadow owner drains, the capture ends its last window in order.
+                handle.stop_rolling(clock.now_ns());
+                deadline = Some(std::time::Instant::now() + after);
+                crate::console::line("[C0_E1/STOP] operator stop of an unbounded run: admission closed, Shadow drains, the last window ends partial, journals sealed; live=false submission=false".into());
+            } else {
+                handle.shared.abort.store(true, Ordering::Release);
+                crate::console::line("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false".into());
+            }
         }
-        if analytics.is_finished() || std::time::Instant::now() >= deadline {
+        if deadline.is_none() && handle.shared.abort.load(Ordering::Acquire) {
+            deadline = Some(std::time::Instant::now() + after);
+        }
+        if analytics.is_finished() || deadline.is_some_and(|d| std::time::Instant::now() >= d) {
             handle.shared.abort.store(true, Ordering::Release);
             handle.shared.shadow_failed.store(true, Ordering::Release);
             handle.shared.market_failed.store(true, Ordering::Release);
@@ -756,6 +828,265 @@ mod supervise_tests {
             "{refused}"
         );
         assert!(!run.exists());
+    }
+
+    /// The end of an unbounded econ4h test run: its directory, result, econ window records and
+    /// the owners' end `(aborted, shadow_failed, market_failed)`.
+    struct Unbounded {
+        run: std::path::PathBuf,
+        result: Result<(), String>,
+        windows: Vec<crate::analytics::econ::EconWindow>,
+        owners: Option<(bool, bool, bool)>,
+    }
+
+    /// DEC-16: an admitted unbounded econ4h run (`until-stopped:2s:4s`) on the production C0-E1
+    /// path over the loopback peer, its windows checked against real provider evidence; the
+    /// operator stop (injected, never the process signal) comes once `stop_after` windows
+    /// closed, or the evidence goes after the first window (`halt`). Returns the run, its
+    /// result, the econ window records and the owners' end.
+    fn unit_e_unbounded(tag: &str, halt: bool) -> Unbounded {
+        use crate::orchestration::provider_evidence::{
+            self as pe, ProviderEvidence, ProviderProof,
+        };
+        use crate::orchestration::until_stopped as us;
+        let (url, _) = loopback_peer(None);
+        let out =
+            std::env::temp_dir().join(format!("p0_unit_e_unbounded_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let project = out.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let env: std::collections::HashMap<&str, String> = [
+            ("P0_ECON_RUN_ID", "unit_e_unbounded".to_string()),
+            ("P0_ECON_OUT_DIR", out.to_string_lossy().to_string()),
+            ("P0_RUN_LAYOUT", "v2".into()),
+            ("P0_MEASUREMENT_DURATION", "until-stopped:2s:4s".into()),
+            ("P0_PROVIDER_CLASS", "test".into()),
+            ("P0_MARKET_READY_TIMEOUT_SECS", "10".into()),
+            ("P0_ECON_DRAIN_SECS", "1".into()),
+            ("P0_MARKET_DRAIN_TIMEOUT_SECS", "5".into()),
+            ("P0_WS_URL", url),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            ),
+            ("P0_MARKET_SOURCE", "logs".into()),
+            ("P0_MARKET_HEARTBEAT_SECS", "1".into()),
+        ]
+        .into_iter()
+        .collect();
+        let get = |k: &str| env.get(k).cloned();
+        let clock = Clock::new();
+        let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
+        let mut cfg = crate::analytics::econ::EconConfig::from_lookup(&get, now_s).unwrap();
+        let config = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec!["https://rpc.invalid".into()],
+            ..Default::default()
+        };
+        let evidence = ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: crate::analytics::journal::hex(
+                    &solana_sdk::hash::hash(b"https://rpc.invalid").to_bytes(),
+                ),
+                measured_at_unix_s: now_s as f64,
+                evidence_sha256: Some("a".repeat(64)),
+                allowed_rps: config.limits.rpc_rps as f64,
+                available_calls: config.limits.max_requests * 4,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: true,
+            archive_qualified: false,
+            source_sha256: "s".into(),
+        };
+        let file = out.join("evidence.p0j");
+        crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
+        pe::import(&project, &file).unwrap();
+        cfg.rolling = Some(us::Rolling {
+            project: project.clone(),
+            binding: us::tests::binding(2, 4),
+            qualification_id: "0123456789abcdef".into(),
+            config,
+            max_runtime_seconds: None,
+            resume: None,
+        });
+        let market = crate::market_observer::MarketConfig::from_lookup(&get, now_s).unwrap();
+        let run = cfg.run_dir.clone();
+        let paths = cfg.paths();
+        let econ_windows = paths.snapshot(crate::analytics::econ::ECON_WINDOWS_JOURNAL);
+        let records = move || -> Vec<crate::analytics::econ::EconWindow> {
+            let Ok(mut r) = crate::storage::segments::ChainReader::open(&econ_windows) else {
+                return Vec::new();
+            };
+            let mut seen = Vec::new();
+            while let Ok(Some(f)) = r.next_frame() {
+                if f.kind == crate::analytics::journal::kind::ECON_WINDOW {
+                    seen.push(f.typed().unwrap());
+                }
+            }
+            seen
+        };
+        let owner = |h: crate::analytics::econ::Handle| -> Result<(), String> {
+            h.shared.shadow_ready.store(true, Ordering::Release);
+            let _ = h.shared.shadow_ready_ns.compare_exchange(
+                0,
+                h.clock.now_ns(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+            while !h.drain_expired() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(())
+        };
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopper = stop.clone();
+        let running = std::thread::spawn(move || {
+            run_econ4h_stopped_by(cfg, market, clock, Ok::<_, &'static str>(owner), &|| {
+                stopper.load(Ordering::Acquire)
+            })
+        });
+        // Ordered by the journals, never by timing.
+        let waiting = std::time::Instant::now();
+        let wanted = if halt { 1 } else { 2 };
+        while records().len() < wanted {
+            assert!(
+                waiting.elapsed() < Duration::from_secs(60) && !running.is_finished(),
+                "{} windows closed",
+                records().len()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if halt {
+            std::fs::remove_dir_all(project.join(pe::STORE)).unwrap();
+        } else {
+            stop.store(true, Ordering::Release);
+        }
+        let result = running.join().unwrap();
+        let mut r = crate::analytics::journal::Reader::open(
+            &crate::analytics::journal::binary_path(&paths.phases()),
+        )
+        .unwrap();
+        let (mut owners, mut capture_phase) = (None, false);
+        while let Ok(Some(f)) = r.next_frame() {
+            if f.kind != crate::analytics::journal::kind::MEASUREMENT_PHASE {
+                continue;
+            }
+            match f
+                .typed::<crate::analytics::measurement::PhaseRecord>()
+                .unwrap()
+                .phase
+            {
+                crate::analytics::measurement::Phase::OwnersFinished {
+                    aborted,
+                    shadow_failed,
+                    market_failed,
+                } => owners = Some((aborted, shadow_failed, market_failed)),
+                crate::analytics::measurement::Phase::Capture(_) => capture_phase = true,
+                _ => {}
+            }
+        }
+        assert!(
+            !capture_phase,
+            "an unbounded run journals windows, no fixed capture"
+        );
+        Unbounded {
+            run,
+            result,
+            windows: records(),
+            owners,
+        }
+    }
+
+    /// DEC-16: an unbounded econ4h run measures window after window until its operator stop —
+    /// every window closed by its checks (CONTINUE) with its four provisional snapshots, the
+    /// last one partial at the stop; owners and capture end in order (the stop is no abort),
+    /// the windows journal is sealed complete, and no ECON_FINAL exists.
+    #[test]
+    fn dec16_an_unbounded_econ4h_run_measures_its_windows_until_its_stop() {
+        use crate::analytics::econ::WindowStatus;
+        let Unbounded {
+            run,
+            result,
+            windows,
+            owners,
+        } = unit_e_unbounded("stop", false);
+        assert_eq!(result, Ok(()));
+        assert_eq!(owners, Some((false, false, false)));
+        let (last, closed) = windows.split_last().unwrap();
+        assert!(closed.len() >= 2, "{windows:?}");
+        for (i, w) in closed.iter().enumerate() {
+            assert_eq!(w.window, i as u64 + 1);
+            assert_eq!(
+                w.status,
+                WindowStatus::Closed {
+                    verdict: "CONTINUE".into()
+                }
+            );
+            assert_eq!(w.snapshots, 4);
+        }
+        assert_eq!(
+            last.status,
+            WindowStatus::Partial {
+                reason: "OPERATOR_STOP".into()
+            }
+        );
+        let paths = crate::run_layout::RunPaths::new(&run, crate::run_layout::RunLayout::V2);
+        let chain = crate::storage::segments::verify_chain(
+            &paths.snapshot(crate::analytics::econ::ECON_WINDOWS_JOURNAL),
+        )
+        .unwrap();
+        assert!(chain.sealed && chain.complete, "{chain:?}");
+        assert!(!paths
+            .snapshot(crate::analytics::econ::REPORT_JOURNAL)
+            .exists());
+        let _ = std::fs::remove_dir_all(run.parent().unwrap());
+    }
+
+    /// DEC-16: a window whose checks fail halts an unbounded econ4h run — the window is closed
+    /// with its HALT verdict, the run aborts (owners and capture), the next window ends partial
+    /// at once and the run result names the HALT.
+    #[test]
+    fn dec16_an_unbounded_econ4h_run_halts_at_its_first_failed_window() {
+        use crate::analytics::econ::WindowStatus;
+        let Unbounded {
+            run,
+            result,
+            windows,
+            owners,
+        } = unit_e_unbounded("halt", true);
+        let halt = "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING";
+        assert_eq!(
+            result,
+            Err(format!("C0_E1_UNTIL_STOPPED_INCOMPLETE: {halt}"))
+        );
+        assert!(
+            owners.is_some_and(|(aborted, _, market_failed)| aborted && market_failed),
+            "{owners:?}"
+        );
+        let halted = windows
+            .iter()
+            .position(|w| {
+                w.status
+                    == WindowStatus::Closed {
+                        verdict: halt.into(),
+                    }
+            })
+            .unwrap_or_else(|| panic!("{windows:?}"));
+        assert!(windows[..halted].iter().all(|w| w.status
+            == WindowStatus::Closed {
+                verdict: "CONTINUE".into()
+            }));
+        assert_eq!(
+            windows[halted + 1..]
+                .iter()
+                .map(|w| w.status.clone())
+                .collect::<Vec<_>>(),
+            [WindowStatus::Partial {
+                reason: halt.into()
+            }]
+        );
+        let _ = std::fs::remove_dir_all(run.parent().unwrap());
     }
 
     /// Readiness unit E (PHASENPLAN L.2): capture, optional post-capture verification, report and

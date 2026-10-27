@@ -845,5 +845,44 @@ fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
     )
     .unwrap();
     assert_eq!(admit(&autostarted).err(), Some("AUTOSTART_NOT_PERMITTED"));
+    // DEC-16: the same admission for an unbounded econ4h run — its own complete
+    // qualification; it has no autostart and no continuation after a crash.
+    let mut econ_binding = binding.clone();
+    econ_binding.mode = "econ4h".into();
+    let econ = us::put(
+        &d,
+        &Qualification {
+            binding: econ_binding.clone(),
+            ..complete.clone()
+        },
+    )
+    .unwrap();
+    let mut econ_env = full.clone();
+    econ_env.insert(ENV_UNTIL_STOPPED_QUALIFICATION, econ.clone());
+    let horizon = darkbot_solana::runtime_config::horizon("until-stopped:1m:2m").unwrap();
+    let rolling_for = |env: &HashMap<&str, String>| {
+        rolling_admission(
+            &|k| env.get(k).cloned(),
+            "econ4h",
+            horizon,
+            fixture_identity(),
+            "binary".into(),
+            &|| Ok(darkbot_solana::runtime_config::RuntimeConfig::default()),
+            1002,
+        )
+    };
+    let admitted = rolling_for(&econ_env).unwrap();
+    assert_eq!(
+        (admitted.binding, admitted.qualification_id.as_str()),
+        (econ_binding, econ.as_str())
+    );
+    for (key, value) in [
+        (auto::ENV_AUTOSTART, "0123456789abcdef"),
+        (us::ENV_RESUME, "crashed"),
+    ] {
+        let mut refused = econ_env.clone();
+        refused.insert(key, value.into());
+        assert_eq!(rolling_for(&refused).err(), Some(gated), "{key}");
+    }
     let _ = std::fs::remove_dir_all(d);
 }

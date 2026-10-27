@@ -392,6 +392,8 @@ pub(crate) fn run_published(
     }
     // One terminal publication for every return path, including initialization and
     // evidence-write failures before the capture loop begins.
+    // DEC-16: an unbounded econ4h run's windows check against its admission.
+    let rolling = rolling.or_else(|| econ.as_ref().and_then(|h| h.cfg.rolling.clone()));
     let result = run_embedded_inner(cfg, clock, econ, status_tap.clone(), rolling);
     if let Some(tap) = &status_tap {
         tap.publish_phase(|p| {
@@ -445,6 +447,92 @@ fn roll_window(
         check.window, check.verdict, check.detail
     ));
     Ok(check)
+}
+
+/// One C0-E1 market checkpoint (boundary `index` of the measurement plan) to the analytics.
+fn emit_checkpoint(
+    h: &crate::analytics::econ::Handle,
+    core: &ObserverCore,
+    cfg: &MarketConfig,
+    index: usize,
+) {
+    let seconds = h.cfg.plan.seconds(index);
+    let summary = core.summary(&SummaryContext {
+        run_id: cfg.run_id.clone(),
+        commitment: cfg.commitment.into(),
+        configured_duration_seconds: seconds,
+        actual_observation_seconds: seconds,
+        stream_ready: true,
+        full_duration_observed: true,
+        drain_complete: false,
+        min_sample_liquidations: cfg.min_sample_liquidations,
+        ..Default::default()
+    });
+    h.emit(crate::analytics::econ::Evidence::MarketCheckpoint {
+        index,
+        summary: Box::new(summary),
+    });
+}
+
+/// DEC-16: the window boundaries of an unbounded econ4h run's capture.
+struct EconWindows<'a> {
+    h: &'a crate::analytics::econ::Handle,
+    rolling: &'a crate::orchestration::until_stopped::Rolling,
+    /// The window now open (1-based, the econ grid's).
+    open: u64,
+}
+
+impl EconWindows<'_> {
+    fn width(&self) -> u64 {
+        self.h
+            .shared
+            .window_ns
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+    /// The open window's end on the grid.
+    fn end(&self) -> u64 {
+        self.h
+            .shared
+            .start_ns
+            .load(std::sync::atomic::Ordering::Acquire)
+            + self.open * self.width()
+    }
+
+    /// DEC-16: closes every window whose end `t` has passed — its remaining checkpoints, the
+    /// journals' rotation with the window's checks (`roll_window`), then `WindowClosed` to the
+    /// analytics, in that order. `true` once a window's checks halted the run.
+    #[allow(clippy::too_many_arguments)]
+    fn close_passed(
+        &mut self,
+        t: u64,
+        windows: &mut crate::orchestration::until_stopped::RollingWindows,
+        sink: &mut JournalSink,
+        cfg: &MarketConfig,
+        core: &ObserverCore,
+        checkpoint_index: &mut usize,
+        clock: &Clock,
+    ) -> Result<bool, String> {
+        while t > self.end() {
+            let end = self.end();
+            while *checkpoint_index < crate::analytics::measurement::SNAPSHOT_COUNT {
+                *checkpoint_index += 1;
+                emit_checkpoint(self.h, core, cfg, *checkpoint_index);
+            }
+            let end_s = (clock.unix_ns(end) / 1_000_000_000) as u64;
+            let check = roll_window(windows, self.rolling, sink, cfg, end_s)?;
+            self.h.emit(crate::analytics::econ::Evidence::WindowClosed {
+                window: self.open,
+                boundary_ns: end,
+                verdict: check.verdict.clone(),
+            });
+            *checkpoint_index = 0;
+            self.open += 1;
+            if check.verdict != crate::orchestration::until_stopped::CONTINUE {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 /// DEC-16: the windows of a crashed unbounded run, continued: the interrupted window (from its
@@ -640,6 +728,7 @@ fn run_embedded_inner(
     let mut last_flush = Instant::now();
     let mut stop_reason = "TIMER";
     let mut write_error: Option<String> = None;
+    let mut econ_windows: Option<EconWindows> = None;
 
     // ---- phase 1: CAPTURE (no RPC) ----
     loop {
@@ -663,6 +752,14 @@ fn run_embedded_inner(
             stop_reason = "OPERATOR_STOP";
             break;
         }
+        // DEC-16: an unbounded econ4h run ends at its stop, the cutoff its supervisor sets.
+        if econ
+            .as_ref()
+            .is_some_and(|h| h.cfg.unbounded && h.cutoff().is_some())
+        {
+            stop_reason = "OPERATOR_STOP";
+            break;
+        }
         if let (Some(h), Some((start, Some(cutoff)))) = (&econ, window) {
             let due = h
                 .cfg
@@ -670,22 +767,40 @@ fn run_embedded_inner(
                 .due(clock.now_ns().min(cutoff).saturating_sub(start));
             while checkpoint_index < due {
                 checkpoint_index += 1;
-                let seconds = h.cfg.plan.seconds(checkpoint_index);
-                let summary = core.summary(&SummaryContext {
-                    run_id: cfg.run_id.clone(),
-                    commitment: cfg.commitment.into(),
-                    configured_duration_seconds: seconds,
-                    actual_observation_seconds: seconds,
-                    stream_ready: true,
-                    full_duration_observed: true,
-                    drain_complete: false,
-                    min_sample_liquidations: cfg.min_sample_liquidations,
-                    ..Default::default()
-                });
-                h.emit(crate::analytics::econ::Evidence::MarketCheckpoint {
-                    index: checkpoint_index,
-                    summary: Box::new(summary),
-                });
+                emit_checkpoint(h, &core, &cfg, checkpoint_index);
+            }
+        }
+        // DEC-16: the open window's checkpoints of an unbounded econ4h run; its boundary closes
+        // it once the stream passed it (ingress below) or nothing is queued after it.
+        if let (Some(e), Some(w)) = (econ_windows.as_mut(), windows.as_mut()) {
+            let now = clock.now_ns();
+            let from = e.end() - e.width();
+            let due = e.h.cfg.plan.due(now.min(e.end()).saturating_sub(from));
+            while checkpoint_index < due {
+                checkpoint_index += 1;
+                emit_checkpoint(e.h, &core, &cfg, checkpoint_index);
+            }
+            if now > e.end() && !consumer.pending() {
+                match e.close_passed(
+                    now,
+                    w,
+                    &mut sink,
+                    &cfg,
+                    &core,
+                    &mut checkpoint_index,
+                    &clock,
+                ) {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        stop_reason = "UNTIL_STOPPED_HALT";
+                        break;
+                    }
+                    Err(err) => {
+                        write_error = Some(err);
+                        stop_reason = "WRITE_ERROR";
+                        break;
+                    }
+                }
             }
         }
         if window.is_none() && started.elapsed() >= ready_timeout {
@@ -697,7 +812,7 @@ fn run_embedded_inner(
         }
         // DEC-16: an unbounded capture's window boundary; its first HALT stops the capture. An
         // autostarted one ends in order at its standing approval's maximum runtime.
-        if let (Some(w), Some(r)) = (windows.as_mut(), &rolling) {
+        if let (Some(w), Some(r), None) = (windows.as_mut(), &rolling, &econ) {
             let now_s = clock_unix_s(&clock);
             if r.max_runtime_seconds.is_some_and(|max| w.ran(max, now_s)) {
                 stop_reason = crate::orchestration::autostart::MAX_RUNTIME;
@@ -737,70 +852,105 @@ fn run_embedded_inner(
             .unwrap_or(Duration::from_secs(1))
             .min(Duration::from_millis(250));
         let now_s = clock_unix_s(&clock);
-        let step = match consumer.pop_timeout(wait) {
-            Some(IngressEvent::Reconnected {
-                attempt, t_rx_ns, ..
-            }) if window.is_none() => {
-                let cutoff = duration_ns.map(|d| t_rx_ns.saturating_add(d));
-                window = Some((t_rx_ns, cutoff));
-                ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
-                core.start_observation(t_rx_ns, cutoff);
-                if let (Some(r), None) = (&rolling, &windows) {
-                    windows = Some(
-                        crate::orchestration::until_stopped::RollingWindows::start(
-                            &cfg.run_dir,
-                            r.binding.clone(),
-                            &r.qualification_id,
-                            clock_unix_s(&clock),
-                            0,
-                        )
-                        .map_err(|e| format!("UNTIL_STOPPED_WINDOWS: {e}"))?,
-                    );
-                }
-                if let Some(tap) = &status_tap {
-                    tap.publish_phase(|p| {
-                        p.phase = CapturePhase::Capture;
-                        p.stream_ready_unix_s = ready_unix_s;
-                    });
-                }
-                if let Some(h) = &econ {
-                    let evidence = h.cfg.plan.capture_window(clock, t_rx_ns)?;
-                    crate::analytics::measurement::journal(
-                        &h.cfg.paths(),
-                        clock,
-                        crate::analytics::measurement::Phase::Capture(evidence),
-                    )?;
-                    // A C0-E1 run is a fixed measurement (its windows: DEC-16 stage 2 econ4h).
-                    h.start(
-                        t_rx_ns,
-                        cutoff.ok_or(
-                            "C0_E1_UNBOUNDED: the economics run measures a fixed duration",
-                        )?,
-                    );
-                }
-                core.coverage(
-                    &mut sink,
-                    now_s,
-                    Some(t_rx_ns),
-                    match cutoff {
-                        Some(cutoff) => WindowEvent::StreamReady {
-                            attempt,
-                            observation_start_t_rx_ns: t_rx_ns,
-                            observation_cutoff_t_rx_ns: cutoff,
+        let step =
+            match consumer.pop_timeout(wait) {
+                Some(IngressEvent::Reconnected {
+                    attempt, t_rx_ns, ..
+                }) if window.is_none() => {
+                    let cutoff = duration_ns.map(|d| t_rx_ns.saturating_add(d));
+                    window = Some((t_rx_ns, cutoff));
+                    ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
+                    core.start_observation(t_rx_ns, cutoff);
+                    if let (Some(r), None) = (&rolling, &windows) {
+                        windows = Some(
+                            crate::orchestration::until_stopped::RollingWindows::start(
+                                &cfg.run_dir,
+                                r.binding.clone(),
+                                &r.qualification_id,
+                                clock_unix_s(&clock),
+                                0,
+                            )
+                            .map_err(|e| format!("UNTIL_STOPPED_WINDOWS: {e}"))?,
+                        );
+                    }
+                    if let Some(tap) = &status_tap {
+                        tap.publish_phase(|p| {
+                            p.phase = CapturePhase::Capture;
+                            p.stream_ready_unix_s = ready_unix_s;
+                        });
+                    }
+                    if let Some(h) = &econ {
+                        match (cutoff, &rolling) {
+                            (Some(cutoff), _) => {
+                                let evidence = h.cfg.plan.capture_window(clock, t_rx_ns)?;
+                                crate::analytics::measurement::journal(
+                                    &h.cfg.paths(),
+                                    clock,
+                                    crate::analytics::measurement::Phase::Capture(evidence),
+                                )?;
+                                h.start(t_rx_ns, cutoff);
+                            }
+                            // DEC-16: an admitted unbounded run measures its windows from here.
+                            (None, Some(r)) if h.cfg.unbounded => {
+                                h.start_rolling(t_rx_ns);
+                                econ_windows = Some(EconWindows {
+                                    h,
+                                    rolling: r,
+                                    open: 1,
+                                });
+                            }
+                            (None, _) => return Err(
+                                "C0_E1_UNBOUNDED: an unbounded economics run needs its admission"
+                                    .into(),
+                            ),
+                        }
+                    }
+                    core.coverage(
+                        &mut sink,
+                        now_s,
+                        Some(t_rx_ns),
+                        match cutoff {
+                            Some(cutoff) => WindowEvent::StreamReady {
+                                attempt,
+                                observation_start_t_rx_ns: t_rx_ns,
+                                observation_cutoff_t_rx_ns: cutoff,
+                            },
+                            None => WindowEvent::StreamReadyUntilStopped {
+                                attempt,
+                                observation_start_t_rx_ns: t_rx_ns,
+                            },
                         },
-                        None => WindowEvent::StreamReadyUntilStopped {
-                            attempt,
-                            observation_start_t_rx_ns: t_rx_ns,
-                        },
-                    },
-                )
-            }
-            Some(ev) => {
-                let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
-                core.on_ingress_event(ev, event_unix_s, &mut sink)
-            }
-            None => Ok(()),
-        };
+                    )
+                }
+                Some(ev) => {
+                    // DEC-16: a window closes before the first event past its boundary.
+                    if let (Some(e), Some(w)) = (econ_windows.as_mut(), windows.as_mut()) {
+                        match e.close_passed(
+                            ev.t_rx_ns(),
+                            w,
+                            &mut sink,
+                            &cfg,
+                            &core,
+                            &mut checkpoint_index,
+                            &clock,
+                        ) {
+                            Ok(false) => {}
+                            Ok(true) => {
+                                stop_reason = "UNTIL_STOPPED_HALT";
+                                break;
+                            }
+                            Err(err) => {
+                                write_error = Some(err);
+                                stop_reason = "WRITE_ERROR";
+                                break;
+                            }
+                        }
+                    }
+                    let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
+                    core.on_ingress_event(ev, event_unix_s, &mut sink)
+                }
+                None => Ok(()),
+            };
         if let Err(e) = step {
             write_error = Some(e.to_string());
             stop_reason = "WRITE_ERROR";
@@ -892,9 +1042,12 @@ fn run_embedded_inner(
             },
         )?;
     }
+    // DEC-16: an unbounded econ4h run's stop is its ordered end, never an abort.
+    let rolling_stop =
+        econ.as_ref().is_some_and(|h| h.cfg.unbounded) && stop_reason == "OPERATOR_STOP";
     if stop_reason != "TIMER" {
         core.mark_incomplete("TRANSPORT_CAPTURE_ABORT");
-        if let Some(h) = &econ {
+        if let (Some(h), false) = (&econ, rolling_stop) {
             h.shared
                 .market_failed
                 .store(true, std::sync::atomic::Ordering::Release);
