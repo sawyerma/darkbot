@@ -223,4 +223,45 @@ Die erste JSON- und SBE-Messung zeigen denselben Snapshot-Sequenzwert und densel
 
 **Externe Primärquellen:** [Bitget Update Preview – V5 und 05.11.2026](https://www.bitget.com/docs/uta/update-preview), [SBE XML-Schema](https://www.bitget.com/docs/uta/websocket/sbe/sbe-intro), [Demo-Quickstart](https://www.bitget.com/docs/uta/quick-start). Bitgets Quickstart dokumentiert den Demo-JSON-Host; der ergänzte Demo-SBE-Pfad ist **praktisch ermittelt**, nicht als offizieller Quickstart-Host nachgewiesen.
 
-**R2-Folgeprüfungen / OPEN:** Originalcapture auf Checksumme/Format prüfen, echtes V5-Schema als Hash pinnen, kanonisches deterministisches Offline-Replay, absichtlich entfernten/duplizierten Frame als `GAP` erkennen, Resubscribe+neuen Snapshot validieren, 50-Level-Parität über gesamte Sequenz (idealerweise mit parallel synchronisiertem Referenzfeed), nach 05.11.2026 live V5 prüfen, schließlich Rust-Decoder und Burst-/Dauerlauf testen. Die bisherige `P1=NOT_RUN`- und `Gate 1=OPEN`-Einstufung bleibt unverändert.
+**R2-Folgeprüfungen / OPEN:** Capture-Integritäts- und deterministische Offline-Fehlertests sind inzwischen **für genau diesen Mitschnitt bestanden (siehe §10)**. Weiter erforderlich sind: echtes V5-XML-Schema als Hash pinnen, On-Exchange-Resubscribe+neuen Snapshot validieren, unabhängige 50-Level-Buchparität sowie exakt 50 sichtbare Top-Level nach Delta-Verarbeitung nachweisen, nach 05.11.2026 live V5 prüfen, Rust-Decoder und Burst-/Dauerlauf testen. Die bisherige `P1=NOT_RUN`- und `Gate 1=OPEN`-Einstufung bleibt unverändert.
+
+## 10. R2 – V5-Offline-Fehlertests auf verifiziertem Original-Capture (27.10.2026)
+
+**Quelle:** Nutzer-Terminalausgabe `bitget_r2_offline_fault.py` (macOS Python), eingereicht am 27.10.2026; **keine Netzwerk-/Trading-Zugriffe**. Testartefakte liegen auf dem Mac unter `~/Downloads/`. Die Quelle wurde nicht in Git committet; **Originalcapture und Testskript wurden nur lokal ausgeführt und nicht durch unabhängigen Lauf auf anderer Hardware reproduziert**.
+
+**Input:** `BITGET_R2_DEMO_SBE_CANDIDATE.capture`  
+**Capture-SHA-256** (vom Skript gegen fest erwarteten Hash geprüft): `e4a0d1be4d49a1e1e7d397bc78efc175f96d55f940c23e40f56b6b5dff2f760f`  
+**Datei-Parsing:** korrekter `DNR2CAP1\x00`-Header, **27 Records** (davon **25 SBE-Binärframes**, 2 Steuer-Frames), kein Truncation-/Decode-Fehler.  
+**Ergebnis:** sämtliche im Terminal ausgeführten Assertions **PASS**.
+
+| Test-ID (Terminal) | Beobachtung | Status |
+|---|---|---|
+| `CAPTURE_HAS_V5_SNAPSHOT_AND_UPDATES` | 1 Snapshot, 24 Updates aus echtem SBE-V5-Capture | **PASS** |
+| `ORIGINAL_DETERMINISTIC_REPLAY` | identische Zähler und Endbuch-Hash in zwei unabhängigen In-Memory-Replays | **PASS** |
+| `FAULT_POSITION_VALID` | zu löschendes Delta tatsächlich vorhanden, weitere Folgeupdates vorhanden | **PASS** |
+| `MISSING_DELTA_BLOCKS_BOOK` | Delta an Frameindex 12 gelöscht: **1 Gap**, danach **11 Folgedeltas blockiert** | **PASS** |
+| `OUT_OF_ORDER_DELTA_BLOCKS_BOOK` | zwei reale Deltas vertauscht: **1 Gap**, danach **12 Folgedeltas blockiert** | **PASS** |
+| `EXACT_DUPLICATE_IGNORED_WITH_SAME_BOOK_HASH` | exaktes Delta doppelt: **1 Duplikat ignoriert**, 25 Nachrichten angewandt, Endhash unverändert | **PASS** |
+| `RECOVERY_PRECONDITION_INVALID` | Buch bleibt nach Lücke ungültig | **PASS** |
+| `REAPPLY_AUTHENTIC_SNAPSHOT_RESTORES_BOOK_OFFLINE` | nach ungültigem Buch die **gleiche gespeicherte Snapshot+Delta-Sequenz** erneut eingespielt: wieder gültiger, identischer Endbuch-Hash | **PASS (offline)** |
+
+**Original-Endzustand (Buch-Hash, SHA-256):**  
+`8f0ac92007a70cf90bd6b8616d6be6f302e00e949a5b37751572d84162e137b3`
+
+**Zählerbelege:**
+```text
+ORIGINAL       {'snapshot': 1, 'applied': 25, 'update': 24}
+DROPPED_UPDATE {'snapshot': 1, 'applied': 12, 'update': 11, 'gap': 1, 'blocked_after_gap': 11}
+OUT_OF_ORDER   {'snapshot': 1, 'applied': 12, 'update': 11, 'gap': 1, 'blocked_after_gap': 12}
+DUPLICATE      {'snapshot': 1, 'applied': 25, 'update': 24, 'duplicate_ignored': 1}
+RECOVERY       {'snapshot': 2, 'applied': 37, 'update': 35, 'gap': 1, 'blocked_after_gap': 11}
+```
+
+**Grenze der Aussage:**
+1. Der Test verwendet ein **Python-Modell**, nicht den späteren Rust-Decoder. Gleiche `Book.digest()`-Werte belegen deterministisches Verhalten **dieser Implementierung und dieses Inputs**, noch keine unabhängige Buchkorrektheit gegenüber Bitget.
+2. Beim Recovery wird **kein frischer Snapshot aus der Börse abgerufen**. Es wird der ursprüngliche authentische Snapshot **offline nochmals eingespielt**. Ein echter Resubscribe-/Resnapshot-Test ist ausdrücklich **NOT_RUN**.
+3. Der bisherige Zustand hält beliebig viele Preislevels als Dictionary und wurde **nicht unabhängig gegen exakte Top-50-L2-Semantik validiert** (korrektes Entfernen/Begrenzen von Stufen, Delta-Randfälle, Nullmengen, Partial-Snapshots und alle 50 Preise/Mengen). Eine gültige `seq/pseq`-Kette allein beweist das nicht.
+4. Die bewusst verursachten Fehler sind **Entfernen, Tauschen, exakte Duplikation** eines Frames; es ist kein vollständiges Fuzz-/Schema-Evolution-/Kaltstart-/Crash-/Netzwerk-Recovery-Gate.
+5. Die ursprüngliche Datei ist lokal vorhanden und gegen den zuvor protokollierten Hash gegengeprüft, wurde aber noch **nicht als versioniertes, langfristig archiviertes Rohartefakt in Git oder Object Storage** gesichert.
+
+**Statusänderung R2:** `OFFLINE_V5_FAULT_SPIKE = PASS (getestete Fälle)`; `LIVE_RESUBSCRIBE = NOT_RUN`; `50_LEVEL_PARITY = NOT_RUN`; `RUST_DECODER = NOT_RUN`; `R2_GESAMT = PARTIAL`; `P1 = NOT_RUN`; `GATE 1 = OPEN`.
