@@ -419,3 +419,111 @@
 | `prestudy/bsc/experiments/gate0/evidence` | 142 | TRACKED_EVIDENCE, Einzelresultat nur mit Original-Run/Log |
 
 **Offene Vollständigkeitsgrenze:** Nicht versionierte Laufdaten (`~/.darkbot`, `bsc/.local`, `bsc/data`, `~/Library/Logs/DarkBot`), alte Git-History-/Reflog-Commits und private CI-/Claude-Ausgaben lassen sich aus einem aktuellen GitHub-Tree nicht vollständig rekonstruieren. Bis dahin gilt `ALL_HISTORIC_RUNS_VERIFIED=NO`. `LOCAL_PASS` bleibt an den ursprünglichen SHA/Scope gebunden.
+
+
+## 9. Normative Einzelabnahmekriterien – ergänzter Pflichtkatalog
+
+**Wichtig:** PRESCRIBED bedeutet vorgeschrieben, aber **nicht automatisch ausgeführt oder bestanden**. Historische Aussagen aus dem Masterplan sind auf ihren damaligen Code-/Testscope begrenzt. Für jeden unten genannten Teilfall sind einzelne `test_name → commit_sha → evidence_path → outcome`-Bindungen auf dem finalen BSC-Release zu prüfen. Neue Nutzerentscheidungen vom 27.10. haben bei reinen Entwicklungs-/G0.4-Zeitvorgaben Vorrang; davon unabhängige fachliche Gates bleiben bestehen.
+
+### 9.1 Vollständige W1–X1-Matrix aus dem Production Master Plan §14
+
+| ID / Beleg | Testpflicht/Owner | dokumentierter früherer Scope | Referenz |
+|---|---|---|---|
+| W1 — EIP-155, historical 343-byte TX, short r/s, 1,024 signatures | Unit 1: byte/hash/chain/sender/low-S/output/buffer tests | Unit 1 IMPLEMENTED_TESTED and FROZEN for its declared scope | SN01 |
+| W2 — malformed RLP and 27,624 actual differential inputs | Unit 1: real Rust differential and bounded decoder error cases | Unit 1 IMPLEMENTED_TESTED/FROZEN; delivered differential set PASS, no exhaustive-fuzz claim | SN01 |
+| P1 — V6 TAXED_V3, real CREATE2, seven vectors, corrected mismatch | Unit 2: deployment/salt/init-code/address golden and wrong-mode rejection | Unit 2 IMPLEMENTED_TESTED and FROZEN for its declared scope; wider Flap scope remains Phase D | SN02, SN19 |
+| P2 — 65 TX witness, Router→Portal and direct call, independent output | Units 2/3: independent semantic fixtures tied to actual prestate/caller | Scoped Unit 2/3 production fixtures IMPLEMENTED_TESTED/FROZEN; generic live semantics remain unqualified | SN03, SN04, SN19 |
+| Q1 — 497 dependency rows, coherent snapshot/invalidators | Units 2/3 + C2: explicit profile inputs; stale/reorg/mode/code/caller negatives | Unit 2/3 input/admission contracts tested; live coherent cache/refresh/invalidation coverage TRACKED_DEFERRED to C2 | SN04, SN07 |
+| Q2 — immediate DOGE BUY, minOutput exact/+1, pre-launch revert | Unit 3: sequential EVM golden and negative tests, no observed-output input | Unit 3 exact DOGE fixture scope IMPLEMENTED_TESTED/FROZEN; other conversion segments remain disabled | SN03, SN05 |
+| Q3 — native-BNB Curve-20 and exact fee rounding | Unit 3 + G: independent Rust/EVM, tax toggle/exemption/slippage/overflow | Unit 3 qualified Curve-20 scope IMPLEMENTED_TESTED/FROZEN; broader economics/cost remains Phase G and operational policy Unit 6 | SN05, SN18 |
+| N1 — 8,000 signals/1,000 intents, cross-chain and ordering failures | Unit 4: bounded dedup/nonces/recipient isolation/UNKNOWN regressions | Unit 4 IMPLEMENTED_TESTED and FROZEN for its declared single-sender scope; integrated timing remains C3 | SN06 |
+| N2 — 256 final-envelope bindings, short signatures | Units 1/2/4: intended chain/signer/nonce/Portal/token/recipient final binding | Unit 1/2/4 binding path IMPLEMENTED_TESTED/FROZEN; eight test senders do not authorize multi-sender production | SN01, SN02, SN06 |
+| N3 — injected HoL, startup quarantine in all four states | Unit 4 + C2: coupling telemetry, startup failures, controlled recovery proof | Unit 4 quarantine/HoL consumer semantics IMPLEMENTED_TESTED/FROZEN; durable fence Unit 6/runner, recovery proof C2/Unit 5, real HoL timing C3 | SN06, SN08 |
+| S1 — permit-before-write, ACK≠confirm, partial-write HALT | Units 4/5: once-economic/per-adapter permits and fault matrix | Unit 4 permit/fan-out state machine IMPLEMENTED_TESTED/FROZEN; actual transport/provider behavior remains Unit 5 | SN08, SN10 |
+| S2 — ordered self-launch/public/private inclusion, gas/budget/floor evidence | Unit 5 + Unit 4/C2 + C3/J: exact options/payload bytes, cost/expiry/placement; §8 after-handoff validity and delayed-execution regressions | API acceptance/diagnostic is not real N+1 qualification; request expiry is not transaction revocation | SN12 |
+| T1 — 0.433125/0.535250-ms real same-block BUYs | C3 + inclusion track: retain scope/order/acquisition; new exact-runtime measurement | Historical constructive evidence; producer elapsed time UNKNOWN | SN13 |
+| T2 — prepared remote diagnostics and tails >1 ms | Unit 5 + C3: separate prepared/full path and per-adapter tails/all outcomes | No universal “every send <1 ms” claim | SN09, SN10, SN11 |
+| T3 — 0.103417/0.045125-ms real following-block BUYs | Unit 5 + C3/J: preserve counterexample, optimize arrival/order | Fast local send does not guarantee first-block acquisition | SN13 |
+| T4 — clock/actual-send/producer witness | C0 schema + C1/C3 + J: bracket original successful execution, conservative bound; frozen per-cell campaign and verdict evaluator regressions | Actual T0→T_buy <1 ms NOT PROVEN; no campaign or universal-bound claim without its distinct proof | SN11, SN13, SN14, SN15 |
+| R1 — no-peer/disconnect/hash/fetch/rate-limit failures | C1/F + runner adapters: source health, actionable binding, full denominator | No feed/P2P coverage winner presumed | SN07, SN17 |
+| R2 — pending/canonical/replacement/reorg counterexamples | C2: every applicable retirement-contract counterexample with exact test | Unit 4 proof-consumer transitions IMPLEMENTED_TESTED/FROZEN; proof production and full canonical/reorg ownership remain C2; no parallel chain-state engine | SN16, SN19 |
+| C1 — first 15 s, complete receipt/internal-event acquisition evidence | C0 recorder + F/I/J: bounded raw capture, explicit window/completeness | Minimal schema alone is not implemented COMPLETE capture | SN14, SN17 |
+| C2 — journal/borrow/sequence/checksum/replay | C0 recorder + C1/F/I: lifetime, corruption/gap/restart and identity tests | No hotpath writer wait; derivatives are offline | SN15, SN16, SN17 |
+| X1 — old Solana/PAPER latency and Research Strategy C scans | H: separate observation semantics, BSC fee/EV validation | Preserve Solana; no BSC-EV/timing inference | SN18, SN20 |
+
+### 9.2 Vollständige Economics-Gate-Testmatrix §13
+
+### Quote boundaries
+- zero/invalid input rejection;
+- minimum meaningful input;
+- representative small/medium/large inputs;
+- near-boundary state;
+- exact rounding edge cases.
+### Fees/taxes
+- fee-free only if protocol evidence proves it;
+- each fee component;
+- each supported tax/mode;
+- combined components/order.
+### Buy/sell
+- exact local quote parity;
+- exact helper/eth_call parity where available;
+- historical executed vector;
+- revert vector where available.
+### Network cost
+- success receipt;
+- revert receipt;
+- replacement lifecycle;
+- approval/permit path where applicable.
+### Unknown
+- unknown version;
+- unknown mode;
+- missing economic evidence;
+- parity mismatch.
+
+**Belegpflicht:** Alle unterstützten Venue-/Mode-/Version-Kombinationen einzeln, einschließlich realer BUY-/SELL-/Exit-/Approval-/Permit-/Revert-/Replacement-/Migration-Kosten. Ohne explizites Roh-Evidence-Mapping `OPEN`.
+
+### 9.3 C1.5–C1.10, F, I/J, Frontend und Failure-Gates
+
+| Vertrag und Pflichtfall | Status des Nachweises |
+|---|---|
+| C1 Common: fmt, Clippy, c14 Prefilter, Go fmt/build, C13/C14 Interop | Historisch PASS in C1-Gates; neuer finaler SHA OPEN |
+| C1.5: Rust Debug/Release, Compile-fail/Lifetime, HOT0 0 Alloc, Kontrollpfad-Allokation | Historisch C1 PASS; finaler SHA OPEN |
+| C1.6: Hostprofile S zweimal bytegleich; Profil P fail-closed; Go race TestC16 | Historisch C1 PASS; finaler SHA OPEN |
+| C1.7: outbound Slow-/Fail-/Partial-Peer, Worker Lifecycle, Go race TestC17 | Historisch C1 PASS; finaler SHA OPEN |
+| C1.8: Rust Stress Debug/Release, Go race TestC18/TestC15, State/Ownership | Historisch C1 PASS; finaler SHA OPEN |
+| C1.9: production-selected-peer, 10.000 Samples/4 Peers, exakte p50/p95/p99/p99.9/p99.99/max, Manifest/Raw | Historisch PASS in C1.9-Scope; reale Mainnet-Fullchain extern OPEN |
+| C1.9b: Chain-97-Hook, RLPx, gleiche Clock-/Boot-Identität, Negative Qualifier | Historisch Testnet PASS; Mainnet OPEN |
+| C1.10: Frozen source/build/config/hash/pin, dirty tree / stale source refusal / verify Freeze | Historisch C1 FROZEN; neue Codeänderungen nicht abgenommen |
+| F: exakt ein **30-minütiges cleanes, natives geth**-Capture, Binärmanifest, Gap/Overflow/Quality/Replay | OPEN / EXTERNAL_BLOCKED laut STATUS; max. 2h G0.4 ist getrennt |
+| F: Peer-Decode→Rust→Recorder p50/p95/p99/p99.9/p99.99/max, Schwellen 0.5/1/3 ms | PARTIAL / finaler echter Ingress-Gate OPEN |
+| F/I: Journal Corruption, Capacity, Replay, Restart, Reorg, disk-full nur isolierter Testträger | Historische Teil-PASS, vollständiges Final-SHA-Mapping OPEN |
+| G: Quote/fee/tax/rounding/revert/BUY/SELL/approval/permit/replace/migration | Historische Teil-PASS, alle unterstützten Profile einzeln OPEN |
+| H: wiederholbarer Strategy-Core, valider Exit und Risk, echte wirtschaftliche Verluste dokumentieren | Replay PASS 201/201; PAPER-Wirtschaft 3/3 Verluste |
+| I: gleiche Rust-Core-Pfade in PAPER/SHADOW/LIVE, Egress- und Senderkonkurrenz, finaler Adapter `T_send` | Teil-PASS PAPER; echtes Live-`T_send` OPEN |
+| J: 999999 vs. 1000000 ns, Unknown Producer, SEND ohne Erwerb, schlechte Platzierung, fehlende 15-s-Capture, Reorg/Spät-Erwerb, Zero-Attempt und verändertes Manifest | Prescribed, Fall-zu-Test-Mapping OPEN |
+| F0-BSC/UI: Native→Protobuf→Gateway→React, Proto Golden U256/signed PnL, CAS/Receipt, Crash, Five Tabs, View Filters, A11y, No Poll, Pixeldiff | Historischer E2E PASS; neue Wallet Controls und Pixeldiff OPEN/NOT_RUN |
+| G0.7/G0.8: realer individueller Mainnet-BUY, Erwerb, eigener Tx-Index N+1 und kein externer BUY dazwischen, Gesamtkosten | NOT_RUN (Echtgeld) |
+| Original-T0 Witness: Upper-bound < 1000000 ns am selben Produzenten, Fehlergrenzen | UNKNOWN/NOT_PROVEN |
+
+### 9.4 Zusätzliche historisch dokumentierte Prüfungen, bislang ohne Einzelstatus
+
+| Referenz | Historischer Lauf/Ergebnis | Status |
+|---|---|---|
+| `prestudy/bsc/evidence/docs/reviews/C0_UNIT1_REV2_REVIEW.md` | 27 Rust-Tests im Debug und Release, 27.624 echte RLP-Differentialinputs, Format zuerst rot, isoliert repariert | HISTORICAL_PASS / Scope C0-Unit1 |
+| Historisches Unit-1/2/3-Mapping Masterplan | 1.024 Signature-Inputs; sieben CREATE2-Vektoren; 65 historische Tx-Vektoren; 497 State-Abhängigkeiten | HISTORICAL_SCOPED; neueste Anwendung offen |
+| Historisches Unit-4-Mapping Masterplan | 8.000 Signale / 1.000 Intents; 256 Envelope-Bindungen; Quarantäne/HoL/Partial-Write | HISTORICAL_SCOPED; produktiver Mainnet-Egress offen |
+| `prestudy/bsc/experiments/gate0/evidence/` | archivierte G0.3/G0.5/G0.6/G0.7-Tests, einschließlich vorheriger realer **Testnet**-BUY-Runs | HISTORICAL_TESTNET; keine BSC Chain-56-Akquisition |
+| `prestudy/bsc/evidence/tests/legacy_gate0/gate0-evidence/` | historische G0.1/G0.2-RPC-/CREATE2-/Economics-/Archiv- und Fehler-Responses | HISTORICAL_MIXED; nicht alle Rohantworten PASS |
+| `prestudy/bsc/evidence/docs/phase_a/PHASE_A_REPORT.md` | 253 PRE / 280 POST / 287 POST_FIX, Parity+Performance | OUT_OF_BSC_SCOPE: Phase-A-Solana/alte gemeinsame Architektur; nicht aktuelle BSC-Testsumme |
+| `bsc/docs/5_OFFENE_FEHLER/BSC_Bug_V2.md` | P1–P9 read-only Auditbefunde ohne eigene Dynamiktests | STATIC_REVIEW, NICHT TEST_EXECUTED |
+| `frontend/docs/FRONTEND_PHASENPLAN.md` | Gemeinsame Wire-/Gateway-/Frontend-Regression; Einzel-Project_0-Gates nicht als BSC-Fach-PASS werten | SHARED_REGRESSION, BSC-Abgrenzung erforderlich |
+
+### 9.5 Was für den vollständigen Anspruch noch fehlt
+
+1. **Alle jemals durchgeführten Einzeltests** lassen sich nicht allein aus Git `main` beweisen. Nicht versionierte Mac-/Claude-/CI-Logs und historische Git-Commits können zusätzliche Testläufe enthalten. `ALL_HISTORIC_RUNS_VERIFIED=NO`.
+2. **Alle tatsächlichen Einzeltestfälle** auch aus Inline-Rust-`#[cfg(test)]`, Go und Vitest benötigen namentliche `--list`-/Discovery-Ausgabe; §8 erfasst Testdateien, nicht jede Testfunktion. `ALL_TEST_CASES_MAPPED=NO`.
+3. **Alle bindenden Anforderungen gegen Ergebnisbeleg:** Die Abschnittsanforderungen der Dokumente müssen pro Testfall gegen aktuelle Signaturen und Belege geprüft werden, nicht nur durch PASS auf einer gesamten Suite. `ALL_REQUIREMENT_TO_CASE_MAPPED=NO`.
+4. **Endstand noch nicht abgenommen:** Release-PASS bezieht sich auf `8f26b02a`, nicht auf die zukünftige Wallet-/Economics-/Daily-BUY-Control-Version. `LATEST_FINAL_SHA_FULL_GATE=NOT_RUN`.
+5. Pro Test zwingend: `owner / test_case / required_scope / source_file / command / git_sha / run_id / result / exit_code / sample_count / evidence_sha256 / limitation`. Ohne Originaldaten `SOURCE_UNVERIFIED`, nicht angenommener PASS.
+
+**Fazit:** Dieses Register enthält jetzt einen deutlich vollständigeren versionierten Quell- und Pflichtenindex. Es ist **noch keine nachweislich vollständige Historie sämtlicher jemals gestarteter Testprozesse**. Diese Differenz ist ausdrücklich offen und bei der nächsten lokalen Claude-Übergabe gegen unverversionierte Artefakte zu schließen.
