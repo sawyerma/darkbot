@@ -5454,7 +5454,7 @@ Bestehender Project_0-Reiter → action-spezifische typisierte Protobuf-Paramete
 | 12 | keine neue Anzeige; typisierte Gründe in vorhandenen Projektionen | nein |
 | 13 | Liquidator/Wallets: Admission- und LIVE-Status | ja: LIVE-Anforderung über Controller, `effective=BLOCKED` bis Freigabe |
 | 14, 15 | Prozessentscheidungen ohne neue GUI-Funktion | nein |
-| 16 | Capture: Laufzeitmodell, Qualifikationsnachweise und HALT-Grund | Start nur über den bestehenden Boot-Ablauf; neues Bedienelement nur nach Nutzerentscheidung |
+| 16 | Capture: Laufzeitmodell, Qualifikationsnachweise, aktuelles Fenster und HALT-Grund | ja: Boot-Ablauf „Bis Stop“ (gesperrt mit Grund ohne Qualifikation), Stop (Drain/Seal/Abschluss), Dauerfreigabe Autostart erteilen/widerrufen (Bindung angezeigt) |
 
 **Kein neues Bedienelement** bei `nein`. Ein solcher Schalter bräuchte eine neue Nutzerentscheidung. Für jede Entscheidung **mit Laufzeitwirkung** ist der typisierte persistente `.p0j`-Nachweis Pflicht; für reine Build- oder Prozessentscheidungen werden keine künstlichen Laufzeitrecords erzeugt.
 
@@ -5531,6 +5531,8 @@ Jede arbeitende Session ein eigener Worktree/Index; bei gleichzeitigen Sessions 
 ### DEC-16 — Dauerbetrieb `UntilStopped`: **jetzt vollständig bauen** (Nutzerentscheidung 26.10.2026)
 
 Dauerbetrieb `UntilStopped` (24/7) jetzt vollständig entwickeln, nach DEC-07 und vor DEC-06; keine neue Architektur, kein späterer Neuaufbau. `RunHorizon::admit()` bleibt der zentrale Admission-Prüfpunkt, aber nicht das einzige Gate; die bestehende Sperre wird nicht pauschal entfernt. Qualifikationen als typisierte, persistente, identitätsgebundene Nachweise: SK-07-Segmentierung und Recovery, rollierende Kapazität, Providerbudgets, verfügbare Provider-Evidence. Ohne vollständige Qualifikation `RUN_HORIZON_UNTIL_STOPPED_GATED`; mit ihr grundsätzlich zulässig, aber nur mit den Netzwerk-, Start- und Betriebsfreigaben. Ressourcen-, Provider- und Integritätsgates bleiben im Betrieb wirksam, Verstoß ⇒ sicherer HALT. Offline-Tests beider Fälle inkl. Crash, Restart, Recovery, Ressourcenerschöpfung; reale Mainnet-Qualifikation `NOT_RUN`/`BLOCKED_EXTERNAL`. Qualifizierter Dauerbetrieb ist **keine** Erlaubnis für unbeaufsichtigte Neustarts und **keine** LIVE-Freigabe.
+
+Stufen innerhalb von DEC-16 (Nutzer 26.10.2026), je mit vollständigem gate.sh und CI auf dem finalen SHA: 1. modusneutral (admit(), Qualifikations-Records, rollierende Segmente, laufende Kapazitäts- und Budgetprüfung, Recovery); 2. econ4h und market; 3. Shadow-Owner (Owner-Fenster, Drains, Owner-Journale). Alle drei Modi, LIVE bleibt gesperrt; admit() bleibt je Modus GATED, bis dessen Qualifikationsnachweise vorliegen. GUI (Capture-Reiter, bestehender Boot-Abschnitt, kein neuer Reiter): Dauer-Auswahl „Bis Stop“ mit Fenster, Runway und Qualifikations-ID, ohne vollständige Qualifikation sichtbar, aber gesperrt mit Grund; Stop laufender UntilStopped-Läufe (Drain, Seal, Abschlussstatus); Anzeige, Erteilen und Widerrufen der Dauerfreigabe für den Autostart, gebunden an Config-Hash, Modus, Provider, Budget, maximale Laufzeit und Ablauf, Bindung vor dem Erteilen angezeigt. Stand: Stufe 1 OFFLINE_VERIFIED `202d4304` (BUGS §22.5).
 
 ### Verpflichtender Frontend-Rundweg im **gleichen** Fachpaket – `frontend/README.md` §§1–4 + Wire V1.3
 
