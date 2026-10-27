@@ -5,7 +5,7 @@ Stand: 27.10.2026. Status: verbindlicher P0-*Sollvertrag*, Quellen-Spikes und Re
 ## 1. Einziges System und Baseline
 
 - Autoritätsbaum: öffentliche Bitget-Frames → Rust typed L1/L2 → ein Rust-Indikator-/Graph-Kern → SignalIntent → ein Account-Risk-/Order-Owner → Bitget UTA V3; Backtest/Replays verwenden den gleichen Graph-/Signal-Kern. Rust publiziert ausschließlich geeignete Protobuf-Projektionen zum bestehenden Gateway → bestehende React-Graphite-SPA.
-- Versionsregister SOURCE_BASELINE muss für darkbot, ws_ai, Pine-Originale, jedes upstream Open-Source-Projekt *Commit, Dateipfad, SHA256 falls vorhanden, Lizenz, Zweck, Status KEEP/REFERENCE/PORT/REJECT* tragen. Bisher gepinnte Upstreams stehen in P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md; Quellenprüfung ≠ alle Tests bestanden.
+- Versionsregister SOURCE_BASELINE muss für darkbot, ws_ai, jedes upstream Open-Source-Projekt *Commit, Dateipfad, SHA256 falls vorhanden, Lizenz, Zweck, Status KEEP/REFERENCE/PORT/REJECT* tragen. Bisher gepinnte Upstreams stehen in P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md; Quellenprüfung ≠ alle Tests bestanden.
 - Project_0, BSC, Solana bleiben fachlich getrennt. Keine Frontend-/Gateway-Duplikate, keine gemeinsamen Trading-Regeln oder kopierten 1-ms-Ziele. API-Key niemals Teil eines Control-Themas.
 
 ## 2. Namespace-/Topic-Design für die spätere Governance-Abnahme
@@ -44,7 +44,7 @@ Nicht alle Topics im MVP zwingend aktiv; bei fehlender echter Projektion Descrip
 | R1 / DN-D08/09 | UTA V3 One-way + Isolated für V1 festgelegt; Bitget Account Mode, Stop-/TP-, Partial-/Reduce-only-Verhalten nachlesen und Demo validieren | PRODUKT FEST / DEMO NOT_RUN |
 | R2 | Bitget Public SBE Depth50 V5, raw trade IDs/Order, Rate-Limits, Historie, 7-Tage-Soak | P1 R2 PARTIAL / CODE NOT_RUN |
 | R3 | Private WS/REST, Account-/Order-/Stop-Reconcile, Lost ACK, Reboot/Fills | P5 NOT_RUN |
-| R4 | Originale Pine v6/datei-hashes, 5s-/MTF/Barclose/intrabar-Golden-Referenz und unabhängige Rechenprüfung | ORIGINAL/TEST OFFEN |
+| R4 | Eigene mathematische Definitionen für Williams/Andean/BX, 5s-/MTF-/Barclose-Regeln und unabhängige Golden-Rechnungen | FORMEL-/GOLDEN-TEST OFFEN |
 | R5 | NodeType-/Unit-/Validity-/Graph-IR und alle drei Beispielstrategien Golden und negativ | PLAN SPEZIFIZIERT / TEST OFFEN |
 | R6 | Bitget UTA-V3 Adapter eigene Rust-Domäne, vor Bibliothekseinsatz versionierte Lizenz-/Kompatibilitätspfade; Kosten/latency p99 gegen Alternativen | CODE-SPIKE OFFEN |
 | R7 | Candle-/Trade-/L2-Fillannahmen; konservatives Intrabar-Modell, Funding/Fees/Maker-/Adverse Selection | PLAN SPEZIFIZIERT / KALIBRIERUNG OFFEN |

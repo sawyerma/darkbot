@@ -6,10 +6,10 @@ Stand: 27.10.2026. Dokumentstatus: PLANUNGSVERTRAG. **Kein Code und kein Test wi
 
 | Bereich | Fachliche Soll-Spezifikation | Verbindliche Hauptreferenz | Zur Laufzeit noch nachzuweisen |
 |---|---|---|---|
-| Gate 1 / P0 | Quellbaseline, Governance, Optionen und Restentscheidungen | GATE_1.md; P0_RESEARCH_UND_VERTRAEGE_V1.md | Pine-Originale, Demo-Capabilities, Source-Inventar, konkrete Architecture-Spikes |
+| Gate 1 / P0 | Quellbaseline, Governance, Optionen und Restentscheidungen | GATE_1.md; P0_RESEARCH_UND_VERTRAEGE_V1.md | Demo-Capabilities, Source-Inventar, konkrete Architecture-Spikes |
 | P1 | Bitget Public SBE V5, echte Einzeltrades, L0/L1/L2, 1s/MTF, 24h+7d | PHASENPLAN_P1_V1.md; P1_BAR_SCHEMA_AND_TRADE_ORDER_V1.md | Rust, V5-Decoder, T01–T27, 7 Tage; **V5 60s-Probe 8/62 Parserfehler** |
 | P2 | Qualifizierter Historie→Live-Warm-up/Handover ohne doppelte Signale | P2_P3_P4_DETAILVERTRAG_V1.md | Datenlücken-/Restart- und Cross-Segment-Test |
-| P3 | Typisierter Graph, Bool3, Indikatoren, Pine-Goldens, immutable Strategie | P2_P3_P4_DETAILVERTRAG_V1.md | Pine-Original und ausführende Rust-Nodes/Golden-Vectors |
+| P3 | Typisierter Graph, Bool3, Indikatoren, unabhängige Indikator-Goldens, immutable Strategie | P2_P3_P4_DETAILVERTRAG_V1.md | Mathematische Formeln/Varianten und ausführende Rust-Nodes/Golden-Vectors |
 | P4 | Replay/Backtest im selben Kern, Kosten-/Fill-Tiers und getrennte OOS-Qualifikation | P2_P3_P4_DETAILVERTRAG_V1.md | Market-/Maker-/L2-Parität und echte Kosten/Slippage |
 | P5 | Bitget UTA V3; One-way/Isolated als V1-Soll; S0–S7; Journal, Stops und Recovery | PHASENPLAN_P5_V1.md; P5_ORDER_STATE_UND_CRASH_MATRIX_V1.md | 28 A-Tests; DN-P5-ALL-001; private Demo-Konto-/Order-Gates |
 | Wallet | Private WS plus REST-Kontoabgleich; Equity/Available/Positionen/Stops | WALLET_ACCOUNT_SYNC_V1.md | echte Demo-Readbacks; Wallet-Publisher/UI |
@@ -27,7 +27,7 @@ Stand: 27.10.2026. Dokumentstatus: PLANUNGSVERTRAG. **Kein Code und kein Test wi
 
 **Echte externe Evidenz:** Authentifizierte Bitget-UTA-Capabilities des konkret vorgesehenen Unterkontos; One-way/Isolated-, Leverage-, Reduce-only- und Schutzorder-Readbacks; reale Gebühren-/Funding-/Fill-Parameter; Private-WS-Abbrüche und Stop-Partial-Fills; komplette USDT-Futures-Symbolliste; kein Fake-PASS.
 
-**Benutzervorgaben:** tatsächliches API-Unterkonto, spätere Demo-Order-Berechtigung, Konto-/Bot-Risikokapital, Verlust-/Drawdowngrenzen, erlaubte Strategie und gewünschter Risikohorizont, belegte Pine-Vergleichsdatei, künftiger Host und signierte LIVE-Freigabe. Ohne diese Werte keine willkürlichen Defaults und keine Orders.
+**Benutzervorgaben:** tatsächliches API-Unterkonto, spätere Demo-Order-Berechtigung, Konto-/Bot-Risikokapital, Verlust-/Drawdowngrenzen, erlaubte Strategie und gewünschter Risikohorizont, künftiger Host und signierte LIVE-Freigabe. Ohne diese Werte keine willkürlichen Defaults und keine Orders.
 
 **Engineering-/Testentscheidungen:** Hostregion/Latenz- und Stale-Schwellen, Bitget REST-vs-privater WS-Ordertransport, exakter TP/SL-Trigger, konkrete Cloud-/Backup-/Secret-Lösung, Golden-Toleranzen und statistische Mindestkriterien: vor jeweiligen Experimenten bzw. Abnahmeläufen versionieren, anstatt nach Messergebnissen zu optimieren.
 

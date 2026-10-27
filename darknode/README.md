@@ -200,7 +200,7 @@ flowchart LR
 | **02 · Williams + Andean + BX** | LONG: (Wnorm > 70) AND Andean Bull AND BX Bull; SHORT spiegelbildlich mit Wnorm < 30 | Separate Schwellen (Beispiel 55/45) | Mehrere Indikatoren per AND kombinieren |
 | **03 · Cross / Exit / Re-Entry** | LONG: CrossAbove Wnorm 70, SHORT: CrossBelow Wnorm 30 | Exit über neue 55-/45-Cross-Ereignisse | Edge-Signale und erneutes Scharfschalten nach bestätigtem Schließen |
 
-**Alle Zahlen und Signalpfade sind ausschließlich Entwurfs-/UX-Beispiele und keine validierte Pine-Strategie oder Handelsfreigabe.** Klassischer Williams %R: −100 bis 0; `Wnorm = Wraw + 100`, Einheit und Zeitrahmen im Node-Typ prüfen. Ab V1 sind die fünf Kategorien **Marktdaten, Indikatoren, Bedingungen, Aktionen, Risiko** sichtbar. Erlaubte Verbindungen sind typisiert (`Candle`, `Scalar<unit>`, `Bool3`, `SignalIntent`, `RiskPolicy`); unpassende Einheiten/Ports, Rückkopplung ohne Delay, STALE/INVALID werden vor Handel geblockt. Der Controller hat **keine** frei verknüpfbare Möglichkeit, die Risk-/Execution-Gates zu umgehen.
+**Alle Zahlen und Signalpfade sind ausschließlich Entwurfs-/UX-Beispiele und keine unabhängig validierte Handelsstrategie oder Handelsfreigabe.** Klassischer Williams %R: −100 bis 0; `Wnorm = Wraw + 100`, Einheit und Zeitrahmen im Node-Typ prüfen. Ab V1 sind die fünf Kategorien **Marktdaten, Indikatoren, Bedingungen, Aktionen, Risiko** sichtbar. Erlaubte Verbindungen sind typisiert (`Candle`, `Scalar<unit>`, `Bool3`, `SignalIntent`, `RiskPolicy`); unpassende Einheiten/Ports, Rückkopplung ohne Delay, STALE/INVALID werden vor Handel geblockt. Der Controller hat **keine** frei verknüpfbare Möglichkeit, die Risk-/Execution-Gates zu umgehen.
 
 ### 24/7-Laufzeit und wichtigste Prioritäten
 
@@ -228,9 +228,9 @@ flowchart TB
 **24/7 bedeutet:** die Rust-Engine läuft auf einem dauerhaft betriebenen Host und bleibt unabhängig von einem geöffneten DarkBot-Frontend. Exchange-native bestätigte Stops können weiterbestehen, lokale dynamische Stopanpassungen benötigen die laufende Engine. Erst Backtest/Replay → Bitget Demo → Fault-Gates → separat autorisiertes LIVE.
 
 
-## 5. Indikatorreferenz / Pine-Status
+## 5. Eigenständige mathematische Indikatoren
 
-Bereitgestelltes Referenzscript: `DarkMa MTF Pressure Scalp v1.0` (Pine v6, derzeit als `indicator()` definiert, **kein ausführender Bitget-Bot**). Sichtbar enthalten: sechs Standard-TFs 5s/10s/30s/1m/5m/10m, Andean 40/7, Williams 14, BX, RLS/Burg/Ghost, OOS-/Triple-Barrier-Labeling und virtuelle Outcome-Kosten. Referenzparameter ≠ bereits gültige Handelsfreigabe. Eintritts-, Exit-, Intrabar-/Barclose- und MTF-Semantik vor Implementierung in eine Golden-Test-Matrix überführen. Nicht alle Visualisierungs-/Forecast-Features müssen in V1 handelnd sein.
+**Keine externe Skriptmigration und keine Skript-Parität als Freigabegate.** Williams %R, Andean, BX/XTrender und Signalregeln werden eigenständig mathematisch spezifiziert und **nativ in Rust** implementiert. **Python ist optional** für unabhängige Kontrollrechnungen, Forschungsanalysen und Golden-Fixtures, aber nicht für den produktiven Handels-Hot-Path. Live, Replay und Backtest benutzen denselben Rust-Evaluator. Getestet werden Algorithmusvarianten, Normierung, Numerik, Warmup, MTF, Einheiten, INVALID und Cross-Grenzen. Musterregeln sind keine qualifizierte Echtgeldstrategie.
 
 ## 6. Sicherheit, Kapital und Reconnect
 

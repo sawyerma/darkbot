@@ -26,6 +26,7 @@
 | DN-D17 | **Höchste Logik:** Open/Close-Intents + Stop-/BE-/Trailing-Policies an genau einen Rust Position-/Risk-/Execution-Owner; BOTH ist Berechtigung für beide Richtungen, nicht simultane Gegenpositionen | FESTGELEGT |
 | DN-D18 | **No JSON intern:** Bitget-JSON ausschließlich am externen Adapterrand; innerhalb Rust/Protobuf/Binärformate; in L0 dürfen externe Originalbytes opak abgelegt werden | FESTGELEGT; Implementierungsnachweis offen |
 | DN-D19 | **P1-Speicher:** Roh-/Normaldaten/Candle-Cache als L0/L1/L2-Binärdateien; kleine transaktionale Control-/Registry-/Gap-/Manifestdaten in SQLite; keine produktiven Redis/Parquet/ClickHouse-Pfade | FESTGELEGT; R2c/R2d offen |
+| DN-D20 | **Indikatoren:** mathematisch eigene Rust-Implementierung mit einem Live-/Replay-/Backtest-Evaluator; Python optional für unabhängige Tests, keine Skriptmigration | FESTGELEGT; Tests NOT_RUN |
 
 **P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN; Linux/systemd und verschlüsseltes Off-Host-Backup sind nun verbindliche V1-Designentscheidungen, keine bereits getesteten Hosts.
 
@@ -35,13 +36,13 @@
 
 | Quelle | Was wir wissen | Was noch fehlt |
 |---|---|---|
-| Pine `DarkMa MTF Pressure Scalp v1.0` | Pine v6 `indicator()`; Andean 40/7, Williams 14, BX, sechs MTFs, RLS/Burg/Ghost, virtuelle TP/SL/Timeout Outcomes | Datei-Hash/Version pinnen, vollständige Funktions-/Alert-/Entry-/Exit-Matrix, Pine-Golden-Vectors, Barclose/Intrabar-Parität |
-| Zweites Pine-Screener-Script (früheres Gespräch) | Als weitere User-Referenz genannt | Genaue aktuelle Datei/Version verifizieren, nicht Inhalte hineininterpretieren |
+| Eigene Indikatoren | Williams %R, Andean und BX als eigene mathematische Rust-Algorithmen | Formeln, Varianten, Warmup, MTF und unabhängig berechnete Golden-Vektoren spezifizieren |
+| Optionale Kontrollrechnung | Python als unabhängig eingesetztes Numerik-/Testwerkzeug | Rust gegen mathematische Vektoren und Replay-Gleichheit verifizieren |
 | `sawyerma/ws_ai` | Vorarbeiten für Bitget-WS, REST, historische Daten; alte V1/V2-Endpunkte und mehrere WS-Verantwortlichkeiten in untersuchten Dateien | Tatsächliche Laufzeitpfade, Codeowner, Tests, Performance, KEEP/PORT/REPLACE mit aktuellem SHA |
 | `sawyerma/darkbot` | Ein bestehendes React-Frontend, Graphite-Tokens, ein Topic-/Protobuf-Gateway; Projekt-Registry und Schema vorhanden | Exakten Integrationscommit, Freiraum ProjectId/Topics, ACL/Commands, Reporter-Pfade vor Codeänderung pinnen |
 | Project_0 README | GitHub Mermaid-Architekturmodell (Quellen → Engine → Ausführung → Journal/Reporter) | Nur Darstellungsprinzip übernehmen, keine fachliche P0-Latenz-/Trading-Logik |
 
-**Beispiel aus dem Benutzerwunsch, nicht aktuelles Pine-Entry-Resultat:** Williams-Normierung `W_norm = W_raw + 100`; LONG > 70 %, SHORT < 30 %. Beide Richtungen brauchen separate Entry/Exit- und Rearm-Regeln. Triple-Barrier-Outcomes im Pine-Script sind zunächst virtuelle Labels, **keine Bitget-Orders**.
+**Illustratives Beispiel (keine Handelsfreigabe):** Williams `W_norm=W_raw+100`; LONG >70, SHORT <30. Entry-/Exit-/Rearm-Regeln eigenständig spezifizieren.
 
 
 ## Node-Builder-Referenz und drei verbindliche Beispiele
@@ -65,7 +66,7 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 **Northtrader-Bezug:** Das nachweislich öffentliche [Northtrader Strategy Builder](https://northtrader.com/platform/strategy-builder)-Konzept bietet fünf Gruppen (6 Marktdaten, 15 Indikatoren, 12 Bedingungen, 9 Risiko, 8 Aktionen), direkt editierbare Bausteine, eine Beispielstrategie mit EMA-Cross/Long/SL/TP sowie Codegenerierung in NorthScript. **Wir adaptieren nur die graphische Gruppierung und Wert/Condition/Action-Trennung.** Wir behaupten **nicht**, Northtrader besitze denselben Rust Controller oder dieselbe Engine. DarkNode übersetzt den versionierten Graphen in typisierte Protobuf-/Rust-Strategy-IR, **nicht** in NorthScript. Eine Code-Rückkonvertierung oder freie Script-Node ist **kein V1-Gate**.
 
-**Gate-1-Nachweisstatus:** UX-Referenz und Mermaid-Entscheidungsfluss dokumentiert; **keine** React-Flow-Implementierung und **keine** bestätigte Rust-Orderlogik. Offene Implementationstests: Portkompatibilität/Einheiten/Clocks, INVALID-Semantik, ungenutzte Kanten, Node-State und Replay/Pine-Parität, neue Signalflanken, gleichzeitig widersprüchliche Signals, Partial-Fill/unknown State, Schutzorder, Gateway-Commands und Reconnect.
+**Gate-1-Nachweisstatus:** UX-Referenz und Mermaid-Entscheidungsfluss dokumentiert; **keine** React-Flow-Implementierung und **keine** bestätigte Rust-Orderlogik. Offene Implementationstests: Portkompatibilität/Einheiten/Clocks, INVALID-Semantik, ungenutzte Kanten, Node-State und Rust-Live-/Replay-Gleichheit, neue Signalflanken, gleichzeitig widersprüchliche Signals, Partial-Fill/unknown State, Schutzorder, Gateway-Commands und Reconnect.
 
 ### Drei Referenzstrategien (keine Echtgeld-Konfiguration)
 
@@ -75,7 +76,7 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 | N2 | Williams-Limits AND Andean Bull/Bear AND BX Bull/Bear | getrennte Schwellen als Beispiel | 3 parallel berechnete Indikatoren → boolesche AND-Nodes |
 | N3 | CrossAbove(70) long, CrossBelow(30) short | CrossBelow(55) long exit, CrossAbove(45) short exit | Edge-getriggerte Orders, Rearm nach bestätigtem FLAT |
 
-\`Wnorm = Wraw + 100\`; für klassische Williams %R sind 70 % ⇒ −30 und 30 % ⇒ −70. Die Exitwerte 55/45 sind **nur illustrative Vorschlagswerte**, die echte Pine-Regel ist separat anhand Golden-Vectors zu definieren.
+`Wnorm=Wraw+100`; 70 % entspricht −30, 30 % entspricht −70 in der Rohskala. Exitwerte 55/45 sind nur illustrative Regeln.
 
 
 ## P5 – Private Bitget-Futures-Anbindung (Research-Artefakt)
@@ -113,7 +114,7 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 | R1 | Bitget Demo: ausgewählter Account, Futures-Kontrakt, Order/Fill/Stop/Modify/Cancel/TP-SL, One-way/Hedge | Capability-Matrix pro Ordertyp; exakte adapterseitige Schutzpolicy |
 | R2 | Bitget Public WS: Trades/Depth-Seq/Gaps, Heartbeats, Reconnect, REST-Handover; 5s-Kerzen aus Trades | Kanonische Zeit-/Sequenz-/Qualitätsregeln |
 | R3 | Bitget Private WS und REST: verlorenes ACK, Teilfills, Restart mit offener Position, Schutzorder gelöscht | State Machine, Recovery-Holds, Idempotenz-/Journalvertrag |
-| R4 | Pine: identische historische Bars, Endbar vs intrabar, MTF-Alignment, Williams-Normierung, Andean/BX | Golden-Vectors, Rust-Port-Reihenfolge |
+| R4 | Native Rust-Indikatoren, Mathematik, Barclose/Intrabar, MTF und optional Python-Goldens | eindeutige Referenzvektoren und Rust-Live-/Replay-Parität |
 | R5 | Graph: typisierte Portverbindungen, boolesche INVALID-Semantik, Cycle-Rejection, Entry/Exit-Rearm, versionierter Hash | Compiler-/Graph-Contract |
 | R6 | Rust Spike: NautilusTrader vs Barter/eigener Kern (gleiche Strategie/Daten) | KEEP/INTEGRATE/REFERENCE/REJECT anhand Test/Kosten/Latency |
 | R7 | Backtest: Candle-Fills vs Trade- vs L2-Fills, Funding/Fees, Same-Bar SL/TP | Simulationsstufe und Evidenzgrenzen |
@@ -121,12 +122,12 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 ## 5. Gate-1-Abnahmekriterien (aktuell nicht erfüllt)
 
-- [ ] Aktuelle exakte Repo-Commits und Hashes aller Pine-Referenzen dokumentiert; Benutzer-Skript vollständig auf Output-/Signalpfade geprüft.
+- [ ] Mathematische Algorithmen, Inputs, Einheiten, Warmup, MTF und INVALID für alle V1-Indikatoren spezifiziert; unabhängige Golden-Vektoren definiert.
 - [ ] `ws_ai` IST-Callgraph und Komponentenentscheidung `KEEP / PORT / REPLACE / DELETE` mit Dateien/Funktionen/Tests dokumentiert.
 - [ ] Bitget-Kontomodus, Kontraktpräzision, Stop-/Trailing-/OCO-/Reduce-only-Semantik anhand aktueller Doku **und Demo-Tests** bestätigt.
 - [ ] Öffentlicher/private WS-Owner, Datenlücken, REST-Backfill, Historienverfügbarkeit unter 1m und Wiederanlaufpolitik definiert.
 - [ ] Node-Type-/Port-/Unit-/Clock-/Validity-Standard mit negativen Graph-/Boolean-Tests spezifiziert.
-- [ ] Long/Short/Exit-Schwellen und Bedingungen getrennt aus Userregeln vs originalem Pine ableitbar; Rearm-Modell getestet.
+- [ ] Eigene Entry-/Exit-/Rearm-Regeln versioniert und durch Golden-/Edge-/Replay-Szenarien überprüfbar.
 - [ ] Strategie-IR, Graphhash, Plugin-Typversionen, Golden-Vectors, qualifizierter Backtest-/Live-Paritätspfad entworfen.
 - [ ] Signierter Orderintent, ACK-vs-Fill, dauerhafter Journal-Sync, Fremdorders, Fills, initiale Schutzorder und Crash-Matrix spezifiziert.
 - [ ] Gemeinsamer DarkBot-Protobuf-/Topic-/ACL-/Command-Entwurf (ohne Projektkollisionen) und gewünschte UI-Felder inventarisiert.

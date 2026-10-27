@@ -14,7 +14,7 @@ Stand: 27.10.2026. Status: spezifiziert, Implementierung und Tests NOT_RUN. P1.5
 
 **P2-Golden/Negativmatrix:** gleiche ms-Timestamps, Overlap-Duplikate, Hole über Warmup, Partial-Bar, Stunden-/Tageswechsel UTC, WS-Reconnect, Backfill-Response Out-of-Order, kalte und warme Engine, late trade/Gap, Source-Gap mitten in 5s-Window, kurz vor Signalflanke und per-Node-Historical-Finality. PASS nur bei identischem Signal-Trace und belegtem NO_ENTRY unter Defekt.
 
-## P3. Typisierte Node-Registry, Pine-Parität und Strategy-IR
+## P3. Typisierte Node-Registry, unabhängige Indikatorvalidierung und Strategy-IR
 
 - Ein **GraphCompiler**, ein **Evaluator** für Backtest/Live. Nicht Frontend-Node-Execution. Graph als DAG, Knoten mit stabiler NodeType-ID und Version, Instance-ID, typisierten Ports, Skala/Einheiten (raw Williams -100…0 vs norm 0…100), TF/Clock, Warmup und INVALID-Policy. Ungültige Kanten/Cycles/Einheiten/Doppelausgänge blockieren das Publish/Activate; optionale Eingänge nur ausdrücklich im Typvertrag.
 - V1 Gruppen exakt Marktdaten, Indikatoren, Bedingungen, Aktionen, Risiko; erste echte Typen CandleSource, Williams %R, Andean, BX, Compare/Cross, AND/OR/NOT/XOR (ggf. NOR/NAND), Confirm und Long/Short/Exit; Risk-Policy wird vom Order-Owner geprüft. Kein Benutzer-Code-Node, keine zweite Simple/Advanced-Execution-Engine.
@@ -23,9 +23,9 @@ Stand: 27.10.2026. Status: spezifiziert, Implementierung und Tests NOT_RUN. P1.5
 - **Action-Priorität:** Schutz-/Emergency-Owner vor neuen Entries; Exit vor entgegengerichtetem Entry; bei LONG+SHORT gleichzeitig qualifizierter HOLD, keine automatische Hedge-Position. BOTH erlaubt Richtungsauswahl, nicht parallele Gegenpositionen. Indikatorwerte niemals signierten Request erzeugen; nur typisierte Intents.
 - **Immutable Graph:** normalisierte Knoten-/Kanten-/Paramter-/Plugin-Typversion, TF und Evaluationsregeln eindeutig serialisiert, Hash aus kanonischer Form, Save-Draft→Compile/Validate→Backtest→Qualify→Activate mit Compare-and-Swap/Autorisierung. Änderung an Grenzwert, Einheit, Warmup oder Priorität erzwingt neue Version und neue Qualification; React darf alte laufende Graphversion nicht mutieren.
 
-**Drei V1-Golden-Drafts (Beispiele, nicht Original-Pine):** N1 Williams norm >70 LONG/<30 SHORT, separate LongExit <55 / ShortExit >45; N2 Williams+Andean+BX Bool3 AND; N3 CrossAbove(70)/CrossBelow(30) und separate Exit-Crosses. Benchmark nur wenn Original-/Normierungs-/Warmup-Semantik explizit beschrieben. Vom Pine-Original nicht belegte Aussagen als OPEN kennzeichnen, kein Gleichsetzen der Demo-Beispielregel mit validierter Handelsstrategie.
+**Drei V1-Golden-Drafts (eigene Beispielregeln, keine qualifizierte Strategie):** N1 Williams norm >70 LONG/<30 SHORT, separate LongExit <55 / ShortExit >45; N2 Williams+Andean+BX Bool3 AND; N3 CrossAbove(70)/CrossBelow(30) und separate Exit-Crosses. Validierung anhand eigenständig spezifizierter Formeln, Normierung, Warmup und Grenzfälle; Beispielregeln nicht mit einer validierten Handelsstrategie gleichsetzen.
 
-**Parität:** Pine-Original/Version/Inputs exakt pinnen; Golden-Datei enthält vollständige Zeitreihe inkl. Uhrzeit, Quellbars, Node-Ausgänge, False/Invalid, Signals, GraphHash, Replay-Hash, Toleranz je Indikatorklasse. Last Price/Mark Price und BarClose/TickEvent getrennt, keine beliebige numerische Rundungsgrenze. Regression von NaN/Overflow/Unbounded/Division-by-zero; Property/Fuzz und Golden Tests für alle Dateigrenzen.
+**Unabhängige Validierung:** Formeln, Algorithmusvarianten, Eingaben und Parameter eindeutig versionieren; Python optional für getrennte numerische Kontrollrechnungen; Golden-Datei enthält vollständige Zeitreihe inkl. Uhrzeit, Quellbars, Node-Ausgänge, False/Invalid, Signals, GraphHash, Replay-Hash, Toleranz je Indikatorklasse. Last Price/Mark Price und BarClose/TickEvent getrennt, keine beliebige numerische Rundungsgrenze. Regression von NaN/Overflow/Unbounded/Division-by-zero; Property/Fuzz und Golden Tests für alle Dateigrenzen.
 
 ## P4. Kostenbewusste, reproduzierbare Simulation
 
@@ -38,4 +38,4 @@ Stand: 27.10.2026. Status: spezifiziert, Implementierung und Tests NOT_RUN. P1.5
 
 ## Exit-Kriterien
 
-P2: gleiche Warmup/Handover-Inputdaten → bitgleich gleiche Indicator Inputs/Signals; bei Gap NO_ENTRY. P3: Graph-Compiler-/Bool3-/Node-Version-/Pine-Golden-Tests bestanden. P4: reproduzierbare Replay-/Fee-/No-Lookahead-Goldens, dokumentierte Fillmodel-Grenzen und gesonderter ökonomischer OOS-Report. Bis echte Läufe vorliegen alle NOT_RUN.
+P2: gleiche Warmup/Handover-Inputdaten → bitgleich gleiche Indicator Inputs/Signals; bei Gap NO_ENTRY. P3: Graph-Compiler-/Bool3-/Node-Version-/mathematische Golden-Tests bestanden. P4: reproduzierbare Replay-/Fee-/No-Lookahead-Goldens, dokumentierte Fillmodel-Grenzen und gesonderter ökonomischer OOS-Report. Bis echte Läufe vorliegen alle NOT_RUN.
