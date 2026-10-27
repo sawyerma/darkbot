@@ -1,0 +1,82 @@
+# DarkNode P5 – Open-Source-Code-Audit und einheitlicher Sicherheits-Gesamttest V1.0
+
+**Stand:** 27.10.2026 · **Status:** Quellcode-Recherche zum fixierten Stand, keine P5-Laufzeitabnahme · **P5 = NOT_RUN, GATE 1 = OPEN, SIGN/ARM/LIVE verboten.**  
+**Bindend:** [PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md), besonders S0–S7 und P5-A01–A28. P3 bezeichnet die Indikator-/Node-Engine, P5 die Private Execution. Keine Änderungen an BSC/Project_0, keine parallele Architektur.
+
+## 1. Source-Baseline (exakt gepinnte Upstream-Commits; verifizierte Git-Refs)
+
+| System | Upstream-SHA | Lizenz laut GitHub-Repository-Metadaten | Nutzen/Status |
+|---|---|---|---|
+| [NautilusTrader](https://github.com/nautechsystems/nautilus_trader) | `6a64881b9f54f3ca79a322e980dbef51fd5482a9` | LGPL-3.0 | Typisierte Risk-/Execution-Engine und Persistenz-/In-flight-Prinzip, **nicht** kopieren ohne Lizenz-/Kompatibilitätsprüfung |
+| [Freqtrade](https://github.com/freqtrade/freqtrade) | `dafa0b6f4e1af30a80aedf730b5509ca59d0d7cc` | GPL-3.0 | On-exchange-Stop-Management, Emergency-Exit, Exchange-Integrationsmatrix; **Architektur- und Testreferenz**, keine direkte Übernahme GPL-Code |
+| [Hummingbot](https://github.com/hummingbot/hummingbot) | `9af100d6822da7d2d0291a906c730ef172284ee2` | Apache-2.0 | Active/Cached/Lost Order-Tracker, In-Flight-Trades, späte Fills; Codeübernahme nur bei konkret qualifizierter, erforderlicher Funktion |
+| [CCXT](https://github.com/ccxt/ccxt) | `133fd945e5dabea9b08a3d6b1012cefe1ef9713b` | MIT | Exchange-/Instrumentpräzision, Leverage/Margin/Position-Methodik; **Bitget-UTA-V3-Kompatibilität pro Methode prüfen**, kein ungeprüfter Classic-V2-Fallback |
+| [barter-rs](https://github.com/barter-rs/barter-rs) | `9770b27a83f844472b93b593b08063affc974b0d` | MIT | Rust typed exchange/event/portfolio-pattern, **Bitget-UTA-P5-Abdeckung nicht nachgewiesen** |
+
+**Wichtig:** Die SHAs pinnen den Repository-HEAD am Abrufzeitpunkt. Die unten ausdrücklich genannten Fundstellen in konkreten Quelldateien wurden gelesen; der übrige komplette Codebestand dieser fünf Projekte wurde **noch nicht vollständig statisch/ausführbar auditiert**. Die Upstream-SHAs allein belegen keine Funktionsparität. Als nächste Stufe exakte Datei-Blob-SHAs und Testfall-Referenzen beilegen, wo eine Implementation tatsächlich übernommen wird.
+
+## 2. Konkret gelesener Open-Source-Code und übertragbare Mechanismen
+
+| Quelle / exakte Codelocation | Beobachtetes echtes Verhalten | Für DarkNode zu übernehmen | Was NICHT bewiesen ist |
+|---|---|---|---|
+| [Nautilus live Rust config `crates/live/src/node/config.rs`](https://github.com/nautechsystems/nautilus_trader/blob/6a64881b9f54f3ca79a322e980dbef51fd5482a9/crates/live/src/node/config.rs) `LiveRiskEngineConfig`, etwa Zeile 189 ff. | Getrennte `max_order_submit_rate`, `max_order_modify_rate`, `max_notional_per_order` pro Instrument; Konfiguration enthält auch explizites `bypass`-Flag | Zentraler eigentümergebundener Risk-Owner mit nominalen Limits/Rate-Gates, **kein erlaubter Prod-Bypass** | Dass alle Edge-Cases der Upstream Risk-Engine sicher sind; konfigurierbarer `bypass` ist gerade ein Konfigurationsrisiko |
+| [Nautilus live config](https://github.com/nautechsystems/nautilus_trader/blob/6a64881b9f54f3ca79a322e980dbef51fd5482a9/crates/live/src/node/config.rs), `LiveExecutionEngineConfig`, etwa Zeile 409 ff. | `snapshot_orders`, `snapshot_positions`, periodische Position-Snapshots, Cache-Restore-Optionen | Persistente Zustandsprojektion und verifizierbarer Restart-Reconcile | Kein beweisbar crash-atomarer SQLite/Datei-Dual-Commit ohne eigenen Test |
+| [Freqtrade `freqtrade/freqtradebot.py`](https://github.com/freqtrade/freqtrade/blob/dafa0b6f4e1af30a80aedf730b5509ca59d0d7cc/freqtrade/freqtradebot.py) `handle_stoploss_on_exchange` ~1637 | Sucht existierende SL-Orders an der Börse und prüft/neuerstellt deren Zustand; TODO zu Liquidationspreis ausdrücklich im Code | Schutzorders gegen **Exchange-Orderstatus + Position** prüfen, statt nur lokales Flag | Bitget UTA V3 Preset-SL-/Partial-Fill-Semantik nicht durch Freqtrade bewiesen |
+| [Freqtrade `freqtradebot.py`](https://github.com/freqtrade/freqtrade/blob/dafa0b6f4e1af30a80aedf730b5509ca59d0d7cc/freqtrade/freqtradebot.py) ~341, `_exit_lock` | Lock zur Vermeidung von Kollision zwischen Exit und Stoploss-Recreation aus anderem Thread | Strikte serialisierte Ownership/CAS über Close/Stop-Replacement und Reconcile | Kein automatischer Schutz vor allen verteilten Timeout-/late-Fill-Races |
+| [Freqtrade `freqtradebot.py`](https://github.com/freqtrade/freqtrade/blob/dafa0b6f4e1af30a80aedf730b5509ca59d0d7cc/freqtrade/freqtradebot.py) `handle_trailing_stoploss_on_exchange` ~1734 | Preispräzision und ggf. Cancel-/Replace-Verarbeitung mit Exchange-/Zeit-Gates | Monotoner Stop-Schutz, Cancel/Replace als eigene mögliche Deckungslücke behandeln | Exchange-native Trailing-OCO ist nicht automatisch identisch |
+| [Hummingbot `client_order_tracker.py`](https://github.com/hummingbot/hummingbot/blob/9af100d6822da7d2d0291a906c730ef172284ee2/hummingbot/connector/client_order_tracker.py) ~59–117 | `_in_flight_orders`, `_cached_orders`, `_lost_orders`; `all_fillable_orders` schließt **auch verlorene** Orders ein; `all_updatable_orders` schließt lost ein | „Lokale FAILED/LOST“-Order bleibt für späte Fills/Status-Events correlatable | Unterschiedliche Connectoren können zusätzliche Bugs enthalten |
+| [Hummingbot `position_executor.py`](https://github.com/hummingbot/hummingbot/blob/9af100d6822da7d2d0291a906c730ef172284ee2/hummingbot/strategy_v2/executors/position_executor/position_executor.py) ~364–383 und ~699–718 | Close-Order gilt lokal als „nicht gefunden“ → `failed_orders` und `_close_order=None`; auch bei Failure-Event wird `_close_order` freigegeben | **Negativtest**: verspäteter Fill nach verloren/fehlgeschlagenen Close darf niemals zweite risikosteigernde oder doppelte Close auslösen; persistente alte ID für späte Fills behalten | Die konkrete Fehlerfolge aus Issue #7295 war an einem anderen Connector, nicht als Bitget-Nachweis übertragen |
+| [Hummingbot `position_executor.py`](https://github.com/hummingbot/hummingbot/blob/9af100d6822da7d2d0291a906c730ef172284ee2/hummingbot/strategy_v2/executors/position_executor/position_executor.py) ~481–500 | `place_close_order_and_cancel_open_orders` berücksichtigt `amount_to_close` vs Mindestgröße und storniert offene Orders | Teilfills/Restexposure/Close-Quantity samt Positionsbestätigung berechnen, nicht vom Order-ACK | Nachweis echter Bitget `reduceOnly`/Hedge `posSide` nötig |
+| CCXT / Barter | Upstream und Lizenz gepinnt, **noch keine einzelne vollständig qualifizierte Bitget-UTA-V3-Rust-Methode aus Code+Tests extrahiert** | Nächster Audit-Schritt: Methodencensus, V2/V3-Aufrufpfade, Test-Dateien, Lizenz/Port-Matrix | **Kein** „ready-to-import Bitget-Uta-Rust-Connector“ behaupten |
+
+**Reuse-Regel:** Exakte testbare Datenmodelle und fail-closed Zustandsübergänge übernehmen, *nicht* vollständige Fremd-Bot-Architektur mit konkurrierendem Exchange-/Risk-Owner einbetten. LGPL/GPL/MIT/Apache-Lizenz- und Copyright-Auflagen vor Codekopie separat prüfen. Was Freqtrade/Hummingbot belegen, ist primär ein **bewährtes Muster und regressionsrelevanter Fehlerfall**, nicht automatisch ein sicheres Bitget-UTA-Produkt.
+
+## 3. Ein gemeinsames ausführbares Abnahmeprogramm statt 28 einzelner Terminal-Häppchen
+
+**Gesamttest-ID: `DN-P5-ALL-001`.** Ein **einziger** Runner gegen fixiertes Git-Commit und versionierte Szenario-/Exchange-Captures; Ausgabe einer einzigen menschlich lesbaren Test-/Fehlermatrix und reproduzierbarer DBREC-Evidenz. Die Testlogik ist **noch nicht implementiert**, also **`NOT_RUN`**. Ein Script, das blind die Strings `PASS` für noch nicht vorhandene Testfälle druckt, ist verboten.
+
+Die gleiche Testmatrix läuft in getrennten, expliziten Sicherheitsumgebungen:
+
+| Lane | Zugriff | Aufgaben | Freigabe-/Resultatregel |
+|---|---|---|---|
+| **A – Source + Contract** | Read-only Git, API-Docs, Parser/Signer off-line | P5-A01–A28 gegen Dateien/Funktionen/Test-IDs und dokumentierte UTA-Endpunkte mappen; API-Signatur/Decimals/modes verifizieren | `PASS/FAIL/NOT_IMPLEMENTED/NOT_RUN`, jedes Urteil mit Datei+Zeile+Commit |
+| **B – Recorded Fault Replay** | **Kein Netzwerk, kein Credential**; nur echte versionierte Captures + explizite negative Eingangsmanipulation | ACK verloren, Send/Commit-Kill, late fill, Partial-fill, Replace/Cancel, unknown Orders, Stop verloren, Drift, Underflow/Overflow, Leverage falsch, Mark-vs-Last, Restart-Reconcile | Golden State-/Exposure-/No-Duplicate-Hashes; synthetisch **nur als gekennzeichnete Fault-Injection**, nicht als Beweis realer Börsenfähigkeit |
+| **C – Bitget Public Read-Only** | Kein Key | Vollständiger USDT-Futures-Markt-/Precision-Katalog, Instrumentstatus, Update-/Rate-Limits/Depth/Trade-Referenzen | Reale API-Antworten + Capture-Hashes, keine Order |
+| **D – Private Read-Only Demo** | **Eigene, restriktive Demo-Read-Credentials** nach Nutzerkonfiguration | `settings`, `assets`, Positionen, unfilled Orders, Stops und private WS; Balance/Mode/Leverage-Drift/No-Position-Readback | Kein Mutation-Request; `BLOCKED` ohne Key, **nie** ersatzweise Mainnet-Trade-Key |
+| **E – Mutierende Bitget-Demo-Akzeptanz** | Separater Demo-Trade/Management-Key, dediziertes Testkonto, **explizite Freigabe vor Aktivierung** | Hebel/Mode setzen, Market/Limit/IOC/FOK, Teilfill, TP/SL/Stop-Replace, Cancel, late ACK, Hostkill, Emergency, CountdownCancel gesondert | Jede mutation ordnungsgemäß journalisiert und über Bitget wirklich bestätigt, keine automatische Freigabe durch diesen Plan |
+| **F – Betrieb + Stress/Soak** | Echten freigegebenen Demo-Host, externer Alarmkanal | WS-Ausfälle, Clock-Drift, Rate-Limits, Disk-full, Outbox, Alarm-SLA, p50/p95/p99, Restart, 24/7 / mehrtägiges Soak | Separater Dauerzeitnachweis; nicht in wenige Minuten zusammenfassen |
+
+**Kritisch:** Die Lane E ist **kein** Auftrag, jetzt Orders oder Key-Uploads auszuführen. A–C sind ohne private Rechte vorplanbar; D benötigt eigene Zugangsdaten, E ausdrückliche Freigabe nach A–D und unabhängige Sicherheitsbedingungen.
+
+### Einheitliche Negativ-Szenarien (an P5-Axx gebunden)
+
+| Bereich | Cases im DN-P5-ALL-001 | Erwarteter Sicherheitsbeweis |
+|---|---|---|
+| Kapital + Risk | P5-A13/A14; 1–1000× konfigurierter Hebel, falsches Contractmultiplier/Decimal, Qty/Notional-Overflow, freie Margin vs volle Risk-Exposure, unbekannte Reservation, parallele Bot-Intents | **0** über Budget/Nominalwert/Menge genehmigte Entries, selbst bei falsch konfiguriertem Hebel |
+| Konto/Hebel/Liquidation | A02/A03/A04/A09/A15/A16; falsche UTA-/Margin-/Hold-Mode, Position nach vermeintlichem FLAT, Response OK aber Readback falsch, fehlerhafte/fehlende Liquidation | `NO_ENTRY/HALTED`, kontrollierter Reduction-/Stop-Policy-Pfad |
+| Stop/Emergency | A07/A17/A18/A19/A20/A28; Partial-fill mit inkorrekter Stop-Qty, abgesagter Stop, Marktgap, stop-limit nicht gefüllt, stale Private WS, externer Cancel | Keine still ungeschützte Position als `ACTIVE`; kontrollierter Replacement-/Emergency-Intent + Alarm nach erklärtem Ausgang |
+| ACK/Fills/Cancel/Recovery | A06/A08/A12/A21/A22/A27; Send committed/no ACK, Cancel ACK aber late FILL, FAILED close→später Fill, Restart exakt an jedem Persistenzpunkt, Fremdorder, Duplicate private WS | Keine doppelte Entry-/Close-/Flip-Order, alle bestätigten Exchange-Fills genau einmal journalisiert |
+| Trading-State + UI | A10/A23/A24/A26; HALTED, REDUCING, manuelles Emergency, unautorisierte Gateway-Commands, Browserausfall, Risk-bypass-Attempt | Nur autorisierte, mengenbegrenzte Reduktionsaktion; kein `ACTIVE` bei unsicherem Exchange-/Stop-Zustand |
+| CountdownCancel | A25; unbekannte API-Freischaltung, Stop-/Strategy-Order-Cancel unter Deadline und Hostausfall | Funktion **OFF**, bis echte Demo-Beweise zeigen, dass nötiger Schutz bleibt; ansonsten bei offenem Schutz deaktiviert |
+
+### Evidenzformat – pro Szenario verpflichtend
+
+`source_commit, upstream_sha, test_id, lane, mode, instrument_version, account_mode, fixture_id/hash, exchange_event_id/clientOid, input_canonical_hash, state_before/state_after, pos_before/after, worst_exposure, stop_coverage, flags, assertions, status, reason, output_hash, timestamp`. Secrets, Passphrase, volle Keys, personbezogene Handelsdaten nicht loggen oder in Git schreiben. Intern Typen/Protobuf/DBREC, **kein JSON in produktivem Runtime-Hot-Path**. Offline-Testreport darf lesbare Markdown/DBREC erzeugen.
+
+Für **jeden** A01–A28: `PASS/FAIL/BLOCKED/NOT_RUN` basierend auf tatsächlich gelaufenen Testcases. Fehlender Code = `NOT_IMPLEMENTED/NOT_RUN`, fehlende erforderliche Demo-Rechte = `BLOCKED` **nur für diese Lane**, nicht für Source-/Offline-Test. Mehrere Gates dürfen nicht durch einen generischen „16 PASS“/Wrapper-Exit kaschiert werden.
+
+**P5-Ausgang:** Alle erforderlichen A01–A28 in den festgelegten Lanes PASS, Coverage für relevante Bitget-UTA-Modi nachgewiesen, keine UNKNOWN-Order, kein ungeschützter gemeldeter READY-Trade, Not-Aus-Fälle getestet; abschließende Demo-Stress-/Soak-Evidenz. Erst dann separate Prüfung der LIVE-Berechtigung gemäß P9; P5-PASS alleine erteilt **kein** LIVE.
+
+## 4. Fehlende Vorarbeiten, bevor der Gesamttest echt laufen kann
+
+1. **Aktueller DarkNode-Codezustand:** Git `darknode/` hat bisher Dokumentation/Diagramme, aber keine bestätigte produktive P5-Rust-Implementierung. Deshalb können A13–A28 nicht gegen echte P5-Ausführungszustände bestanden werden.
+2. **CCXT/Barter tiefer codenah prüfen:** echte Bitget-UTA-V3-Methoden und -Tests gegen gepinnten SHA, Deprecation-/Rate-Limit-Ketten, Fehlerfälle, kein V2-Order-Fallback. Nur die benötigten Adaptermethoden auswählen.
+3. **Weitere Nautilus-/Freqtrade-/Hummingbot-Funktionen codenah prüfen:** Risk-`HALTED`/`REDUCING`-Transitions, Stop- und Account-Recovery, aktuelle bekannte Bugs, ihren eigenen Testkatalog; nicht nur README/Docs.
+4. **Bitget-Demo-Capability-Matrix:** privates UTA Read-only, `preset stoploss` für Partial-fill und `countdownCancel`/Strategy-Order-Abdeckung; ohne Demo-Zugang nicht als PASS abnehmen.
+5. **All-in-One Runner implementieren, erst nach echten Interfaces:** Testfallkatalog, Zustandssnapshots, Fixtures, Guards/Nonces, nachvollziehbarer Overall-Status. Eigenständige Rust-P5-Ausführung separat phasentreu implementieren; keine Schein-Mocks im Produktcode und keine echten Order-Requests ohne Freigabe.
+
+## 5. Entscheidung
+
+**Wiederverwenden:** Risk-Gate-/Rate-/Notional-Pattern aus Nautilus, Stop-/Emergency-/Lock-Pattern aus Freqtrade, InFlight/Cached/Lost/late-Fill-Pattern aus Hummingbot, Instrument/Precision-/Exchange-Adapter-Vertrag aus CCXT, typed Rust-Patterns aus Barter. **Nicht ersetzen:** vorhandenen DarkBot-Gateway-/Graphite-/Protobuf-Stack, nicht neue Exchange-/Risk-Architektur beginnen. **Nicht übernehmen:** Lizenzpflichtigen Fremdcode ohne Compliance; unbestätigte Classic-V2-private Bitget-Methoden; „gesicherte“ Verlustgarantien.
+
+**Gesamtbewertung 27.10.2026:** Source-Referenzen teilweise geprüft, P5-Testplan spezifiziert. **`DN-P5-ALL-001=NOT_RUN`, `P5-A01..A28=NOT_RUN`, `P5=NOT_RUN`, `GATE 1=OPEN`.**
