@@ -183,6 +183,8 @@ pub fn assess(
         q.census_state != "COMPLETE",
         format!("journal {}", q.census_state),
     );
+    // Paket 8 review L7: a run that observed nothing is no clean capture.
+    why(q.capture_s == 0, "empty capture window (0 s)".into());
     why(
         q.native_interruptions > 0,
         format!(
@@ -425,6 +427,30 @@ mod tests {
         );
         j.record(RecordKind::Runtime, end + 3_000, EXIT_PAYLOAD.to_vec());
         let _ = j.finish();
+    }
+
+    /// Paket 8 review L7: a run that stopped at once (a stop file left from
+    /// the last stop) observed nothing: not clean (before: CLEAN).
+    #[test]
+    fn an_empty_capture_window_is_not_clean() {
+        let base = std::env::temp_dir().join(format!("bsc-quality-empty-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        write(&base, 0, 0, None);
+        let q = assess(
+            &base,
+            "7",
+            Some(&status(7, 5)),
+            4096,
+            16_384,
+            CONFIG,
+            BUILD,
+            1_800,
+        )
+        .unwrap();
+        assert_eq!(q.capture_s, 0);
+        assert!(!q.clean, "{}", q.summary());
+        assert!(q.reasons.iter().any(|r| r.contains("empty capture window")));
+        fs::remove_dir_all(&base).unwrap();
     }
 
     /// A clean 30-minute native run is accepted; the same run from public

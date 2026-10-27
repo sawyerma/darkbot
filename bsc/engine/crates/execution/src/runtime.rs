@@ -1450,7 +1450,7 @@ pub fn run(
     rundir: &Path,
     repo_root: &Path,
 ) -> Result<(), String> {
-    let store = Store::open(sources_dir, 64)?;
+    let store = Store::open(sources_dir, crate::sources::KEEP_GENERATIONS)?;
     let clock = Clock(Instant::now());
     let started_ms = observed_now()?;
     let dir = rundir.join("bsc-runtime");
@@ -1964,6 +1964,13 @@ pub fn run(
             journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
             journal.record(RecordKind::Runtime, clock.now_ns(), EXIT_PAYLOAD.to_vec());
             journal.finish()?;
+            // The stop is consumed (Paket 8 review L7: a stop file left
+            // behind stopped the next start at once).
+            if let Err(e) = fs::remove_file(&stop_file)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("{}: {e}", stop_file.display());
+            }
             // The last periodic census ends before the final one.
             if let Some(done) = census_job.take() {
                 let _ = done.join();
@@ -1981,6 +1988,8 @@ mod tests {
     use super::*;
 
     const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+    /// The shipped refused accounts: the frozen G0.7 launcher and buyer.
+    const REFUSED: &str = "BSC_EXEC_REFUSED_ACCOUNTS=0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd,0x9c8a0Db41914beEE52Dd49790c4F087E252743DE\n";
 
     #[test]
     fn the_config_is_strict() {
@@ -2043,6 +2052,9 @@ mod tests {
             exec.identity_path
                 .ends_with(".darkbot/bsc/paper_identity.key")
         );
+        // Paket 8 review L4: the frozen G0.7 wallets are refused as PAPER
+        // identity.
+        assert_eq!(exec.refused_accounts.len(), 2);
         assert!(exec.identity_path.is_absolute());
         assert_eq!(
             (
@@ -2098,8 +2110,8 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LANES=64\n", ""),
             CONFIG.replace("BSC_RUNTIME_MAX_LAUNCH_CALLDATA=16384\n", ""),
             CONFIG.replace("MAX_LAUNCH_CALLDATA=16384", "MAX_LAUNCH_CALLDATA=1023"),
-            CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", ""),
-            CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", "BSC_EXEC_REFUSED_ACCOUNTS=0x12\n"),
+            CONFIG.replace(REFUSED, ""),
+            CONFIG.replace(REFUSED, "BSC_EXEC_REFUSED_ACCOUNTS=0x12\n"),
             // Gate M2: the paths that take the sender, required and exact.
             CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C\n", ""),
             CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C", "BSC_EXEC_SENDER_PATHS=C3+C2"),
@@ -2465,6 +2477,8 @@ mod tests {
         }
         fs::write(base.join("bsc.runtime.stop"), b"stop\n").unwrap();
         runner.join().unwrap().unwrap();
+        // Paket 8 review L7: the stop is consumed; the next start runs.
+        assert!(!base.join("bsc.runtime.stop").exists());
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &fs::read(&status).unwrap()).unwrap();
         assert_eq!(r.text(rs::MODE).unwrap(), "READ_ONLY");
         let rows = r.nested_all(rs::SOURCES).unwrap();

@@ -443,6 +443,32 @@ fn a_four_launch_whose_derived_token_differs_is_a_mismatch() {
     assert_eq!((l.four_token, l.c1_scope), (FourToken::Mismatch, false));
 }
 
+/// Paket 8 review H1: a Classic launch of the second (deployer, template)
+/// pair (0x0e019d2d…5f2e, block 129985540, token …4444) is one of the
+/// frozen candidates: Matched, not a mismatch that makes a capture
+/// NOT_CLEAN (before: the one candidate of the first pair, Mismatch).
+#[test]
+fn a_classic_launch_of_the_second_pair_matches() {
+    let (block, receipts) = load(FOUR_BLOCK, FOUR_RECEIPTS, 129_781_119);
+    let base = detect(&block, &receipts).remove(0);
+    let mut launch = base.clone();
+    let object: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/chain/tx_0x0e019d2d_classic_template2.json"
+    ))
+    .unwrap();
+    let parsed = crate::wss::parse_tx_map(object["result"].as_object().unwrap());
+    let verified = verify_object(&parsed).unwrap();
+    launch.token = Some(hex::decode_to_array("0138af76e32e0d3233bc1ad1651398978a994444").unwrap());
+    let l = launch.with_transaction(Ok(&verified), 16_384);
+    assert_eq!(l.four_token, FourToken::Matched);
+    // A token of neither pair stays a counted mismatch.
+    let mut launch = base;
+    launch.token = Some([0x77; 20]);
+    let verified = verify_object(&parsed).unwrap();
+    let l = launch.with_transaction(Ok(&verified), 16_384);
+    assert_eq!(l.four_token, FourToken::Mismatch);
+}
+
 #[test]
 fn failed_receipts_and_other_contracts_are_not_launches() {
     let (block, receipts) = load(FLAP_B_BLOCK, FLAP_B_RECEIPTS, 129_781_248);

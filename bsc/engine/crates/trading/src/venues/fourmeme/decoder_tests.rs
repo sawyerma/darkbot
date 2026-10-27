@@ -185,9 +185,8 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                 assert_eq!(l.request_id, e.request_id);
                 assert_eq!(e.creator, c.from);
                 assert_eq!(l.signature.len(), 65);
-                assert_eq!(
-                    pending_token(&deployment, &r),
-                    PendingToken::Unconfirmed(e.token),
+                assert!(
+                    matches!(pending_token(&deployment, &r), PendingToken::Candidates(t) if t[0] == e.token),
                     "{}",
                     c.tx
                 );
@@ -530,7 +529,7 @@ fn pre_execution_token_address_is_proven_or_unknown() {
         &recognize(&deployment, Some(c.to), &salted, MAX),
     );
     assert!(
-        matches!((a, b), (PendingToken::Unconfirmed(x), PendingToken::Unconfirmed(y)) if x != y)
+        matches!((a, b), (PendingToken::Candidates(x), PendingToken::Candidates(y)) if x[0] != y[0] && x[1] != y[1])
     );
     // Nothing else predicts a token.
     let buy = fixture("CLASSIC", "BUY");

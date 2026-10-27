@@ -1,0 +1,7 @@
+# Four.meme Classic: the second (deployer, template) pair TokenManager2 launches with (Paket 8 review H1).
+# Read-only from BSC mainnet (bsc-dataseed): each line is a witnessed createToken launch: tx block salt canonical_token,
+# the token CREATE2 from deployer 0xe8ce4e9175de23f97f853e19c522ef29cebf13e3 with the salt and the EIP-1167 init code
+# of template 0x46862924e2a229170ebd065e24a0da72af58a986 (runtime code keccak at block 129992928: deployer
+# ce2353c2f158bc7f2c7589c9c8b9bede322d749f83efdd8f2471840fe98857b8, template a5529c201b5fdf90cdcddd546521c4e75374e47fdb1aa356859307a4532da97f).
+0x0e019d2da8e95e5d394c6ed1c49abc358db22a9e65eba74ef8c56dfba95f5f2e 129985540 0xd7192ce6a212af9035fa43a0f232b7128af85a701ea2d25bac887dc88e95a6ab 0x0138af76e32e0d3233bc1ad1651398978a994444
+0x523753d89657d92623646288e2d08c4a158d676e3054ebf788aa949756816908 129986111 0xb41c6a438be720185bb2439459e1dd6799a5060442cf2c2c5518258ea3778226 0x708d25e4d4386ac0c57b26362ba21d84ba9f4444

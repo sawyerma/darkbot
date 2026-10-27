@@ -47,14 +47,11 @@ use darkbot_bsc_execution::runtime::{
     RuntimeConfig, journal_max_payload, preflight_setup, run as run_runtime, stop_file,
     write_census,
 };
-use darkbot_bsc_execution::sources::{Entity, Mode, Store};
+use darkbot_bsc_execution::sources::{Entity, KEEP_GENERATIONS, Mode, Store};
 use darkbot_bsc_execution::{capture_preflight, capture_quality, replay_proof};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::process::ExitCode;
-
-/// Generations kept besides the current one.
-const KEEP_GENERATIONS: u64 = 64;
 
 fn flag<'a>(args: &'a [String], name: &str) -> Result<&'a str, String> {
     let at = args

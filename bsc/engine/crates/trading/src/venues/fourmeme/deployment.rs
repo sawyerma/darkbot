@@ -20,6 +20,14 @@
 //! valid while the deployer, the template (per OpenFour preset) and the
 //! calldata layout are those frozen here; a canonical launch event that
 //! names another token is a mode outside the freeze.
+//!
+//! Classic has two (deployer, template) pairs (Paket 8 review H1): the
+//! frozen one (every frozen launch; tokens ending ffff) and a second one
+//! TokenManager2 (same implementation) launches with as well, witnessed by
+//! two canonical launches (tokens ending 4444) and read at block 129992928
+//! (`fixtures/fourmeme/classic_template2_20261027.txt`). The calldata names
+//! neither, so a pending Classic launch has a candidate per pair and no
+//! named token.
 
 use alloy_primitives::{Address, B256, U256, address, b256, keccak256};
 
@@ -43,6 +51,20 @@ pub struct OpenFourPreset {
     pub token_implementation: Address,
 }
 
+/// One Classic (deployer, template) pair: the CREATE2 deployer and the
+/// implementation its tokens are EIP-1167 clones of (an immutable of the
+/// deployer's runtime).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassicTemplate {
+    pub deployer: Address,
+    pub deployer_runtime_keccak256: B256,
+    pub template: Address,
+    pub template_runtime_keccak256: B256,
+}
+
+/// The Classic pairs TokenManager2 launches with (see the module doc).
+pub const CLASSIC_TEMPLATES: usize = 2;
+
 /// The frozen Four.meme contracts of one chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FourDeployment {
@@ -51,12 +73,9 @@ pub struct FourDeployment {
     pub token_manager2: Address,
     pub token_manager2_implementation: Address,
     pub token_manager2_implementation_runtime_keccak256: B256,
-    /// The Classic token deployer (CREATE2) and the template its tokens
-    /// clone (an immutable of the deployer's runtime).
-    pub classic_token_deployer: Address,
-    pub classic_token_deployer_runtime_keccak256: B256,
-    pub classic_token_template: Address,
-    pub classic_token_template_runtime_keccak256: B256,
+    /// The Classic (deployer, template) pairs: the G0.1 freeze's first,
+    /// the second witnessed after it.
+    pub classic_templates: [ClassicTemplate; CLASSIC_TEMPLATES],
     /// The one Classic `createToken` argument length the fixtures witness
     /// (bytes of `args`; 8 launches of both freezes); the salt position is
     /// proven for it only. It holds name and symbol of at most 32 bytes
@@ -110,14 +129,28 @@ pub fn bsc_mainnet_g01_129842711() -> FourDeployment {
         token_manager2_implementation_runtime_keccak256: b256!(
             "07eb30d004f7e1b214a2b5c9704e2c7866648b65d1ffeb0c38fd54b5512f030e"
         ),
-        classic_token_deployer: address!("6e0c4ba9ce0c901f1bba6af55cd66da3b0443ef1"),
-        classic_token_deployer_runtime_keccak256: b256!(
-            "666d5ae213c594d3cd4a156fd7cf84c85680db01a01e68eabee892d01ee9ce09"
-        ),
-        classic_token_template: address!("7330d8865f4b6800b72bdd73e2007833a5d45c94"),
-        classic_token_template_runtime_keccak256: b256!(
-            "49052d1fff3ba35008538f6694480d71469a0a76c82ce47d0500cab6e8775f6d"
-        ),
+        classic_templates: [
+            ClassicTemplate {
+                deployer: address!("6e0c4ba9ce0c901f1bba6af55cd66da3b0443ef1"),
+                deployer_runtime_keccak256: b256!(
+                    "666d5ae213c594d3cd4a156fd7cf84c85680db01a01e68eabee892d01ee9ce09"
+                ),
+                template: address!("7330d8865f4b6800b72bdd73e2007833a5d45c94"),
+                template_runtime_keccak256: b256!(
+                    "49052d1fff3ba35008538f6694480d71469a0a76c82ce47d0500cab6e8775f6d"
+                ),
+            },
+            ClassicTemplate {
+                deployer: address!("e8ce4e9175de23f97f853e19c522ef29cebf13e3"),
+                deployer_runtime_keccak256: b256!(
+                    "ce2353c2f158bc7f2c7589c9c8b9bede322d749f83efdd8f2471840fe98857b8"
+                ),
+                template: address!("46862924e2a229170ebd065e24a0da72af58a986"),
+                template_runtime_keccak256: b256!(
+                    "a5529c201b5fdf90cdcddd546521c4e75374e47fdb1aa356859307a4532da97f"
+                ),
+            },
+        ],
         classic_args_len: 672,
         openfour_registry: address!("912cef0c3ae9ab6eb3ec87cab69371cfb317ab94"),
         openfour_core: address!("ebe7b6c1089d9f72ad07f34e36d898e44e5e27f3"),
@@ -156,14 +189,17 @@ impl FourDeployment {
         }
     }
 
-    /// The Classic token of a launch with `salt`, if it is a clone of the
-    /// frozen template by the frozen deployer.
-    pub fn classic_token(&self, salt: B256) -> Address {
-        create2_address(
-            self.classic_token_deployer,
-            salt,
-            keccak256(minimal_proxy_init_code(self.classic_token_template)),
-        )
+    /// The Classic token of a launch with `salt` under each frozen pair:
+    /// the launch's token is one of them (its salt was mined for one), but
+    /// the calldata names neither.
+    pub fn classic_tokens(&self, salt: B256) -> [Address; CLASSIC_TEMPLATES] {
+        self.classic_templates.map(|t| {
+            create2_address(
+                t.deployer,
+                salt,
+                keccak256(minimal_proxy_init_code(t.template)),
+            )
+        })
     }
 
     /// The frozen token implementation of an OpenFour preset.
@@ -196,13 +232,13 @@ mod tests {
     fn the_frozen_derivation_reproduces_the_freeze() {
         let d = bsc_mainnet_g01_129842711();
         assert_eq!(
-            keccak256(minimal_proxy_init_code(d.classic_token_template)),
+            keccak256(minimal_proxy_init_code(d.classic_templates[0].template)),
             b256!("701a364cab6ae8867f16bae0a17fa0b01fe43e0770fa3655f31a03a54262e134")
         );
         assert_eq!(
-            d.classic_token(b256!(
+            d.classic_tokens(b256!(
                 "b3b9bc8c554de542fe9181f3df7867fd957debabfe4d7bf3326149b5ada7e48e"
-            )),
+            ))[0],
             address!("a89a24209a3ae8ba1ffb3f0567b69ef4765bffff")
         );
         let preset = U256::from(1_778_027_615_733u64);
@@ -225,5 +261,28 @@ mod tests {
         assert_eq!(d.family_of(d.token_manager2), Some(Family::Classic));
         assert_eq!(d.family_of(d.openfour_core), Some(Family::OpenFour));
         assert_eq!(d.family_of(d.openfour_registry), None);
+    }
+
+    /// Paket 8 review H1: both witnessed launches of the second Classic
+    /// pair reproduce under it, and not under the frozen first one (before:
+    /// the one candidate contradicted the canonical token).
+    #[test]
+    fn the_second_classic_pair_reproduces_its_launches() {
+        let d = bsc_mainnet_g01_129842711();
+        let text = include_str!("../../../fixtures/fourmeme/classic_template2_20261027.txt");
+        let mut n = 0;
+        for line in text
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+        {
+            let f: Vec<&str> = line.split(' ').collect();
+            let salt: B256 = f[2].parse().unwrap();
+            let token: Address = f[3].parse().unwrap();
+            let [first, second] = d.classic_tokens(salt);
+            assert_eq!(second, token, "{}", f[0]);
+            assert_ne!(first, token);
+            n += 1;
+        }
+        assert_eq!(n, 2);
     }
 }

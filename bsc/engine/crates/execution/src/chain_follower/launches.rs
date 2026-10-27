@@ -171,8 +171,17 @@ impl ReceiptLaunch {
             (_, Ok(t)) => match four_launch_token(&four, &t.raw, max_launch_calldata) {
                 None => FourToken::NotRecognized,
                 Some(PendingToken::Unknown) => FourToken::Unknown,
-                Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token)) => {
+                Some(PendingToken::Derived(token)) => {
                     if Some(token.into_array()) == self.token {
+                        FourToken::Matched
+                    } else {
+                        FourToken::Mismatch
+                    }
+                }
+                // Paket 8 review H1: a Classic launch's token is one of the
+                // frozen pairs' candidates; none of them is another pair.
+                Some(PendingToken::Candidates(tokens)) => {
+                    if tokens.iter().any(|t| Some(t.into_array()) == self.token) {
                         FourToken::Matched
                     } else {
                         FourToken::Mismatch

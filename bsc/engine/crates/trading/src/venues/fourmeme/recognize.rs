@@ -13,7 +13,7 @@
 use alloy_primitives::{Address, B256, U256, hex};
 
 use super::abi::{AbiError, WORD, Words, body, tails};
-use super::deployment::{Family, FourDeployment};
+use super::deployment::{CLASSIC_TEMPLATES, Family, FourDeployment};
 
 /// A launch, BUY or SELL function of a published Four.meme ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,11 +292,11 @@ pub enum PendingToken {
     /// CREATE2 from frozen inputs the calldata selects: an OpenFour preset
     /// of the frozen table and its `tokenSalt`.
     Derived(Address),
-    /// CREATE2 from the frozen Classic deployer and template and the salt
-    /// of the calldata. Every frozen launch used that template, but the
-    /// calldata does not name it: a candidate until the canonical
-    /// `TokenCreate` names the same token.
-    Unconfirmed(Address),
+    /// CREATE2 from each frozen Classic (deployer, template) pair and the
+    /// salt of the calldata, which names neither pair: no token is named
+    /// before execution; the canonical `TokenCreate` must name one of the
+    /// candidates (Paket 8 review H1: a second pair is live).
+    Candidates([Address; CLASSIC_TEMPLATES]),
     /// No proven derivation (another preset, not a decoded launch).
     Unknown,
 }
@@ -346,7 +346,7 @@ pub fn recognize<'a>(
 /// The token of a recognized launch, where its derivation is proven.
 pub fn pending_token(deployment: &FourDeployment, recognized: &Recognized<'_>) -> PendingToken {
     match recognized {
-        Recognized::ClassicLaunch(l) => PendingToken::Unconfirmed(deployment.classic_token(l.salt)),
+        Recognized::ClassicLaunch(l) => PendingToken::Candidates(deployment.classic_tokens(l.salt)),
         Recognized::OpenFourLaunch(l) => deployment
             .openfour_token(l.preset_id, l.init.token_salt)
             .map_or(PendingToken::Unknown, PendingToken::Derived),

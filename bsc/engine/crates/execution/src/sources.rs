@@ -525,6 +525,9 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fs::File::open(dir)?.sync_all()
 }
 
+/// Source-mode generations the store keeps besides the current one (one
+/// value for every caller; Paket 8 review L5).
+pub const KEEP_GENERATIONS: u64 = 64;
 impl Store {
     pub fn open(dir: impl Into<PathBuf>, keep: u64) -> Result<Self, String> {
         let dir = dir.into();
