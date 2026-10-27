@@ -59,6 +59,22 @@ try:
     (h.WORK/'app/current').symlink_to(release,target_is_directory=True)
     h.run('up','--no-open')
     subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=180,env=h.env)
+    # Paket 8 review L3: launchd restarts the runtime after a crash (SIGKILL); the restart is a new run
+    # and the C2 owner restores its checkpoint.
+    journal=h.WORK/'run/bsc-runtime/journal'
+    runs=lambda: sorted(p.name for p in journal.iterdir() if p.is_dir())
+    before=runs()
+    subprocess.run(['launchctl','kill','SIGKILL',h.domain+'/'+h.label+'.bsc.runtime'],check=True)
+    import time
+    restored=''
+    for _ in range(90):
+        time.sleep(1)
+        if len(runs())>len(before):
+            shown=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/dbrec_show'),str(h.WORK/'run/bsc-runtime/status.dbrec')],capture_output=True,text=True).stdout
+            restored=next((l for l in shown.splitlines() if l.startswith('state.checkpoint_restore')),'')
+            if 'RESTORED' in restored: break
+    assert len(runs())>len(before) and 'RESTORED' in restored, (before, runs(), restored)
+    print('PASS runtime crash: launchd restart, new run', runs()[-1], restored, flush=True)
     # Phase H: the finished run replays through Strategy C to exactly its journaled outputs.
     h.run('down')
     replay=subprocess.run([str(runtime),'strategy-replay','--rundir',str(h.WORK/'run'),'--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,timeout=120)
