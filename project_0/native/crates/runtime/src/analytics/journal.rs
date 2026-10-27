@@ -109,6 +109,8 @@ pub mod kind {
     pub const ECON_OPPORTUNITY: u16 = 412;
     /// One row of `canonical_market_shadow.jsonl`.
     pub const ECON_CANONICAL: u16 = 413;
+    /// DEC-16: one measured window of an unbounded econ4h run (`economics_windows.p0j`).
+    pub const ECON_WINDOW: u16 = 414;
     /// C0-E1 phase boundary `{phase, at_ns, unix_ns, details}` (supervisor, market, analytics).
     pub const MEASUREMENT_PHASE: u16 = 500;
     /// The run's measurement plan as handed from the plan compiler to the runtime (JFI-04).
@@ -218,6 +220,7 @@ pub mod kind {
         ECON_FINAL,
         ECON_OPPORTUNITY,
         ECON_CANONICAL,
+        ECON_WINDOW,
         MEASUREMENT_PHASE,
         MEASUREMENT_PLAN,
         OPERATIONAL_CONFIG,

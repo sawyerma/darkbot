@@ -21,6 +21,8 @@ use std::time::Duration;
 mod canonical;
 #[path = "econ_docs.rs"]
 mod docs;
+#[path = "econ_rolling.rs"]
+mod rolling;
 #[cfg(feature = "historical")]
 pub use canonical::canonical_legacy_view;
 pub use canonical::{
@@ -30,6 +32,7 @@ pub use canonical::{
     LOSS_ATTRIBUTION_EARLIER_RECORDS, LOSS_ATTRIBUTION_MODEL,
 };
 pub use docs::*;
+pub use rolling::{EconWindow, WindowStatus, WINDOWS_JOURNAL as ECON_WINDOWS_JOURNAL};
 
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
 
@@ -75,6 +78,11 @@ pub struct EconConfig {
     pub layout: crate::run_layout::RunLayout,
     pub run_id: String,
     pub provider_class: String,
+    /// DEC-16: the run is unbounded (`--duration until-stopped:W:R`): windows of the plan's
+    /// duration until the stop.
+    pub unbounded: bool,
+    /// DEC-16: what its windows check against once admitted (`RunHorizon::admit`).
+    pub rolling: Option<crate::orchestration::until_stopped::Rolling>,
 }
 impl EconConfig {
     pub fn paths(&self) -> crate::run_layout::RunPaths {
@@ -133,6 +141,13 @@ impl EconConfig {
             layout,
             run_id,
             provider_class: get("P0_PROVIDER_CLASS").unwrap_or_else(|| "UNKNOWN".into()),
+            unbounded: get("P0_MEASUREMENT_DURATION").is_some_and(|d| {
+                matches!(
+                    darkbot_solana::runtime_config::horizon(&d),
+                    Ok(darkbot_solana::runtime_config::Horizon::UntilStopped { .. })
+                )
+            }),
+            rolling: None,
         })
     }
 }
@@ -174,6 +189,13 @@ pub enum Evidence {
         summary: Box<crate::market_observer::MarketSummary>,
     },
     MarketFinal(Box<crate::market_observer::MarketFinal>),
+    /// DEC-16: an unbounded run's window ended at `boundary_ns` with this gate verdict (after
+    /// the capture rotated its journals and journaled the window's checks).
+    WindowClosed {
+        window: u64,
+        boundary_ns: u64,
+        verdict: String,
+    },
     MarketCounters {
         at_ns: u64,
         before: Box<crate::market_observer::MarketStats>,
@@ -252,6 +274,8 @@ pub struct ShadowStats {
 pub struct Shared {
     pub start_ns: AtomicU64,
     pub cutoff_ns: AtomicU64,
+    /// DEC-16: an unbounded run's window (ns); 0 for a fixed run.
+    pub window_ns: AtomicU64,
     pub abort: AtomicBool,
     /// Set with `abort` when the operator requested the stop (SIGTERM/SIGINT, `p0ctl run stop`).
     pub operator_stop: AtomicBool,
@@ -324,14 +348,54 @@ impl Handle {
         self.shared.start_ns.store(at, Ordering::Release);
         self.shared.cutoff_ns.store(cutoff, Ordering::Release);
     }
+    /// DEC-16: an unbounded run's measurement starts at `at`: windows of the plan's duration
+    /// follow each other without a run cutoff, so the Shadow owner admits until the stop.
+    pub fn start_rolling(&self, at: u64) {
+        self.shared.window_ns.store(
+            self.cfg.plan.duration_seconds * crate::analytics::measurement::NS,
+            Ordering::Release,
+        );
+        self.shared.start_ns.store(at, Ordering::Release);
+    }
+    /// DEC-16: whether this is an unbounded run whose windows started.
+    pub fn rolling(&self) -> bool {
+        self.shared.window_ns.load(Ordering::Acquire) > 0
+    }
+    /// DEC-16: the stop of an unbounded run is its cutoff, now: admission closes and the
+    /// Shadow owner drains exactly as at a fixed cutoff (the first stop wins).
+    pub fn stop_rolling(&self, now: u64) {
+        let _ = self.shared.cutoff_ns.compare_exchange(
+            0,
+            now.max(1),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
     pub fn cutoff(&self) -> Option<u64> {
         let n = self.shared.cutoff_ns.load(Ordering::Acquire);
         (n > 0).then_some(n)
     }
-    /// The live hour of a receive time (`None` outside the started window).
-    pub fn hour(&self, ns: u64) -> Option<usize> {
+    /// The measurement window `(number, start, end)` a receive time belongs to: a fixed run's
+    /// one window `[start, cutoff]`; an unbounded run's grid window (the first `[s, s+W]`, then
+    /// `(s+(w-1)W, s+wW]`: a boundary belongs to the earlier window), never past its stop.
+    pub fn window_of(&self, ns: u64) -> Option<(u64, u64, u64)> {
         let start = self.shared.start_ns.load(Ordering::Acquire);
-        live_hour(&self.cfg.plan, start, self.cutoff()?, ns)
+        let window = self.shared.window_ns.load(Ordering::Acquire);
+        if window == 0 {
+            let cutoff = self.cutoff()?;
+            return (ns >= start && ns <= cutoff).then_some((1, start, cutoff));
+        }
+        if ns < start || self.cutoff().is_some_and(|c| ns > c) {
+            return None;
+        }
+        let k = ns.saturating_sub(start).saturating_sub(1) / window;
+        let from = start + k * window;
+        Some((k + 1, from, from + window))
+    }
+    /// The live hour of a receive time within its window (`None` outside the started run).
+    pub fn hour(&self, ns: u64) -> Option<usize> {
+        let (_, start, end) = self.window_of(ns)?;
+        live_hour(&self.cfg.plan, start, end, ns)
     }
     pub fn admission_closed(&self) -> bool {
         self.shared.abort.load(Ordering::Acquire)
@@ -851,6 +915,8 @@ struct Worker {
     retained_bytes: u64,
     retained_bytes_peak: u64,
     retention_byte_limit: u64,
+    /// DEC-16: the windows of an unbounded run (`None`: a fixed run).
+    rolling: Option<rolling::RollingState>,
 }
 impl Worker {
     fn new(
@@ -870,8 +936,19 @@ impl Worker {
         let evaluations =
             crate::storage::segments::SegmentedWriter::create(&evaluations_path, segment_bytes)
                 .map_err(|e| e.to_string())?;
-        let reports =
-            journal::Writer::create(&paths.snapshot(REPORT_JOURNAL)).map_err(|e| e.to_string())?;
+        // DEC-16: an unbounded run reports per window (window 1 first).
+        let (reports, rolling) = if h.cfg.unbounded {
+            (
+                rolling::report_journal(&paths, 1)?,
+                Some(rolling::RollingState::create(&paths)?),
+            )
+        } else {
+            (
+                journal::Writer::create(&paths.snapshot(REPORT_JOURNAL))
+                    .map_err(|e| e.to_string())?,
+                None,
+            )
+        };
         Ok(Self {
             h,
             rx,
@@ -909,6 +986,7 @@ impl Worker {
                 .limits
                 .econ_retention_mib
                 * crate::storage::budget::MIB,
+            rolling,
         })
     }
     /// Reserves `bytes` of the retention budget, or records an overflow and refuses.
@@ -928,15 +1006,14 @@ impl Worker {
     fn release(&mut self, bytes: u64) {
         self.retained_bytes = self.retained_bytes.saturating_sub(bytes);
     }
-    /// Inside the capture window `[start, cutoff]` (the market core's `in_window`).
+    /// Inside the capture window `[start, cutoff]` (the market core's `in_window`); DEC-16: an
+    /// unbounded run's open window.
     fn in_window(&self, ns: u64) -> bool {
-        let start = self.h.shared.start_ns.load(Ordering::Acquire);
-        self.h
-            .cutoff()
-            .is_some_and(|cutoff| ns >= start && ns <= cutoff)
+        self.window()
+            .is_some_and(|(start, cutoff)| ns >= start && ns <= cutoff)
     }
     fn hour(&self, ns: u64) -> Option<usize> {
-        self.h.hour(ns)
+        self.window_hour(ns)
     }
     fn over_limit(&self) {
         self.h
@@ -945,6 +1022,23 @@ impl Worker {
             .fetch_add(1, Ordering::Relaxed);
     }
     fn accept(&mut self, e: Evidence) -> Result<(), String> {
+        // DEC-16: an unbounded run's windows (a fixed run sends no window evidence).
+        if let Evidence::WindowClosed {
+            window,
+            boundary_ns,
+            verdict,
+        } = e
+        {
+            return self.close_window(window, boundary_ns, verdict);
+        }
+        let e = if self.rolling.is_some() && self.h.rolling() {
+            match self.route(e) {
+                Some(e) => e,
+                None => return Ok(()),
+            }
+        } else {
+            e
+        };
         match e {
             Evidence::CanonicalMarket(event) => {
                 if self.canonical_market.len() >= self.h.capacity() {
@@ -1091,6 +1185,7 @@ impl Worker {
             }
             Evidence::MarketFinal(v) => self.market_final = Some(*v),
             Evidence::ShadowStats(v) => self.shadow_stats = Some(v),
+            Evidence::WindowClosed { .. } => {}
         }
         Ok(())
     }
@@ -1758,9 +1853,16 @@ impl Worker {
     fn report(&self, index: usize, finalizing: bool) -> SnapshotReport {
         let cumulative = self.metrics(0, index);
         let delta = self.metrics(index - 1, index);
-        let start = self.h.shared.start_ns.load(Ordering::Acquire);
+        // DEC-16: an unbounded run reports its open window.
+        let window = self.window();
+        let start = match (&self.rolling, window) {
+            (Some(_), Some((from, _))) => from,
+            _ => self.h.shared.start_ns.load(Ordering::Acquire),
+        };
         let end = start + self.h.cfg.plan.offset_ns(index);
-        let elapsed = if finalizing {
+        let elapsed = if let (Some(_), Some((_, until))) = (&self.rolling, window) {
+            self.h.clock.now_ns().min(until).saturating_sub(start) as f64 / 1e9
+        } else if finalizing {
             self.market_final
                 .as_ref()
                 .map(|m| m.summary.actual_observation_seconds)
@@ -1770,11 +1872,12 @@ impl Worker {
             self.h.clock.now_ns().saturating_sub(start) as f64 / 1e9
         };
         let complete = finalizing && elapsed >= self.h.cfg.plan.seconds(index);
-        let capture_window = if self.h.cutoff().is_some() {
-            self.h.cfg.plan.capture_window(self.h.clock, start).ok()
-        } else {
-            None
-        };
+        let capture_window =
+            if self.h.cutoff().is_some() || self.rolling.is_some() && window.is_some() {
+                self.h.cfg.plan.capture_window(self.h.clock, start).ok()
+            } else {
+                None
+            };
         let r6 = if index == SNAPSHOT_COUNT && finalizing {
             self.market_final.clone()
         } else {
@@ -2131,8 +2234,8 @@ impl Worker {
             while let Some(ev) = self.rx.try_pop() {
                 self.accept(ev)?;
             }
-            if let Some(cutoff) = self.h.cutoff() {
-                let start = self.h.shared.start_ns.load(Ordering::Acquire);
+            // The open window's due snapshots (DEC-16: an unbounded run's window).
+            if let Some((start, cutoff)) = self.window() {
                 let n = self
                     .h
                     .cfg
@@ -2150,6 +2253,9 @@ impl Worker {
                 }
                 break;
             }
+        }
+        if self.rolling.is_some() {
+            return self.finish_rolling();
         }
         // The evaluation stream is complete only if no evidence was dropped before this worker.
         let complete = self.h.shared.drops.load(Ordering::Relaxed) == 0;

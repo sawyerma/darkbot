@@ -212,7 +212,6 @@ pub(super) fn shadow_stats() -> ShadowStats {
         remote_projection_queue_depth: 0,
     }
 }
-#[cfg(feature = "historical")]
 /// Typed `ECON_SNAPSHOT` / `ECON_FINAL` frames of a report journal (the journal is the
 /// document; JSON views exist only after an explicit offline export).
 pub(super) fn report_frames(path: &Path) -> (Vec<SnapshotFrame>, Option<SnapshotReport>) {
@@ -5282,4 +5281,206 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         Some((intent.signatures[2].as_str(), 1_000))
     );
     assert_eq!(safety.capital_in_use(), 1_000, "reserved until settled");
+}
+
+/// DEC-16: a worker of an unbounded run (`until-stopped`): windows of 4 s from t = 1 ns.
+fn rolling_worker() -> Worker {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let mut cfg = config();
+    cfg.plan = MeasurementPlan::new(4).unwrap();
+    cfg.unbounded = true;
+    cfg.run_dir = std::env::temp_dir().join(format!(
+        "c0_e1_rolling_{}_{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&cfg.run_dir);
+    cfg.paths().create().unwrap();
+    let (tx, rx) = bounded("test-econ-rolling", 64);
+    let h = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg,
+    };
+    h.start_rolling(1);
+    Worker::new(
+        h,
+        rx,
+        "logs".into(),
+        "confirmed".into(),
+        "UNKNOWN".into(),
+        30,
+    )
+    .unwrap()
+}
+fn shadow_at(t: u64) -> Evidence {
+    let mut r = rec();
+    r.timing.t_rx_ns = Some(t);
+    Evidence::Shadow(Box::new(r))
+}
+fn windows_of(w: &Worker) -> Vec<EconWindow> {
+    let path = w.h.cfg.paths().snapshot(ECON_WINDOWS_JOURNAL);
+    let mut r = crate::storage::segments::ChainReader::open(&path).unwrap();
+    let mut seen = Vec::new();
+    while let Ok(Some(f)) = r.next_frame() {
+        if f.kind == kind::ECON_WINDOW {
+            seen.push(f.typed().unwrap());
+        }
+    }
+    seen
+}
+fn sealed(path: &Path) -> bool {
+    let mut r = crate::analytics::journal::Reader::open(path).unwrap();
+    while let Ok(Some(_)) = r.next_frame() {}
+    r.sealed
+}
+
+/// DEC-16: the grid of an unbounded run — the first window `[s, s+W]`, then `(s+(w-1)W, s+wW]`
+/// (a boundary belongs to the earlier window), hours within each window, nothing past the stop;
+/// the stop is the run's cutoff and the first stop wins. A fixed run keeps its one window.
+#[test]
+fn dec16_an_unbounded_run_has_a_grid_of_windows_until_its_stop() {
+    let w = rolling_worker();
+    let h = &w.h;
+    assert!(h.rolling() && h.cutoff().is_none() && !h.admission_closed());
+    let s = 1u64;
+    let width = 4_000_000_000u64;
+    assert_eq!(h.window_of(0), None);
+    assert_eq!(h.window_of(s), Some((1, s, s + width)));
+    assert_eq!(h.window_of(s + width), Some((1, s, s + width)));
+    assert_eq!(
+        h.window_of(s + width + 1),
+        Some((2, s + width, s + 2 * width))
+    );
+    assert_eq!(
+        (h.hour(s), h.hour(s + width), h.hour(s + width + 1)),
+        (Some(0), Some(3), Some(0))
+    );
+    h.stop_rolling(s + width + 10);
+    h.stop_rolling(s + 3 * width);
+    assert_eq!(h.cutoff(), Some(s + width + 10));
+    assert_eq!(h.window_of(s + width + 11), None);
+    let fixed = worker();
+    assert!(!fixed.h.rolling());
+    assert_eq!(fixed.h.window_of(1), Some((1, 1, 4_000_000_001)));
+    assert_eq!(fixed.h.window_of(4_000_000_002), None);
+}
+
+/// DEC-16: an unbounded run measures its windows one after another with the fixed run's
+/// reports: each closed window has its four provisional snapshots (no ECON_FINAL) in its own
+/// sealed report journal and one typed window record; evidence of the next window waits for
+/// it, evidence after its window closed is counted late and never attributed back; a close out
+/// of order is refused; the stop records the open window as partial and seals the journals.
+#[test]
+fn dec16_an_unbounded_run_measures_its_windows_one_after_another() {
+    let mut w = rolling_worker();
+    let width = 4_000_000_000u64;
+    w.accept(shadow_at(10)).unwrap();
+    w.accept(shadow_at(3_000_000_000)).unwrap();
+    // Window 2's evaluation arrives before window 1 closed: it waits.
+    w.accept(shadow_at(width + 500)).unwrap();
+    assert_eq!(w.evaluation_counts.iter().sum::<u64>(), 2);
+    let first = w.reports.path.clone();
+    w.accept(Evidence::WindowClosed {
+        window: 1,
+        boundary_ns: 1 + width,
+        verdict: "CONTINUE".into(),
+    })
+    .unwrap();
+    let (frames, last) = report_frames(&first);
+    assert_eq!(
+        frames
+            .iter()
+            .map(|f| (f.index, f.finalizing))
+            .collect::<Vec<_>>(),
+        [(1, false), (2, false), (3, false), (4, false)]
+    );
+    assert!(last.is_none(), "a window has no ECON_FINAL");
+    let four = &frames[3].report;
+    assert_eq!(four.shadow.cumulative.evaluations, 2);
+    assert!(four.window.provisional);
+    assert_eq!(
+        four.capture_window.as_ref().map(|c| c.capture_start_ns),
+        Some(1)
+    );
+    assert!(sealed(&first));
+    // The waiting evaluation opened window 2; one from window 1 now is late.
+    assert_eq!(w.evaluation_counts.iter().sum::<u64>(), 1);
+    w.accept(shadow_at(2_000_000_000)).unwrap();
+    assert_eq!(
+        w.evaluation_counts.iter().sum::<u64>(),
+        1,
+        "never attributed back"
+    );
+    assert_ne!(w.reports.path, first);
+    let order = w
+        .accept(Evidence::WindowClosed {
+            window: 5,
+            boundary_ns: 9,
+            verdict: "CONTINUE".into(),
+        })
+        .unwrap_err();
+    assert!(order.starts_with("ECON_WINDOW_ORDER"), "{order}");
+    w.accept(Evidence::WindowClosed {
+        window: 2,
+        boundary_ns: 1 + 2 * width,
+        verdict: "CONTINUE".into(),
+    })
+    .unwrap();
+    let (frames, _) = report_frames(&w.h.cfg.run_dir.join(&windows_of(&w)[1].report_journal));
+    assert_eq!(frames[3].report.shadow.cumulative.evaluations, 1);
+    w.h.shared.operator_stop.store(true, Ordering::Release);
+    w.h.stop_rolling(1 + 2 * width + 100);
+    let run_dir = w.h.cfg.run_dir.clone();
+    let paths = w.h.cfg.paths();
+    w.finish_rolling().unwrap();
+    let path = paths.snapshot(ECON_WINDOWS_JOURNAL);
+    let mut r = crate::storage::segments::ChainReader::open(&path).unwrap();
+    let mut windows: Vec<EconWindow> = Vec::new();
+    while let Ok(Some(f)) = r.next_frame() {
+        if f.kind == kind::ECON_WINDOW {
+            windows.push(f.typed().unwrap());
+        }
+    }
+    assert_eq!(
+        windows
+            .iter()
+            .map(|w| (w.window, w.status.clone(), w.late_evidence))
+            .collect::<Vec<_>>(),
+        [
+            (
+                1,
+                WindowStatus::Closed {
+                    verdict: "CONTINUE".into()
+                },
+                0
+            ),
+            (
+                2,
+                WindowStatus::Closed {
+                    verdict: "CONTINUE".into()
+                },
+                1
+            ),
+            (
+                3,
+                WindowStatus::Partial {
+                    reason: "OPERATOR_STOP".into()
+                },
+                0
+            ),
+        ]
+    );
+    assert!(windows
+        .iter()
+        .all(|w| w.opportunities == 0 || w.snapshots == 4));
+    assert_ne!(windows[0].evaluations, windows[1].evaluations);
+    let chain = crate::storage::segments::verify_chain(&path).unwrap();
+    assert!(chain.sealed && chain.complete, "{chain:?}");
+    assert!(
+        !paths.snapshot(REPORT_JOURNAL).exists(),
+        "no run-level ECON report"
+    );
+    let _ = std::fs::remove_dir_all(run_dir);
 }

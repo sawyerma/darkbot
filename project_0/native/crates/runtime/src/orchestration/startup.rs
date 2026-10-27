@@ -283,6 +283,14 @@ where
     S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
 {
     use crate::analytics::econ;
+    // DEC-16: an unbounded econ4h run measures windows only once admitted with its
+    // qualification (RunHorizon::admit; GATED until its rolling windows qualify).
+    if cfg.unbounded && cfg.rolling.is_none() {
+        return Err(format!(
+            "{}: an unbounded econ4h run starts only admitted with its qualification",
+            crate::analytics::measurement::UNTIL_STOPPED_GATED
+        ));
+    }
     market.duration_secs = cfg.plan.duration_seconds;
     market.ready_timeout_secs = cfg.plan.budgets.stream_ready_seconds;
     market.drain_timeout_secs = cfg.plan.budgets.market_drain_seconds;
@@ -704,6 +712,50 @@ mod supervise_tests {
         };
         let result = run_econ4h_with(cfg, market, clock, Ok::<_, &'static str>(owner));
         (run, result, accepted.load(Ordering::Acquire))
+    }
+
+    /// DEC-16: an unbounded econ4h configuration (`until-stopped:W:R`) measures windows of W
+    /// with the window's plan, and never runs unadmitted: refused before any worker, owner or
+    /// run directory exists.
+    #[test]
+    fn dec16_an_unadmitted_unbounded_econ4h_run_is_refused_before_anything_starts() {
+        let out = std::env::temp_dir().join(format!("p0_unbounded_econ_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let env: std::collections::HashMap<&str, String> = [
+            ("P0_ECON_RUN_ID", "unbounded".to_string()),
+            ("P0_ECON_OUT_DIR", out.to_string_lossy().to_string()),
+            ("P0_RUN_LAYOUT", "v2".into()),
+            ("P0_MEASUREMENT_DURATION", "until-stopped:4s:8s".into()),
+            ("P0_WS_URL", "ws://127.0.0.1:1".into()),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            ),
+            ("P0_MARKET_SOURCE", "logs".into()),
+        ]
+        .into_iter()
+        .collect();
+        let get = |k: &str| env.get(k).cloned();
+        let cfg = crate::analytics::econ::EconConfig::from_lookup(&get, 1).unwrap();
+        assert!(cfg.unbounded && cfg.rolling.is_none());
+        assert_eq!(
+            cfg.plan.duration_seconds, 4,
+            "each window has the plan of W"
+        );
+        let market = crate::market_observer::MarketConfig::from_lookup(&get, 1).unwrap();
+        let run = cfg.run_dir.clone();
+        let refused = run_econ4h_with(
+            cfg,
+            market,
+            Clock::new(),
+            Ok::<_, &'static str>(|_: crate::analytics::econ::Handle| Ok(())),
+        )
+        .unwrap_err();
+        assert!(
+            refused.starts_with(crate::analytics::measurement::UNTIL_STOPPED_GATED),
+            "{refused}"
+        );
+        assert!(!run.exists());
     }
 
     /// Readiness unit E (PHASENPLAN L.2): capture, optional post-capture verification, report and

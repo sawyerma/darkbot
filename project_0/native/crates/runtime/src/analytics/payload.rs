@@ -861,6 +861,7 @@ macro_rules! typed_kinds {
                 $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
             }
             k::ECON_CANONICAL => $f::<super::econ::CanonicalJoin>($kind, $schema, $bytes),
+            k::ECON_WINDOW => $f::<super::econ::EconWindow>($kind, $schema, $bytes),
             k::MEASUREMENT_PHASE => $f::<super::measurement::PhaseRecord>($kind, $schema, $bytes),
             k::MEASUREMENT_PLAN => {
                 $f::<super::measurement::MeasurementPlan>($kind, $schema, $bytes)

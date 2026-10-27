@@ -213,6 +213,19 @@ impl MeasurementPlan {
         let seconds = darkbot_solana::runtime_config::duration_seconds(s)?;
         Self::new(seconds).map(|p| p.duration_seconds)
     }
+    /// DEC-16: the plan duration of a run's `--duration` — a fixed duration, or the window of an
+    /// unbounded horizon (`until-stopped:W:R`: windows of W seconds follow each other until the
+    /// stop; each window is measured with exactly this plan).
+    pub fn window_seconds(s: &str) -> Result<u64, String> {
+        use darkbot_solana::runtime_config::{horizon, Horizon};
+        let seconds = match horizon(s)? {
+            Horizon::Fixed { seconds } => seconds,
+            Horizon::UntilStopped {
+                checkpoint_seconds, ..
+            } => checkpoint_seconds,
+        };
+        Self::new(seconds).map(|p| p.duration_seconds)
+    }
     /// Typed run horizon of this plan (always fixed: finite measurement windows only).
     pub fn horizon(&self) -> RunHorizon {
         RunHorizon::Fixed {
@@ -236,7 +249,7 @@ impl MeasurementPlan {
             return Ok(plan);
         }
         let seconds = if let Some(s) = get("P0_MEASUREMENT_DURATION") {
-            Self::parse_duration(&s)?
+            Self::window_seconds(&s)?
         } else {
             number(get, "P0_ECON_DURATION_SECS", 14400, MAX_SECONDS)?
         };
@@ -301,7 +314,7 @@ impl MeasurementPlan {
     }
     fn check_legacy(&self, get: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
         if let Some(duration) = get("P0_MEASUREMENT_DURATION") {
-            if Self::parse_duration(&duration)? != self.duration_seconds {
+            if Self::window_seconds(&duration)? != self.duration_seconds {
                 return Err("duration conflicts with MeasurementPlan".into());
             }
         }
