@@ -14,7 +14,7 @@
 | DN-D05 | **Frontend:** bestehender DarkBot-React-Graphite-Stack und **ein** Gateway; versionierte Protobuf-Kommunikation | FESTGELEGT |
 | DN-D06 | **Kapital:** Bitget CEX, API-Key Read/Trade ohne Auszahlung; MetaMask nicht nötig | FESTGELEGT |
 | DN-D07 | **MVP:** genau ein qualifizierter Bot, danach mehrere isolierte feste Paar-/Strategieinstanzen | FESTGELEGT |
-| DN-D08 | **Exakter Kontomodus:** UTA vs anderes, One-way/Hedge, isolated/cross, API V3-Capabilities | OPEN – Bitget-Abgleich |
+| DN-D08 | **Exakter Kontomodus:** UTA vs anderes, One-way/Hedge, isolated/cross, API V3-Capabilities | OPEN – Bitget-Abgleich; One-way + Isolated ist ein enger V1-Prüfkandidat, keine bereits bestandene Kontofreigabe |
 | DN-D09 | **Serverseitige Stop-/TP-/Trailing-Semantik** pro Futures-Kontrakt und Ordertyp | OPEN – Bitget-Demo-Evidenz |
 | DN-D10 | **Engine-Reuse:** NautilusTrader, Barter oder schlanker eigener Rust-Kern; Lizenz, Performance, Einbindung | OPEN – technische Spikes |
 | DN-D11 | **Trigger:** Schwellen-level vs CROSS, Hysterese/Rearm, Barclose vs intrabar und Exit-Priorität | OPEN – Golden-Regelfälle |
@@ -78,7 +78,7 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 
 ## P5 – Private Bitget-Futures-Anbindung (Research-Artefakt)
 
-[PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md) dokumentiert offizielle UTA-V3-Konto-/Hebel-/Order-/Stop-/Private-WS-Capabilities, Open-Source-Vergleiche, Demo-Verträge, die zentrale Rust-Order-Autorität und die Sicherheits-/Crash-Gates. **Alle privaten Funktionen sind bisher nur dokumentiert, NICHT RUN**. Der volle USDT-Futures-Symbolkatalog ist ebenfalls noch nicht abgerufen. Keine Modus-/Hebeländerung und keine Order während Gate 1.
+[PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md) (V1.2) dokumentiert offizielle UTA-V3-Konto-/Hebel-/Order-/Stop-/Private-WS-Capabilities, Open-Source-Vergleiche, Demo-Verträge, die zentrale Rust-Order-Autorität und die Sicherheits-/Crash-Gates. **Alle privaten Funktionen sind bisher nur dokumentiert, NICHT RUN**. Der volle USDT-Futures-Symbolkatalog ist ebenfalls noch nicht abgerufen. Keine Modus-/Hebeländerung und keine Order während Gate 1.
 
 ## 3. Open-Source-Analyse: Daten, Exchange, Backtest, Nodes, Charts
 

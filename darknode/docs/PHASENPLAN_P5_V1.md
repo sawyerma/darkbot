@@ -1,6 +1,6 @@
-# DarkNode – PHASENPLAN P5 V1.1: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
+# DarkNode – PHASENPLAN P5 V1.2: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
 
-**Stand:** 27.10.2026 · **Revision V1.1:** S0–S7 / P5-A13–A28 · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
+**Stand:** 27.10.2026 · **Revision V1.2:** S0–S7 / P5-A01–A28, Größenregel, Exchange-Drift, Strategy-ID, Kostengates · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
 **Projektkonvention:** Im Gesamtplan [PHASENPLAN.md](PHASENPLAN.md) bezeichnet **P3 die Indikator-/Graph-Engine**; die private Bitget-Anbindung ist **P5**. Diese Datei konkretisiert ausschließlich P5, ohne die bestehenden P0–P10-IDs umzudeuten. P1 bleibt öffentliche Marktdaten/Rohtrade-Aufzeichnung und 1s-/MTF-Aggregation.
 
 ## 1. Verifizierter Dokumentationsstand vs. echter Nachweis
@@ -160,6 +160,47 @@ Bitget UTA REST Signatur: `ACCESS-SIGN = Base64(HMAC-SHA256(secret, timestamp + 
 
 
 **Verbindliche Code-Audit- und Gesamtprüfungsreferenz:** [P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md](P5_OPEN_SOURCE_CODE_AUDIT_AND_TESTPLAN_V1.md) mit fixierten Upstream-SHAs, konkreten Source-/Testdateien, CCXT-V2-vs-UTA-Routing, Hummingbot-/Freqtrade-Regressionen und einheitlichem Testprogramm `DN-P5-ALL-001` in A–F-Lanes. **Gesamttest noch NOT_RUN; keine PASS-Vortäuschung.**
+
+## 5b. Präzisierungen V1.2 – P5-Sicherheit, identische A01–A28 (27.10.2026)
+
+**Status:** normative Erweiterung des bestehenden Tests `DN-P5-ALL-001`; keine neue Engine, keine zusätzliche Phase, keine Orderausführung. Die Schichten **S0–S7 sind acht Schichten**. Sämtliche folgenden Implementierungs- und Demo-Nachweise bleiben `NOT_RUN`.
+
+### Positionsgröße ist eine überprüfbare Risikorechnung (S1 / A14)
+
+Für lineare USDT-Futures wird die Ordermenge aus einem pro Trade freigegebenen **Netto-Verlustbudget** und den tatsächlichen Kontrakt-/Einheitendaten berechnet, **bevor** Lot-Schritte abgerundet werden. Konservativer Prüfwert je Base-Einheit: `d = abs(entry_reference - stop_reference) + entry_fee_per_base + exit_fee_per_base + entry_slippage_reserve_per_base + exit_gap_slippage_reserve_per_base + funding_reserve_per_base` (alle in USDT/Base; niemals Prozent mit USDT/BTC addieren). Dann `q_risk = floor_to_lot(risk_budget_USDT / d)`; die endgültig genehmigte Menge ist das **Minimum** aus `q_risk`, Notional-Limit, Mengen-/Exposure-Limit, Available-/Reservation-Limit und Exchange-Maximum. Ist `d`, Kontowährung, Stop, Tick/Lot oder Kostenreserve nicht verlässlich bestimmt, gilt `NO_ENTRY`. Der Risikoansatz gilt getrennt von der harten S1-Nominalwertgrenze, auch bei höherem Hebel und gleichzeitig unbekannten In-flight-Orders. Die Reserve modelliert Szenarien, **keinen garantierten Maximalverlust** bei Gaps/Liquidation. Teste Rundung, Decimal-Overflow, minOrderAmount, stark wechselnden Preis, Teilfills, Kapital- und UID-Grenzen.
+
+### Strategy-Order-Identität und Schutzstatus (S3/S4 / A17–A22/A27)
+
+Bitget UTA V3 dokumentiert `clientOid` bei `POST /api/v3/trade/place-strategy-order` **nur für `type=tpsl`**. Die erwähnte sechs­stündige Idempotenzgültigkeit ist laut Dokumentation **nicht vollständig garantiert**; für andere Strategietypen keine Gleichsetzung mit einem verifizierten `clientOid`-Schutz. Auch bei gewöhnlichen Orders prüft Bitget `clientOid`-Eindeutigkeit nur gegen **offene** Orders. Daher: persistente **eigene** Request-Identität, Exchange-`orderId`, Typ, Konto, Symbol, Side, Triggerbasis, Menge, Zeit, Parent-/Suborder-Relation und Readback; unbekannte Antwort ⇒ `UNKNOWN`, REST/WS-Abgleich **vor** Ersatz, Modify, Cancel oder erneutem Exit. Für V1 ist `tpsl` als prüfbarer Stop-Kandidat vorzuziehen; `full`/ `partial`, `qty`, Partial-Fill und `modify-strategy-order` müssen gegen echte Demo-Positionen belegt werden. Ein modifizierter Stop gilt erst nach neuer Exchange-Bestätigung. Andere Strategietypen sind weder still erlaubt noch bereits widerlegt.
+
+### Exchange-autonome Positionsänderung (S3/S4/S7 / A08/A20/A26/A27)
+
+Bitget nennt `execType=reduce/liquidation` sowie ADL-/Liquidations- und Forced-Reduction-Ereignisse in den offiziellen Enumerationen. Die Position kann deshalb ohne eigenen offenen Bot-Fill von der erwarteten Menge abweichen. **Positions-Snapshot und eigene Orderhistorie nicht gleichsetzen.** Position, Fill-/Orderjournal und Schutzmenge ereignisgetrieben **und** nach jedem Reconnect/Restart/periodisch vergleichen. Ungeklärte Reduktion, Liquidation, ADL, externe manuelle Aktion oder Fremdorder ⇒ `NO_ENTRY/RECOVERING`, Stopmenge erneut überprüfen, verwaiste Schutzorders behandeln und erst nach eindeutigem Readback in `ACTIVE` zurückkehren. Fault-Replay: Positionsänderung ohne eigenen Fill, danach verzögerte Events, Neustart und Stopmengenabweichung.
+
+### Tagesverlust: Exchange-Equity und PnL nachvollziehbar abgleichen (S1/S7 / A11/A14/A26)
+
+Die reine Differenz `equity_jetzt - equity_UTC00` ist **kein** verlässlicher Trading-Tages-PnL: Transfers/Einlagen/Entnahmen, Asset-Konvertierungen und externe Kontobewegungen können sie verändern. Speichere qualifizierte Exchange-Equity-Snapshots mit UTC-Grenze und Account-/Währungsversion; berechne eine **um externe Cashflows korrigierte Equity-Änderung** einschließlich ungeklärter Balance-Ereignisse und halte **realisierten Netto-PnL, Gebühren, Funding und unrealisierten marktbewerteten PnL** getrennt prüfbar. Tages-/Gesamtrisiko muss laufende offene Verluste einbeziehen; fehlende 00:00-Basis, Staleness oder widersprüchliche Accountdaten sperren neue Entries. Exakte Tagesreset-, FX- und High-Water-Regel vor Aktivierung versionieren, nicht aus einem internen Win/Loss-Zähler ableiten.
+
+### Nettonutzen, Kosten und Risiko bleiben zwei unabhängige Gates (P4/P8/P9; S1/S7)
+
+Die **technische P5-Implementierung** darf gemäß Gesamtphasenplan parallel zu P3/P4 vorbereitet werden; ein positives Backtestergebnis ist **keine Bedingung zum Implementieren** des sicheren Order-Owners. Für **Strategiequalifikation und späteres Echtgeld-LIVE** ist dagegen ein vorab festgelegter, reproduzierbarer Out-of-Sample-/Walk-forward-Test mit **kontospezifischen** Maker-/Taker-Gebühren, Spread, Slippage, Funding, Fill-/Non-Fill- und Adverse-Selection-Annahmen Pflicht. Öffentliche Gebühren sind nur ein Snapshot, nicht der individuell geltende Tarif. Market-/Maker-/Post-only-Ausführungen getrennt modellieren und nach realer Demo-/Pilot-Evidenz kalibrieren; Demo-Liquidität ist kein Echtgeld-Fill-Beweis. Unverifizierte positive Erwartung ⇒ kein ökonomisches LIVE-Gate; keine erfundene Mindest-Rendite oder statistische Signifikanz. Das **nicht überbrückbare zentrale** Kosten-/Risk-Gate prüft jeden Order-Intent; ein visueller Kosten-Node kann es **nicht** ersetzen. Funding-Termin und `mark`-/`market`-Stop-Trigger werden mit qualifizierter Daten- und Kostenbasis als versionierte Parameter verglichen; eine generelle Funding-Minuten-Sperre wird ohne Strategieprüfung nicht hartcodiert.
+
+### V1-Modusumfang nicht still verändern (DN-D08, A02–A07/A15–A20)
+
+**One-way + Isolated ist ein sinnvoller enger V1-Prüfkandidat, aber laut `GATE_1.md` DN-D08 noch nicht als geprüfter Bitget-Kontomodus freigegeben.** Die endgültige Auswahl erfolgt nach read-only Account-Capability und Demo. Nicht aktivierte Hedge-/Cross-/IOC-/FOK-/OCO-/Trailing-Varianten müssen mindestens **sicher abgelehnt** werden; volle positive Testmatrix nur für aktivierte Capabilities. Initialer Market-Entry mit Preset-SL und Reduce-only-Market-Exit ist ein Kandidat, **keine vorab bewiesene Teilfill-/Stop-Garantie**. Eine Stop-Monotonie und Exchange-Modify-Readback sind auch bei lokalem Break-even/Trailing notwendig; Post-only nicht grundsätzlich aus V1 ausschließen, bevor P4 Kosten/Fills bewertet. Es gibt keine zweite Order-Engine.
+
+### Zusätzliche Assertions innerhalb der bestehenden 28 Tests
+
+| Bestehende IDs | Zusätzlicher zwingender Negativ-/Realnachweis |
+|---|---|
+| A11/A14 | Quantitätsformel, Gebühren-/Gap-/Funding-Reserve, Lot-Floor, Min-Notional, Notional-Cap und um externe Cashflows korrigierter Tagesverlust |
+| A17–A20 | `tpsl`-`clientOid`-Grenze, `full/partial`, `qty`, Replace/Modify-ACK≠Stop bestätigt, Restmenge nach Fill |
+| A08/A21/A22/A27 | Nach >6h, verlorener Orderantwort, Reboot, Late Fill und identischer alter `clientOid` nie blind erneut senden |
+| A20/A26/A27 | Exchange-autonome Reduktion/ADL/Liquidation/Fremdaktion ohne eigenen Fill, Stop-Readback, keine Phantomposition |
+| A02–A07/A15 | Exakt freigegebener One-way-/Isolated-Mode; alle deaktivierten Modi/Ordertypen ausdrücklich ablehnen |
+| A28 | Stop-Trigger `mark` vs `market`, Preisgap, Kosten- und Funding-Schock; keine modellierte Fill-Garantie |
+
+**Primärquellen (Dokumentation, keine Demo-Evidenz):** [Bitget Strategy Trading / `clientOid` und `tpsl`](https://www.bitget.com/docs/catalog/trading/strategy-trading), [Bitget Best Practices / Open-Order-ID-Uniqueness](https://www.bitget.com/docs/uta/best-practices-guide), [Bitget UTA Enumerations / Forced-Reduction und ADL](https://www.bitget.com/docs/uta/enum), [Bitget Account Channel / Equity](https://www.bitget.com/docs/uta/websocket/private/Account-Channel), [Bitget Account Settings / Mode und Leverage](https://www.bitget.com/docs/catalog/account/account-settings).
 
 ## 6. Referenzvergleich Open Source (keine produktive Dependency-Freigabe)
 

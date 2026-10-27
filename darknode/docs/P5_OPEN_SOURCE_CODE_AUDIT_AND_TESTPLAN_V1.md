@@ -1,4 +1,4 @@
-# DarkNode P5 – Open-Source-Code-Audit und einheitlicher Sicherheits-Gesamttest V1.0
+# DarkNode P5 – Open-Source-Code-Audit und einheitlicher Sicherheits-Gesamttest V1.1
 
 **Stand:** 27.10.2026 · **Status:** Quellcode-Recherche zum fixierten Stand, keine P5-Laufzeitabnahme · **P5 = NOT_RUN, GATE 1 = OPEN, SIGN/ARM/LIVE verboten.**  
 **Bindend:** [PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md), besonders S0–S7 und P5-A01–A28. P3 bezeichnet die Indikator-/Node-Engine, P5 die Private Execution. Keine Änderungen an BSC/Project_0, keine parallele Architektur.
@@ -79,6 +79,20 @@ Die gleiche Testmatrix läuft in getrennten, expliziten Sicherheitsumgebungen:
 Für **jeden** A01–A28: `PASS/FAIL/BLOCKED/NOT_RUN` basierend auf tatsächlich gelaufenen Testcases. Fehlender Code = `NOT_IMPLEMENTED/NOT_RUN`, fehlende erforderliche Demo-Rechte = `BLOCKED` **nur für diese Lane**, nicht für Source-/Offline-Test. Mehrere Gates dürfen nicht durch einen generischen „16 PASS“/Wrapper-Exit kaschiert werden.
 
 **P5-Ausgang:** Alle erforderlichen A01–A28 in den festgelegten Lanes PASS, Coverage für relevante Bitget-UTA-Modi nachgewiesen, keine UNKNOWN-Order, kein ungeschützter gemeldeter READY-Trade, Not-Aus-Fälle getestet; abschließende Demo-Stress-/Soak-Evidenz. Erst dann separate Prüfung der LIVE-Berechtigung gemäß P9; P5-PASS alleine erteilt **kein** LIVE.
+
+## 3a. Erweiterte Negativfälle – Ergänzung 27.10.2026
+
+Die P5-V1.2-Präzisierungen in [PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md#5b-präzisierungen-v12--p5-sicherheit-identische-a01a28-27102026) erweitern **bestehende** A01–A28; **keine zusätzlichen fiktiven PASS-Tests**, kein neues Testprogramm.
+
+| Proof-Lane und bestehende Test-IDs | Neu zu prüfende Assertions | Status |
+|---|---|---|
+| B · A11/A14 | `Qty = floor_step(min(risk_budget / loss_per_base, notional_cap/entry, qty_cap, ...))`: Preis-/Mengen-Einheiten, Gebühren, Slippage-Reserve, Funding, Min-Notional und falscher Hebel; 00:00-Equity mit/ohne externe Cashflows, fehlende Snapshots | NOT_RUN |
+| A/B/D/E · A17–A22/A27 | `clientOid` bei `type=tpsl`, sechs Stunden **keine garantierte Idempotenz**, keine ID-Annahme bei anderen Typen; REST/WS-Vergleich von `orderId`, Stopmenge, `full/partial`, Stop-Modify und nachgelieferten Fills | NOT_RUN |
+| B/D/E · A08/A20/A26/A27 | ADL/liquidation/forced-reduce oder externe Positionsänderung ohne eigenen Fill, verzögerte WS-Events, Reboot, Stop-Überdeckung und Phantom-FLAT | NOT_RUN |
+| A/B/E · A02–A07/A15/A28 | Kontomodus nur nach Readback freischalten; blockierte Ordertypen/Modi fail-closed, `mark`-/`market`-Trigger, Stopgap, Fees-/Funding-Schock | NOT_RUN |
+| P4/P8/P9 · Wirtschaftlichkeit, **separat von DN-P5-ALL-001** | OOS/WFA netto nach Gebühren/Spread/Slippage/Funding, Non-Fills und tatsächlicher Positionsgröße; echte Demo-Fills nicht als Live-Slippage behandeln; vorab fixiertes Kriterium für ökonomische LIVE-Qualifikation | NOT_RUN |
+
+Die 28 A-IDs sind der **technische** Sicherheits-Gesamttest. Ökonomische Strategiequalifikation ist die **eigene** P4/P8/P9-Abnahme, nicht durch eine weitere P5-Runner-Flag automatisch erfüllt. Der `DN-P5-ALL-001`-Runner wird damit nicht als bereits lauffähig ausgewiesen.
 
 ## 4. Fehlende Vorarbeiten, bevor der Gesamttest echt laufen kann
 
