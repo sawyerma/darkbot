@@ -90,11 +90,14 @@ describe("BSC source control", () => {
       { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "unix_milliseconds" },
       { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" },
       ...(canonical ? [{ name: "canonical[0].state", value: "FOLLOWING", kind: 7, unit: "" }, { name: "canonical[0].head", value: "100", kind: 2, unit: "" },
-        { name: "canonical[0].flap_launches", value: "3", kind: 2, unit: "" }, { name: "canonical[0].seen_full_before", value: "2", kind: 2, unit: "" }] : [])] });
+        { name: "canonical[0].flap_launches", value: "3", kind: 2, unit: "" }, { name: "canonical[0].seen_full_before", value: "2", kind: 2, unit: "" },
+        { name: "canonical[0].four_deployment", value: "MATCH at block 129994638", kind: 7, unit: "" }] : [])] });
     expect(runtimeView([status(10_000, false)], 11_000).view.canonical).toBeUndefined();
     const c = runtimeView([status(10_000, true)], 11_000).view.canonical;
     expect(c).toMatchObject({ state: "FOLLOWING", head: "100", headAgeMs: "UNKNOWN" });
     expect(c?.launches).toContain("Flap 3");
+    // Phase E review L3: the Four drift guard's verdict.
+    expect(c?.launches).toContain("Four deployment MATCH at block 129994638");
     expect(c?.join).toContain("full before block time 2");
     expect(runtimeView([status(10_000, true)], 20_000).view.canonical?.state).toBe("STALE");
   });

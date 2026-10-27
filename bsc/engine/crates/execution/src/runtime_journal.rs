@@ -268,6 +268,19 @@ pub fn launch_id_payload(
     out
 }
 
+/// The Four.meme drift guard's verdict (Phase E review L3), a `Runtime`
+/// record: `v | code u8 (1 match, 2 drift, 3 probe failed) | block u64`
+/// (0 when the probe failed).
+pub fn four_probe_payload(code: u8, block: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(FOUR_PROBE_LEN);
+    out.push(b'v');
+    out.push(code);
+    out.extend_from_slice(&block.to_le_bytes());
+    out
+}
+
+pub const FOUR_PROBE_LEN: usize = 10;
+
 pub fn reorg_payload(depth: u32, head: u64, hash: &[u8; 32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(45);
     out.push(b'R');

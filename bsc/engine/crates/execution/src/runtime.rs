@@ -191,6 +191,9 @@ pub struct CanonicalConfig {
     pub join_delay_ms: u64,
     /// The C2 chain-state owner's bounds (it needs the follower).
     pub state: StateConfig,
+    /// Phase E review L3: how often the Four.meme drift guard reads the
+    /// live deployment against the freeze (`BSC_CANONICAL_FOUR_PROBE_MS`).
+    pub four_probe_ms: u64,
 }
 
 fn bounded(name: &str, value: &str, min: u64, max: u64) -> Result<u64, String> {
@@ -315,6 +318,7 @@ impl RuntimeConfig {
                     endpoint: url.to_string(),
                     limits,
                     join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
+                    four_probe_ms: take("BSC_CANONICAL_FOUR_PROBE_MS", 60_000, 86_400_000)?,
                     state,
                 })
             }
@@ -774,6 +778,12 @@ fn spawn_follower(
 /// The runtime's view of the canonical chain and the launch join.
 struct Canonical {
     state: &'static str,
+    /// Phase E review L3: the Four.meme drift guard's last verdict
+    /// (`UNPROBED`, `MATCH at block n`, `DRIFT at block n: ...`,
+    /// `PROBE_FAILED: ...`); while drifted, no Four token derivation is
+    /// proven (journaled as UNKNOWN).
+    four_deployment: String,
+    four_drift: bool,
     head: Option<(u64, [u8; 32])>,
     head_seen_ns: Option<u64>,
     /// The head block's time (header ms) and the local wall ms when the
@@ -820,6 +830,8 @@ impl Canonical {
     fn new(config: &CanonicalConfig, window_from_ms: u64) -> Self {
         Canonical {
             state: "CONNECTING",
+            four_deployment: "UNPROBED".into(),
+            four_drift: false,
             head: None,
             head_seen_ns: None,
             head_block_ms: None,
@@ -1001,7 +1013,16 @@ impl Canonical {
                     external_buys: l.external_buys_after,
                     c1_scope: l.c1_scope,
                     venue_target: l.venue_target,
-                    four_token: l.four_token,
+                    // Drifted: the frozen derivation proves nothing.
+                    four_token: match l.four_token {
+                        crate::chain_follower::FourToken::Matched
+                        | crate::chain_follower::FourToken::Mismatch
+                            if self.four_drift =>
+                        {
+                            crate::chain_follower::FourToken::Unknown
+                        }
+                        t => t,
+                    },
                     tx: match l.unverifiable {
                         None => LaunchTx::Verified,
                         Some(r) if is_unrebuildable(r) => LaunchTx::Unrebuildable,
@@ -1144,7 +1165,8 @@ impl Canonical {
             .set(e::BLOCKS_SKIPPED, self.blocks_skipped)
             .set(e::WAITING, self.ledger.waiting() as u64)
             .set(e::BACKFILL_BLOCKS, self.backfill_blocks)
-            .set(e::BACKFILL_LAUNCHES, self.backfill_launches);
+            .set(e::BACKFILL_LAUNCHES, self.backfill_launches)
+            .set(e::FOUR_DEPLOYMENT, self.four_deployment.as_str());
         if let Some((n, _)) = self.head {
             d.set(e::HEAD, n);
         }
@@ -1500,6 +1522,11 @@ pub fn run(
     let mut journaled_drops = [0u64; 5];
     // The periodic census in flight, if any.
     let mut census_job: Option<std::thread::JoinHandle<()>> = None;
+    // Phase E review L3: the Four.meme drift guard in flight, and its next
+    // run (at start, then every BSC_CANONICAL_FOUR_PROBE_MS).
+    type FourProbe = Result<crate::venue_probe::FourObservation, crate::venue_probe::ProbeError>;
+    let mut four_job: Option<std::thread::JoinHandle<FourProbe>> = None;
+    let mut next_four = Instant::now();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
@@ -1955,6 +1982,55 @@ pub fn run(
                     .ok();
             }
         }
+        // Phase E review L3: the Four drift guard on its own thread; its
+        // verdict is journaled and in the status, a drift makes every Four
+        // token derivation UNKNOWN until a probe matches again.
+        if let (Some(cc), Some(c)) = (canonical_config.as_ref(), canonical.as_mut()) {
+            if let Some(job) = four_job.take_if(|j| j.is_finished()) {
+                let (code, block, verdict) = match job.join() {
+                    Ok(Ok(o)) if o.drift.is_empty() => {
+                        c.four_drift = false;
+                        (
+                            1,
+                            o.block_number,
+                            format!("MATCH at block {}", o.block_number),
+                        )
+                    }
+                    Ok(Ok(o)) => {
+                        c.four_drift = true;
+                        let at = o.block_number;
+                        (
+                            2,
+                            at,
+                            format!("DRIFT at block {at}: {}", o.drift.join("; ")),
+                        )
+                    }
+                    Ok(Err(e)) => (3, 0, format!("PROBE_FAILED: {e}")),
+                    Err(_) => (3, 0, "PROBE_FAILED: the probe thread panicked".to_owned()),
+                };
+                c.four_deployment = verdict;
+                journal.record(
+                    RecordKind::Runtime,
+                    clock.now_ns(),
+                    crate::runtime_journal::four_probe_payload(code, block),
+                );
+            }
+            if four_job.is_none() && Instant::now() >= next_four && !stopping {
+                let (endpoint, limits) = (cc.endpoint.clone(), cc.limits);
+                four_job = std::thread::Builder::new()
+                    .name("bsc-four-probe".into())
+                    .spawn(move || {
+                        crate::venue_probe::probe_four(
+                            &endpoint,
+                            &limits,
+                            &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711(),
+                        )
+                    })
+                    .map_err(|e| eprintln!("four probe thread: {e}"))
+                    .ok();
+                next_four = Instant::now() + Duration::from_millis(cc.four_probe_ms);
+            }
+        }
         if stopping && adapters.is_empty() {
             drop(tx);
             // A clean stop disarms the PAPER path (its fence goes).
@@ -2138,6 +2214,75 @@ mod tests {
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
+    }
+
+    /// Phase E review L3: while the drift guard says DRIFT, a Four launch the
+    /// follower matched (or mismatched) against the frozen derivation counts
+    /// as UNKNOWN: the freeze proves nothing about a drifted deployment.
+    #[test]
+    fn a_drifted_four_deployment_proves_no_token() {
+        use crate::chain_follower::{CanonicalLaunch, FourToken, Venue};
+        const BLOCK_MS: u64 = 1_792_000_000_000;
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-four-drift-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let cc = config.canonical.clone().unwrap();
+        let mut c = Canonical::new(&cc, BLOCK_MS);
+        assert_eq!(c.four_deployment, "UNPROBED");
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let core = IngressCore::new(64, config.max_launch_calldata);
+        let block = CanonicalEvent::Block {
+            number: 10,
+            hash: [10; 32],
+            parent_hash: [9; 32],
+            timestamp_s: BLOCK_MS / 1_000,
+            timestamp_ms: BLOCK_MS,
+            txs: Vec::new(),
+            observed: Instant::now(),
+            observed_unix_ms: Some(BLOCK_MS + 300),
+        };
+        let four = |tx: u8| {
+            CanonicalEvent::Launch(CanonicalLaunch {
+                venue: Venue::Four,
+                block_number: 10,
+                block_hash: [10; 32],
+                tx_index: u64::from(tx),
+                tx_hash: [tx; 32],
+                token: Some([tx; 20]),
+                creator: None,
+                external_buys_after: None,
+                first_external_buy_index: None,
+                sender: Some([tx; 20]),
+                nonce: Some(0),
+                c1_scope: false,
+                venue_target: true,
+                four_token: FourToken::Matched,
+                unverifiable: None,
+            })
+        };
+        c.event(10, block, &mut journal);
+        c.event(10, four(1), &mut journal);
+        c.four_drift = true;
+        c.event(10, four(2), &mut journal);
+        c.join(u64::MAX, &core, &mut journal);
+        let k = c.ledger.counters();
+        assert_eq!(
+            (
+                k.four_launches,
+                k.four_pending_decoded,
+                k.four_pending_unknown
+            ),
+            (2, 1, 1)
+        );
+        let _ = journal.finish();
+        fs::remove_dir_all(&base).unwrap();
     }
 
     /// The follower's events, joined with the sightings, reach the status

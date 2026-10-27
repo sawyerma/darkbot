@@ -65,6 +65,9 @@ pub struct Window {
     pub pending_join: u64,
     /// Canonical/reorg records that do not parse (an older layout, damage).
     pub unparsed_records: u64,
+    /// Phase E review L3: Four.meme drift guard probes that found the live
+    /// deployment drifted from the freeze.
+    pub four_drift_probes: u64,
     /// Pending events the ingress queue dropped before this journal.
     pub ingress_dropped: u64,
     /// The capture window: from the first canonical record to the stop
@@ -458,6 +461,13 @@ fn replay(
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            (RecordKind::Runtime, Some(b'v'))
+                if p.len() == crate::runtime_journal::FOUR_PROBE_LEN =>
+            {
+                if p[1] == 2 {
+                    window.four_drift_probes += 1;
+                }
+            }
             (RecordKind::Runtime, Some(b'Q')) if p.len() == 1 => {
                 stop_ns = stop_ns.or(Some(record.timestamp_ns));
             }
@@ -569,7 +579,7 @@ fn replay(
                 }
             }
             // A known runtime tag of another length: damaged, counted (L6).
-            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X' | b'Q')) => {
+            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X' | b'Q' | b'v')) => {
                 window.unparsed_records += 1
             }
             (RecordKind::Canonical | RecordKind::Reorg, _) => window.unparsed_records += 1,
@@ -1255,6 +1265,14 @@ mod tests {
                 ),
             ));
         }
+        // Phase E review L3: one drift guard probe found a drift, one a match.
+        for (code, block) in [(2, 99), (1, 100)] {
+            records.push((
+                RecordKind::Runtime,
+                300,
+                crate::runtime_journal::four_probe_payload(code, block),
+            ));
+        }
         records.push((
             RecordKind::Canonical,
             400,
@@ -1263,6 +1281,7 @@ mod tests {
         records.push((RecordKind::Runtime, 401, EXIT_PAYLOAD.to_vec()));
         write(&dir, 1_000, &records);
         let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.windows[0].four_drift_probes, 1);
         assert_eq!(
             (
                 c.four_launches,

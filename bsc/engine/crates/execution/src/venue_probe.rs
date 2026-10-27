@@ -41,6 +41,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::VenueBuyTerms;
 use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, ObservedDeployment, RuntimeSha256,
 };
+use darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment;
 use serde_json::Value;
 
 use crate::chain_follower::http::Client;
@@ -116,6 +117,10 @@ pub enum ProbeRead {
     CallerBalance,
     /// The pinned height read again after the state reads.
     BlockRecheck,
+    /// The Four.meme drift guard (E review L3): a frozen contract's code,
+    /// and a frozen proxy's EIP-1967 implementation slot.
+    FourCode,
+    FourImplementationSlot,
 }
 
 /// How a well-formed hex answer violates its ABI or storage type.
@@ -354,6 +359,127 @@ where
         },
         terms,
         caller_balance_wei,
+    })
+}
+
+/// The live Four.meme deployment against the frozen one at one canonical
+/// block (Phase E review L3, the drift guard): each frozen proxy's EIP-1967
+/// implementation and the keccak of every frozen runtime code. `drift`
+/// names every difference; empty, the live deployment is the frozen one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FourObservation {
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    pub drift: Vec<String>,
+}
+
+/// Observes the live Four.meme deployment read-only at one canonical block
+/// of `endpoint`, bounded by `limits`, as [`probe_flap`] does the Flap one.
+pub fn probe_four(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FourDeployment,
+) -> Result<FourObservation, ProbeError> {
+    let config = ProbeError::Config;
+    let rest = endpoint
+        .strip_prefix("https://")
+        .ok_or_else(|| config(FollowerConfigError::NotHttps))?;
+    let target = Endpoint::parse(&format!("wss://{rest}"))
+        .map_err(|e| config(FollowerConfigError::Url(e)))?;
+    limits
+        .validate()
+        .map_err(|e| config(FollowerConfigError::Limits(e)))?;
+    let tls = tls_config().map_err(|_| config(FollowerConfigError::Tls))?;
+    let (authority, path) = authority_and_path(target.url());
+    let bounds = connect_bounds(limits);
+    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
+    let mut client = Client::new(connect, authority, path, limits);
+    probe_four_with(&mut client, deployment)
+}
+
+/// [`probe_four`] over a connected client (plain TCP in the tests).
+fn probe_four_with<S, C>(
+    client: &mut Client<S, C>,
+    deployment: &FourDeployment,
+) -> Result<FourObservation, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let mut wire = Wire {
+        client,
+        stop: AtomicBool::new(false),
+        id: 0,
+    };
+    let chain_id = wire.quantity(ProbeRead::ChainId, "eth_chainId", "[]")?;
+    if chain_id != deployment.chain_id {
+        return Err(ProbeError::WrongChain {
+            expected: deployment.chain_id,
+            observed: chain_id,
+        });
+    }
+    let block_number = wire.quantity(ProbeRead::BlockNumber, "eth_blockNumber", "[]")?;
+    let block_hash = wire.block_hash(ProbeRead::Block, block_number)?;
+    let at = pinned(&block_hash);
+    let mut drift = Vec::new();
+    // The proxies: their implementation, then its code.
+    for (name, proxy, frozen, keccak) in [
+        (
+            "TokenManager2",
+            deployment.token_manager2,
+            deployment.token_manager2_implementation,
+            deployment.token_manager2_implementation_runtime_keccak256,
+        ),
+        (
+            "OpenFour Core",
+            deployment.openfour_core,
+            deployment.openfour_core_implementation,
+            deployment.openfour_core_implementation_runtime_keccak256,
+        ),
+        (
+            "OpenFour create deployer",
+            deployment.openfour_create_deployer,
+            deployment.openfour_create_deployer_implementation,
+            deployment.openfour_create_deployer_implementation_runtime_keccak256,
+        ),
+    ] {
+        let read = ProbeRead::FourImplementationSlot;
+        let slot = wire.storage(&at, read, proxy, &EIP1967_IMPLEMENTATION_SLOT)?;
+        let live = word_address(&slot).map_err(abi(read))?;
+        if live != frozen {
+            drift.push(format!("{name} implementation {live} (frozen {frozen})"));
+            continue;
+        }
+        let code = wire.code(&at, ProbeRead::FourCode, live)?;
+        if code.keccak256 != keccak {
+            drift.push(format!("{name} implementation code {}", code.keccak256));
+        }
+    }
+    // The Classic pairs: each deployer's and template's code.
+    for (i, t) in deployment.classic_templates.iter().enumerate() {
+        for (what, address, keccak) in [
+            ("deployer", t.deployer, t.deployer_runtime_keccak256),
+            ("template", t.template, t.template_runtime_keccak256),
+        ] {
+            let code = wire.code(&at, ProbeRead::FourCode, address)?;
+            if code.keccak256 != keccak {
+                drift.push(format!(
+                    "Classic pair {} {what} code {}",
+                    i + 1,
+                    code.keccak256
+                ));
+            }
+        }
+    }
+    if wire.block_hash(ProbeRead::BlockRecheck, block_number)? != block_hash {
+        return Err(ProbeError::Reorg {
+            number: block_number,
+        });
+    }
+    Ok(FourObservation {
+        block_number,
+        block_hash,
+        drift,
     })
 }
 
@@ -1428,6 +1554,125 @@ mod tests {
             ))),
             hex!("c92fe1d364edee5515a4eb764784e51b24327983c85d50d181173244fcb17247")
         );
+    }
+
+    /// The Four deployment whose fingerprints are those of the served codes,
+    /// and a node serving it (the frozen addresses, test codes).
+    fn served_four() -> (FourDeployment, Node) {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+        let real = bsc_mainnet_g01_129842711();
+        let code = |n: u8| vec![0x60, 0x80, 0x60, 0x40, 0x10 + n];
+        let mut d = real;
+        d.token_manager2_implementation_runtime_keccak256 = keccak256(code(1));
+        d.openfour_core_implementation_runtime_keccak256 = keccak256(code(2));
+        d.openfour_create_deployer_implementation_runtime_keccak256 = keccak256(code(3));
+        for (i, t) in d.classic_templates.iter_mut().enumerate() {
+            t.deployer_runtime_keccak256 = keccak256(code(4 + 2 * i as u8));
+            t.template_runtime_keccak256 = keccak256(code(5 + 2 * i as u8));
+        }
+        let mut node = Node::mainnet();
+        node.codes = vec![
+            (d.token_manager2_implementation, code(1)),
+            (d.openfour_core_implementation, code(2)),
+            (d.openfour_create_deployer_implementation, code(3)),
+        ];
+        for (i, t) in d.classic_templates.iter().enumerate() {
+            node.codes.push((t.deployer, code(4 + 2 * i as u8)));
+            node.codes.push((t.template, code(5 + 2 * i as u8)));
+        }
+        node.storage = [
+            (d.token_manager2, d.token_manager2_implementation),
+            (d.openfour_core, d.openfour_core_implementation),
+            (
+                d.openfour_create_deployer,
+                d.openfour_create_deployer_implementation,
+            ),
+        ]
+        .map(|(proxy, implementation)| {
+            (
+                proxy,
+                EIP1967_IMPLEMENTATION_SLOT,
+                address_word(implementation),
+            )
+        })
+        .to_vec();
+        (d, node)
+    }
+
+    fn run_four(
+        node: Node,
+        deployment: &FourDeployment,
+    ) -> (Result<FourObservation, ProbeError>, Vec<(String, Value)>) {
+        let server = serve(node);
+        let limits = limits();
+        let mut client = Client::new(
+            connector(server.addr, limits),
+            server.addr.to_string(),
+            "/rpc".to_owned(),
+            &limits,
+        );
+        let result = probe_four_with(&mut client, deployment);
+        drop(client);
+        server.done.store(true, Ordering::Release);
+        (result, server.handle.join().unwrap())
+    }
+
+    /// Phase E review L3, the Four drift guard: the frozen deployment reads
+    /// as frozen; an upgraded TokenManager2 and a changed Classic template
+    /// are each named; every read pinned to one block, rechecked at the end.
+    #[test]
+    fn the_four_drift_guard_names_every_difference() {
+        let (d, node) = served_four();
+        let (result, seen) = run_four(node, &d);
+        let o = result.unwrap();
+        assert_eq!(
+            (o.block_number, o.block_hash, o.drift.len()),
+            (HEAD, HASH, 0)
+        );
+        let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(
+            methods.iter().filter(|m| **m == "eth_getStorageAt").count(),
+            3
+        );
+        assert_eq!(methods.iter().filter(|m| **m == "eth_getCode").count(), 7);
+        assert_eq!(methods.last(), Some(&"eth_getBlockByNumber"));
+        let (_, mut node) = served_four();
+        let upgraded = Address::repeat_byte(0x99);
+        node.set_storage(
+            d.token_manager2,
+            EIP1967_IMPLEMENTATION_SLOT,
+            address_word(upgraded),
+        );
+        node.codes[6].1 = vec![0x60, 0x80, 0xff];
+        let o = run_four(node, &d).0.unwrap();
+        assert_eq!(o.drift.len(), 2, "{:?}", o.drift);
+        assert!(o.drift[0].starts_with("TokenManager2 implementation"));
+        assert!(o.drift[1].starts_with("Classic pair 2 template code"));
+    }
+
+    /// The live Four.meme deployment against the freeze. Read-only; prints
+    /// what differs. Run it with
+    /// `cargo test -p darkbot-bsc-execution --features runtime --lib venue_probe::tests::live_four -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "network: read-only probe of the Four.meme contracts at bsc-dataseed.bnbchain.org"]
+    fn live_four_deployment_is_the_frozen_one() {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+        let limits = FollowerLimits {
+            request_timeout: Duration::from_secs(10),
+            max_response_bytes: 16 << 20,
+            connect_timeout: Duration::from_secs(5),
+            handshake_timeout: Duration::from_secs(10),
+            read_tick: Duration::from_millis(100),
+            ..limits()
+        };
+        let o = probe_four(
+            "https://bsc-dataseed.bnbchain.org",
+            &limits,
+            &bsc_mainnet_g01_129842711(),
+        )
+        .unwrap();
+        println!("four at block {}: drift {:?}", o.block_number, o.drift);
+        assert!(o.drift.is_empty());
     }
 
     /// The current deployment and venue terms on BSC Mainnet. Read-only;

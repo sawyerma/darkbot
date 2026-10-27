@@ -63,6 +63,8 @@ pub struct Quality {
     pub unparsed_records: u64,
     pub clock_suspect: bool,
     pub four_mismatch: u64,
+    /// Phase E review L3: drift guard probes that found a drift.
+    pub four_drift_probes: u64,
     pub four_no_derivation: u64,
 }
 
@@ -148,6 +150,7 @@ pub fn assess(
         unparsed_records: window.unparsed_records,
         clock_suspect: alone.clock_suspect,
         four_mismatch: alone.four_mismatch,
+        four_drift_probes: window.four_drift_probes,
         four_no_derivation: alone.four_no_derivation,
         proof,
     };
@@ -226,6 +229,13 @@ pub fn assess(
     why(
         q.proof.undecodable > 0,
         format!("{} sightings undecodable", q.proof.undecodable),
+    );
+    why(
+        q.four_drift_probes > 0,
+        format!(
+            "the Four.meme deployment drifted from the freeze ({} probes)",
+            q.four_drift_probes
+        ),
     );
     why(
         q.four_mismatch > 0,
