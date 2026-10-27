@@ -10,6 +10,14 @@
 - **Sicherheit:** öffentliche APIs ohne Key; Host-Allowlist und TLS unabhängig von Konfiguration erzwingen; keine frei definierbaren Fremdhosts oder Host-Redirects. Private Order-/Wallet-/Trade-Keys und Order-Endpunkte gehören nicht zu P1.
 - **UI-Ort:** offen (O11), nicht automatisch Wallet; bestehende fünf DarkNode-Tabs bleiben unverändert.
 
+## Verbindlicher Historien- und Backtest-Datenweg (P1 V1.2)
+
+**Rohdaten zuerst:** `Classic-V2 /api/v2/mix/market/fills-history` liefert historische **öffentliche Einzeltrades**, keine fertigen 1s-Candles. Ihre Unix-Millisekunden-Zeitstempel hatten im echten Test **1 ms kleinsten positiven Abstand**, mit zahlreichen unterschiedlichen Trade-IDs pro gleichem Millisekunden-Zeitstempel. Die originale ID, Side, Preis, Menge, Quelle und Ordnungsinformation in **L1** verlustfrei bewahren. **P1.6 aggregiert daraus selbst 1s OHLCV** und anschließend 5s/10s/30s/1m/weitere konfigurierte Timeframes in L2. **1m-REST-Candles sind nur Gegenprobe, kein Rohtrade-Ersatz für 1s-/Tick-Backtests.** L1 ist für vollständiges Tick-Replay erhalten; L2 kann aus qualifiziertem L1 neu gebaut werden. Historische L2-Orderbücher sind **nicht** aus der REST-Einzeltrade-API rekonstruierbar.
+
+**Gemessener sequenzieller Import:** 20.000 aktuelle Trades in **8,632 s (2.317 Trades/s)**, historisch vor 60 Tagen 5.000 Trades in **2,033 s (2.459 Trades/s)**. Bis zu 1.000 Trades/Page, 7-Tage-Fenster, 90-Tage-Reichweite; Langzeit-Rate/429/Vollständigkeit offen. [Messbericht](P1_EVIDENCE/BITGET_HISTORICAL_RAW_TRADES_TIME_RATE_2026-10-27.md).
+
+**V5-Befund:** Längerer 60-s-Demo-Depth50-Test mit **8 Parserfehlern bei 62 Frames** – Decoder **nicht** als qualifiziert betrachten; das betrifft nicht die nachgewiesene historische Trade-REST-Funktion.
+
 ## Öffentliche Basisadressen
 
 | Transport | Adresse | Nachweis |
