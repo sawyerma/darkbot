@@ -121,11 +121,10 @@ fn check_tx(block: &str, launch: &CanonicalLaunch) {
     let input = raw["input"].as_str().unwrap();
     let pending_scope = match launch.venue {
         Venue::Flap => address_of(&raw["to"]) == FLAP_PORTAL && input.starts_with("0x8cb5772c"),
-        // Four.meme: a direct `createToken` to the venue's contract (the
-        // decoder then derives the token; compared in the venue tests).
-        Venue::Four => {
-            address_of(&raw["to"]) == FOUR_TOKEN_MANAGER2 && input.starts_with("0x519ebb10")
-        }
+        // Four Classic: never the C1-like scope, its token is not derivable
+        // before execution (two frozen pairs, the calldata names neither;
+        // Paket 8 review M1), even for a direct `createToken`.
+        Venue::Four => false,
         Venue::OpenFour => {
             address_of(&raw["to"]) == OPENFOUR_CORE && input.starts_with("0x519ebb10")
         }
@@ -350,12 +349,14 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         sender: Some(hex!("774352301321637bc2cad74e67d4089f36e15962")),
         nonce: Some(262),
         // Phase E: the production Four decoder recognizes the signed bytes
-        // as a Classic launch whose derived token (CREATE2 of the frozen
-        // deployer and template, salt from the calldata) is this token: a
-        // launch outside the freeze's fixtures confirms the derivation.
-        c1_scope: true,
+        // as a Classic launch whose token is the first frozen pair's
+        // candidate (CREATE2 of its deployer and template, salt from the
+        // calldata). Paket 8 review M1: with two live pairs the calldata
+        // named neither, so it is a candidate, not derivable before
+        // execution and not the C1-like scope.
+        c1_scope: false,
         venue_target: true,
-        four_token: FourToken::Matched,
+        four_token: FourToken::Candidate,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -460,7 +461,9 @@ fn a_classic_launch_of_the_second_pair_matches() {
     let verified = verify_object(&parsed).unwrap();
     launch.token = Some(hex::decode_to_array("0138af76e32e0d3233bc1ad1651398978a994444").unwrap());
     let l = launch.with_transaction(Ok(&verified), 16_384);
-    assert_eq!(l.four_token, FourToken::Matched);
+    // Paket 8 review M1: one of two candidates, not derivable before
+    // execution: never Matched, never the C1-like scope.
+    assert_eq!((l.four_token, l.c1_scope), (FourToken::Candidate, false));
     // A token of neither pair stays a counted mismatch.
     let mut launch = base;
     launch.token = Some([0x77; 20]);

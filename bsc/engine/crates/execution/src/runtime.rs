@@ -1017,6 +1017,7 @@ impl Canonical {
                     four_token: match l.four_token {
                         crate::chain_follower::FourToken::Matched
                         | crate::chain_follower::FourToken::Mismatch
+                        | crate::chain_follower::FourToken::Candidate
                             if self.four_drift =>
                         {
                             crate::chain_follower::FourToken::Unknown
@@ -1148,6 +1149,7 @@ impl Canonical {
             .set(e::FOUR_PENDING_DECODED, c.four_pending_decoded)
             .set(e::FOUR_PENDING_UNKNOWN, c.four_pending_unknown)
             .set(e::FOUR_PENDING_MISMATCH, c.four_pending_mismatch)
+            .set(e::FOUR_PENDING_CANDIDATE, c.four_pending_candidate)
             .set(e::FOUR_ACTIONABLE, c.four_actionable)
             .set(e::REVERTED_LAUNCHES, self.reverted_launches)
             .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)

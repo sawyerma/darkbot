@@ -67,6 +67,11 @@ pub enum FourToken {
     /// A derived token that is not the canonical one (another mode or
     /// template than the frozen ones).
     Mismatch,
+    /// Paket 8 review M1: a Four Classic launch whose canonical token is
+    /// one of the frozen pairs' candidates. Before execution the calldata
+    /// names neither pair, so no token was derivable: never `Matched`,
+    /// never actionable or C1 scope.
+    Candidate,
 }
 
 /// The event of a venue that announces a new token.
@@ -178,11 +183,12 @@ impl ReceiptLaunch {
                         FourToken::Mismatch
                     }
                 }
-                // Paket 8 review H1: a Classic launch's token is one of the
-                // frozen pairs' candidates; none of them is another pair.
+                // Paket 8 review H1/M1: a Classic launch's token is one of
+                // the frozen pairs' candidates (none of them: another pair);
+                // a candidate, not a token derived before execution.
                 Some(PendingToken::Candidates(tokens)) => {
                     if tokens.iter().any(|t| Some(t.into_array()) == self.token) {
-                        FourToken::Matched
+                        FourToken::Candidate
                     } else {
                         FourToken::Mismatch
                     }

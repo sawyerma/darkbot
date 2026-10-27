@@ -98,6 +98,10 @@ bsc_readiness_stop() {
   [ -n "$pid" ] || { say "kein BSC readiness Job aktiv"; return 0; }
   local launch; launch="$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.launch")"
   printf 'launch_id=%s\n' "$launch" > "$RUNDIR/bsc.readiness.stopping"
+  # Signal only once the job armed its stop handler (at most 5 s): a TERM
+  # before would end it without a result (Paket 8 review L6).
+  local i=0
+  while [ "$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.armed" 2>/dev/null)" != "$launch" ] && [ "$i" -lt 50 ] && [ "$(bsc_pid)" = "$pid" ]; do sleep 0.1; i=$((i+1)); done
   launchctl kill SIGTERM "$DOMAIN/$BSC_READINESS_LABEL" || { [ "$(bsc_pid)" != "$pid" ] || die "BSC readiness konnte nicht signalisiert werden"; }
   say "BSC readiness: geordneter Stopp angefordert"
 }

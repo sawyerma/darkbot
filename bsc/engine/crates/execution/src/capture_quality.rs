@@ -63,8 +63,10 @@ pub struct Quality {
     pub unparsed_records: u64,
     pub clock_suspect: bool,
     pub four_mismatch: u64,
-    /// Phase E review L3: drift guard probes that found a drift.
+    /// Phase E review L3: drift guard probes that found a drift, and those
+    /// that verified the freeze.
     pub four_drift_probes: u64,
+    pub four_match_probes: u64,
     pub four_no_derivation: u64,
 }
 
@@ -151,6 +153,7 @@ pub fn assess(
         clock_suspect: alone.clock_suspect,
         four_mismatch: alone.four_mismatch,
         four_drift_probes: window.four_drift_probes,
+        four_match_probes: window.four_match_probes,
         four_no_derivation: alone.four_no_derivation,
         proof,
     };
@@ -229,6 +232,12 @@ pub fn assess(
     why(
         q.proof.undecodable > 0,
         format!("{} sightings undecodable", q.proof.undecodable),
+    );
+    // Paket 8 review L1: the drift guard must have verified the freeze in
+    // the window (a failed or missing probe proves nothing).
+    why(
+        q.four_match_probes == 0,
+        "the Four.meme deployment was not verified in the capture window (no MATCH probe)".into(),
     );
     why(
         q.four_drift_probes > 0,
@@ -413,6 +422,12 @@ mod tests {
         );
         let geth = |e| source_event_payload(SourceId::Geth, e);
         j.record(RecordKind::Runtime, 1, geth(SourceEvent::Connected));
+        // The Four drift guard verified the freeze in the window.
+        j.record(
+            RecordKind::Runtime,
+            1,
+            crate::runtime_journal::four_probe_payload(1, 10),
+        );
         if let Some(at) = lost_at_s {
             j.record(
                 RecordKind::Runtime,

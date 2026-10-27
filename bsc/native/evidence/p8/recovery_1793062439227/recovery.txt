@@ -1,0 +1,38 @@
+release build e8547e7c82f28b60f631575c928c619004f2c6bbd7128f94c93f3be7e206eaf0 at 73881d51
+paper_sender=0xc0068ad6d33914f604d86669345119a4364727d3
+outcome=APPLIED source=BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW generation=1 request_id=rec-0
+outcome=APPLIED source=BSC_STATE_C2 requested=SHADOW effective=SHADOW generation=2 request_id=rec-1
+outcome=APPLIED source=BSC_EXEC requested=SHADOW effective=SHADOW generation=3 request_id=rec-2
+outcome=APPLIED source=BSC_STRATEGY_C requested=SHADOW effective=SHADOW generation=4 request_id=rec-3
+run 1 pid 53768
+run 1 killed (SIGKILL)
+run 2 pid 54442 (restart after the crash)
+run 2 exit 0
+replay proof of run 1793062439227: FAIL (segments 1, records 789, last sequence 788, manifest match false, sightings Flap 0 Four 0 OpenFour 0 undecodable 0, other pending 0 (to venues 0), census UNTERMINATED deterministic true, runtime Flap counter not of this run)
+no run manifest: the run is not sealed
+capture quality of run 1793062439227: NOT_CLEAN (Phase F acceptance NOT_MET; native connected 0 s of the 148 s window, planned 1800 s, native source false, replay FAIL)
+chain id 0, not BSC (56)
+strategy replay of run 1793062439227: INCOMPLETE (records 789, starts 1, outputs journaled 1 replayed 1; inputs: trades 437, terms 7, migrations 0, incomplete 0; launches 1, passed 0, rejected 1, data incomplete 0, not tracked 0, slot limit 0, creator sold 0; PAPER entered 0, cancelled 0, exits creator-sell 0 target 0 stop 0 timeout 0; gains 0 (0 wei), losses 0 (0 wei), unresolved 0, open at the e
+no run manifest names the run's configuration
+replay proof of run 1793062591241: PASS (segments 1, records 823, last sequence 822, manifest match true, sightings Flap 3 Four 0 OpenFour 0 undecodable 0, other pending 0 (to venues 0), census COMPLETE deterministic true, runtime Flap counter 3)
+
+capture quality of run 1793062591241: CLEAN (Phase F acceptance NOT_MET; native connected 0 s of the 136 s window, planned 1800 s, native source false, replay PASS)
+
+strategy replay of run 1793062591241: PASS (records 823, starts 1, outputs journaled 13 replayed 13; inputs: trades 348, terms 75, migrations 0, incomplete 0; launches 11, passed 2, rejected 8, data incomplete 0, not tracked 1, slot limit 0, creator sold 0; PAPER entered 2, cancelled 0, exits creator-sell 0 target 0 stop 0 timeout 0; gains 0 (0 wei), losses 0 (0 wei), unresolved 0, open at the end
+
+covered_ms=300876 windows=2 flap_launches=12 c1_scope=3 tx_unverifiable=0 four_launches=3 orphaned=0 outage=0 unjoined=0 blocks_skipped=0 between_windows=72 unparsed=0
+four pre-execution token: derived=3 no_derivation=0 mismatch=0 not_recognized=0 unrecorded=0
+four before the block time: full=0 hash_only=0 after=0 missed=3 clock_unknown=0
+later sightings=0 lag_us p50=n/a p95=n/a max=n/a
+before the block time: full=0 (c1_scope 0) hash_only=0 after=7 missed=5 clock_unknown=0
+generation=4
+BSC_INGRESS_GETH requested=OFF effective=OFF
+BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW
+BSC_INGRESS_DRPC requested=OFF effective=OFF
+BSC_INGRESS_BLOCKREQ requested=OFF effective=OFF
+BSC_INGRESS_48CLUB requested=OFF effective=OFF
+BSC_STATE_C2 requested=SHADOW effective=SHADOW
+BSC_EXEC requested=SHADOW effective=SHADOW
+BSC_STRATEGY_C requested=SHADOW effective=SHADOW
+<scratch>/rec/status-run2.dbrec: no schema for record type 40 version 18
+RECOVERY-DONE

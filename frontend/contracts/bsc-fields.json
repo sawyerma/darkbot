@@ -2386,13 +2386,13 @@
   "command_bindings": [
     {
       "source_path": "ops/bsc-control.sh",
-      "source_sha": "3e4d36657de750a6b8441334c396b733e6b9b8e6c36fa497c7843a4fe6000b15",
+      "source_sha": "62b57b7a1018519d61932866b7fb84ff2d8ac8dc3bfb8bbfcd0b532264c57a83",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
     {
       "source_path": "bsc/tools/readiness_job.py",
-      "source_sha": "b083cef60b0db137d92e00737227a47ec8917cc90c2a3695190411a45853c39b",
+      "source_sha": "9771d9b5442e927edcca451dc58101cab8cd94e79345697ebd62edb3dd87ad64",
       "owner": "BSC lifecycle",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },

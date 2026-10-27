@@ -177,6 +177,9 @@ pub struct JoinCounters {
     /// canonical one.
     pub four_pending_unknown: u64,
     pub four_pending_mismatch: u64,
+    /// Paket 8 review M1: Four Classic launches whose token is one of the
+    /// frozen pairs' candidates (not derivable before execution).
+    pub four_pending_candidate: u64,
     /// Four.meme launches seen in full before their block whose token the
     /// decoder derived from the launch bytes: actionable before execution
     /// (Phase F §7/§10, the Four counterpart of `c1_scope_full_before`).
@@ -220,6 +223,7 @@ impl JoinCounters {
                 FourToken::Matched => step(&mut self.four_pending_decoded),
                 FourToken::Unknown => step(&mut self.four_pending_unknown),
                 FourToken::Mismatch => step(&mut self.four_pending_mismatch),
+                FourToken::Candidate => step(&mut self.four_pending_candidate),
                 FourToken::NotApplicable | FourToken::NotRecognized => {}
             }
             if j.launch.four_token == FourToken::Matched

@@ -66,8 +66,10 @@ pub struct Window {
     /// Canonical/reorg records that do not parse (an older layout, damage).
     pub unparsed_records: u64,
     /// Phase E review L3: Four.meme drift guard probes that found the live
-    /// deployment drifted from the freeze.
+    /// deployment drifted from the freeze, and those that found it as
+    /// frozen (Paket 8 review L1: a window without one is unverified).
     pub four_drift_probes: u64,
+    pub four_match_probes: u64,
     /// Pending events the ingress queue dropped before this journal.
     pub ingress_dropped: u64,
     /// The capture window: from the first canonical record to the stop
@@ -105,6 +107,9 @@ pub struct Census {
     /// Four.meme launches by the pre-execution verdict; `unrecorded`: a
     /// record of an older build.
     pub four_derived: u64,
+    /// Paket 8 review M1: Four Classic launches whose token is one of the
+    /// frozen pairs' candidates (not derivable, not actionable).
+    pub four_candidate: u64,
     pub four_no_derivation: u64,
     pub four_mismatch: u64,
     pub four_not_recognized: u64,
@@ -464,8 +469,10 @@ fn replay(
             (RecordKind::Runtime, Some(b'v'))
                 if p.len() == crate::runtime_journal::FOUR_PROBE_LEN =>
             {
-                if p[1] == 2 {
-                    window.four_drift_probes += 1;
+                match p[1] {
+                    1 => window.four_match_probes += 1,
+                    2 => window.four_drift_probes += 1,
+                    _ => {}
                 }
             }
             (RecordKind::Runtime, Some(b'Q')) if p.len() == 1 => {
@@ -780,6 +787,7 @@ fn census_of(
                     Some(FourToken::Matched) => &mut out.four_derived,
                     Some(FourToken::Unknown) => &mut out.four_no_derivation,
                     Some(FourToken::Mismatch) => &mut out.four_mismatch,
+                    Some(FourToken::Candidate) => &mut out.four_candidate,
                     // `NotApplicable` on a Four record is refused by `launch_record`.
                     Some(FourToken::NotRecognized | FourToken::NotApplicable) => {
                         &mut out.four_not_recognized
@@ -899,6 +907,7 @@ impl Census {
             .set(cs::FLAP_LAUNCHES, self.flap_launches)
             .set(cs::FOUR_LAUNCHES, self.four_launches)
             .set(cs::FOUR_DERIVED, self.four_derived)
+            .set(cs::FOUR_CANDIDATE, self.four_candidate)
             .set(cs::FOUR_NO_DERIVATION, self.four_no_derivation)
             .set(cs::FOUR_MISMATCH, self.four_mismatch)
             .set(cs::FOUR_NOT_RECOGNIZED, self.four_not_recognized)
@@ -980,7 +989,7 @@ impl Census {
         let opti = |v: Option<i64>| v.map_or("n/a".to_string(), |v| v.to_string());
         let mut s = format!(
             "covered_ms={} windows={} flap_launches={} c1_scope={} tx_unverifiable={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={} between_windows={} unparsed={}\n\
-             four pre-execution token: derived={} no_derivation={} mismatch={} not_recognized={} unrecorded={}\n\
+             four pre-execution token: derived={} candidate={} no_derivation={} mismatch={} not_recognized={} unrecorded={}\n\
              four before the block time: full={} hash_only={} after={} missed={} clock_unknown={}\n\
              later sightings={} lag_us p50={} p95={} max={}\n\
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
@@ -1000,6 +1009,7 @@ impl Census {
             self.blocks_between_windows,
             self.unparsed_records,
             self.four_derived,
+            self.four_candidate,
             self.four_no_derivation,
             self.four_mismatch,
             self.four_not_recognized,
@@ -1281,7 +1291,13 @@ mod tests {
         records.push((RecordKind::Runtime, 401, EXIT_PAYLOAD.to_vec()));
         write(&dir, 1_000, &records);
         let c = census(&dir, 4096, None).unwrap();
-        assert_eq!(c.windows[0].four_drift_probes, 1);
+        assert_eq!(
+            (
+                c.windows[0].four_drift_probes,
+                c.windows[0].four_match_probes
+            ),
+            (1, 1)
+        );
         assert_eq!(
             (
                 c.four_launches,
@@ -1306,7 +1322,10 @@ mod tests {
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 2);
         assert_eq!(record.u64(cs::FOUR_MISSED).unwrap(), 6);
-        assert!(c.summary().contains("derived=2 no_derivation=1 mismatch=1"));
+        assert!(
+            c.summary()
+                .contains("derived=2 candidate=0 no_derivation=1 mismatch=1")
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

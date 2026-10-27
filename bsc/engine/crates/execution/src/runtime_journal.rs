@@ -213,6 +213,7 @@ pub fn four_token_byte(t: FourToken) -> u8 {
         FourToken::Unknown => 2,
         FourToken::Matched => 3,
         FourToken::Mismatch => 4,
+        FourToken::Candidate => 5,
     }
 }
 
@@ -223,6 +224,7 @@ pub fn four_token_of_byte(byte: u8) -> Option<FourToken> {
         FourToken::Unknown,
         FourToken::Matched,
         FourToken::Mismatch,
+        FourToken::Candidate,
     ]
     .into_iter()
     .find(|t| four_token_byte(*t) == byte)
@@ -990,10 +992,11 @@ mod tests {
             FourToken::Unknown,
             FourToken::Matched,
             FourToken::Mismatch,
+            FourToken::Candidate,
         ] {
             assert_eq!(four_token_of_byte(four_token_byte(t)), Some(t));
         }
-        assert_eq!(four_token_of_byte(5), None);
+        assert_eq!(four_token_of_byte(6), None);
     }
 
     /// Every venue's byte reads back as that venue; no other byte does.

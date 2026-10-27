@@ -1,0 +1,53 @@
+release build f885a83ce73d68e4a26cdaaa6d4799e32a3c49350452f44031661142fb07604d at 53436297
+paper_sender=0xee088078a340321623c5ad8ce579428f0306baa7
+outcome=APPLIED source=BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW generation=1 request_id=rec-0
+outcome=APPLIED source=BSC_STATE_C2 requested=SHADOW effective=SHADOW generation=2 request_id=rec-1
+outcome=APPLIED source=BSC_EXEC requested=SHADOW effective=SHADOW generation=3 request_id=rec-2
+outcome=APPLIED source=BSC_STRATEGY_C requested=SHADOW effective=SHADOW generation=4 request_id=rec-3
+run 1 pid 92163
+run 1 killed (SIGKILL)
+run 2 pid 93091 (restart after the crash)
+run 2 exit 0
+replay proof of run 1793057299325: FAIL (segments 1, records 576, last sequence 575, manifest match false, sightings Flap 0 Four 0 OpenFour 0 undecodable 0, other pending 0 (to venues 0), census UNTERMINATED deterministic true, runtime Flap counter not of this run)
+no run manifest: the run is not sealed
+capture quality of run 1793057299325: NOT_CLEAN (Phase F acceptance NOT_MET; native connected 0 s of the 148 s window, planned 1800 s, native source false, replay FAIL)
+chain id 0, not BSC (56)
+strategy replay of run 1793057299325: INCOMPLETE (records 576, starts 1, outputs journaled 1 replayed 1; inputs: trades 223, terms 7, migrations 0, incomplete 0; launches 1, passed 0, rejected 1, data incomplete 0, not tracked 0, slot limit 0, creator sold 0; PAPER entered 0, cancelled 0, exits creator-sell 0 target 0 stop 0 timeout 0; gains 0 (0 wei), losses 0 (0 wei), unresolved 0, open at the e
+no run manifest names the run's configuration
+replay proof of run 1793057451341: PASS (segments 1, records 689, last sequence 688, manifest match true, sightings Flap 0 Four 2 OpenFour 0 undecodable 0, other pending 0 (to venues 0), census COMPLETE deterministic true, runtime Flap counter 0)
+
+capture quality of run 1793057451341: NOT_CLEAN (Phase F acceptance NOT_MET; native connected 0 s of the 134 s window, planned 1800 s, native source false, replay PASS)
+1 Four derivations contradict the canonical token
+strategy replay of run 1793057451341: PASS (records 689, starts 1, outputs journaled 6 replayed 6; inputs: trades 271, terms 42, migrations 1, incomplete 0; launches 6, passed 0, rejected 5, data incomplete 0, not tracked 1, slot limit 0, creator sold 0; PAPER entered 0, cancelled 0, exits creator-sell 0 target 0 stop 0 timeout 0; gains 0 (0 wei), losses 0 (0 wei), unresolved 0, open at the end 0 
+
+covered_ms=300437 windows=2 flap_launches=7 c1_scope=0 tx_unverifiable=0 four_launches=5 orphaned=0 outage=0 unjoined=0 blocks_skipped=0 between_windows=71 unparsed=0
+four pre-execution token: derived=3 no_derivation=0 mismatch=2 not_recognized=0 unrecorded=0
+four before the block time: full=0 hash_only=0 after=2 missed=3 clock_unknown=0
+later sightings=0 lag_us p50=n/a p95=n/a max=n/a
+before the block time: full=0 (c1_scope 0) hash_only=0 after=1 missed=6 clock_unknown=0
+generation=4
+BSC_INGRESS_GETH requested=OFF effective=OFF
+BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW
+BSC_INGRESS_DRPC requested=OFF effective=OFF
+BSC_INGRESS_BLOCKREQ requested=OFF effective=OFF
+BSC_INGRESS_48CLUB requested=OFF effective=OFF
+BSC_STATE_C2 requested=SHADOW effective=SHADOW
+BSC_EXEC requested=SHADOW effective=SHADOW
+BSC_STRATEGY_C requested=SHADOW effective=SHADOW
+sources[1].source_id = "BSC_INGRESS_PUBLICNODE"
+sources[1].effective = "SHADOW"
+sources[1].health = "HEALTHY"
+sources[1].connects = 1
+sources[1].disconnects = 0
+sources[1].rate_limited = 0
+sources[1].full = 37577
+sources[1].hash_only = 0
+sources[1].rejected = 207
+sources[1].dropped = 0
+sources[1].duplicates = 10968
+sources[1].first_any = 26609
+sources[1].first_full = 26609
+sources[1].launch_sightings = 0
+sources[1].launch_first = 0
+sources[1].last_event_age_ms = 4
+RECOVERY-DONE

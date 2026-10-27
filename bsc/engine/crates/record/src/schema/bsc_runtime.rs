@@ -282,11 +282,14 @@ pub mod runtime_status {
         /// (`UNPROBED`, `MATCH at block n`, `DRIFT at block n: ...`,
         /// `PROBE_FAILED: ...`).
         pub const FOUR_DEPLOYMENT: u16 = 33;
+        /// v10 (Paket 8 review M1): Four Classic launches whose token is
+        /// one of the frozen pairs' candidates (not derivable).
+        pub const FOUR_PENDING_CANDIDATE: u16 = 34;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 9,
+            schema_version: 10,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -321,6 +324,7 @@ pub mod runtime_status {
                 Field::req(FOUR_ACTIONABLE, "four_actionable", U64),
                 Field::req(REVERTED_LAUNCHES, "reverted_launches", U64),
                 Field::opt(FOUR_DEPLOYMENT, "four_deployment", Text),
+                Field::req(FOUR_PENDING_CANDIDATE, "four_pending_candidate", U64),
             ],
         };
     }
@@ -763,7 +767,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 18,
+        schema_version: 19,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

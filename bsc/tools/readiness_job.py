@@ -23,6 +23,11 @@ signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 os.umask(0o077)
 rundir.mkdir(parents=True, exist_ok=True)
+# The stop handler is armed: a stop request may signal now (before, the
+# default action would end the job without a result; Paket 8 review L6).
+armed = rundir / ('bsc.readiness.armed.' + launch + '.tmp')
+armed.write_text(f'launch_id={launch}\n')
+os.replace(armed, rundir / 'bsc.readiness.armed')
 temporary = rundir / ('bsc.readiness.' + launch + '.tmp')
 result = 'FAILED'
 exit_code = 1

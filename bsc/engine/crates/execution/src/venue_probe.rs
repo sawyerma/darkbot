@@ -366,6 +366,9 @@ where
 /// block (Phase E review L3, the drift guard): each frozen proxy's EIP-1967
 /// implementation and the keccak of every frozen runtime code. `drift`
 /// names every difference; empty, the live deployment is the frozen one.
+/// Limit (Paket 8 review L2): code identity only, not TokenManager2's
+/// template configuration; a further (deployer, template) pair under the
+/// same code shows only afterwards, as a canonical Four mismatch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FourObservation {
     pub block_number: u64,
