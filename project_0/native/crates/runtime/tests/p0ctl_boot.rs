@@ -3,8 +3,10 @@
 //! refused before any flow; each approval must name its own token; a start needs the flow's
 //! READY network audit and exactly the flow's duration; the flow's identity is the one `run
 //! start` audits; a flow id is used once. No network read happens.
+mod support;
 use darkbot_runner::orchestration::boot_control;
 use std::process::Command;
+use support::Serialized;
 
 fn p0ctl(project: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_p0ctl"))
@@ -13,7 +15,7 @@ fn p0ctl(project: &std::path::Path, args: &[&str]) -> (i32, String, String) {
         .arg("--project")
         .arg(project)
         .args(args)
-        .output()
+        .serialized_output()
         .unwrap();
     (
         out.status.code().unwrap_or(-1),
@@ -153,7 +155,7 @@ fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
         if let Some(ctl) = ctl {
             cmd.env("DARKBOT_CTL", ctl);
         }
-        let out = cmd.output().unwrap();
+        let out = cmd.serialized_output().unwrap();
         (
             out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -312,7 +314,7 @@ fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
     let out = Command::new(env!("CARGO_BIN_EXE_p0-journal"))
         .arg("import-provider-evidence")
         .args([&json, &record])
-        .output()
+        .serialized_output()
         .unwrap();
     assert!(
         out.status.success(),
@@ -432,7 +434,7 @@ fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualificati
     // keeps the test hermetic (the capture is built by the reporter crate).
     let bin = d.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl")).unwrap();
+    support::install(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl"));
     std::fs::write(bin.join("p0-market-capture-reported"), b"capture stand-in").unwrap();
     let run = |args: &[&str], ctl: Option<&std::path::Path>| {
         let mut cmd = Command::new(bin.join("p0ctl"));
@@ -445,7 +447,7 @@ fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualificati
         if let Some(ctl) = ctl {
             cmd.env("DARKBOT_CTL", ctl);
         }
-        let out = cmd.output().unwrap();
+        let out = cmd.serialized_output().unwrap();
         (
             out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stderr).into_owned(),

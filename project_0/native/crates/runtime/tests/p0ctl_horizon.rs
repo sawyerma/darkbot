@@ -2,7 +2,9 @@
 //! a qualification records every part and is stored by id; an unbounded start is admitted only
 //! by `RunHorizon::admit` with a complete qualification bound to exactly the run — without one,
 //! with an open part or another horizon it is refused before any start step. No network read.
+mod support;
 use std::process::Command;
+use support::Serialized;
 
 struct Ctl {
     bin: std::path::PathBuf,
@@ -17,7 +19,7 @@ impl Ctl {
         std::fs::create_dir_all(project.join("data")).unwrap();
         // The binding names p0ctl and the runtime beside it: a copied p0ctl with a stand-in
         // runtime keeps the test hermetic (the runtimes are built by the reporter crate).
-        std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl")).unwrap();
+        support::install(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl"));
         std::fs::write(bin.join("p0-longtail"), b"runtime stand-in").unwrap();
         Self { bin, project }
     }
@@ -28,7 +30,7 @@ impl Ctl {
             .arg("--project")
             .arg(&self.project)
             .args(args)
-            .output()
+            .serialized_output()
             .unwrap();
         (
             out.status.code().unwrap_or(-1),
@@ -227,7 +229,7 @@ fn dec16_the_plan_compiler_plans_the_window_and_names_the_runway() {
             .env_clear()
             .env("P0_MEASUREMENT_DURATION", duration)
             .args(args)
-            .output()
+            .serialized_output()
             .unwrap();
         assert!(
             out.status.success(),

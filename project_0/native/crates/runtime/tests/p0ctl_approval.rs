@@ -2,7 +2,9 @@
 //! (attempt or exit) is read strictly, checked alone and shown with what it binds; it exits 0
 //! only for a valid profile bound to this project's clean HEAD and these binaries. Offline, no
 //! state change, LIVE stays locked.
+mod support;
 use std::process::Command;
+use support::Serialized;
 
 fn p0ctl(project: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     p0ctl_at(
@@ -23,7 +25,7 @@ fn p0ctl_at(
         .arg("--project")
         .arg(project)
         .args(args)
-        .output()
+        .serialized_output()
         .unwrap();
     (
         out.status.code().unwrap_or(-1),
@@ -314,7 +316,7 @@ fn approval_show_passes_only_for_this_clean_build() {
                 "commit.gpgsign=false",
             ])
             .args(args)
-            .output()
+            .serialized_output()
             .unwrap();
         assert!(
             out.status.success(),
@@ -334,7 +336,7 @@ fn approval_show_passes_only_for_this_clean_build() {
     let _ = std::fs::remove_dir_all(&bin);
     std::fs::create_dir_all(&bin).unwrap();
     let ctl = bin.join("p0ctl");
-    std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), &ctl).unwrap();
+    support::install(env!("CARGO_BIN_EXE_p0ctl"), &ctl);
     std::fs::write(bin.join("p0-longtail"), b"runtime stand-in").unwrap();
     let binary = darkbot_runner::orchestration::boot_audit::binary_identity_of(
         &ctl,

@@ -3,8 +3,10 @@
 //! exactly the previewed binding (its digest), is revoked at once, and an autostart without one
 //! starts nothing. No network read: the autostart under a grant stops at the network step,
 //! whose provider evidence was never imported.
+mod support;
 use darkbot_runner::orchestration::{autostart, boot_control, until_stopped as us};
 use std::process::Command;
+use support::Serialized;
 
 const GENESIS: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 
@@ -21,7 +23,7 @@ impl Ctl {
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(project.join("data")).unwrap();
         // The binding names p0ctl and the capture beside it (a stand-in keeps it hermetic).
-        std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl")).unwrap();
+        support::install(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl"));
         std::fs::write(bin.join("p0-market-capture-reported"), b"capture stand-in").unwrap();
         Self { bin, project }
     }
@@ -37,7 +39,7 @@ impl Ctl {
             .arg("--project")
             .arg(&self.project)
             .args(args)
-            .output()
+            .serialized_output()
             .unwrap();
         (
             out.status.code().unwrap_or(-1),
