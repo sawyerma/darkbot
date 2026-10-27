@@ -645,7 +645,14 @@ impl Generation {
                 Entity::Switch(s) => set_here(&self.switch(s).set_by),
                 Entity::Runtime => set_here(&self.runtime.set_by),
                 Entity::BuyLimit => set_here(&self.buy_limit.set_by),
-                Entity::Source(_) | Entity::Component(_) => true,
+                // Sources and components keep no setter: the request changed
+                // one of them only if it set nothing else in this generation.
+                Entity::Source(_) | Entity::Component(_) => {
+                    !self.venues.iter().any(|v| set_here(&v.set_by))
+                        && !self.switches.iter().any(|s| set_here(&s.set_by))
+                        && !set_here(&self.runtime.set_by)
+                        && !set_here(&self.buy_limit.set_by)
+                }
             }
     }
 
@@ -1817,16 +1824,25 @@ fn highest_generation(dir: &Path) -> Result<Option<u64>, String> {
 /// Read-only, for the status projection: the current generation's file and
 /// record, validated against the owner's rule; `None` before `init`.
 pub fn current_record(dir: &Path) -> Result<Option<(PathBuf, Record)>, String> {
+    Ok(current_record_and_generation(dir)?.map(|(path, record, _)| (path, record)))
+}
+
+/// The current generation's record and the generation it decodes to, from
+/// one read of the file.
+pub fn current_record_and_generation(
+    dir: &Path,
+) -> Result<Option<(PathBuf, Record, Generation)>, String> {
     let Some(n) = highest_generation(dir)? else {
         return Ok(None);
     };
     let path = dir.join("generations").join(format!("{n:020}.dbrec"));
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    if Generation::decode(&bytes)?.generation != n {
+    let g = Generation::decode(&bytes)?;
+    if g.generation != n {
         return Err(format!("generation file {n} holds another generation"));
     }
     let record = decode_generation(&bytes)?;
-    Ok(Some((path, record)))
+    Ok(Some((path, record, g)))
 }
 
 #[cfg(test)]
@@ -2320,6 +2336,29 @@ mod tests {
             g.live_reason_now(FOUR_EXECUTION_PATH_MISSING, Some("boot-2")),
             FOUR_EXECUTION_PATH_MISSING
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review pass 3 L3a: a lost receipt replayed as a source or component
+    /// request the generation happens to hold is not that request's change
+    /// when the request set something else; the genuine replay still is.
+    #[test]
+    fn a_replay_as_an_unchanged_source_is_not_the_request() {
+        let (dir, s) = session("replay-source", "boot-1");
+        s.request("x", SwitchId::Arm, Mode::Enabled, 0, 1).unwrap();
+        fs::remove_file(dir.join("receipts/x.dbrec")).unwrap();
+        let e = s.request("x", SourceId::Drpc, Mode::Off, 0, 2).unwrap_err();
+        assert!(e.contains("belongs to another request"), "{e}");
+        let e = s
+            .request("x", ComponentId::ExecC3, Mode::Off, 0, 3)
+            .unwrap_err();
+        assert!(e.contains("belongs to another request"), "{e}");
+        let genuine = s.request("x", SwitchId::Arm, Mode::Enabled, 0, 4).unwrap();
+        assert_eq!((genuine.outcome, genuine.generation), ("APPLIED", 1));
+        s.request("y", SourceId::Drpc, Mode::Shadow, 1, 5).unwrap();
+        fs::remove_file(dir.join("receipts/y.dbrec")).unwrap();
+        let again = s.request("y", SourceId::Drpc, Mode::Shadow, 1, 6).unwrap();
+        assert_eq!((again.outcome, again.generation), ("APPLIED", 2));
         fs::remove_dir_all(dir).unwrap();
     }
 

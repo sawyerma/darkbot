@@ -1125,19 +1125,18 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // Order V2 §5: the five sources' modes from their native owner's state
     // (RUNDIR/bsc-sources); a state the owner's rule refuses is a warning.
     let sources = rundir.join("bsc-sources");
-    match darkbot_bsc_execution::sources::current_record(&sources) {
-        Ok(Some((path, r))) => {
+    match darkbot_bsc_execution::sources::current_record_and_generation(&sources) {
+        Ok(Some((path, r, g))) => {
             let mut record = native_record(rundir, &path, &r);
-            // Review L5: a LIVE reason as it reads in this boot session.
-            if let Ok(g) = darkbot_bsc_execution::sources::current_generation(&sources) {
-                let boot = darkbot_bsc_execution::sources::boot_session().ok();
-                for f in record
-                    .fields
-                    .iter_mut()
-                    .filter(|f| f.name.ends_with(".block_reason"))
-                {
-                    f.value = g.live_reason_now(&f.value, boot.as_deref()).to_owned();
-                }
+            // Review L5: a LIVE reason as it reads in this boot session (the
+            // record's other leaves are its bytes; the mapping says so).
+            let boot = darkbot_bsc_execution::sources::boot_session().ok();
+            for f in record
+                .fields
+                .iter_mut()
+                .filter(|f| f.name.ends_with(".block_reason"))
+            {
+                f.value = g.live_reason_now(&f.value, boot.as_deref()).to_owned();
             }
             monitoring.records.push(record)
         }

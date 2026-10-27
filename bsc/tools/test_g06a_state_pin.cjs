@@ -69,10 +69,28 @@ test('local simulation refuses another block than the preflight before any state
       DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI: '50000000', DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256: 'ab'.repeat(32),
     });
     assert.notEqual(r.code, 0, r.out);
-    assert.match(r.out, /STATE_BLOCK_MISMATCH/);
+    // Plan 27.10.: with the native signing switches DISABLED (their default,
+    // and the owner state every test runs in) the simulation stops before any
+    // signature and before any request; only with them ENABLED in this boot
+    // does it reach the BSC-002 pin and refuse the other block there.
+    if (/native switches refuse the signature: STOP: CONTROL_DISABLED/.test(r.out)) {
+      assert.equal(m.seen.length, 0, JSON.stringify(m.seen.map((c) => c.method)));
+    } else {
+      assert.match(r.out, /STATE_BLOCK_MISMATCH/);
+    }
     assert.equal(m.seen.filter((c) => STATE_METHODS.includes(c.method)).length, 0, JSON.stringify(m.seen.map((c) => c.method)));
     assert.ok(!fs.existsSync(out));
   } finally { m.close(); }
+});
+
+test('the simulation pins the preflight block before its first state read', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'g06a_local_simulate.cjs'), 'utf8');
+  const main = source.slice(source.indexOf('async function main()'));
+  const pinned = main.indexOf("await requireBlock(rpc, rpcUrl, parentNumber, req('DARKBOT_G06A_SEND_HEAD_HASH'), 'before the simulation');");
+  assert.ok(pinned > 0, 'the BSC-002 pin before the simulation');
+  assert.ok(pinned < main.indexOf('new RPCStateManager('));
+  assert.ok(pinned < main.indexOf('installBasicAccountLoader('));
+  assert.ok(main.indexOf('requireSigningSwitches();') < main.indexOf('.signTransaction('));
 });
 
 test('the cross-check reads every state word pinned to the preflight block hash', async () => {
