@@ -428,8 +428,14 @@ fn dec16_an_unbounded_raw_capture_flow_starts_until_stopped_with_its_qualificati
     let d = std::env::temp_dir().join(format!("p0ctl_boot_unbounded_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("data")).unwrap();
+    // The binding names p0ctl and the capture beside it: a copied p0ctl with a stand-in capture
+    // keeps the test hermetic (the capture is built by the reporter crate).
+    let bin = d.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), bin.join("p0ctl")).unwrap();
+    std::fs::write(bin.join("p0-market-capture-reported"), b"capture stand-in").unwrap();
     let run = |args: &[&str], ctl: Option<&std::path::Path>| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_p0ctl"));
+        let mut cmd = Command::new(bin.join("p0ctl"));
         cmd.env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("P0_MARKET_SOURCE", "logs")

@@ -42,7 +42,7 @@ PINNED = {
     'runtime/src/execution/one_shot.rs': (7, 'H'),  # <wallet>.json decoded only by the explicit migration (p0ctl fe04 migrate); open refuses it (F8, 25.10.)
     'runtime/src/market/deployment.rs': (1, 'W'),
     'runtime/src/market/observer.rs': (1, 'W'),
-    'runtime/src/market/rows.rs': (34, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
+    'runtime/src/market/rows.rs': (35, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4); DEC-16: the render of StreamReadyUntilStopped (27.10.)
     'runtime/src/market/summary.rs': (4, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/market/winner.rs': (3, 'W'),
     'runtime/src/market_gap.rs': (3, 'W'),
@@ -177,7 +177,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 305)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 306)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):
