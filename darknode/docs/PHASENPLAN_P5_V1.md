@@ -1,6 +1,6 @@
-# DarkNode – PHASENPLAN P5 V1.3: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
+# DarkNode – PHASENPLAN P5 V1.4: Bitget UTA Private API, Futures-Steuerung und sicherer Order-Owner
 
-**Stand:** 27.10.2026 · **Revision V1.3:** S0–S7 / P5-A01–A28, Größenregel, Exchange-Drift, Strategy-ID, Kostengates, zeitkritischer Rust-Ausführungspfad · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
+**Stand:** 27.10.2026 · **Revision V1.4:** S0–S7 / P5-A01–A28, Größenregel, Exchange-Drift, Strategy-ID, Kostengates, Low-Latency und 24/7-Betriebs-Recovery · **Status:** Architektur-/Capability-Research, **P5 = NOT_RUN**, **GATE 1 = OPEN**, **SIGN/ARM/LIVE untersagt** ohne gesonderte Freigabe.
 **Projektkonvention:** Im Gesamtplan [PHASENPLAN.md](PHASENPLAN.md) bezeichnet **P3 die Indikator-/Graph-Engine**; die private Bitget-Anbindung ist **P5**. Diese Datei konkretisiert ausschließlich P5, ohne die bestehenden P0–P10-IDs umzudeuten. P1 bleibt öffentliche Marktdaten/Rohtrade-Aufzeichnung und 1s-/MTF-Aggregation.
 
 ## 1. Verifizierter Dokumentationsstand vs. echter Nachweis
@@ -266,6 +266,35 @@ Je Abschnitt `count, min, p50, p95, p99, p99.9, max`, Event-/Queue-Verluste, Hos
 
 **Offener Performance-Entscheid:** Konkrete p99/p99.9-Zielwerte für **internen** Signal→Durable-Send einschließlich `fsync`, L7-Stop-Deckung und L8-Notfallreaktion müssen **vor der Demo-Abnahme**, anhand R6-Host-/REST-vs-WS-Spikes **vorab versioniert** und als echte harte PASS-/FAIL-Assertions implementiert werden. Keine gemessenen Werte, keine Zahlen aus anderen Projekten und keine erfundene Börsen-Garantie. `LIVE` bleibt gesperrt, solange die technischen Schutzinvarianten oder erforderlichen Latenz-Gates fehlen.
 
+## 5d. V1.4 – 24/7-Update-/Restore-/Schlüsselbetrieb und JS-Präzision (27.10.2026)
+
+**Status:** Verbindliche Sicherheits- und Operationsplanung, **NOT_RUN**; kein neues P5-A-Testnummernsystem. Zentrale Owner- und Stopregeln S0–S7 haben Vorrang. Ziel ist ein **sicher wiederaufnehmbarer** 24/7-Dienst, nicht „Update ohne jede Unterbrechung“ oder eine garantierte Rekonstruktion verloren gegangener Exchange-Historie.
+
+### Software-Update oder Rollback bei offener Position (A12/A20/A24/A26/A27; P8)
+
+1. **Quiesce:** neue Entries und Graphaktivierungen sperren; Version/Account/Position/alle Pending-/UNKNOWN-Orders/Stopdeckung an der Börse erfassen. Bestehende Schutzorders nicht voreilig stornieren; offene Entries nur mit belegtem Abschluss/Cancellation handhaben.
+2. **Variante FLAT:** nach bestätigt `FLAT`, keinen aktiven/UNKNOWN Orders und abgeschlossener Reconciliation stoppen, versioniert deployen, Journal-/Schema-/Store-Migration mit Crash-Tests, neu starten und volle S7-Prüfung vor `ACTIVE`.
+3. **Variante Position OPEN:** nur wenn der für **die komplette bestätigte Positionsmenge** passende börsenseitige Stop **vor dem Shutdown real bestätigt** ist und dessen Gültigkeit nicht vom Rust-Prozess abhängt. Alte Engine geordnet stoppen, keine zwei gleichzeitigen Order-Owner, dauerhafte Reservations/Order-Intent/Journal-Watermarks erhalten. Neuer SHA startet **`HALTED/RECOVERING`**, private WS + REST Full-Sync, alle Orders/Fills/Positionen/Stops/Mode/Hebel/Fees/Clock und Versions-/Migrationsergebnis prüfen, dann **separates** kontrolliertes Re-ARM; nie automatisch auf ACTIVE nur weil Prozess läuft.
+4. **Fehler/Rollback:** falscher Stop, unbekannter Orderstatus, inkompatibles Journal/Schema, unklare Position oder nicht verifizierte Rollback-Daten ⇒ kein Entry, Alarm, dokumentierte Emergency-Policy. Lokale Stop-Nachführung und Strategie-Exits sind während des Updates nicht aktiv – dies ist ein **bewusstes Risikofenster**, kein als ununterbrochen geschützter Handel ausgebbar. Hostkill zwischen jedem Schritt fault-injizieren.
+
+### Hostverlust/defekter Datenträger/Kaltstart ohne lokales Journal (A08/A20/A26/A27; P8)
+
+- **Zwei verschiedene Restore-Wege:** (A) off-host **verschlüsseltes**, versioniertes, regelmäßig verifiziertes Backup mit Journal-/SQLite-/Graph-/Instrument-Schema-/Config-Watermarks; Recovery mit Checksum/Atomizität/RPO und dokumentierter RTO. Kein Geheimnistransport im Snapshot. (B) **Fresh Host, KEIN lokales Journal/Backup**: Identität/Tradingrechte lesen, alle verfügbaren Bitget-Positionen, Orders, Strategy-Stops, Fills und Historienfenster über REST + private WS abgleichen.
+- **Was sich nicht sicher rekonstruieren lässt** (vor einem verlorenen ACK persistent gespeicherter lokaler Intent, bereits ausgelaufene Exchange-History, proprietäre Bot-Zuordnung, nie bestätigter Strategy-Stop, wiederverwendete IDs), bleibt explizit `UNKNOWN`; nie anhand einer momentan leeren Orderliste `FLAT`/keine offene Reservation behaupten.
+- Nach Recovery ohne qualifiziertes Journal **nur `HALTED/RECOVERING`**; bestehende Exchange-Stops erhalten und auf Mengen-/Triggerdeckung read-only prüfen. Fehlender Stop => `PROTECTION_UNKNOWN`, Alarm, ausschließlich zuvor qualifizierter, deduplizierter, mengenbegrenzter Notfallpfad; kein blindes Replacement-/Close-Senden. Kein Auto-LIVE/Auto-ARM; Betreiber entscheidet nach Account-/Journal-/Stop-/Versionsnachweis.
+- Pflicht-Fixtures: Hostverlust während Send-vor-ACK, spät auftauchender Fill, fremde Position, unvollständige Strategy-Order-History, verwaister Stop, Restore mit falschem Schema/UID, abgebrochener Backup-Write und erneuter Boot. Integrierte Tests gegen **echte Exchange-Abfragen** separat erst in genehmigter Demo-Lane.
+
+### API-Schlüssel: konkrete sichere Ablage als P0-/P5-Hostentscheid (A10/A13/A26)
+
+- **Nicht nur „serverseitig“:** Geplanter Produktionsstandard ist ein **dedizierter nichtprivilegierter Rust-Dienstnutzer**, mit Secrets aus einem **OS-gestützten Secret-/Credential-Speicher** (z. B. systemd encrypted credentials auf einem dafür qualifizierten Linux-Host oder ein KMS/Vault mit vergleichbarem Zugriffsschutz). Nur falls separat geprüft: verschlüsseltes Secret auf Disk, dessen **Entschlüsselungsschlüssel außerhalb desselben Secret-Files** liegt und nur dem zulässigen Dienstkontext zugänglich ist. `chmod 600` auf einem Klartext-Key allein ist **keine** ausreichende Schlüsselmanagement-Architektur.
+- **Keine** API-Keys/Passphrases in Git, Frontend, URL, Protobuf-Topics, Shell-Command-Argumenten, Crash-Dumps, Artefakten oder normalen Logs; Umgebung-Variablen in Produktion nur nach gesonderter Exposure-/Host-Bewertung. Read-only-, Demo-Trade-, Echtgeld-Trade- und Adminrechte räumlich/logisch getrennt, IP-/Egress-Whitelists.
+- Rotation/Revocation: vor geplantem Wechsel neue Berechtigungen read-only prüfen, laufende Orders/Stops/Positionen dokumentieren, **kein** unkontrollierter zweiter aktiver Owner. Nach Schlüsselverlust/Revoke **`NO_ENTRY`**, Alarm und Exchange-Abgleich mit qualifizierten verbliebenen Leserechten; keine blinde Order-Wiederholung. Operatives Runbook: Provisioning, Rotation, Hostkompromittierung, Backup-Entschlüsselung, Offboarding, Rechteaudit.
+- **Offen vor Implementierung:** Ziel-OS/Host/Secret-Store/KMS, Prozess-/Datei-Isolation, Recovery-Key-Verwahrung und Rotations-SLO; alle Entscheidungen als versionierte ADR mit Negativtests.
+
+### Zahlen/IDs ohne JavaScript-Präzisionsverlust (A05/A11/A14/A26; DN-PROTO-005)
+
+Bitget-Order-/Trade-IDs aus API-Strings ohne numerische Zwischenkonversion **als exakte Strings** erhalten; Proto-`int64/uint64` in Rust/TS in exakten Integer-/`bigint`-Typen; Geld/Qty/Notional/Margin/PnL/Fee/Funding durch typisierte Decimal-/Mantissa+Scale+Currency-Kontrakte. **Niemals** JavaScript-`number` als unkontrollierten Transport für Exchange-IDs oder Geldwerte. Goldens `1498752928271056898`, `9007199254740993`, `u64::MAX`, negative PnL, Scale-/Currency-/Overflow-Konflikt und `absent` vs echte 0; vollständiger Rust→Proto→Gateway→TS→UI-Roundtrip gemäß [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md).
+
 ## 6. Referenzvergleich Open Source (keine produktive Dependency-Freigabe)
 
 | Projekt | Konkreter Recherche-Nutzen | Begrenzung für DarkNode |
@@ -283,11 +312,11 @@ Je Abschnitt `count, min, p50, p95, p99, p99.9, max`, Event-/Queue-Verluste, Hos
 |---|---|---|
 | P5-A01 | Full USDT-Futures-Instruments ohne `symbol` → valide dynamische Auswahl; stillgelegtes Paar und Formatänderungen blockiert | NOT_RUN |
 | P5-A02 | Account/UTAmode/read permissions/holdMode/marginMode/actualLeverage/risktiers aus dem echten **Demo-Account** mit dokumentierten Rückgabedaten erkannt | NOT_RUN |
-| P5-A03 | 5× als Beispiel: `pre-set-leverage` lesen, autorisiertes `set-leverage` auf Demo, `settings` erneut lesen; Long-/Short-/isolated/cross-Semantik | NOT_RUN |
+| P5-A03 | 5× als Beispiel: `pre-set-leverage` lesen, autorisiertes `set-leverage` auf Demo, `settings` erneut lesen; qualifizierten V1-Margin-/Hold-Modus positiv, nicht freigegebene Modi fail-closed negativ prüfen | NOT_RUN |
 | P5-A04 | Mode-Wechsel nur bei Flat+keinen offenen Orders; ablehnender Exchange-Response darf keine Readiness vortäuschen | NOT_RUN |
-| P5-A05 | One-way/Hedge buy/sell/posSide/reduceOnly und Positionsmengen, Instrument-Tick-/Lot-/Min-Notional-Tests gegen Bitget-Demo | NOT_RUN |
-| P5-A06 | Market, Limit, IOC, FOK, Post-only, Cancel, Modify – Response vs tatsächliche WS-Order/Fill-Deltas getrennt | NOT_RUN |
-| P5-A07 | Initial TP/SL, serverseitiges SL, Trigger, OCO, Trailing; Stop-Versagen, Partial-Fill, Cancel-replace und bestätigte Schutzexistenz | NOT_RUN |
+| P5-A05 | Buy/sell/posSide/reduceOnly nur für den per DN-D08 freigegebenen V1-Mode positiv; andere One-way-/Hedge-Modi ausdrücklich erkennen und ablehnen; Positionsmenge, Tick/Lot/Min-Notional auf Demo | NOT_RUN |
+| P5-A06 | Zulässige V1-Ordertypen (Market/Limit und nach Capability ggf. Post-only) positiv; nicht zugelassene IOC/FOK/andere Typen fail-closed; Cancel/Modify-ACK gegen echte Order/Fill-Deltas getrennt | NOT_RUN |
+| P5-A07 | Zulässiges initiales Exchange-SL/TP positiv; nicht zugelassene OCO/Exchange-Trailing-Varianten ablehnen; Trigger, Stop-Versagen, Partial-Fill, Cancel/Replace und bestätigte Schutzexistenz | NOT_RUN |
 | P5-A08 | Lost ACK, Doppelsignal, reconnect, Gateway-Close, REST/WS Konflikt, Reboot mit Position + ClientOid-Requery → **keine Doppelorder** | NOT_RUN |
 | P5-A09 | Margin/Leverage-Änderungen, Order-Rate-Limits, UID/IP-Limits, Signatur-/Timestamp-/Clock-Fehler und 429; fail-closed | NOT_RUN |
 | P5-A10 | Secrets/IP-Allowlist, keine Withdrawal-Rechte, kein Frontend-Key, getrenntes Demo/Live, SBE-Hot-Path ohne interne JSON-Verträge | NOT_RUN |
@@ -297,7 +326,7 @@ Je Abschnitt `count, min, p50, p95, p99, p99.9, max`, Event-/Queue-Verluste, Hos
 | P5-A14 | Nominal-/Mengen-/Bot-/UID-Limits vor jeder Order inklusive offener/UNKNOWN/Partial Exposure und Hebelabweichung – nie nur Margin; Graph/Gateway kann Risk nicht umgehen | NOT_RUN |
 | P5-A15 | FLAT ohne offene Orders: pre-set-leverage → set-leverage → settings/Position readback; falscher Hebel/Mode/PosSide blockiert Entry und meldet HALTED | NOT_RUN |
 | P5-A16 | Nach jedem Fill Bitget-Liquidationspreis/Markpreis/MMR/Leverage prüfen, konservativen Long-/Short-Stop-Puffer validieren; zu wenig Puffer → sichere Verkleinerung/Not-Exit statt stiller READY | NOT_RUN |
-| P5-A17 | Preset-SL am Entry in realer Demo für One-way/Hedge/isolated/cross/Market/Limit; Server-Schutzstatus und Trigger nach realem Fill nachgewiesen, nicht nur ACK | NOT_RUN |
+| P5-A17 | Preset-SL im freigegebenen V1-Mode für aktivierte Entry-Typen real auf Demo testen; ungeprüfte Hedge/Cross-Kombinationen negativ ablehnen. Server-Schutzstatus und Trigger nach tatsächlichem Fill nachweisen, nicht nur ACK | NOT_RUN |
 | P5-A18 | Teilfill: Stopmenge exakt gegen bestätigte Position verifiziert; Zeit bis wirksamen Schutz und mögliches ungeschütztes Intervall real gemessen, keine Sofortwirkung behauptet | NOT_RUN |
 | P5-A19 | Stop fehlt/wird abgelehnt/manuell gelöscht: UNKNOWN → qualifizierter Ersatzstop → wenn nötig kontrollierter Emergency-Close → FLAT/Reconcile oder UNKNOWN+Alarm, keine ungeprüften Wiederholungen | NOT_RUN |
 | P5-A20 | Periodischer und Reconnect-/Restart-Stop-Audit mit REST+Private WS erkennt falsche Menge/Trigger, externe Löschung/Neuanlage und Positionsänderung | NOT_RUN |

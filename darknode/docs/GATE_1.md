@@ -1,7 +1,7 @@
 # DarkNode – GATE 1: Research, Anforderungen und Architekturentscheidungen
 
 **Stand:** 26.10.2026 · **Status:** OPEN / DISCOVERY · **Scope:** Dokumentation und Plan; keine Code-/Protobuf-/Gateway-Änderung, keine reale Handelsfreigabe.  
-**Leitdokumente:** [README](../README.md), [Gesamtphasenplan](PHASENPLAN.md), [P1-Phasenplan V1.1](PHASENPLAN_P1_V1.md), [Endpoint-Registry](ENDPOINT_REGISTRY.md), [P1-Evidenz](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md).
+**Leitdokumente:** [README](../README.md), [Gesamtphasenplan](PHASENPLAN.md), [P1-Phasenplan V1.3](PHASENPLAN_P1_V1.md), [Endpoint-Registry](ENDPOINT_REGISTRY.md), [P1-Evidenz](P1_EVIDENCE/BITGET_PUBLIC_API_VERIFIKATION_2026-10-27.md).
 
 ## 1. Entscheidungslage
 
@@ -14,7 +14,7 @@
 | DN-D05 | **Frontend:** bestehender DarkBot-React-Graphite-Stack und **ein** Gateway; versionierte Protobuf-Kommunikation | FESTGELEGT |
 | DN-D06 | **Kapital:** Bitget CEX, API-Key Read/Trade ohne Auszahlung; MetaMask nicht nötig | FESTGELEGT |
 | DN-D07 | **MVP:** genau ein qualifizierter Bot, danach mehrere isolierte feste Paar-/Strategieinstanzen | FESTGELEGT |
-| DN-D08 | **Exakter Kontomodus:** UTA vs anderes, One-way/Hedge, isolated/cross, API V3-Capabilities | OPEN – Bitget-Abgleich; One-way + Isolated ist ein enger V1-Prüfkandidat, keine bereits bestandene Kontofreigabe |
+| DN-D08 | **Exakter Kontomodus:** UTA vs anderes, One-way/Hedge, isolated/cross, API V3-Capabilities | OPEN – One-way + Isolated bevorzugter enger V1-Demo-Prüfkandidat; positive Matrix nur für freigegebene Capabilities, andere Modi werden sicher abgelehnt |
 | DN-D09 | **Serverseitige Stop-/TP-/Trailing-Semantik** pro Futures-Kontrakt und Ordertyp | OPEN – Bitget-Demo-Evidenz |
 | DN-D10 | **Engine-Reuse:** NautilusTrader, Barter oder schlanker eigener Rust-Kern; Lizenz, Performance, Einbindung | OPEN – technische Spikes |
 | DN-D11 | **Trigger:** Schwellen-level vs CROSS, Hysterese/Rearm, Barclose vs intrabar und Exit-Priorität | OPEN – Golden-Regelfälle |
@@ -26,6 +26,8 @@
 | DN-D17 | **Höchste Logik:** Open/Close-Intents + Stop-/BE-/Trailing-Policies an genau einen Rust Position-/Risk-/Execution-Owner; BOTH ist Berechtigung für beide Richtungen, nicht simultane Gegenpositionen | FESTGELEGT |
 | DN-D18 | **No JSON intern:** Bitget-JSON ausschließlich am externen Adapterrand; innerhalb Rust/Protobuf/Binärformate; in L0 dürfen externe Originalbytes opak abgelegt werden | FESTGELEGT; Implementierungsnachweis offen |
 | DN-D19 | **P1-Speicher:** Roh-/Normaldaten/Candle-Cache als L0/L1/L2-Binärdateien; kleine transaktionale Control-/Registry-/Gap-/Manifestdaten in SQLite; keine produktiven Redis/Parquet/ClickHouse-Pfade | FESTGELEGT; R2c/R2d offen |
+
+**P0/P7-Planungsreferenz:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) definiert generierte Feldinventur, CI-Abdeckung und JS-Precision-Goldens, keine bereits getesteten Schemas. [P5 §5d](PHASENPLAN_P5_V1.md) legt Update/Restore/API-Key-Betrieb fest, alle NOT_RUN.
 
 „FESTGELEGT“ bezeichnet das **Produkt-/Architekturziel**, keinen implementierten und keinen getesteten Sachverhalt. Alle API-/Fremdcode-Behauptungen müssen vor Übernahme gegen exakte Version/Commit und Tests verifiziert werden.
 

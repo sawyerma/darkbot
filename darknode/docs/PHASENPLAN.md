@@ -1,6 +1,6 @@
 # DarkNode – Verbindlicher Phasenplan (Planungsbaseline)
 
-**Version:** 0.2 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** verbindlicher Projekt-/Protobuf-Feldabgleich als durchgehendes P0–P10-Entwicklungsgate (nur Planung, keine Implementierung)  
+**Version:** 0.3 · **Stand:** 27.10.2026 · **Status:** DRAFT / GATE 1 OPEN · **Änderung:** P1/P2- und UX-Konsistenz, automatisierte Protobuf-Feldpflege, M1-Durchstich, P5-Betriebssicherheit (nur Planung, keine Implementierung)  
 **Scope:** `darknode/` mit eigenem Rust-Owner; ein vorhandenes DarkBot-Frontend/Gateway; Bitget als initiale einzige Exchange. Kein LIVE, kein Deploy und keine Implementation durch diesen Dokumentations-Commit.  
 **Maßstab:** Jede Phase ist erst fertig, wenn ihre Nachweise am festen Commit reproduzierbar sind. **P0–P10** sind Umsetzungsphasen **nach** dem vorgeschalteten Research-**GATE 1**.
 
@@ -32,31 +32,39 @@ flowchart LR
     class P0,P1,P2,P3,P4,P5,P6,P7,P10 engine
 ```
 
-**Node-Editor ist Teil des ersten nutzbaren V1-Produkts.** UI-Arbeit kann parallel zu Adapter-/Engine-Arbeit vorbereitet werden; der qualifizierte E2E-Pfad wartet auf beide. Ein zweiter Simple-/Advanced-Strategiekern ist ausdrücklich verboten.
+**Node-Editor ist Teil des ersten nutzbaren V1-Produkts.** UI-Arbeit kann parallel zu Adapter-/Engine-Arbeit vorbereitet werden; der qualifizierte E2E-Pfad wartet auf beide. Ein zweiter Simple-/Advanced-Strategiekern ist ausdrücklich verboten. **M1** ist ein früher Integrationsmeilenstein, keine zusätzliche Handelsfreigabe.
+
+## M1 – früher vertikaler Durchstich (Meilenstein, keine eigene Handelsphase)
+
+**Ziel:** Echte Daten, einen minimalen Rust-Strategiepfad, denselben Risk-/Order-Owner, vorhandenes Gateway und React-UI **früh** integrieren. Keine Aussetzung der P0–P10-Abnahmen und kein Entfernen des vollständigen V1-Node-Editors.
+
+- **M1-A – rein lesend:** BTCUSDT echte Bitget-Rohtrades → eigener Rust-1s-/5s-Aggregator (P1.6/T25–T27) → zunächst Williams %R als typisierter Node → SignalIntent → Rust-Risk-Entscheid im `NO_SEND`-Modus → eigene DarkNode-Protobuf-Projektion → Gateway → Browser. Wallet zunächst ehrlich `UNAVAILABLE`, solange noch kein qualifizierter privater Read-only-Kontosync besteht. Später echte Wallet-/Positionswerte aus qualifiziertem Read-only-API-Zugang, nie Mock-Balances.
+- **M1-B – ausschließlich gesondert freigegebene Bitget-Demo-Orders:** Erst nach zuständigen P5-Demo-Capability-/Journal-/Stop-/Partial-Fill-/Emergency-/Reconciliation-Vorgates und **expliziter** Demo-Mutationsfreigabe: streng begrenzter Entry mit serverseitigem Initial-SL → tatsächlicher Fill → Stop-Readback → Exit → REST/WS-Abgleich → Darstellung von Position/Wallet/Order. Ein unbekannter Order-/Schutzstatus blockiert alle weiteren Entries; keine blinde Wiederholung. Ohne qualifizierten Schutz/Mode bleibt M1-B **BLOCKED**, auch wenn M1-A erfolgreich ist.
+- **Nachweis pro Stufe:** eingefrorener Code-SHA, Quellen-/Signal-/Schema-Goldens, echte (oder ausdrücklich markierte Fault-)Fixtures, Rust→Protobuf→Gateway→UI-Roundtrip, realer Readback und eindeutige Zustands-/Order-/Fill-IDs. Weder Demo-PASS noch M1-PASS autorisiert P9-LIVE.
 
 ## P0 – Baseline, Source-Audit, ADRs und Protobuf-Verträge
 
-**Auftrag:** `darkbot` und `ws_ai` auf SHA fixieren, `project_0/` und `bsc/` ausdrücklich unverändert lassen; alle vorhandenen WS-/Order-/DB-/Historien-/Chartpfade prüfen. Fremdbibliotheken/Lizenzen inventarisieren. Exakten Bitget-Futures-/Kontomodus und fachliche Besitzer festlegen. Neue Projektdomäne, Topic-ID-Plan, Protobuf-Payloads, Commands/Receipts, Readiness und Anti-Mock-Regeln gegen das tatsächliche Gateway/Wire-Protokoll erstellen. **Vor der Umsetzung** die in Abschnitt „Querschnittsvertrag DN-PROTO“ definierte dreifach getrennte Projektidentität, Feldinventur und kontinuierliche Rust→Proto→Gateway→Frontend-Testkette festlegen; kein Projekt-ID-/Topic-Push vor dem Governance-Gate.
+**Auftrag:** `darkbot` und `ws_ai` auf SHA fixieren, `project_0/` und `bsc/` ausdrücklich unverändert lassen; alle vorhandenen WS-/Order-/DB-/Historien-/Chartpfade prüfen. Fremdbibliotheken/Lizenzen inventarisieren. Exakten Bitget-Futures-/Kontomodus und fachliche Besitzer festlegen. Neue Projektdomäne, Topic-ID-Plan, Protobuf-Payloads, Commands/Receipts, Readiness und Anti-Mock-Regeln gegen das tatsächliche Gateway/Wire-Protokoll erstellen. **Vor der Umsetzung** den [DN-PROTO-Vertrag](DN_PROTO_CONTRACT_V1.md) für getrennte Projektidentität, **automatisch generierte** Feldinventur und laufenden Rust→Proto→Gateway→Frontend-Nachweis festlegen; keine Projekt-ID-/Topic-Vergabe vor dem Governance-Gate.
 
-**Artefakte:** `SOURCE_BASELINE.md`, `WS_AI_PORT_INVENTORY.md` (KEEP/PORT/REPLACE/DELETE), `ADRS.md`, `PROTO_FIELD_CENSUS.md` (**vollständige Source-to-UI-Feld-/Parameter-/Aktionsmatrix, inklusive absichtlich interner Felder und Begründung**), versionierter Protobuf-Schemaentwurf, `EXCHANGE_CAPABILITIES.md` sowie `DN_PROTO_CONTRACT_CHECKS.md` (geplante Gate-IDs DN-PROTO-001–008, Automations-/CI-Pfade und Verantwortliche).
+**Artefakte:** `SOURCE_BASELINE.md`, `WS_AI_PORT_INVENTORY.md` (KEEP/PORT/REPLACE/DELETE), `ADRS.md`, **generierter** `PROTO_FIELD_CENSUS.md` aus `.proto`-Deskriptoren + qualifizierten UI-/Publisher-Mappings, versionierter Protobuf-Schemaentwurf, `EXCHANGE_CAPABILITIES.md` und [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md). Keine handgepflegte 20-Spalten-Feldkopie.
 
 **Abnahme:** keine kollidierenden IDs/Topics, vorhandene Protobuf-Codegenerierung und Schema-/Breaking-Tests bestehen, ACL/Command-Lifecycle getestet; keine Parallel-Frontend-/Gateway-Struktur, keine Liveautorisierung. **DN-PROTO-001–003**: Eigentum/ID/Topic-Bereich und vollständig inventarisierter Feldvertrag geprüft; neue fachliche Felder ohne nachvollziehbare UI-Projektion oder dokumentierte Nichtanzeige führen zu `FAIL`, nicht still zu „fertig“.
 
-## P1 – Bitget öffentliche Daten (Rust)
+## P1 – Bitget öffentliche Marktdaten und Rohtrade-Historie (Rust)
 
-**Auftrag:** eindeutiger Public-WS-Owner pro Exchange-Konto/Instrument; Instrument-Katalog (Tick, Step, Mindestgrößen, Futures-Funding/Contractspecs), Trades, marktbezogene Candles, Orderbook-Events und Markprice gemäß getesteter API. Bounded Queues, Sequenz-/Gap-Kontrolle, Heartbeat, Reconnect und Resubscribe. Fremdprotokoll nur im Adapter.
+**Verbindlicher Detailplan:** [PHASENPLAN_P1_V1.md](PHASENPLAN_P1_V1.md), inhaltliche Revision **V1.3**, mit P1.1–P1.10, T01–T27 und P1-K-Gates. Dieser Detailplan ist die **einzige fachliche Autorität** für P1-Speicher-/Bar-/Historien-/V5-Semantik.
 
-**Artefakte:** Feed-Adapter, Event-Typen, Health-Metriken, konfigurierbare Quellen, rohe und kanonische Testcaptures.
+**Auftrag:** verifizierte Bitget-Public-SBE-/REST-Daten, Instrumente, echte Einzeltrades, L0-Raw-Frames/L1-normalisierte Trades/L2-eigene 1s-/MTF-Bars, Backfill/Coverage, Snapshot-/Delta-Recovery und 24/7-Betrieb. **1s/5s/10s/30s/1m-Barwerte werden ausschließlich aus hinreichend geordneten echten Rohtrades selbst erzeugt**; Bitget-REST-Kerzen sind unabhängige Referenz, keine künstlich subdividierten 1s-Bars. Der V5-Depth50-Decoder bleibt ein offenes kritisches Gate, nicht durch alte V4-Captures qualifiziert.
 
-**Abnahme:** Determinismus, keine doppelten Events, keine verlorenen Book-Deltas ohne `STALE`, geplanter längerer Capture mit simuliertem Offline/Online; p50/p95/p99, Backpressure, Recovery-Success dokumentiert. Noch keine Orders.
+**Abnahme:** P1-Detailgates inklusive T25 (Historie→1s/MTF), T26 (gleicher ms-Timestamp, Trade-Reihenfolge) und T27 (direkte MTF-Aggregation = aus 1s komponierte MTF), Gap/Crash/Replay/Soak- und p50/p95/p99-Belege am genauen Commit; kein scheingültiges PASS aus Public-Research-Skripten. Noch keine Handelsfreigabe.
 
-## P2 – Historie, Warm-up, Data Handover und Storage
+## P2 – qualifiziertes Historie→Live-Handover und Strategie-Warm-up
 
-**Auftrag:** REST-History/Pagination, echte Trades und Candles; Seconds-TFs (5s/10s/30s) nur aus zeitlich passenden Trade- oder fein genug vorhandenen Daten aggregieren; Funding/Mark-Price-History soweit nötig. Datenmanifest mit Quellen, Zeithorizont, UTC, Nanosekunden/Zeiteinheit, Gaps, Dedupe, Revisionsverhalten; lokaler Parquet/Arrow-Cache optional nach Messung. Erst Historie/Indikatorwarmup, dann überlappungsfreies Live-Handover.
+**Abgrenzung:** Erfassung, echter Rohtrade-Import, L0/L1/L2-Speicher, SQLite-Registry, Bar-Aggregation und Reparatur gehören ausschließlich zu [P1.5–P1.7](PHASENPLAN_P1_V1.md). **Kein zweites Parquet-/Arrow-Produktionsformat, keine zweite Historiendatenbank und kein zweiter Aggregator in P2.**
 
-**Artefakte:** verifizierbare Datasets, Capture/Backfill-CLI, `DATA_QUALITY.md` und Replay-Testfixtures.
+**Auftrag:** konsistenter, deduplizierter und qualitätsgeprüfter Übergang aus der P1-Historie zum P3-Indikator-/Graph-Warm-up und anschließenden Live-Stream. Gleiche Instrument-/Schema-/Bar- und Zeitversion, vollständige Warm-up-Fenster, keine Zukunftsdaten oder History-Live-Doppelzählung; mangelnde Coverage ⇒ `NO_ENTRY`.
 
-**Abnahme:** Datenlücken/Fehlfolgen werden erkannt statt übersprungen, bei ungenügender Historie `NO_ENTRY`; Wiederholungsdownload derselben Quelle liefert identische Zeitreihen, Lookahead ausgeschlossen.
+**Artefakte/Abnahme:** Handover-/Warm-up-Vertrag, Tick-/Bar-Trace-/Gap- und Neustart-Fixtures, verifizierte Identität von Live-gegen-Replay-Signalen am Cutover. Keine Wiederholung der P1-Tests als vermeintliche P2-Laufzeitabnahme.
 
 ## P3 – Rust-Indikatoren + standardisierte Node-Engine (V1 Pflicht)
 
@@ -83,13 +91,13 @@ flowchart LR
 
 ## P5 – Bitget Private API, Orderowner, Recovery und Risiko
 
-**Verbindlicher Detailplan:** [P5 V1.0 – UTA V3 Private API, Kontomodi, Hebel, Strategy-Orders, Sicherheits- und Recovery-Gates](PHASENPLAN_P5_V1.md). **P3 bleibt die Indikator-/Node-Engine**, P5 verwaltet die private Bitget-Anbindung. **Die vollständige USDT-Futures-Instruments-Liste ist noch nicht real abgefragt; bislang nur BTCUSDT.**
+**Verbindlicher Detailplan:** [P5 V1.4 – UTA V3 Private API, S0–S7, Order-/Stop-Recovery, Low-Latency und Operations](PHASENPLAN_P5_V1.md). **P3 bleibt die Indikator-/Node-Engine**, P5 verwaltet die private Bitget-Anbindung. **Die vollständige USDT-Futures-Instruments-Liste ist noch nicht real abgefragt; bislang nur BTCUSDT.**
 
 **Auftrag:** serverseitige Secrets, Trade-/Read-Rechte ohne Withdrawal, IP-Whitelist; Private WS/REST für Account, offene Orders, Fills, Positionen, Schutzorders und Orderstatus. Ein persistenter zentraler Order-Owner. Vor Senden `clientOid`, Payloadhash, Bot/Graph-Version und Risk-Reservation fsync/persistent; Orderzustände von SUBMIT_PENDING über ACK/WORKING/PARTIAL/FILLED bis CLOSED/UNKNOWN. Initialen Bitget-Stop nur auf bestätigte Venue-Capability gestützt. Break-even/Trailing/Reduce-only/TP-SL und Exit-Prioritäten testbar.
 
 **Recovery:** WS/Netz weg → neue Entries sperren. Nach timeout: Order-/Fill-Lookup vor jeglichem Retry. Crash an jeder Persistenz-/Request-/ACK-/Fill-Grenze; beim Neustart REST+WS-Snapshot und lokales Journal abgleichen. Unbekannte Fremdorders/offene Positionen/fehlende Stops: HOLD mit definierter Betreiberaktion. Gebührennetto-BE, Drawdown, Margin, Funding-/Liquidationsabstände kontrollieren.
 
-**Verbindlicher Wallet-/Kontosynchronisationsvertrag:** [WALLET_ACCOUNT_SYNC_V1.md](WALLET_ACCOUNT_SYNC_V1.md) – privater UTA-WS für Account/Position/Order/Fill/Schutzstatus und REST-Readback für Vollständigkeit/Recovery. Derselbe autoritative Rust-Account-State treibt Risiko und Protobuf-UI; kein eigenes Browser-Exchange-Polling. **P5-Publishervertrag:** `AccountSnapshot`, `CoinBalance`, `ExchangePosition`, `ExchangeOrder`, `StopCoverage`, `BotRiskReservation` und `AccountSyncState` werden je benötigtem Wallet-/Overview-/Live-Anzeigefeld über typisierte, versionierte DarkNode-Domänenprojektionen abgebildet. Quellen-/Währungs-/Einheiten-/Zeit-/Quality-/Presence-Semantik und Stale-/Unknown-Grenzen sind Bestandteil der Feldinventur und der Rust-/TS-Goldens; keine Scheinwerte durch leere/fehlende Felder.
+**Verbindlicher Wallet-/Kontosynchronisationsvertrag:** [WALLET_ACCOUNT_SYNC_V1.md](WALLET_ACCOUNT_SYNC_V1.md) – privater UTA-WS für Account/Position/Order/Fill/Schutzstatus und REST-Readback für Vollständigkeit/Recovery. Derselbe autoritative Rust-Account-State treibt Risiko und Protobuf-UI; kein eigenes Browser-Exchange-Polling. Protobuf-Feld-/Money-/ID-Goldens und UI-Verfügbarkeit gemäß [DN-PROTO](DN_PROTO_CONTRACT_V1.md), nicht aus WebSocket-Login allein abgeleitet. **P5-Publishervertrag:** `AccountSnapshot`, `CoinBalance`, `ExchangePosition`, `ExchangeOrder`, `StopCoverage`, `BotRiskReservation` und `AccountSyncState` werden je benötigtem Wallet-/Overview-/Live-Anzeigefeld über typisierte, versionierte DarkNode-Domänenprojektionen abgebildet. Quellen-/Währungs-/Einheiten-/Zeit-/Quality-/Presence-Semantik und Stale-/Unknown-Grenzen sind Bestandteil der Feldinventur und der Rust-/TS-Goldens; keine Scheinwerte durch leere/fehlende Felder.
 
 **Artefakte:** `ORDER_STATE_MACHINE.md`, `CRASH_RECOVERY_MATRIX.md`, dauerhaftes Journal, Risk-Budget-Modell, Demo-Testcaptures.
 
@@ -101,22 +109,22 @@ flowchart LR
 
 **Artefakte:** End-to-End-Testjournal, reproduzierbare Laufzeit-/Konnektivitäts-/Positionsreports, Operations-Runbook.
 
-**Abnahme:** ein durchgehender Testlauf mit vielen Zyklen und Reconnects, korrekte Position-/Kapital-/Stopzustände; sämtliche Signalentscheidungen mit IDs/Reason Codes rückverfolgbar; kein Mock-Feed als vermeintliche Live-Quelle. **DN-PROTO-005:** zu jedem E2E-Szenario identische Rust-Source-IDs, Protobuf-IDs und Frontend-Anzeige-/Quality-Zuordnung; keine fehlenden oder abweichend skalierten Variablen, Events oder Command-Parameter.
+**Abnahme:** ein durchgehender Testlauf mit vielen Zyklen und Reconnects, korrekte Position-/Kapital-/Stopzustände; sämtliche Signalentscheidungen mit IDs/Reason Codes rückverfolgbar; kein Mock-Feed als vermeintliche Live-Quelle. **DN-PROTO-005:** echte Rust-/Proto-/UI-Parität für IDs, Skalierungen, fehlende Werte, Events und Command-Parameter.
 
 ## P7 – DarkBot-Graphite-Frontend inklusive Node-Editor
 
 **UX-Contract ab Gate 1:** fünf Tabs exakt **Overview / Builder / Backtest / Live / Wallet**. Im Builder links **Nodes**, fünf Gruppen **Marktdaten / Indikatoren / Bedingungen / Aktionen / Risiko**, editierbare Felder im Node (kein dauerhafter Inspector), drei wählbare Vorlagen. Visuelle Referenz: [builder_examples.html](visuals/builder_examples.html) (nur Browser-Demo). Keine Signalprüfungs-Ansicht und kein zusätzlicher Monitoring-Tab.
 
 
-**Auftrag:** Route `darknode` in existierender Projekt-Registry, keine zweite App/Sidebar. Vorhandene Graphite-Tokens, React/TS, Protobuf-Topics, Gateway-Commands/Receipts und Quality States. **Node-Editor V1** per React Flow: Palette, typisierte Ports, Parameter-/Threshold-Inspector (Williams-Werte), AND/OR/NOT/XOR, Entry/Exit-Gruppen, save draft→validate→immutable version→backtest→qualify→activate. Lightweight Charts für BTCUSDT/Indikatoren/Position/SL. Bot-Übersicht, Replay, Journal, Zustands-/Recovery-Anzeige. Live-/PnL-Anzeigen ausschließlich echte Publisherdaten.
+**Auftrag:** Route `darknode` in existierender Projekt-Registry, keine zweite App/Sidebar. Vorhandene Graphite-Tokens, React/TS, Protobuf-Topics, Gateway-Commands/Receipts und Quality States. **Node-Editor V1** per React Flow: Palette, typisierte Ports, Parameter/Schwellenwerte **direkt in den Nodes** (kein dauerhaftes Inspector-Panel), AND/OR/NOT/XOR, Entry/Exit-Gruppen, save draft→validate→immutable version→backtest→qualify→activate. Lightweight Charts für BTCUSDT/Indikatoren/Position/SL. Bot-Übersicht, Replay, Journal, Zustands-/Recovery-Anzeige. Live-/PnL-Anzeigen ausschließlich echte Publisherdaten.
 
 **Wallet-Reiter V1 (verbindlich):** Bitget-Unterkonto/DEMO-LIVE/Sync-Age, Equity USD, USDT Coin-Balance/Available, Margin/Reservations, Gebühren/Funding, PnL, **alle** Exchange-Positionen (Menge/Notional/Entry/Hebel/Liquidation), offene Orders und bestätigte Stops; Bot-Budgets explizit von tatsächlichen Exchange-Salden unterscheiden. `STALE/RECONCILING` zeigt letzte belegte Werte mit Zeitstempel, niemals erfundene 0/FLAT. Für Details und Gate-Tests siehe [WALLET_ACCOUNT_SYNC_V1.md](WALLET_ACCOUNT_SYNC_V1.md). Overview/Live teilen denselben Rust-Publisher, Frontend nur Protobuf.
 
-**Verbindliche laufende P7-Feldpflege:** Für jedes neue/umbenannte/entfallene/normierte Rust-Statusfeld, jeden Node-Parameter, Bot-/Risk-Wert, Wallet-Betrag, Order-/Stopstatus, Gate-/Readiness-Wert und Command-Parameter **im selben Änderungspaket** Protobuf-Payload, Gateway-Topic-Descriptor, TypeScript-Codegen, DarkNode-Adapter/Store, konkreten UI-Verwendungsort (oder nachweislich bewusstes `EXCLUDED_INTERNAL`), Einheiten-/Presence-/Quality-Regeln und Tests/Feldinventur nachführen. **Keine** generische `name/value`-String-Fläche als Ersatz für kritische Money-/Risk-/Positions-/Order-Variablen; `unknown` wird nicht zu 0, `FLAT`, `PASS` oder `LIVE`. Backend und Frontend werden **parallel und kontinuierlich**, nicht nachträglich als „Restarbeit“ gekoppelt.
+**Verbindliche laufende P7-Feldpflege:** `.proto`-Felder, Einheiten/Presence/Quality, erforderliche Frontend-Verwendung und Zuständigkeit werden **generiert und automatisiert auf Abdeckung geprüft** nach [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md); bestehende Felder nicht händisch in 20-Spalten-Tabellen verdoppeln. Bei V1-relevanten Backend-Änderungen muss die Rust→Proto→Gateway→UI-Kette im **selben Änderungspaket** stimmen; `NO_ENTRY/UNKNOWN` darf nicht zu `0/FLAT/PASS` umgedeutet werden. Kein generisches `name/value` als Ersatz für sicherheitskritische Money-/Positions-/Orderdaten.
 
-**Artefakte:** Graphite-Seite, FE-Adapter und Store, Node UI, validierte Graph-Editor→Rust-Roundtrips, Pixeldiff/Regressionstests, **aktualisierte Proto-Field-Census-/UI-Placement-Matrix und reproduzierbarer DN-PROTO-Gate-Report**.
+**Artefakte:** Graphite-Seite, FE-Adapter/Store, Node UI, Graph-Editor→Rust-Roundtrips, Pixeldiff/Regressionstests, **generierter** DN-PROTO-Census und reproduzierbarer Gate-Report.
 
-**Abnahme:** kein User-Graph kann Risk/Orderowner umgehen; keine ungetypten JSON-Blobs als gültige Strategy-IR; keine Mock-Fills/PnL in produktiven Topics; alle neuen Topics mit passenden Publisher/Quality/ACL. **DN-PROTO-004/006/007:** generierte Rust-/TS-Protos und beide Topic-Tabellen konsistent; Goldens für echte gesetzte/fehlende/ungültige/überlaufende Werte und Commands; alle für V1 vorgesehenen Anzeigefelder durch echte Publisher-/Adapter-/UI-Tests abgedeckt. Bewusst zukünftige Felder tragen `FUTURE_PHASE_BLOCKED` und sind nicht als fertige V1-Verbindung zählbar. Falls Editor noch nicht vollständig bedienbar, V1 nicht fertig.
+**Abnahme:** kein User-Graph kann Risk/Orderowner umgehen; keine ungetypten JSON-Blobs als gültige Strategy-IR; keine Mock-Fills/PnL in produktiven Topics; alle neuen Topics mit passenden Publisher/Quality/ACL. **DN-PROTO-004/006/007:** generierte Rust-/TS-Protos und beide Topic-Tabellen konsistent; Goldens für echte gesetzte/fehlende/ungültige/überlaufende Werte und Commands; alle für V1 vorgesehenen Anzeigefelder durch echte Publisher-/Adapter-/UI-Tests abgedeckt; UI-Pfadreferenzen aus dem Schema müssen durch Tests bestätigt statt nur deklariert sein. Bewusst zukünftige Felder tragen `FUTURE_PHASE_BLOCKED` und sind nicht als fertige V1-Verbindung zählbar. Falls Editor noch nicht vollständig bedienbar, V1 nicht fertig.
 
 ## P8 – Stresstests, Fehler-Evidenz und Performance
 
@@ -142,49 +150,13 @@ flowchart LR
 
 **Abnahme:** pro-Bot-Fills/Orders/Positions-/Budgetzuordnung eindeutig, globale Limits eingehalten, keine Interferenz oder Doppelorders, Graphengine bleibt dieselbe.
 
-## Querschnittsvertrag DN-PROTO – Project_0, BSC und DarkNode getrennt; durchgängige Feldpflege (verbindliche Planung)
+## DN-PROTO – eigenständige DarkNode-Domäne und automatisch nachgeführte Feldverträge
 
-**Warum:** Ein Protobuf-Schema allein stellt weder sicher, dass ein Rust-Owner die Felder tatsächlich publiziert, noch dass alle sichtbaren Daten im React-Frontend ankommen. DarkNode bekommt **eine dritte fachlich unabhängige Produktdomäne neben Project_0 und BSC**; die bestehende, noch nicht angebundene Solana-Domäne bleibt **ProjectId 3**. DarkNode ist daher **nicht** ProjectId 3. Gleicher Transport ist keine gemeinsame Fachlogik.
+**Verbindlicher Detailvertrag:** [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md); für **P0–P10** durchgehende Gates `DN-PROTO-001–008` mit CI und reproduzierbarem Schema-/Gateway-/Publisher-/Frontend-Roundtrip. Ein `PASS` ist ausschließlich nach echter Ausführung erlaubt.
 
-### DN-PROTO-A – Domänen-/Nummernplan, vor tatsächlicher Vergabe durch P0 bestätigen
-
-| Fachdomäne | Paket | bestehende ProjectId | bestehender Topic-Bereich | Status |
-|---|---|---:|---|---|
-| Project_0 | `darkbot.project0.v1` | 1 | 10–29 | Bestehend; unverändert lassen |
-| BSC | `darkbot.bsc.v1` | 2 | 30–49 | Bestehend; unverändert lassen |
-| Solana | eigene Domäne noch nicht produktiv angebunden | 3 | 50–69 | Bereits als Platzhalter reserviert; nicht übernehmen |
-| **DarkNode** | **`darkbot.darknode.v1` (vorgesehen)** | **4 (Kandidat)** | **70–89 (Kandidat)** | **`DN-D14=OPEN` bis P0-Governance**, nicht heute in `topics.proto` reservieren |
-
-Nach Governance-Ergebnis ist DarkNode in **denselben** bereits vorhandenen Mechanismen (nicht als zusätzliche Anwendung) einzutragen: `protocol/schemas/darkbot/control/v1/topics.proto`, eigenes `protocol/schemas/darkbot/darknode/v1/*.proto`, `gateway/build.rs`/`gateway/src/proto.rs`, `gateway/src/topics.rs` (projekt- und payloadgebundene Descriptoren), `gateway/src/engine.rs`/`gateway/src/config.rs` (Feed-Owner/Supervision), `gateway/src/overview.rs` (ehrlicher Source-/Readinessstatus) sowie `frontend/src/core/realtime/topicTable.ts`, `frontend/src/app/projectRegistry.ts` und `frontend/src/features/darknode/`. Eine neue Navigation führt in die bereits geplanten **fünf DarkNode-internen Tabs**; keine fremden Projekt-Reiter umbauen. Ein noch nicht existierender Publisher/Adapter führt zu `available=false`/`UNAVAILABLE` und nicht zu einer fiktiv verbundenen Engine.
-
-**Vorgesehene fachliche Projektionen** (Nummern erst P0 zuordnen, nur wenn tatsächlich gebraucht): `darknode.status` (Health/Readiness), `darknode.market.state` (Feed/Qualität), `darknode.strategy.state` (Graph/Parameter/Version), `darknode.backtest.state` (qualifizierte Jobs/Ergebnisse), `darknode.wallet.state` (Account/Equity/Assets/Exposure), `darknode.positions.state` (Position/Menge/Margin/Liquidation), `darknode.orders.state` (Orders/Stops/Unknown), `darknode.execution.events` (durable Order-/Fill-/Emergency-Ereignisse), `darknode.control.state` (autorisierte Steuerungs-/Receipt-Zustände). **Kein** Freigeben leerer Topics nur zum Erreichen einer Topiczahl. Topic-Typ/STATE-EVENT, ACL, Publisher, max. Payload, Dedupe-/Sequenz-/Epoch-/Freshness-Vertrag pro Topic festlegen.
-
-### DN-PROTO-B – kontinuierliche Source→Wire→Anzeige-Feldinventur
-
-`PROTO_FIELD_CENSUS.md` wird **während P0–P10 bei jeder fachlichen Änderung** aktualisiert, nicht erst am Ende. Jede Zeile repräsentiert ein **semantisches** Feld bzw. einen Parameter (nicht nur einen String-Schlüssel) und enthält:
-
-`field_id, domain_owner, feature/tab/section, Rust source type+file/function, value/unit/currency/scale, optional/presence/default semantics, source timestamp+quality+staleness, Proto message+field_number, TopicId/class/publisher, Gateway descriptor/ACL, TS adapter path+mapping, Store selector, UI consumer (oder ausdrücklicher Ausschluss), producer- und consumer-test_id, evidence_SHA, phase/status, reason`.
-
-**Pflicht-Klassifikation für jedes relevante Feld:** `CONNECTED_VERIFIED` (über komplette Publisher-/Gateway-/UI-Strecke getestet), `SOURCE_ONLY_MISSING_WIRE`, `WIRE_MISSING_PUBLISHER`, `WIRE_MISSING_ADAPTER`, `UI_UNMAPPED`, `MAPPING_BUG`, `FUTURE_PHASE_BLOCKED`, `EXCLUDED_INTERNAL`. Eine Planungszeile/Mockanzeige darf nie `CONNECTED_VERIFIED` heißen. Sicherheitsgeheimnisse, Exchange-Credentials, interne Order-Signer-/HFT-Details und reine Implementierungsvariablen werden **ausdrücklich ausgeschlossen**, niemals ins Protobuf „zur Vollständigkeit“ gespiegelt. Ein neues Feld ohne zugeordnete Zeile ist **automatisch ein Gate-Fehler**.
-
-**Monetäre und Trading-Daten** verpflichtend stark typisiert: Geldbetrag mit Währung/Scale, Preis, Base-Menge, Nominalwert, Equity, verfügbarer Betrag, Reservations, Hebel, PnL, Stop-/Orderstatus, AccountSyncState/Quality, Bot-ID, Strategy-Version, Exec-/Order-IDs und korrelierte Zeiten. Keine lose String-`NativeField`-/`name/value`-Tabelle als alleinige Contracts dieser kritischen Daten. Protobuf `optional`/Presence, Enum-/INVALID-/UNKNOWN-Verhalten und exakte Decimal-Konvertierung in Rust/TS mit Goldens testen. Wo ein Feld aus Bitget nicht belegbar ist, `UNAVAILABLE/UNKNOWN` statt erfundener `0` oder `FLAT` ausgeben.
-
-### DN-PROTO-C – Tests und CI werden bei **jeder** DarkNode-Entwicklung mitgeführt
-
-| Gate-ID | Geplante Abnahmebedingung |
-|---|---|
-| `DN-PROTO-001` | `ProjectId`-/Topic-ID-Einzigartigkeit, fest vergebener DarkNode-Namespace und keine Besitzrechte an BSC/Project_0/Solana-Topics |
-| `DN-PROTO-002` | Vollständiges Feld-/Parameter-/Command-Census inkl. Status und begründetem `EXCLUDED_INTERNAL`; keine unbekannten fachlichen Backend-Felder |
-| `DN-PROTO-003` | `buf lint`, `buf breaking`, Schema-Fingerprint, Rust/TS-Codegen und eingecheckte generierte Dateien gegen **echten vorherigen Commit** reproduzierbar |
-| `DN-PROTO-004` | Gateway-Rust-/Frontend-TS-Descriptor-Tabellen, Protobuf-Payloadtypen, Publisher-Owner, STATE/EVENT-Klasse, Availability und ACL stimmen **1:1** |
-| `DN-PROTO-005` | Golden-Roundtrips Rust→Protobuf→TS und zurück für Wallet/Positions-/Ordermengen, Graph-/Threshold-Parameter, Fehlwerte, Dezimal-Grenzen, Version/Presence/Quality |
-| `DN-PROTO-006` | Jeder für V1 verwendete Feldwert besitzt einen echten nativen Publisher und einen Frontend-Adapter/Store/Verbraucher-Test; `SOURCE_ONLY` oder `UI_UNMAPPED` ist `FAIL`, sofern die Funktion als implementiert gilt |
-| `DN-PROTO-007` | Command-/Receipt-/Aktivierungsparameter, ACL, erwartete Versions-/Request-IDs und Neustart-/Idempotenzfälle typisiert und fail-closed; Frontend kann weder Risk-Owner noch Order-Gate umgehen |
-| `DN-PROTO-008` | Integration-/Negativtests für Cross-Project-Leak, Status-/Feld-Drift, fehlenden Publisher, Gateway-/Client-Schemaabweichung, STALE/UNKNOWN, Replay/Reconnect und echte UI-Darstellung |
-
-**Workflow-Plan:** Bestehendes `protocol/scripts/check.sh`, Rust-/Gateway-Tests, `frontend`-Typecheck/Vitest/Build/Boundary-Checks und Gateway-Wire-Tests **wiederverwenden und im P0/P7 um den DarkNode-Feld-Census-Check erweitern**; keine alternative Protobuf-/CI-Infrastruktur. Die zukünftige CI/Required-Checks-Konfiguration muss bei Änderungen an `darknode/**` (soweit Code/Schemas/Census), `protocol/**`, `gateway/**`, `frontend/**` und den betreffenden Workflows die einschlägigen DN-PROTO-Gates ausführen. Insbesondere darf eine **reine DarkNode-Rust-Änderung** den Rust→Proto→UI-Vertragscheck nicht überspringen. Für eine reine Dokumentationsänderung nur die geeigneten Doc-/Link-/Planprüfungen und keine fingierten Laufzeit-PASS erzwingen; CI-Pfadfilter konkret testen.
-
-**Änderungsregel:** Änderung nur am Backend und „Frontend später“ ist für V1-relevante Felder **keine fertige Paket-Abnahme**. Ein Paket enthält denselben SHA für native Publisher/Parameter, Protobuf-Schema/Topic-Registrierung, generierten Rust-/TS-Code, Gateway-Descriptor, FE-Adapter/Store/Anzeige, Inventur und passende Golden-/Negativtests. **Sichere gestufte Entwicklung** bleibt erlaubt, jedoch Zwischenstand ausdrücklich `IN_PROGRESS/FUTURE_PHASE_BLOCKED`; keine vollständig verbundenen Werte behaupten. Tests nur `PASS` bei realem Exit=0 und konkreten Assertion-/Artefaktbelegen. Domain-Owner = DarkNode, niemals BSC/Project_0; Fremdprojektdateien bleiben unverändert, abgesehen von gemeinsamer, additiver Infrastruktur, wo es für die Domänenregistrierung notwendig und getestet ist.
+- Bereits vergeben: `Project_0=1 / Topics 10–29`, `BSC=2 / 30–49`, `Solana=3 / 50–69`. **DarkNode als eigenes Paket `darkbot.darknode.v1`, ProjectId 4 und Topics 70–89 nur P0-Governance-Kandidaten** (`DN-D14=OPEN`); heute nichts reservieren/implementieren.
+- Protobuf-Deskriptoren sind Quelle für Feldnummern/Typen/Optionen. Zusätzliche fachliche Metadaten (Einheit/Scale, Presence/Quality, UI-Zuordnung oder expliziter Ausschluss) einmalig deklariert, Feldinventur daraus **generiert**, nicht manuell gepflegt. **Quellcode-/Testbeweise** müssen unabhängig bestätigen, dass Publisher und UI-Konsumenten tatsächlich existieren; Schema-Metadaten allein sind kein `CONNECTED_VERIFIED`.
+- Auch **reine DarkNode-Rust-Änderungen** müssen bei relevanten Änderungen die Rust↔Proto↔Gateway↔TS-/UI-Prüfung in der künftigen CI auslösen. Kein Paket fertig, wenn relevante Variablen/Commands/Quality-/Wallet-/Order-/Risikofelder fehlen; staged Implementierungen bleiben ehrlich `IN_PROGRESS/NOT_RUN`. Nicht sicherheitsrelevante rein interne Rust-Variablen dürfen ausgeschlossen bleiben.
 
 ## Globale Qualitäts- und Integrationsregeln
 
@@ -196,9 +168,9 @@ Nach Governance-Ergebnis ist DarkNode in **denselben** bereits vorhandenen Mecha
 - **Isolation:** keine BSC-/Project_0-Fachregeln oder Latenzziele übernehmen; deren Programme/Dateien/Design-Freeze nicht nebenbei verändern.
 - **Reuse:** mindestens Open-Source-Vergleich bei Bitget-Connector, Rust-Kern, L2-Backtest, Chart und Node-Editor; Bibliothek nur nach Lizenz/Version/Capability-Evidenz.
 - **Testarten:** Unit, Property/Fuzz, Pine-Golden, Protobuf Breaking, Integration Demo, Replay, Latency, Fault, End-to-End, GUI/Pixeldiff.
-- **Kontinuierlicher DN-PROTO-Vertrag:** Kein fertiger DarkNode-Paketstatus bei vergessenem Backend-Feld, fehlendem Protobuf-Publisher, falscher Topic-/Projektzuordnung, fehlender UI-Anbindung oder übersprungenen Required-CI-Checks. Querschnittsvertrag DN-PROTO gilt in P0–P10 ohne neues UI-Tab und ohne zweiten Gateway/WS.
+- **Kontinuierlicher DN-PROTO-Vertrag:** Nach [DN_PROTO_CONTRACT_V1.md](DN_PROTO_CONTRACT_V1.md) ist bei fehlendem Backend-Feld, Protobuf-Publisher, korrekter Projektzuordnung, UI-Verbraucher oder Required-Check kein vollständiger Paket-PASS möglich.
 - **Kein Push anderer uncommitted Änderungen:** Umsetzung nur in freigegebenen, klar begrenzten Projektdateien.
 
 ## Definition of Done für DarkNode V1
 
-Ein fix gewähltes Futures-Handelspaar; versionierter editierbarer Node-Graph; Pine-paritäre Kernindikatoren; deterministische Live-/Backtest-Evaluation; bestands-/schutzorderkonsistente Bitget-Demo-Ausführung; reconnect-/restart-sichere Trading-Engine; Protobuf/Graphite-UI **mit vollständig gegen Rust-Publisher, Protobuf-Schemas, Gateway-Descriptoren und Frontend-Verwendung abgeglichenem V1-Feld-Census (DN-PROTO-001–008 PASS)**; belegte Testmatrix. **V1 heißt hier technisch fertig im Demo-Betrieb** – Echtgeld-LIVE ist **P9 separat**. Mehrere Bots und umfangreiche Orderflow-/Pro-Widgets sind keine V1-Voraussetzung.
+Ein fix gewähltes Futures-Handelspaar; versionierter editierbarer Node-Graph; Pine-paritäre Kernindikatoren; deterministische Live-/Backtest-Evaluation; bestands-/schutzorderkonsistente Bitget-Demo-Ausführung; reconnect-/restart-sichere Trading-Engine; Protobuf/Graphite-UI **mit aus Schemas generiertem Feld-Census und separat nachgewiesener Rust-/Gateway-/UI-Integration (DN-PROTO-001–008 PASS)**; belegte Testmatrix. **V1 heißt hier technisch fertig im Demo-Betrieb** – Echtgeld-LIVE ist **P9 separat**. Mehrere Bots und umfangreiche Orderflow-/Pro-Widgets sind keine V1-Voraussetzung.
