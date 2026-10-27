@@ -23,16 +23,24 @@ flowchart TB
     CFG["BOT 01 – FEST: BTCUSDT / USDT-M<br/>eine aktive Strategy-Version / 24-7"]
     subgraph EXT["1 – BITGET / EXTERNE PROTOKOLLE"]
         direction LR
-        PUB["Public WebSocket<br/>Trades / Candles / Depth"]
-        HIST["REST Historical<br/>Backfill / Instrumente / Funding"]
+        PUB["Public WebSocket<br/>Live-Rohtrades / BBO / Depth"]
+        HIST["Classic V2 historische Einzeltrades<br/>1-ms-Zeitstempel / 90 Tage / Cursor"]
         PRIV["Private WS + REST<br/>Orders / Fills / Positionen / Stops"]
     end
     CFG --> PUB
     CFG --> HIST
-    PUB --> NORMAL
-    HIST --> NORMAL
+    PUB --> RAW
+    HIST --> IMP
+    IMP --> RAW
     subgraph DATA["2 – EIN RUST DATEN-OWNER"]
-        NORMAL["Normalisieren, Zeit und Sequenzen prüfen<br/>Backfill → Warm-up → Live-Handover"]
+        IMP["P1.7 Rohtrade-Import<br/>Coverage / Dedupe / IDs / Resume"]
+        RAW[("L0 Original-Frames / L1 echte Trade-Events<br/>verlustfrei und versioniert")]
+        NORMAL["Rust Normalisieren / Zeit / Sequenz<br/>Warm-up → Live-Handover"]
+        AGG["P1.6 Eigene Aggregation<br/>Rohtrades → 1s → 5s/10s/30s/1m"]
+        L2[("L2 abgeleitete Candle-Dateien<br/>rekonstruierbar aus L1")]
+        RAW --> NORMAL
+        RAW --> AGG
+        AGG --> L2
         QUAL{"Frisch / vollständig / synchron?"}
         NORMAL --> QUAL
         QUAL -->|"NEIN"| NOENTRY["NO_ENTRY / RECOVERING"]
@@ -46,6 +54,9 @@ flowchart TB
         I --> C --> S
     end
     STATE --> I
+    RAW --> BT["Historisches Backtesting<br/>Tick-Replay auf Originaltrades"]
+    L2 --> BT
+    QUAL -.-> BT
     subgraph EXEC["4 – EIN POSITION-/RISIKO-/ORDER-OWNER"]
         BOT["Persistenter Bot-State<br/>FLAT / PENDING / OPEN / RECOVERING"]
         GATE{"Risk, Kosten, frische Daten<br/>Position + Graph-Freigabe PASS?"}
@@ -69,6 +80,7 @@ flowchart TB
     end
     J --> R
     STATE -.-> R
+    L2 -.-> R
     FE -.->|"Autorisierte neue Graphversion<br/>niemals direkter BUY"| CFG
     classDef source fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     classDef core fill:#dcfce7,stroke:#16a34a,color:#14532d
@@ -80,7 +92,7 @@ flowchart TB
     class NOENTRY,NOORDER stop
 ```
 
-**Datenweg:** **DN-D18: kein internes JSON** – externes Bitget-JSON nur im Bitget-Adapter (opake Originalframes zulässig in L0); danach typisierte Rust-/Protobuf-/Binärdaten. **DN-D19:** SQLite als kleiner Control-/Registry-Store, Marktvolumen in eigenen L0/L1/L2-Dateien; deterministische Strategieevaluation und persistente Orderereignisse. **Frontend-Datenweg:** bestehender Reporter → vorhandenes Gateway → Protobuf-WebSocket → Graphite-React. Browser, React Flow und Charts sind **nie** Order-Authority.
+**Datenweg:** **Historisch echte öffentliche Einzeltrades (Unix-ms, im Test 1 ms) vollständig laden und verlustfrei in L1 speichern. Die 1s-, 5s-, 10s-, 30s- und 1m-Candles für Backtest und Charts erzeugt DarkNode selbst aus den Rohtrades; Bitget-REST-1m-Candles sind nur Referenz. Original-Rohtrades bleiben für Tick-Replay erhalten, aus Candles kann man die vollständigen Trades nicht wiederherstellen.** Siehe [P1-Phasenplan V1.2](docs/PHASENPLAN_P1_V1.md) und [historische Mess-Evidenz](docs/P1_EVIDENCE/BITGET_HISTORICAL_RAW_TRADES_TIME_RATE_2026-10-27.md). **DN-D18: kein internes JSON** – externes Bitget-JSON nur im Bitget-Adapter (opake Originalframes zulässig in L0); danach typisierte Rust-/Protobuf-/Binärdaten. **DN-D19:** SQLite als kleiner Control-/Registry-Store, Marktvolumen in eigenen L0/L1/L2-Dateien; deterministische Strategieevaluation und persistente Orderereignisse. **Frontend-Datenweg:** bestehender Reporter → vorhandenes Gateway → Protobuf-WebSocket → Graphite-React. Browser, React Flow und Charts sind **nie** Order-Authority.
 
 ## 3. Trading-Zyklus: immer dasselbe Paar
 
@@ -235,7 +247,7 @@ Bereitgestelltes Referenzscript: `DarkMa MTF Pressure Scalp v1.0` (Pine v6, derz
 |---|---|
 | Exchange | Bitget; **zunächst USDT-M Futures**; UTA-V3-/Kontomodus-Kompatibilität in G1 prüfen |
 | Realtime | Ein Rust Bitget Public/Private Adapter; benötigte REST-Aufrufe isoliert |
-| Historie | Eigene L0/L1/L2-Binärdateien mit Zeitindex, Backfill/Dedupe/Quality und zeitkausalem Replay; SQLite nur für kleine Control-/Registry-/Gap-/Manifestdaten; ClickHouse ausschließlich Benchmarkreferenz R2c |
+| Historie | **Classic-V2 öffentliche Einzeltrades (1-ms-Zeitstempel, 90-Tage-API-Grenze), selbst zu 1s/5s/10s/30s/1m aggregieren.** L0/L1-Rohdaten für Tick-Replay erhalten, L2-Candle-Cache rekonstruierbar, SQLite nur Control-/Gap-/Manifestdaten; ClickHouse ausschließlich Benchmarkreferenz R2c |
 | Indikatoren / Graph | Rust, ein deterministischer Evaluator; Graphversionen immutable |
 | Stops / Execution | Zentraler Rust Order-/Risk-/Reconcile-Owner |
 | Backtest | Gleicher Rust Strategie-/Event-Kern, realistische Gebühren/Fills; NautilusTrader vs eigener Kern und HftBacktest evaluieren |
