@@ -1395,9 +1395,14 @@ pub fn export_views(
             }
         }
         // A torn tail lost frames: no view may present the prefix as the journal (H1 keeps such
-        // a capture readable and INCOMPLETE for verification, not exportable).
-        if reader.tail_truncated() {
+        // a capture readable and INCOMPLETE for verification, not exportable). DEC-16: so did a
+        // crashed segment inside a recovered chain, and a recovered chain may have lost frames
+        // its crash never wrote.
+        if reader.tail_truncated() || reader.torn_bytes > 0 {
             return Err(bad("EXPORT_TORN_TAIL"));
+        }
+        if reader.recovered > 0 {
+            return Err(bad("EXPORT_RECOVERED_CHAIN"));
         }
         for out in outs {
             out.into_inner().map_err(|e| e.into_error())?.sync_all()?;

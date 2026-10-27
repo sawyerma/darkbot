@@ -172,6 +172,8 @@ pub struct SegmentedWriter {
     events_sealed: u64,
     sealed_bytes: u64,
     max_segment_bytes: u64,
+    /// DEC-16: the chain was continued after a crash; its seal is never complete.
+    recovered: bool,
 }
 
 impl SegmentedWriter {
@@ -186,6 +188,7 @@ impl SegmentedWriter {
             events_sealed: 0,
             sealed_bytes: 0,
             max_segment_bytes,
+            recovered: false,
         })
     }
     /// DEC-16: continues the chain at `first` after a crash (see the module docs). A chain that
@@ -257,6 +260,7 @@ impl SegmentedWriter {
                 events_sealed: r.events,
                 sealed_bytes,
                 max_segment_bytes,
+                recovered: matches!(recovered, Recovered::Crash { .. }) || r.recovered > 0,
             },
             recovered,
         ))
@@ -349,7 +353,8 @@ impl SegmentedWriter {
         Ok(previous)
     }
     pub fn seal(&mut self, complete: bool) -> io::Result<SealedSet> {
-        let durable = self.writer.seal(complete)?;
+        // A chain continued after a crash may have lost frames: its manifest says so too.
+        let durable = self.writer.seal(complete && !self.recovered)?;
         Ok(SealedSet {
             durable,
             segments: self.index,
@@ -1133,6 +1138,39 @@ mod tests {
             .unwrap_err()
             .contains("SEGMENT_RECOVERY_MISPLACED"));
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a chain continued after a crash is never exported as the journal (a torn crash
+    /// lost frames; a clean one may have lost what it never wrote), and its last segment's own
+    /// manifest says incomplete.
+    #[test]
+    fn dec16_a_recovered_chain_is_never_exported_and_seals_incomplete() {
+        for torn in [true, false] {
+            let d = dir("recover_export");
+            let first = d.join("market.p0j");
+            let n = write(&first, 0, &rows(12), false);
+            if torn {
+                let crashed = segment_path(&first, n);
+                let bytes = std::fs::read(&crashed).unwrap();
+                std::fs::write(&crashed, &bytes[..bytes.len() - 5]).unwrap();
+            }
+            let (mut w, _) = SegmentedWriter::recover(&first, 0).unwrap();
+            append_rows(&mut w, &rows(2));
+            let sealed = w.seal(true).unwrap();
+            let mut last = journal::Reader::open(&sealed.last_file).unwrap();
+            while last.next_frame().unwrap().is_some() {}
+            assert!(last.sealed && !last.complete, "{torn}");
+            let out = d.join("view.jsonl");
+            let e = journal::export_views(&first, &[(None, out.as_path())], false).unwrap_err();
+            let want = if torn {
+                "EXPORT_TORN_TAIL"
+            } else {
+                "EXPORT_RECOVERED_CHAIN"
+            };
+            assert_eq!(e.to_string(), want, "{torn}");
+            assert!(!out.exists());
+            std::fs::remove_dir_all(d).unwrap();
+        }
     }
 
     /// DEC-16: a successor is linked into place only complete with its first frame; a crash
