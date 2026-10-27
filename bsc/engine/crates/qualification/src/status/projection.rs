@@ -1090,7 +1090,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // The G0.4 census replayed from the runtime journals (no verdict).
     let census = rundir.join("bsc-runtime/g04-census.dbrec");
     if let Some(bytes) = read(&census) {
-        match record::decode(&schema::bsc_census::census::SCHEMA, &bytes) {
+        match schema::bsc_census::census::decode_census(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &census, &r)),
             Err(_) => warnings.push("G04_CENSUS_INVALID".into()),
         }

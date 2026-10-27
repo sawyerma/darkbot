@@ -179,6 +179,10 @@ fn launch_tx(launcher: &Signer, nonce: u64) -> Vec<u8> {
     raw
 }
 
+/// One handoff for the G0.6 validity check: the delivered launch hash, the
+/// launch the BUY answers, its token and the signed BUY.
+type Handoff = ([u8; 32], [u8; 32], [u8; 20], Vec<u8>);
+
 /// Nearest-rank statistics of one stage as the C1 latency record.
 fn stats(segment: &str, values: &[u64]) -> (Draft, String) {
     let mut v = values.to_vec();
@@ -396,7 +400,7 @@ fn c3_paper_path_latency() {
     let mut scratch = Vec::with_capacity(512);
     // G0.6 validity of every handoff, checked after the loop: the launch it
     // answers, its token and its signed BUY (moved, not copied).
-    let mut handoffs: Vec<([u8; 32], [u8; 32], [u8; 20], Vec<u8>)> = Vec::with_capacity(launches);
+    let mut handoffs: Vec<Handoff> = Vec::with_capacity(launches);
     // The cold launch alone, then the rest in bursts.
     let chunks = std::iter::once(0..1).chain(
         (1..launches)

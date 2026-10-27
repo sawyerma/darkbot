@@ -156,6 +156,15 @@ pub struct Census {
     pub lead_max_us: Option<u64>,
     pub contested_launches: u64,
     pub external_buys: u64,
+    /// G0.4 placement (Flap): launches whose first external BUY in the
+    /// launch block sits at the launch index + 1 (the earliest valid
+    /// position after the launch, taken by a foreign BUY), later in the
+    /// block; of the first those seen in full before the block; launches
+    /// whose placement is unknown (token unknown, trades incomplete).
+    pub adjacent_buy_launches: u64,
+    pub later_buy_launches: u64,
+    pub adjacent_buy_full_before: u64,
+    pub placement_unknown: u64,
     /// Flap launches whose external buys are unknown (not in the two above).
     pub buys_unknown: u64,
     pub unjoined: u64,
@@ -197,6 +206,10 @@ pub struct VenueInputs {
 pub(crate) struct LaunchRecord {
     venue: Venue,
     block_hash: [u8; 32],
+    /// The launch's index in its block; `None` for an orphaned one.
+    tx_index: Option<u64>,
+    /// The created token, where known.
+    token: Option<[u8; 20]>,
     pub(crate) tx_hash: [u8; 32],
     external_buys: Option<u32>,
     pub(crate) class: u8,
@@ -275,6 +288,12 @@ pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     Some(LaunchRecord {
         venue,
         block_hash: hash_at(p, 10)?,
+        tx_index: Some(u64_at(p, 42)?),
+        token: if flag(p[82])? {
+            Some(p.get(83..103)?.try_into().ok()?)
+        } else {
+            None
+        },
         tx_hash: hash_at(p, 50)?,
         external_buys: if buys_known {
             Some(u32::from_le_bytes(p.get(104..108)?.try_into().ok()?))
@@ -361,6 +380,9 @@ impl Connectivity {
     }
 }
 
+/// Flap BUYs by (block hash, token): (tx index, tx hash).
+type BlockBuys = HashMap<([u8; 32], [u8; 20]), Vec<(u64, [u8; 32])>>;
+
 /// What one journal contributes.
 struct Replay {
     window: Window,
@@ -372,6 +394,10 @@ struct Replay {
     connectivity: Connectivity,
     /// The lag of every later sighting of a launch behind its first (`L`).
     later_lags_ns: Vec<u64>,
+    /// Flap BUYs (`T`).
+    buys: BlockBuys,
+    /// Blocks whose trades are incomplete (`W`).
+    trade_gap_blocks: HashSet<[u8; 32]>,
 }
 
 /// One journal: a single file of an older build or a segmented run.
@@ -444,6 +470,8 @@ fn replay(
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
     let mut later_lags_ns: Vec<u64> = Vec::new();
+    let mut buys: BlockBuys = HashMap::new();
+    let mut trade_gap_blocks: HashSet<[u8; 32]> = HashSet::new();
     // Reverted launch calls (`V`), by block and transaction.
     let mut reverted: HashMap<([u8; 32], [u8; 32]), Venue> = HashMap::new();
     // Every journaled launch sighting (`RawSignedTx`), by transaction hash.
@@ -559,6 +587,8 @@ fn replay(
                     launches.push(LaunchRecord {
                         venue,
                         block_hash: block,
+                        tx_index: None,
+                        token: None,
                         tx_hash: tx,
                         external_buys: None,
                         class: 0,
@@ -578,8 +608,20 @@ fn replay(
                 if crate::runtime_journal::flap_trade_of(p).is_some() =>
             {
                 window.flap_trades += 1;
+                if let Some(t) = crate::runtime_journal::flap_trade_of(p)
+                    && !t.sell
+                {
+                    buys.entry((t.block_hash, t.token))
+                        .or_default()
+                        .push((t.tx_index, t.tx_hash));
+                }
             }
-            (RecordKind::Canonical, Some(b'W')) if p.len() == 57 => window.trade_gaps += 1,
+            (RecordKind::Canonical, Some(b'W')) if p.len() == 57 => {
+                window.trade_gaps += 1;
+                if let Some(block) = hash_at(p, 9) {
+                    trade_gap_blocks.insert(block);
+                }
+            }
             (RecordKind::Canonical, Some(b'F'))
                 if crate::runtime_journal::flap_term_of(p).is_some() => {}
             (RecordKind::Canonical, Some(b'M')) if p.len() == 77 => {}
@@ -635,6 +677,8 @@ fn replay(
         launches.clear();
         connectivity = Connectivity::default();
         later_lags_ns.clear();
+        buys.clear();
+        trade_gap_blocks.clear();
     } else {
         window.ingress_dropped = dropped.values().fold(0u64, |a, b| a.saturating_add(*b));
         window.last_block = window.last_block.or(checkpoint);
@@ -682,6 +726,8 @@ fn replay(
         not_included,
         connectivity,
         later_lags_ns,
+        buys,
+        trade_gap_blocks,
     })
 }
 
@@ -880,6 +926,30 @@ fn census_of(
                 }
                 None => out.buys_unknown += 1,
             }
+            // G0.4 placement: the first external BUY of the token in the
+            // launch block, after the launch (its own creator purchase is
+            // the launch transaction).
+            match (l.tx_index, l.token) {
+                (Some(index), Some(token)) if !r.trade_gap_blocks.contains(&l.block_hash) => {
+                    let first = r
+                        .buys
+                        .get(&(l.block_hash, token))
+                        .into_iter()
+                        .flatten()
+                        .filter(|(i, h)| *i > index && *h != l.tx_hash)
+                        .map(|(i, _)| *i)
+                        .min();
+                    match first {
+                        Some(i) if i == index + 1 => {
+                            out.adjacent_buy_launches += 1;
+                            out.adjacent_buy_full_before += u64::from(l.class == 1);
+                        }
+                        Some(_) => out.later_buy_launches += 1,
+                        None => {}
+                    }
+                }
+                _ => out.placement_unknown += 1,
+            }
         }
         later.extend(r.later_lags_ns.iter().map(|ns| ns / 1_000));
         for v in &r.reverted {
@@ -982,7 +1052,11 @@ impl Census {
             .set(cs::AFTER, self.after)
             .set(cs::MISSED, self.missed)
             .set(cs::CONTESTED_LAUNCHES, self.contested_launches)
-            .set(cs::EXTERNAL_BUYS, self.external_buys);
+            .set(cs::EXTERNAL_BUYS, self.external_buys)
+            .set(cs::ADJACENT_BUY_LAUNCHES, self.adjacent_buy_launches)
+            .set(cs::LATER_BUY_LAUNCHES, self.later_buy_launches)
+            .set(cs::ADJACENT_BUY_FULL_BEFORE, self.adjacent_buy_full_before)
+            .set(cs::PLACEMENT_UNKNOWN, self.placement_unknown);
         for (tag, v) in [
             (cs::LEAD_P50_US, self.lead_p50_us),
             (cs::LEAD_P95_US, self.lead_p95_us),
@@ -1041,7 +1115,8 @@ impl Census {
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
-             contested={} external_buys={} buys_unknown={} criteria={}\n",
+             contested={} external_buys={} buys_unknown={} criteria={}\n\
+             first external BUY in the launch block: at N+1 {} (seen in full before the block {}) later {} unknown {}\n",
             self.covered_ms,
             self.windows.len(),
             self.flap_launches,
@@ -1088,6 +1163,10 @@ impl Census {
             self.external_buys,
             self.buys_unknown,
             CRITERIA_UNCONFIRMED,
+            self.adjacent_buy_launches,
+            self.adjacent_buy_full_before,
+            self.later_buy_launches,
+            self.placement_unknown,
         );
         for w in &self.windows {
             s.push_str(&format!(
@@ -1915,6 +1994,120 @@ mod tests {
         assert_eq!(c.four_lead_max_us, Some(7));
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_ACTIONABLE).unwrap(), 2);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// G0.4 placement: the first external BUY of the token in the launch
+    /// block at N+1, later, none (the launch's own creator purchase is not
+    /// external); unknown without a token or with the block's trades
+    /// incomplete.
+    #[test]
+    fn the_first_external_buy_of_a_launch_block_is_placed() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-placement-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let p = SourceId::PublicNode;
+        let joined = |block: u8, tx: u8, index: u64, token: Option<[u8; 20]>, full: bool| {
+            let mut l = launch(Venue::Flap, block, tx, Some(1), 100);
+            l.tx_index = index;
+            l.token = token;
+            (
+                RecordKind::Canonical,
+                100,
+                canonical_launch_payload(&Joined {
+                    launch: l,
+                    visibility: if full {
+                        Visibility::FullBefore {
+                            source: p,
+                            lead_us: 9,
+                        }
+                    } else {
+                        Visibility::Missed
+                    },
+                }),
+            )
+        };
+        let buy = |block: u8, index: u64, tx: u8, token: [u8; 20], sell: bool| {
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_journal::flap_trade_payload(
+                    &crate::chain_follower::CanonicalTrade {
+                        block_number: u64::from(block),
+                        block_hash: [block; 32],
+                        tx_index: index,
+                        tx_hash: [tx; 32],
+                        log_index: 0,
+                        origin: [tx; 20],
+                        sell,
+                        token,
+                        trader: [tx; 20],
+                        amount: [1; 32],
+                        eth: [1; 32],
+                        fee: [0; 32],
+                        post_price: [1; 32],
+                    },
+                ),
+            )
+        };
+        let records = vec![
+            (
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 10, &[10; 32]),
+            ),
+            (
+                RecordKind::Runtime,
+                5,
+                source_event_payload(p, SourceEvent::Connected),
+            ),
+            // Block 10: launch at 5 (seen in full), a SELL at 6, a BUY at 6
+            // of another token, the first BUY of its token at 6: N+1.
+            buy(10, 6, 61, [1; 20], false),
+            buy(10, 6, 62, [9; 20], false),
+            buy(10, 8, 63, [1; 20], false),
+            joined(10, 1, 5, Some([1; 20]), true),
+            // Block 11: launch at 3, its own creator purchase (same tx), the
+            // first external BUY at 7: later.
+            buy(11, 3, 2, [2; 20], false),
+            buy(11, 4, 64, [2; 20], true),
+            buy(11, 7, 65, [2; 20], false),
+            joined(11, 2, 3, Some([2; 20]), false),
+            // Block 12: only the creator purchase: none.
+            buy(12, 0, 4, [3; 20], false),
+            joined(12, 4, 0, Some([3; 20]), false),
+            // Block 13: trades incomplete; block 14: token unknown.
+            (
+                RecordKind::Canonical,
+                95,
+                crate::runtime_journal::trade_gap_payload(13, &[13; 32], 2, 0),
+            ),
+            joined(13, 5, 1, Some([5; 20]), false),
+            joined(14, 6, 1, None, false),
+            (
+                RecordKind::Canonical,
+                500,
+                window_payload(b'E', 14, &[14; 32]),
+            ),
+            (RecordKind::Runtime, 501, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(
+            (
+                c.adjacent_buy_launches,
+                c.adjacent_buy_full_before,
+                c.later_buy_launches,
+                c.placement_unknown,
+                c.flap_launches
+            ),
+            (1, 1, 1, 2, 5)
+        );
+        let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
+        assert_eq!(record.u64(cs::ADJACENT_BUY_LAUNCHES).unwrap(), 1);
+        assert!(
+            c.summary()
+                .contains("at N+1 1 (seen in full before the block 1) later 1 unknown 2")
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
