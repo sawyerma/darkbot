@@ -239,8 +239,9 @@ pub struct ObserverCore {
     pub(super) source: MarketSource,
     pub(super) enrich_cfg: EnrichConfig,
     pub(super) observing: bool,
-    /// `(start_t_rx_ns, cutoff_t_rx_ns)` on the shared monotonic ingress clock.
-    pub(super) window: Option<(u64, u64)>,
+    /// `(start_t_rx_ns, cutoff_t_rx_ns)` on the shared monotonic ingress clock; an unbounded
+    /// capture's window has no cutoff until its stop freezes one.
+    pub(super) window: Option<(u64, Option<u64>)>,
     pub(super) seen: HashSet<String>,
     pub(super) liquidation_signatures: HashSet<String>,
     pub(super) targets: HashSet<String>,
@@ -352,8 +353,8 @@ impl ObserverCore {
         }
     }
 
-    /// Open the observation window `[start_t_rx_ns, cutoff_t_rx_ns]`.
-    pub fn start_observation(&mut self, start_t_rx_ns: u64, cutoff_t_rx_ns: u64) {
+    /// Open the observation window `[start_t_rx_ns, cutoff_t_rx_ns]` (`None`: until stopped).
+    pub fn start_observation(&mut self, start_t_rx_ns: u64, cutoff_t_rx_ns: Option<u64>) {
         self.observing = true;
         self.window = Some((start_t_rx_ns, cutoff_t_rx_ns));
     }
@@ -553,7 +554,7 @@ impl ObserverCore {
             return false;
         }
         match (self.window, t_rx_ns) {
-            (Some((start, cutoff)), Some(t)) => t >= start && t <= cutoff,
+            (Some((start, cutoff)), Some(t)) => t >= start && cutoff.is_none_or(|c| t <= c),
             _ => true,
         }
     }
@@ -632,7 +633,7 @@ impl ObserverCore {
                 self.stats.events_outside_observation += 1;
                 return false;
             }
-            if t_rx_ns > cutoff {
+            if cutoff.is_some_and(|c| t_rx_ns > c) {
                 self.stats.events_after_cutoff += 1;
                 return false;
             }
@@ -1366,9 +1367,8 @@ impl ObserverCore {
     pub fn summary(&self, cfg: &SummaryContext) -> super::summary::MarketSummary {
         let s = &self.stats;
         let observed_end = self.window.map(|(start, cutoff)| {
-            start
-                .saturating_add((cfg.actual_observation_seconds.max(0.0) * 1e9) as u64)
-                .min(cutoff)
+            let end = start.saturating_add((cfg.actual_observation_seconds.max(0.0) * 1e9) as u64);
+            cutoff.map_or(end, |c| end.min(c))
         });
         let outage = observed_end.and_then(|end| self.transport_outage_ns(end));
         let mut sorted = self.edges.clone();

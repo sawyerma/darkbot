@@ -33,7 +33,7 @@ fn a2_market_journal(dir: &Path, commitment: &str) -> PathBuf {
     core.coverage(&mut sink, 0, None, WindowEvent::Start(Box::new(start)))
         .unwrap();
     // The window of the test worker (`h.start(1, 4_000_000_001)`).
-    core.start_observation(1, 4_000_000_001);
+    core.start_observation(1, Some(4_000_000_001));
     for (slot, t_rx_ns) in A2_RECEIPTS {
         let ev = IngressEvent::Slot(SlotUpdate {
             slot,

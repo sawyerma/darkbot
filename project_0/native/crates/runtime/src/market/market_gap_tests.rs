@@ -104,7 +104,7 @@ fn gap_intervals_are_bounded_and_capacity_is_incomplete() {
     let (mut c, mut s) = gap_core(100, 599);
     assert_eq!(c.gaps.len(), 1);
     assert!(!c.coverage_complete());
-    c.start_observation(0, 10000);
+    c.start_observation(0, Some(10000));
     c.gap_cfg.max_gaps = 1;
     gap_open(&mut c, &mut s, Some(600), 100);
     gap_reconnect(&mut c, &mut s, 110);
@@ -159,7 +159,7 @@ fn complete_canonical_window_is_authority_despite_transport_gap_telemetry() {
 #[test]
 fn p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery() {
     let mut c = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
-    c.start_observation(0, 10_000);
+    c.start_observation(0, Some(10_000));
     let mut s = VecSink::default();
     for n in 0..527 {
         gap_open(&mut c, &mut s, Some(10), 10 + n * 3);
@@ -239,7 +239,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
     fs::create_dir_all(&cfg.run_dir).unwrap();
     let mut sink = JsonlSink::create(&cfg.run_dir).unwrap();
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-    core.start_observation(0, 18_000_000_000_000);
+    core.start_observation(0, Some(18_000_000_000_000));
     core.stop_observation();
     let outcome = CaptureOutcome {
         finished_unix_s: 1_700_000_100,
@@ -291,7 +291,7 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
     fs::create_dir_all(&cfg.run_dir).unwrap();
     let mut sink = JsonlSink::create(&cfg.run_dir).unwrap();
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-    core.start_observation(0, 18_000_000_000_000);
+    core.start_observation(0, Some(18_000_000_000_000));
     core.stop_observation();
     let outcome = CaptureOutcome {
         finished_unix_s: 1_700_000_100,

@@ -407,6 +407,12 @@ pub enum WindowEvent {
         drain_complete: bool,
         write_error: Option<String>,
     },
+    /// DEC-16: the stream became ready for an unbounded capture (`until-stopped`): its window has
+    /// no cutoff — it ends at its stop (appended: older frames keep their variant indices).
+    StreamReadyUntilStopped {
+        attempt: u32,
+        observation_start_t_rx_ns: u64,
+    },
 }
 
 /// The configured capture at START (transport policy as applied by the WSS adapter).
@@ -642,6 +648,15 @@ impl WindowEvent {
                 "STOPPED",
                 json!({"reason": reason, "drain_complete": drain_complete,
                 "write_error": write_error}),
+            ),
+            WindowEvent::StreamReadyUntilStopped {
+                attempt,
+                observation_start_t_rx_ns,
+            } => (
+                "STREAM_READY",
+                json!({"attempt": attempt,
+                "observation_start_t_rx_ns": observation_start_t_rx_ns,
+                "observation_cutoff_t_rx_ns": Value::Null}),
             ),
         }
     }

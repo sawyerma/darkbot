@@ -1888,7 +1888,7 @@ mod regression {
         let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap();
         let summary = |secs: f64, done: bool| {
             let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::DEFAULT);
-            core.start_observation(0, u64::MAX);
+            core.start_observation(0, None);
             core.summary(&SummaryContext {
                 run_id: "golden".into(),
                 commitment: "finalized".into(),

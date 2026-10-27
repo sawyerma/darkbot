@@ -168,7 +168,7 @@ fn ctx(ready: bool, full: bool, secs: f64) -> SummaryContext {
 
 fn open_core(source: MarketSource, enrich: EnrichConfig) -> ObserverCore {
     let mut core = ObserverCore::new(program(), source, enrich);
-    core.start_observation(0, u64::MAX);
+    core.start_observation(0, None);
     core
 }
 
@@ -445,7 +445,7 @@ fn cutoff_counts_queued_events_received_before_and_rejects_events_after() {
     let p = program();
     let mut core = ObserverCore::new(p, MarketSource::Transactions, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
-    core.start_observation(1_000, 2_000);
+    core.start_observation(1_000, Some(2_000));
     // Timer has fired; these were still queued and are drained now.
     core.on_transaction(
         tx_event("A", 10, &logs_with(&p, &[event_line()]), None, 1_999),
@@ -607,7 +607,7 @@ fn d6_counter_evidence_only_on_change_or_a_new_hour() {
     use darkbot_solana::ingress::SourceHealth;
     let (h, rx) = econ::window_handle();
     let mut core = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT);
-    core.start_observation(1, 4_000_000_001);
+    core.start_observation(1, Some(4_000_000_001));
     core.econ = Some(h);
     let mut sink = VecSink::default();
     let health = |t_rx_ns| {
@@ -672,7 +672,7 @@ fn d6_counter_evidence_only_on_change_or_a_new_hour() {
 fn slot_telemetry_frames_measure_stream_silence() {
     let mut core = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut sink = VecSink::default();
-    core.start_observation(0, 10_000_000_000);
+    core.start_observation(0, Some(10_000_000_000));
     let slot = |t: u64| {
         IngressEvent::Slot(SlotUpdate {
             slot: 1,
@@ -1296,7 +1296,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     fs::create_dir_all(&cfg.run_dir).unwrap();
     let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-    core.start_observation(0, 600_000_000_000);
+    core.start_observation(0, Some(600_000_000_000));
     core.on_logs(
         logs_event(
             "x",
@@ -1997,7 +1997,7 @@ fn capture_operator_stop_seals_incomplete() {
         let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
         let ready = stop != "STREAM_NOT_READY";
         if ready {
-            core.start_observation(0, 600_000_000_000);
+            core.start_observation(0, Some(600_000_000_000));
             core.stop_observation();
         }
         let outcome = CaptureOutcome {
@@ -2060,7 +2060,7 @@ fn ingress_panic_after_last_event_never_seals_complete() {
         fs::create_dir_all(&cfg.run_dir).unwrap();
         let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
         let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-        core.start_observation(0, 600_000_000_000);
+        core.start_observation(0, Some(600_000_000_000));
         let (tx, rx) = darkbot_common::channel::bounded::<IngressEvent>("r2", 16);
         let thread: super::capture::IngressThread = std::thread::spawn(move || {
             tx.try_push(IngressEvent::Slot(SlotUpdate {
@@ -2167,7 +2167,7 @@ fn r1_full_and_half_full_queue_drain_completely_before_the_seal() {
         fs::create_dir_all(&cfg.run_dir).unwrap();
         let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
         let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-        core.start_observation(0, 600_000_000_000);
+        core.start_observation(0, Some(600_000_000_000));
         let (tx, rx) = darkbot_common::channel::bounded::<IngressEvent>("r1", CAP);
         let slot = |n: usize| {
             IngressEvent::Slot(SlotUpdate {
@@ -2279,7 +2279,7 @@ fn r1_ingress_alive_past_the_drain_deadline_seals_incomplete() {
     fs::create_dir_all(&cfg.run_dir).unwrap();
     let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
-    core.start_observation(0, 600_000_000_000);
+    core.start_observation(0, Some(600_000_000_000));
     let (tx, rx) = darkbot_common::channel::bounded::<IngressEvent>("r1d", 64);
     let slot = |n: u64| {
         IngressEvent::Slot(SlotUpdate {
@@ -2969,7 +2969,7 @@ fn a01_source_health_reconnects_reach_the_capture_projection() {
     let mut reader = tap.reader();
     let mut core = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT);
     core.status_tap = Some(tap);
-    core.start_observation(1, 4_000_000_001);
+    core.start_observation(1, Some(4_000_000_001));
     let health = IngressEvent::Health(SourceHealth {
         source: SourceKind::WsRpcControl,
         connected: true,
@@ -3217,5 +3217,60 @@ fn dec16_an_autostarted_capture_ends_in_order_at_its_maximum_runtime() {
     let chain =
         crate::storage::segments::verify_chain(&u.run_dir.join(us::WINDOWS_JOURNAL)).unwrap();
     assert!(chain.sealed && chain.complete, "{chain:?}");
+    // The stream became ready without a cutoff: typed, never a sentinel value.
+    let mut r =
+        crate::storage::segments::ChainReader::open(&u.run_dir.join(MARKET_JOURNAL)).unwrap();
+    let mut ready = Vec::new();
+    while let Some(f) = r.next_frame().unwrap() {
+        if f.kind == crate::analytics::journal::kind::MARKET_COVERAGE {
+            if let super::rows::MarketCoverage::Window { event, .. } = f.typed().unwrap() {
+                if matches!(
+                    event,
+                    super::rows::WindowEvent::StreamReady { .. }
+                        | super::rows::WindowEvent::StreamReadyUntilStopped { .. }
+                ) {
+                    ready.push(event)
+                }
+            }
+        }
+    }
+    assert!(
+        matches!(
+            ready.as_slice(),
+            [super::rows::WindowEvent::StreamReadyUntilStopped { .. }]
+        ),
+        "{ready:?}"
+    );
     let _ = (&u.project, fs::remove_dir_all(&u.root));
+}
+
+/// DEC-16: the unbounded StreamReady is an appended variant — a bounded one is encoded exactly as
+/// before (older market journals stay readable), the unbounded one after every older variant.
+#[test]
+fn dec16_the_unbounded_stream_ready_is_appended_and_bounded_frames_keep_their_encoding() {
+    use super::rows::WindowEvent;
+    let bounded = bincode::serialize(&WindowEvent::StreamReady {
+        attempt: 2,
+        observation_start_t_rx_ns: 5,
+        observation_cutoff_t_rx_ns: 9,
+    })
+    .unwrap();
+    let expected = [
+        &1u32.to_le_bytes()[..],
+        &2u32.to_le_bytes(),
+        &5u64.to_le_bytes(),
+        &9u64.to_le_bytes(),
+    ]
+    .concat();
+    assert_eq!(bounded, expected);
+    let unbounded = WindowEvent::StreamReadyUntilStopped {
+        attempt: 2,
+        observation_start_t_rx_ns: 5,
+    };
+    let bytes = bincode::serialize(&unbounded).unwrap();
+    assert_eq!(bytes[..4], 15u32.to_le_bytes());
+    assert_eq!(
+        bincode::deserialize::<WindowEvent>(&bytes).unwrap(),
+        unbounded
+    );
 }

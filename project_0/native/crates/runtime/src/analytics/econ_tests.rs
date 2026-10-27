@@ -183,7 +183,7 @@ pub(crate) fn market_summary(secs: f64) -> crate::market_observer::MarketSummary
         .parse()
         .unwrap();
     let mut core = ObserverCore::new(program, MarketSource::Logs, EnrichConfig::DEFAULT);
-    core.start_observation(0, u64::MAX);
+    core.start_observation(0, None);
     core.summary(&SummaryContext {
         run_id: "test".into(),
         commitment: "finalized".into(),

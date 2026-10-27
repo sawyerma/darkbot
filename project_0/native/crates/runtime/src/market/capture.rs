@@ -558,13 +558,11 @@ fn run_embedded_inner(
 
     let started = Instant::now();
     let ready_timeout = Duration::from_secs(cfg.ready_timeout_secs);
-    let duration_ns = if cfg.duration_secs == 0 {
-        u64::MAX
-    } else {
-        cfg.duration_secs.saturating_mul(1_000_000_000)
-    };
+    // DEC-16: an unbounded capture (`until-stopped`, duration 0) has no cutoff until its stop.
+    let duration_ns =
+        (cfg.duration_secs > 0).then(|| cfg.duration_secs.saturating_mul(1_000_000_000));
     let mut ready_unix_s: Option<u64> = None;
-    let mut window: Option<(u64, u64)> = None;
+    let mut window: Option<(u64, Option<u64>)> = None;
     let mut last_overflow = 0u64;
     let mut last_flush = Instant::now();
     let mut stop_reason = "TIMER";
@@ -593,7 +591,7 @@ fn run_embedded_inner(
             stop_reason = "OPERATOR_STOP";
             break;
         }
-        if let (Some(h), Some((start, cutoff))) = (&econ, window) {
+        if let (Some(h), Some((start, Some(cutoff)))) = (&econ, window) {
             let due = h
                 .cfg
                 .plan
@@ -622,7 +620,7 @@ fn run_embedded_inner(
             stop_reason = "STREAM_NOT_READY";
             break;
         }
-        if window.is_some_and(|(_, cutoff)| clock.now_ns() >= cutoff) {
+        if window.is_some_and(|(_, cutoff)| cutoff.is_some_and(|c| clock.now_ns() >= c)) {
             break;
         }
         // DEC-16: an unbounded capture's window boundary; its first HALT stops the capture. An
@@ -662,7 +660,8 @@ fn run_embedded_inner(
             break;
         }
         let wait = window
-            .map(|(_, cutoff)| Duration::from_nanos(cutoff.saturating_sub(clock.now_ns())))
+            .and_then(|(_, cutoff)| cutoff)
+            .map(|cutoff| Duration::from_nanos(cutoff.saturating_sub(clock.now_ns())))
             .unwrap_or(Duration::from_secs(1))
             .min(Duration::from_millis(250));
         let now_s = clock_unix_s(&clock);
@@ -670,7 +669,7 @@ fn run_embedded_inner(
             Some(IngressEvent::Reconnected {
                 attempt, t_rx_ns, ..
             }) if window.is_none() => {
-                let cutoff = t_rx_ns.saturating_add(duration_ns);
+                let cutoff = duration_ns.map(|d| t_rx_ns.saturating_add(d));
                 window = Some((t_rx_ns, cutoff));
                 ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
                 core.start_observation(t_rx_ns, cutoff);
@@ -699,16 +698,28 @@ fn run_embedded_inner(
                         clock,
                         crate::analytics::measurement::Phase::Capture(evidence),
                     )?;
-                    h.start(t_rx_ns, cutoff);
+                    // A C0-E1 run is a fixed measurement (its windows: DEC-16 stage 2 econ4h).
+                    h.start(
+                        t_rx_ns,
+                        cutoff.ok_or(
+                            "C0_E1_UNBOUNDED: the economics run measures a fixed duration",
+                        )?,
+                    );
                 }
                 core.coverage(
                     &mut sink,
                     now_s,
                     Some(t_rx_ns),
-                    WindowEvent::StreamReady {
-                        attempt,
-                        observation_start_t_rx_ns: t_rx_ns,
-                        observation_cutoff_t_rx_ns: cutoff,
+                    match cutoff {
+                        Some(cutoff) => WindowEvent::StreamReady {
+                            attempt,
+                            observation_start_t_rx_ns: t_rx_ns,
+                            observation_cutoff_t_rx_ns: cutoff,
+                        },
+                        None => WindowEvent::StreamReadyUntilStopped {
+                            attempt,
+                            observation_start_t_rx_ns: t_rx_ns,
+                        },
                     },
                 )
             }
@@ -781,13 +792,14 @@ fn run_embedded_inner(
         }
     }
     let capture_end_ns = clock.now_ns();
-    // Freeze an open-ended window at the operator stop before draining queued ingress.
-    if cfg.duration_secs == 0 {
-        if let Some((start, _)) = window {
-            window = Some((start, capture_end_ns));
-            core.start_observation(start, capture_end_ns);
+    // Freeze an open-ended window at its stop before draining queued ingress.
+    let window: Option<(u64, u64)> = window.map(|(start, cutoff)| match cutoff {
+        Some(cutoff) => (start, cutoff),
+        None => {
+            core.start_observation(start, Some(capture_end_ns));
+            (start, capture_end_ns)
         }
-    }
+    });
     if let Some(tap) = &status_tap {
         tap.publish_phase(|p| {
             p.phase = CapturePhase::Drain;
