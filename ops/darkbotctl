@@ -237,7 +237,7 @@ write_capture_plist() {
   for k in P0_WS_URL P0_MARKET_READY_TIMEOUT_SECS P0_REPORT_MIN_INTERVAL_MS \
            P0_MODE P0_MEASUREMENT_DURATION P0_PROJECT_DIR \
            P0_NETWORK_AUDIT P0_NETWORK_AUDIT_TOKEN P0_NETWORK_AUDIT_APPROVED_AT \
-           P0_UNTIL_STOPPED_QUALIFICATION P0_UNTIL_STOPPED_AUTOSTART; do
+           P0_UNTIL_STOPPED_QUALIFICATION P0_UNTIL_STOPPED_AUTOSTART P0_UNTIL_STOPPED_RESUME; do
     if [ -n "${!k:-}" ]; then extra="$extra$(plist_env "$k" "${!k}")"$'\n'; fi
   done
   ( umask 077; cat > "$CAPTURE_PLIST" <<EOF
@@ -255,7 +255,7 @@ $(plist_env P0_ENV_FILE "$ENV_FILES")
 $(plist_env P0_MARKET_OUT_DIR "$APP_HOME/data/market")
 $(plist_env P0_REPORT_SOCKET "$SOCK")
 $(plist_env P0_REPORT_GENERATION_FILE "$GEN_FILE")
-$(plist_env P0_MARKET_RUN_ID "app-$launch")
+$(plist_env P0_MARKET_RUN_ID "${P0_UNTIL_STOPPED_RESUME:-app-$launch}")
 $(plist_env P0_MARKET_DURATION_SECS "$secs")
 $(plist_env P0_RESULT_FILE "$RESULT_FILE")
 $(plist_env P0_LAUNCH_ID "$launch")
@@ -460,6 +460,12 @@ _capture_start() {
   local secs="${1:-}" log launch p foreign i=0 previous_generation
   previous_generation="$(cat "$GEN_FILE" 2>/dev/null || echo 0)"
   case "$secs" in until-stopped) ;; ''|*[!0-9]*) die "Dauer in Sekunden angeben, z. B. darkbotctl capture start 600 (keine Standarddauer)";; esac
+  # DEC-16: an unbounded start may continue the crashed run the controller named (its run id).
+  case "${P0_UNTIL_STOPPED_RESUME:-}" in
+    '') ;;
+    *[!A-Za-z0-9_-]*) die "UNTIL_STOPPED_RESUME_INVALID: $P0_UNTIL_STOPPED_RESUME" ;;
+    *) [ "$secs" = until-stopped ] || die "UNTIL_STOPPED_RESUME_UNBOUNDED_ONLY: nur ein Lauf bis Stop wird fortgesetzt" ;;
+  esac
   if [ "$secs" != until-stopped ]; then
     [ "$secs" -ge 60 ] && [ "$secs" -le 86400 ] || die "Dauer: until-stopped oder 60..86400 Sekunden"
   fi

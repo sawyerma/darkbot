@@ -111,6 +111,20 @@ fn newest_qualification(project: &Path, mode: &str) -> Option<QualificationView>
     None
 }
 
+/// DEC-16: the crashed run a new approved start of `binding` with `qualification_id` continues:
+/// the newest unbounded run under `root` when it never ended (its windows journal unsealed),
+/// never halted and was admitted as exactly this run; otherwise the start is a new run.
+pub fn resumable(root: &Path, binding: &us::Binding, qualification_id: &str) -> Option<String> {
+    newest_run(root)
+        .filter(|r| {
+            !r.sealed
+                && r.halted.is_none()
+                && &r.record.binding == binding
+                && r.record.qualification_id == qualification_id
+        })
+        .map(|r| r.run_id)
+}
+
 /// The newest run under `root` with a windows journal, read as far as it is written.
 fn newest_run(root: &Path) -> Option<RunView> {
     for dir in newest_first(root) {
@@ -255,6 +269,11 @@ mod tests {
         let r = v.run.unwrap();
         assert_eq!((r.run_id.as_str(), r.windows, r.sealed), ("r1", 0, false));
         assert_eq!(r.record.qualification_id, id);
+        // Never ended, never halted, admitted as exactly this run: a start continues it.
+        let market = d.join("data/market");
+        assert_eq!(resumable(&market, &b, &id), Some("r1".into()));
+        assert_eq!(resumable(&market, &b, "fedcba9876543210"), None);
+        assert_eq!(resumable(&market, &binding(60, 120), &id), None);
         // Granted: in force; a closed window that halted, then the seal.
         autostart::record(
             &d,
@@ -287,6 +306,11 @@ mod tests {
             )
             .unwrap();
         assert_ne!(check.verdict, us::CONTINUE);
+        assert_eq!(
+            resumable(&market, &b, &id),
+            None,
+            "a halted run is never continued"
+        );
         w.finish(false).unwrap();
         let v = projection(&d);
         let a = v.autostart.unwrap();

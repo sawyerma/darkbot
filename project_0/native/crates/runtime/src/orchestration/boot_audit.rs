@@ -1886,6 +1886,7 @@ pub(crate) fn market_admission_with(
                 qualification_id: id,
                 config,
                 max_runtime_seconds,
+                resume: get(super::until_stopped::ENV_RESUME).filter(|v| !v.is_empty()),
             })
         }
     };

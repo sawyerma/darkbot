@@ -26,10 +26,14 @@ impl Ctl {
         Self { bin, project }
     }
     fn run(&self, args: &[&str]) -> (i32, String) {
+        self.run_env(args, &[])
+    }
+    fn run_env(&self, args: &[&str], env: &[(&str, &std::path::Path)]) -> (i32, String) {
         let out = Command::new(self.bin.join("p0ctl"))
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("P0_MARKET_SOURCE", "logs")
+            .envs(env.iter().copied())
             .arg("--project")
             .arg(&self.project)
             .args(args)
@@ -253,4 +257,109 @@ fn dec16_a_standing_approval_records_exactly_its_previewed_binding_until_revoked
     let (code, out) = ctl.run(&["autostart", "start"]);
     assert_eq!(code, 2);
     assert!(out.contains("AUTOSTART_NOT_GRANTED"), "{out}");
+}
+
+/// DEC-16 (user decision 27.10.): an approved unbounded raw-capture start continues the crashed
+/// run of exactly its binding and qualification — the launcher gets that run id and the start
+/// names it; a newer run that halted is never continued, the start is then a new run.
+#[test]
+fn dec16_an_unbounded_start_names_the_crashed_run_it_continues() {
+    use std::os::unix::fs::PermissionsExt;
+    let ctl = Ctl::new("resume");
+    let qid = ctl.qualification(true);
+    let binding = us::get(&ctl.project, &qid).unwrap().binding;
+    let market = ctl.project.join("data/market");
+    std::fs::create_dir_all(market.join("crashed")).unwrap();
+    // As a killed capture leaves it: the windows journal never sealed.
+    drop(
+        us::RollingWindows::start(&market.join("crashed"), binding.clone(), &qid, now(), 0)
+            .unwrap(),
+    );
+    let calls = ctl.project.join("calls.log");
+    let launcher = ctl.project.join("ok-ctl");
+    std::fs::write(
+        &launcher,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"$P0_UNTIL_STOPPED_RESUME\" >> '{}'; echo 'Capture gestartet pid=1 dauer=until-stopped launch=l9'\n",
+            calls.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let start = |flow: &str| {
+        let (code, out) = ctl.run(&[
+            "boot",
+            "offline",
+            "--flow",
+            flow,
+            "--mode",
+            "market",
+            "--duration",
+            "until-stopped:1m:2m",
+        ]);
+        assert!(code == 0 || code == 2, "{out}");
+        let (code, out) = ctl.run_env(
+            &[
+                "boot",
+                "run",
+                "--flow",
+                flow,
+                "--step",
+                "START",
+                "--approve",
+                "0123456789abcdef",
+                "--qualification",
+                &qid,
+            ],
+            &[("DARKBOT_CTL", &launcher)],
+        );
+        assert_eq!(code, 0, "{out}");
+        let line = std::fs::read_to_string(&calls)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap()
+            .to_string();
+        let run = match boot_control::status(&ctl.project, flow).unwrap().start {
+            boot_control::StepState::Done(o) => o.run_id,
+            other => panic!("{other:?}"),
+        };
+        (line, run, out)
+    };
+    let (line, run, out) = start("u1");
+    assert_eq!(line, "capture start until-stopped|crashed");
+    assert_eq!(run.as_deref(), Some("crashed"));
+    assert!(
+        out.contains("continues the crashed unbounded run crashed"),
+        "{out}"
+    );
+    // A newer run that halted: never continued — the next start is a new run.
+    let halted = market.join("halted");
+    std::fs::create_dir_all(&halted).unwrap();
+    let mut w = us::RollingWindows::start(&halted, binding.clone(), &qid, now(), 0).unwrap();
+    let empty = ctl.project.join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let check = w
+        .close(
+            &darkbot_solana::runtime_config::RuntimeConfig::default(),
+            "logs",
+            us::Measured {
+                now: now() + 60,
+                bytes: 0,
+                run_volume: &empty,
+                environment: darkbot_runner::storage::preflight::Environment::default(),
+                provider: darkbot_solana::provider::WindowUsage {
+                    requests: 0,
+                    bytes: 0,
+                },
+                evidence: None,
+                sealed: None,
+            },
+        )
+        .unwrap();
+    assert_ne!(check.verdict, us::CONTINUE);
+    drop(w);
+    let (line, run, _) = start("u2");
+    assert_eq!(line, "capture start until-stopped|");
+    assert_eq!(run.as_deref(), Some("app-l9"));
 }

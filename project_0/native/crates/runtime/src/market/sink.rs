@@ -123,6 +123,26 @@ impl JournalSink {
     pub fn create(run_dir: &Path) -> Result<Self, String> {
         Self::create_with(run_dir, WriterConfig::from_active())
     }
+    /// DEC-16: continues the market journal of an unbounded run that crashed (its SK-07
+    /// recovery); how it continued and the chain's bytes so far.
+    pub fn resume(
+        run_dir: &Path,
+    ) -> Result<(Self, crate::storage::segments::Recovered, u64), String> {
+        let (writer, recovered, bytes) = MarketJournalWorker::resume(
+            &run_dir.join(MARKET_JOURNAL),
+            WriterConfig::from_active(),
+        )?;
+        Ok((
+            Self {
+                writer: Some(writer),
+                #[cfg(all(test, feature = "historical"))]
+                run_dir: run_dir.into(),
+                rows: 0,
+            },
+            recovered,
+            bytes,
+        ))
+    }
     pub fn create_with(run_dir: &Path, cfg: WriterConfig) -> Result<Self, String> {
         for (_, name) in MARKET_VIEWS {
             let view = run_dir.join(name);

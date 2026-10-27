@@ -228,6 +228,36 @@ pub struct MarketJournalWorker {
 impl MarketJournalWorker {
     /// Creates the journal (never overwrites) and starts its writer thread.
     pub fn start(path: &Path, cfg: WriterConfig) -> Result<Self, String> {
+        Self::spawn(path, cfg, |segment_bytes| {
+            super::segments::SegmentedWriter::create(path, segment_bytes)
+                .map_err(|e| format!("cannot create {}: {e}", path.display()))
+        })
+    }
+
+    /// DEC-16: continues the journal of a run that crashed (SK-07 recovery: the crashed segment
+    /// stays as it is, a recovery link continues the chain); also returns how it continued and
+    /// the chain's bytes so far.
+    pub fn resume(
+        path: &Path,
+        cfg: WriterConfig,
+    ) -> Result<(Self, super::segments::Recovered, u64), String> {
+        let mut how = None;
+        let worker = Self::spawn(path, cfg, |segment_bytes| {
+            let (writer, recovered) =
+                super::segments::SegmentedWriter::recover(path, segment_bytes)
+                    .map_err(|e| format!("cannot recover {}: {e}", path.display()))?;
+            how = Some((recovered, writer.bytes()));
+            Ok(writer)
+        })?;
+        let (recovered, bytes) = how.ok_or("MARKET_JOURNAL_RECOVERY_LOST")?;
+        Ok((worker, recovered, bytes))
+    }
+
+    fn spawn(
+        path: &Path,
+        cfg: WriterConfig,
+        open: impl FnOnce(u64) -> Result<super::segments::SegmentedWriter, String>,
+    ) -> Result<Self, String> {
         let budget = MemoryBudget::new(cfg.initial_bytes, cfg.max_bytes, cfg.system_reserve_bytes)
             .map_err(str::to_string)?;
         if cfg.batch_frames == 0 {
@@ -244,8 +274,7 @@ impl MarketJournalWorker {
         let fixed = budget
             .acquire(fixed_bytes, Duration::ZERO)
             .map_err(str::to_string)?;
-        let writer = super::segments::SegmentedWriter::create(path, cfg.segment_bytes)
-            .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
+        let writer = open(cfg.segment_bytes)?;
         let (tx, rx) = bounded::<Msg>("market-journal-writer", slots);
         let failure = Arc::new(Mutex::new(None));
         let counters = Arc::new(LaneCounters::default());

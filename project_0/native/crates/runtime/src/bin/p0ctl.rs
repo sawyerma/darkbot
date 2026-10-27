@@ -1465,8 +1465,28 @@ fn start_raw_capture(
         .map_err(|_| "BOOT_CLOCK")?
         .as_secs();
     let mut command = Command::new(&ctl);
+    // DEC-16: an unbounded start continues the crashed run of exactly this binding and
+    // qualification (never a halted or an ended one); the capture admits that again.
+    let mut resumed = None;
     if let Some(id) = &qualification {
         command.env(boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION, id);
+        let (binding, _) = until_stopped::binding(
+            project,
+            &flow.mode,
+            &flow.operational,
+            &flow.duration,
+            &|k| std::env::var(k).ok(),
+            &boot_audit::binary_identity_for,
+        )?;
+        resumed = darkbot_runner::orchestration::until_stopped_view::resumable(
+            &project.join("data/market"),
+            &binding,
+            id,
+        );
+        if let Some(run) = &resumed {
+            println!("[p0ctl] the start continues the crashed unbounded run {run}");
+            command.env(until_stopped::ENV_RESUME, run);
+        }
     }
     // DEC-16: an autostarted capture names the standing approval it runs under.
     if let Some(digest) = &autostart {
@@ -1496,7 +1516,8 @@ fn start_raw_capture(
             .split_whitespace()
             .find_map(|w| w.strip_prefix("launch="))
             .ok_or("BOOT_RAW_CAPTURE_UNCONFIRMED: the launcher named no started capture")?;
-        Ok(Some(format!("app-{launch}")))
+        // A continued run keeps its run id (the launcher passes it on).
+        Ok(Some(resumed.unwrap_or_else(|| format!("app-{launch}"))))
     } else {
         let text = String::from_utf8_lossy(&out.stderr);
         let last = text

@@ -447,6 +447,53 @@ fn roll_window(
     Ok(check)
 }
 
+/// DEC-16: the windows of a crashed unbounded run, continued: the interrupted window (from its
+/// last recorded end to now) checked like any window before the capture reads anything; a HALT
+/// there ends the run (its windows journal sealed, never resumed again).
+fn resume_windows(
+    rolling: &crate::orchestration::until_stopped::Rolling,
+    cfg: &MarketConfig,
+    now_s: u64,
+    bytes: u64,
+) -> Result<crate::orchestration::until_stopped::RollingWindows, String> {
+    use crate::orchestration::until_stopped as us;
+    let (windows, check) = us::RollingWindows::resume(
+        &cfg.run_dir,
+        rolling.binding.clone(),
+        &rolling.qualification_id,
+        &rolling.config,
+        cfg.source.as_str(),
+        us::Measured {
+            now: now_s,
+            bytes,
+            run_volume: &cfg.run_dir,
+            environment: crate::storage::preflight::environment(&cfg.run_dir),
+            // What this process has used so far (nothing read yet); the crashed one's use ended
+            // with it.
+            provider: darkbot_solana::provider::shared().roll_window(),
+            evidence: us::newest_evidence(
+                &rolling.project,
+                &rolling.config,
+                &rolling.binding,
+                now_s.saturating_add(rolling.binding.checkpoint_seconds),
+            ),
+            sealed: None,
+        },
+    )
+    .map_err(|e| format!("UNTIL_STOPPED_RESUME: {e}"))?;
+    crate::console::line(format!(
+        "[UNTIL_STOPPED] window={} verdict={} {}",
+        check.window, check.verdict, check.detail
+    ));
+    if windows.halted().is_some() {
+        if let Err(e) = windows.finish(false) {
+            crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
+        }
+        return Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into());
+    }
+    Ok(windows)
+}
+
 fn run_embedded_inner(
     cfg: MarketConfig,
     clock: Clock,
@@ -457,7 +504,33 @@ fn run_embedded_inner(
     let process_started = clock_unix_s(&clock);
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;
-    let mut sink = JournalSink::create(&cfg.run_dir)?;
+    // DEC-16: an approved start continues the crashed unbounded run it names — its journals by
+    // their SK-07 recovery, the window the crash interrupted checked again before any read.
+    let (mut sink, mut windows) = match rolling
+        .as_ref()
+        .and_then(|r| r.resume.as_ref().map(|id| (r, id)))
+    {
+        None => (JournalSink::create(&cfg.run_dir)?, None),
+        Some((r, id)) => {
+            if id != &cfg.run_id {
+                return Err(format!(
+                    "UNTIL_STOPPED_RESUME_DRIFT: the start continues {id}, the capture is {}",
+                    cfg.run_id
+                ));
+            }
+            let (mut sink, how, bytes) = JournalSink::resume(&cfg.run_dir)?;
+            crate::console::line(format!(
+                "[UNTIL_STOPPED] continues run {id}: market journal {how:?}"
+            ));
+            match resume_windows(r, &cfg, process_started, bytes) {
+                Ok(w) => (sink, Some(w)),
+                Err(code) => {
+                    let _ = sink.finish(false);
+                    return Err(code);
+                }
+            }
+        }
+    };
     if econ.is_none() {
         print_banner(&cfg);
     }
@@ -567,7 +640,6 @@ fn run_embedded_inner(
     let mut last_flush = Instant::now();
     let mut stop_reason = "TIMER";
     let mut write_error: Option<String> = None;
-    let mut windows: Option<crate::orchestration::until_stopped::RollingWindows> = None;
 
     // ---- phase 1: CAPTURE (no RPC) ----
     loop {
@@ -673,7 +745,7 @@ fn run_embedded_inner(
                 window = Some((t_rx_ns, cutoff));
                 ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
                 core.start_observation(t_rx_ns, cutoff);
-                if let Some(r) = &rolling {
+                if let (Some(r), None) = (&rolling, &windows) {
                     windows = Some(
                         crate::orchestration::until_stopped::RollingWindows::start(
                             &cfg.run_dir,

@@ -558,7 +558,13 @@ pub struct Rolling {
     pub qualification_id: String,
     pub config: darkbot_solana::runtime_config::RuntimeConfig,
     pub max_runtime_seconds: Option<u64>,
+    /// The crashed run this start continues (its run id; `until_stopped_view::resumable`).
+    pub resume: Option<String>,
 }
+
+/// DEC-16: the crashed unbounded run an approved start continues (its run id), decided by the
+/// controller and admitted again by the capture.
+pub const ENV_RESUME: &str = "P0_UNTIL_STOPPED_RESUME";
 
 /// The verdict of a window whose gates all held.
 pub const CONTINUE: &str = "CONTINUE";

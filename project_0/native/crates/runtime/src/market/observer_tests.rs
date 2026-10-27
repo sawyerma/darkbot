@@ -2997,15 +2997,34 @@ struct Unbounded {
 
 /// DEC-16: an unbounded raw capture of 1-s windows (2-s runway) against a loopback WebSocket,
 /// with provider evidence in the controller's store; `max_runtime_seconds` as an autostarted
-/// run's standing approval sets it.
-fn unbounded_capture(tag: &str, max_runtime_seconds: Option<u64>) -> Unbounded {
+/// run's standing approval sets it. `crashed` lays down the run as a killed capture leaves it
+/// (both journals unsealed) and starts it again to continue `(resume id, evidence kept)`.
+fn unbounded_capture(
+    tag: &str,
+    max_runtime_seconds: Option<u64>,
+    crashed: Option<(&str, bool)>,
+) -> Unbounded {
     use crate::orchestration::provider_evidence::{self as pe, ProviderEvidence, ProviderProof};
     use crate::orchestration::until_stopped as us;
     use tungstenite::Message;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        // A capture that never connects ends the server (the test then fails, never hangs).
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                Err(_) => return,
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_millis(50)))
             .unwrap();
@@ -3077,12 +3096,13 @@ fn unbounded_capture(tag: &str, max_runtime_seconds: Option<u64>) -> Unbounded {
     let file = root.join("evidence.p0j");
     crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
     pe::import(&project, &file).unwrap();
-    let rolling = us::Rolling {
+    let mut rolling = us::Rolling {
         project: project.clone(),
         binding: us::tests::binding(1, 2),
         qualification_id: "0123456789abcdef".into(),
         config,
         max_runtime_seconds,
+        resume: None,
     };
     let out = root.join("out").to_string_lossy().to_string();
     let cfg = MarketConfig::from_lookup(
@@ -3104,6 +3124,33 @@ fn unbounded_capture(tag: &str, max_runtime_seconds: Option<u64>) -> Unbounded {
     )
     .unwrap();
     let run_dir = cfg.run_dir.clone();
+    if let Some((resume, evidence)) = crashed {
+        fs::create_dir_all(&run_dir).unwrap();
+        let w = us::RollingWindows::start(
+            &run_dir,
+            rolling.binding.clone(),
+            &rolling.qualification_id,
+            unix_now_s().unwrap() - 1,
+            0,
+        )
+        .unwrap();
+        drop(w);
+        let mut market =
+            crate::storage::segments::SegmentedWriter::create(&run_dir.join(MARKET_JOURNAL), 0)
+                .unwrap();
+        market
+            .append_typed(
+                crate::analytics::journal::Provenance::default(),
+                &super::rows::MarketCoverage::ShadowWarmupWait { observed_unix_s: 1 },
+            )
+            .unwrap();
+        market.sync().unwrap();
+        drop(market);
+        if !evidence {
+            fs::remove_dir_all(project.join(pe::STORE)).unwrap();
+        }
+        rolling.resume = Some(resume.into());
+    }
     let capture = std::thread::spawn(move || {
         super::capture::run_published(cfg, Clock::try_new().unwrap(), None, None, Some(rolling))
     });
@@ -3149,7 +3196,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
         root,
         project,
         run_dir,
-    } = unbounded_capture("halt", None);
+    } = unbounded_capture("halt", None, None);
     let windows = run_dir.join(us::WINDOWS_JOURNAL);
     let verdicts = || window_verdicts(&run_dir);
     let waiting = Instant::now();
@@ -3199,7 +3246,7 @@ fn dec16_an_unbounded_capture_rolls_its_windows_and_halts_at_its_first_violated_
 #[test]
 fn dec16_an_autostarted_capture_ends_in_order_at_its_maximum_runtime() {
     use crate::orchestration::until_stopped as us;
-    let u = unbounded_capture("max_runtime", Some(3));
+    let u = unbounded_capture("max_runtime", Some(3), None);
     let result = u.capture.join().unwrap();
     u.server.join().unwrap();
     assert_eq!(
@@ -3242,6 +3289,132 @@ fn dec16_an_autostarted_capture_ends_in_order_at_its_maximum_runtime() {
         "{ready:?}"
     );
     let _ = (&u.project, fs::remove_dir_all(&u.root));
+}
+
+/// The market journal's rows in order (as far as written).
+fn market_rows(run_dir: &std::path::Path) -> Vec<super::rows::MarketCoverage> {
+    let mut r = crate::storage::segments::ChainReader::open(&run_dir.join(MARKET_JOURNAL)).unwrap();
+    let mut rows = Vec::new();
+    while let Ok(Some(f)) = r.next_frame() {
+        if f.kind == crate::analytics::journal::kind::MARKET_COVERAGE {
+            rows.push(f.typed().unwrap());
+        }
+    }
+    rows
+}
+
+/// DEC-16 (user decision 27.10.): a crashed unbounded capture's next approved start continues
+/// the same run — its market journal and its windows journal by their SK-07 recovery (the
+/// crashed segments untouched), the interrupted window checked again first
+/// (`UNTIL_STOPPED_CRASH_RECOVERED`), then its windows go on until the run ends in order.
+#[test]
+fn dec16_a_crashed_unbounded_capture_continues_the_same_run() {
+    use crate::orchestration::provider_evidence as pe;
+    use crate::orchestration::until_stopped as us;
+    let u = unbounded_capture("resume", None, Some(("unbounded", true)));
+    // Ordered by the journals, never by timing: once a continued window held and the stream is
+    // ready, the evidence goes and the next window halts the run.
+    let streaming = || {
+        market_rows(&u.run_dir).iter().any(|r| {
+            matches!(
+                r,
+                super::rows::MarketCoverage::Window {
+                    event: super::rows::WindowEvent::StreamReadyUntilStopped { .. },
+                    ..
+                }
+            )
+        })
+    };
+    let waiting = Instant::now();
+    while !(window_verdicts(&u.run_dir)
+        .iter()
+        .any(|w| w.verdict == us::CONTINUE)
+        && streaming())
+    {
+        assert!(
+            waiting.elapsed() < Duration::from_secs(30) && !u.capture.is_finished(),
+            "no continued window with a ready stream: {:?}",
+            window_verdicts(&u.run_dir)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    fs::remove_dir_all(u.project.join(pe::STORE)).unwrap();
+    let result = u.capture.join().unwrap();
+    u.server.join().unwrap();
+    assert_eq!(
+        result,
+        Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into())
+    );
+    let all = window_verdicts(&u.run_dir);
+    let (first, rest) = all.split_first().unwrap();
+    assert_eq!(
+        (first.window, first.verdict.as_str()),
+        (1, us::CRASH_RECOVERED),
+        "{}",
+        first.detail
+    );
+    assert!(first.detail.starts_with("Crash"), "{}", first.detail);
+    let (last, held) = rest.split_last().unwrap();
+    assert_eq!(last.verdict, "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");
+    assert!(
+        !held.is_empty() && held.iter().all(|w| w.verdict == us::CONTINUE),
+        "{all:?}"
+    );
+    let windows =
+        crate::storage::segments::verify_chain(&u.run_dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    assert!(
+        windows.sealed && windows.recovered == 1 && !windows.complete,
+        "{windows:?}"
+    );
+    let market = crate::storage::segments::verify_chain(&u.run_dir.join(MARKET_JOURNAL)).unwrap();
+    assert!(market.sealed && market.recovered == 1, "{market:?}");
+    // The same run: the crashed process's rows first, then the continued capture's.
+    assert!(matches!(
+        market_rows(&u.run_dir).first(),
+        Some(super::rows::MarketCoverage::ShadowWarmupWait { .. })
+    ));
+    let _ = fs::remove_dir_all(&u.root);
+}
+
+/// DEC-16: the interrupted window of a crashed run is checked before the continued capture
+/// reads anything: without valid provider evidence it halts the run — sealed INCOMPLETE, never
+/// continued again — and the stream is never opened. A start naming another run is refused.
+#[test]
+fn dec16_a_crashed_run_whose_interrupted_window_fails_halts_before_any_read() {
+    use crate::orchestration::until_stopped as us;
+    let u = unbounded_capture("resume_halt", None, Some(("unbounded", false)));
+    assert_eq!(
+        u.capture.join().unwrap(),
+        Err("MARKET_CAPTURE_INCOMPLETE: UNTIL_STOPPED_HALT".into())
+    );
+    let all = window_verdicts(&u.run_dir);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(all[0].verdict, "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");
+    let windows =
+        crate::storage::segments::verify_chain(&u.run_dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    assert!(windows.sealed && !windows.complete, "{windows:?}");
+    // Nothing after the recovery: no capture start, no stream.
+    let rows = market_rows(&u.run_dir);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(
+        crate::orchestration::until_stopped_view::resumable(
+            u.run_dir.parent().unwrap(),
+            &us::tests::binding(1, 2),
+            "0123456789abcdef"
+        ),
+        None,
+        "a halted run is never continued"
+    );
+    drop(u.server);
+    let _ = fs::remove_dir_all(&u.root);
+    let other = unbounded_capture("resume_drift", None, Some(("another-run", true)));
+    let refused = other.capture.join().unwrap().unwrap_err();
+    assert!(
+        refused.starts_with("UNTIL_STOPPED_RESUME_DRIFT"),
+        "{refused}"
+    );
+    drop(other.server);
+    let _ = fs::remove_dir_all(&other.root);
 }
 
 /// DEC-16: the unbounded StreamReady is an appended variant — a bounded one is encoded exactly as
