@@ -64,7 +64,7 @@ def sync(root, app, run):
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)
-    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/tools/readiness_job.py']:
+    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/config/g04_criteria.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
     # Phase H: the frozen gas evidence Strategy C reads from the snapshot (BSC_STRATEGY_C_GAS_EVIDENCE).

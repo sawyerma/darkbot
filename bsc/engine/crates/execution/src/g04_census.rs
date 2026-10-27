@@ -169,6 +169,27 @@ pub struct Census {
     pub clock_suspect: bool,
     /// Per source: actionable launches it delivered first.
     pub first_full_before: Vec<(SourceId, u64)>,
+    /// The inputs of the G0.4 criteria (`g04_criteria`) per venue, in
+    /// [`CRITERIA_VENUES`] order. Not part of the census record.
+    pub criteria_inputs: [VenueInputs; 3],
+}
+
+/// The venues of the G0.4 criteria, in [`Census::criteria_inputs`] order.
+pub const CRITERIA_VENUES: [&str; 3] = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
+
+/// One venue's G0.4 criteria inputs (order V2 §8, `bsc/config/g04_criteria.env`):
+/// its launches while a source was connected (`connected`), those of them in
+/// the venue's tradable profile (`scope`: Flap the C1 scope of the strict
+/// decoder, Four a recognized launch), those of the scope actionable before
+/// the block (seen in full before the block time with a verified
+/// transaction; Four also with the token derived from its bytes) and the
+/// leads (µs) of the actionable ones, sorted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VenueInputs {
+    pub connected: u64,
+    pub scope: u64,
+    pub actionable: u64,
+    pub leads_us: Vec<u64>,
 }
 
 /// One canonical launch record (`b'C'`); class 0 marks an orphaned one.
@@ -665,7 +686,7 @@ fn replay(
 }
 
 /// Nearest rank of quantile `q` (per mille) when `n >= 1000 / (1000 - q)`.
-fn percentile<T: Copy>(sorted: &[T], q_per_mille: u64) -> Option<T> {
+pub(crate) fn percentile<T: Copy>(sorted: &[T], q_per_mille: u64) -> Option<T> {
     let n = sorted.len() as u64;
     if n == 0 || n * (1000 - q_per_mille) < 1000 {
         return None;
@@ -762,6 +783,28 @@ fn census_of(
             }
             out.tx_unverifiable += u64::from(l.tx_unverifiable);
             out.tx_answer_refused += u64::from(l.tx_answer_refused);
+            if r.connectivity.any_connected_at(l.seen_ns) {
+                let (i, scope, token) = match l.venue {
+                    Venue::Flap => (0, l.c1_scope, true),
+                    venue => (
+                        if venue == Venue::OpenFour { 2 } else { 1 },
+                        !matches!(
+                            l.four,
+                            None | Some(FourToken::NotRecognized | FourToken::NotApplicable)
+                        ),
+                        l.four == Some(FourToken::Matched),
+                    ),
+                };
+                let v = &mut out.criteria_inputs[i];
+                v.connected += 1;
+                if scope {
+                    v.scope += 1;
+                    if l.class == 1 && !l.tx_unverifiable && token {
+                        v.actionable += 1;
+                        v.leads_us.push(l.delta_us);
+                    }
+                }
+            }
             if l.venue != Venue::Flap {
                 out.four_launches += 1;
                 *match l.venue {
@@ -848,6 +891,9 @@ fn census_of(
         }
         out.launches_not_included += r.not_included;
         out.windows.push(r.window);
+    }
+    for v in &mut out.criteria_inputs {
+        v.leads_us.sort_unstable();
     }
     later.sort_unstable();
     four_leads.sort_unstable();
@@ -1869,6 +1915,101 @@ mod tests {
         assert_eq!(c.four_lead_max_us, Some(7));
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_ACTIONABLE).unwrap(), 2);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// G0.4 criteria inputs per venue: launches while a source was
+    /// connected, those in the tradable profile, those of the profile
+    /// actionable before the block and their leads.
+    #[test]
+    fn criteria_inputs_count_connected_scope_and_actionable_per_venue() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-criteria-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let p = SourceId::PublicNode;
+        let joined = |venue, tx, four, visibility, seen| {
+            let mut l = launch(venue, 10, tx, Some(0), seen);
+            if venue != Venue::Flap {
+                l.four_token = four;
+            }
+            (
+                RecordKind::Canonical,
+                seen,
+                canonical_launch_payload(&Joined {
+                    launch: l,
+                    visibility,
+                }),
+            )
+        };
+        let full = |lead_us| Visibility::FullBefore { source: p, lead_us };
+        let records = vec![
+            (
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 10, &[10; 32]),
+            ),
+            (
+                RecordKind::Runtime,
+                5,
+                source_event_payload(p, SourceEvent::Connected),
+            ),
+            // Flap: in the C1 scope and seen in full (actionable), outside
+            // the scope (tx 3), in the scope but missed.
+            joined(Venue::Flap, 1, FourToken::NotApplicable, full(4_000), 100),
+            joined(Venue::Flap, 3, FourToken::NotApplicable, full(5_000), 100),
+            joined(
+                Venue::Flap,
+                4,
+                FourToken::NotApplicable,
+                Visibility::Missed,
+                100,
+            ),
+            // Four Classic: only a candidate token, never actionable.
+            joined(Venue::Four, 6, FourToken::Candidate, full(6_000), 100),
+            // OpenFour: derived (actionable) and not recognized (no scope).
+            joined(Venue::OpenFour, 7, FourToken::Matched, full(7_000), 100),
+            joined(
+                Venue::OpenFour,
+                8,
+                FourToken::NotRecognized,
+                full(8_000),
+                100,
+            ),
+            (
+                RecordKind::Runtime,
+                300,
+                source_event_payload(p, SourceEvent::Disconnected),
+            ),
+            // No source connected: outside every denominator.
+            joined(
+                Venue::Flap,
+                9,
+                FourToken::NotApplicable,
+                Visibility::Missed,
+                400,
+            ),
+            (
+                RecordKind::Canonical,
+                500,
+                window_payload(b'E', 11, &[11; 32]),
+            ),
+            (RecordKind::Runtime, 501, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        let rows: Vec<_> = c
+            .criteria_inputs
+            .iter()
+            .map(|v| (v.connected, v.scope, v.actionable, v.leads_us.clone()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (3, 2, 1, vec![4_000]),
+                (1, 1, 0, vec![]),
+                (2, 1, 1, vec![7_000]),
+            ]
+        );
+        assert_eq!((c.flap_launches, c.outage_launches), (4, 1));
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -339,4 +339,78 @@ pub mod census {
     };
 }
 
-pub const ALL: &[&Schema] = &[&census::SCHEMA, &census::V8];
+/// The G0.4 verdict (order V2 §8): the census replayed by `bsc_runtime
+/// g04-verdict` against the criteria file (`bsc/config/g04_criteria.env`).
+/// Criteria the user has not confirmed give `CRITERIA_UNCONFIRMED` and no
+/// venue rows: no evaluation before the confirmation.
+pub mod verdict {
+    use super::*;
+
+    /// One venue's denominator, actionable share, lead and verdict.
+    pub mod venue {
+        use super::*;
+
+        pub const VENUE: u16 = 1;
+        pub const CONNECTED: u16 = 2;
+        pub const SCOPE: u16 = 3;
+        pub const ACTIONABLE: u16 = 4;
+        pub const SHARE_PPM: u16 = 5;
+        pub const LEAD_P50_US: u16 = 6;
+        pub const MIN_LAUNCHES: u16 = 7;
+        pub const VERDICT: u16 = 8;
+        pub const REASONS: u16 = 9;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.g04-verdict.venue",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(VENUE, "venue", Text),
+                Field::req(CONNECTED, "connected", U64),
+                Field::req(SCOPE, "scope", U64),
+                Field::req(ACTIONABLE, "actionable", U64),
+                Field::opt(SHARE_PPM, "share_ppm", U64),
+                Field::opt(LEAD_P50_US, "lead_p50_us", U64),
+                Field::req(MIN_LAUNCHES, "min_launches", U64),
+                Field::req(VERDICT, "verdict", Text),
+                Field::rep(REASONS, "reasons", Text),
+            ],
+        };
+    }
+
+    pub const CRITERIA_SHA256: u16 = 1;
+    pub const CRITERIA_STATE: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// `CRITERIA_UNCONFIRMED`, `NOT_EVALUABLE`, `CONTINUE`, `ADAPT` or `STOP`.
+    pub const VERDICT: u16 = 5;
+    pub const REASONS: u16 = 6;
+    pub const CAMPAIGN_MS: u16 = 7;
+    pub const COVERED_MS: u16 = 8;
+    pub const COVERED_PPM: u16 = 9;
+    pub const VENUES: u16 = 10;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-verdict.v1",
+        record_type: 63,
+        schema_version: 1,
+        fields: &[
+            Field::req(CRITERIA_SHA256, "criteria_sha256", B256),
+            Field::req(CRITERIA_STATE, "criteria_state", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(CAMPAIGN_MS, "campaign_ms", U64),
+            Field::req(COVERED_MS, "covered_ms", U64),
+            Field::opt(COVERED_PPM, "covered_ppm", U64),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+        ],
+    };
+}
+
+pub const ALL: &[&Schema] = &[&census::SCHEMA, &census::V8, &verdict::SCHEMA];

@@ -1249,3 +1249,95 @@ fn the_latest_c19_evidence_is_projected_from_binary_records() {
     );
     fs::remove_dir_all(&root).unwrap();
 }
+/// C1.9 and C1.10 come from the committed C1.10 freeze record (status,
+/// accepted C1.9 gate, non-claims), not from constants; without a record
+/// both are UNKNOWN.
+#[test]
+fn c1_gates_are_projected_from_the_freeze_record() {
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-c1gates-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("run")).unwrap();
+    let gate = |s: &projection::Snapshot, id: &str| {
+        let g = s.status.gates.iter().find(|g| g.gate_id == id).unwrap();
+        (
+            g.state.clone(),
+            g.reason_codes.clone(),
+            g.evidence.is_some(),
+        )
+    };
+    let none = projection::project(&root, &root.join("run"));
+    for id in ["C1.9", "C1.10"] {
+        assert_eq!(
+            gate(&none, id),
+            ("UNKNOWN".into(), vec!["NO_C1_FREEZE_RECORD".into()], false)
+        );
+    }
+    let freeze = root.join("bsc/native/evidence/c1/c1-10-freeze-818525b1");
+    fs::create_dir_all(&freeze).unwrap();
+    fs::copy(
+        repo().join("bsc/native/evidence/c1/c1-10-freeze-818525b1/c1-10-freeze-record.dbrec"),
+        freeze.join("c1-10-freeze-record.dbrec"),
+    )
+    .unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let (state, reasons, evidence) = gate(&s, "C1.10");
+    assert_eq!(state, "IMPLEMENTED_TESTED/FROZEN");
+    assert!(evidence);
+    assert!(reasons.contains(&"T0_TO_T_BUY_LT_1MS = NOT_PROVEN".to_string()));
+    let (state, reasons, _) = gate(&s, "C1.9");
+    assert_eq!(state, "PASS");
+    assert!(reasons.contains(&"LIVE = BLOCKED".to_string()));
+    fs::remove_dir_all(&root).unwrap();
+}
+/// G0.4: CRITERIA_UNCONFIRMED from the committed proposal until a verdict
+/// record exists; then the verdict and its reasons.
+#[test]
+fn the_g04_gate_shows_the_criteria_state_or_the_verdict() {
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-g04gate-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let run = root.join("run");
+    fs::create_dir_all(run.join("bsc-runtime")).unwrap();
+    let gate = |s: &projection::Snapshot| {
+        let g = s.status.gates.iter().find(|g| g.gate_id == "G0.4").unwrap();
+        (g.state.clone(), g.reason_codes.clone())
+    };
+    assert_eq!(
+        gate(&projection::project(&root, &run)),
+        ("UNKNOWN".into(), vec!["NO_G04_CRITERIA".into()])
+    );
+    fs::create_dir_all(root.join("bsc/config")).unwrap();
+    fs::copy(
+        repo().join("bsc/config/g04_criteria.env"),
+        root.join("bsc/config/g04_criteria.env"),
+    )
+    .unwrap();
+    assert_eq!(
+        gate(&projection::project(&root, &run)),
+        (
+            "CRITERIA_UNCONFIRMED".into(),
+            vec!["CRITERIA_PROPOSED".into()]
+        )
+    );
+    use darkbot_bsc_execution::g04_criteria::{Criteria, evaluate};
+    let text = fs::read_to_string(root.join("bsc/config/g04_criteria.env"))
+        .unwrap()
+        .replace("=PROPOSED", "=CONFIRMED");
+    let verdict = evaluate(
+        &Criteria::parse(text.as_bytes()).unwrap(),
+        &darkbot_bsc_execution::g04_census::Census::default(),
+        1,
+    );
+    fs::write(
+        run.join("bsc-runtime/g04-verdict.dbrec"),
+        verdict.encode(1).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        gate(&projection::project(&root, &run)),
+        (
+            "NOT_EVALUABLE".into(),
+            vec!["CAMPAIGN_RUNNING".into(), "COVERAGE_BELOW_MINIMUM".into()]
+        )
+    );
+    fs::remove_dir_all(&root).unwrap();
+}

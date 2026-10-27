@@ -7,6 +7,7 @@
 //! bsc_runtime source show --state <dir>
 //! bsc_runtime source request <SOURCE_OR_COMPONENT_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! bsc_runtime capture-preflight --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime capture-quality --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
@@ -38,6 +39,11 @@
 //! G0.4 census record (`bsc-runtime/g04-census.dbrec`) and prints its text
 //! view; the running runtime refreshes the same record itself.
 //!
+//! `g04-verdict` replays the census and rates it against the G0.4 criteria
+//! file (order V2 §8) into `bsc-runtime/g04-verdict.dbrec` and prints it;
+//! unconfirmed criteria rate nothing. Exit 0 only for a verdict
+//! (CONTINUE, ADAPT or STOP).
+//!
 //! `request` applies one user request with its generation as the CAS and
 //! prints its receipt as one line; the same request again prints the same
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
@@ -48,7 +54,7 @@ use darkbot_bsc_execution::runtime::{
     write_census,
 };
 use darkbot_bsc_execution::sources::{Entity, KEEP_GENERATIONS, Mode, Store};
-use darkbot_bsc_execution::{capture_preflight, capture_quality, replay_proof};
+use darkbot_bsc_execution::{capture_preflight, capture_quality, g04_criteria, replay_proof};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::process::ExitCode;
@@ -96,6 +102,26 @@ fn run(args: &[String]) -> Result<bool, String> {
             let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?), None)?;
             print!("{}", census.summary());
             Ok(true)
+        }
+        [cmd, rest @ ..] if cmd == "g04-verdict" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let criteria_path = flag(rest, "--criteria")?;
+            let criteria = g04_criteria::Criteria::parse(
+                &std::fs::read(criteria_path).map_err(|e| format!("{criteria_path}: {e}"))?,
+            )?;
+            let rundir = std::path::Path::new(flag(rest, "--rundir")?);
+            let census = write_census(&config, rundir, None)?;
+            let now = darkbot_bsc_record::observed_now()?;
+            let verdict = g04_criteria::evaluate(&criteria, &census, now);
+            replay_proof::write(
+                &rundir.join("bsc-runtime/g04-verdict.dbrec"),
+                &verdict.encode(now)?,
+            )?;
+            print!("{}", verdict.summary());
+            Ok(verdict.verdict != g04_criteria::NOT_EVALUABLE
+                && verdict.verdict != darkbot_bsc_execution::g04_census::CRITERIA_UNCONFIRMED)
         }
         [cmd, rest @ ..] if cmd == "replay-proof" => {
             let config_path = flag(rest, "--config")?;
@@ -273,7 +299,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

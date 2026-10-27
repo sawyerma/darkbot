@@ -301,6 +301,108 @@ fn gate(id: &str, state: &str, evidence: Option<Evidence>, reasons: Vec<String>)
     }
 }
 
+/// C1.9 and C1.10 from the newest C1.10 freeze record: its status (and what
+/// it misses), its accepted C1.9 gate and its non-claims; without a record
+/// both are UNKNOWN.
+fn c1_gates(root: &Path, records: &[(PathBuf, Record)]) -> [GateStatus; 2] {
+    use schema::c1_qualification::{freeze_bindings as fb, freeze_record as fr};
+    let freeze = latest(records, &[fr::SCHEMA.name]).and_then(|(p, r)| {
+        let bindings = r.nested(fr::BINDINGS).ok()?;
+        Some((p, r, bindings))
+    });
+    let Some((path, r, bindings)) = freeze else {
+        let none = || vec!["NO_C1_FREEZE_RECORD".to_string()];
+        return [
+            gate("C1.9", "UNKNOWN", None, none()),
+            gate("C1.10", "UNKNOWN", None, none()),
+        ];
+    };
+    let non_claims: Vec<String> = bindings
+        .texts(fb::NON_CLAIMS)
+        .unwrap_or_default()
+        .into_iter()
+        .map(safe_text)
+        .collect();
+    let c19 = bindings
+        .nested_all(fb::GATES)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|g| g.text(fb::gate::GATE).is_ok_and(|id| id == "C1.9"))
+        .and_then(|g| g.text(fb::gate::VERDICT).ok().map(safe_text));
+    let mut c110_reasons: Vec<String> = r
+        .texts(fr::MISSING)
+        .unwrap_or_default()
+        .into_iter()
+        .map(safe_text)
+        .collect();
+    c110_reasons.extend(non_claims.iter().cloned());
+    let status = r.text(fr::STATUS).map(safe_text).unwrap_or_default();
+    [
+        match c19 {
+            Some(verdict) => gate(
+                "C1.9",
+                &verdict,
+                Some(evidence(root, path, Some(r))),
+                non_claims,
+            ),
+            None => gate(
+                "C1.9",
+                "UNKNOWN",
+                Some(evidence(root, path, Some(r))),
+                vec!["C1.9_NOT_IN_FREEZE_RECORD".into()],
+            ),
+        },
+        gate(
+            "C1.10",
+            &status,
+            Some(evidence(root, path, Some(r))),
+            c110_reasons,
+        ),
+    ]
+}
+
+/// G0.4 (order V2 §8): the newest verdict of `bsc_runtime g04-verdict` in
+/// the run directory; without one, the state of the criteria file
+/// (`CRITERIA_UNCONFIRMED` while the user has not confirmed them).
+fn g04_gate(root: &Path, rundir: &Path) -> GateStatus {
+    use schema::bsc_census::verdict as gv;
+    let path = rundir.join("bsc-runtime/g04-verdict.dbrec");
+    if let Some(bytes) = read(&path) {
+        return match record::decode(&gv::SCHEMA, &bytes) {
+            Ok(r) => gate(
+                "G0.4",
+                &r.text(gv::VERDICT).map(safe_text).unwrap_or_default(),
+                Some(evidence(rundir, &path, Some(&r))),
+                r.texts(gv::REASONS)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(safe_text)
+                    .collect(),
+            ),
+            Err(_) => gate("G0.4", "UNKNOWN", None, vec!["G04_VERDICT_INVALID".into()]),
+        };
+    }
+    let criteria = root.join("bsc/config/g04_criteria.env");
+    match read(&criteria).map(|b| darkbot_bsc_execution::g04_criteria::Criteria::parse(&b)) {
+        Some(Ok(c)) => gate(
+            "G0.4",
+            if c.confirmed {
+                "NOT_RUN"
+            } else {
+                darkbot_bsc_execution::g04_census::CRITERIA_UNCONFIRMED
+            },
+            None,
+            vec![if c.confirmed {
+                "NO_VERDICT".into()
+            } else {
+                "CRITERIA_PROPOSED".into()
+            }],
+        ),
+        Some(Err(_)) => gate("G0.4", "UNKNOWN", None, vec!["G04_CRITERIA_INVALID".into()]),
+        None => gate("G0.4", "UNKNOWN", None, vec!["NO_G04_CRITERIA".into()]),
+    }
+}
+
 /// The offline G0.7 A/B candidate state for the GUI: the public mirror of the
 /// snapshot (every ID recomputed from its public fields, never a salt) and
 /// the runtime selection requests. Absent mirror: no field (GUI shows
@@ -993,6 +1095,14 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("G04_CENSUS_INVALID".into()),
         }
     }
+    // Its verdict against the versioned criteria (`bsc_runtime g04-verdict`).
+    let verdict = rundir.join("bsc-runtime/g04-verdict.dbrec");
+    if let Some(bytes) = read(&verdict) {
+        match record::decode(&schema::bsc_census::verdict::SCHEMA, &bytes) {
+            Ok(r) => monitoring.records.push(native_record(rundir, &verdict, &r)),
+            Err(_) => warnings.push("G04_VERDICT_INVALID".into()),
+        }
+    }
     // Phase F: the capacity preflight of a scoped capture and the newest
     // capture→replay identity proof (both written by bsc_runtime).
     let preflight = rundir.join("bsc-runtime/capture-preflight.dbrec");
@@ -1047,7 +1157,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("STRATEGY_REPLAY_INVALID".into()),
         }
     }
-    let gates = vec![
+    let mut gates = vec![
         gate(
             "G0.6a",
             &dry.state,
@@ -1065,14 +1175,9 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             monitoring.evidence.clone(),
             g08_reasons,
         ),
-        gate(
-            "C1.9",
-            "UNKNOWN",
-            None,
-            vec!["NOT_CONNECTED_TO_EXECUTION".into()],
-        ),
-        gate("C1.10", "UNKNOWN", None, vec!["NO_PHASE_ACCEPTANCE".into()]),
+        g04_gate(root, rundir),
     ];
+    gates.extend(c1_gates(root, &records));
     Snapshot {
         status: BscStatus {
             source_commit: fs::read_to_string(root.join("COMMIT"))

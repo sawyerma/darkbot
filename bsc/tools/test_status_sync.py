@@ -73,6 +73,7 @@ class SyncTests(unittest.TestCase):
    (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
    (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
    (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_RPC_HTTPS=https://rpc.example.invalid/\n')
+   (root/'bsc/config/g04_criteria.env').write_text('BSC_G04_CRITERIA_STATE=PROPOSED\n')
    subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    (root/'bsc/config/g07_attempt1_acceptance_v5.dbrec').write_bytes(b'v5 fixture')
@@ -88,6 +89,8 @@ class SyncTests(unittest.TestCase):
    snapshot=(app/'bsc-source').resolve()
    self.assertEqual((snapshot/'CHECKOUT').read_text().strip(),str(root.resolve()))
    self.assertTrue((snapshot/'bsc/config/readiness.public.env').is_file())
+   # G0.4: the criteria file the reporter shows (CRITERIA_UNCONFIRMED until confirmed).
+   self.assertEqual((snapshot/'bsc/config/g04_criteria.env').read_text(),'BSC_G04_CRITERIA_STATE=PROPOSED\n')
    self.assertEqual((snapshot/'bsc/.local/g06a_sign/g06a_sign_20261025T000000Z/dry_result.dbrec').read_bytes(),b'bound dry')
    manifest=(snapshot/'SOURCES.SHA256SUMS').read_text()
    self.assertIn('./bsc/config/g07_producer_witness_source_attempt1.json',manifest)

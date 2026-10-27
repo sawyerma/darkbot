@@ -67,6 +67,9 @@ pub mod canonical_join;
 /// The G0.4 market census replayed from the runtime journals.
 #[cfg(feature = "runtime")]
 pub mod g04_census;
+/// The G0.4 verdict against the versioned criteria file.
+#[cfg(feature = "runtime")]
+pub mod g04_criteria;
 /// The runtime's bounded binary journal.
 #[cfg(feature = "runtime")]
 pub mod runtime_journal;
