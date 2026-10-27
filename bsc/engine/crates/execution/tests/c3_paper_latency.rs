@@ -17,6 +17,12 @@
 //! with `BSC_C3_LATENCY_EVIDENCE_DIR` set, the statistics and the raw
 //! totals are written there as one binary record. A local metric only: no
 //! transport, no acquisition, no T0→T_buy claim.
+//!
+//! G0.6 head-of-line: with `BSC_C3_LATENCY_BURST=k` (2..=8, the lane
+//! capacity) the launches arrive `k` at a time (published together, then
+//! polled one by one, as the single executor takes them); each burst
+//! position also reports its latency from the burst's first publish to its
+//! PAPER sink handoff.
 #![cfg(feature = "runtime")]
 
 use alloy_primitives::{Address, B256, U256, hex, keccak256};
@@ -375,104 +381,127 @@ fn c3_paper_path_latency() {
         "journal record",
         "T_ingress -> T_shadow_sink",
     ];
+    let burst: usize = std::env::var("BSC_C3_LATENCY_BURST")
+        .map(|v| v.parse().expect("BSC_C3_LATENCY_BURST is a number"))
+        .unwrap_or(1);
+    assert!(
+        (1..=8).contains(&burst),
+        "BSC_C3_LATENCY_BURST is 1..=8 (the lane capacity)"
+    );
+    // Per burst position: the burst's first publish -> this sink handoff.
+    let mut positions: Vec<Vec<u64>> = vec![Vec::with_capacity(N / burst + 1); burst];
     let mut samples: Vec<Vec<u64>> = vec![Vec::with_capacity(N); stages.len()];
     let (mut cold, mut misses) = (0u64, 0u64);
     let (mut alloc_min, mut alloc_max) = (u64::MAX, 0u64);
     let mut scratch = Vec::with_capacity(512);
-    for (i, raw) in txs.iter().enumerate() {
-        let hash = keccak256(raw).0;
-        let published = now() + 1;
-        producer
-            .publish(&RecordV2 {
-                kind: RecordKind::EarlyTxSeen,
-                flags: 0,
-                timestamp_ns: published,
-                clock_id: CLOCK_ID_MONOTONIC,
-                source: SOURCE_ETH_BROADCAST,
-                peer: [0x22; 32],
-                hash,
-                // The packet was decoded just before the ingress record.
-                aux: ingress_aux(published - 1),
-                payload: raw,
-            })
-            .unwrap();
-        let mut done = false;
-        poller.poll_once(
-            |_| {},
-            |record| {
-                let ingress = now();
-                let allocs = allocations();
-                // The signed envelope and its sender, as C2 needs them.
-                let signed = decode_signed(record.payload).unwrap();
-                let from = recover_legacy_sender(&signed, 56, &mut scratch).unwrap();
-                state.apply(&ChainInput::Pending(PendingObservation {
-                    hash: B256::from(hash),
-                    sender: from,
-                    nonce: signed.tx.nonce,
-                    first_seen: FirstSeen {
-                        source: 0,
-                        at_ns: ingress,
-                    },
-                }));
-                let c2_ns = now();
-                let target = decode_tx_target(record.payload).unwrap();
-                let result = exec.on_launch(
-                    PendingLaunch {
-                        hash,
-                        raw: record.payload,
-                        to: target.to,
-                        input: target.data,
-                        ingress_ns: ingress,
-                    },
-                    &LaunchContext {
-                        snapshot: &|cand, p, g| state.snapshot_id(cand, p, g),
-                        head,
-                    },
-                    &clock,
-                );
-                done = true;
-                let buy = match result {
-                    Ok(buy) => buy,
-                    Err(Refusal::Deadline) => {
-                        misses += 1;
-                        return Hot0Decision::Reject;
+    // The cold launch alone, then the rest in bursts.
+    let chunks = std::iter::once(0..1).chain(
+        (1..launches)
+            .step_by(burst)
+            .map(|a| a..(a + burst).min(launches)),
+    );
+    for chunk in chunks {
+        let first_published = now() + 1;
+        for raw in &txs[chunk.clone()] {
+            let published = now() + 1;
+            producer
+                .publish(&RecordV2 {
+                    kind: RecordKind::EarlyTxSeen,
+                    flags: 0,
+                    timestamp_ns: published,
+                    clock_id: CLOCK_ID_MONOTONIC,
+                    source: SOURCE_ETH_BROADCAST,
+                    peer: [0x22; 32],
+                    hash: keccak256(raw).0,
+                    // The packet was decoded just before the ingress record.
+                    aux: ingress_aux(published - 1),
+                    payload: raw,
+                })
+                .unwrap();
+        }
+        for (position, i) in chunk.clone().enumerate() {
+            let hash = keccak256(&txs[i]).0;
+            let mut done = false;
+            poller.poll_once(
+                |_| {},
+                |record| {
+                    let ingress = now();
+                    let allocs = allocations();
+                    // The signed envelope and its sender, as C2 needs them.
+                    let signed = decode_signed(record.payload).unwrap();
+                    let from = recover_legacy_sender(&signed, 56, &mut scratch).unwrap();
+                    state.apply(&ChainInput::Pending(PendingObservation {
+                        hash: B256::from(hash),
+                        sender: from,
+                        nonce: signed.tx.nonce,
+                        first_seen: FirstSeen {
+                            source: 0,
+                            at_ns: ingress,
+                        },
+                    }));
+                    let c2_ns = now();
+                    let target = decode_tx_target(record.payload).unwrap();
+                    let result = exec.on_launch(
+                        PendingLaunch {
+                            hash,
+                            raw: record.payload,
+                            to: target.to,
+                            input: target.data,
+                            ingress_ns: ingress,
+                        },
+                        &LaunchContext {
+                            snapshot: &|cand, p, g| state.snapshot_id(cand, p, g),
+                            head,
+                        },
+                        &clock,
+                    );
+                    done = true;
+                    let buy = match result {
+                        Ok(buy) => buy,
+                        Err(Refusal::Deadline) => {
+                            misses += 1;
+                            return Hot0Decision::Reject;
+                        }
+                        Err(r) => panic!("launch {i}: {r:?}"),
+                    };
+                    let mut payload = Vec::with_capacity(64);
+                    payload.extend_from_slice(&buy.handoff.tx_hash);
+                    payload.extend_from_slice(&buy.handoff.sequence.to_le_bytes());
+                    assert!(journal.record(JournalKind::Runtime, buy.times.sink_ns, payload));
+                    let journal_ns = now();
+                    let used = allocations() - allocs;
+                    let t = buy.times;
+                    let total = t.sink_ns - ingress;
+                    if i == 0 {
+                        cold = total;
+                    } else if chunk.start > WARMUP {
+                        positions[position].push(t.sink_ns - first_published);
                     }
-                    Err(r) => panic!("launch {i}: {r:?}"),
-                };
-                let mut payload = Vec::with_capacity(64);
-                payload.extend_from_slice(&buy.handoff.tx_hash);
-                payload.extend_from_slice(&buy.handoff.sequence.to_le_bytes());
-                assert!(journal.record(JournalKind::Runtime, buy.times.sink_ns, payload));
-                let journal_ns = now();
-                let used = allocations() - allocs;
-                let t = buy.times;
-                let total = t.sink_ns - ingress;
-                if i == 0 {
-                    cold = total;
-                } else if i > WARMUP {
-                    alloc_min = alloc_min.min(used);
-                    alloc_max = alloc_max.max(used);
-                    for (k, v) in [
-                        c2_ns - ingress,
-                        t.decoded_ns - c2_ns,
-                        t.admitted_ns - t.decoded_ns,
-                        t.signed_ns - t.admitted_ns,
-                        t.prepared_ns - t.signed_ns,
-                        t.planned_ns - t.prepared_ns,
-                        t.sink_ns - t.planned_ns,
-                        journal_ns - t.sink_ns,
-                        total,
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        samples[k].push(v);
+                    if i > WARMUP {
+                        alloc_min = alloc_min.min(used);
+                        alloc_max = alloc_max.max(used);
+                        for (k, v) in [
+                            c2_ns - ingress,
+                            t.decoded_ns - c2_ns,
+                            t.admitted_ns - t.decoded_ns,
+                            t.signed_ns - t.admitted_ns,
+                            t.prepared_ns - t.signed_ns,
+                            t.planned_ns - t.prepared_ns,
+                            t.sink_ns - t.planned_ns,
+                            journal_ns - t.sink_ns,
+                            total,
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            samples[k].push(v);
+                        }
                     }
-                }
-                Hot0Decision::Reject
-            },
-        );
-        assert!(done, "record {i} not delivered");
+                    Hot0Decision::Reject
+                },
+            );
+            assert!(done, "record {i} not delivered");
+        }
     }
     drop(arena);
     journal.finish().unwrap();
@@ -488,6 +517,16 @@ fn c3_paper_path_latency() {
         let (stage, line) = stats(name, values);
         println!("{line}");
         d.push(c::STAGES, stage.into_nested());
+    }
+    if burst > 1 {
+        for (p, values) in positions.iter().enumerate() {
+            let name = format!(
+                "burst {burst} position {p}: first publish -> T_shadow_sink (head-of-line)"
+            );
+            let (stage, line) = stats(&name, values);
+            println!("{line}");
+            d.push(c::STAGES, stage.into_nested());
+        }
     }
     if let Some(out) = std::env::var_os("BSC_C3_LATENCY_EVIDENCE_DIR") {
         let host = format!(
@@ -540,6 +579,15 @@ fn c3_paper_path_latency() {
             "FASTLANE_LOCAL: the FastLane record is published locally, not by a synced geth",
         ] {
             d.push(c::NON_CLAIMS, n);
+        }
+        if burst > 1 {
+            d.push(
+                c::NON_CLAIMS,
+                format!(
+                    "BURST {burst}: launches published {burst} at a time and taken one by one by the single executor; a synthetic arrival pattern, not an observed one"
+                )
+                .as_str(),
+            );
         }
         let out = Path::new(&out);
         fs::create_dir_all(out).unwrap();
