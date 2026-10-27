@@ -76,6 +76,10 @@ Die HTML-Vorschau ist ein **interaktiver, eigenständiger Gate-1-Prototyp** und 
 \`Wnorm = Wraw + 100\`; für klassische Williams %R sind 70 % ⇒ −30 und 30 % ⇒ −70. Die Exitwerte 55/45 sind **nur illustrative Vorschlagswerte**, die echte Pine-Regel ist separat anhand Golden-Vectors zu definieren.
 
 
+## P5 – Private Bitget-Futures-Anbindung (Research-Artefakt)
+
+[PHASENPLAN_P5_V1.md](PHASENPLAN_P5_V1.md) dokumentiert offizielle UTA-V3-Konto-/Hebel-/Order-/Stop-/Private-WS-Capabilities, Open-Source-Vergleiche, Demo-Verträge, die zentrale Rust-Order-Autorität und die Sicherheits-/Crash-Gates. **Alle privaten Funktionen sind bisher nur dokumentiert, NICHT RUN**. Der volle USDT-Futures-Symbolkatalog ist ebenfalls noch nicht abgerufen. Keine Modus-/Hebeländerung und keine Order während Gate 1.
+
 ## 3. Open-Source-Analyse: Daten, Exchange, Backtest, Nodes, Charts
 
 **Diese Projekte sind Referenzen/Kandidaten, keine bereits geprüften integrierten Dependencies.** Live-Streams und vollständige historische Tick-/Orderbucharchive sind verschiedene Fähigkeiten. Codeübernahme nur nach Version-/Lizenzprüfung.
