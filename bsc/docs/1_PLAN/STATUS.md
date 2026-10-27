@@ -1,5 +1,13 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## Ergänzter verbindlicher Arbeitsauftrag (27.10.2026) — Wallet-/Wirtschaftscontrols
+
+`PHASENPLAN.md` verlangt jetzt die vollständige technische Schaltbarkeit einschließlich **LAUNCHER** und **BUYER** mit zwei voneinander unabhängigen nativen `ENABLE/DISABLE`-Controls, Initial-/Recovery-Default jeweils `DISABLED`, identischer Terminal-/Frontend-Autorität und vollständigem Native→Protobuf→Gateway→BSC-Wallets-Panel-Rundweg. Alle wirtschaftlichen Controls initial `DISABLED/OFF`, keine automatische Freigabe anderer Modi. Technische Implementierung und nichtwirtschaftliche E2E-Abnahme sind vor G0.7/G0.8 erlaubt; deren reale Erwerbs-/Timing-Evidence bleibt ausstehend.
+
+**IST / offene Arbeit:** `BscWalletsState` und `WalletsPanel.tsx` zeigen bislang nur Identitäten/Snapshots und besitzen keine Launcher-/Buyer-Steuerung. Der Gateway-Control-Allowlist fehlt ein Wallet-Command. Vorhandene Source-/Component-/Candidate-Schalter nicht neu bauen. Fehlende Wallet-, Venue-, globalen Runtime- und wirtschaftlichen Controller/Statusbindungen als `SOLL_MISSING` inventarisieren, technisch implementieren und mit Default-DISABLED-/CLI-/Frontend-/Crash-/Negativtests nachweisen. **Diese Dokumentationsänderung hat keine Mainnet-Transaktion und kein SIGN/ARM/SEND ausgelöst.** Historische Safety-/Gate-0-Nachweise bleiben erhalten.
+
+---
+
 ## Fortschritt Auftrag V2 (verbindlich: [BSC_UMSETZUNGSAUFTRAG_V2.md](../5_OFFENE_FEHLER/BSC_UMSETZUNGSAUFTRAG_V2.md))
 
 Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prüfen, erstes offenes Paket fortsetzen. Basis: `87c064ba`.
