@@ -314,41 +314,43 @@ fn run(args: &[String]) -> Result<bool, String> {
             let g = store.current()?;
             println!("generation={}", g.generation);
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
+            // As each holds in this boot session (switches, LIVE reasons).
             let rows = g
                 .sources
                 .iter()
-                .map(|s| (s.source.name(), s.requested, s.effective))
-                .chain(
-                    g.components
-                        .iter()
-                        .map(|c| (c.component.name(), c.requested, c.effective)),
-                )
+                .map(|s| (s.source.name(), s.requested, Entity::Source(s.source)))
+                .chain(g.components.iter().map(|c| {
+                    (
+                        c.component.name(),
+                        c.requested,
+                        Entity::Component(c.component),
+                    )
+                }))
                 .chain(
                     g.venues
                         .iter()
-                        .map(|v| (v.venue.name(), v.requested, v.effective)),
+                        .map(|v| (v.venue.name(), v.requested, Entity::Venue(v.venue))),
                 )
-                .chain(g.switches.iter().map(|s| {
-                    (
-                        s.switch.name(),
-                        s.requested,
-                        g.switch_now(s.switch, boot.as_deref()),
-                    )
-                }))
+                .chain(
+                    g.switches
+                        .iter()
+                        .map(|s| (s.switch.name(), s.requested, Entity::Switch(s.switch))),
+                )
                 .chain([
                     (
                         darkbot_bsc_execution::sources::RUNTIME_MODE,
                         g.runtime.requested,
-                        g.runtime.effective,
+                        Entity::Runtime,
                     ),
                     (
                         darkbot_bsc_execution::sources::BUY_ATTEMPTS_PER_DAY,
                         g.buy_limit.requested,
-                        g.buy_limit.effective,
+                        Entity::BuyLimit,
                     ),
                 ])
                 .collect::<Vec<_>>();
-            for (name, requested, effective) in rows {
+            for (name, requested, entity) in rows {
+                let effective = g.effective_now(entity, boot.as_deref());
                 println!(
                     "{} requested={} effective={}{}",
                     name,

@@ -680,6 +680,28 @@ impl Generation {
         }
     }
 
+    /// A stored block reason as it reads in the boot session `boot`: a
+    /// requested LIVE names the economic LIVE switch as it holds now, and an
+    /// ENABLED of an earlier boot no longer does (review L5).
+    pub fn live_reason_now<'a>(&self, reason: &'a str, boot: Option<&str>) -> &'a str {
+        if reason == ECONOMIC_LIVE_NOT_AUTHORIZED
+            && self.switch_now(SwitchId::Live, boot) != Effective::Enabled
+        {
+            ECONOMIC_LIVE_DISABLED
+        } else {
+            reason
+        }
+    }
+
+    /// The effective mode of any entity in the boot session `boot`.
+    pub fn effective_now(&self, entity: Entity, boot: Option<&str>) -> Effective {
+        match (entity, self.effective_of(entity)) {
+            (Entity::Switch(s), _) => self.switch_now(s, boot),
+            (_, Effective::Blocked(r)) => Effective::Blocked(self.live_reason_now(r, boot)),
+            (_, other) => other,
+        }
+    }
+
     fn live_gate(&self) -> LiveGate {
         if self.switch(SwitchId::Live).requested == Mode::Enabled {
             LiveGate::Enabled
@@ -2263,6 +2285,40 @@ mod tests {
                 .component(ComponentId::ExecC3)
                 .effective,
             Effective::Blocked(ECONOMIC_LIVE_DISABLED)
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review L5: after a reboot nobody restarted the owner for, a requested
+    /// LIVE names the LIVE switch as it holds in this boot, not as written.
+    #[test]
+    fn a_live_reason_reads_the_live_switch_of_this_boot() {
+        let (dir, s) = session("live-boot", "boot-1");
+        s.request("l-on", SwitchId::Live, Mode::Enabled, 0, 1)
+            .unwrap();
+        s.request("v-live", VenueId::Flap, Mode::Live, 1, 2)
+            .unwrap();
+        s.request("r-live", Entity::Runtime, Mode::Live, 2, 3)
+            .unwrap();
+        let g = s.current().unwrap();
+        let written = Effective::Blocked(ECONOMIC_LIVE_NOT_AUTHORIZED);
+        for e in [Entity::Venue(VenueId::Flap), Entity::Runtime] {
+            assert_eq!(g.effective_of(e), written);
+            assert_eq!(g.effective_now(e, Some("boot-1")), written);
+            for boot in [Some("boot-2"), None] {
+                assert_eq!(
+                    g.effective_now(e, boot),
+                    Effective::Blocked(ECONOMIC_LIVE_DISABLED)
+                );
+            }
+        }
+        assert_eq!(
+            g.effective_now(Entity::Switch(SwitchId::Live), Some("boot-2")),
+            Effective::Blocked(RESET_BY_RESTART)
+        );
+        assert_eq!(
+            g.live_reason_now(FOUR_EXECUTION_PATH_MISSING, Some("boot-2")),
+            FOUR_EXECUTION_PATH_MISSING
         );
         fs::remove_dir_all(dir).unwrap();
     }

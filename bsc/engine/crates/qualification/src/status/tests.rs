@@ -1526,3 +1526,57 @@ fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
     assert_eq!(limit.day_utc.len(), 10);
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// Review L5: a LIVE requested in an earlier boot session with the LIVE
+/// switch ENABLED reads ECONOMIC_LIVE_DISABLED now, typed and in the raw
+/// source-modes leaves, as the reset LIVE switch itself does.
+#[test]
+fn a_live_reason_of_an_earlier_boot_is_projected_as_it_holds_now() {
+    use darkbot_bsc_execution::sources::{Entity, Mode, Store, SwitchId, VenueId};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-live-boot-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let run = root.join("run");
+    fs::create_dir_all(&run).unwrap();
+    let earlier =
+        Store::open_in_session(run.join("bsc-sources"), 8, Ok("an-earlier-boot".into())).unwrap();
+    earlier
+        .request("l-on", SwitchId::Live, Mode::Enabled, 0, 1)
+        .unwrap();
+    earlier
+        .request("v-live", VenueId::Flap, Mode::Live, 1, 2)
+        .unwrap();
+    earlier
+        .request("r-live", Entity::Runtime, Mode::Live, 2, 3)
+        .unwrap();
+    let s = projection::project(&root, &run);
+    let mode = s.launch.runtime_mode.unwrap();
+    assert_eq!(
+        (mode.effective.as_str(), mode.block_reason.as_str()),
+        ("BLOCKED", "ECONOMIC_LIVE_DISABLED")
+    );
+    let modes = s
+        .monitoring
+        .records
+        .iter()
+        .find(|r| r.schema == schema::bsc_runtime::source_modes::SCHEMA.name)
+        .unwrap();
+    let reasons: Vec<_> = modes
+        .fields
+        .iter()
+        .filter(|f| f.name.ends_with(".block_reason"))
+        .map(|f| f.value.as_str())
+        .collect();
+    assert!(reasons.contains(&"ECONOMIC_LIVE_DISABLED"), "{reasons:?}");
+    assert!(
+        !reasons.contains(&"ECONOMIC_LIVE_NOT_AUTHORIZED"),
+        "{reasons:?}"
+    );
+    let live = s
+        .launch
+        .economic_controls
+        .iter()
+        .find(|c| c.id == "BSC_ECON_LIVE")
+        .unwrap();
+    assert_eq!(live.block_reason, "RESET_BY_RESTART");
+    fs::remove_dir_all(&root).unwrap();
+}

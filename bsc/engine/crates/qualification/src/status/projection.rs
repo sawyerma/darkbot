@@ -1126,7 +1126,21 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // (RUNDIR/bsc-sources); a state the owner's rule refuses is a warning.
     let sources = rundir.join("bsc-sources");
     match darkbot_bsc_execution::sources::current_record(&sources) {
-        Ok(Some((path, r))) => monitoring.records.push(native_record(rundir, &path, &r)),
+        Ok(Some((path, r))) => {
+            let mut record = native_record(rundir, &path, &r);
+            // Review L5: a LIVE reason as it reads in this boot session.
+            if let Ok(g) = darkbot_bsc_execution::sources::current_generation(&sources) {
+                let boot = darkbot_bsc_execution::sources::boot_session().ok();
+                for f in record
+                    .fields
+                    .iter_mut()
+                    .filter(|f| f.name.ends_with(".block_reason"))
+                {
+                    f.value = g.live_reason_now(&f.value, boot.as_deref()).to_owned();
+                }
+            }
+            monitoring.records.push(record)
+        }
         Ok(None) => {}
         Err(_) if !sources.exists() => {}
         Err(_) => warnings.push("SOURCE_MODES_INVALID".into()),
@@ -1164,11 +1178,17 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                     )
                 };
                 let (request_id, set_generation) = set_by(&g.runtime);
+                let runtime = g.effective_now(
+                    darkbot_bsc_execution::sources::Entity::Runtime,
+                    darkbot_bsc_execution::sources::boot_session()
+                        .ok()
+                        .as_deref(),
+                );
                 launch.runtime_mode = Some(ControlSwitch {
                     id: darkbot_bsc_execution::sources::RUNTIME_MODE.into(),
                     requested: g.runtime.requested.name(),
-                    effective: g.runtime.effective.name(),
-                    block_reason: g.runtime.effective.reason().unwrap_or_default().into(),
+                    effective: runtime.name(),
+                    block_reason: runtime.reason().unwrap_or_default().into(),
                     generation: g.generation,
                     request_id,
                     set_generation,
