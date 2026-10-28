@@ -186,6 +186,110 @@ Code `b72bf2ed`…`4b0139ee` (Owner `sources.rs`, Projektion, `darkbot.bsc.v1`, 
 
 **Abnahme und Reihenfolge:** In den bestehenden PASS/FAIL/OPEN-Zeilen pro Quelle und E2E-Test `source_id, endpoint_class, requested/effective, connected/subscribed, cold_start_ms, steady_state, capability(HASH_ONLY/VERIFIED_FULL/ACTIONABLE), samples, drops/errors, first/lead/delta p50/p95/p99/max, git_sha, release_binary_sha, config_sha, raw_evidence, verdict` dokumentieren; unabhängiger Review des finalen Codes. Fehlende, unqualifizierte oder nicht beobachtbare Quellen explizit lassen, **keine erfundenen fünf grünen WebSockets**. Die tatsächlich verwendete Kette muss ihre Offline-Sicherheits-/Korrekheitsnachweise vor dem separaten echten G0.7-BUY erfüllen; Ergebnisse anderer späterer Fremdlaunch-/Produktions-Scope bleiben OPEN. Keine neuen Langzeitläufe oder Kosten, kein Blockieren der parallel vorbereiteten lokalen SIGN-DRY/V5-/Readiness-Arbeit.
 
+### 3b. Verbindliche logische Schalter-Kombinationsmatrix (28.10.2026) — Pflicht VOR dem ersten Echtgeld-BUY
+
+**Abnahmegrenze:** Vor **S4/G0.7 (erstem realem Mainnet-BUY)** sind die für den tatsächlich genutzten Self-Launch-, Wallet-, Transport- und Guard-Scope zutreffenden Kombinationen **auszuführen und mit PASS zu belegen**, nicht nur als Liste abzuhaken. Bereits gleichwertige Altbelege auf exakt passendem Git-/Binary-/Config-Stand referenzieren statt Tests nutzlos zu wiederholen. Bei einem für den gewählten G0.7-Pfad relevanten FAIL/OPEN bleibt der Geldversuch gesperrt. G0.7-SIGN-DRY, V5-Vorschlag und Readiness dürfen parallel vorbereitet werden; eine neue G0.4-Wartezeit ist nicht verlangt. **Nur Offline-/SHADOW-/PAPER-Tests mit synthetischen Konten, Mock-WS/RPC und garantiert nicht sendendem Transport.** Die echten, finanzierten Operator-Wallets und ihre Schalter sind für diese Tests tabu. Kein Home-Bypass; die kanonische OS-Home-Regel bleibt erhalten.
+
+**Inventar: 20 native Controls, Autorität im Rust-Owner.** Die verbindlichen IDs und zulässigen Modi stammen ausschließlich aus bsc/engine/crates/execution/src/sources.rs (SourceId, ComponentId, VenueId, SwitchId, Entity::accepts/effective). protocol/schemas/darkbot/bsc/v1/status.proto, Gateway und Frontend sind Projektionen, nicht die Freigabeinstanz.
+
+| Bereich | Native IDs (Suffix zu BSC_) | Anzahl | Modi |
+|---|---|---:|---|
+| Ingress | INGRESS_GETH, INGRESS_PUBLICNODE, INGRESS_DRPC, INGRESS_BLOCKREQ, INGRESS_48CLUB | 5 | OFF/SHADOW/LIVE |
+| Komponenten | STATE_C2, EXEC, STRATEGY_C | 3 | OFF/SHADOW/LIVE |
+| Venues | VENUE_FLAP, VENUE_FOUR_CLASSIC, VENUE_OPENFOUR | 3 | OFF/SHADOW/LIVE |
+| Wallets | WALLET_LAUNCHER, WALLET_BUYER | 2 | DISABLED/ENABLED |
+| Wirtschaft | ECON_SIGN, ECON_ARM, ECON_SEND, ECON_ATTEMPT, ECON_LIVE | 5 | DISABLED/ENABLED |
+| Runtime | RUNTIME_MODE | 1 | OFF/SHADOW/PAPER/LIVE |
+| Tageslimit | BUY_ATTEMPTS_PER_DAY | 1 | nichtnegative Ganzzahl; 0 = kein BUY |
+| **Summe** | | **20** | |
+
+**Wichtige Trennung:** Der G0.7-Self-Launch-Runner prüft sechs Pflichtschalter (WALLET_LAUNCHER, WALLET_BUYER, ECON_SIGN, ECON_ARM, ECON_SEND, ECON_ATTEMPT) und zusätzlich Tageslimit, genehmigten V5-/Guard-/Attempt-/Budget-/Nonce-/Builder-Zustand. Ein Wallet-ENABLE alleine kann keinen Echtgeld-BUY auslösen. Der allgemein gewählte RUNTIME_MODE LIVE sowie Source-/Component-/Venue-LIVE bleiben derzeit **auch bei ECON_LIVE ENABLED BLOCKED**, weil der Native-Owner keinen operativen J-/Bot-LIVE-Executor autorisiert. G0.7-BUY und künftiger automatischer LIVE-Betrieb sind getrennt; der Test bestätigt die Sperre, nicht eine fiktive Freigabe.
+
+#### A. Fünf Ingress-Quellen und Umschaltung
+
+S = SHADOW, 0 = OFF. Nur PublicNode und dRPC haben im aktuellen Standardprofil echte WSS-Endpoints. BlockReq ist nicht konfiguriert, Geth ist kein angebundener öffentlicher WSS-Adapter, 48Club ist ohne Feed-Zugang unqualifiziert. Keine fünf grünen WebSockets erfinden.
+
+| ID | Schalterkombination / Fehlerereignis | Verbindliche Erwartung |
+|---|---|---|
+| A01 | Alle fünf Ingress OFF | Keine Source-WSS-Adapter; kanonischer Follower separat bewerten |
+| A02 | Nur PUBLICNODE SHADOW | Nur PublicNode verbunden/subscribed; eigene Ereignisse und Health |
+| A03 | Nur DRPC SHADOW | Nur dRPC verbunden/subscribed; eigene Ereignisse und Health |
+| A04 | PUBLICNODE + DRPC SHADOW | Beide parallel, gemeinsamer TX-Hash/Clock-Kontext; getrennte Quellzahlen |
+| A05 | PublicNode Disconnect, dRPC SHADOW | dRPC unbeeinflusst; PublicNode-Fehler und Recovery erfasst |
+| A06 | dRPC Disconnect, PublicNode SHADOW | PublicNode unbeeinflusst; dRPC-Fehler und Recovery erfasst |
+| A07 | Beide Down/Rate-limit | Health/Drops ehrlich; keine erfundene volle oder handelbare TX |
+| A08 | Früher HASH, spätere verifizierte FULL einer anderen Quelle | FULL gewinnt für actionable; HASH niemals BUY-ready |
+| A09 | Identische FULL-TX von beiden Quellen | Nur ein Kandidat, korrekte erste/spätere Zeit, kein Double-BUY |
+| A10 | BLOCKREQ SHADOW ohne Endpoint | NOT_CONFIGURED/UNQUALIFIED statt PASS |
+| A11 | BLOCKREQ SHADOW mit isoliertem Mock-WSS | Adapter-Handshake/Subscribe/Disconnect/Recovery; kein Live-Provider-PASS |
+| A12 | GETH SHADOW ohne native angebundene Quelle | Fehlender IPC-/geth-Adapter als UNQUALIFIED; kein fiktiver Runtime-Empfang |
+| A13 | 48CLUB SHADOW ohne Providerberechtigung | BLOCKED SOURCE_ACCESS_UNQUALIFIED, kein Providerkauf |
+| A14 | Jede der fünf Quellen einzeln LIVE angefordert | Immer BLOCKED mit richtigem LIVE-Grund, auch bei ECON_LIVE ENABLED |
+| A15 | PUBLICNODE und DRPC einzeln OFF → SHADOW → OFF → SHADOW | Start/Stop/Re-Subscribe; keine veraltete Generation, kein Zombie-Adapter |
+| A16 | Kaputte FULL/Signer, Queue voll, Disconnect, Reconnect, Rate-Limit | Ablehnung/Backpressure/Drops erfasst, keine falsche Actionability |
+
+Für Quellen-Stabilität und reale Verzögerung gilt §3a: Vorhandene Daten zuerst, optional höchstens **10 Minuten insgesamt** auf demselben Host, parallel für verfügbare Quellen und ohne feste Warm-up-Wartezeit. Es zählt erst die **bestätigte Subscription**; Cold-start, Steady-State und Reconnect getrennt. Keine Wartepflicht vor SIGN-DRY/V5.
+
+#### B. Runtime, C2/C3/Strategie und drei Venues
+
+In jeder Zeile sind nicht genannte Komponenten/Venues OFF, sofern sie nicht ausdrücklich vom referenzierten Zustand übernommen werden. PAPER läuft nur bei tatsächlich qualifiziertem Papierkonto, zutreffendem Portal/Terms und C2/Nonce. Die Tests dürfen keine unqualifizierten Economics als PASS ausgeben.
+
+| ID | Fachlich sinnvolle Komponentenkombination | Verbindliche Erwartung |
+|---|---|---|
+| B01 | Runtime OFF, alle Quellen/Komponenten/Venues OFF | Keine PAPER-Strategie, kein PAPER-BUY |
+| B02 | Runtime OFF, PUBLICNODE SHADOW, C2 SHADOW | Ingress/C2 dürfen lesen; weder C3 noch Strategie-BUY |
+| B03 | Runtime SHADOW, FLAP SHADOW, STRATEGY_C SHADOW | Strategy-C-PAPER-Ledger, kein C3-Sink |
+| B04 | Runtime SHADOW, FLAP SHADOW, EXEC SHADOW, C2 SHADOW | C3-PAPER-Handoff bleibt OFF |
+| B05 | Runtime PAPER, FLAP SHADOW, EXEC SHADOW, C2 SHADOW, STRATEGY_C OFF | C3 bis PAPER-Sink nur bei qualifiziertem PAPER-Sender/Terms/Nonce |
+| B06 | Runtime PAPER, FLAP SHADOW, STRATEGY_C SHADOW, EXEC OFF | Strategie-Ledger, kein C3-BUY |
+| B07 | Runtime PAPER, FLAP SHADOW, C2/EXEC/STRATEGY_C SHADOW | Beide PAPER-Verarbeitungen; eindeutige Nonce-/Intent-Koordination |
+| B08 | Wie B07, aber FLAP OFF | Keine Flap-Kandidatenzulassung zu C3/Strategie |
+| B09 | Wie B05, aber C2 OFF | C3 verweigert ohne C2-Snapshot, kein BUY |
+| B10 | Wie B05, aber EXEC OFF | Kein C3-BUY |
+| B11 | FOUR_CLASSIC SHADOW | BLOCKED FOUR_EXECUTION_PATH_MISSING |
+| B12 | OPENFOUR SHADOW | BLOCKED FOUR_EXECUTION_PATH_MISSING |
+| B13 | FLAP SHADOW + beide Four-Venues SHADOW | Flap bleibt unabhängig; Four bleibt BLOCKED |
+| B14 | Jede Quelle/Komponente/Venue/Runtime einzeln LIVE mit ECON_LIVE DISABLED | BLOCKED mit zutreffendem Grund; C2 ggf. eigener operationaler Grund |
+| B15 | Gleiche LIVE-Requests mit ECON_LIVE ENABLED | Weiterhin BLOCKED; kein produktiver LIVE-Executor |
+| B16 | Runtime OFF → SHADOW → PAPER → OFF während Replay-Events | Keine hängenden Lanes/Positionen; konsistentes Journal; kein SEND |
+
+**Zusätzliche vollständige Unterkombination:** Bei RUNTIME_MODE PAPER und FLAP SHADOW alle **8 binären OFF/SHADOW-Kombinationen** von STATE_C2/EXEC/STRATEGY_C mit produktiven Callern gegen Mock-/Replay-Inputs durchschalten. Je Venue OFF/SHADOW/LIVE einzeln, mit fachgerechter BLOCKED-Begründung. Keine sinnlosen kartesischen Kombinationen aller 20 Controls.
+
+#### C. Wallet-, ökonomische Freigabe- und Tageslimit-Prüfungen
+
+L = WALLET_LAUNCHER, B = WALLET_BUYER, S = ECON_SIGN, A = ECON_ARM, D = ECON_SEND, T = ECON_ATTEMPT, V = ECON_LIVE; 1 = ENABLED, 0 = DISABLED. In synthetischen Harnesses meint „SIGN-Check PASS“ nur die Erfüllung der nativen Schaltervoraussetzung, niemals eine Erlaubnis zum Signieren realer Wallet-Keys.
+
+| ID | Logische Schalterkombination / Zustandswechsel | Verbindliche Erwartung |
+|---|---|---|
+| C01 | L/B/S/A/D/T/V alle DISABLED; Tageslimit 0 | Default fail-closed; 0 SIGN/SEND |
+| C02 | L=1, B=0, S=1, A/D/T=0 | SIGN-Check verweigert |
+| C03 | L=0, B=1, S=1, A/D/T=0 | SIGN-Check verweigert |
+| C04 | L=1, B=1, S=0, A/D/T=0 | SIGN-Check verweigert |
+| C05 | L=1, B=1, S=1, A/D/T=0 | Nur lokale SIGN-DRY-Schaltervoraussetzung erfüllt; keine reale SIGN-Freigabe, kein SEND |
+| C06 | Wie C05, danach L deaktivieren | SIGN-Check verweigert |
+| C07 | Wie C05, danach B deaktivieren | SIGN-Check verweigert |
+| C08 | L/B/S/A/D/T=1; Tageslimit 0; Testkonto | Wirtschaftlicher Versuch vor SEND verweigert |
+| C09 | L/B/S/A/D/T=1; Limit 1, V5/Guard UNARMED | Versuch verweigert; sechs Schalter allein genügen nicht |
+| C10 | Alle sechs Pflichtschalter außer jeweils genau einem auf ENABLED | Sechs isolierte Negativfälle; jeder verhindert Signatur/Release |
+| C11 | Sechs Pflichtschalter + Limit 1, synthetische V5/Attempt-Grenzen | Produktive Guard-/Barrierenlogik im isolierten Harness, keine echte Egress-Freigabe |
+| C12 | ECON_LIVE ENABLED + RUNTIME_MODE LIVE | RUNTIME weiterhin BLOCKED ECONOMIC_LIVE_NOT_AUTHORIZED |
+| C13 | Tageslimit 1, erster Attempt gezählt, zweiter angefragt | Zweiter verhindert; kein Double-Count |
+| C14 | Limit 3, Race, Restart, UTC-Tageswechsel | Persistenz, Idempotenz und Kapazität korrekt |
+| C15 | Alle sieben Wirtschaftsschalter ENABLED, Owner-Restart/Bootwechsel | Wirksam DISABLED/RESET_BY_RESTART; Limit bleibt separat persistent |
+| C16 | Pflichtschalter nach Preflight, vor Release-Barriere deaktiviert | Kein unautorisierter neuer Release; nach möglichem Write UNKNOWN statt falsch UNSENT |
+| C17 | Zeitgleiche CLI-/GUI-Schaltrequests mit identischer CAS-Generation | Genau ein Apply, anderer stale/conflict; keine verlorene Änderung |
+| C18 | Dieselbe request_id und Bytes / dieselbe ID mit anderem Inhalt | Idempotentes Receipt bzw. Konflikt |
+| C19 | Owner unlesbar, fremdes HOME, veraltete GUI-Projektion | Fail closed; keine effektive Freigabe |
+| C20 | Jeden Wallet-/Wirtschaftsschalter, Runtime und Limit einzeln über CLI und GUI | Native/Protobuf/Gateway/Frontend: requested/effective/reason/generation/receipt identisch |
+
+**Vollständige relevante Unterkombinationen:** Alle **8 Belegungen** von L/B/S als isolierter SIGN-Guard; alle **8 Belegungen** von A/D/T bei sonst gültigen synthetischen Pflichtbedingungen; V=0 und V=1 jeweils mit Source-, Venue- und Runtime-LIVE-Request; Limit 0/1/mehrere/ausgeschöpft/UTC-Tageswechsel. Jede einzelne der sechs G0.7-Bedingungen muss bei DISABLED eine eigene fail-closed-Probe bestehen. Kein wahlloser 128-Zustände-Test ohne Betriebszweck.
+
+#### D. Verbindlicher Nachweis / STOP-Regel
+
+**Für jede Test-ID**: Request wirklich am isolierten nativen Owner stellen und reale Wirkung am zuständigen Fach-Caller prüfen; dazu Native CLI (darkbotctl bsc source request/show), Source-DBREC, Protobuf-Status, Gateway-Receipt und die fünf BSC-Frontend-Reiter auf exakte requested/effective/blocked_reason/generation/request_id abgleichen. Negativfälle verlangen null unautorisierte Signatur/Netzwerksendung, null Doppel-BUY/Nonce- oder Limitumgehung. Auch Crash, Restart, CAS-Race und Frontend-Stale prüfen. Pro Fall Git-/Release-Binary-/Config-SHA, konkrete Eingaben, Test-Scope, Original-Evidence, unabhängiger Review und PASS/FAIL/OPEN. Ein bloßer Quelltexttest oder alternativ akzeptierter Frühabbruch ersetzt keinen echten Verhaltensnachweis (BSC-002-Regressionslehre).
+
+**Kein Mainnet-BUY vor diesem Gate** im tatsächlich benötigten G0.7-Scope. Extern noch nicht zugängliche und *nicht verwendete* Quellen (z. B. 48Club-Ingress, Geth, BlockReq), Four-/Fremdlaunch- oder künftige J-LIVE-Funktion bleiben ehrlich EXTERNAL_BLOCKED/OPEN, dürfen aber keinen anderen bereits qualifizierten Self-Launch-G0.7-Scope künstlich blockieren. Getestete Schalter sind nur Permissions, weiterhin keine V5-/ARM-/Grant-/SEND-/BUY-Freigabe.
+
 ## 4. Messschritte in richtiger Reihenfolge
 
 | Schritt | Was genau tun? | Erwarteter Output / Fortschritt | Vor echter Mainnet-Aktion nötig? |
@@ -194,6 +298,7 @@ Code `b72bf2ed`…`4b0139ee` (Owner `sources.rs`, Projektion, `darkbot.bsc.v1`, 
 | **S1 – Schalter-E2E** | Wallet LAUNCHER/BUYER und alle weiteren wirtschaftlichen Controls implementieren, Defaults DISABLED, CLI/Frontend-Projektion, Fallmatrix | O01/O02/O17 lokal PASS; 0 SIGN/0 SEND bei DISABLED | Ja |
 | **S2 – Marktsichtung stoppen/auswerten** | Bestehende G0.4-Aufzeichnung nur geordnet beenden; bereits vorhandene Daten einmal pro Source/Profil auswerten; optional maximal 10 Minuten als Explorationsrahmen (kein Pflichtlauf) | Zeitfenster, tatsächliche Quellenverfügbarkeit, vollständige Signed-TX-Anteile, fremde BUY-Positionen; unzureichender Nenner NOT_EVALUABLE | **Keine Wartepflicht** für einen einzelnen G0.7-Kauf |
 | **S2a – Quellen einzeln + native Ketten-E2E (offline vor echtem BUY)** | Die fünf Source-IDs gemäß §3a separat klassifizieren; verfügbare WSS parallel, cold-start/subscribed/steady-state je Quelle messen; Mock-WSS/Replay/Last/Negativfälle der echten Rust-Kette; vorhandene Rohdaten zuerst, bei Bedarf insgesamt höchstens 10 Minuten read-only Live-Sichtung. | O04–O06/O15/O16/O18: pro Quelle begründeter PASS/OPEN/NOT_CONFIGURED/EXTERNAL_BLOCKED mit Hash-/Full-/Actionable-Zeit und nativem BUY-Handoff; keine erfundene echte T_send-Inclusion | **Ja**, Offline-Safety für die tatsächlich zum wirtschaftlichen Versuch verwendete Kette vor S4; nicht benötigte Quellen mit dokumentiertem Nicht-PASS, **keine Wartepflicht** vor SIGN-DRY/V5/Readiness |
+| **S2b – Schalter-Kombinationsgate (§3b)** | A01–A16, B01–B16, C01–C20 und definierte 8er-Unterkombinationen mit isoliertem Native-Owner, CLI/Proto/Gateway/Frontend und tatsächlichem Fachverhalten testen; bereits belegt nur per SHA/Evidence anrechnen | Jeder Fall mit PASS/FAIL/OPEN, Gründen, Receipts, Sicherheits- und Wirkungstest; gewählter G0.7-Scope ohne offene Pflichtfälle | **Ja, zwingend VOR S4/erstem Echtgeld-BUY**; unbenutzte nicht qualifizierte Feeds und J/LIVE bleiben separat OPEN |
 | **S3 – Current qualification** | Flap-/Four-Verträge und Self-Launch-Economics/BUY-Kontext prüfen; fremde Profile separat; echte Preflight-/G0.6-Identität und Transport/Kosten-Provenienz | O03/O04/O06 soweit ohne Geld testbar; keine Mainnet-Ausführung | Ja, für den jeweils gewählten Scope |
 | **S4 – G0.7 Versuch 1** | Separat genehmigter exakt gebundener Self-Launch + BUY mit laufender Capture | Echter Versuch, vollständige G0.7 Evidence, **nicht** nur RPC-ACK | Ja, nur bei ausdrücklicher wirtschaftlicher Nutzerfreigabe |
 | **S5 – G0.8 direkt danach** | Receipts, canonical Block, tatsächlichen Token-Zufluss, Position N+1/0 Konkurrenten, Gesamtkosten, Reorg/UNRESOLVED prüfen | Separater Erwerbs-/Ordering-/Kosten-PASS, ADAPT, STOP oder UNRESOLVED; T0-Gap unabhängig UNKNOWN ohne Witness | Ja, nach Versuch |
