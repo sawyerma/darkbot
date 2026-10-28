@@ -1,12 +1,17 @@
-//! DEC-16 (stage 3): the rolling windows of an unbounded Shadow owner run, the mode-neutral
-//! `until_stopped::RollingWindows` driven by the owner itself. The first window opens at the
-//! owner's first tradable READY; every window is the run's checkpoint long whatever the
-//! readiness within it (its ready time is recorded). At a window's end the owner journals the
-//! window's counters (`OwnerWindow`, the last event of the window's evidence segment), asks its
-//! evidence writer to seal that segment and ends the provider window — without waiting and
-//! without a drain: candidates, watches and workers go on, what crosses the boundary is counted
-//! (D-1). Once the segment is sealed the window's gates are re-checked (`check_window`); a
-//! violated gate is the run's safe HALT, final for the run.
+//! DEC-16 (stage 3): the rolling windows of an unbounded Shadow owner run.
+//!
+//! A Shadow-only run drives the mode-neutral `until_stopped::RollingWindows` itself: the first
+//! window opens at the owner's first tradable READY; every window is the run's checkpoint long
+//! whatever the readiness within it (its ready time is recorded); its gates are re-checked at
+//! its end (`check_window`) and a violated gate is the run's safe HALT, final for the run.
+//! An econ4h run's windows are the econ grid, whose gates its market capture checks; the owner
+//! follows that grid with its own journals and checks the integrity of every segment it sealed
+//! (a failure aborts the run).
+//!
+//! In both, at a window's end the owner journals the window's counters (`OwnerWindow`, the last
+//! event of the window's evidence segment) and asks its evidence writer to seal that segment —
+//! without waiting and without a drain: candidates, watches and workers go on, what crosses the
+//! boundary is counted (D-1).
 use super::*;
 use crate::analytics::evidence::{OwnerCounters, OwnerWindow, RotatedSegment, Rotation};
 use crate::orchestration::until_stopped::{self as us, Rolling, RollingWindows};
@@ -17,49 +22,90 @@ use std::sync::mpsc::TryRecvError;
 /// A window's end whose evidence segment the writer has not sealed yet.
 struct Pending {
     ended_unix_s: u64,
-    provider: darkbot_solana::provider::WindowUsage,
+    /// The provider window it ended (a Shadow-only run's; an econ run's capture ends its own).
+    provider: Option<darkbot_solana::provider::WindowUsage>,
     rotation: Rotation,
     requested: std::time::Instant,
 }
 
+/// Whose windows these are.
+// One value per run, held in place by its owner (never moved on a hot path).
+#[allow(clippy::large_enum_variant)]
+enum Driver {
+    /// A Shadow-only run: the owner's own rolling windows, checked here.
+    Own {
+        rolling: Box<Rolling>,
+        windows: Option<RollingWindows>,
+        /// The provider budget whose window a boundary ends (production: the shared one every
+        /// RPC client of the run accounts against).
+        budget: std::sync::Arc<darkbot_solana::provider::Budget>,
+    },
+    /// An econ4h run: the econ grid, checked by its capture.
+    Econ,
+}
+
 pub(crate) struct OwnerWindows {
-    rolling: Rolling,
+    driver: Driver,
     run_dir: std::path::PathBuf,
-    windows: Option<RollingWindows>,
-    /// The open window as the MT0 journal follows it (0 before the first).
+    /// The window now open (0 before the first); the MT0 journal follows it.
+    open: u64,
     mt0_window: std::sync::Arc<AtomicU64>,
     pending: Option<Pending>,
     environment: fn(&std::path::Path) -> preflight::Environment,
-    /// The provider budget whose window a boundary ends (production: the shared one every RPC
-    /// client of the run accounts against).
-    budget: std::sync::Arc<darkbot_solana::provider::Budget>,
     /// How long a window's end may wait for its sealed segment (`market_writer_stall_ms`).
     stall: Duration,
     started_unix_s: u64,
     ready_ns: u64,
     last_ns: Option<u64>,
-    /// Why the run stops: an operator stop, its HALT, the end of its standing approval or its
-    /// maximum runtime.
+    /// Why a Shadow-only run stops: an operator stop, its HALT, the end of its standing
+    /// approval or its maximum runtime.
     stop: Option<&'static str>,
     /// A window that could not be journaled or checked: the run ends INCOMPLETE.
     failure: Option<&'static str>,
 }
 
 impl OwnerWindows {
+    /// The windows of a Shadow-only run admitted as `rolling`.
     pub(crate) fn new(
         rolling: Rolling,
         run_dir: std::path::PathBuf,
         mt0_window: std::sync::Arc<AtomicU64>,
     ) -> Self {
         let stall = Duration::from_millis(rolling.config.limits.market_writer_stall_ms);
-        Self {
-            rolling,
+        Self::with(
+            Driver::Own {
+                rolling: Box::new(rolling),
+                windows: None,
+                budget: darkbot_solana::provider::shared(),
+            },
             run_dir,
-            windows: None,
+            mt0_window,
+            stall,
+        )
+    }
+
+    /// The owner's side of an econ4h run's windows (the econ grid; `stall` as its writers').
+    pub(crate) fn econ(
+        run_dir: std::path::PathBuf,
+        mt0_window: std::sync::Arc<AtomicU64>,
+        stall: Duration,
+    ) -> Self {
+        Self::with(Driver::Econ, run_dir, mt0_window, stall)
+    }
+
+    fn with(
+        driver: Driver,
+        run_dir: std::path::PathBuf,
+        mt0_window: std::sync::Arc<AtomicU64>,
+        stall: Duration,
+    ) -> Self {
+        Self {
+            driver,
+            run_dir,
+            open: 0,
             mt0_window,
             pending: None,
             environment: preflight::environment,
-            budget: darkbot_solana::provider::shared(),
             stall,
             started_unix_s: 0,
             ready_ns: 0,
@@ -85,7 +131,9 @@ impl OwnerWindows {
         mut self,
         budget: std::sync::Arc<darkbot_solana::provider::Budget>,
     ) -> Self {
-        self.budget = budget;
+        if let Driver::Own { budget: b, .. } = &mut self.driver {
+            *b = budget;
+        }
         self
     }
 
@@ -99,9 +147,22 @@ impl OwnerWindows {
         self.stop.get_or_insert(reason);
     }
 
-    /// Whether a window's end is due at `now_s` (its counters are taken then).
-    pub(crate) fn due(&self, now_s: u64) -> bool {
-        self.pending.is_none() && self.windows.as_ref().is_some_and(|w| w.due(now_s))
+    /// Whether the open window ends at `now_ns`/`now_s` (its counters are taken then).
+    pub(crate) fn due(
+        &self,
+        now_ns: u64,
+        now_s: u64,
+        econ: Option<&crate::analytics::econ::Handle>,
+    ) -> bool {
+        if self.pending.is_some() || self.open == 0 {
+            return false;
+        }
+        match &self.driver {
+            Driver::Own { windows, .. } => windows.as_ref().is_some_and(|w| w.due(now_s)),
+            Driver::Econ => econ
+                .and_then(|h| h.window_of(now_ns))
+                .is_some_and(|(k, _, _)| k > self.open),
+        }
     }
 
     /// How the run ended for its result: a failed window or a HALT is an error, every other
@@ -121,10 +182,60 @@ impl OwnerWindows {
         Err(code)
     }
 
+    /// Opens the first window: a Shadow-only run's at its first ready, an econ run's once its
+    /// grid started (the window `now_ns` falls in).
+    fn open_first(
+        &mut self,
+        ready: bool,
+        now_ns: u64,
+        now_s: u64,
+        econ: Option<&crate::analytics::econ::Handle>,
+    ) -> Result<Option<&'static str>, &'static str> {
+        let opened = match &mut self.driver {
+            Driver::Own {
+                rolling, windows, ..
+            } => {
+                if !ready {
+                    return Ok(None);
+                }
+                match RollingWindows::start(
+                    &self.run_dir,
+                    rolling.binding.clone(),
+                    &rolling.qualification_id,
+                    now_s,
+                    0,
+                ) {
+                    Ok(w) => {
+                        let first = w.window();
+                        *windows = Some(w);
+                        first
+                    }
+                    Err(e) => {
+                        crate::console::line(format!("UNTIL_STOPPED_WINDOWS {e}"));
+                        return self.fail("UNTIL_STOPPED_WINDOWS_WRITE_FAILED");
+                    }
+                }
+            }
+            Driver::Econ => match econ
+                .filter(|h| h.rolling())
+                .and_then(|h| h.window_of(now_ns))
+            {
+                Some((k, _, _)) => k,
+                None => return Ok(None),
+            },
+        };
+        self.open = opened;
+        self.mt0_window.store(opened, Ordering::Release);
+        self.started_unix_s = now_s;
+        self.last_ns = Some(now_ns);
+        Ok(None)
+    }
+
     /// One owner pass (`ready`: the owner's tradable readiness, `now_ns` its monotonic and
-    /// `now_s` its wall clock; `counters` taken when a window ends): opens the first window at
-    /// the first ready, ends a due window and re-checks a window once its segment is sealed.
-    /// `Ok(Some(reason))` stops the run; `Err` is a window that failed (the run is INCOMPLETE).
+    /// `now_s` its wall clock; `counters` taken when a window ends; `econ`: an econ run's
+    /// handle): opens the first window, ends a due window and checks a window once its segment
+    /// is sealed. `Ok(Some(reason))` stops the run; `Err` is a window that failed (the run is
+    /// INCOMPLETE).
     pub(crate) fn tick(
         &mut self,
         ready: bool,
@@ -132,33 +243,16 @@ impl OwnerWindows {
         now_s: u64,
         evidence: &mut OwnerEvidenceWriter,
         counters: Option<OwnerCounters>,
+        econ: Option<&crate::analytics::econ::Handle>,
     ) -> Result<Option<&'static str>, &'static str> {
         if let Some(code) = self.failure {
             return Err(code);
         }
-        if self.windows.is_none() {
-            if self.stop.is_some() || !ready {
+        if self.open == 0 {
+            if self.stop.is_some() {
                 return Ok(self.stop);
             }
-            match RollingWindows::start(
-                &self.run_dir,
-                self.rolling.binding.clone(),
-                &self.rolling.qualification_id,
-                now_s,
-                0,
-            ) {
-                Ok(w) => {
-                    self.mt0_window.store(w.window(), Ordering::Release);
-                    self.windows = Some(w);
-                }
-                Err(e) => {
-                    crate::console::line(format!("UNTIL_STOPPED_WINDOWS {e}"));
-                    return self.fail("UNTIL_STOPPED_WINDOWS_WRITE_FAILED");
-                }
-            }
-            self.started_unix_s = now_s;
-            self.last_ns = Some(now_ns);
-            return Ok(None);
+            return self.open_first(ready, now_ns, now_s, econ);
         }
         if let Some(last) = self.last_ns.replace(now_ns) {
             if ready {
@@ -180,11 +274,9 @@ impl OwnerWindows {
                 Err(TryRecvError::Disconnected) => self.fail("OWNER_EVIDENCE_DISCONNECTED"),
             };
         }
-        let windows = self.windows.as_ref().expect("open");
-        if windows.due(now_s) {
-            let window = windows.window();
+        if self.due(now_ns, now_s, econ) {
             let record = OwnerWindow {
-                window,
+                window: self.open,
                 started_unix_s: self.started_unix_s,
                 ended_unix_s: now_s,
                 ready_ns: std::mem::take(&mut self.ready_ns),
@@ -198,45 +290,73 @@ impl OwnerWindows {
                 Ok(r) => r,
                 Err(e) => return self.fail(e.0),
             };
+            let provider = match &self.driver {
+                Driver::Own { budget, .. } => Some(budget.roll_window()),
+                Driver::Econ => None,
+            };
             self.pending = Some(Pending {
                 ended_unix_s: now_s,
-                provider: self.budget.roll_window(),
+                provider,
                 rotation,
                 requested: std::time::Instant::now(),
             });
-            self.mt0_window.store(window + 1, Ordering::Release);
+            self.open += 1;
+            self.mt0_window.store(self.open, Ordering::Release);
             self.started_unix_s = now_s;
             return Ok(None);
         }
-        if self.rolling.max_runtime_reached(windows, now_s) {
-            self.stop = Some(super::super::autostart::MAX_RUNTIME);
+        if let Driver::Own {
+            rolling,
+            windows: Some(w),
+            ..
+        } = &self.driver
+        {
+            if rolling.max_runtime_reached(w, now_s) {
+                self.stop = Some(super::super::autostart::MAX_RUNTIME);
+            }
         }
         Ok(self.stop)
     }
 
-    /// Re-checks the window that ended at `p` against its sealed evidence segment.
+    /// Checks the window that ended at `p` against its sealed evidence segment: a Shadow-only
+    /// run's gates (`check_window`), an econ run's segment integrity.
     fn close(
         &mut self,
         p: Pending,
         sealed: RotatedSegment,
     ) -> Result<Option<&'static str>, &'static str> {
+        let Driver::Own {
+            rolling, windows, ..
+        } = &mut self.driver
+        else {
+            return match us::segment_intact(&sealed.sealed, sealed.root_sha256) {
+                Ok(()) => Ok(None),
+                Err(e) => {
+                    crate::console::line(format!("UNTIL_STOPPED_SEGMENT_INTEGRITY {e}"));
+                    self.fail("UNTIL_STOPPED_SEGMENT_INTEGRITY")
+                }
+            };
+        };
         let next_end = p
             .ended_unix_s
-            .saturating_add(self.rolling.binding.checkpoint_seconds);
-        let windows = self.windows.as_mut().expect("open");
+            .saturating_add(rolling.binding.checkpoint_seconds);
+        let windows = windows.as_mut().expect("open");
         let check = windows.close(
-            &self.rolling.config,
+            &rolling.config,
             super::super::boot_audit::SHADOW_CAPTURE_SOURCE,
             us::Measured {
                 now: p.ended_unix_s,
                 bytes: us::run_bytes(&self.run_dir),
                 run_volume: &self.run_dir,
                 environment: (self.environment)(&self.run_dir),
-                provider: p.provider,
+                provider: p.provider.unwrap_or(darkbot_solana::provider::WindowUsage {
+                    requests: 0,
+                    bytes: 0,
+                }),
                 evidence: us::newest_evidence(
-                    &self.rolling.project,
-                    &self.rolling.config,
-                    &self.rolling.binding,
+                    &rolling.project,
+                    &rolling.config,
+                    &rolling.binding,
                     next_end,
                 ),
                 sealed: Some((&sealed.sealed, sealed.root_sha256)),
@@ -253,16 +373,16 @@ impl OwnerWindows {
             "[UNTIL_STOPPED] window={} verdict={} {}",
             check.window, check.verdict, check.detail
         ));
-        if let Some(reason) = self.rolling.after_window(&check) {
+        if let Some(reason) = rolling.after_window(&check) {
             if let Some(code) = check.halt_code() {
-                self.rolling.suspend_autostart(code, p.ended_unix_s);
+                rolling.suspend_autostart(code, p.ended_unix_s);
             }
             self.stop = Some(reason);
         }
         Ok(self.stop)
     }
 
-    /// The run's end: a window's end still waiting for its segment is re-checked first (within
+    /// The run's end: a window's end still waiting for its segment is checked first (within
     /// the stall budget), then the open window's record carries the run's end — its stop, its
     /// failure, or `end` (how the owner loop ended otherwise).
     pub(crate) fn end(
@@ -286,11 +406,11 @@ impl OwnerWindows {
                 }
             }
         }
-        let Some(windows) = &self.windows else {
+        if self.open == 0 {
             return;
-        };
+        }
         let record = OwnerWindow {
-            window: windows.window(),
+            window: self.open,
             started_unix_s: self.started_unix_s,
             ended_unix_s: now_s,
             ready_ns: std::mem::take(&mut self.ready_ns),
@@ -307,10 +427,13 @@ impl OwnerWindows {
         self.failure.or(self.stop).unwrap_or("RUN_END")
     }
 
-    /// Seals the windows journal: complete only for a run that ended in order and never halted
-    /// or failed a window.
+    /// Seals a Shadow-only run's windows journal: complete only for a run that ended in order
+    /// and never halted or failed a window (an econ run's is its capture's).
     pub(crate) fn finish(self, in_order: bool) {
-        if let Some(w) = self.windows {
+        if let Driver::Own {
+            windows: Some(w), ..
+        } = self.driver
+        {
             if let Err(e) = w.finish(in_order && self.failure.is_none()) {
                 crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
             }
@@ -348,9 +471,18 @@ impl ShadowOwner {
         };
         let now_ns = self.clock.now_ns();
         let now_s = (self.clock.unix_ns(now_ns) / 1_000_000_000) as u64;
-        let counters = w.due(now_s).then(|| self.owner_counters());
+        let counters = w
+            .due(now_ns, now_s, self.econ.as_ref())
+            .then(|| self.owner_counters());
         let go_on = matches!(
-            w.tick(ready, now_ns, now_s, &mut self.evidence, counters),
+            w.tick(
+                ready,
+                now_ns,
+                now_s,
+                &mut self.evidence,
+                counters,
+                self.econ.as_ref()
+            ),
             Ok(None)
         );
         self.windows = Some(w);
@@ -475,14 +607,13 @@ mod tests {
     }
     impl Run {
         fn tick(&mut self, ready: bool, now_s: u64) -> Result<Option<&'static str>, &'static str> {
-            let counters = self.windows.due(now_s).then(OwnerCounters::default);
-            self.windows.tick(
-                ready,
-                now_s * 1_000_000_000,
-                now_s,
-                &mut self.evidence,
-                counters,
-            )
+            let now_ns = now_s * 1_000_000_000;
+            let counters = self
+                .windows
+                .due(now_ns, now_s, None)
+                .then(OwnerCounters::default);
+            self.windows
+                .tick(ready, now_ns, now_s, &mut self.evidence, counters, None)
         }
         /// Ticks at `now_s` until the window that ended has been re-checked.
         fn settle(&mut self, now_s: u64) -> Result<Option<&'static str>, &'static str> {
@@ -526,14 +657,18 @@ mod tests {
         r.budget.account_bytes(1_234).unwrap();
         assert_eq!(r.tick(false, 1_030), Ok(None));
         assert_eq!(r.tick(true, 1_060), Ok(None));
-        assert!(!r.windows.due(1_060) && r.windows.due(1_061));
+        assert!(!r.windows.due(1_060_000_000_000, 1_060, None));
+        assert!(r.windows.due(1_061_000_000_000, 1_061, None));
         assert_eq!(r.tick(true, 1_061), Ok(None));
         assert_eq!(
             r.mt0.load(Ordering::Acquire),
             2,
             "MT0 segments for window 2 now"
         );
-        assert!(!r.windows.due(1_200), "one window's end at a time");
+        assert!(
+            !r.windows.due(1_200_000_000_000, 1_200, None),
+            "one window's end at a time"
+        );
         assert_eq!(r.settle(1_061), Ok(None));
         let (checks, _) = chain::<us::WindowCheck>(
             &r.run_dir.join(us::WINDOWS_JOURNAL),
@@ -698,5 +833,104 @@ mod tests {
         );
         assert!(!complete);
         let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    /// DEC-16: an unbounded econ4h run's owner follows the econ grid (its capture checks the
+    /// windows): its first window is the grid window it is in once the grid started; a window's
+    /// end (a boundary belongs to the earlier window) seals the owner's segment after the
+    /// window's record and checks that segment's integrity — a broken one fails the run.
+    #[cfg(any(feature = "historical", feature = "crate_health"))]
+    #[test]
+    fn dec16_an_unbounded_econ4h_owner_cuts_its_journals_on_the_econ_grid() {
+        for broken in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "p0_owner_econ_windows_{}_{broken}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let first = dir.join("opportunities.p0j");
+            let (mut evidence, _) = OwnerEvidenceWriter::start_rolling(
+                first.clone(),
+                dir.join("recovery.p0j"),
+                64,
+                Duration::from_secs(60),
+                0,
+                false,
+            )
+            .unwrap();
+            let (h, _rx) = crate::analytics::econ::test_handle(16);
+            let mt0 = Arc::new(AtomicU64::new(0));
+            let mut w = OwnerWindows::econ(dir.clone(), mt0.clone(), Duration::from_secs(5));
+            let tick = |w: &mut OwnerWindows, ns: u64, e: &mut OwnerEvidenceWriter| {
+                let counters = w
+                    .due(ns, ns / 1_000_000_000, Some(&h))
+                    .then(OwnerCounters::default);
+                w.tick(true, ns, ns / 1_000_000_000, e, counters, Some(&h))
+            };
+            assert_eq!(tick(&mut w, 5_000_000_000, &mut evidence), Ok(None));
+            assert_eq!(
+                mt0.load(Ordering::Acquire),
+                0,
+                "no window before the grid starts"
+            );
+            let start = 10_000_000_000;
+            h.start_rolling(start);
+            let width = h.shared.window_ns.load(Ordering::Acquire);
+            assert_eq!(tick(&mut w, start + 1, &mut evidence), Ok(None));
+            assert_eq!(mt0.load(Ordering::Acquire), 1);
+            assert!(
+                !w.due(start + width, 0, Some(&h)),
+                "the boundary belongs to window 1"
+            );
+            assert_eq!(tick(&mut w, start + width + 1, &mut evidence), Ok(None));
+            assert_eq!(mt0.load(Ordering::Acquire), 2);
+            if broken {
+                // The writer sealed window 1's segment once its successor exists.
+                let next = crate::storage::segments::segment_path(&first, 2);
+                let waiting = std::time::Instant::now();
+                while !next.exists() {
+                    assert!(waiting.elapsed() < Duration::from_secs(5));
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let mut bytes = std::fs::read(&first).unwrap();
+                let at = bytes.len() / 2;
+                bytes[at] ^= 0xff;
+                std::fs::write(&first, bytes).unwrap();
+            }
+            let mut outcome = Ok(None);
+            for _ in 0..1_000 {
+                outcome = tick(&mut w, start + width + 2, &mut evidence);
+                if w.pending.is_none() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if broken {
+                assert_eq!(outcome, Err("UNTIL_STOPPED_SEGMENT_INTEGRITY"));
+                assert_eq!(w.result(), Err("UNTIL_STOPPED_SEGMENT_INTEGRITY"));
+                let _ = evidence.finish(None);
+            } else {
+                assert_eq!(outcome, Ok(None));
+                w.end("RUN_COMPLETE", 99, &mut evidence, OwnerCounters::default());
+                evidence.finish(None).unwrap();
+                assert_eq!(w.result(), Ok(()));
+                let (records, complete) = chain::<OwnerWindow>(&first, kind::OWNER_WINDOW);
+                assert!(complete);
+                assert_eq!(
+                    records
+                        .iter()
+                        .map(|r| (r.window, r.end.clone()))
+                        .collect::<Vec<_>>(),
+                    [(1, None), (2, Some("RUN_COMPLETE".to_string()))]
+                );
+            }
+            w.finish(true);
+            assert!(
+                !dir.join(us::WINDOWS_JOURNAL).exists(),
+                "an econ run's windows are its capture's"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }

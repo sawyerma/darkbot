@@ -418,13 +418,16 @@ pub(crate) fn run_published(
 }
 
 /// DEC-16: one rolling window's boundary of an unbounded capture: its segment sealed, its
-/// provider window ended, its gates re-checked against the newest qualifying evidence.
+/// provider window ended, its gates re-checked against the newest qualifying evidence. The
+/// runway counts the market journals, or for an econ4h run every journal below its `run_root`
+/// (owner, evaluations, reports).
 fn roll_window(
     windows: &mut crate::orchestration::until_stopped::RollingWindows,
     rolling: &crate::orchestration::until_stopped::Rolling,
     sink: &mut JournalSink,
     cfg: &MarketConfig,
     now_s: u64,
+    run_root: Option<&std::path::Path>,
 ) -> Result<crate::orchestration::until_stopped::WindowCheck, String> {
     use crate::orchestration::until_stopped as us;
     let rotated = sink.rotate_window().map_err(|e| e.to_string())?;
@@ -436,7 +439,7 @@ fn roll_window(
             cfg.source.as_str(),
             us::Measured {
                 now: now_s,
-                bytes: rotated.bytes,
+                bytes: run_root.map_or(rotated.bytes, us::run_bytes),
                 run_volume: &cfg.run_dir,
                 environment: crate::storage::preflight::environment(&cfg.run_dir),
                 provider,
@@ -527,7 +530,14 @@ impl EconWindows<'_> {
                 emit_checkpoint(self.h, core, cfg, *checkpoint_index);
             }
             let end_s = (clock.unix_ns(end) / 1_000_000_000) as u64;
-            let check = roll_window(windows, self.rolling, sink, cfg, end_s)?;
+            let check = roll_window(
+                windows,
+                self.rolling,
+                sink,
+                cfg,
+                end_s,
+                Some(&self.h.cfg.run_dir),
+            )?;
             // Lossless within the writer stall budget: a lost close would stop the window grid.
             let within = Duration::from_millis(
                 darkbot_solana::runtime_config::active()
@@ -836,7 +846,7 @@ fn run_embedded_inner(
             let now_s = clock_unix_s(&clock);
             // The boundary first: a window that ended is checked before the run may end.
             if w.due(now_s) {
-                match roll_window(w, r, &mut sink, &cfg, now_s) {
+                match roll_window(w, r, &mut sink, &cfg, now_s, None) {
                     Ok(check) => {
                         if let Some(reason) = r.after_window(&check) {
                             stop_reason = reason;

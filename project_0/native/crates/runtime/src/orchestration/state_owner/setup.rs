@@ -726,7 +726,10 @@ pub(super) fn prepare(
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
     // DEC-16: an unbounded run's owner journals are segment chains (sealed per window and at
-    // the segment size); the MT0 journal follows the window the owner opened.
+    // the segment size); the MT0 journal follows the window the owner opened. An econ4h run's
+    // windows are its econ grid.
+    let econ_rolling = econ.as_ref().is_some_and(|h| h.cfg.unbounded);
+    let segmented = rolling.is_some() || econ_rolling;
     let segment_bytes = operational.econ_segment_mib * crate::storage::budget::MIB;
     let mt0_window = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let evidence_sync = Duration::from_millis(
@@ -734,14 +737,14 @@ pub(super) fn prepare(
             .limits
             .owner_evidence_sync_ms,
     );
-    let evidence = match &rolling {
-        None => OwnerEvidenceWriter::start(
+    let evidence = match segmented {
+        false => OwnerEvidenceWriter::start(
             journal_path,
             recovery_path,
             crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
             evidence_sync,
         )?,
-        Some(_) => {
+        true => {
             OwnerEvidenceWriter::start_rolling(
                 journal_path,
                 recovery_path,
@@ -932,9 +935,9 @@ pub(super) fn prepare(
         Err(_) => mt0_default,
     };
     std::fs::create_dir_all(mt0_path.parent().unwrap_or(std::path::Path::new(".")))?;
-    let mt0_journal = match &rolling {
-        None => crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
-        Some(_) => crate::analytics::mt0_journal::Mt0Journal::rolling(
+    let mt0_journal = match segmented {
+        false => crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
+        true => crate::analytics::mt0_journal::Mt0Journal::rolling(
             &mt0_path,
             segment_bytes,
             mt0_window.clone(),
@@ -946,7 +949,15 @@ pub(super) fn prepare(
         shutdown.clone(),
         mt0_journal,
     )?;
-    let windows = rolling.map(|r| super::windows::OwnerWindows::new(r, run_dir, mt0_window));
+    let windows = match rolling {
+        Some(r) => Some(super::windows::OwnerWindows::new(r, run_dir, mt0_window)),
+        None if econ_rolling => Some(super::windows::OwnerWindows::econ(
+            run_dir,
+            mt0_window,
+            Duration::from_millis(operational.market_writer_stall_ms),
+        )),
+        None => None,
+    };
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
     let Fe04Owner {

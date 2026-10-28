@@ -725,6 +725,20 @@ pub struct WindowInputs<'a> {
     pub sealed: Option<(&'a Path, [u8; 32])>,
 }
 
+/// DEC-16: whether the segment at `path` is intact as its writer sealed it — readable to its
+/// end, sealed, with the chain head `root` (every mode's window integrity gate).
+pub fn segment_intact(path: &Path, root: [u8; 32]) -> Result<(), String> {
+    let intact = (|| -> std::io::Result<bool> {
+        let mut r = journal::Reader::open(path)?;
+        while r.next_frame()?.is_some() {}
+        Ok(r.sealed && r.root() == root)
+    })();
+    match intact {
+        Ok(true) => Ok(()),
+        other => Err(format!("{}: {other:?}", path.display())),
+    }
+}
+
 /// DEC-16: the gates every window of an unbounded run re-checks, mode-neutral, in order: the
 /// integrity of the segment the window sealed (re-read from disk, its sealed root); the rolling
 /// runway on the run volume at the window's measured data rate; the host's memory pressure;
@@ -763,17 +777,7 @@ pub fn check_window(
     });
     let halt = (|| -> Result<String, (&'static str, String)> {
         if let Some((path, root)) = inputs.sealed {
-            let intact = (|| -> std::io::Result<bool> {
-                let mut r = journal::Reader::open(path)?;
-                while r.next_frame()?.is_some() {}
-                Ok(r.sealed && r.root() == root)
-            })();
-            if !matches!(intact, Ok(true)) {
-                return Err((
-                    "UNTIL_STOPPED_SEGMENT_INTEGRITY",
-                    format!("{}: {intact:?}", path.display()),
-                ));
-            }
+            segment_intact(path, root).map_err(|e| ("UNTIL_STOPPED_SEGMENT_INTEGRITY", e))?;
         }
         match env.free_disk_bytes {
             None => return Err(("UNTIL_STOPPED_RUNWAY_UNKNOWN", "free disk unknown".into())),

@@ -1055,6 +1055,30 @@ mod supervise_tests {
         )
         .unwrap();
         assert!(chain.sealed && chain.complete, "{chain:?}");
+        // DEC-16 (stage 3): the capture's windows measure every journal of the run (owner,
+        // evaluations, reports), not the market chain alone: window 1 alone measured more than
+        // the market directory ever held.
+        let mut r = crate::storage::segments::ChainReader::open(
+            &paths
+                .market_dir()
+                .join(crate::orchestration::until_stopped::WINDOWS_JOURNAL),
+        )
+        .unwrap();
+        let mut first = None;
+        while let Some(f) = r.next_frame().unwrap() {
+            if f.kind == crate::analytics::journal::kind::UNTIL_STOPPED_WINDOW && first.is_none() {
+                first = Some(
+                    f.typed::<crate::orchestration::until_stopped::WindowCheck>()
+                        .unwrap(),
+                );
+            }
+        }
+        let first = first.unwrap().bytes_total;
+        let market = crate::orchestration::until_stopped::run_bytes(&paths.market_dir());
+        assert!(
+            first > market,
+            "window 1 measured {first} <= {market} market bytes"
+        );
         assert!(!paths
             .snapshot(crate::analytics::econ::REPORT_JOURNAL)
             .exists());
