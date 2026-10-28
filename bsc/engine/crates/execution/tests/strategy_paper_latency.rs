@@ -237,6 +237,8 @@ fn strategy_paper_path_latency() {
         snapshot: &|policy, codehash| state.canonical_snapshot_id(policy, codehash),
         head,
         now_unix_ms: head.map_or(0, |h| h.timestamp * 1_000),
+        // PAPER: its transactions never leave.
+        next_nonce: None,
     };
 
     let mut journal = RuntimeJournal::open(

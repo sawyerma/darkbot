@@ -439,7 +439,9 @@ pub mod buy_attempt_total_slot {
 /// create-new before any byte of it can leave, its most the grant may
 /// lose by it (a BUY's input and gas, an approval's or SELL's gas). The
 /// grant's spend is the sum of its entries; an entry is never removed, so a
-/// possibly sent intent always counts.
+/// possibly sent intent always counts. Its token and nonce (BSC3-024) make
+/// it the write-ahead record of the transaction: an entry the LIVE ledger
+/// has no fact of after a crash is recovered there as UNKNOWN.
 pub mod live_spend {
     use super::*;
 
@@ -456,6 +458,11 @@ pub mod live_spend {
     pub const INPUT_WEI: u16 = 7;
     /// Input and gas at the signed gas price and limit.
     pub const MAX_WEI: u16 = 8;
+    /// The token it trades and the sender's nonce it is signed at (absent
+    /// in entries written before BSC3-024: such an entry cannot be
+    /// recovered and keeps LIVE from arming).
+    pub const TOKEN: u16 = 9;
+    pub const NONCE: u16 = 10;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-spend.v1",
@@ -474,6 +481,8 @@ pub mod live_spend {
             Field::req(GRANT_GENERATION, "grant_generation", U64),
             Field::req(INPUT_WEI, "input_wei", U256),
             Field::req(MAX_WEI, "max_wei", U256),
+            Field::opt(TOKEN, "token", Address),
+            Field::opt(NONCE, "nonce", U64),
         ],
     };
 }
@@ -485,9 +494,11 @@ pub mod live_spend {
 pub mod live_ledger {
     use super::*;
 
-    /// `RELEASED`, `UNKNOWN` (its handoff did not complete), `INCLUDED`,
-    /// `REVERTED`, `REPLACED` (another transaction took its nonce) or
-    /// `ORPHANED` (its block left the canonical chain).
+    /// `RELEASED`, `UNKNOWN` (its handoff did not complete, or it was
+    /// admitted and the process ended before its outcome was written),
+    /// `WITHDRAWN` (admitted, but no byte of it left: never on chain),
+    /// `INCLUDED`, `REVERTED`, `REPLACED` (another transaction took its
+    /// nonce) or `ORPHANED` (its block left the canonical chain).
     pub const KIND: u16 = 1;
     pub const TX_HASH: u16 = 2;
     pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;

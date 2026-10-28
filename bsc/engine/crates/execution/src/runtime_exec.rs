@@ -571,6 +571,7 @@ pub fn launch_to<E: End>(
         executor.refuse_undecodable();
         return None;
     };
+    let next_nonce = owner.clean_next_nonce(&executor.sender());
     executor
         .on_launch(
             PendingLaunch {
@@ -583,6 +584,7 @@ pub fn launch_to<E: End>(
             &LaunchContext {
                 snapshot: &|c, p, g| owner.snapshot(c, p, g),
                 head: owner.head(),
+                next_nonce,
             },
             clock,
         )
@@ -605,6 +607,7 @@ pub fn strategy_to<E: End>(
         snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
         head: owner.head(),
         now_unix_ms,
+        next_nonce: owner.clean_next_nonce(&executor.sender()),
     };
     match *action {
         StrategyAction::Buy {

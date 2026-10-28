@@ -244,6 +244,12 @@ pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
 pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 /// The same signed transaction again: never a second time (no retry).
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
+/// A LIVE transaction whose bytes may have left is not resolved on chain
+/// (BSC3-041): no new arm may take its nonce.
+pub const LIVE_RELEASE_UNRESOLVED: &str = "LIVE_RELEASE_UNRESOLVED";
+/// The LIVE ledger cannot be read or written: what may have left is not
+/// known, nothing arms.
+pub const LIVE_LEDGER_UNREADABLE: &str = "LIVE_LEDGER_UNREADABLE";
 
 /// The LIVE gate's conditions in the order an operator meets them, each
 /// with the reasons that say it does not hold (plan 28.10.): the LIVE tab's
@@ -2414,6 +2420,81 @@ pub struct LiveIntent<'a> {
     pub input_wei: u128,
     /// Input and gas at the signed gas price and limit.
     pub max_wei: u128,
+    /// The token it trades and the sender's nonce it is signed at: with
+    /// the admission durable before any byte can leave (BSC3-024).
+    pub token: [u8; 20],
+    pub nonce: u64,
+}
+
+/// One LIVE intent the owner admitted, as its entry holds it: the
+/// write-ahead record of a transaction whose bytes may have left.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Admitted {
+    pub tx_hash: [u8; 32],
+    pub kind: LiveIntentKind,
+    pub component: ComponentId,
+    pub grant_generation: u64,
+    pub input_wei: u128,
+    pub max_wei: u128,
+    /// Absent in an entry written before BSC3-024.
+    pub token: Option<[u8; 20]>,
+    pub nonce: Option<u64>,
+}
+
+/// Every LIVE intent the owner ever admitted, in no particular order. An
+/// entry that does not decode refuses them all (never under-counted).
+pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+    let entries = match fs::read_dir(spend_dir(dir)) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: {e}")),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: {e}"))?;
+        if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
+            continue;
+        }
+        let bad = || format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display());
+        let r = fs::read(entry.path())
+            .ok()
+            .and_then(|b| decode(&ls::SCHEMA, &b).ok())
+            .ok_or_else(bad)?;
+        let kind = match r.text(ls::KIND).map_err(|_| bad())? {
+            "BUY" => LiveIntentKind::Buy,
+            "APPROVE" => LiveIntentKind::Approve,
+            "SELL" => LiveIntentKind::Sell,
+            _ => return Err(bad()),
+        };
+        out.push(Admitted {
+            tx_hash: r
+                .text(ls::INTENT_ID)
+                .ok()
+                .and_then(parse_hex32)
+                .ok_or_else(bad)?,
+            kind,
+            component: r
+                .text(ls::COMPONENT)
+                .ok()
+                .and_then(ComponentId::parse)
+                .ok_or_else(bad)?,
+            grant_generation: r.u64(ls::GRANT_GENERATION).map_err(|_| bad())?,
+            input_wei: r
+                .u256(ls::INPUT_WEI)
+                .ok()
+                .and_then(wei_u128)
+                .ok_or_else(bad)?,
+            max_wei: r
+                .u256(ls::MAX_WEI)
+                .ok()
+                .and_then(wei_u128)
+                .ok_or_else(bad)?,
+            token: r.opt_address(ls::TOKEN).map_err(|_| bad())?,
+            nonce: r.opt_u64(ls::NONCE).map_err(|_| bad())?,
+        });
+    }
+    Ok(out)
 }
 
 /// Proof that the owner's LIVE gate was clear, at one moment, for the
@@ -2483,6 +2564,11 @@ impl Store {
 
     fn generation_path(&self, n: u64) -> PathBuf {
         self.dir.join("generations").join(format!("{n:020}.dbrec"))
+    }
+
+    /// The owner state directory (the LIVE ledger lives under it).
+    pub fn dir(&self) -> &Path {
+        &self.dir
     }
 
     fn boot(&self) -> Result<&str, String> {
@@ -2646,7 +2732,9 @@ impl Store {
                 ls::INPUT_WEI,
                 darkbot_bsc_record::Value::u128(intent.input_wei),
             )
-            .set(ls::MAX_WEI, darkbot_bsc_record::Value::u128(intent.max_wei));
+            .set(ls::MAX_WEI, darkbot_bsc_record::Value::u128(intent.max_wei))
+            .set(ls::TOKEN, darkbot_bsc_record::Value::Address(intent.token))
+            .set(ls::NONCE, intent.nonce);
         let bytes = d.encode().map_err(|e| e.to_string())?;
         create_durable_dir(&spend_dir(&self.dir))?;
         match write_new(&entry, &bytes) {
@@ -4575,6 +4663,8 @@ pub(crate) mod tests {
             kind,
             input_wei: input,
             max_wei: most,
+            token: [0x10 + n as u8; 20],
+            nonce: 40 + n as u64,
         };
         let buy = |n| intent(n, LiveIntentKind::Buy, 1_000, 2_000);
         let first = s.admit_live(&armed, &buy(0), &q, now).unwrap();
@@ -4582,6 +4672,21 @@ pub(crate) mod tests {
         let (day, total) = first.slots.unwrap();
         assert_eq!((day.slot, total.slot), (0, 0));
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 2_000);
+        // BSC3-024: the admission is the transaction's write-ahead record,
+        // with its token and nonce.
+        assert_eq!(
+            admitted_intents(&dir).unwrap(),
+            vec![Admitted {
+                tx_hash: [0; 32],
+                kind: LiveIntentKind::Buy,
+                component: ComponentId::ExecC3,
+                grant_generation: generation,
+                input_wei: 1_000,
+                max_wei: 2_000,
+                token: Some([0x10; 20]),
+                nonce: Some(40),
+            }]
+        );
         assert_eq!(
             s.admit_live(&armed, &buy(0), &q, now).unwrap_err(),
             LIVE_INTENT_SEEN

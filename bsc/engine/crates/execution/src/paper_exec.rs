@@ -294,6 +294,11 @@ pub enum Refusal {
     Unqualified,
     /// Plan 28.10.: the native owner did not admit the LIVE intent now.
     Owner,
+    /// BSC3-055: an end whose transactions reach the chain takes a nonce
+    /// only when it is the sender's canonical next one (C2, clean): every
+    /// lower nonce is consumed on chain. Nothing was consumed; the intent
+    /// may come again once the lower nonce is.
+    SenderNonce,
 }
 
 impl Refusal {
@@ -319,6 +324,7 @@ impl Refusal {
             Self::PathOff => "PATH_OFF",
             Self::Unqualified => "UNQUALIFIED",
             Self::Owner => "OWNER",
+            Self::SenderNonce => "SENDER_NONCE",
         }
     }
 }
@@ -373,6 +379,9 @@ pub struct CanonicalContext<'a> {
     pub snapshot: &'a dyn Fn(u64, u64) -> Option<SnapshotId>,
     pub head: Option<ChainHead>,
     pub now_unix_ms: u64,
+    /// The sender's canonical next nonce, when C2 knows it exactly (clean):
+    /// an end whose transactions reach the chain takes no other.
+    pub next_nonce: Option<u64>,
 }
 
 impl CanonicalContext<'_> {
@@ -746,6 +755,15 @@ pub trait End {
     type Handoff: HandoffTime + Copy + core::fmt::Debug + PartialEq + Eq;
     /// The fence file prefix and the fence body's magic of this end.
     const FENCE: (&'static str, [u8; 8]);
+    /// Whether this end's transactions reach the chain (BSC3-055). Then
+    /// the sender's lanes together keep the single-sender order of the
+    /// intent contract (Unit 4 invariant 3): a transaction is handed over
+    /// only at the sender's canonical next nonce (C2), so at most one nonce
+    /// of the sender has bytes out that the chain has not consumed, and an
+    /// exit's SELL waits for its approval to be canonical. An end whose
+    /// transactions never leave the process (PAPER) plans its sequence
+    /// ahead.
+    const CHAIN_ORDERED: bool;
 
     fn address(&self) -> [u8; 20];
     fn signer(&self) -> &Signer;
@@ -806,6 +824,8 @@ impl PaperEnd {
 impl End for PaperEnd {
     type Handoff = PaperHandoff;
     const FENCE: (&'static str, [u8; 8]) = ("paper", *b"DBPAPFN3");
+    // A PAPER transaction never leaves the process.
+    const CHAIN_ORDERED: bool = false;
 
     fn address(&self) -> [u8; 20] {
         self.identity.address()
@@ -1060,6 +1080,9 @@ pub struct LaunchContext<'a> {
     pub snapshot: &'a dyn Fn(B256, u64, u64) -> Option<SnapshotId>,
     /// The canonical head: number and timestamp (unix seconds).
     pub head: Option<ChainHead>,
+    /// The sender's canonical next nonce, when C2 knows it exactly (clean):
+    /// an end whose transactions reach the chain takes no other.
+    pub next_nonce: Option<u64>,
 }
 
 impl Executor<PaperEnd> {
@@ -1271,7 +1294,7 @@ impl<E: End> Executor<E> {
         let admitted = admit_native_buy(&state, &self.policy).map_err(|_| Refusal::Admission)?;
         let admitted_ns = clock.now_ns();
         let token = admitted.token().into_array();
-        if self.bought.contains(&token) {
+        if self.holds(&token) {
             return Err(Refusal::DuplicateToken);
         }
         let exposure = self.budget.max_total_wei;
@@ -1280,6 +1303,11 @@ impl<E: End> Executor<E> {
         }
         if self.strategy_used > 0 && !self.strategy_skipped_first {
             return Err(Refusal::NonceTaken);
+        }
+        // BSC3-055: every C3 lane is at the arm's nonce; it goes only while
+        // that is the sender's canonical next nonce.
+        if E::CHAIN_ORDERED && c2.next_nonce != Some(self.first_nonce) {
+            return Err(Refusal::SenderNonce);
         }
         let Some(lane) = self.lanes.get_mut(self.used) else {
             return Err(Refusal::LanesExhausted);
@@ -1375,7 +1403,10 @@ impl<E: End> Executor<E> {
     /// session handed off (gate M1); the SELL sells at most that BUY's
     /// bound minimum output, the tokens it is sure to hold. The intents
     /// that reached the sink are returned even when a later one was
-    /// refused (gate L3), with that refusal.
+    /// refused (gate L3), with that refusal. A chain ordered end hands over
+    /// the approval alone (no refusal: the exit is not over, see
+    /// [`Executor::exited`]); the exit again, once the approval is
+    /// canonical, hands over the SELL (BSC3-055).
     pub fn on_strategy_exit(
         &mut self,
         token: [u8; 20],
@@ -1407,13 +1438,50 @@ impl<E: End> Executor<E> {
         (out, refused)
     }
 
+    /// Whether this arm holds `token` already, by either strategy: one
+    /// sender buys a token once (BSC3-055, Unit 4 invariant 2).
+    fn holds(&self, token: &[u8; 20]) -> bool {
+        self.bought.contains(token) || self.strategy_bought.iter().any(|h| h.token == *token)
+    }
+
+    /// The nonce the next strategy lane is at.
+    pub fn strategy_next_nonce(&self) -> u64 {
+        let skip = self.strategy_used == 0 && self.c3_took_nonce;
+        self.strategy_first_nonce + (self.strategy_used + usize::from(skip)) as u64
+    }
+
+    /// Whether this arm's SELL of `token` may have left (its exit is over
+    /// for this arm).
+    pub fn exited(&self, token: &[u8; 20]) -> bool {
+        self.exited.contains(token)
+    }
+
+    /// Tokens whose exit's approval went and whose SELL did not (a chain
+    /// ordered end's SELL waits for its approval to be canonical).
+    pub fn exits_awaiting_sell(&self) -> Vec<[u8; 20]> {
+        self.approved
+            .iter()
+            .map(|(t, _)| *t)
+            .filter(|t| !self.exited.contains(t))
+            .collect()
+    }
+
     /// The next strategy lane: its nonce is the next of the PAPER
     /// sender's sequence (each lane one nonce above the last). Refused
     /// once a taken nonce was not handed off (a hole no later PAPER
-    /// transaction could pass on chain).
-    fn next_strategy_lane(&mut self) -> Result<usize, Refusal> {
+    /// transaction could pass on chain). An end whose transactions reach
+    /// the chain takes it only at the sender's canonical next nonce
+    /// `canonical`; refused otherwise with nothing taken (BSC3-055).
+    fn next_strategy_lane(&mut self, canonical: Option<u64>) -> Result<usize, Refusal> {
         if self.strategy_nonce_gap {
             return Err(Refusal::NonceGap);
+        }
+        if E::CHAIN_ORDERED {
+            let next = self.strategy_next_nonce();
+            let lane_left = next - self.strategy_first_nonce < self.strategy_lanes.len() as u64;
+            if lane_left && canonical != Some(next) {
+                return Err(Refusal::SenderNonce);
+            }
         }
         if self.strategy_used == 0 && self.c3_took_nonce {
             self.strategy_used = 1;
@@ -1495,7 +1563,7 @@ impl<E: End> Executor<E> {
         .map_err(|_| Refusal::Admission)?;
         let admitted = admit_curve_buy(&state, &policy).map_err(|_| Refusal::Admission)?;
         let admitted_ns = clock.now_ns();
-        if self.strategy_bought.iter().any(|h| h.token == token) {
+        if self.holds(&token) {
             return Err(Refusal::DuplicateToken);
         }
         let gas = U256::from(self.config.gas_price_wei) * U256::from(self.config.gas_limit);
@@ -1511,7 +1579,16 @@ impl<E: End> Executor<E> {
         {
             return Err(Refusal::SessionCap);
         }
-        let index = self.next_strategy_lane()?;
+        // A chain ordered end keeps a lane for every SELL its approval
+        // waits for.
+        if E::CHAIN_ORDERED {
+            let taken = self.strategy_next_nonce() - self.strategy_first_nonce;
+            let left = (self.strategy_lanes.len() as u64).saturating_sub(taken);
+            if left <= self.exits_awaiting_sell().len() as u64 {
+                return Err(Refusal::LanesExhausted);
+            }
+        }
+        let index = self.next_strategy_lane(c2.next_nonce)?;
         let Ok(ticket) = self.strategy_lanes[index].reserve(admitted.token()) else {
             self.strategy_refused(index, true);
             return Err(Refusal::Lane);
@@ -1662,18 +1739,26 @@ impl<E: End> Executor<E> {
         {
             return Err(Refusal::SessionCap);
         }
+        // BSC3-055: a chain ordered end's SELL waits for its approval to be
+        // canonical; it comes back as an exit with the approval out.
+        let defer_sell = E::CHAIN_ORDERED && approved.is_none();
         let needed = if approved.is_some() { 1 } else { 2 };
         if self.strategy_lanes.len() - self.strategy_used < needed {
             return Err(Refusal::LanesExhausted);
         }
         let approve_index = match approved {
             Some(_) => None,
-            None => Some(self.next_strategy_lane()?),
+            None => Some(self.next_strategy_lane(c2.next_nonce)?),
         };
-        let sell_index = self.next_strategy_lane()?;
-        let first = approve_index.unwrap_or(sell_index);
+        let sell_index = match defer_sell {
+            true => None,
+            false => Some(self.next_strategy_lane(c2.next_nonce)?),
+        };
+        let Some(first) = approve_index.or(sell_index) else {
+            return Err(Refusal::Lane);
+        };
         let mut tickets = [None, None];
-        for (slot, index) in [approve_index, Some(sell_index)].into_iter().enumerate() {
+        for (slot, index) in [approve_index, sell_index].into_iter().enumerate() {
             let Some(index) = index else { continue };
             match self.strategy_lanes[index].reserve(admitted.token()) {
                 Ok(t) => tickets[slot] = Some(t),
@@ -1683,16 +1768,15 @@ impl<E: End> Executor<E> {
                 }
             }
         }
-        let [approve_ticket, Some(sell_ticket)] = tickets else {
-            self.strategy_refused(first, true);
-            return Err(Refusal::Lane);
-        };
+        let [approve_ticket, sell_ticket] = tickets;
         // The approval at n, the SELL at n+1 (a SELL alone: n is its own
-        // nonce minus one, the approval already out).
-        let base = match approve_ticket {
-            Some(a) if sell_ticket.nonce() == a.nonce() + 1 => Some(a.nonce()),
-            Some(_) => None,
-            None => sell_ticket.nonce().checked_sub(1),
+        // nonce minus one, the approval already out; an approval alone: the
+        // SELL comes at n+1 later).
+        let base = match (approve_ticket, sell_ticket) {
+            (Some(a), Some(s)) if s.nonce() == a.nonce() + 1 => Some(a.nonce()),
+            (Some(a), None) => Some(a.nonce()),
+            (None, Some(s)) => s.nonce().checked_sub(1),
+            _ => None,
         };
         let Some(base) = base else {
             self.strategy_refused(first, true);
@@ -1713,7 +1797,9 @@ impl<E: End> Executor<E> {
             approve_index
                 .zip(approve_ticket)
                 .map(|(i, t)| (IntentKind::Approve, i, t, approve_gas)),
-            Some((IntentKind::Sell, sell_index, sell_ticket, sell_gas)),
+            sell_index
+                .zip(sell_ticket)
+                .map(|(i, t)| (IntentKind::Sell, i, t, sell_gas)),
         ];
         for (kind, index, ticket, gas) in steps.into_iter().flatten() {
             let built = match kind {
@@ -1783,6 +1869,11 @@ impl<E: End> Executor<E> {
                 },
                 raw: self.raw.clone(),
             });
+        }
+        if defer_sell {
+            // The approval is out; its SELL waits for it to be canonical
+            // (the exit again then hands it over).
+            return Ok(());
         }
         self.exited.push(token);
         // The position is closed: its input leaves the open exposure, the
@@ -2081,6 +2172,15 @@ pub(crate) mod tests {
         LaunchContext {
             snapshot: &snapshot,
             head,
+            next_nonce: None,
+        }
+    }
+
+    /// [`c2`] with the sender's canonical next nonce `next` (a LIVE end).
+    pub(crate) fn c2_next(head: Option<ChainHead>, next: u64) -> LaunchContext<'static> {
+        LaunchContext {
+            next_nonce: Some(next),
+            ..c2(head)
         }
     }
 
@@ -2265,6 +2365,7 @@ pub(crate) mod tests {
         let none = LaunchContext {
             snapshot: &|_, _, _| None,
             head: Some(HEAD),
+            next_nonce: None,
         };
         assert_eq!(
             exec.on_launch(
@@ -2492,6 +2593,19 @@ pub(crate) mod tests {
             snapshot: &canonical,
             head,
             now_unix_ms: NOW_MS,
+            next_nonce: None,
+        }
+    }
+
+    /// [`strategy_c2`] with the sender's canonical next nonce `next` (a
+    /// LIVE end).
+    pub(crate) fn strategy_c2_next(
+        head: Option<ChainHead>,
+        next: u64,
+    ) -> CanonicalContext<'static> {
+        CanonicalContext {
+            next_nonce: Some(next),
+            ..strategy_c2(head)
         }
     }
 
@@ -2667,6 +2781,7 @@ pub(crate) mod tests {
             snapshot: &|_, _| None,
             head: Some(HEAD),
             now_unix_ms: NOW_MS,
+            next_nonce: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &none, &clock(1, 1), 1),
@@ -2682,6 +2797,7 @@ pub(crate) mod tests {
             snapshot: &canonical,
             head: Some(HEAD),
             now_unix_ms: HEAD.timestamp * 1_000 + 30_001,
+            next_nonce: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &late, &clock(1, 1), 1),
@@ -3001,6 +3117,7 @@ pub(crate) mod tests {
     impl End for RecordingEnd {
         type Handoff = Recorded;
         const FENCE: (&'static str, [u8; 8]) = ("recording", *b"DBTSTFN1");
+        const CHAIN_ORDERED: bool = false;
 
         fn address(&self) -> [u8; 20] {
             self.signer.address().into_array()

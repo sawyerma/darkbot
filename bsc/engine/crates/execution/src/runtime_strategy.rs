@@ -568,15 +568,7 @@ impl StrategyRuntime {
                         decided_ns,
                     })
                 }
-                Pending::Exit(token, decided_ns) => self
-                    .curve(&token)
-                    .zip(self.engine.position_tokens(&token))
-                    .map(|(curve, tokens)| StrategyAction::Exit {
-                        token,
-                        tokens,
-                        curve,
-                        decided_ns,
-                    }),
+                Pending::Exit(token, decided_ns) => self.exit_action(token, decided_ns),
             };
             match action {
                 Some(a) => out.push(a),
@@ -584,6 +576,21 @@ impl StrategyRuntime {
             }
         }
         out
+    }
+
+    /// The exit of the position on `token` as the engine holds it now (its
+    /// tokens, its curve): a LIVE exit whose SELL waited for its approval to
+    /// be canonical continues with it (BSC3-055). None when the position or
+    /// its curve is gone.
+    pub fn exit_action(&self, token: [u8; 20], decided_ns: u64) -> Option<StrategyAction> {
+        self.curve(&token)
+            .zip(self.engine.position_tokens(&token))
+            .map(|(curve, tokens)| StrategyAction::Exit {
+                token,
+                tokens,
+                curve,
+                decided_ns,
+            })
     }
 
     fn curve(&self, token: &[u8; 20]) -> Option<StrategyCurve> {

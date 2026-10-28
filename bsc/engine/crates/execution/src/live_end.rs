@@ -10,13 +10,16 @@
 //! campaign slot, the grant's budget, all durable before any byte can
 //! leave). The release dispatch sends it over qualified transports.
 //!
-//! Nothing is retried. A dispatch that may have written anything is
-//! recorded as released (handed off, or UNKNOWN when its handoff did not
-//! complete) for reconciliation, and the executor stops the sender's
+//! Nothing is retried. The owner's admission names the transaction's token
+//! and nonce and is durable before any byte can leave (its write-ahead
+//! record, BSC3-024); right after the dispatch its outcome is a fact of the
+//! LIVE ledger: released (handed off), UNKNOWN (its handoff did not
+//! complete) or withdrawn (no byte left). The executor stops the sender's
 //! sequence on an UNKNOWN. The route is the builders' TLS connections or,
 //! for a non-sending run, the loopback adapter on 127.0.0.1.
 
 use crate::live_key::LiveKey;
+use crate::live_ledger::{Fact, FactKind, Ledger};
 use crate::live_qualification::{Verified, capability};
 use crate::paper_exec::{End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by};
 use crate::sources::{ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, Store};
@@ -128,6 +131,11 @@ pub struct LiveEnd {
     wall_ms: Box<dyn Fn() -> u64 + Send>,
     released: Vec<Released>,
     last_refusal: Option<String>,
+    /// The LIVE ledger under the owner's state, the facts this end wrote
+    /// there and why the last one could not be written.
+    ledger: Ledger,
+    facts: u64,
+    ledger_failure: Option<String>,
 }
 
 impl core::fmt::Debug for LiveEnd {
@@ -225,6 +233,7 @@ impl LiveEnd {
         }
         let table = AdapterTable::new(chain_id, capability_generation, &bindings)
             .map_err(|e| e.to_string())?;
+        let ledger = Ledger::open(store.dir());
         Ok(LiveEnd {
             key,
             armed,
@@ -235,6 +244,9 @@ impl LiveEnd {
             wall_ms,
             released: Vec::new(),
             last_refusal: None,
+            ledger,
+            facts: 0,
+            ledger_failure: None,
         })
     }
 
@@ -301,6 +313,17 @@ impl LiveEnd {
         self.last_refusal.as_deref()
     }
 
+    /// The ledger facts this end wrote (one per admitted intent).
+    pub fn facts_written(&self) -> u64 {
+        self.facts
+    }
+
+    /// Why the last admitted intent's fact could not be written: its
+    /// admission entry recovers it once nothing is armed.
+    pub fn ledger_failure(&self) -> Option<&str> {
+        self.ledger_failure.as_deref()
+    }
+
     fn refuse(&mut self, refusal: Refusal, why: String) -> Handed<LiveHandoff> {
         self.last_refusal = Some(why);
         Handed::refused(refusal)
@@ -310,6 +333,7 @@ impl LiveEnd {
 impl End for LiveEnd {
     type Handoff = LiveHandoff;
     const FENCE: (&'static str, [u8; 8]) = ("live", *b"DBLIVFN1");
+    const CHAIN_ORDERED: bool = true;
 
     fn address(&self) -> [u8; 20] {
         self.key.address()
@@ -468,6 +492,10 @@ impl End for LiveEnd {
         }
         // The owner, as it holds now: nothing before this consumed an
         // attempt or a budget, and nothing after it can leave unadmitted.
+        // Its entry, with the token and nonce, is the transaction's
+        // write-ahead record (BSC3-024).
+        let token = ticket.token().into_array();
+        let nonce = ticket.nonce();
         let admitted = self.store.admit_live(
             &self.armed,
             &LiveIntent {
@@ -476,6 +504,8 @@ impl End for LiveEnd {
                 kind,
                 input_wei,
                 max_wei,
+                token,
+                nonce,
             },
             &self.qualification.view,
             (self.wall_ms)(),
@@ -531,13 +561,38 @@ impl End for LiveEnd {
                 }
             }
         };
+        // The admitted intent's outcome, a ledger fact at once: off the
+        // dispatch, before the executor goes on.
+        let fact = Fact {
+            kind: match (disclosed, result.is_ok()) {
+                (false, _) => FactKind::Withdrawn,
+                (true, true) => FactKind::Released,
+                (true, false) => FactKind::Unknown,
+            },
+            tx_hash,
+            intent: kind,
+            component,
+            token,
+            nonce,
+            grant_generation: self.armed.grant_generation(),
+            input_wei: Some(budget.max_buy_input_wei),
+            max_wei: Some(budget.max_total_wei),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+        };
+        match self.ledger.append(&fact, (self.wall_ms)()) {
+            Ok(_) => self.facts += 1,
+            Err(e) => self.ledger_failure = Some(e),
+        }
         if disclosed {
             self.released.push(Released {
                 tx_hash,
                 kind,
                 component,
-                token: ticket.token().into_array(),
-                nonce: ticket.nonce(),
+                token,
+                nonce,
                 input_wei: budget.max_buy_input_wei,
                 max_wei: budget.max_total_wei,
                 handed_off: result.is_ok(),
@@ -562,7 +617,7 @@ impl End for LiveEnd {
 pub(crate) mod tests {
     use super::*;
     use crate::paper_exec::tests::{
-        HEAD, c2, clock, config, curve_after, dir, launch, strategy_c2, validated,
+        HEAD, c2_next, clock, config, curve_after, dir, launch, strategy_c2_next, validated,
     };
     use crate::paper_exec::{Arming, Executor, IntentKind, PendingLaunch, StrategyCurve};
     use crate::sources::tests::{grant_of, live_ready_granting, qualified};
@@ -719,7 +774,8 @@ pub(crate) mod tests {
         .unwrap();
         let (port, requests) = stand_in();
         let mut cfg = config(2, 2);
-        cfg.strategy_lanes = 4;
+        // The BUY, its approval and SELL, and one more BUY.
+        cfg.strategy_lanes = 5;
         let end = LiveEnd::new(
             key,
             armed,
@@ -760,7 +816,7 @@ pub(crate) mod tests {
             ingress_ns: 100,
         };
         let buy = exec
-            .on_launch(pending, &c2(Some(HEAD)), &clock(100, 7))
+            .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
         let request = String::from_utf8(requests.recv_timeout(wait).unwrap()).unwrap();
         assert!(request.contains(&format!(
@@ -777,7 +833,8 @@ pub(crate) mod tests {
         let c3_most = 1_000_000_000_000_000u128 + 1_000_000_000 * 300_000;
         assert_eq!(buy_usage(&state, now).unwrap().used, 1);
         assert_eq!(spent_by_grant(&state, generation).unwrap(), c3_most);
-        // Strategy C: the BUY alone, then its approval and SELL.
+        // Strategy C, once nonce 0 is canonical: the BUY alone, then its
+        // approval and SELL.
         reconnect(&mut exec);
         let token = [0xAB; 20];
         let input = U256::from(10_000_000_000_000_000u64);
@@ -787,7 +844,7 @@ pub(crate) mod tests {
                 token,
                 curve,
                 input,
-                &strategy_c2(Some(HEAD)),
+                &strategy_c2_next(Some(HEAD), 1),
                 &clock(500, 3),
                 500,
             )
@@ -815,14 +872,15 @@ pub(crate) mod tests {
             ..curve
         };
         reconnect(&mut exec);
-        // The day's BUYs are taken; the exit needs none. Its SELL finds the
-        // connection still awaiting the approval's answer: refused before
-        // anything is consumed, then sent on a ready connection.
-        let ctx = strategy_c2(Some(HEAD));
+        // The day's BUYs are taken; the exit needs none. Once the BUY is
+        // canonical its approval goes; its SELL waits for the approval to
+        // be canonical, then goes alone.
+        let ctx = strategy_c2_next(Some(HEAD), 2);
         let (out, refused) = exec.on_strategy_exit(token, tokens, held, &ctx, &clock(900, 3), 900);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, IntentKind::Approve);
-        assert_eq!(refused, Some(Refusal::Unqualified));
+        assert_eq!(refused, None);
+        assert!(!exec.exited(&token));
         let approval = requests.recv_timeout(wait).unwrap();
         assert!(
             String::from_utf8(approval)
@@ -830,6 +888,7 @@ pub(crate) mod tests {
                 .contains(&hex(&out[0].raw))
         );
         reconnect(&mut exec);
+        let ctx = strategy_c2_next(Some(HEAD), 3);
         let (out, refused) = exec.on_strategy_exit(token, tokens, held, &ctx, &clock(950, 3), 950);
         assert_eq!((out.len(), refused), (1, None));
         assert_eq!(out[0].kind, IntentKind::Sell);
@@ -846,17 +905,13 @@ pub(crate) mod tests {
             .unwrap();
         assert!(r.applied());
         reconnect(&mut exec);
-        let (hash, raw, input) = launch(1, 8);
-        let refused = exec.on_launch(
-            PendingLaunch {
-                hash,
-                raw: &raw,
-                to: Some(portal),
-                input: &input,
-                ingress_ns: 100,
-            },
-            &c2(Some(HEAD)),
-            &clock(100, 7),
+        let refused = exec.on_strategy_buy(
+            [0xCD; 20],
+            curve,
+            input,
+            &strategy_c2_next(Some(HEAD), 4),
+            &clock(1_000, 3),
+            1_000,
         );
         assert_eq!(refused.unwrap_err(), Refusal::Owner);
         assert_eq!(exec.end().last_refusal(), Some(LIVE_GRANT_CHANGED));
@@ -869,6 +924,291 @@ pub(crate) mod tests {
         assert_eq!(exec.end().released().len(), 4);
         // The key file was only read.
         assert_eq!(fs::read(&key_path).unwrap(), [0x33u8; 32]);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// An executor armed towards the LIVE end of a grant for both
+    /// strategies at nonce 0, on the loopback stand-in: the owner's state,
+    /// the run directory, the executor and what the stand-in receives.
+    fn armed_both(tag: &str) -> (PathBuf, PathBuf, Executor<LiveEnd>, mpsc::Receiver<Vec<u8>>) {
+        let (state, store, now) = live_ready_granting(tag, |now| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            ..grant_of(now + 3_600_000, LiveStrategies::Both)
+        });
+        let q = verified();
+        let armed = store
+            .live_now(&[ComponentId::ExecC3, ComponentId::StrategyC], &q.view, now)
+            .unwrap();
+        let d = dir(tag);
+        let (key_path, buyer) = key_file(&d);
+        let key = LiveKey::load(
+            &key_path,
+            Path::new("/nonexistent-repo"),
+            buyer,
+            &[],
+            &armed,
+        )
+        .unwrap();
+        let (port, requests) = stand_in();
+        let mut cfg = config(2, 2);
+        cfg.strategy_lanes = 4;
+        let end = LiveEnd::new(
+            key,
+            armed,
+            store,
+            q,
+            LiveRoute::Loopback { port },
+            56,
+            cfg.capability_generation,
+            Box::new(move || now),
+        )
+        .unwrap();
+        let mut exec = Executor::arm_end(
+            end,
+            validated(),
+            WITNESSED_MAINNET_TERMS,
+            cfg,
+            Arming {
+                next_nonce: 0,
+                fence_dir: &d.join("fences"),
+                session: 1,
+                arm: 0,
+            },
+        )
+        .unwrap();
+        assert!(
+            exec.end_mut()
+                .connect(std::time::Duration::from_secs(2))
+                .is_empty()
+        );
+        (state, d, exec, requests)
+    }
+
+    fn reconnect(e: &mut Executor<LiveEnd>) {
+        assert!(
+            e.end_mut()
+                .connect(std::time::Duration::from_secs(2))
+                .is_empty()
+        );
+    }
+
+    /// BSC3-055: one sender's LIVE transactions reach the chain one nonce
+    /// after the other (Unit 4 invariant 3 across the sender's lanes).
+    /// While the C3 BUY at nonce 0 is not canonical, the strategy's BUY at
+    /// nonce 1 is refused and nothing of it leaves; once C2 shows nonce 0
+    /// consumed it goes. An exit's approval goes at its nonce; its SELL
+    /// waits for the approval to be canonical, and then goes alone. A
+    /// refusal for the order consumes nothing.
+    #[test]
+    fn one_sender_releases_one_nonce_after_the_other() {
+        let (state, d, mut exec, requests) = armed_both("live-order");
+        let wait = std::time::Duration::from_secs(2);
+        let silent = std::time::Duration::from_millis(300);
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        // C2 not clean: no nonce is known, nothing goes.
+        assert_eq!(
+            exec.on_launch(
+                pending,
+                &crate::paper_exec::tests::c2(Some(HEAD)),
+                &clock(100, 7)
+            )
+            .unwrap_err(),
+            Refusal::SenderNonce
+        );
+        assert!(requests.recv_timeout(silent).is_err());
+        exec.on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
+            .unwrap();
+        requests.recv_timeout(wait).unwrap();
+        reconnect(&mut exec);
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let buy = |exec: &mut Executor<LiveEnd>, next: u64| {
+            exec.on_strategy_buy(
+                token,
+                curve,
+                input,
+                &strategy_c2_next(Some(HEAD), next),
+                &clock(500, 3),
+                500,
+            )
+        };
+        // Nonce 0 is not canonical yet: nonce 1 does not go.
+        assert_eq!(buy(&mut exec, 0).unwrap_err(), Refusal::SenderNonce);
+        assert!(requests.recv_timeout(silent).is_err());
+        assert_eq!(exec.strategy_next_nonce(), 1);
+        // Nonce 0 consumed: the BUY at nonce 1.
+        let entry = buy(&mut exec, 1).unwrap();
+        assert_eq!(decode_signed(&entry.raw).unwrap().tx.nonce, 1);
+        requests.recv_timeout(wait).unwrap();
+        reconnect(&mut exec);
+        let tokens = decode_swap_exact_input_native(decode_signed(&entry.raw).unwrap().tx.input)
+            .unwrap()
+            .min_output_amount;
+        let q = quote_native_buy(&NativeBuyInputs {
+            token: curve.terms,
+            reserve_before: curve.reserve,
+            circulating_before: curve.circulating,
+            input_amount: input,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let held = StrategyCurve {
+            reserve: q.reserve_after,
+            circulating: q.supply_after,
+            ..curve
+        };
+        let exit = |exec: &mut Executor<LiveEnd>, next: u64| {
+            exec.on_strategy_exit(
+                token,
+                tokens,
+                held,
+                &strategy_c2_next(Some(HEAD), next),
+                &clock(900, 3),
+                900,
+            )
+        };
+        // The BUY at 1 is not canonical: the approval at 2 does not go.
+        let (out, refused) = exit(&mut exec, 1);
+        assert_eq!((out.len(), refused), (0, Some(Refusal::SenderNonce)));
+        assert!(requests.recv_timeout(silent).is_err());
+        // It is: the approval goes, the SELL waits for it; the exit is not
+        // over.
+        let (out, refused) = exit(&mut exec, 2);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        assert_eq!(decode_signed(&out[0].raw).unwrap().tx.nonce, 2);
+        assert_eq!(refused, None);
+        assert!(!exec.exited(&token));
+        requests.recv_timeout(wait).unwrap();
+        assert!(requests.recv_timeout(silent).is_err());
+        assert_eq!(exec.exits_awaiting_sell(), vec![token]);
+        // The approval not canonical yet: still no SELL.
+        let (out, refused) = exit(&mut exec, 2);
+        assert_eq!((out.len(), refused), (0, Some(Refusal::SenderNonce)));
+        assert!(requests.recv_timeout(silent).is_err());
+        // Canonical, but the connection still awaits the approval's
+        // answer: refused before anything is consumed.
+        let (out, refused) = exit(&mut exec, 3);
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Unqualified)));
+        assert!(requests.recv_timeout(silent).is_err());
+        assert_eq!(exec.strategy_next_nonce(), 3);
+        reconnect(&mut exec);
+        // On a ready connection: the SELL alone, at 3.
+        let (out, refused) = exit(&mut exec, 3);
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        assert_eq!(decode_signed(&out[0].raw).unwrap().tx.nonce, 3);
+        requests.recv_timeout(wait).unwrap();
+        assert_eq!(exec.exits_awaiting_sell(), Vec::<[u8; 20]>::new());
+        // Four transactions, each handed off once, in nonce order.
+        let nonces: Vec<u64> = exec.end().released().iter().map(|r| r.nonce).collect();
+        assert_eq!(nonces, vec![0, 1, 2, 3]);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-024 (review): an intent the owner admitted whose dispatch then
+    /// found the transport start deadline passed: no byte reaches the
+    /// stand-in, its fact is WITHDRAWN (resolved, never on chain, no
+    /// position, no cost), so neither recovery nor the next arm takes it
+    /// for one that may have left. The owner's slot stays taken (counted
+    /// conservatively, BSC3-068).
+    #[test]
+    fn an_admitted_intent_that_never_left_is_withdrawn() {
+        use crate::live_ledger::fold;
+        let (state, d, mut exec, requests) = armed_both("live-withdrawn");
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let late = clock(100 + 2_000_000, 1);
+        let refused = exec.on_launch(
+            PendingLaunch {
+                hash,
+                raw: &raw,
+                to: Some(portal),
+                input: &input,
+                ingress_ns: 100,
+            },
+            &c2_next(Some(HEAD), 0),
+            &late,
+        );
+        assert_eq!(refused.unwrap_err(), Refusal::Deadline);
+        assert!(
+            requests
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .is_err()
+        );
+        assert!(exec.end().released().is_empty());
+        let facts = Ledger::open(&state).facts().unwrap();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(
+            (facts[0].kind, facts[0].intent, facts[0].nonce),
+            (FactKind::Withdrawn, LiveIntentKind::Buy, 0)
+        );
+        let book = fold(&facts);
+        assert_eq!(book.unresolved().count(), 0);
+        assert!(book.positions.is_empty());
+        assert_eq!(
+            Ledger::open(&state)
+                .recover(&crate::sources::admitted_intents(&state).unwrap(), 1)
+                .unwrap()
+                .unknown,
+            0
+        );
+        assert_eq!(crate::sources::admitted_intents(&state).unwrap().len(), 1);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-055: a token is bought once per sender and arm, whichever
+    /// strategy asks: Strategy C's BUY of the token C3 bought is refused.
+    #[test]
+    fn a_token_is_bought_once_by_one_sender() {
+        let (state, d, mut exec, requests) = armed_both("live-dedup");
+        let wait = std::time::Duration::from_secs(2);
+        let silent = std::time::Duration::from_millis(300);
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        let buy = exec
+            .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
+            .unwrap();
+        requests.recv_timeout(wait).unwrap();
+        reconnect(&mut exec);
+        // Nonce 0 canonical (the C3 BUY reverted, say): the strategy's BUY
+        // of the same token is still not a second purchase.
+        let again = exec.on_strategy_buy(
+            buy.token,
+            curve_after(1_000_000_000_000_000_000),
+            U256::from(10_000_000_000_000_000u64),
+            &strategy_c2_next(Some(HEAD), 1),
+            &clock(500, 3),
+            500,
+        );
+        assert_eq!(again.err(), Some(Refusal::DuplicateToken));
+        assert!(requests.recv_timeout(silent).is_err());
         exec.disarm().unwrap();
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(state).unwrap();

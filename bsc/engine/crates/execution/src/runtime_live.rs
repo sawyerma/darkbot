@@ -24,6 +24,13 @@
 //! positions they make are adopted by the executor (its exits sell the
 //! real tokens) and held by Strategy C (its exit rules on the real curve).
 //!
+//! A restart or a closed gate never forgets one (BSC3-024/041): the owner's
+//! admission entries recover what the process could not write; an arm
+//! needs the ledger readable and every transaction resolved on chain
+//! (included, reverted, or its nonce taken by another), because bytes out
+//! may still take their nonce; an arm that ends with one unresolved keeps
+//! its fence, and a later arm settles the fences of earlier ones only then.
+//!
 //! Launches reach it only as verified full pending transactions (the
 //! runtime never hands it a hash-only sighting). Nothing is re-armed
 //! automatically after a refusal: switching the scope off and on again
@@ -234,16 +241,24 @@ pub struct LiveRuntime {
     boot: Option<String>,
     wall: fn() -> u64,
     ledger: Ledger,
-    /// The armed end's released transactions already in the ledger.
-    recorded: usize,
+    /// The armed end's ledger facts already folded.
+    folded_facts: u64,
     /// The block being applied: number, hash, time; its buyer transactions.
     block: Option<(u64, [u8; 32], u64)>,
     seen: Vec<Seen>,
     /// The ledger's fold, and why it could not be read.
     book: Book,
     ledger_error: Option<String>,
+    /// A fact this process could not write: the book may miss it, so no
+    /// arm follows and no fence settles until a restart recovers what the
+    /// admission entries hold (BSC3-024/041).
+    ledger_write_failed: Option<String>,
     /// Positions reported opened (to the executor and Strategy C).
     opened: Vec<[u8; 20]>,
+    /// Open positions whose exit the strategy decided and whose SELL has
+    /// not gone: the exit continues once the sender's nonce order allows
+    /// (BSC3-055), across arms of this process.
+    exits_wanted: Vec<[u8; 20]>,
 }
 
 impl LiveRuntime {
@@ -303,19 +318,82 @@ impl LiveRuntime {
             boot: None,
             wall: wall_ms,
             ledger,
-            recorded: 0,
+            folded_facts: 0,
             block: None,
             seen: Vec::new(),
             book: Book::default(),
             ledger_error: None,
+            ledger_write_failed: None,
             opened: Vec::new(),
+            exits_wanted: Vec::new(),
         }
         .folded()
     }
 
+    /// At the start, nothing armed: what the last process admitted and
+    /// could not write is recovered, then the ledger folded.
     fn folded(mut self) -> Self {
-        self.refold();
+        let _ = self.reconciled(wall_ms());
         self
+    }
+
+    /// With nothing armed: every admitted transaction is a ledger fact
+    /// (recovered as UNKNOWN if the process ended before its outcome was
+    /// written), the ledger folds, and every transaction is resolved on
+    /// chain. Otherwise why no arm may follow (BSC3-024/041).
+    fn reconciled(&mut self, now_ms: u64) -> Result<(), String> {
+        let unreadable = |e: String| format!("{}: {e}", crate::sources::LIVE_LEDGER_UNREADABLE);
+        let recovered = crate::sources::admitted_intents(&self.state_dir)
+            .map(|admitted| self.ledger.recover(&admitted, now_ms));
+        // The book as the ledger holds it, whatever else failed.
+        self.refold();
+        let recovered = recovered?.map_err(unreadable)?;
+        if let Some(why) = self.ledger_fault() {
+            return Err(why);
+        }
+        if let Some(tx) = recovered.unrecoverable.first() {
+            return Err(format!(
+                "{}: {} admitted without token and nonce, 0x{}",
+                crate::sources::LIVE_RELEASE_UNRESOLVED,
+                recovered.unrecoverable.len(),
+                alloy_primitives::hex::encode(tx)
+            ));
+        }
+        let open: Vec<&Fact> = self.book.unresolved().map(|t| &t.released).collect();
+        match open.first() {
+            None => Ok(()),
+            Some(f) => Err(format!(
+                "{}: {} transaction(s), nonce {} 0x{}",
+                crate::sources::LIVE_RELEASE_UNRESOLVED,
+                open.len(),
+                f.nonce,
+                alloy_primitives::hex::encode(f.tx_hash)
+            )),
+        }
+    }
+
+    /// The fences of earlier arms of this end (a crash, or an arm that
+    /// ended with transactions unresolved), settled once the ledger shows
+    /// everything they released resolved: renamed `.settled`, kept.
+    fn settle_fences(&self) -> Result<(), String> {
+        let prefix = format!("{}-", <LiveEnd as crate::paper_exec::End>::FENCE.0);
+        let entries = match std::fs::read_dir(&self.fence_dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("{}: {e}", self.fence_dir.display())),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("{}: {e}", self.fence_dir.display()))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(&prefix) && name.ends_with(".fence") {
+                let to = self.fence_dir.join(format!("{name}.settled"));
+                std::fs::rename(entry.path(), &to)
+                    .map_err(|e| format!("{}: {e}", entry.path().display()))?;
+            }
+        }
+        std::fs::File::open(&self.fence_dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| format!("{}: {e}", self.fence_dir.display()))
     }
 
     /// The ledger's fold now; an unreadable ledger is visible and counts
@@ -335,46 +413,55 @@ impl LiveRuntime {
 
     fn append(&mut self, fact: &Fact) {
         if let Err(e) = self.ledger.append(fact, (self.wall)()) {
-            self.ledger_error = Some(e);
+            self.ledger_write_failed = Some(e);
         }
     }
 
-    /// Every transaction the armed end released since the last call, as a
-    /// ledger fact (handed off or UNKNOWN).
-    fn sync_released(&mut self) {
+    /// Why the ledger cannot be trusted now: it does not read, or a fact
+    /// of this process (or of the armed end) was not written.
+    fn ledger_fault(&self) -> Option<String> {
+        let end = self
+            .executor
+            .as_ref()
+            .and_then(|x| x.end().ledger_failure());
+        self.ledger_error
+            .as_deref()
+            .or(self.ledger_write_failed.as_deref())
+            .or(end)
+            .map(|e| format!("{}: {e}", crate::sources::LIVE_LEDGER_UNREADABLE))
+    }
+
+    /// A ledger fault ends an armed path at once (its fence stays); what
+    /// the admission entries hold is recovered right away (BSC3-024/045).
+    fn fail_closed_on_ledger(&mut self) {
+        let Some(why) = self.ledger_fault() else {
+            return;
+        };
+        if let Some(e) = self
+            .executor
+            .as_ref()
+            .and_then(|x| x.end().ledger_failure())
+        {
+            self.ledger_write_failed = Some(e.to_string());
+        }
+        if self.executor.is_some() {
+            self.close(why);
+            let _ = self.reconciled((self.wall)());
+        }
+    }
+
+    /// After a hand-over: the facts the armed end wrote are folded; a fact
+    /// it could not write ends the arm.
+    fn handed(&mut self) {
         let Some(x) = self.executor.as_ref() else {
             return;
         };
-        let generation = x.end().armed().grant_generation();
-        let new: Vec<Fact> = x.end().released()[self.recorded..]
-            .iter()
-            .map(|r| Fact {
-                kind: if r.handed_off {
-                    FactKind::Released
-                } else {
-                    FactKind::Unknown
-                },
-                tx_hash: r.tx_hash,
-                intent: r.kind,
-                component: r.component,
-                token: r.token,
-                nonce: r.nonce,
-                grant_generation: generation,
-                input_wei: Some(r.input_wei),
-                max_wei: Some(r.max_wei),
-                block: None,
-                gas_wei: None,
-                tokens: None,
-                eth_wei: None,
-            })
-            .collect();
-        self.recorded += new.len();
-        for f in &new {
-            self.append(f);
-        }
-        if !new.is_empty() {
+        let written = x.end().facts_written();
+        if written != self.folded_facts {
+            self.folded_facts = written;
             self.refold();
         }
+        self.fail_closed_on_ledger();
     }
 
     /// One canonical event: the buyer's transactions of a block become
@@ -489,6 +576,12 @@ impl LiveRuntime {
                 changes.push(PositionChange::Ended { token: p.token });
             }
         }
+        for c in &changes {
+            if let PositionChange::Ended { token } = c {
+                self.exits_wanted.retain(|t| t != token);
+            }
+        }
+        self.fail_closed_on_ledger();
         changes
     }
 
@@ -520,10 +613,17 @@ impl LiveRuntime {
         self.stop(Phase::Off);
     }
 
+    /// The arm ends. Its fence stays while a transaction it may have
+    /// released is unresolved or not known (BSC3-041): a later arm settles
+    /// it only once the chain resolved them.
     fn disarm(&mut self) {
-        if let Some(x) = self.executor.take()
-            && x.disarm().is_err()
-        {
+        let Some(x) = self.executor.take() else {
+            return;
+        };
+        let unknown = x.end().ledger_failure().is_some() || self.ledger_fault().is_some();
+        if unknown || self.book.unresolved().next().is_some() {
+            drop(x);
+        } else if x.disarm().is_err() {
             self.disarm_errors += 1;
         }
     }
@@ -639,6 +739,11 @@ impl LiveRuntime {
             Ok(n) => n,
             Err(why) => return self.close(why),
         };
+        if self.executor.is_some()
+            && let Some(why) = self.ledger_fault()
+        {
+            return self.close(why);
+        }
         if let Some(x) = self.executor.as_mut() {
             // Armed under another grant: this one ends, a new arm follows.
             // (The moment of the proof differs every pass; the grant decides.)
@@ -655,6 +760,11 @@ impl LiveRuntime {
         }
         if self.phase.terminal() {
             return;
+        }
+        // BSC3-024/041: no arm while a transaction an earlier arm (or
+        // process) may have released can still take its nonce.
+        if let Err(why) = self.reconciled(now_ms) {
+            return self.close(why);
         }
         let (Some(owner), Some((endpoint, limits))) = (owner, canonical) else {
             self.phase = Phase::WaitingC2;
@@ -699,6 +809,26 @@ impl LiveRuntime {
             self.phase = Phase::WaitingNonce;
             return;
         };
+        // C2 and the ledger agree: a nonce the ledger holds consumed is
+        // consumed on chain (an orphan the ledger missed, or C2 behind it,
+        // stops here until they agree).
+        if let Some(t) = self.book.txs.iter().find(|t| {
+            matches!(
+                t.state,
+                FactKind::Included | FactKind::Reverted | FactKind::Replaced
+            ) && t.released.nonce >= next_nonce
+        }) {
+            let why = format!(
+                "{}: nonce {} consumed in the ledger, open on chain (C2 next {next_nonce}), 0x{}",
+                crate::sources::LIVE_RELEASE_UNRESOLVED,
+                t.released.nonce,
+                alloy_primitives::hex::encode(t.released.tx_hash)
+            );
+            // The validated probe stays: no new probe each pass while
+            // they disagree.
+            self.phase = Phase::Blocked(why);
+            return;
+        }
         if matches!(self.phase, Phase::ConnectFailed(_)) && !self.retry_due() {
             return;
         }
@@ -755,6 +885,10 @@ impl LiveRuntime {
             );
             return;
         }
+        // Everything earlier arms released is resolved: their fences are.
+        if let Err(e) = self.settle_fences() {
+            return self.stop(Phase::ArmFailed(format!("fences: {e}")));
+        }
         let armed = Executor::arm_end(
             end,
             deployment,
@@ -780,7 +914,7 @@ impl LiveRuntime {
                 {
                     executor.adopt(p.token, p.tokens, p.input_wei);
                 }
-                self.recorded = 0;
+                self.folded_facts = 0;
                 self.next_nonce = Some(next_nonce);
                 self.executor = Some(executor);
                 self.phase = Phase::Armed;
@@ -841,7 +975,7 @@ impl LiveRuntime {
             return None;
         }
         let buy = launch_to(x, hash, raw, ingress_ns, owner, clock);
-        self.sync_released();
+        self.handed();
         buy
     }
 
@@ -854,43 +988,95 @@ impl LiveRuntime {
         now_unix_ms: u64,
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
         let handed = strategy_to(self.executor.as_mut()?, action, owner, clock, now_unix_ms);
-        self.sync_released();
+        if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action {
+            self.want_exit(token);
+        }
+        self.handed();
         Some(handed)
     }
 
-    /// C2's evidence about the buyer's nonces, applied to the armed lanes.
-    pub fn apply_evidence(&mut self, evidence: &[LaneEvidence]) -> Vec<Option<IntentState>> {
-        let Some(x) = self.executor.as_mut() else {
+    /// An exit the strategy decided stays wanted while its position is
+    /// open and its SELL has not gone (a refusal that consumed nothing, an
+    /// approval that waits for its nonce, an arm that ended in between).
+    fn want_exit(&mut self, token: [u8; 20]) {
+        let sold = self.executor.as_ref().is_some_and(|x| x.exited(&token));
+        let open = self
+            .book
+            .positions
+            .iter()
+            .any(|p| p.token == token && p.state == PositionState::Open);
+        self.exits_wanted.retain(|t| *t != token);
+        if open && !sold {
+            self.exits_wanted.push(token);
+        }
+    }
+
+    /// The wanted exits that may go on now (BSC3-055): armed, and the
+    /// strategy's next nonce is the buyer's canonical next nonce (C2). The
+    /// strategy's exit again, for each.
+    pub fn exits_to_continue(&self, owner: &StateOwner) -> Vec<[u8; 20]> {
+        let Some(x) = &self.executor else {
             return Vec::new();
         };
-        let outcomes: Vec<Option<IntentState>> = evidence
+        if owner.clean_next_nonce(&self.setup.buyer) != Some(x.strategy_next_nonce()) {
+            return Vec::new();
+        }
+        self.exits_wanted
             .iter()
-            .map(|e| {
-                x.apply_evidence(match e {
-                    LaneEvidence::Inclusion(p) => NonceEvidence::Inclusion(p),
-                    LaneEvidence::Finality(p) => NonceEvidence::Finality(p),
-                    LaneEvidence::Orphan(p) => NonceEvidence::Orphan(p),
+            .copied()
+            .filter(|t| !x.exited(t))
+            .collect()
+    }
+
+    /// C2's evidence about the buyer's nonces, applied to the armed lanes;
+    /// the ledger's transactions are resolved by it whether armed or not
+    /// (BSC3-041).
+    pub fn apply_evidence(&mut self, evidence: &[LaneEvidence]) -> Vec<Option<IntentState>> {
+        let outcomes: Vec<Option<IntentState>> = match self.executor.as_mut() {
+            Some(x) => evidence
+                .iter()
+                .map(|e| {
+                    x.apply_evidence(match e {
+                        LaneEvidence::Inclusion(p) => NonceEvidence::Inclusion(p),
+                        LaneEvidence::Finality(p) => NonceEvidence::Finality(p),
+                        LaneEvidence::Orphan(p) => NonceEvidence::Orphan(p),
+                    })
                 })
-            })
-            .collect();
-        // Another transaction took a released one's nonce: it never
-        // happened (UNKNOWN resolved), its position neither.
-        let replaced: Vec<Fact> = evidence
-            .iter()
-            .zip(&outcomes)
-            .filter_map(|(e, o)| match (e, o) {
-                (LaneEvidence::Inclusion(p), Some(IntentState::Replaced)) => Some(p.nonce()),
-                _ => None,
-            })
-            .flat_map(|nonce| {
-                self.book
-                    .unresolved()
-                    .filter(move |t| t.released.nonce == nonce)
-                    .map(|t| Fact::about(&t.released, FactKind::Replaced))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        let _ = self.record(&replaced);
+                .collect(),
+            None => Vec::new(),
+        };
+        // Another transaction of the buyer took an unresolved one's nonce:
+        // it never happened, its position neither. Its block orphaned, the
+        // nonce is open again and so is the transaction.
+        let buyer = Address::from(self.setup.buyer);
+        let mut facts = Vec::new();
+        for e in evidence {
+            match e {
+                LaneEvidence::Inclusion(p) if p.sender() == buyer => {
+                    facts.extend(
+                        self.book
+                            .unresolved()
+                            .filter(|t| {
+                                t.released.nonce == p.nonce() && t.released.tx_hash != p.tx_hash().0
+                            })
+                            .map(|t| Fact::about(&t.released, FactKind::Replaced)),
+                    );
+                }
+                LaneEvidence::Orphan(p) if p.sender() == buyer => {
+                    facts.extend(
+                        self.book
+                            .txs
+                            .iter()
+                            .filter(|t| {
+                                t.state == FactKind::Replaced && t.released.nonce == p.nonce()
+                            })
+                            .map(|t| Fact::about(&t.released, FactKind::Orphaned)),
+                    );
+                }
+                _ => {}
+            }
+        }
+        let _ = self.record(&facts);
         outcomes
     }
 
@@ -1374,11 +1560,17 @@ mod tests {
                 post_price: [0; 32],
             })
         };
-        let apply = |x: &mut LiveRuntime, events: Vec<CanonicalEvent>| {
-            events
-                .iter()
-                .flat_map(|e| x.on_canonical(e))
-                .collect::<Vec<_>>()
+        // As the runtime applies a canonical event: C2 first, its evidence
+        // to the LIVE path, then the follower's facts.
+        let apply = |x: &mut LiveRuntime, c2: &mut StateOwner, events: Vec<CanonicalEvent>| {
+            let mut changes = Vec::new();
+            for e in &events {
+                c2.canonical(e);
+                let evidence = c2.take_evidence();
+                let _ = x.apply_evidence(&evidence);
+                changes.extend(x.on_canonical(e));
+            }
+            changes
         };
         let complete = |n: u64, h: u8| CanonicalEvent::BlockComplete {
             number: n,
@@ -1392,6 +1584,7 @@ mod tests {
         };
         let changes = apply(
             &mut x,
+            &mut c2,
             vec![
                 block(HEAD + 1, 0xb2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
                 trade(buy_tx, HEAD + 1, 0xb2, false, tokens, input),
@@ -1403,6 +1596,7 @@ mod tests {
         // again in the new chain's block, it is.
         let changes = apply(
             &mut x,
+            &mut c2,
             vec![CanonicalEvent::Reorg {
                 orphaned: vec![(HEAD + 1, [0xb2; 32])],
                 new_head: (HEAD + 1, [0xc2; 32]),
@@ -1411,6 +1605,7 @@ mod tests {
         assert_eq!(changes, vec![PositionChange::Ended { token }]);
         let changes = apply(
             &mut x,
+            &mut c2,
             vec![
                 block(HEAD + 1, 0xc2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
                 trade(buy_tx, HEAD + 1, 0xc2, false, tokens, input),
@@ -1432,16 +1627,32 @@ mod tests {
             decided_ns: 0,
         };
         reconnect(&mut x);
-        let (out, _) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, IntentKind::Approve);
+        // BSC3-055: the SELL waits for the approval to be canonical.
+        assert_eq!(refused, None);
         let approve_tx = out[0].handoff.tx_hash;
         requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+        let changes = apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 2, 0xc3, 0xc2, vec![tx(approve_tx, 1, 50_000)]),
+                complete(HEAD + 2, 0xc3),
+            ],
+        );
+        assert_eq!(changes, Vec::new());
+        // The approval is canonical: the exit continues with the SELL.
+        assert_eq!(x.exits_to_continue(&c2), vec![token]);
         reconnect(&mut x);
         let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
         assert_eq!((out.len(), refused), (1, None));
         assert_eq!(out[0].kind, IntentKind::Sell);
         let sell_tx = out[0].handoff.tx_hash;
         requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
         let positions = &x.book().positions;
         assert_eq!(positions[0].state, PositionState::Exiting);
         let proceeds = quote_native_sell(
@@ -1459,19 +1670,11 @@ mod tests {
         .output_amount;
         let changes = apply(
             &mut x,
+            &mut c2,
             vec![
-                block(
-                    HEAD + 2,
-                    0xc3,
-                    0xc2,
-                    vec![tx(approve_tx, 1, 50_000), {
-                        let mut s = tx(sell_tx, 2, 150_000);
-                        s.index = 1;
-                        s
-                    }],
-                ),
-                trade(sell_tx, HEAD + 2, 0xc3, true, tokens, proceeds),
-                complete(HEAD + 2, 0xc3),
+                block(HEAD + 3, 0xc4, 0xc3, vec![tx(sell_tx, 2, 150_000)]),
+                trade(sell_tx, HEAD + 3, 0xc4, true, tokens, proceeds),
+                complete(HEAD + 3, 0xc4),
             ],
         );
         assert_eq!(changes, vec![PositionChange::Ended { token }]);
@@ -1494,5 +1697,711 @@ mod tests {
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(state).unwrap();
+    }
+
+    /// A C3 LIVE scope on the loopback stand-in: the owner's state, the
+    /// qualification's repository, the run directory, the setup and what
+    /// the stand-in receives.
+    struct Rig {
+        state: PathBuf,
+        root: PathBuf,
+        d: PathBuf,
+        buyer: [u8; 20],
+        strategies: LiveStrategies,
+        live: LiveSetup,
+        exec: ExecSetup,
+        requests: std::sync::mpsc::Receiver<Vec<u8>>,
+    }
+
+    impl Rig {
+        fn new(tag: &str, strategies: LiveStrategies) -> Rig {
+            let (state, _store, now) = live_ready_granting(tag, |now| LiveGrant {
+                max_input_wei: 10_000_000_000_000_000,
+                max_spend_wei: 100_000_000_000_000_000,
+                adapters: vec![LiveAdapter::Club48BuilderV1],
+                ..grant_of(now + 3_600_000, strategies)
+            });
+            assert_eq!(now, NOW);
+            let root = fixture(tag, "PASS");
+            let ev = || vec!["ev/measure.dbrec".to_string()];
+            let spec = Spec {
+                venues: vec![(VenueId::Flap, ev())],
+                sources: vec![(SourceId::PublicNode, ev())],
+                adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+                acquisition: Some("ev/g08.dbrec".into()),
+                risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+            };
+            fs::create_dir_all(root.join("bsc/config")).unwrap();
+            fs::write(
+                root.join(LIVE_QUALIFICATION_PATH),
+                build(&root, &spec, 1).unwrap(),
+            )
+            .unwrap();
+            let d = std::env::temp_dir().join(format!("bsc-{tag}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&d);
+            let (key, buyer) = key_file(&d);
+            let (port, requests) = stand_in();
+            Rig {
+                exec: setup(d.join("unused.key"), Duration::from_secs(3_600)),
+                live: LiveSetup {
+                    key_path: key,
+                    buyer,
+                    route: LiveRouteConfig::Loopback { port },
+                    connect_timeout: Duration::from_secs(2),
+                },
+                state,
+                root,
+                d,
+                buyer,
+                strategies,
+                requests,
+            }
+        }
+
+        /// The LIVE path of one process in the boot session `boot`.
+        fn runtime(&self, boot: &str) -> LiveRuntime {
+            LiveRuntime::with_prober(
+                self.live.clone(),
+                self.exec.clone(),
+                &self.root,
+                self.state.clone(),
+                self.d.join("fences"),
+                None,
+                funded,
+            )
+            .in_session(boot, fixed)
+        }
+
+        /// The operator authorizes LIVE again in `boot` (after a restart
+        /// reset the switches or a revoke took the grant): every switch
+        /// ENABLED and a new grant.
+        fn authorize(&self, boot: &str, request: &str) {
+            let s = Store::open_in_session(&self.state, 8, Ok(boot.into())).unwrap();
+            s.restart(NOW).unwrap();
+            for (i, id) in crate::sources::SwitchId::ALL.into_iter().enumerate() {
+                let g = s.current().unwrap().generation;
+                let r = s
+                    .request(
+                        &format!("{request}-{i}"),
+                        Entity::Switch(id),
+                        Mode::Enabled,
+                        g,
+                        NOW,
+                    )
+                    .unwrap();
+                assert!(r.applied(), "{}", r.line());
+            }
+            let grant = LiveGrant {
+                max_input_wei: 10_000_000_000_000_000,
+                max_spend_wei: 100_000_000_000_000_000,
+                adapters: vec![LiveAdapter::Club48BuilderV1],
+                ..grant_of(NOW + 3_600_000, self.strategies)
+            };
+            let g = s.current().unwrap().generation;
+            let r = s
+                .grant_live(request, grant.clone(), grant.scope_sha256(), g, NOW)
+                .unwrap();
+            assert!(r.applied(), "{}", r.line());
+        }
+
+        fn fences(&self, suffix: &str) -> Vec<String> {
+            let mut out: Vec<String> = fs::read_dir(self.d.join("fences"))
+                .map(|e| {
+                    e.filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .filter(|n| n.ends_with(suffix))
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.sort();
+            out
+        }
+
+        fn clean(self) {
+            fs::remove_dir_all(self.d).unwrap();
+            fs::remove_dir_all(self.root).unwrap();
+            fs::remove_dir_all(self.state).unwrap();
+        }
+    }
+
+    /// C2 at `HEAD` with the buyer's next nonce `next`.
+    fn c2_at(dir: &Path, buyer: [u8; 20], next: u64) -> StateOwner {
+        let mut c2 = owner(dir, buyer);
+        c2.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: buyer,
+            next_nonce: next,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        c2
+    }
+
+    /// Block `n` (hash `[h; 32]`, parent `[parent; 32]`) with `txs`.
+    fn block_of(n: u64, h: u8, parent: u8, txs: Vec<CanonicalTx>) -> CanonicalEvent {
+        CanonicalEvent::Block {
+            number: n,
+            hash: [h; 32],
+            parent_hash: [parent; 32],
+            timestamp_s: 1_793_000_000 + (n - HEAD),
+            timestamp_ms: 1_793_000_000_000 + (n - HEAD) * 1_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs,
+        }
+    }
+
+    fn complete_of(n: u64, h: u8) -> CanonicalEvent {
+        CanonicalEvent::BlockComplete {
+            number: n,
+            hash: [h; 32],
+        }
+    }
+
+    /// `events` as the runtime applies them: C2 first, its evidence to the
+    /// LIVE path, then the follower's facts.
+    fn feed(
+        x: &mut LiveRuntime,
+        c2: &mut StateOwner,
+        events: Vec<CanonicalEvent>,
+    ) -> Vec<PositionChange> {
+        let mut changes = Vec::new();
+        for event in &events {
+            c2.canonical(event);
+            let evidence = c2.take_evidence();
+            let _ = x.apply_evidence(&evidence);
+            changes.extend(x.on_canonical(event));
+        }
+        changes
+    }
+
+    /// Block `HEAD + 1` with `txs`, as the runtime applies it.
+    fn include(
+        x: &mut LiveRuntime,
+        c2: &mut StateOwner,
+        txs: Vec<CanonicalTx>,
+    ) -> Vec<PositionChange> {
+        feed(
+            x,
+            c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, txs),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        )
+    }
+
+    fn reason(x: &LiveRuntime) -> (String, Option<String>) {
+        let r = record(x);
+        (
+            r.text(l::STATE).unwrap().to_string(),
+            r.opt_text(l::REASON).unwrap().map(str::to_string),
+        )
+    }
+
+    /// BSC3-024/041: the process dies right after its BUY was handed to the
+    /// builders. The restart knows the BUY (the owner's admission wrote it
+    /// with its token and nonce before any byte could leave), refuses a new
+    /// arm while the BUY's nonce may still be taken by it, opens the
+    /// position once the chain includes it, and only then arms again, at
+    /// the next nonce. Nothing leaves in between.
+    #[test]
+    fn a_release_lost_in_a_crash_is_recovered_and_blocks_the_next_arm() {
+        let r = Rig::new("live-crash", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (hash, raw, launcher) = launch();
+        let mut c2 = c2;
+        c2.pending(hash, launcher, 3, 0, 10);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        // The BUY leaves; the process is killed before anything else runs.
+        let buy = launch_to(x.executor.as_mut().unwrap(), hash, &raw, 10, &c2, &clock).unwrap();
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        std::mem::forget(x);
+        // The kill came between the dispatch and the outcome's fact: only
+        // the owner's admission entry, durable before any byte left, holds
+        // the BUY.
+        for e in fs::read_dir(r.state.join("live-ledger")).unwrap() {
+            fs::remove_file(e.unwrap().path()).unwrap();
+        }
+        // The restart: the BUY is a fact again, UNKNOWN and unresolved.
+        r.authorize("boot-2", "after-crash");
+        let mut x = r.runtime("boot-2");
+        let unresolved: Vec<_> = x.book().unresolved().map(|t| t.released.tx_hash).collect();
+        assert_eq!(unresolved, vec![buy.handoff.tx_hash]);
+        let tx = &x.book().tx(&buy.handoff.tx_hash).unwrap().released;
+        assert_eq!(
+            (tx.kind, tx.token, tx.nonce),
+            (crate::live_ledger::FactKind::Unknown, buy.token, 5)
+        );
+        // C2 restarted, the nonce still 5: no new arm while the BUY may
+        // take it.
+        let mut c2 = c2_at(&r.d.join("c2-restarted"), r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let (state, why) = reason(&x);
+        assert_eq!(state, "BLOCKED");
+        assert!(
+            why.as_deref()
+                .unwrap()
+                .starts_with(crate::sources::LIVE_RELEASE_UNRESOLVED),
+            "{why:?}"
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        // The chain includes it: the position opens; the next arm takes
+        // the next nonce.
+        let changes = include(
+            &mut x,
+            &mut c2,
+            vec![CanonicalTx {
+                hash: buy.handoff.tx_hash,
+                index: 0,
+                sender: r.buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: None,
+            }],
+        );
+        assert!(
+            matches!(changes.as_slice(), [PositionChange::Opened { token, .. }] if *token == buy.token),
+            "{changes:?}"
+        );
+        assert_eq!(x.book().unresolved().count(), 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(record(&x).opt_u64(l::NEXT_NONCE).unwrap(), Some(6));
+        // The crashed arm's fence is settled, not deleted.
+        assert_eq!(r.fences(".fence").len(), 1);
+        assert_eq!(r.fences(".fence.settled"), vec!["live-7-0.fence.settled"]);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-041: the gate closes while a released BUY is unresolved. The
+    /// arm's fence stays; a new grant does not arm while the BUY may take
+    /// its nonce; another transaction on that nonce (C2's inclusion
+    /// evidence, applied while nothing is armed) resolves it as replaced,
+    /// and then the path arms again.
+    #[test]
+    fn a_disarm_with_an_unresolved_release_keeps_its_fence_and_blocks_the_next_arm() {
+        let r = Rig::new("live-unresolved", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .unwrap();
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Revoked with the BUY unresolved: the arm ends, its fence stays.
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
+                .unwrap()
+                .applied()
+        );
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(r.fences(".fence"), vec!["live-7-0.fence"]);
+        // The next pass with the gate closed.
+        settle(&mut x, &c2);
+        assert_eq!(
+            reason(&x),
+            ("BLOCKED".to_string(), Some(LIVE_GRANT_MISSING.to_string()))
+        );
+        // A new grant: still no arm.
+        r.authorize("boot-1", "regrant");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let (state, why) = reason(&x);
+        assert_eq!(state, "BLOCKED");
+        assert!(
+            why.as_deref()
+                .unwrap()
+                .starts_with(crate::sources::LIVE_RELEASE_UNRESOLVED),
+            "{why:?}"
+        );
+        // Another transaction of the buyer takes nonce 5: the BUY never
+        // happened; nothing opens.
+        let changes = include(
+            &mut x,
+            &mut c2,
+            vec![CanonicalTx {
+                hash: [0xee; 32],
+                index: 0,
+                sender: r.buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: None,
+            }],
+        );
+        assert_eq!(changes, Vec::new());
+        let tx = x.book().tx(&buy.handoff.tx_hash).unwrap();
+        assert_eq!(tx.state, crate::live_ledger::FactKind::Replaced);
+        // That block leaves the chain: nonce 5 is open again, and so is
+        // the BUY; still no arm.
+        let changes = feed(
+            &mut x,
+            &mut c2,
+            vec![CanonicalEvent::Reorg {
+                orphaned: vec![(HEAD + 1, [0xb2; 32])],
+                new_head: (HEAD + 1, [0xc2; 32]),
+            }],
+        );
+        assert_eq!(changes, Vec::new());
+        let tx = x.book().tx(&buy.handoff.tx_hash).unwrap();
+        assert_eq!(tx.state, crate::live_ledger::FactKind::Released);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(
+            reason(&x)
+                .1
+                .unwrap()
+                .starts_with(crate::sources::LIVE_RELEASE_UNRESOLVED)
+        );
+        // The new chain's block takes nonce 5 by the other one again.
+        let other = CanonicalTx {
+            hash: [0xee; 32],
+            index: 0,
+            sender: r.buyer,
+            nonce: 5,
+            succeeded: true,
+            cost: None,
+        };
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xc2, 0xb1, vec![other]),
+                CanonicalEvent::NonceFact {
+                    sender: r.buyer,
+                    next_nonce: 6,
+                    block_number: HEAD + 1,
+                    block_hash: [0xc2; 32],
+                },
+                complete_of(HEAD + 1, 0xc2),
+            ],
+        );
+        let tx = x.book().tx(&buy.handoff.tx_hash).unwrap();
+        assert_eq!(tx.state, crate::live_ledger::FactKind::Replaced);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(record(&x).opt_u64(l::NEXT_NONCE).unwrap(), Some(6));
+        assert_eq!(r.fences(".fence.settled"), vec!["live-7-0.fence.settled"]);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-055 (review HIGH): an exit refused for the sender's nonce order
+    /// is not lost. Position A is open; B's BUY is out at nonce 1 and not
+    /// canonical; A's exit would take nonce 2: nothing goes, the exit stays
+    /// wanted. Once B is canonical it continues: A's approval, and once
+    /// that is canonical, its SELL.
+    #[test]
+    fn an_exit_refused_for_the_nonce_order_continues_once_it_may() {
+        use crate::chain_follower::{CanonicalTrade, TxCost};
+        use crate::paper_exec::{IntentKind, Refusal, StrategyCurve};
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+        };
+        let r = Rig::new("live-exit-order", LiveStrategies::StrategyC);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let input = U256::from(10_000_000_000_000_000u64);
+        let quote = |reserve, circulating, amount| {
+            quote_native_buy(&NativeBuyInputs {
+                token: terms,
+                reserve_before: reserve,
+                circulating_before: circulating,
+                input_amount: amount,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+                holding_cap: HoldingCap::None,
+            })
+            .unwrap()
+        };
+        let fresh = quote(
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(1_000_000_000_000_000_000u128),
+        );
+        let curve = StrategyCurve {
+            terms,
+            reserve: fresh.reserve_after,
+            circulating: fresh.supply_after,
+        };
+        let bought = quote(curve.reserve, curve.circulating, input);
+        let tokens = bought.output_amount;
+        let held = StrategyCurve {
+            reserve: bought.reserve_after,
+            circulating: bought.supply_after,
+            ..curve
+        };
+        let buy = |token| StrategyAction::Buy {
+            token,
+            curve,
+            input_wei: input,
+            decided_ns: 0,
+        };
+        let exit = |token| StrategyAction::Exit {
+            token,
+            tokens,
+            curve: held,
+            decided_ns: 0,
+        };
+        let buyer = r.buyer;
+        let receipt = |hash, nonce| CanonicalTx {
+            hash,
+            index: 0,
+            sender: buyer,
+            nonce,
+            succeeded: true,
+            cost: Some(TxCost {
+                gas_used: 200_000,
+                effective_gas_price: 50_000_000,
+            }),
+        };
+        let trade = |hash, n: u64, h: u8, token| {
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: n,
+                block_hash: [h; 32],
+                tx_index: 0,
+                tx_hash: hash,
+                log_index: 0,
+                origin: buyer,
+                sell: false,
+                token,
+                trader: buyer,
+                amount: tokens.to_be_bytes(),
+                eth: input.to_be_bytes(),
+                fee: [0; 32],
+                post_price: [0; 32],
+            })
+        };
+        let reconnect = |x: &mut LiveRuntime| {
+            let failed = x
+                .executor
+                .as_mut()
+                .unwrap()
+                .end_mut()
+                .connect(Duration::from_secs(2));
+            assert!(failed.is_empty());
+        };
+        let wait = Duration::from_secs(2);
+        let silent = Duration::from_millis(300);
+        let (a, b) = ([0xA1; 20], [0xB2; 20]);
+        // A: bought at nonce 0 and included.
+        let (out, refused) = x.on_strategy(&buy(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        let a_tx = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        let changes = feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![receipt(a_tx, 0)]),
+                trade(a_tx, HEAD + 1, 0xb2, a),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        assert!(
+            matches!(changes.as_slice(), [PositionChange::Opened { token, .. }] if *token == a),
+            "{changes:?}"
+        );
+        // B: bought at nonce 1, not canonical yet.
+        reconnect(&mut x);
+        let (out, _) = x.on_strategy(&buy(b), &c2, &clock, now_ms).unwrap();
+        assert_eq!(out.len(), 1);
+        let b_tx = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        // A's exit triggers now: nothing goes, the exit stays wanted.
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::SenderNonce)));
+        assert!(r.requests.recv_timeout(silent).is_err());
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+        // B canonical: A's exit goes on, its approval at nonce 2.
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 2, 0xb3, 0xb2, vec![receipt(b_tx, 1)]),
+                trade(b_tx, HEAD + 2, 0xb3, b),
+                complete_of(HEAD + 2, 0xb3),
+            ],
+        );
+        assert_eq!(x.exits_to_continue(&c2), vec![a]);
+        let (out, refused) = x.on_strategy(&exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        let approve = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        // The approval not canonical: the SELL waits.
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 3, 0xb4, 0xb3, vec![receipt(approve, 2)]),
+                complete_of(HEAD + 3, 0xb4),
+            ],
+        );
+        assert_eq!(x.exits_to_continue(&c2), vec![a]);
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        r.requests.recv_timeout(wait).unwrap();
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-024 (review MEDIUM): the end cannot write its BUY's fact (the
+    /// ledger refuses writes): the arm ends at once and keeps its fence;
+    /// this process does not arm again (a fact it wrote may be missing);
+    /// the restart recovers the BUY from the owner's admission entry as
+    /// UNKNOWN, and nothing arms while it is unresolved.
+    #[test]
+    fn a_fact_the_end_cannot_write_ends_the_arm_and_is_recovered() {
+        let r = Rig::new("live-unwritable", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let ledger = r.state.join("live-ledger");
+        fs::create_dir_all(&ledger).unwrap();
+        fs::set_permissions(&ledger, fs::Permissions::from_mode(0o500)).unwrap();
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .unwrap();
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!x.armed());
+        let (state, why) = reason(&x);
+        assert_eq!(state, "ENDED");
+        assert!(
+            why.as_deref()
+                .unwrap()
+                .starts_with(crate::sources::LIVE_LEDGER_UNREADABLE),
+            "{why:?}"
+        );
+        assert_eq!(r.fences(".fence"), vec!["live-7-0.fence"]);
+        // Writable again: this process still does not arm.
+        fs::set_permissions(&ledger, fs::Permissions::from_mode(0o700)).unwrap();
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
+                .unwrap()
+                .applied()
+        );
+        settle(&mut x, &c2);
+        r.authorize("boot-1", "regrant");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(
+            reason(&x)
+                .1
+                .unwrap()
+                .starts_with(crate::sources::LIVE_LEDGER_UNREADABLE)
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        std::mem::forget(x);
+        // The restart: the BUY is a fact, UNKNOWN, and blocks the arm.
+        r.authorize("boot-2", "after-restart");
+        let mut x = r.runtime("boot-2");
+        let tx = &x.book().tx(&buy.handoff.tx_hash).unwrap().released;
+        assert_eq!(
+            (tx.kind, tx.token, tx.nonce),
+            (crate::live_ledger::FactKind::Unknown, buy.token, 5)
+        );
+        let c2 = c2_at(&r.d.join("c2-restarted"), r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(
+            reason(&x)
+                .1
+                .unwrap()
+                .starts_with(crate::sources::LIVE_RELEASE_UNRESOLVED)
+        );
+        r.clean();
+    }
+
+    /// BSC3-041/045: an entry of the ledger that does not read blocks the
+    /// arm with its reason; nothing is folded from a partial ledger.
+    #[test]
+    fn an_unreadable_ledger_blocks_the_arm() {
+        let r = Rig::new("live-unreadable", LiveStrategies::C3);
+        let ledger = r.state.join("live-ledger");
+        fs::create_dir_all(&ledger).unwrap();
+        fs::write(ledger.join("00000000000000000000.dbrec"), b"torn").unwrap();
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let (state, why) = reason(&x);
+        assert_eq!(state, "BLOCKED");
+        assert!(
+            why.as_deref()
+                .unwrap()
+                .starts_with(crate::sources::LIVE_LEDGER_UNREADABLE),
+            "{why:?}"
+        );
+        assert!(r.fences(".fence").is_empty());
+        r.clean();
     }
 }

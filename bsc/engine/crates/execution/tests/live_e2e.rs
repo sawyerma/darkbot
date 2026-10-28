@@ -687,9 +687,10 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     .unwrap();
     let tokens = q.output_amount;
     let token = buy.token;
+    // Each transaction alone in its block.
     let tx = |hash, nonce, gas: u64| CanonicalTx {
         hash,
-        index: nonce,
+        index: 0,
         sender: buyer,
         nonce,
         succeeded: true,
@@ -754,8 +755,9 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         matches!(changes.as_slice(), [PositionChange::Opened { tokens: t, .. }] if *t == tokens)
     );
 
-    // The exit by the rules: the approval, then the SELL of the real
-    // tokens, signed by the buyer key, each admitted by the owner.
+    // The exit by the rules: the approval, then, once it is canonical
+    // (BSC3-055: one nonce after the other), the SELL of the real tokens,
+    // signed by the buyer key, each admitted by the owner.
     let held = StrategyCurve {
         terms,
         reserve: q.reserve_after,
@@ -773,8 +775,33 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     let (out, refused) = x.on_strategy(&exit, &owner, &clock, now_ms()).unwrap();
     assert!(!out.is_empty(), "{refused:?} {:?}", status(&x));
     assert_eq!(out[0].kind, IntentKind::Approve);
+    assert_eq!(out.len(), 1);
+    // The exit is not over: its SELL waits for the approval's nonce.
+    assert_eq!(refused, None);
     let approve_tx = out[0].handoff.tx_hash;
     requests.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(requests.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(x.exits_to_continue(&owner).is_empty());
+    // The approval is included: the exit continues with the SELL.
+    let changes = apply(
+        &mut x,
+        &mut owner,
+        vec![
+            block(
+                HEAD + 2,
+                0xb3,
+                0xb2,
+                head_ms + 2_000,
+                vec![tx(approve_tx, 1, 50_000)],
+            ),
+            CanonicalEvent::BlockComplete {
+                number: HEAD + 2,
+                hash: [0xb3; 32],
+            },
+        ],
+    );
+    assert!(changes.is_empty());
+    assert_eq!(x.exits_to_continue(&owner), vec![token]);
     // The next pass keeps the connection (the stand-in answers nothing).
     settle(&mut x, &owner);
     let (out, refused) = x.on_strategy(&exit, &owner, &clock, now_ms()).unwrap();
@@ -798,16 +825,16 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         &mut owner,
         vec![
             block(
-                HEAD + 2,
+                HEAD + 3,
+                0xb4,
                 0xb3,
-                0xb2,
-                head_ms + 2_000,
-                vec![tx(approve_tx, 1, 50_000), tx(sell_tx, 2, 150_000)],
+                head_ms + 3_000,
+                vec![tx(sell_tx, 2, 150_000)],
             ),
-            trade(sell_tx, HEAD + 2, 0xb3, true, tokens, proceeds),
+            trade(sell_tx, HEAD + 3, 0xb4, true, tokens, proceeds),
             CanonicalEvent::BlockComplete {
-                number: HEAD + 2,
-                hash: [0xb3; 32],
+                number: HEAD + 3,
+                hash: [0xb4; 32],
             },
         ],
     );

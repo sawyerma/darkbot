@@ -620,6 +620,28 @@ struct Adapter {
     handle: JoinHandle<()>,
 }
 
+/// Every LIVE transaction a Strategy C decision handed over, journaled.
+fn journal_live(
+    journal: &mut RuntimeJournal,
+    intents: &[crate::paper_exec::ExecIntent<crate::live_end::LiveHandoff>],
+) {
+    for i in intents {
+        journal.record(
+            RecordKind::Runtime,
+            i.times.sink_ns,
+            crate::runtime_journal::live_release_payload(
+                i.kind.code(),
+                &i.handoff,
+                [0; 32],
+                i.token,
+                i.block,
+                &i.times,
+                &i.raw,
+            ),
+        );
+    }
+}
+
 /// Phase I: Strategy C's decisions of the records just applied go to the
 /// armed C3 executor (`BSC_EXEC` ARMED), on C2's canonical snapshot; each
 /// PAPER transaction at the sink is journaled (`J`). Without an armed
@@ -652,31 +674,30 @@ fn strategy_to_paper(
         .ok()
         .and_then(|d| u64::try_from(d.as_millis()).ok())
         .unwrap_or(u64::MAX);
+    let clk = FnClock {
+        id: CLOCK_ID_MONOTONIC,
+        now: || clock.now_ns(),
+    };
+    // BSC3-055: a LIVE exit whose approval is canonical now sells.
+    if let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref())
+        && l.armed()
+    {
+        for token in l.exits_to_continue(o) {
+            let Some(action) = s.exit_action(token, clock.now_ns()) else {
+                continue;
+            };
+            if let Some((intents, _refused)) = l.on_strategy(&action, o, &clk, now_unix_ms) {
+                journal_live(journal, &intents);
+            }
+        }
+    }
     for action in s.take_actions() {
         // Plan 28.10.: the LIVE path takes the decision when it is armed.
         if let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref())
             && l.armed()
         {
-            let clk = FnClock {
-                id: CLOCK_ID_MONOTONIC,
-                now: || clock.now_ns(),
-            };
             if let Some((intents, _refused)) = l.on_strategy(&action, o, &clk, now_unix_ms) {
-                for i in &intents {
-                    journal.record(
-                        RecordKind::Runtime,
-                        i.times.sink_ns,
-                        crate::runtime_journal::live_release_payload(
-                            i.kind.code(),
-                            &i.handoff,
-                            [0; 32],
-                            i.token,
-                            i.block,
-                            &i.times,
-                            &i.raw,
-                        ),
-                    );
-                }
+                journal_live(journal, &intents);
             }
             continue;
         }

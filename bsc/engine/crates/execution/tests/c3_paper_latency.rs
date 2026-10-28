@@ -459,6 +459,8 @@ fn c3_paper_path_latency() {
                         &LaunchContext {
                             snapshot: &|cand, p, g| state.snapshot_id(cand, p, g),
                             head,
+                            // PAPER: its transactions never leave.
+                            next_nonce: None,
                         },
                         &clock,
                     );

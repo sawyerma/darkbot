@@ -14,12 +14,19 @@
 //!   transaction is unresolved again until it is included anew.
 //! - An UNKNOWN transaction (its handoff did not complete) is unresolved,
 //!   and visible, until the chain includes or replaces it.
+//! - A WITHDRAWN transaction was admitted, but no byte of it left: it is
+//!   resolved and never on chain.
+//!
+//! Every transaction the owner admitted is a fact here (BSC3-024): its
+//! admission entry, durable before any byte can leave, names its token and
+//! nonce, and one the ledger has no fact of (the process ended between the
+//! admission and its outcome) is recovered as UNKNOWN ([`Ledger::recover`]).
 //!
 //! Realized PnL = proceeds − input − all gas of the position's
 //! transactions; a failed BUY's gas is a loss of its own. A cost the
 //! receipt did not state counts at its most (the signed gas limit).
 
-use crate::sources::{ComponentId, LiveIntentKind};
+use crate::sources::{Admitted, ComponentId, LiveIntentKind};
 use alloy_primitives::U256;
 use darkbot_bsc_record::schema::bsc_runtime::live_ledger as k;
 use darkbot_bsc_record::{Draft, Value, decode};
@@ -33,6 +40,7 @@ use std::path::{Path, PathBuf};
 pub enum FactKind {
     Released,
     Unknown,
+    Withdrawn,
     Included,
     Reverted,
     Replaced,
@@ -44,6 +52,7 @@ impl FactKind {
         match self {
             Self::Released => "RELEASED",
             Self::Unknown => "UNKNOWN",
+            Self::Withdrawn => "WITHDRAWN",
             Self::Included => "INCLUDED",
             Self::Reverted => "REVERTED",
             Self::Replaced => "REPLACED",
@@ -55,6 +64,7 @@ impl FactKind {
         [
             Self::Released,
             Self::Unknown,
+            Self::Withdrawn,
             Self::Included,
             Self::Reverted,
             Self::Replaced,
@@ -62,6 +72,12 @@ impl FactKind {
         ]
         .into_iter()
         .find(|k| k.name() == text)
+    }
+
+    /// A transaction's first fact: what its release (or admission) made of
+    /// it.
+    fn first(self) -> bool {
+        matches!(self, Self::Released | Self::Unknown | Self::Withdrawn)
     }
 }
 
@@ -108,6 +124,36 @@ impl Fact {
             ..of.clone()
         }
     }
+
+    /// The admitted transaction `a` as `kind` (none without its token and
+    /// nonce: an entry written before BSC3-024).
+    pub fn admitted(a: &Admitted, kind: FactKind) -> Option<Fact> {
+        Some(Fact {
+            kind,
+            tx_hash: a.tx_hash,
+            intent: a.kind,
+            component: a.component,
+            token: a.token?,
+            nonce: a.nonce?,
+            grant_generation: a.grant_generation,
+            input_wei: Some(U256::from(a.input_wei)),
+            max_wei: Some(U256::from(a.max_wei)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+        })
+    }
+}
+
+/// What [`Ledger::recover`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Recovered {
+    /// Admitted transactions now facts, as UNKNOWN.
+    pub unknown: usize,
+    /// Admitted transactions that cannot be facts (no token or nonce in
+    /// their entry): unresolved for good.
+    pub unrecoverable: Vec<[u8; 32]>,
 }
 
 /// The ledger under an owner state directory.
@@ -173,6 +219,31 @@ impl Ledger {
             .and_then(|d| d.sync_all())
             .map_err(e)?;
         Ok(seq)
+    }
+
+    /// Every admitted transaction the ledger has no fact of becomes one, as
+    /// UNKNOWN: its bytes may have left (the process ended between its
+    /// admission and its outcome). Run with no LIVE end armed (startup,
+    /// before an arm), so no admission is in flight.
+    pub fn recover(&self, admitted: &[Admitted], now_ms: u64) -> Result<Recovered, String> {
+        let facts = self.facts()?;
+        let mut out = Recovered::default();
+        for a in admitted {
+            if facts
+                .iter()
+                .any(|f| f.kind.first() && f.tx_hash == a.tx_hash)
+            {
+                continue;
+            }
+            match Fact::admitted(a, FactKind::Unknown) {
+                Some(f) => {
+                    self.append(&f, now_ms)?;
+                    out.unknown += 1;
+                }
+                None => out.unrecoverable.push(a.tx_hash),
+            }
+        }
+        Ok(out)
     }
 
     fn names(&self) -> Result<Vec<(u64, PathBuf)>, String> {
@@ -248,7 +319,8 @@ impl Ledger {
 pub struct Tx {
     pub released: Fact,
     /// The last word on it: `Released`/`Unknown` while unresolved (also
-    /// after an orphan), else `Included`, `Reverted` or `Replaced`.
+    /// after an orphan), else `Withdrawn`, `Included`, `Reverted` or
+    /// `Replaced`.
     pub state: FactKind,
     pub inclusion: Option<Fact>,
 }
@@ -343,7 +415,7 @@ pub fn fold(facts: &[Fact]) -> Book {
     let mut txs: Vec<Tx> = Vec::new();
     for f in facts {
         match f.kind {
-            FactKind::Released | FactKind::Unknown => {
+            kind if kind.first() => {
                 if txs.iter().all(|t| t.released.tx_hash != f.tx_hash) {
                     txs.push(Tx {
                         released: f.clone(),
@@ -374,7 +446,8 @@ pub fn fold(facts: &[Fact]) -> Book {
         }
     }
     let mut book = Book::default();
-    for t in &txs {
+    // A withdrawn transaction never left: no position, no cost.
+    for t in txs.iter().filter(|t| t.state != FactKind::Withdrawn) {
         if matches!(t.state, FactKind::Included | FactKind::Reverted) {
             book.gas_wei += t.gas();
         }
@@ -556,6 +629,59 @@ mod tests {
         // An entry that does not decode refuses the ledger.
         fs::write(dir.join("live-ledger/00000000000000000099.dbrec"), b"x").unwrap();
         assert!(Ledger::open(&dir).facts().is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn admitted(n: u8, token: Option<[u8; 20]>) -> Admitted {
+        Admitted {
+            tx_hash: [n; 32],
+            kind: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            grant_generation: 7,
+            input_wei: 1_000,
+            max_wei: 1_300,
+            token,
+            nonce: token.map(|_| u64::from(n)),
+        }
+    }
+
+    /// BSC3-024: an admitted transaction the ledger has no fact of (the
+    /// process ended between its admission and its outcome) becomes an
+    /// UNKNOWN fact, once; one without token and nonce cannot and is named.
+    /// A withdrawn transaction (no byte left) is resolved, with no position
+    /// and no cost.
+    #[test]
+    fn admitted_transactions_without_a_fact_are_recovered_as_unknown() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-recover-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let known = Fact::admitted(&admitted(1, Some([0xA; 20])), FactKind::Released).unwrap();
+        let withdrawn = Fact::admitted(&admitted(2, Some([0xB; 20])), FactKind::Withdrawn).unwrap();
+        ledger.append(&known, 1).unwrap();
+        ledger.append(&withdrawn, 1).unwrap();
+        let all = [
+            admitted(1, Some([0xA; 20])),
+            admitted(2, Some([0xB; 20])),
+            admitted(3, Some([0xC; 20])),
+            admitted(4, None),
+        ];
+        let r = ledger.recover(&all, 2).unwrap();
+        assert_eq!(r.unknown, 1);
+        assert_eq!(r.unrecoverable, vec![[4; 32]]);
+        let facts = ledger.facts().unwrap();
+        assert_eq!(facts.len(), 3);
+        assert_eq!(
+            facts[2],
+            Fact::admitted(&admitted(3, Some([0xC; 20])), FactKind::Unknown).unwrap()
+        );
+        // Once only.
+        assert_eq!(ledger.recover(&all, 3).unwrap().unknown, 0);
+        let book = fold(&facts);
+        let unresolved: Vec<[u8; 32]> = book.unresolved().map(|t| t.released.tx_hash).collect();
+        assert_eq!(unresolved, vec![[1; 32], [3; 32]]);
+        assert_eq!(book.tx(&[2; 32]).unwrap().state, FactKind::Withdrawn);
+        assert!(book.positions.iter().all(|p| p.token != [0xB; 20]));
+        assert_eq!(book.gas_wei, U256::ZERO);
         fs::remove_dir_all(dir).unwrap();
     }
 }
