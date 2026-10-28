@@ -31,6 +31,8 @@ pub const EVIDENCE_SHORT: &str = "THRESHOLD_EVIDENCE_SHORT";
 pub const MISS_FALLBACK: &str = "THRESHOLD_MISS_FALLBACK";
 /// ACTIVE is not effective yet: the open sweep batch is evaluated first.
 pub const BARRIER: &str = "THRESHOLD_BARRIER";
+/// A refused request: a threshold mode beside the C0 census (it rides on the R127 sweep).
+pub const CENSUS: &str = "C0_CENSUS_REQUIRES_R127_SWEEP_MODE";
 /// A refused request: ACTIVE is reachable from OBSERVE only.
 pub const OFF_TO_ACTIVE: &str =
     "THRESHOLD_TRANSITION_INVALID: OFF -> ACTIVE, request OBSERVE first";
@@ -141,10 +143,18 @@ pub fn decide(i: &Inputs) -> (Effective, &'static str) {
     }
 }
 
-/// A request of the operator from the current one: ACTIVE only from OBSERVE (or ACTIVE).
-pub fn request(current: Requested, next: Requested) -> Result<Requested, &'static str> {
+/// A request of the operator from the current one: ACTIVE only from OBSERVE (or ACTIVE), and no
+/// threshold mode beside a C0 census.
+pub fn request(
+    current: Requested,
+    next: Requested,
+    census: bool,
+) -> Result<Requested, &'static str> {
     if current == Requested::Off && next == Requested::Active {
         return Err(OFF_TO_ACTIVE);
+    }
+    if census && next != Requested::Off {
+        return Err(CENSUS);
     }
     Ok(next)
 }
@@ -344,7 +354,9 @@ mod tests {
     #[test]
     fn active_is_requested_from_observe_only() {
         use Requested::*;
-        assert_eq!(request(Off, Active), Err(OFF_TO_ACTIVE));
+        assert_eq!(request(Off, Active, false), Err(OFF_TO_ACTIVE));
+        assert_eq!(request(Off, Observe, true), Err(CENSUS));
+        assert_eq!(request(Observe, Off, true), Ok(Off), "OFF beside a census");
         for (from, to) in [
             (Off, Off),
             (Off, Observe),
@@ -354,7 +366,7 @@ mod tests {
             (Active, Observe),
             (Active, Off),
         ] {
-            assert_eq!(request(from, to), Ok(to), "{from:?} -> {to:?}");
+            assert_eq!(request(from, to, false), Ok(to), "{from:?} -> {to:?}");
         }
         for v in VALUES {
             assert_eq!(Requested::parse(v).map(Requested::code), Some(v));

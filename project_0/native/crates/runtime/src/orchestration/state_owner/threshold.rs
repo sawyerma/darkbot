@@ -7,6 +7,8 @@ use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
 #[derive(Debug)]
 pub(super) struct ThresholdControl {
     pub(super) requested: Requested,
+    /// Where the requested mode came from (`config`, `controller seq N`, `resume`).
+    pub(super) requested_source: String,
     pub(super) effective: Effective,
     pub(super) block: &'static str,
     /// Bumped by every change of the effective mode or its block reason.
@@ -44,6 +46,16 @@ pub(super) struct ObserveBatch {
 }
 
 impl ThresholdControl {
+    /// DEC-06: a resumed run continues its threshold mode — the requested mode and its OBSERVE
+    /// evidence; the effective mode follows the index the next Ready rebuilds.
+    pub(super) fn continue_from(&mut self, r: Restored) {
+        self.requested = r.requested;
+        self.requested_source = "resume".into();
+        self.stats.ticks = r.ticks;
+        self.stats.streak = r.streak;
+        self.latched = r.latched;
+    }
+
     pub(super) fn new(
         requested: Requested,
         min_ticks: Option<u64>,
@@ -53,6 +65,7 @@ impl ThresholdControl {
     ) -> Self {
         Self {
             requested,
+            requested_source: "config".into(),
             effective: if requested == Requested::Off {
                 Effective::Off
             } else {
@@ -76,7 +89,80 @@ impl ThresholdControl {
     }
 }
 
+/// DEC-06: the threshold mode a resumed run continues with, from its owner journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Restored {
+    pub(super) requested: Requested,
+    pub(super) ticks: u64,
+    pub(super) streak: u64,
+    pub(super) latched: bool,
+}
+
+/// DEC-06: the threshold mode of the run whose owner journal (chain) is `journal`, read in order:
+/// a transition or stats record sets the requested mode and the evidence, a later miss resets the
+/// streak (an alarm latches). Growth after the last record is not restored (conservative); a torn
+/// tail ends the read; `None` without a record.
+pub(super) fn restore(journal: &std::path::Path) -> Option<Restored> {
+    use crate::analytics::evidence::{ThresholdMiss, ThresholdStatsRecord, ThresholdTransition};
+    use crate::analytics::payload::Payload;
+    let mut reader = crate::storage::segments::ChainReader::open(journal).ok()?;
+    let mut out: Option<Restored> = None;
+    while let Ok(Some(frame)) = reader.next_frame() {
+        if frame.kind == ThresholdTransition::KIND {
+            if let Ok(t) = frame.typed::<ThresholdTransition>() {
+                if let Some(requested) = Requested::parse(&t.requested) {
+                    out = Some(Restored {
+                        requested,
+                        ticks: t.ticks,
+                        streak: t.streak,
+                        latched: t.latched,
+                    });
+                }
+            }
+        } else if frame.kind == ThresholdStatsRecord::KIND {
+            if let (Ok(s), Some(o)) = (frame.typed::<ThresholdStatsRecord>(), out.as_mut()) {
+                (o.ticks, o.streak) = (s.ticks, s.streak);
+            }
+        } else if frame.kind == ThresholdMiss::KIND {
+            if let (Ok(m), Some(o)) = (frame.typed::<ThresholdMiss>(), out.as_mut()) {
+                o.streak = 0;
+                o.latched |= m.alarm;
+            }
+        }
+    }
+    out
+}
+
 impl ShadowOwner {
+    /// DEC-06: the operator's threshold mode request `value` (capability control `seq`), hot at
+    /// the owner: OFF → ACTIVE is refused (ACTIVE only from OBSERVE), a requested mode beside a C0
+    /// census is refused (the census rides on the sweep), a new ACTIVE request lifts a latched
+    /// miss fallback; turning the index on or off rebuilds it. The effective mode follows.
+    pub(super) fn threshold_request(&mut self, value: &str, seq: u64) -> Result<(), &'static str> {
+        let next = Requested::parse(value).ok_or("THRESHOLD_VALUE_INVALID")?;
+        let next = tm::request(self.threshold.requested, next, self.c0_census.is_some())?;
+        let (was, generation, indexing) = (
+            self.threshold.requested,
+            self.threshold.generation,
+            self.threshold_indexing(),
+        );
+        self.threshold.requested = next;
+        self.threshold.requested_source = format!("controller seq {seq}");
+        if next == Requested::Active {
+            self.threshold.latched = false;
+        }
+        if indexing != self.threshold_indexing() {
+            self.threshold_index_reset();
+        }
+        self.threshold_refresh("REQUEST");
+        if self.threshold.generation == generation && next != was {
+            // The requested mode changed, the effective one did not: a record of its own.
+            self.threshold.generation = generation.saturating_add(1);
+            self.threshold_record("REQUEST");
+        }
+        Ok(())
+    }
+
     /// The threshold trigger admits (effective ACTIVE); otherwise the sweep is authoritative.
     pub(super) fn threshold_authority(&self) -> bool {
         self.threshold.effective == Effective::Active
@@ -141,9 +227,10 @@ impl ShadowOwner {
         };
         owner_log!(
             self,
-            "threshold_mode: generation={} requested={} effective={} block={} cause={cause}",
+            "threshold_mode: generation={} requested={} ({}) effective={} block={} cause={cause}",
             record.generation,
             record.requested,
+            t.requested_source,
             record.effective,
             if record.block_reason.is_empty() {
                 "-"
@@ -575,5 +662,145 @@ impl ShadowOwner {
         self.threshold.block = "";
         self.threshold.bootstrapped = true;
         self.threshold_ready = true;
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+    use crate::analytics::evidence::{
+        LatencyNs, OwnerEvidenceWriter, ThresholdMiss, ThresholdStatsRecord, ThresholdTransition,
+    };
+
+    fn transition(requested: &str, ticks: u64, streak: u64, latched: bool) -> OwnerEvidence {
+        OwnerEvidence::ThresholdTransition(ThresholdTransition {
+            generation: 1,
+            requested: requested.into(),
+            effective: "OBSERVE".into(),
+            block_reason: String::new(),
+            cause: "TEST".into(),
+            ticks,
+            streak,
+            latched,
+            at_unix_ms: None,
+        })
+    }
+    fn stats(ticks: u64, streak: u64) -> OwnerEvidence {
+        OwnerEvidence::ThresholdStats(Box::new(ThresholdStatsRecord {
+            generation: 1,
+            requested: "ACTIVE".into(),
+            effective: "OBSERVE".into(),
+            block_reason: String::new(),
+            ticks,
+            streak,
+            uncomparable_ticks: 0,
+            hits: 0,
+            misses: 0,
+            extra: 0,
+            sampled_out: 0,
+            fallbacks: 0,
+            index_evaluations: 0,
+            crosscheck_samples: 0,
+            crosscheck_skipped: 0,
+            crosscheck_stale: 0,
+            crosscheck_misses: 0,
+            budget_ppm: 1,
+            sweep_detect_ns: LatencyNs::default(),
+            threshold_detect_ns: LatencyNs::default(),
+            observe_owner_ns: LatencyNs::default(),
+            observe_owner_ns_total: 0,
+        }))
+    }
+    fn miss(alarm: bool) -> OwnerEvidence {
+        OwnerEvidence::ThresholdMiss(ThresholdMiss {
+            generation: 1,
+            phase: "OBSERVE".into(),
+            account: Pubkey::new_unique(),
+            slot: 1,
+            input_revision: 1,
+            alarm,
+            at_unix_ms: None,
+        })
+    }
+    fn chain(tag: &str, events: Vec<OwnerEvidence>) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("p0_dec06_restore_{}_{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("opportunities.p0j");
+        let (mut w, _) = OwnerEvidenceWriter::start_rolling(
+            path.clone(),
+            dir.join("recovery.p0j"),
+            64,
+            std::time::Duration::from_millis(5),
+            1 << 20,
+            false,
+        )
+        .unwrap();
+        for e in events {
+            w.emit(e).unwrap();
+        }
+        w.finish(None).unwrap();
+        path
+    }
+
+    /// DEC-06: a resumed run's threshold mode, read in journal order — the last transition, newer
+    /// stats, a later miss resetting the streak (an alarm latching); nothing without a record.
+    #[test]
+    fn restore_reads_the_journal_in_order_and_stays_conservative() {
+        let p = chain(
+            "order",
+            vec![
+                transition("OBSERVE", 0, 0, false),
+                stats(40, 40),
+                transition("ACTIVE", 60, 60, false),
+                stats(90, 90),
+                miss(false),
+                stats(95, 5),
+            ],
+        );
+        assert_eq!(
+            restore(&p),
+            Some(Restored {
+                requested: Requested::Active,
+                ticks: 95,
+                streak: 5,
+                latched: false
+            })
+        );
+        let p = chain(
+            "alarm",
+            vec![
+                transition("ACTIVE", 10, 10, false),
+                stats(12, 12),
+                miss(true),
+            ],
+        );
+        assert_eq!(
+            restore(&p),
+            Some(Restored {
+                requested: Requested::Active,
+                ticks: 12,
+                streak: 0,
+                latched: true
+            })
+        );
+        assert_eq!(restore(&chain("none", vec![stats(5, 5), miss(true)])), None);
+        // A torn tail (a crash inside a frame) ends the read; the prefix stands.
+        let p = chain(
+            "torn",
+            vec![transition("OBSERVE", 3, 3, false), stats(7, 7)],
+        );
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&p)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, &[0x50, 0x30, 0x4a, 0x31, 9, 9]))
+            .unwrap();
+        assert_eq!(
+            restore(&p).map(|r| (r.requested, r.ticks, r.streak)),
+            Some((Requested::Observe, 7, 7))
+        );
+        assert_eq!(restore(&p.with_file_name("missing.p0j")), None);
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 }

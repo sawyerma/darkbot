@@ -42,6 +42,8 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         ("LIVE", "ON", "CAPABILITY_VALUE_INVALID"),
         ("HOLD_B", "LIVE", "CAPABILITY_VALUE_INVALID"),
         ("HOLD_B", "ACTIVE", "CAPABILITY_NO_RUNTIME"),
+        ("THRESHOLD_TRIGGER", "SWEEP", "CAPABILITY_VALUE_INVALID"),
+        ("THRESHOLD_TRIGGER", "OBSERVE", "CAPABILITY_NO_RUNTIME"),
     ] {
         let (code, _, err) = p0ctl(&d, &["capability", "set", capability, value]);
         assert_eq!(code, 2);
@@ -95,6 +97,20 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
     let (code, _, err) = p0ctl(
         &d,
         &["capability", "set", "LIVE", "OFF", "--expect-version", "0"],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("CAPABILITY_VERSION_CONFLICT"), "{err}");
+    // DEC-06: the threshold mode on the same CAS version.
+    let (code, _, err) = p0ctl(
+        &d,
+        &[
+            "capability",
+            "set",
+            "THRESHOLD_TRIGGER",
+            "OBSERVE",
+            "--expect-version",
+            "0",
+        ],
     );
     assert_eq!(code, 2);
     assert!(err.contains("CAPABILITY_VERSION_CONFLICT"), "{err}");

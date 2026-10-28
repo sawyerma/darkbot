@@ -409,6 +409,18 @@ impl ShadowOwner {
             &request_capability,
             Some(c) if c == crate::execution::bundle_path::JITO_BUNDLE
         );
+        // DEC-06: the threshold mode, hot at the owner under its own rule (OFF → ACTIVE refused).
+        let threshold = matches!(
+            &request_capability,
+            Some(c) if c == crate::orchestration::threshold_mode::THRESHOLD_TRIGGER
+        );
+        let valid = match valid {
+            Ok(requested) if threshold => self
+                .threshold_request(&requested, seq)
+                .map(|()| requested)
+                .map_err(String::from),
+            other => other,
+        };
         let c = &mut self.sources.capabilities;
         let applied = valid.is_ok();
         if let Ok(requested) = &valid {
@@ -420,6 +432,8 @@ impl ShadowOwner {
             } else if hold_b {
                 c.hold_b_requested =
                     crate::execution::hold_b::HoldMode::parse(requested).unwrap_or_default();
+            } else if threshold {
+                // Applied by `threshold_request` (the owner's threshold mode).
             } else {
                 c.live_requested = cap::LIVE_VALUES
                     .into_iter()
@@ -442,6 +456,9 @@ impl ShadowOwner {
                 self.hold_gate.mode.code(),
                 c.hold_b_block,
             )
+        } else if threshold {
+            let t = &self.threshold;
+            (t.requested.code(), t.effective.code(), t.block)
         } else {
             let requested = self.sources.capabilities.live_requested;
             let (effective, block_reason) = cap::live_effective(requested);
@@ -484,6 +501,14 @@ impl ShadowOwner {
                 self,
                 "capability_control: decision seq={seq} not recorded: {e}"
             );
+            // DEC-06: a threshold ACTIVE request stands only recorded (durable receipts).
+            if threshold
+                && self.threshold.requested
+                    == crate::orchestration::threshold_mode::Requested::Active
+            {
+                self.threshold.requested = crate::orchestration::threshold_mode::Requested::Observe;
+                self.threshold_refresh("UNRECORDED");
+            }
             // DEC-04: an ACTIVE decision stands only recorded.
             if hold_b && self.hold_gate.mode == crate::execution::hold_b::HoldMode::Active {
                 self.hold_gate.mode = crate::execution::hold_b::HoldMode::Observe;

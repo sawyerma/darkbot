@@ -29,7 +29,7 @@
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
-//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
+//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
@@ -1998,7 +1998,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE [--expect-version N] | p0ctl capability status";
 
 /// DEC-13: the operator's capability request (`set`), the same controller path as `source`:
 /// written only for a running owner of this project, CAS-versioned, then its doorbell rung; the

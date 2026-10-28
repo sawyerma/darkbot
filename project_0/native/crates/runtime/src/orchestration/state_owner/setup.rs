@@ -775,6 +775,10 @@ pub(super) fn prepare(
             .limits
             .owner_evidence_sync_ms,
     );
+    // DEC-06: a continued run's threshold mode, read before its chain is continued.
+    let threshold_restored = (resumed.is_some() || econ_resume)
+        .then(|| super::threshold::restore(&journal_path))
+        .flatten();
     let mut evidence = match segmented {
         false => OwnerEvidenceWriter::start(
             journal_path,
@@ -835,7 +839,7 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let threshold_bootstrap_batch = usize::try_from(operational.threshold_bootstrap_batch)?;
     // DEC-06: the start request of the threshold mode; effective only through OBSERVE.
-    let threshold = super::threshold::ThresholdControl::new(
+    let mut threshold = super::threshold::ThresholdControl::new(
         crate::orchestration::threshold_mode::Requested::from_config(
             darkbot_solana::runtime_config::active().threshold_trigger,
         ),
@@ -844,6 +848,9 @@ pub(super) fn prepare(
         usize::try_from(operational.threshold_crosscheck_accounts)?,
         clock.now_ns(),
     );
+    if let Some(r) = threshold_restored {
+        threshold.continue_from(r);
+    }
     let threshold_requested =
         threshold.requested != crate::orchestration::threshold_mode::Requested::Off;
     let threshold_ready = !threshold_requested;

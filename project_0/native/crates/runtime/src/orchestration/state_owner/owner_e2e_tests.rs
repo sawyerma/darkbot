@@ -5201,3 +5201,110 @@ fn dec06_active_crosscheck_ignores_healthy_stale_and_covered_samples() {
     cleanup(f);
     cleanup(h);
 }
+
+/// DEC-06 (N-5): the threshold mode through the one controller, hot at the owner — OFF → ACTIVE
+/// refused (recorded, nothing changes); OBSERVE turns the index on (SWEEP, INDEX_BOOTSTRAP, then
+/// OBSERVE); ACTIVE needs N; a new ACTIVE request lifts a latched miss fallback; OFF takes ACTIVE
+/// back with a full sweep and clears the index. Every decision is a durable receipt.
+#[test]
+fn dec06_the_controller_switches_the_threshold_mode_hot() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::capability_control;
+    use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
+    let mut f = fixture_with("dec06_controller", None);
+    let dir = f.dir.join("capability-control");
+    f.owner.sources.capabilities.dir = Some(dir.clone());
+    f.owner.sources.capabilities.config_version = Some(0);
+    let account = dec06_ready(&mut f, 95.0);
+    let request = |seq, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: tm::THRESHOLD_TRIGGER.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+        })
+    };
+    let decided = |f: &Fixture| {
+        let o = capability_control::latest_outcome(&dir).unwrap().unwrap();
+        let t = &f.owner.threshold;
+        (
+            o.seq,
+            o.applied,
+            o.requested,
+            o.effective,
+            t.effective,
+            t.block,
+        )
+    };
+    f.owner.apply_capability_control(1, request(1, "ACTIVE"));
+    let (seq, applied, ..) = decided(&f);
+    assert_eq!((seq, applied), (1, false), "OFF -> ACTIVE refused");
+    assert!(capability_control::latest_outcome(&dir)
+        .unwrap()
+        .unwrap()
+        .detail
+        .contains(tm::OFF_TO_ACTIVE));
+    assert_eq!(f.owner.threshold.requested, Requested::Off);
+    f.owner.apply_capability_control(2, request(2, "OBSERVE"));
+    assert_eq!(
+        decided(&f),
+        (
+            2,
+            true,
+            "OBSERVE".into(),
+            "SWEEP".into(),
+            Effective::Sweep,
+            tm::INDEX_BOOTSTRAP
+        )
+    );
+    assert_eq!(f.owner.threshold.requested_source, "controller seq 2");
+    assert_eq!(
+        Vec::from(f.owner.threshold_bootstrap.clone()),
+        vec![account]
+    );
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.threshold.effective, Effective::Observe);
+    f.owner.apply_capability_control(3, request(3, "ACTIVE"));
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::B8_UNDECIDED)
+    );
+    f.owner.threshold.min_ticks = Some(1);
+    f.owner.threshold.stats.streak = 1;
+    f.owner.threshold_refresh("STATE");
+    assert!(f.owner.threshold_authority());
+    f.owner.threshold.latched = true;
+    f.owner.threshold_refresh("MISS");
+    assert_eq!(f.owner.threshold.block, tm::MISS_FALLBACK);
+    f.owner.apply_capability_control(4, request(4, "ACTIVE"));
+    assert!(
+        !f.owner.threshold.latched,
+        "a new ACTIVE request lifts the latch"
+    );
+    assert_eq!(
+        f.owner.threshold.block,
+        tm::BARRIER,
+        "the fallback's sweep first"
+    );
+    f.owner.sweep();
+    assert!(f.owner.threshold_authority());
+    let fallbacks = f.owner.threshold.stats.fallbacks;
+    f.owner.apply_capability_control(5, request(5, "OFF"));
+    assert_eq!(
+        decided(&f),
+        (5, true, "OFF".into(), "OFF".into(), Effective::Off, "")
+    );
+    assert_eq!(f.owner.threshold.stats.fallbacks, fallbacks + 1);
+    assert_eq!(
+        f.owner.sweep_dirty_banks.len(),
+        2,
+        "ACTIVE left: full sweep"
+    );
+    assert_eq!(
+        f.owner.threshold_index.tracked_accounts() + f.owner.threshold_bootstrap.len(),
+        0,
+        "no index without a mode"
+    );
+    assert_eq!(f.owner.sources.capabilities.config_version, Some(5));
+    cleanup(f);
+}

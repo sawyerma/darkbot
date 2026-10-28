@@ -1,5 +1,6 @@
 //! DEC-13 operator capability control (`p0ctl capability set LIVE LIVE|OFF`, DEC-04
-//! `p0ctl capability set HOLD_B OFF|OBSERVE|ACTIVE`): typed,
+//! `p0ctl capability set HOLD_B OFF|OBSERVE|ACTIVE`, DEC-06 `… THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE`,
+//! hot, OFF → ACTIVE refused by the owner): typed,
 //! append-only request files beside the source-control log, rung by the same doorbell and handed
 //! to the state owner by the same control thread (`source_control::spawn`). The operator's value
 //! is the *requested* one; only the owner decides the *effective* one and records it
@@ -36,8 +37,8 @@ fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
 }
 
 /// The controllable capabilities and their values: LIVE (DEC-13), the B hold mode (DEC-04), the
-/// bundle path (DEC-11).
-pub const CAPABILITIES: [(&str, &[&str]); 3] = [
+/// bundle path (DEC-11), the threshold mode (DEC-06).
+pub const CAPABILITIES: [(&str, &[&str]); 4] = [
     (LIVE, &LIVE_VALUES),
     (
         crate::execution::hold_b::HOLD_B,
@@ -47,13 +48,17 @@ pub const CAPABILITIES: [(&str, &[&str]); 3] = [
         crate::execution::bundle_path::JITO_BUNDLE,
         &crate::execution::bundle_path::JITO_BUNDLE_VALUES,
     ),
+    (
+        super::threshold_mode::THRESHOLD_TRIGGER,
+        &super::threshold_mode::VALUES,
+    ),
 ];
 
 /// A request names a known capability and one of its values.
 pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
     let Some((_, values)) = CAPABILITIES.iter().find(|(c, _)| *c == capability) else {
         return Err(format!(
-            "CAPABILITY_UNKNOWN: {capability} (LIVE|HOLD_B|JITO_BUNDLE)"
+            "CAPABILITY_UNKNOWN: {capability} (LIVE|HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER)"
         ));
     };
     if !values.contains(&requested) {
