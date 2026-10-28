@@ -34,7 +34,7 @@ W external wire · R offline render/stdout/export · H historical reader or expl
 | runtime/src/orchestration/provider_evidence.rs | 1 | C | measured operator file (F13) |
 | solana/examples/p0-gap-ws-proxy.rs | 10 | W |  |
 | solana/src/bin/p0-probe-v1.rs | 16 | WR |  |
-| solana/src/chain.rs | 40 | WH | wire decode; encode_* only for the read-only historical view check (25.10., F4) |
+| solana/src/chain.rs | 41 | WH | wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4) |
 | solana/src/ingress/mod.rs | 5 | W |  |
 | solana/src/ingress/ws_rpc.rs | 14 | W |  |
 | solana/src/provider.rs | 13 | W | V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result) |

@@ -20,7 +20,7 @@ PROJECT = CRATES.parents[1]
 # Binaries that read historical sources only.
 HISTORICAL_BINS = {'runtime/src/bin/p0-parity.rs'}
 # Mixed files: the external wire decoders stay in the standard build, the re-encoders do not.
-STANDARD_MIXED = {'solana/src/chain.rs': 9}
+STANDARD_MIXED = {'solana/src/chain.rs': 10}
 
 
 class HistoricalFeature(unittest.TestCase):

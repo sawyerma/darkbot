@@ -53,7 +53,7 @@ PINNED = {
     'runtime/src/orchestration/provider_evidence.rs': (1, 'C'),  # measured operator file (F13)
     'solana/examples/p0-gap-ws-proxy.rs': (10, 'W'),
     'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
-    'solana/src/chain.rs': (40, 'WH'),  # wire decode; encode_* only for the read-only historical view check (25.10., F4)
+    'solana/src/chain.rs': (41, 'WH'),  # wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4)
     'solana/src/ingress/mod.rs': (5, 'W'),
     'solana/src/ingress/ws_rpc.rs': (14, 'W'),
     'solana/src/provider.rs': (13, 'W'),  # V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result)
@@ -177,7 +177,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 306)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 307)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):
