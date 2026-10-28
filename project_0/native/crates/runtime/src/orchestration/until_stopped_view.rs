@@ -114,15 +114,21 @@ fn newest_qualification(project: &Path, mode: &str) -> Option<QualificationView>
 /// The record journal of a Shadow run in its directory (`P0_RECORD_PATH`, `capture.sh shadow`).
 pub const SHADOW_RECORD: &str = "opportunities.p0j";
 
-/// DEC-16: where the unbounded runs of `mode` live below the project and the journal a crashed
-/// run leaves unsealed in its directory beside its windows journal; `None`: the mode's runs
-/// are never continued after a crash.
-pub fn layout(mode: &str) -> Option<(&'static str, &'static str)> {
+/// DEC-16: where the unbounded runs of `mode` live below the project, where a run keeps its
+/// windows journal (relative to its directory) and the journal a crash leaves unsealed beside
+/// it; `None`: the mode's runs are never continued after a crash.
+pub fn layout(mode: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match mode {
         super::boot_audit::MARKET_MODE => {
-            Some(("data/market", crate::market_observer::MARKET_JOURNAL))
+            Some(("data/market", "", crate::market_observer::MARKET_JOURNAL))
         }
-        "shadow" => Some(("data/shadow", SHADOW_RECORD)),
+        "shadow" => Some(("data/shadow", "", SHADOW_RECORD)),
+        // An econ4h run (layout V2): its capture's market directory.
+        "econ4h" => Some((
+            "data/runs",
+            "capture/market",
+            crate::market_observer::MARKET_JOURNAL,
+        )),
         _ => None,
     }
 }
@@ -131,8 +137,8 @@ pub fn layout(mode: &str) -> Option<(&'static str, &'static str)> {
 /// the newest unbounded run of its mode when it never ended (its windows journal unsealed),
 /// never halted and was admitted as exactly this run; otherwise the start is a new run.
 pub fn resumable(project: &Path, binding: &us::Binding, qualification_id: &str) -> Option<String> {
-    let (root, journal) = layout(&binding.mode)?;
-    resumable_in(&project.join(root), journal, binding, qualification_id)
+    let (root, dir, journal) = layout(&binding.mode)?;
+    resumable_below(&project.join(root), dir, journal, binding, qualification_id)
 }
 
 /// [`resumable`] among the runs below `root`, whose crash leaves `journal` unsealed.
@@ -142,13 +148,24 @@ pub fn resumable_in(
     binding: &us::Binding,
     qualification_id: &str,
 ) -> Option<String> {
-    newest_run(root)
+    resumable_below(root, "", journal, binding, qualification_id)
+}
+
+/// [`resumable_in`] with each run's windows and `journal` in its subdirectory `dir`.
+fn resumable_below(
+    root: &Path,
+    dir: &str,
+    journal: &str,
+    binding: &us::Binding,
+    qualification_id: &str,
+) -> Option<String> {
+    newest_run_below(root, dir)
         .filter(|r| {
             !r.sealed
                 && r.halted.is_none()
                 && &r.record.binding == binding
                 && r.record.qualification_id == qualification_id
-                && unsealed(&root.join(&r.run_id).join(journal))
+                && unsealed(&root.join(&r.run_id).join(dir).join(journal))
         })
         .map(|r| r.run_id)
 }
@@ -164,8 +181,13 @@ fn unsealed(first: &Path) -> bool {
 
 /// The newest run under `root` with a windows journal, read as far as it is written.
 fn newest_run(root: &Path) -> Option<RunView> {
+    newest_run_below(root, "")
+}
+
+/// [`newest_run`] with each run's windows journal in its subdirectory `sub`.
+fn newest_run_below(root: &Path, sub: &str) -> Option<RunView> {
     for dir in newest_first(root) {
-        let first = dir.join(us::WINDOWS_JOURNAL);
+        let first = dir.join(sub).join(us::WINDOWS_JOURNAL);
         let Ok(mut r) = crate::storage::segments::ChainReader::open(&first) else {
             continue;
         };
@@ -376,9 +398,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    /// DEC-16 (stage 3): a crashed unbounded Shadow run is continued by a start of exactly its
-    /// binding and qualification while its record journal is unsealed; an econ4h run is never
-    /// continued (no layout yet), nor a run of another mode.
+    /// DEC-16 (stage 3): a crashed unbounded Shadow or econ4h run is continued by a start of
+    /// exactly its binding and qualification while the journal its crash left is unsealed —
+    /// each mode's runs in their own layout, never a run of another mode.
     #[test]
     fn dec16_resumable_continues_only_an_unsealed_unhalted_run_of_its_mode() {
         let d = std::env::temp_dir().join(format!("p0_us_resumable_{}", std::process::id()));
@@ -399,8 +421,22 @@ mod tests {
         assert_eq!(resumable(&d, &market, id), None, "another mode's runs");
         let mut econ = b.clone();
         econ.mode = "econ4h".into();
+        assert_eq!(resumable(&d, &econ, id), None, "no econ4h run");
+        // A crashed econ4h run: its capture's windows and market journal in capture/market.
+        let market_dir = d.join("data/runs/e1/capture/market");
+        std::fs::create_dir_all(&market_dir).unwrap();
+        let ew = us::RollingWindows::start(&market_dir, econ.clone(), id, 1_000, 0).unwrap();
+        drop(
+            crate::storage::segments::SegmentedWriter::create(
+                &market_dir.join(crate::market_observer::MARKET_JOURNAL),
+                0,
+            )
+            .unwrap(),
+        );
+        assert_eq!(resumable(&d, &econ, id), Some("e1".into()));
+        ew.finish(true).unwrap();
         assert_eq!(resumable(&d, &econ, id), None);
-        assert_eq!(layout("econ4h"), None);
+        assert_eq!(layout("live"), None);
         w.finish(true).unwrap();
         assert_eq!(
             resumable(&d, &b, id),

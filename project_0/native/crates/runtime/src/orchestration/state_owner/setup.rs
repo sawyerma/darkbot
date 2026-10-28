@@ -748,6 +748,11 @@ pub(super) fn prepare(
     // the segment size); the MT0 journal follows the window the owner opened. An econ4h run's
     // windows are its econ grid.
     let econ_rolling = econ.as_ref().is_some_and(|h| h.cfg.unbounded);
+    // DEC-16: a continued econ4h run's owner continues its journals' chains.
+    let econ_resume = econ
+        .as_ref()
+        .and_then(|h| h.cfg.rolling.as_ref())
+        .is_some_and(|r| r.resume.is_some());
     let segmented = rolling.is_some() || econ_rolling;
     let segment_bytes = operational.econ_segment_mib * crate::storage::budget::MIB;
     let mt0_window = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
@@ -772,7 +777,7 @@ pub(super) fn prepare(
                 crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
                 evidence_sync,
                 segment_bytes,
-                resumed.is_some(),
+                resumed.is_some() || econ_resume,
             )?
             .0
         }
@@ -976,7 +981,7 @@ pub(super) fn prepare(
             &mt0_path,
             segment_bytes,
             mt0_window.clone(),
-            resumed.is_some(),
+            resumed.is_some() || econ_resume,
         )?,
     };
     let mt0_reporter = darkbot_common::mt0::spawn_reporter(

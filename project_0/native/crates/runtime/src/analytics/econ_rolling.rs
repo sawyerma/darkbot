@@ -69,6 +69,91 @@ impl RollingState {
     pub fn fail(&mut self, why: String) {
         self.halted.get_or_insert(why);
     }
+    /// DEC-16 (D-3): the windows of a continued run: its windows journal continues its chain
+    /// (SK-07 recovery) and every window up to `base` it did not record — the window the crash
+    /// interrupted — is recorded partial (`CRASH_RECOVERED`: no snapshot, its report journal
+    /// left as the crash left it, its evaluations in the crashed segment `evaluations`, the
+    /// monotonic times of a process that ended unknown, 0); window `base + 1` opens next.
+    /// Evidence lost with the crashed process is never attributed again.
+    pub fn resume(
+        paths: &crate::run_layout::RunPaths,
+        base: u64,
+        clock: &Clock,
+        evaluations: Option<&crate::storage::segments::SegmentRef>,
+    ) -> Result<Self, String> {
+        let first = paths.snapshot(WINDOWS_JOURNAL);
+        let (mut recorded, mut ended_unix_ns) = (0u64, 0u128);
+        let mut r = crate::storage::segments::ChainReader::open(&first)
+            .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?;
+        while let Some(f) = r
+            .next_frame()
+            .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?
+        {
+            if f.kind == kind::ECON_WINDOW {
+                let w: EconWindow = f
+                    .typed()
+                    .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?;
+                (recorded, ended_unix_ns) = (w.window, w.end_unix_ns);
+            }
+        }
+        let (mut journal, _) = crate::storage::segments::SegmentedWriter::recover(&first, 0)
+            .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?;
+        let evaluations = evaluations
+            .cloned()
+            .ok_or("ECON_RESUME: the evaluation chain was not continued after a crash")?;
+        let now = clock.unix_ns(clock.now_ns());
+        for window in recorded + 1..=base {
+            let report = window_report_path(paths, window);
+            let record = EconWindow {
+                window,
+                from_ns: 0,
+                end_ns: 0,
+                from_unix_ns: ended_unix_ns,
+                end_unix_ns: now,
+                status: WindowStatus::Partial {
+                    reason: crate::orchestration::until_stopped::CRASH_RECOVERED.into(),
+                },
+                snapshots: 0,
+                opportunities: 0,
+                report_journal: report
+                    .strip_prefix(&paths.root)
+                    .unwrap_or(&report)
+                    .display()
+                    .to_string(),
+                report_root_sha256: String::new(),
+                evaluations: evaluations.clone(),
+                late_evidence: 0,
+                pending_overflow: 0,
+                analytics_drops: 0,
+                retention_overflow: 0,
+                writer_errors: 0,
+            };
+            let provenance = Provenance {
+                source: journal::source::ECON,
+                source_seq: window,
+                ..Default::default()
+            };
+            journal
+                .append_typed(provenance, &record)
+                .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?;
+            crate::console::line(format!(
+                "[C0_E1/WINDOW] window={window} status=Partial(CRASH_RECOVERED) (continued run)"
+            ));
+            ended_unix_ns = now;
+        }
+        journal
+            .sync()
+            .map_err(|e| format!("ECON_WINDOWS_JOURNAL: {e}"))?;
+        Ok(Self {
+            window: base + 1,
+            pending: VecDeque::new(),
+            pending_overflow: 0,
+            late: 0,
+            journal,
+            counters_at_open: [0; 3],
+            halted: None,
+        })
+    }
     pub fn create(paths: &crate::run_layout::RunPaths) -> Result<Self, String> {
         Ok(Self {
             window: 1,
@@ -84,6 +169,29 @@ impl RollingState {
             halted: None,
         })
     }
+}
+
+/// DEC-16: the windows a crashed run's capture has behind it — its last checked window and the
+/// one the crash interrupted (its windows journal in the market directory).
+pub(super) fn resumed_base(paths: &crate::run_layout::RunPaths) -> Result<u64, String> {
+    let first = paths
+        .market_dir()
+        .join(crate::orchestration::until_stopped::WINDOWS_JOURNAL);
+    let mut r = crate::storage::segments::ChainReader::open(&first)
+        .map_err(|e| format!("UNTIL_STOPPED_RESUME: {e}"))?;
+    let mut last = 0;
+    while let Some(f) = r
+        .next_frame()
+        .map_err(|e| format!("UNTIL_STOPPED_RESUME: {e}"))?
+    {
+        if f.kind == kind::UNTIL_STOPPED_WINDOW {
+            last = f
+                .typed::<crate::orchestration::until_stopped::WindowCheck>()
+                .map_err(|e| format!("UNTIL_STOPPED_RESUME: {e}"))?
+                .window;
+        }
+    }
+    Ok(last + 1)
 }
 
 /// The report journal of window `window` (created on demand).
@@ -125,7 +233,9 @@ impl Worker {
         if width == 0 {
             return None;
         }
-        let from = start + (r.window - 1) * width;
+        // A continued run's grid starts after the windows before this process.
+        let base = self.h.shared.window_base.load(Ordering::Acquire);
+        let from = start + (r.window - 1 - base) * width;
         let end = from + width;
         Some((from, self.h.cutoff().map_or(end, |c| c.min(end))))
     }

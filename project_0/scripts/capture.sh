@@ -232,7 +232,16 @@ export P0_ECON_OUT_DIR P0_RUN_LAYOUT
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_ECON_OUT_DIR")/.p0-runtime.lock}"
 # The run's code identity (head, source hashes) is read from this checkout, not the build path.
 export P0_PROJECT_DIR="$PROJECT_DIR"
-RUN_DIR="$(py operations.capture.run_store allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
+# DEC-16: the continuation of exactly this crashed unbounded run (decided by p0ctl, admitted again
+# natively by the runtime) takes its existing directory; every other start allocates a new one.
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" ]]; then
+  RUN_DIR="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
+  [[ "$P0_UNTIL_STOPPED_RESUME" == "$P0_ECON_RUN_ID" && "$P0_RUN_LAYOUT" == v2 && -d "$RUN_DIR/capture" ]] || {
+    echo "UNTIL_STOPPED_RESUME_DRIFT: $P0_UNTIL_STOPPED_RESUME is not the run $RUN_DIR" >&2; exit 2;
+  }
+else
+  RUN_DIR="$(py operations.capture.run_store allocate "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" "$P0_RUN_LAYOUT")" || exit 2
+fi
 if [[ "$P0_RUN_LAYOUT" == v2 ]]; then
   LOG_DIR="$RUN_DIR/logs"; CAPTURE_DIR="$RUN_DIR/capture"
 else
@@ -240,9 +249,11 @@ else
 fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
+# A continued run appends to its logs (the crashed process's lines stay).
+TEE=(tee); [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" ]] && TEE=(tee -a)
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
   --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify \
-  --bin p0-journal --bin p0-capacity --bin p0ctl 2>&1 | tee "$LOG_DIR/build.log" || {
+  --bin p0-journal --bin p0-capacity --bin p0ctl 2>&1 | "${TEE[@]}" "$LOG_DIR/build.log" || {
   echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
@@ -252,8 +263,13 @@ if [[ -n "${P0_MEASUREMENT_PLAN:-}" ]]; then
   echo "launcher creates its own plan; unset P0_MEASUREMENT_PLAN" >&2; exit 2
 fi
 mkdir -p "$CAPTURE_DIR"
-# JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
-P0_ECON_DURATION_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$CAPTURE_DIR/measurement_plan.p0j")" || exit 2
+# JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text). A
+# continued run keeps its own plan (the persisted plan is authoritative).
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" && -f "$CAPTURE_DIR/measurement_plan.p0j" ]]; then
+  P0_ECON_DURATION_SECS="$(P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j" "$BIN_DIR/p0-measurement-plan" --runway)" || exit 2
+else
+  P0_ECON_DURATION_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$CAPTURE_DIR/measurement_plan.p0j")" || exit 2
+fi
 export P0_ECON_DURATION_SECS P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j"
 # DEC-16: an unbounded run (until-stopped:W:R) measures windows of W until its stop; its capacity
 # preflight covers its minimum runway R (a fixed run: its duration).
@@ -263,9 +279,14 @@ echo "Capture: ${P0_ECON_DURATION_SECS}s (capacity horizon ${CAPACITY_SECS}s); s
 # and sync probe on this volume, OS memory/CPU, operational budgets and the verifier budget of the
 # selected chain-verify mode. A capture longer than 600 s starts only when QUALIFIED; the native
 # report capture/capacity_preflight.p0j is the record.
-"$BIN_DIR/p0-capacity" --duration "$CAPACITY_SECS" --out "$CAPTURE_DIR" --capture-source "$P0_MARKET_SOURCE" \
+# A continued run is preflighted again into its own record (the first one stays immutable).
+CAPACITY_OUT="$CAPTURE_DIR"
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" ]]; then
+  CAPACITY_OUT="$CAPTURE_DIR/resume_$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$CAPACITY_OUT"
+fi
+"$BIN_DIR/p0-capacity" --duration "$CAPACITY_SECS" --out "$CAPACITY_OUT" --capture-source "$P0_MARKET_SOURCE" \
   --basis-root "$P0_ECON_OUT_DIR" --exclude-run "$RUN_DIR" --chain-verify "$CHAIN_VERIFY" ${CAPACITY_VERIFY[@]+"${CAPACITY_VERIFY[@]}"} \
-  | tee "$LOG_DIR/capacity_preflight.txt" || {
+  | "${TEE[@]}" "$LOG_DIR/capacity_preflight.txt" || {
   echo "Capacity preflight: start not allowed (report: $LOG_DIR/capacity_preflight.txt). Nothing was deleted." >&2; exit 2;
 }
 # Binary journals (PERSIST-01); the daily summary is a frame of the opportunity journal.
@@ -281,7 +302,11 @@ mkdir -p "$(dirname "$P0_RECORD_PATH")"
 status=0
 # All durations follow the same capture lifecycle. Never timebox the entire
 # process by capture duration: bootstrap and verification have separate budgets.
-"$BIN" ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} > "$LOG_DIR/console_summary.txt" 2> >(tee "$LOG_DIR/runtime.log" >&2) || status=$?
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" ]]; then
+  "$BIN" ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} >> "$LOG_DIR/console_summary.txt" 2> >(tee -a "$LOG_DIR/runtime.log" >&2) || status=$?
+else
+  "$BIN" ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} > "$LOG_DIR/console_summary.txt" 2> >(tee "$LOG_DIR/runtime.log" >&2) || status=$?
+fi
 wait # stderr tee must finish before immutable evidence hashing
 cat "$LOG_DIR/console_summary.txt"
 if [[ -f "$CAPTURE_DIR/run_manifest.p0j" ]]; then

@@ -506,7 +506,13 @@ impl EconWindows<'_> {
             .shared
             .start_ns
             .load(std::sync::atomic::Ordering::Acquire)
-            + self.open * self.width()
+            + (self.open
+                - self
+                    .h
+                    .shared
+                    .window_base
+                    .load(std::sync::atomic::Ordering::Acquire))
+                * self.width()
     }
 
     /// DEC-16: closes every window whose end `t` has passed — its remaining checkpoints, the
@@ -640,6 +646,10 @@ fn run_embedded_inner(
             crate::console::line(format!(
                 "[UNTIL_STOPPED] continues run {id}: market journal {how:?}"
             ));
+            // An econ4h run's runway counts every journal below its run root (as its windows).
+            let bytes = econ.as_ref().map_or(bytes, |h| {
+                crate::orchestration::until_stopped::run_bytes(&h.cfg.run_dir)
+            });
             match resume_windows(r, &cfg, process_started, bytes) {
                 Ok(w) => (sink, Some(w)),
                 Err(code) => {
@@ -927,7 +937,11 @@ fn run_embedded_inner(
                                 econ_windows = Some(EconWindows {
                                     h,
                                     rolling: r,
-                                    open: 1,
+                                    open: h
+                                        .shared
+                                        .window_base
+                                        .load(std::sync::atomic::Ordering::Acquire)
+                                        + 1,
                                 });
                             }
                             (None, _) => return Err(

@@ -5531,3 +5531,153 @@ fn dec16_control_evidence_reaches_the_analytics_or_is_reported() {
     assert!(worker.join().unwrap().0);
     assert_eq!(h.shared.drops.load(Ordering::Relaxed), 2);
 }
+
+/// DEC-16 (D-3): a crashed unbounded econ4h run continues as itself — its windows journal and
+/// its evaluations continue their chains, every window its crash interrupted is recorded partial
+/// (`CRASH_RECOVERED`: nothing attributed back), and its windows go on numbered after the last
+/// one its capture checked, on the grid the restart opens.
+#[test]
+fn dec16_a_crashed_econ4h_run_continues_its_window_numbers() {
+    use crate::orchestration::until_stopped as us;
+    let width = 4_000_000_000u64;
+    let mut w = rolling_worker();
+    w.accept(shadow_at(10)).unwrap();
+    w.accept(Evidence::WindowClosed {
+        window: 1,
+        boundary_ns: 1 + width,
+        verdict: "CONTINUE".into(),
+    })
+    .unwrap();
+    w.accept(shadow_at(width + 500)).unwrap();
+    let cfg = w.h.cfg.clone();
+    let paths = cfg.paths();
+    // The capture had checked window 1 (its windows journal in the market directory).
+    let mut b = us::tests::binding(4, 8);
+    b.mode = "econ4h".into();
+    std::fs::create_dir_all(paths.market_dir()).unwrap();
+    let mut capture =
+        us::RollingWindows::start(&paths.market_dir(), b.clone(), "0123456789abcdef", 1_000, 0)
+            .unwrap();
+    capture
+        .close(
+            &darkbot_solana::runtime_config::RuntimeConfig::default(),
+            "logs",
+            us::Measured {
+                now: 1_004,
+                bytes: 0,
+                run_volume: &cfg.run_dir,
+                environment: crate::storage::preflight::Environment::default(),
+                provider: darkbot_solana::provider::WindowUsage {
+                    requests: 0,
+                    bytes: 0,
+                },
+                evidence: None,
+                sealed: None,
+            },
+        )
+        .unwrap();
+    // The crash: nothing ends in order, no journal is sealed.
+    drop(capture);
+    drop(w);
+    assert_eq!(
+        rolling::resumed_base(&paths).unwrap(),
+        2,
+        "window 1 checked, 2 interrupted"
+    );
+    let mut resumed = cfg.clone();
+    resumed.rolling = Some(us::Rolling {
+        project: cfg.run_dir.clone(),
+        binding: b,
+        qualification_id: "0123456789abcdef".into(),
+        config: darkbot_solana::runtime_config::RuntimeConfig::default(),
+        max_runtime_seconds: None,
+        resume: Some(cfg.run_id.clone()),
+        autostart: None,
+    });
+    let shared = Shared::default();
+    shared.window_base.store(2, Ordering::Release);
+    let (tx, rx) = bounded("test-econ-resumed", 64);
+    let h = Handle {
+        tx,
+        shared: Arc::new(shared),
+        clock: Clock::new(),
+        cfg: resumed,
+    };
+    h.start_rolling(1);
+    assert_eq!(
+        h.window_of(2).map(|(n, ..)| n),
+        Some(3),
+        "numbered after the interrupted one"
+    );
+    assert_eq!(h.window_of(2 + width).map(|(n, ..)| n), Some(4));
+    let mut w = Worker::new(
+        h,
+        rx,
+        "logs".into(),
+        "confirmed".into(),
+        "UNKNOWN".into(),
+        30,
+    )
+    .unwrap();
+    assert_eq!(w.rolling.as_ref().unwrap().window, 3);
+    assert_eq!(
+        w.window(),
+        Some((1, 1 + width)),
+        "window 3 opens on the restart's grid"
+    );
+    assert!(w.evaluations.recovered(), "the evaluation chain continues");
+    let windows = windows_of(&w);
+    assert_eq!(
+        windows
+            .iter()
+            .map(|x| (x.window, x.status.clone()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                1,
+                WindowStatus::Closed {
+                    verdict: "CONTINUE".into()
+                }
+            ),
+            (
+                2,
+                WindowStatus::Partial {
+                    reason: us::CRASH_RECOVERED.into()
+                }
+            )
+        ]
+    );
+    assert_eq!(
+        (
+            windows[1].snapshots,
+            windows[1].opportunities,
+            &windows[1].evaluations
+        ),
+        (0, 0, w.evaluations.recovered_from().unwrap()),
+        "the interrupted window's evidence ended with its process"
+    );
+    w.accept(shadow_at(100)).unwrap();
+    w.accept(Evidence::WindowClosed {
+        window: 3,
+        boundary_ns: 1 + width,
+        verdict: "CONTINUE".into(),
+    })
+    .unwrap();
+    w.h.shared.operator_stop.store(true, Ordering::Release);
+    w.h.stop_rolling(1 + width + 100);
+    let path = paths.snapshot(ECON_WINDOWS_JOURNAL);
+    w.finish_rolling().unwrap();
+    let mut r = crate::storage::segments::ChainReader::open(&path).unwrap();
+    let mut numbers = Vec::new();
+    while let Ok(Some(f)) = r.next_frame() {
+        if f.kind == kind::ECON_WINDOW {
+            numbers.push(f.typed::<EconWindow>().unwrap().window);
+        }
+    }
+    assert_eq!(numbers, [1, 2, 3, 4]);
+    assert!(
+        r.sealed && !r.complete,
+        "a continued chain is never complete"
+    );
+    let _ = std::fs::remove_dir_all(&cfg.run_dir);
+}

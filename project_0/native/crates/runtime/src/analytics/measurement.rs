@@ -812,6 +812,50 @@ pub fn repo_root() -> std::path::PathBuf {
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
 }
 
+/// DEC-16: a continued run's manifest is the one its first start wrote — the same run, plan,
+/// provider class and runtime binary — never rewritten; its phases go on with a new bootstrap.
+pub fn verify_manifest(
+    paths: &crate::run_layout::RunPaths,
+    run_id: &str,
+    provider_class: &str,
+    plan: &MeasurementPlan,
+    clock: Clock,
+) -> Result<(), String> {
+    let m: RunManifest = super::journal::read_typed_value(&paths.capture(RUN_MANIFEST_JOURNAL))
+        .map_err(|e| format!("RUN_MANIFEST_RESUME: {e}"))?;
+    let binary = std::env::current_exe()
+        .and_then(|p| std::fs::read(&p))
+        .map_err(|e| format!("RUN_MANIFEST_RESUME: {e}"))?;
+    let binary = solana_sdk::hash::hash(&binary)
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let mut drift = Vec::new();
+    if m.run_id != run_id {
+        drift.push("run_id");
+    }
+    if &m.plan != plan {
+        drift.push("plan");
+    }
+    if m.provider_class != provider_class {
+        drift.push("provider_class");
+    }
+    if m.binary_sha256 != binary {
+        drift.push("binary");
+    }
+    if !drift.is_empty() {
+        return Err(format!("RUN_MANIFEST_RESUME_DRIFT: {}", drift.join(", ")));
+    }
+    journal(
+        paths,
+        clock,
+        Phase::Bootstrap {
+            budget_seconds: plan.budgets.bootstrap_seconds,
+        },
+    )
+}
+
 pub fn persist_manifest(
     paths: &crate::run_layout::RunPaths,
     run_id: &str,
@@ -1215,6 +1259,54 @@ mod tests {
 #[cfg(all(test, feature = "historical"))]
 mod persistence_tests {
     use super::*;
+    /// DEC-16: a continued run's manifest is verified, never rewritten — the same run, plan,
+    /// provider class and binary pass and a new bootstrap is journaled; any drift is refused.
+    #[test]
+    fn dec16_a_continued_run_keeps_its_manifest() {
+        use crate::run_layout::{RunLayout, RunPaths};
+        let clock = Clock::new();
+        let root = std::env::temp_dir().join(format!(
+            "p0-resume-manifest-{}-{}",
+            std::process::id(),
+            clock.unix_ns(0)
+        ));
+        let paths = RunPaths::new(&root, RunLayout::V2);
+        paths.create().unwrap();
+        let plan = MeasurementPlan::new(61).unwrap();
+        persist_manifest(&paths, "run", "test", &plan, clock).unwrap();
+        let before = fs::read(paths.capture(RUN_MANIFEST_JOURNAL)).unwrap();
+        verify_manifest(&paths, "run", "test", &plan, clock).unwrap();
+        assert_eq!(
+            fs::read(paths.capture(RUN_MANIFEST_JOURNAL)).unwrap(),
+            before
+        );
+        let other = MeasurementPlan::new(62).unwrap();
+        assert_eq!(
+            verify_manifest(&paths, "other", "test", &other, clock).unwrap_err(),
+            "RUN_MANIFEST_RESUME_DRIFT: run_id, plan"
+        );
+        assert!(verify_manifest(&paths, "run", "other", &plan, clock)
+            .unwrap_err()
+            .contains("provider_class"));
+        let mut phases = crate::analytics::journal::Reader::open(
+            &crate::analytics::journal::binary_path(&paths.phases()),
+        )
+        .unwrap();
+        let mut bootstraps = 0;
+        while let Some(f) = phases.next_frame().unwrap() {
+            if f.kind == crate::analytics::journal::kind::MEASUREMENT_PHASE
+                && matches!(
+                    f.typed::<PhaseRecord>().unwrap().phase,
+                    Phase::Bootstrap { .. }
+                )
+            {
+                bootstraps += 1;
+            }
+        }
+        assert_eq!(bootstraps, 2, "the continuation bootstraps again");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn manifest_is_exclusive_and_phase_journal_preserves_exact_window() {
         use crate::run_layout::{RunLayout, RunPaths};

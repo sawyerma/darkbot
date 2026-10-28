@@ -272,6 +272,9 @@ pub struct ShadowStats {
 }
 #[derive(Default)]
 pub struct Shared {
+    /// DEC-16: the windows of a continued unbounded run before this process (the window the
+    /// crash interrupted included): its grid's windows are numbered on from there.
+    pub window_base: AtomicU64,
     pub start_ns: AtomicU64,
     pub cutoff_ns: AtomicU64,
     /// DEC-16: an unbounded run's window (ns); 0 for a fixed run.
@@ -412,7 +415,8 @@ impl Handle {
         }
         let k = ns.saturating_sub(start).saturating_sub(1) / window;
         let from = start + k * window;
-        Some((k + 1, from, from + window))
+        let base = self.shared.window_base.load(Ordering::Acquire);
+        Some((base + k + 1, from, from + window))
     }
     /// The live hour of a receive time within its window (`None` outside the started run).
     pub fn hour(&self, ns: u64) -> Option<usize> {
@@ -518,17 +522,34 @@ pub fn spawn(
     market: &MarketConfig,
 ) -> Result<(Handle, std::thread::JoinHandle<Result<(), String>>), String> {
     cfg.paths().create().map_err(|e| e.to_string())?;
-    crate::analytics::measurement::persist_manifest(
-        &cfg.paths(),
-        &cfg.run_id,
-        &cfg.provider_class,
-        &cfg.plan,
-        clock,
-    )?;
+    // DEC-16: a continued run keeps its manifest (verified, never rewritten) and numbers its
+    // windows on after the last one its capture checked, the interrupted one included.
+    let resume = cfg.rolling.as_ref().is_some_and(|r| r.resume.is_some());
+    let shared = Shared::default();
+    if resume {
+        crate::analytics::measurement::verify_manifest(
+            &cfg.paths(),
+            &cfg.run_id,
+            &cfg.provider_class,
+            &cfg.plan,
+            clock,
+        )?;
+        shared
+            .window_base
+            .store(rolling::resumed_base(&cfg.paths())?, Ordering::Release);
+    } else {
+        crate::analytics::measurement::persist_manifest(
+            &cfg.paths(),
+            &cfg.run_id,
+            &cfg.provider_class,
+            &cfg.plan,
+            clock,
+        )?;
+    }
     let (tx, rx) = bounded("econ-analytics", cfg.queue_capacity);
     let handle = Handle {
         tx,
-        shared: Arc::new(Shared::default()),
+        shared: Arc::new(shared),
         clock,
         cfg: cfg.clone(),
     };
@@ -955,11 +976,27 @@ impl Worker {
             .limits
             .econ_segment_mib
             * crate::storage::budget::MIB;
-        let evaluations =
+        // DEC-16: a continued run's evaluations continue their chain (SK-07 recovery).
+        let resume = h.cfg.rolling.as_ref().is_some_and(|r| r.resume.is_some());
+        let evaluations = if resume {
+            crate::storage::segments::SegmentedWriter::recover(&evaluations_path, segment_bytes)
+                .map(|(w, _)| w)
+        } else {
             crate::storage::segments::SegmentedWriter::create(&evaluations_path, segment_bytes)
-                .map_err(|e| e.to_string())?;
-        // DEC-16: an unbounded run reports per window (window 1 first).
-        let (reports, rolling) = if h.cfg.unbounded {
+        }
+        .map_err(|e| e.to_string())?;
+        // DEC-16: an unbounded run reports per window (window 1 first; a continued run after
+        // the windows its crash interrupted).
+        let (reports, rolling) = if h.cfg.unbounded && resume {
+            let base = h.shared.window_base.load(Ordering::Acquire);
+            let state = rolling::RollingState::resume(
+                &paths,
+                base,
+                &h.clock,
+                evaluations.recovered_from(),
+            )?;
+            (rolling::report_journal(&paths, base + 1)?, Some(state))
+        } else if h.cfg.unbounded {
             (
                 rolling::report_journal(&paths, 1)?,
                 Some(rolling::RollingState::create(&paths)?),

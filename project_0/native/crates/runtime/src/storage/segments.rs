@@ -174,6 +174,8 @@ pub struct SegmentedWriter {
     max_segment_bytes: u64,
     /// DEC-16: the chain was continued after a crash; its seal is never complete.
     recovered: bool,
+    /// DEC-16: the crashed segment's readable part a recovery continued (its recovery link).
+    recovered_from: Option<SegmentRef>,
 }
 
 impl SegmentedWriter {
@@ -193,6 +195,7 @@ impl SegmentedWriter {
             sealed_bytes: 0,
             max_segment_bytes,
             recovered: false,
+            recovered_from: None,
         })
     }
     /// DEC-16: continues the chain at `first` after a crash (see the module docs). A chain that
@@ -210,6 +213,7 @@ impl SegmentedWriter {
             events_through: r.events,
         };
         let next_path = segment_path(first, index + 1);
+        let mut crashed_ref = None;
         let (set_id, recovered, next) = if r.reader.sealed {
             // Sealed with an announced, missing successor: the interrupted rotation.
             let (Some(set_id), true) = (r.set_id, r.announced_missing) else {
@@ -237,10 +241,11 @@ impl SegmentedWriter {
                 &SegmentRecovery {
                     set_id,
                     index: index + 1,
-                    previous,
+                    previous: previous.clone(),
                     torn_bytes,
                 },
             )?;
+            crashed_ref = Some(previous);
             (
                 set_id,
                 Recovered::Crash {
@@ -265,6 +270,7 @@ impl SegmentedWriter {
                 sealed_bytes,
                 max_segment_bytes,
                 recovered: matches!(recovered, Recovered::Crash { .. }) || r.recovered > 0,
+                recovered_from: crashed_ref,
             },
             recovered,
         ))
@@ -275,6 +281,10 @@ impl SegmentedWriter {
     /// DEC-16: whether the chain was continued after a crash (its seal is never complete).
     pub fn recovered(&self) -> bool {
         self.recovered
+    }
+    /// DEC-16: the crashed segment this writer's recovery continued (as its link binds it).
+    pub fn recovered_from(&self) -> Option<&SegmentRef> {
+        self.recovered_from.as_ref()
     }
     /// Event frames of the whole chain so far (every segment, a crashed one's readable ones).
     pub fn events(&self) -> u64 {
