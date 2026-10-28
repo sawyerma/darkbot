@@ -226,6 +226,8 @@ pub struct DriverRequest {
     /// Typed measured FREE_ONLY provider evidence (`PROVIDER_EVIDENCE`): required for an online
     /// strict verification (PHASENPLAN: strict only after an explicit provider preflight).
     pub provider_evidence: Option<PathBuf>,
+    /// The job controller's cancellation (`job cancel`): the attempt ends resumable.
+    pub cancelled: Option<fn() -> bool>,
 }
 
 /// The provider gate of an online strict verification: measured, recent FREE_ONLY evidence for
@@ -614,6 +616,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             min_free_bytes: req.budget.min_free_bytes,
             rps: req.budget.rps,
             offline: req.offline,
+            cancelled: req.cancelled,
         };
         return drive_history(
             req,
@@ -639,6 +642,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         min_free_bytes: req.budget.min_free_bytes,
         rps: req.budget.rps,
         offline: req.offline,
+        cancelled: req.cancelled,
     };
     let outcome: Result<StrictResult, String> = run_strict(job);
     record.at_unix_ns = now_unix_ns()?;
@@ -810,6 +814,14 @@ fn drive_history(
 /// `p0ctl verify`): budgets default to the mode's typed budget of the operational config
 /// (DEC-08: per method); every online history read needs `--provider-evidence`.
 pub fn cli(args: &[String]) -> Result<(String, bool), String> {
+    cli_with(args, None)
+}
+
+/// `cli` under the job controller's cancellation (`job cancel` of a post-capture job).
+pub fn cli_with(
+    args: &[String],
+    cancelled: Option<fn() -> bool>,
+) -> Result<(String, bool), String> {
     if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
         || std::env::var_os("P0_PROFILE").is_some()
     {
@@ -903,6 +915,7 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         resume,
         mode,
         provider_evidence,
+        cancelled,
     })?;
     let text = format!(
         "{}verification_spec_id={}\nverification_attempt_id={}\nverification_result_id={}\nstatus={} reason={}\n",
@@ -1276,6 +1289,7 @@ mod tests {
             resume,
             mode: VerifyMode::Strict,
             provider_evidence: None,
+            cancelled: None,
         };
         let first = drive(&req(false)).unwrap();
         assert_ne!(first.status, "CANONICAL_VERIFIED");

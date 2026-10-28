@@ -474,6 +474,7 @@ fn native_lines(root: &Path, url: &str, out: &Path, max_pages: u64) -> Vec<Strin
         min_free_bytes: 0,
         rps: 1000,
         offline: false,
+        cancelled: None,
     };
     let bot = index::BotEvidence::from_run(root, &program()).unwrap();
     let r = index::run(&job, max_pages, Some(url.to_string()), &bot).unwrap();

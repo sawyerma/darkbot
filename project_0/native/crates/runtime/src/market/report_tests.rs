@@ -294,6 +294,7 @@ mod report_e2e {
             resume,
             mode: super::super::strict_driver::VerifyMode::Strict,
             provider_evidence: None,
+            cancelled: None,
         };
         let first = drive(&req(false)).unwrap();
         assert_eq!(first.status, "HISTORICAL_INCOMPLETE");

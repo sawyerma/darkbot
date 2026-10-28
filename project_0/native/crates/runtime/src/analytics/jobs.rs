@@ -454,9 +454,6 @@ pub fn start(project: &Path, request: &JobRequest, worker: &Path) -> Result<(), 
 pub fn cancel(project: &Path, job_id: &str) -> Result<u32, String> {
     let s = status(project, job_id)?;
     match s.state {
-        JobState::Running { .. } if matches!(s.request.spec, JobSpec::PostCapture { .. }) => {
-            Err("JOB_NOT_CANCELLABLE: a post-capture verification ends at its own budget".into())
-        }
         JobState::Running { pid, .. } if pid > 0 => {
             // SAFETY: kill(2) with SIGTERM to the pid of the job's worker lock holder.
             if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
@@ -597,7 +594,8 @@ fn execute(
             if let Some(wanted) = &r.verification_result {
                 args.extend(["--verification-result".into(), wanted.clone()]);
             }
-            super::post_capture::post_capture(&run, chain_verify, &args).map(Executed::PostCapture)
+            super::post_capture::post_capture_with(&run, chain_verify, &args, cancelled)
+                .map(Executed::PostCapture)
         }
     }
 }
@@ -1078,9 +1076,10 @@ mod tests {
 
     /// A08/F-02, DEC-08: a post-capture job verifies off, index, strict or crosscheck; an online
     /// chain verification needs the operator's provider evidence (the GUI can only ask for one
-    /// from the cache); a running verification is not cancellable (it ends at its own budget).
+    /// from the cache); a running verification is cancelled like every job (ENTSCHEIDUNGEN §8:
+    /// START/STOP/CANCEL/STATUS) — its attempt ends resumable from the cache.
     #[test]
-    fn post_capture_jobs_are_validated_and_not_cancellable() {
+    fn post_capture_jobs_are_validated_and_cancellable() {
         let d = project("post_capture");
         let spec = |mode: &str, offline, evidence: Option<&str>| JobSpec::PostCapture {
             chain_verify: mode.into(),
@@ -1124,13 +1123,18 @@ mod tests {
         let parsed = request_of(&d, "post-capture", &args).unwrap();
         assert_eq!(parsed.spec, spec("strict", true, None));
         assert_eq!((parsed.job_id.as_str(), parsed.max_seconds), ("f", 5));
+        // The running verification's worker (a real child process, never a guessed pid).
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let lock = d.join(JOB_DIR).join("c").join(WORKER_LOCK);
         let mut worker = open_lock(&lock).unwrap();
         assert!(flock_nb(&worker, libc::LOCK_EX).unwrap());
-        writeln!(worker, "pid=4242 started_unix_ms=9").unwrap();
-        assert!(cancel(&d, "c")
-            .unwrap_err()
-            .starts_with("JOB_NOT_CANCELLABLE"));
+        writeln!(worker, "pid={} started_unix_ms=9", child.id()).unwrap();
+        assert_eq!(cancel(&d, "c"), Ok(child.id()));
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
         let _ = std::fs::remove_dir_all(d);
     }
 

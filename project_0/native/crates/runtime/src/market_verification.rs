@@ -35,6 +35,10 @@ pub struct Job {
     pub rps: u64,
     #[serde(default)]
     pub offline: bool,
+    /// The job controller's cancellation (`job cancel`, DEC-08): checked with every budget, the
+    /// attempt ends HISTORICAL_INCOMPLETE `VERIFICATION_CANCELLED`, resumable from its cache.
+    #[serde(skip)]
+    pub cancelled: Option<fn() -> bool>,
 }
 
 impl Job {
@@ -277,6 +281,9 @@ impl<'a> Client<'a> {
     }
     /// Time, disk, RAM and free-space budgets (no subprocess; disk usage tracked incrementally).
     pub(super) fn guard(&self) -> Result<(), &'static str> {
+        if self.job.cancelled.is_some_and(|c| c()) {
+            return Err("VERIFICATION_CANCELLED");
+        }
         if Instant::now() >= self.deadline {
             return Err("VERIFICATION_TIME_BUDGET");
         }
@@ -1068,6 +1075,7 @@ mod tests {
             min_free_bytes: 1024 * 1024,
             rps: 2,
             offline: true,
+            cancelled: None,
         }
     }
     fn cache(j: &Job, read: ChainRead, wire: Value) {
@@ -1126,6 +1134,7 @@ mod tests {
             min_free_bytes: j.min_free_bytes,
             rps: j.rps,
             offline: true,
+            cancelled: None,
         }
     }
     /// Interrupted batches resume identically from native checkpoints with parent/skip proofs;

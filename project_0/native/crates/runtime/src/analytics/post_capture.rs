@@ -33,6 +33,18 @@ pub struct Outcome {
 }
 
 pub fn post_capture(run: &Path, mode: &str, args: &[String]) -> Result<Outcome, String> {
+    post_capture_with(run, mode, args, None)
+}
+
+/// `post_capture` under the job controller's cancellation (DEC-08, `job cancel`): a cancelled
+/// verification ends its attempt resumable and the job is CANCELLED (no report, no
+/// qualification over a verification the operator stopped).
+pub fn post_capture_with(
+    run: &Path,
+    mode: &str,
+    args: &[String],
+    cancelled: Option<fn() -> bool>,
+) -> Result<Outcome, String> {
     if !matches!(mode, "off" | "index" | "strict" | "crosscheck") {
         return Err(format!(
             "CHAIN_VERIFY_{mode}_INVALID: off|index|strict|crosscheck"
@@ -60,7 +72,11 @@ pub fn post_capture(run: &Path, mode: &str, args: &[String]) -> Result<Outcome, 
     }
     let inv = report::parse_args(&rest)?;
     let mut text = String::new();
-    let verification_ok = match strict_driver::cli(&verify) {
+    let verification = strict_driver::cli_with(&verify, cancelled);
+    if cancelled.is_some_and(|c| c()) {
+        return Err(super::backtest::CANCELLED.into());
+    }
+    let verification_ok = match verification {
         Ok((t, verified)) => {
             text.push_str(&t);
             verified || mode == "off"

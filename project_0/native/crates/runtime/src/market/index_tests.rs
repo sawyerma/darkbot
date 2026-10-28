@@ -168,6 +168,7 @@ fn job(tag: &str) -> Job {
         min_free_bytes: 0,
         rps: 1000,
         offline: false,
+        cancelled: None,
     }
 }
 
@@ -323,6 +324,34 @@ fn dec08_index_page_budget_is_resumable() {
         "page 2 only"
     );
     assert_eq!(methods(&seen).len(), 5);
+    std::fs::remove_dir_all(&j.output).unwrap();
+}
+
+/// DEC-08 (`job cancel`): a cancelled attempt ends HISTORICAL_INCOMPLETE `VERIFICATION_CANCELLED`
+/// before any read, its result kept; the next attempt resumes and verifies.
+#[test]
+fn dec08_a_cancelled_index_attempt_is_resumable() {
+    let h = Arc::new(History::new());
+    let server = h.clone();
+    let (url, seen) = loopback(move |m, p| server.answer(m, p));
+    let mut j = job("cancelled");
+    j.cancelled = Some(|| true);
+    let bot = live_capture(&h);
+    let r = run(&j, 10, Some(url.clone()), &bot).unwrap();
+    assert_eq!(
+        (r.status.as_str(), r.reason.as_deref(), r.calls),
+        ("HISTORICAL_INCOMPLETE", Some("VERIFICATION_CANCELLED"), 0)
+    );
+    assert!(methods(&seen).is_empty());
+    j.cancelled = None;
+    assert_eq!(
+        run(&j, 10, Some(url), &bot).unwrap().status,
+        "INDEX_VERIFIED"
+    );
+    assert_eq!(
+        std::fs::read_dir(j.output.join("results")).unwrap().count(),
+        2
+    );
     std::fs::remove_dir_all(&j.output).unwrap();
 }
 
@@ -1103,6 +1132,7 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
         resume: false,
         mode: VerifyMode::Index { max_pages: 5 },
         provider_evidence: None,
+        cancelled: None,
     })
     .unwrap();
     assert_eq!(

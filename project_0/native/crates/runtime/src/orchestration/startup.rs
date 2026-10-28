@@ -1207,6 +1207,7 @@ mod supervise_tests {
                 resume: false,
                 mode: crate::market::observer::strict_driver::VerifyMode::Strict,
                 provider_evidence: None,
+                cancelled: None,
             })
             .unwrap();
             assert_ne!(strict.status, "CANONICAL_VERIFIED", "gap={gap}");
@@ -1309,6 +1310,18 @@ mod supervise_tests {
                     );
                     assert!(cached.verdict.is_some(), "{mode}");
                 }
+                // DEC-08 (`job cancel`): a cancelled verification ends the job CANCELLED.
+                assert_eq!(
+                    crate::analytics::post_capture::post_capture_with(
+                        &run,
+                        "index",
+                        &["--offline".into(), "--resume-verification".into()],
+                        Some(|| true),
+                    )
+                    .err()
+                    .as_deref(),
+                    Some(crate::analytics::backtest::CANCELLED)
+                );
                 assert!(post_capture(&run, "full", &[])
                     .err()
                     .is_some_and(|e| e.starts_with("CHAIN_VERIFY_full_INVALID")));
