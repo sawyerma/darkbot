@@ -20,7 +20,9 @@ const headings=async()=>(await p.locator('h2.g-section-title').allInnerTexts()).
 const expectSections=async(panel)=>assert.deepEqual(await headings(),sections[panel].map((t,i)=>`${i+1}. ${t}`),panel+' section order');
 const body=async()=>await p.locator('body').innerText();
 p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>{errors.push('native dialog');void d.dismiss();});
-const until=async(fn,msg)=>{for(let i=0;i<150;i++){if(await fn())return;await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
+// A wait longer than two seconds is named on stderr with the run's elapsed time, so a harness timeout shows where it stood.
+const t0=Date.now();const elapsed=()=>((Date.now()-t0)/1000).toFixed(1)+' s';
+const until=async(fn,msg)=>{const at=Date.now();for(let i=0;i<150;i++){if(await fn()){if(Date.now()-at>2000)process.stderr.write(`[${elapsed()}] waited ${((Date.now()-at)/1000).toFixed(1)} s: ${msg}\n`);return;}await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
 const state=async()=>await(await api.get(base+'/api/v1/bsc/process')).json();
 try{
  assert.equal((await api.get(base+'/api/v1/bsc/process')).status(),401);
@@ -188,8 +190,8 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> {const t=await strategyComp().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_DISABLED');},'BSC_STRATEGY_C LIVE stays BLOCKED');
  await until(async()=> (await strategyLine().innerText()).includes('NOT_RUNNING'),'Strategy C stopped on LIVE→BLOCKED');
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('11'),'generation 11 pushed');
- await requestSource('BSC_STATE_C2','LIVE','effective=BLOCKED block_reason=C2_OPERATIONAL_NOT_AUTHORIZED','bsc-component-receipt');
- await until(async()=> {const t=await compLine().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('C2_OPERATIONAL_NOT_AUTHORIZED');},'C2 LIVE stays BLOCKED');
+ await requestSource('BSC_STATE_C2','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_DISABLED','bsc-component-receipt');
+ await until(async()=> {const t=await compLine().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_DISABLED');},'C2 LIVE stays BLOCKED (the LIVE gate)');
  // BLOCKED is not SHADOW: the owner stops (its window checkpointed for the next start).
  await until(async()=> (await stateLine().innerText()).includes('NOT_RUNNING'),'C2 owner stopped on LIVE→BLOCKED');
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
@@ -245,7 +247,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  r=requireSwitches('BSC_ECON_SEND','BSC_ECON_SIGN','BSC_WALLET_BUYER');assert(r.code===2&&r.out.includes('BSC_ECON_SIGN DISABLED'),'one switch never enables another');
  await requestSwitch('BSC_ECON_LIVE','ENABLED','bsc-economic-authorization-receipt','source=BSC_ECON_LIVE requested=ENABLED effective=ENABLED');
  await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
- await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'global LIVE ENABLED: DRPC LIVE still BLOCKED, next missing condition');
+ await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('LIVE_GRANT_MISSING');},'global LIVE ENABLED: DRPC LIVE still BLOCKED, next missing condition');
  await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
  await requestSwitch('BSC_ECON_LIVE','DISABLED','bsc-economic-authorization-receipt','source=BSC_ECON_LIVE requested=DISABLED effective=DISABLED');
  await requestSwitch('BSC_ECON_SEND','DISABLED','bsc-economic-attempt-receipt','source=BSC_ECON_SEND requested=DISABLED effective=DISABLED');
@@ -266,6 +268,91 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  const badLimit=await switchPost('bsc.attempt.limit.set','BSC_BUY_ATTEMPTS_PER_DAY:-1',{case:'configVersion',value:0n});
  assert.equal(badLimit.status,2);assert.equal(badLimit.rejectReason,5);
  await setLimit(0);
+ // Plan 28.10.: the LIVE tab. Activation through the GUI up to an effective LIVE (the synthetic, verified
+ // qualification of this isolated snapshot), the grant of a confirmed scope whose SHA-256 is the native
+ // owner's, then deactivation and stop. This runtime has no LIVE path (no BSC_LIVE_* keys, no key):
+ // nothing can be signed or sent.
+ process.stderr.write(`[${elapsed()}] LIVE tab\n`);
+ const liveLine=label=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+label+'$')})}).first();
+ const unmet=async()=>await p.getByTestId('bsc-live-conditions').locator('tr[data-met="false"]').count();
+ const confirm=async()=>await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
+ await p.getByRole('tab',{name:'LIVE',exact:true}).click();
+ await p.getByRole('heading',{name:'9. '+sections.live[8],exact:true}).waitFor();
+ await expectSections('live');
+ await until(async()=> (await liveLine('LIVE gate').innerText()).includes('BLOCKED'),'LIVE gate BLOCKED initially');
+ await until(async()=> (await liveLine('LIVE qualification').innerText()).includes('VERIFIED'),'synthetic qualification VERIFIED');
+ await until(async()=> (await unmet())>5,'the checklist names what is missing');
+ await until(async()=> (await liveLine('LIVE path').innerText()).includes('NOT_CONFIGURED'),'no LIVE path in this runtime');
+ await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await requestSwitch('BSC_WALLET_LAUNCHER','ENABLED','bsc-wallet-launcher-receipt','requested=ENABLED effective=ENABLED');
+ await requestSwitch('BSC_WALLET_BUYER','ENABLED','bsc-wallet-buyer-receipt','requested=ENABLED effective=ENABLED');
+ await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ for(const [id,receipt] of [['BSC_ECON_SIGN','bsc-economic-authorization-receipt'],['BSC_ECON_ARM','bsc-economic-authorization-receipt'],['BSC_ECON_SEND','bsc-economic-attempt-receipt'],['BSC_ECON_ATTEMPT','bsc-economic-attempt-receipt']])
+  await requestSwitch(id,'ENABLED',receipt,`source=${id} requested=ENABLED effective=ENABLED`);
+ await requestSwitch('BSC_RUNTIME_MODE','LIVE','bsc-runtime-mode-receipt','source=BSC_RUNTIME_MODE requested=LIVE');
+ await p.getByRole('tab',{name:'LIVE',exact:true}).click();
+ await requestSwitch('BSC_ECON_LIVE','ENABLED','bsc-live-econ-receipt','source=BSC_ECON_LIVE requested=ENABLED effective=ENABLED');
+ await p.getByTestId('bsc-buy-limit-input').fill('1');await p.getByTestId('bsc-buy-limit-set').click();await confirm();
+ await until(async()=> (await p.getByTestId('bsc-buy-limit-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_PER_DAY requested=1 effective=1'),'daily limit 1 from the LIVE tab');
+ // Every next request takes the pushed generation as its CAS: wait for the push first.
+ await until(async()=> (await liveLine('Daily BUY attempts').innerText()).includes('0 of 1 used on'),'daily limit 1 pushed to the LIVE tab');
+ await p.getByTestId('bsc-live-total-input').fill('1');await p.getByTestId('bsc-live-total-set').click();await confirm();
+ await until(async()=> (await p.getByTestId('bsc-live-total-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_TOTAL requested=1'),'campaign limit 1');
+ await until(async()=> (await liveLine('Campaign BUY attempts').innerText()).includes('0 of 1'),'campaign limit pushed');
+ // The grant: the dialog shows the exact canonical scope and its digest; the native owner computes the same.
+ await p.getByTestId('bsc-live-grant-max-input').fill('2000000000000000');
+ await p.getByTestId('bsc-live-grant-max-spend').fill('50000000000000000');
+ await p.getByTestId('bsc-live-grant-attempts').fill('1');
+ await p.getByTestId('bsc-live-grant-hours').fill('1');
+ await p.getByTestId('bsc-live-grant-review').click();
+ await p.getByTestId('bsc-live-grant-dialog').waitFor();
+ const scope=await p.getByTestId('bsc-live-grant-scope').innerText();const sha=(await p.getByTestId('bsc-live-grant-sha').innerText()).trim();
+ const field=k=>scope.match(new RegExp('^'+k+'=(.*)$','m'))[1];
+ const native=execFileSync(`${dir}/app/current/bsc_runtime`,['live','scope','--venue',field('venue'),'--strategies',field('strategies'),'--sources',field('sources'),'--adapters',field('adapters'),'--max-input-wei',field('max_input_wei'),'--max-spend-wei',field('max_spend_wei'),'--max-attempts',field('max_attempts'),'--expires-unix-ms',field('expires_unix_ms')],{encoding:'utf8'});
+ assert.equal(native.replace(/scope_sha256=.*\n?$/,''),scope.endsWith('\n')?scope:scope+'\n','the shown scope is the native canonical text');
+ assert(native.includes('scope_sha256='+sha),'the confirmed digest is the native one');
+ await p.getByTestId('bsc-live-grant-confirm').click();
+ await until(async()=> (await p.getByTestId('bsc-live-grant-receipt').innerText()).includes('outcome=APPLIED'),'grant APPLIED');
+ await until(async()=> (await liveLine('Grant scope SHA-256').innerText()).includes(sha),'grant pushed with its digest');
+ // The scope: what the grant names and is not yet requested LIVE, from this tab.
+ for(const id of ['BSC_VENUE_FLAP','BSC_INGRESS_PUBLICNODE']){
+  await p.getByTestId(`bsc-live-scope-${id}`).click();await confirm();
+  // The receipt names the owner's decision now: the gate is clear and the grant names it.
+  await until(async()=> (await p.getByTestId('bsc-live-scope-receipt').innerText()).includes(`source=${id} requested=LIVE effective=LIVE generation=`),`${id} LIVE receipt effective LIVE`);
+  await until(async()=> (await p.getByTestId(`bsc-live-scope-${id}`).count())===0,`${id} LIVE pushed`);
+ }
+ // Effective LIVE: every condition holds, every entity of the scope is LIVE now.
+ await until(async()=> (await liveLine('LIVE gate').innerText()).includes('CLEAR'),'LIVE gate CLEAR through the GUI');
+ assert.equal(await unmet(),0,'every condition met');
+ {const rows=await p.getByTestId('bsc-live-scope').locator('tr').all();assert.equal(rows.length,5,'runtime, C2, BSC_EXEC, Flap, PublicNode');for(const row of rows)assert.equal((await row.locator('td').nth(2).innerText()).trim(),'LIVE','scope effective LIVE: '+(await row.innerText()));}
+ {const out=execFileSync(`${dir}/app/current/bsc_runtime`,['live','status','--state',`${dir}/run/bsc-sources`,'--root',`${dir}/app/bsc-source`],{encoding:'utf8'});assert(out.includes('qualification=VERIFIED')&&out.includes('live=CLEAR'),'the CLI sees the same effective LIVE: '+out);}
+ await p.screenshot({path:`${dir}/bsc-live-clear.png`,fullPage:true});
+ // Deactivate: the grant is revoked; stop: the economic LIVE switch off.
+ await p.getByTestId('bsc-live-revoke-request').click();await confirm();
+ await until(async()=> (await p.getByTestId('bsc-live-revoke-receipt').innerText()).includes('outcome=APPLIED'),'revoke APPLIED');
+ await until(async()=> {const t=await liveLine('LIVE gate').innerText();return t.includes('BLOCKED')&&t.includes('LIVE_GRANT_MISSING');},'revoked: BLOCKED LIVE_GRANT_MISSING');
+ await requestSwitch('BSC_ECON_LIVE','DISABLED','bsc-live-econ-receipt','source=BSC_ECON_LIVE requested=DISABLED effective=DISABLED');
+ await p.getByTestId('bsc-live-total-input').fill('0');await p.getByTestId('bsc-live-total-set').click();await confirm();
+ await until(async()=> (await p.getByTestId('bsc-live-total-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_TOTAL requested=0'),'campaign limit 0 applied');
+ await until(async()=> (await liveLine('Campaign BUY attempts').innerText()).includes('0 of 0'),'campaign limit 0 again');
+ await p.screenshot({path:`${dir}/bsc-live.png`,fullPage:true});
+ // Everything back as before: sources and venue SHADOW, runtime PAPER, every switch DISABLED, limit 0.
+ await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ // Monitoring names the LIVE tab's decision: after the stop, BLOCKED with the gate's first reason.
+ await until(async()=> {const t=await srcLine('BSC_INGRESS_PUBLICNODE').innerText();return t.includes('requested LIVE')&&t.includes('BLOCKED')&&t.includes('ECONOMIC_LIVE_DISABLED');},'Monitoring follows the LIVE gate');
+ for(const [id,receipt] of [['BSC_INGRESS_PUBLICNODE','bsc-source-receipt'],['BSC_VENUE_FLAP','bsc-venue-receipt']]){
+  await requestSource(id,'SHADOW',`source=${id} requested=SHADOW effective=SHADOW`,receipt);
+  await until(async()=> (await srcLine(id).innerText()).includes('requested SHADOW'),`${id} SHADOW pushed`);
+ }
+ await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await requestSwitch('BSC_RUNTIME_MODE','PAPER','bsc-runtime-mode-receipt','source=BSC_RUNTIME_MODE requested=PAPER');
+ for(const [id,receipt] of [['BSC_ECON_SIGN','bsc-economic-authorization-receipt'],['BSC_ECON_ARM','bsc-economic-authorization-receipt'],['BSC_ECON_SEND','bsc-economic-attempt-receipt'],['BSC_ECON_ATTEMPT','bsc-economic-attempt-receipt']])
+  await requestSwitch(id,'DISABLED',receipt,`source=${id} requested=DISABLED effective=DISABLED`);
+ await setLimit(0);
+ await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await requestSwitch('BSC_WALLET_LAUNCHER','DISABLED','bsc-wallet-launcher-receipt','requested=DISABLED effective=DISABLED');
+ await requestSwitch('BSC_WALLET_BUYER','DISABLED','bsc-wallet-buyer-receipt','requested=DISABLED effective=DISABLED');
+ process.stderr.write(`[${elapsed()}] LIVE tab restored\n`);
  await p.getByRole('tab',{name:'Overview',exact:true}).click();
  await until(async()=> (await switchLine('Wallet switches').innerText()).includes('Launcher wallet DISABLED · Buyer wallet DISABLED'),'Overview wallet summary');
  assert(!(await switchLine('Economic switches').innerText()).includes('ENABLED'),'every economic switch DISABLED at the end');
@@ -327,7 +414,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await p.setViewportSize({width:390,height:844});await p.goto(base+'/');await p.getByTestId('project-link-bsc').click();
  await until(async()=> (await body()).includes('isolated-fixture'),'mobile BSC feed');
  assert.match(await p.locator('.g-line',{hasText:'Snapshot age'}).first().innerText(),/\d+ s/,'snapshot age shown');
- for(const [tab,panel] of [['Overview','overview'],['Launch / BUY','launch'],['Monitoring','monitoring'],['Analytics','analytics'],['Wallets','wallets']]){
+ for(const [tab,panel] of [['Overview','overview'],['Launch / BUY','launch'],['Monitoring','monitoring'],['Analytics','analytics'],['Wallets','wallets'],['LIVE','live']]){
   await p.getByRole('tab',{name:tab,exact:true}).click();await p.locator('h2.g-section-title').first().waitFor();await expectSections(panel);
   const [scroll,width,wide]=await p.evaluate(()=>[document.documentElement.scrollWidth,window.innerWidth,[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>window.innerWidth+1&&![...e.children].some(c=>c.getBoundingClientRect().right>window.innerWidth+1)).slice(0,5).map(e=>`${e.tagName}.${e.className}: ${(e.textContent||'').slice(0,60)}`)]);
   assert(scroll<=width+1,`${tab} overflows on mobile: ${scroll} > ${width} · ${wide.join(' | ')}`);
@@ -335,5 +422,5 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the native check on the same state, a foreign HOME refused (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the native check on the same state, a foreign HOME refused (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all six tabs (desktop and 390 px without overflow), the LIVE tab: GUI activation to an effective LIVE (gate CLEAR, synthetic verified qualification, the CLI sees the same), grant of a confirmed scope whose SHA-256 is the native owner's, revoke → LIVE_GRANT_MISSING, stop, campaign limit, no LIVE path (nothing signed or sent), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

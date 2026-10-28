@@ -175,7 +175,7 @@ bsc_source_request() {
   case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \
-    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources"
+    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT"
 }
 cmd_bsc() {
   case "${1:-}" in

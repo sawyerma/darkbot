@@ -144,21 +144,9 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
         out.warnings.push("CLOCK_UNREADABLE".into());
         return out;
     };
-    let boot = sources::boot_session().ok();
-    let daily = sources::buy_usage(&dir, now).ok();
-    let total = sources::total_usage(&dir).ok();
-    let spent = match &g.live_set_by {
-        Some(by) => sources::spent_by_grant(&dir, by.generation).ok(),
-        None => Some(0),
-    };
-    let ctx = LiveContext {
-        boot: boot.as_deref(),
-        now_unix_ms: now,
-        daily: daily.as_ref(),
-        total: total.as_ref(),
-        spent_wei: spent,
-        qualification: &verified.view,
-    };
+    let reads = sources::GateReads::read(&dir, &g, now);
+    let ctx = reads.ctx(&verified.view);
+    let (boot, daily, total, spent) = (&reads.boot, &reads.daily, &reads.total, reads.spent_wei);
     let blockers = g.live_blockers(&ctx);
     out.gate = if blockers.is_empty() {
         "CLEAR"

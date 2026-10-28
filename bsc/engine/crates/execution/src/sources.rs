@@ -2300,6 +2300,44 @@ pub fn live_inputs(dir: &Path, now_ms: u64) -> Result<(Generation, BuyUsage, Tot
     ))
 }
 
+/// Everything besides the generation and the qualification the LIVE gate
+/// reads at `now_ms`, owned: one gate for a request's receipt, the runtime
+/// and every tab. A part that does not read stays unreadable, and the gate
+/// names it.
+pub struct GateReads {
+    pub boot: Option<String>,
+    pub now_unix_ms: u64,
+    pub daily: Option<BuyUsage>,
+    pub total: Option<TotalUsage>,
+    pub spent_wei: Option<u128>,
+}
+
+impl GateReads {
+    pub fn read(dir: &Path, g: &Generation, now_ms: u64) -> GateReads {
+        GateReads {
+            boot: boot_session().ok(),
+            now_unix_ms: now_ms,
+            daily: buy_usage(dir, now_ms).ok(),
+            total: total_usage(dir).ok(),
+            spent_wei: match &g.live_set_by {
+                Some(by) => spent_by_grant(dir, by.generation).ok(),
+                None => Some(0),
+            },
+        }
+    }
+
+    pub fn ctx<'a>(&'a self, qualification: &'a LiveQualification) -> LiveContext<'a> {
+        LiveContext {
+            boot: self.boot.as_deref(),
+            now_unix_ms: self.now_unix_ms,
+            daily: self.daily.as_ref(),
+            total: self.total.as_ref(),
+            spent_wei: self.spent_wei,
+            qualification,
+        }
+    }
+}
+
 fn spend_dir(dir: &Path) -> PathBuf {
     dir.join("live-spend")
 }

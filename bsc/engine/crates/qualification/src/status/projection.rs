@@ -1,6 +1,9 @@
 use super::{census, wire::bsc::*};
 use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH};
-use darkbot_bsc_execution::sources::{RESET_BY_RESTART, SwitchId};
+use darkbot_bsc_execution::live_qualification;
+use darkbot_bsc_execution::sources::{
+    Effective, Entity, GateReads, Generation, LiveContext, RESET_BY_RESTART, SwitchId, boot_session,
+};
 use darkbot_bsc_record::{self as record, Kind, Presence, Record, Schema, Value, schema};
 use std::{
     collections::HashMap,
@@ -222,6 +225,47 @@ fn native_record(root: &Path, path: &Path, r: &Record) -> NativeRecord {
         }
         .into(),
         fields,
+    }
+}
+/// Plan 28.10.: each entity row of the owner's record (`<list>[i].<id>`) as
+/// the owner decides it now: a requested LIVE under the LIVE gate (LIVE, or
+/// BLOCKED with the gate's first reason), any other as it reads in this
+/// boot session. The LIVE tab, Monitoring and a receipt name one decision.
+fn gate_rows(record: &mut NativeRecord, g: &Generation, ctx: &LiveContext<'_>) {
+    const IDS: [&str; 4] = ["source_id", "component_id", "venue_id", "setting_id"];
+    let rows: Vec<(String, Effective)> = record
+        .fields
+        .iter()
+        .filter_map(|f| {
+            let (row, leaf) = f.name.rsplit_once('.')?;
+            let entity = Entity::parse(&f.value).filter(|_| IDS.contains(&leaf))?;
+            Some((row.to_owned(), g.effective_live_now(entity, ctx)))
+        })
+        .collect();
+    for (row, now) in rows {
+        let (effective, reason) = (format!("{row}.effective"), format!("{row}.block_reason"));
+        let Some(at) = record.fields.iter().position(|f| f.name == effective) else {
+            continue;
+        };
+        record.fields[at].value = now.name();
+        let kind = record.fields[at].kind;
+        let held = record.fields.iter().position(|f| f.name == reason);
+        match (now.reason(), held) {
+            (Some(r), Some(i)) => record.fields[i].value = r.into(),
+            (Some(r), None) => record.fields.insert(
+                at + 1,
+                NativeField {
+                    name: reason,
+                    kind,
+                    value: r.into(),
+                    unit: String::new(),
+                },
+            ),
+            (None, Some(i)) => {
+                record.fields.remove(i);
+            }
+            (None, None) => {}
+        }
     }
 }
 /// The latest record of each family (legacy import and native variants share one family).
@@ -1133,15 +1177,25 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     match darkbot_bsc_execution::sources::current_record_and_generation(&sources) {
         Ok(Some((path, r, g))) => {
             let mut record = native_record(rundir, &path, &r);
-            // Review L5: a LIVE reason as it reads in this boot session (the
-            // record's other leaves are its bytes; the mapping says so).
+            // Review L5 and plan 28.10.: each entity as the owner decides it
+            // now, the LIVE tab's gate for a requested LIVE (the record's
+            // other leaves are its bytes; the mapping says so).
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
-            for f in record
-                .fields
-                .iter_mut()
-                .filter(|f| f.name.ends_with(".block_reason"))
-            {
-                f.value = g.live_reason_now(&f.value, boot.as_deref()).to_owned();
+            match clock_s() {
+                Some(s) => {
+                    let reads = GateReads::read(&sources, &g, s * 1_000);
+                    let verified = live_qualification::view(root).0;
+                    gate_rows(&mut record, &g, &reads.ctx(&verified.view));
+                }
+                None => {
+                    for f in record
+                        .fields
+                        .iter_mut()
+                        .filter(|f| f.name.ends_with(".block_reason"))
+                    {
+                        f.value = g.live_reason_now(&f.value, boot.as_deref()).to_owned();
+                    }
+                }
             }
             monitoring.records.push(record)
         }
@@ -1182,12 +1236,15 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                     )
                 };
                 let (request_id, set_generation) = set_by(&g.runtime);
-                let runtime = g.effective_now(
-                    darkbot_bsc_execution::sources::Entity::Runtime,
-                    darkbot_bsc_execution::sources::boot_session()
-                        .ok()
-                        .as_deref(),
-                );
+                // Plan 28.10.: a requested LIVE as the LIVE gate decides it now.
+                let runtime = match clock_s() {
+                    Some(s) => {
+                        let reads = GateReads::read(&sources, &g, s * 1_000);
+                        let verified = live_qualification::view(root).0;
+                        g.effective_live_now(Entity::Runtime, &reads.ctx(&verified.view))
+                    }
+                    None => g.effective_now(Entity::Runtime, boot_session().ok().as_deref()),
+                };
                 launch.runtime_mode = Some(ControlSwitch {
                     id: darkbot_bsc_execution::sources::RUNTIME_MODE.into(),
                     requested: g.runtime.requested.name(),

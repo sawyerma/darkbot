@@ -54,11 +54,17 @@ try:
     rpc=next(l.split('=',1)[1] for l in (h.ROOT/'bsc/config/readiness.public.env').read_text().splitlines() if l.startswith('BSC_READINESS_RPC_HTTPS='))
     subprocess.run(['cargo','test','-q','-p','darkbot-bsc-qualification','--all-features','--test','g08_reads_g07_evidence','--','--ignored','--exact','g08_records_unresolved_for_a_never_sent_attempt_on_a_real_rpc'],cwd=h.ROOT/'bsc/engine',env={**os.environ,'BSC_MAINNET_RPC_HTTPS':rpc,'DARKBOT_G08_E2E_OUT':str(g08)},check=True,timeout=600)
     assert (g08/'unresolved.dbrec').is_file()
+    # Plan 28.10.: a verified LIVE qualification of synthetic evidence in this isolated snapshot, so the
+    # LIVE tab can reach an effective LIVE through the GUI. This runtime has no LIVE path (no BSC_LIVE_*
+    # keys, no buyer key): nothing can be signed or sent.
+    assert 'BSC_LIVE_' not in ingress
+    subprocess.run(['cargo','test','-q','-p','darkbot-bsc-execution','--features','runtime','--test','live_e2e','--','--ignored','--exact','write_synthetic_qualification_for_the_browser_e2e'],cwd=h.ROOT/'bsc/engine',env={**os.environ,'DARKBOT_LIVE_E2E_ROOT':str(source)},check=True,timeout=600)
+    assert (source/'bsc/config/live_qualification.dbrec').is_file()
     (h.WORK/'app/bsc-source').symlink_to(source,target_is_directory=True)
     (release/'bsc-root').symlink_to(source,target_is_directory=True)
     (h.WORK/'app/current').symlink_to(release,target_is_directory=True)
     h.run('up','--no-open')
-    subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=180,env=h.env)
+    subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=420,env=h.env)
     # Paket 8 review L3: launchd restarts the runtime after a crash (SIGKILL); the restart is a new run
     # and the C2 owner restores its checkpoint.
     import time

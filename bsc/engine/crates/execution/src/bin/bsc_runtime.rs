@@ -715,7 +715,23 @@ fn run(args: &[String]) -> Result<bool, String> {
                 .map_err(|_| "--expect-generation is an unsigned integer")?;
             let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
             let now = darkbot_bsc_record::observed_now()?;
-            let receipt = store.request(flag(rest, "--request-id")?, source, mode, expected, now)?;
+            let mut receipt = store.request(flag(rest, "--request-id")?, source, mode, expected, now)?;
+            // Plan 28.10.: a requested LIVE as the owner's LIVE gate decides it
+            // now (the qualification in --root; without it none verifies),
+            // the same decision the runtime and every tab read.
+            if mode == Mode::Live {
+                use darkbot_bsc_execution::{live_qualification, sources::GateReads};
+                let dir = std::path::Path::new(flag(rest, "--state")?);
+                let g = darkbot_bsc_execution::sources::current_generation(dir)?;
+                if g.generation == receipt.generation {
+                    let verified = flags(rest, "--root")
+                        .first()
+                        .map(|root| live_qualification::view(std::path::Path::new(root)).0.view)
+                        .unwrap_or_default();
+                    let reads = GateReads::read(dir, &g, now);
+                    receipt.effective = g.effective_live_now(source, &reads.ctx(&verified));
+                }
+            }
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }

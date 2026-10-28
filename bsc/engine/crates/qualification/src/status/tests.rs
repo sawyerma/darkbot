@@ -1692,5 +1692,48 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     assert_eq!(live.positions[0].state, "PENDING");
     assert_eq!(live.transactions[0].state, "RELEASED");
     assert_eq!(live.path_state, "NOT_RUNNING");
+    // Monitoring and Launch / BUY name the same decision as the LIVE tab,
+    // not the owner record's stored placeholder (browser E2E 28.10.).
+    let s = projection::project(&root, &rundir);
+    let modes = s
+        .monitoring
+        .records
+        .iter()
+        .find(|r| r.schema == schema::bsc_runtime::source_modes::SCHEMA.name)
+        .unwrap();
+    let leaf = |id: &str, name: &str| {
+        let row = modes
+            .fields
+            .iter()
+            .find(|f| f.value == id && f.name.ends_with("_id"))
+            .and_then(|f| f.name.rsplit_once('.'))
+            .map(|(row, _)| format!("{row}.{name}"))
+            .unwrap();
+        modes
+            .fields
+            .iter()
+            .find(|f| f.name == row)
+            .map(|f| f.value.clone())
+    };
+    for id in [
+        "BSC_VENUE_FLAP",
+        "BSC_INGRESS_PUBLICNODE",
+        "BSC_STATE_C2",
+        "BSC_EXEC",
+    ] {
+        assert_eq!(
+            (leaf(id, "effective"), leaf(id, "block_reason")),
+            (
+                Some("BLOCKED".into()),
+                Some("LIVE_VENUE_UNQUALIFIED".into())
+            ),
+            "{id}"
+        );
+    }
+    let mode = s.launch.runtime_mode.unwrap();
+    assert_eq!(
+        (mode.effective.as_str(), mode.block_reason.as_str()),
+        ("BLOCKED", "LIVE_VENUE_UNQUALIFIED")
+    );
     fs::remove_dir_all(root).unwrap();
 }
