@@ -953,7 +953,8 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
     std::fs::remove_dir_all(&run_dir).unwrap();
 }
 
-/// U-8 (PERSIST-04): the binary layout of `INDEX_RESULT` (319) is pinned. A failing pin is a
+/// U-8 (PERSIST-04): the binary layouts of `INDEX_RESULT` (319) and `CROSSCHECK_RESULT` (321)
+/// are pinned. A failing pin is a
 /// layout change: bump `SCHEMA` and renew the pin — never silently.
 #[test]
 fn index_result_layout_is_pinned() {
@@ -1014,6 +1015,34 @@ fn index_result_layout_is_pinned() {
         canonical_verified: false,
         c0_e1_master_pass: false,
     };
+    let crosscheck = CrosscheckResult {
+        schema: CROSSCHECK_SCHEMA.into(),
+        verification_spec_id: "spec".into(),
+        status: "HISTORICAL_INCOMPLETE".into(),
+        reason: Some("CROSSCHECK_DISAGREEMENT".into()),
+        incomplete_reasons: vec!["CROSSCHECK_DISAGREEMENT".into()],
+        primary: r.clone(),
+        secondary: r.clone(),
+        disagreements: vec![Disagreement {
+            signature: "s".into(),
+            slot: 9,
+            field: "EVENTS".into(),
+        }],
+        canonical_verified: false,
+        c0_e1_master_pass: false,
+    };
+    let bytes = payload::encode(&crosscheck).unwrap();
+    let back: CrosscheckResult =
+        payload::decode(CrosscheckResult::KIND, CrosscheckResult::SCHEMA, &bytes).unwrap();
+    assert_eq!(back, crosscheck);
+    assert_eq!(
+        (
+            CrosscheckResult::KIND,
+            CrosscheckResult::SCHEMA,
+            solana_sdk::hash::hash(&bytes).to_string().as_str()
+        ),
+        (321, 2, "CJ9mtmzkeukyFYpzvWLK1zjKTLCkun8UkjNrJVEAQJQv")
+    );
     let bytes = payload::encode(&r).unwrap();
     let back: IndexResult =
         payload::decode(IndexResult::KIND, IndexResult::SCHEMA, &bytes).unwrap();
@@ -1033,60 +1062,7 @@ fn index_result_layout_is_pinned() {
 #[test]
 fn dec08_the_driver_runs_and_resumes_the_index() {
     use super::super::strict_driver::{self, DriverRequest, StrictBudget, VerifyMode};
-    use crate::analytics::measurement::{
-        journal as phase, persist_manifest, MeasurementPlan, Phase,
-    };
-    use crate::run_layout::{RunLayout, RunPaths};
-    let d = std::env::temp_dir().join(format!("p0_index_drv_{}_{}", std::process::id(), line!()));
-    let _ = std::fs::remove_dir_all(&d);
-    let root = d.join("run_i");
-    let paths = RunPaths::new(&root, RunLayout::V2);
-    paths.create().unwrap();
-    let plan = MeasurementPlan::new(60).unwrap();
-    let clock = darkbot_common::timing::Clock::new();
-    persist_manifest(&paths, "run_i", "test", &plan, clock).unwrap();
-    let window = plan.capture_window(clock, 1_000 * NS_U).unwrap();
-    let start_s = (window.capture_start_unix_ns / u128::from(NS_U)) as i64;
-    let end_s = (window.capture_cutoff_unix_ns / u128::from(NS_U)) as i64;
-    phase(&paths, clock, Phase::Capture(window)).unwrap();
-    // The capture received the liquidation live (the fixture inside this window).
-    let f = fixture_signature();
-    let live = variant(&f, 1_000, start_s + 10, Value::Null);
-    let tx = darkbot_solana::chain::decode_transaction(&live).unwrap();
-    let logs = tx.meta.as_ref().unwrap().log_messages.clone().unwrap();
-    let receiver = decode_receiver_events(&logs, &program()).events[0].clone();
-    std::fs::create_dir_all(paths.market_dir()).unwrap();
-    let mut w =
-        journal::Writer::create(&paths.market_dir().join(super::super::MARKET_JOURNAL)).unwrap();
-    write_frames(
-        &mut w,
-        source::MARKET,
-        &[super::super::rows::MarketTransaction {
-            signature: f.clone(),
-            slot: 1_000,
-            origin: super::super::rows::TxOrigin::TransactionSubscribe {
-                observed_unix_s: (start_s + 10) as u64,
-                t_rx_ns: 1,
-                tx: Ok(tx),
-            },
-        }],
-    );
-    write_frames(
-        &mut w,
-        source::MARKET,
-        &[super::super::rows::MarketLiquidation::Receiver(Box::new(
-            super::super::rows::ReceiverRow {
-                signature: f.clone(),
-                slot: 1_000,
-                t_rx_ns: Some(1),
-                observed_unix_s: (start_s + 10) as u64,
-                event: receiver,
-                enrichment: Default::default(),
-                enrichment_status: "COMPLETE".into(),
-            },
-        ))],
-    );
-    w.seal(true).unwrap();
+    let (d, root, f, live, start_s, end_s) = driver_run(line!());
     let budget = StrictBudget {
         rps: 100,
         max_calls: 10,
@@ -1125,33 +1101,7 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
     // The checkpoint: the head page (after the end, the liquidation), the page at its cursor
     // (before the start) and the transaction.
     let index = out.join("index");
-    let (a, c) = (Signature::new_unique(), Signature::new_unique());
-    crate::market::observer::verification::cache_fixture(
-        &index,
-        ChainRead::Signatures {
-            address: program(),
-            before: None,
-        },
-        &json!([
-            row(&a.to_string(), 2_000, end_s + 50, Value::Null),
-            row(&f, 1_000, start_s + 10, Value::Null)
-        ]),
-    );
-    crate::market::observer::verification::cache_fixture(
-        &index,
-        ChainRead::Signatures {
-            address: program(),
-            before: Some(Signature::from_str(&f).unwrap()),
-        },
-        &json!([row(&c.to_string(), 900, start_s - 50, Value::Null)]),
-    );
-    crate::market::observer::verification::cache_fixture(
-        &index,
-        ChainRead::Transaction {
-            signature: Signature::from_str(&f).unwrap(),
-        },
-        &live,
-    );
+    checkpoint(&index, &f, &live, start_s, end_s);
     let args: Vec<String> = [
         "--run",
         root.to_str().unwrap(),
@@ -1210,5 +1160,335 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
         "tx + event"
     );
     assert_eq!(std::fs::read_dir(out.join("attempts")).unwrap().count(), 2);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A V2 run with its manifest, CAPTURE window and a market journal that received the real
+/// liquidation `f` live (moved into the window) with its receivership row: (dir, run, f, the
+/// transaction's wire form, window start/end seconds).
+fn driver_run(
+    tag: u32,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    String,
+    Value,
+    i64,
+    i64,
+) {
+    use crate::analytics::measurement::{
+        journal as phase, persist_manifest, MeasurementPlan, Phase,
+    };
+    use crate::run_layout::{RunLayout, RunPaths};
+    let d = std::env::temp_dir().join(format!("p0_index_drv_{}_{}", std::process::id(), tag));
+    let _ = std::fs::remove_dir_all(&d);
+    let root = d.join("run_i");
+    let paths = RunPaths::new(&root, RunLayout::V2);
+    paths.create().unwrap();
+    let plan = MeasurementPlan::new(60).unwrap();
+    let clock = darkbot_common::timing::Clock::new();
+    persist_manifest(&paths, "run_i", "test", &plan, clock).unwrap();
+    let window = plan.capture_window(clock, 1_000 * NS_U).unwrap();
+    let start_s = (window.capture_start_unix_ns / u128::from(NS_U)) as i64;
+    let end_s = (window.capture_cutoff_unix_ns / u128::from(NS_U)) as i64;
+    phase(&paths, clock, Phase::Capture(window)).unwrap();
+    // The capture received the liquidation live (the fixture inside this window).
+    let f = fixture_signature();
+    let live = variant(&f, 1_000, start_s + 10, Value::Null);
+    let tx = darkbot_solana::chain::decode_transaction(&live).unwrap();
+    let logs = tx.meta.as_ref().unwrap().log_messages.clone().unwrap();
+    let receiver = decode_receiver_events(&logs, &program()).events[0].clone();
+    std::fs::create_dir_all(paths.market_dir()).unwrap();
+    let mut w =
+        journal::Writer::create(&paths.market_dir().join(super::super::MARKET_JOURNAL)).unwrap();
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[super::super::rows::MarketTransaction {
+            signature: f.clone(),
+            slot: 1_000,
+            origin: super::super::rows::TxOrigin::TransactionSubscribe {
+                observed_unix_s: (start_s + 10) as u64,
+                t_rx_ns: 1,
+                tx: Ok(tx),
+            },
+        }],
+    );
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[super::super::rows::MarketLiquidation::Receiver(Box::new(
+            super::super::rows::ReceiverRow {
+                signature: f.clone(),
+                slot: 1_000,
+                t_rx_ns: Some(1),
+                observed_unix_s: (start_s + 10) as u64,
+                event: receiver,
+                enrichment: Default::default(),
+                enrichment_status: "COMPLETE".into(),
+            },
+        ))],
+    );
+    w.seal(true).unwrap();
+    (d, root, f, live, start_s, end_s)
+}
+
+/// The INDEX checkpoint of `driver_run`'s window in `dir`: the head page (after the end, the
+/// liquidation), the page at its cursor (before the start) and the transaction.
+fn checkpoint(dir: &std::path::Path, f: &str, live: &Value, start_s: i64, end_s: i64) {
+    let (a, c) = (Signature::new_unique(), Signature::new_unique());
+    crate::market::observer::verification::cache_fixture(
+        dir,
+        ChainRead::Signatures {
+            address: program(),
+            before: None,
+        },
+        &json!([
+            row(&a.to_string(), 2_000, end_s + 50, Value::Null),
+            row(f, 1_000, start_s + 10, Value::Null)
+        ]),
+    );
+    crate::market::observer::verification::cache_fixture(
+        dir,
+        ChainRead::Signatures {
+            address: program(),
+            before: Some(Signature::from_str(f).unwrap()),
+        },
+        &json!([row(&c.to_string(), 900, start_s - 50, Value::Null)]),
+    );
+    crate::market::observer::verification::cache_fixture(
+        dir,
+        ChainRead::Transaction {
+            signature: Signature::from_str(f).unwrap(),
+        },
+        live,
+    );
+}
+
+/// The two jobs of a CROSSCHECK (each its own output, cache and budget) and its result dir.
+fn crosscheck_jobs(tag: &str) -> (Job, Job, std::path::PathBuf) {
+    let base = job(tag);
+    let out = base.output.join("crosscheck");
+    let primary = Job {
+        output: out.join("primary"),
+        ..base.clone()
+    };
+    let secondary = Job {
+        output: out.join("secondary"),
+        ..base
+    };
+    (primary, secondary, out)
+}
+
+/// DEC-08 (CROSSCHECK): two independent sources reading the same history are
+/// CROSSCHECK_VERIFIED — each its own INDEX_VERIFIED result, its own cache and calls, every
+/// transaction of the window read identically — and nothing is promoted to canonical.
+#[test]
+fn dec08_crosscheck_verifies_two_agreeing_sources() {
+    let h = Arc::new(History::new());
+    let (one, two) = (h.clone(), h.clone());
+    let (url_a, seen_a) = loopback(move |m, p| one.answer(m, p));
+    let (url_b, seen_b) = loopback(move |m, p| two.answer(m, p));
+    let (a, b, out) = crosscheck_jobs("cc-agree");
+    let r = crosscheck(
+        [&a, &b],
+        10,
+        [Some(url_a), Some(url_b)],
+        &live_capture(&h),
+        &out,
+    )
+    .unwrap();
+    assert_eq!(r.status, "CROSSCHECK_VERIFIED", "{r:?}");
+    assert!(r.reason.is_none() && r.incomplete_reasons.is_empty() && r.disagreements.is_empty());
+    assert_eq!(
+        (r.primary.status.as_str(), r.secondary.status.as_str()),
+        ("INDEX_VERIFIED", "INDEX_VERIFIED")
+    );
+    assert_eq!(
+        (r.primary.calls, r.secondary.calls),
+        (5, 5),
+        "each source read itself"
+    );
+    assert_eq!((methods(&seen_a).len(), methods(&seen_b).len()), (5, 5));
+    assert_eq!(r.primary.qualified, r.secondary.qualified);
+    assert!(!r.canonical_verified && !r.c0_e1_master_pass);
+    assert!(!r.primary.canonical_verified && !r.secondary.canonical_verified);
+    for dir in [
+        a.output.join("results"),
+        b.output.join("results"),
+        out.join("results"),
+    ] {
+        assert_eq!(std::fs::read_dir(dir).unwrap().count(), 1);
+    }
+    assert!(r.terminal().contains("CROSSCHECK_VERIFIED"));
+    std::fs::remove_dir_all(a.output.parent().unwrap().parent().unwrap()).unwrap();
+}
+
+/// DEC-08 (CROSSCHECK): a source that lacks a transaction of the window, reads it differently
+/// (failed instead of the liquidation) or leaves it unresolved disagrees — HISTORICAL_INCOMPLETE
+/// with every disagreement named, even when both indexes are complete on their own.
+#[test]
+fn dec08_crosscheck_names_every_disagreement() {
+    let h = Arc::new(History::new());
+    let one = h.clone();
+    let (url_a, _) = loopback(move |m, p| one.answer(m, p));
+    // The second source: B missing from its index, F failed.
+    let two = h.clone();
+    let (url_b, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
+        ("getSignaturesForAddress", None) => Reply::Result(json!([
+            row(&two.a, SLOT + 300, BT + 300, Value::Null),
+            row(&two.e, SLOT + 100, BT + 100, Value::Null),
+            row(&two.f, SLOT, BT, History::failed()),
+        ])),
+        ("getSignaturesForAddress", Some(b)) if b == two.f => Reply::Result(json!([
+            row(&two.c, SLOT - 200, BT - 200, Value::Null),
+            row(&two.d, SLOT - 201, BT - 201, Value::Null),
+        ])),
+        ("getTransaction", _) if p[0].as_str() == Some(two.f.as_str()) => {
+            Reply::Result(variant(&two.f, SLOT, BT, History::failed()))
+        }
+        _ => two.answer(m, p),
+    });
+    let (a, b, out) = crosscheck_jobs("cc-disagree");
+    let r = crosscheck(
+        [&a, &b],
+        10,
+        [Some(url_a), Some(url_b.clone())],
+        &live_capture(&h),
+        &out,
+    )
+    .unwrap();
+    assert_eq!(
+        (r.primary.status.as_str(), r.secondary.status.as_str()),
+        ("INDEX_VERIFIED", "INDEX_VERIFIED"),
+        "both complete on their own"
+    );
+    assert_eq!(
+        (r.status.as_str(), r.reason.as_deref()),
+        ("HISTORICAL_INCOMPLETE", Some("CROSSCHECK_DISAGREEMENT"))
+    );
+    let fields = |sig: &str| -> Vec<&str> {
+        r.disagreements
+            .iter()
+            .filter(|d| d.signature == sig)
+            .map(|d| d.field.as_str())
+            .collect()
+    };
+    assert_eq!(fields(&h.b), ["INDEXED_BY_PRIMARY_ONLY"]);
+    assert_eq!(fields(&h.f), ["CLASSIFICATION", "PROGRAM_EVENTS", "EVENTS"]);
+    assert!(fields(&h.e).is_empty(), "the boundary row agrees");
+    std::fs::remove_dir_all(a.output.parent().unwrap().parent().unwrap()).unwrap();
+
+    // An unresolved transaction of the second source: its own result is incomplete.
+    let three = h.clone();
+    let (url_c, _) = loopback(move |m, p| match m {
+        "getTransaction" if p[0].as_str() == Some(three.f.as_str()) => Reply::Result(Value::Null),
+        _ => three.answer(m, p),
+    });
+    let one = h.clone();
+    let (url_a, _) = loopback(move |m, p| one.answer(m, p));
+    let (a, b, out) = crosscheck_jobs("cc-unresolved");
+    let r = crosscheck(
+        [&a, &b],
+        10,
+        [Some(url_a), Some(url_c)],
+        &live_capture(&h),
+        &out,
+    )
+    .unwrap();
+    assert_eq!(
+        r.incomplete_reasons,
+        ["CROSSCHECK_SECONDARY_INCOMPLETE", "CROSSCHECK_DISAGREEMENT"],
+        "agreement on F is unprovable: {r:?}"
+    );
+    assert_eq!(r.secondary.unresolved_transactions, 1);
+    assert_eq!(
+        r.disagreements
+            .iter()
+            .map(|d| (d.signature.as_str(), d.field.as_str()))
+            .collect::<Vec<_>>(),
+        [(h.f.as_str(), "UNRESOLVED")]
+    );
+    std::fs::remove_dir_all(a.output.parent().unwrap().parent().unwrap()).unwrap();
+}
+
+/// DEC-08 end to end through the one driver (offline): `--mode crosscheck` without checkpoints
+/// is incomplete on both sources; with both sources' checkpoints the resumed attempt is
+/// CROSSCHECK_VERIFIED — never canonical.
+#[test]
+fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
+    use super::super::strict_driver;
+    let (d, root, f, live, start_s, end_s) = driver_run(line!());
+    let args = |resume: bool| -> Vec<String> {
+        let mut a: Vec<String> = [
+            "--run",
+            root.to_str().unwrap(),
+            "--mode",
+            "crosscheck",
+            "--offline",
+            "--verify-pages",
+            "5",
+            "--verify-rps",
+            "100",
+            "--verify-calls",
+            "10",
+            "--verify-seconds",
+            "30",
+            "--verify-ram-bytes",
+            &(1u64 << 36).to_string(),
+            "--verify-min-free-bytes",
+            "1",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        if resume {
+            a.push("--resume-verification".into());
+        }
+        a
+    };
+    let (text, verified) = strict_driver::cli(&args(false)).unwrap();
+    assert!(!verified);
+    assert!(
+        text.contains("status=HISTORICAL_INCOMPLETE reason=CROSSCHECK_PRIMARY_INCOMPLETE"),
+        "{text}"
+    );
+    let spec_id = text
+        .lines()
+        .find_map(|l| l.strip_prefix("verification_spec_id="))
+        .unwrap()
+        .to_string();
+    let out = root
+        .canonicalize()
+        .unwrap()
+        .join("verification")
+        .join(format!("{}{spec_id}", strict_driver::NATIVE_PREFIX));
+    let spec: strict_driver::VerificationSpec =
+        journal::read_typed_value(&out.join("spec.p0j")).unwrap();
+    assert_eq!(spec.mode, "crosscheck");
+    for source in ["primary", "secondary"] {
+        checkpoint(
+            &out.join("crosscheck").join(source),
+            &f,
+            &live,
+            start_s,
+            end_s,
+        );
+    }
+    let (text, verified) = strict_driver::cli(&args(true)).unwrap();
+    assert!(verified, "{text}");
+    assert!(
+        text.contains("status=CROSSCHECK_VERIFIED reason=none"),
+        "{text}"
+    );
+    assert!(text.contains("CANONICAL_VERIFIED=false"), "{text}");
+    let results: Vec<CrosscheckResult> = std::fs::read_dir(out.join("crosscheck/results"))
+        .unwrap()
+        .map(|e| journal::read_typed_value(&e.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(results.len(), 2);
+    assert!(results
+        .iter()
+        .any(|r| r.status == "CROSSCHECK_VERIFIED" && r.primary.calls == 0));
     let _ = std::fs::remove_dir_all(&d);
 }

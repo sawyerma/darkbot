@@ -940,6 +940,9 @@ macro_rules! typed_kinds {
             k::INDEX_RESULT => {
                 $f::<crate::market::observer::index::IndexResult>($kind, $schema, $bytes)
             }
+            k::CROSSCHECK_RESULT => {
+                $f::<crate::market::observer::index::CrosscheckResult>($kind, $schema, $bytes)
+            }
             k::STRICT_CHECKPOINT => $f::<strict::StrictCheckpoint>($kind, $schema, $bytes),
             k::STRICT_RESULT => $f::<strict::StrictResult>($kind, $schema, $bytes),
             k::STRICT_SPEC => $f::<crate::market::observer::strict_driver::VerificationSpec>(

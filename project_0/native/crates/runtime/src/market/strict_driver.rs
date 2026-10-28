@@ -8,7 +8,8 @@
 //! result (`verification_result_id`). Resume reuses the same spec and its checkpoints; a changed
 //! capture, manifest, window or decoder is a different spec. Nothing here is JSON: every record is
 //! a typed single-value journal. Layout V2 runs only; historical runs keep the Python driver.
-//! DEC-08: the INDEX mode runs through the same binding, spec, attempt and lock (`drive_index`).
+//! DEC-08: INDEX and CROSSCHECK run through the same binding, spec, attempt and lock
+//! (`drive_history`).
 use super::verification::{read_report, run as run_strict, Job, StrictResult};
 use crate::analytics::journal::{self, hex, kind, source};
 use crate::analytics::measurement::{Phase, PhaseRecord, RunManifest, NS, RUN_MANIFEST_JOURNAL};
@@ -233,6 +234,11 @@ pub enum VerifyMode {
     Index {
         max_pages: u64,
     },
+    /// DEC-08: the same index from two independently qualified FREE_ONLY sources and their
+    /// agreement (`index::crosscheck`); without a second source NOT_RUN (C-02).
+    Crosscheck {
+        max_pages: u64,
+    },
 }
 impl VerifyMode {
     pub fn as_str(self) -> &'static str {
@@ -240,6 +246,7 @@ impl VerifyMode {
             VerifyMode::Off => "off",
             VerifyMode::Strict => "strict",
             VerifyMode::Index { .. } => "index",
+            VerifyMode::Crosscheck { .. } => "crosscheck",
         }
     }
     /// The status a successful attempt of this mode reaches (none for `off`).
@@ -248,6 +255,7 @@ impl VerifyMode {
             VerifyMode::Off => None,
             VerifyMode::Strict => Some("CANONICAL_VERIFIED"),
             VerifyMode::Index { .. } => Some("INDEX_VERIFIED"),
+            VerifyMode::Crosscheck { .. } => Some("CROSSCHECK_VERIFIED"),
         }
     }
 }
@@ -445,6 +453,8 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         ..
     } = bind_capture(&req.run)?;
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
+    // DEC-08: an online CROSSCHECK's second source (or why it cannot run).
+    let mut second: Result<Option<String>, &'static str> = Ok(None);
     let provider = if req.offline || req.mode == VerifyMode::Off {
         None
     } else {
@@ -457,8 +467,17 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         let url = config
             .rpc_url(&|k| std::env::var(k).ok())
             .ok_or("RPC_URL_MISSING")?;
-        strict_provider_gate(config, &url, evidence, now_unix_ns()? as f64 / 1e9)?;
-        Some(solana_sdk::hash::hash(url.as_bytes()).to_bytes())
+        let now = now_unix_ns()? as f64 / 1e9;
+        strict_provider_gate(config, &url, evidence, now)?;
+        let mut binding = url.clone();
+        if let VerifyMode::Crosscheck { .. } = req.mode {
+            second = crosscheck_source(config, &url, evidence, now)?.map(Some);
+            if let Ok(Some(s)) = &second {
+                binding.push('\n');
+                binding.push_str(s);
+            }
+        }
+        Some(solana_sdk::hash::hash(binding.as_bytes()).to_bytes())
     };
     let spec = VerificationSpec {
         schema: SPEC_SCHEMA.into(),
@@ -536,27 +555,47 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             terminal: "verification off: no historical chain RPC, no chain proof\n".into(),
         });
     }
-    if let VerifyMode::Index { max_pages } = req.mode {
-        return drive_index(
+    if let VerifyMode::Index { .. } | VerifyMode::Crosscheck { .. } = req.mode {
+        if let Err(block) = second {
+            // C-02: without a second independently qualified source the crosscheck is NOT_RUN.
+            record.at_unix_ns = now_unix_ns()?;
+            record.status = Some("NOT_RUN".into());
+            record.reason = Some(block.into());
+            journal::write_typed_value(&attempt_dir.join("end.p0j"), source::STRICT, &record)
+                .map_err(|e| format!("ATTEMPT_END: {e}"))?;
+            if capture_files(&run)? != evidence.files {
+                return Err("CAPTURE_EVIDENCE_CHANGED_DURING_VERIFICATION".into());
+            }
+            return Ok(DriverOutcome {
+                verification_spec_id: spec_id,
+                verification_attempt_id: attempt_id,
+                verification_result_id: None,
+                status: "NOT_RUN".into(),
+                terminal: format!("crosscheck not run: {block}; no chain read\n"),
+                reason: record.reason,
+            });
+        }
+        let base = Job {
+            verification_spec_id: spec_id.clone(),
+            output: out.clone(),
+            start_ns: start,
+            end_ns: end,
+            program: spec.program.clone(),
+            max_calls: req.budget.max_calls,
+            max_seconds: req.budget.max_seconds,
+            max_bytes: req.budget.max_bytes,
+            max_disk_bytes: req.budget.max_disk_bytes,
+            max_ram_bytes: req.budget.max_ram_bytes,
+            min_free_bytes: req.budget.min_free_bytes,
+            rps: req.budget.rps,
+            offline: req.offline,
+        };
+        return drive_history(
             req,
             &run,
             &evidence,
-            Job {
-                verification_spec_id: spec_id.clone(),
-                output: out.join("index"),
-                start_ns: start,
-                end_ns: end,
-                program: spec.program.clone(),
-                max_calls: req.budget.max_calls,
-                max_seconds: req.budget.max_seconds,
-                max_bytes: req.budget.max_bytes,
-                max_disk_bytes: req.budget.max_disk_bytes,
-                max_ram_bytes: req.budget.max_ram_bytes,
-                min_free_bytes: req.budget.min_free_bytes,
-                rps: req.budget.rps,
-                offline: req.offline,
-            },
-            max_pages,
+            base,
+            second.ok().flatten(),
             record,
             &attempt_dir,
         );
@@ -617,16 +656,45 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     })
 }
 
-/// DEC-08: one INDEX attempt of a bound capture — the capture side from the run's typed records,
-/// the index through the verifier's budgeted chain client (cache = checkpoint), the result
-/// content-addressed under `index/results/`; the attempt end binds it like a strict result.
-#[allow(clippy::too_many_arguments)]
-fn drive_index(
+/// DEC-08: the second source of an online CROSSCHECK — the second configured RPC endpoint, on
+/// another host, with its own measured FREE_ONLY archive proof (`strict_provider_gate`).
+/// Missing or on the primary's host: `Err` (the crosscheck is NOT_RUN, C-02); present but
+/// unqualified: refused before any chain RPC.
+fn crosscheck_source(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    primary: &str,
+    evidence: &Path,
+    now_unix_s: f64,
+) -> Result<Result<String, &'static str>, String> {
+    let Some(second) = config
+        .rpc_endpoints
+        .get(1)
+        .filter(|s| s.as_str() != primary)
+    else {
+        return Ok(Err("CROSSCHECK_SECOND_PROVIDER_MISSING"));
+    };
+    let host = |u: &str| {
+        reqwest::Url::parse(u)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+    };
+    if host(second).is_none() || host(second) == host(primary) {
+        return Ok(Err("CROSSCHECK_PROVIDER_NOT_INDEPENDENT"));
+    }
+    strict_provider_gate(config, second, evidence, now_unix_s)?;
+    Ok(Ok(second.clone()))
+}
+
+/// DEC-08: one INDEX or CROSSCHECK attempt of a bound capture — the capture side from the run's
+/// typed records, each index through the verifier's budgeted chain client (its cache = its
+/// checkpoint) under `index/` or `crosscheck/{primary,secondary}/`, the result content-addressed;
+/// the attempt end binds it like a strict result.
+fn drive_history(
     req: &DriverRequest,
     run: &Path,
     evidence: &CaptureEvidence,
-    job: Job,
-    max_pages: u64,
+    base: Job,
+    second: Option<String>,
     mut record: AttemptRecord,
     attempt_dir: &Path,
 ) -> Result<DriverOutcome, String> {
@@ -641,17 +709,54 @@ fn drive_index(
                 .ok_or("RPC_URL_MISSING")?,
         )
     };
+    let job = |dir: &str| Job {
+        output: base.output.join(dir),
+        ..base.clone()
+    };
     let program =
-        solana_sdk::pubkey::Pubkey::from_str(&job.program).map_err(|_| "PROGRAM_INVALID")?;
-    let outcome = index::BotEvidence::from_run(run, &program)
-        .and_then(|bot| index::run(&job, max_pages, url, &bot));
+        solana_sdk::pubkey::Pubkey::from_str(&base.program).map_err(|_| "PROGRAM_INVALID")?;
+    let bot = index::BotEvidence::from_run(run, &program);
+    let encode = |bytes: std::io::Result<Vec<u8>>| bytes.map_err(|e| e.to_string());
+    // (encoded result, status, reason, terminal)
+    let outcome: Result<(Vec<u8>, String, Option<String>, String), String> = match req.mode {
+        VerifyMode::Index { max_pages } => bot
+            .and_then(|bot| index::run(&job("index"), max_pages, url, &bot))
+            .and_then(|r| {
+                Ok((
+                    encode(payload::encode(&r))?,
+                    r.status.clone(),
+                    r.reason.clone(),
+                    r.terminal(),
+                ))
+            }),
+        VerifyMode::Crosscheck { max_pages } => {
+            let (a, b) = (job("crosscheck/primary"), job("crosscheck/secondary"));
+            bot.and_then(|bot| {
+                index::crosscheck(
+                    [&a, &b],
+                    max_pages,
+                    [url, second],
+                    &bot,
+                    &base.output.join("crosscheck"),
+                )
+            })
+            .and_then(|r| {
+                Ok((
+                    encode(payload::encode(&r))?,
+                    r.status.clone(),
+                    r.reason.clone(),
+                    r.terminal(),
+                ))
+            })
+        }
+        VerifyMode::Off | VerifyMode::Strict => Err("VERIFY_MODE_NOT_A_HISTORY_READ".into()),
+    };
     record.at_unix_ns = now_unix_ns()?;
     match &outcome {
-        Ok(result) => {
-            let bytes = payload::encode(result).map_err(|e| e.to_string())?;
-            record.verification_result_id = Some(hex(&solana_sdk::hash::hash(&bytes).to_bytes()));
-            record.status = Some(result.status.clone());
-            record.reason = result.reason.clone();
+        Ok((bytes, status, reason, _)) => {
+            record.verification_result_id = Some(hex(&solana_sdk::hash::hash(bytes).to_bytes()));
+            record.status = Some(status.clone());
+            record.reason = reason.clone();
         }
         Err(e) => {
             record.status = Some("HISTORICAL_INCOMPLETE".into());
@@ -669,9 +774,9 @@ fn drive_index(
         verification_result_id: record.verification_result_id,
         status: record.status.unwrap_or_default(),
         reason: record.reason,
-        terminal: match &outcome {
-            Ok(result) => result.terminal(),
-            Err(e) => format!("PROJECT 0 INDEX VERIFICATION: {e}\n"),
+        terminal: match outcome {
+            Ok((_, _, _, terminal)) => terminal,
+            Err(e) => format!("PROJECT 0 {} VERIFICATION: {e}\n", req.mode.as_str()),
         },
     })
 }
@@ -725,12 +830,15 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
                     Some("strict") => VerifyMode::Strict,
                     Some("off") => VerifyMode::Off,
                     Some("index") => VerifyMode::Index { max_pages: pages },
-                    _ => return Err("--mode strict|index|off".into()),
+                    Some("crosscheck") => VerifyMode::Crosscheck { max_pages: pages },
+                    _ => return Err("--mode strict|index|crosscheck|off".into()),
                 }
             }
             "--verify-pages" => {
                 pages = number()?;
-                if let VerifyMode::Index { max_pages } = &mut mode {
+                if let VerifyMode::Index { max_pages } | VerifyMode::Crosscheck { max_pages } =
+                    &mut mode
+                {
                     *max_pages = pages;
                 }
             }
@@ -819,6 +927,67 @@ mod tests {
         assert_eq!(
             strict_provider_gate(&config, url, &dir.join("missing.p0j"), 1001.0),
             Err("STRICT_PROVIDER_EVIDENCE_INVALID".into())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// DEC-08 (C-02): the second source of a CROSSCHECK is the second configured endpoint on
+    /// another host with its own measured FREE_ONLY archive proof; missing, the primary itself
+    /// or on the primary's host it is NOT_RUN; present without its proof it is refused.
+    #[test]
+    fn dec08_crosscheck_needs_a_second_independent_qualified_source() {
+        use crate::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
+        let dir = std::env::temp_dir().join(format!("p0_cc_{}_{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
+        let (primary, second) = ("http://archive-a.invalid", "http://archive-b.invalid");
+        let proof = |url: &str| ProviderProof {
+            policy: "FREE_ONLY".into(),
+            passed: true,
+            provider_binding: sha(url.as_bytes()),
+            measured_at_unix_s: 1000.0,
+            evidence_sha256: Some(sha(b"fixture")),
+            allowed_rps: 5.0,
+            available_calls: 3,
+        };
+        let evidence = |urls: &[&str]| {
+            let path = dir.join(format!("evidence_{}.p0j", urls.len()));
+            let e = ProviderEvidence {
+                providers: urls.iter().map(|u| proof(u)).collect(),
+                wss_provider_binding: None,
+                wss_free_only: false,
+                archive_qualified: true,
+                source_sha256: sha(b"measured"),
+            };
+            journal::write_typed_value(&path, source::FE01, &e).unwrap();
+            path
+        };
+        let both = evidence(&[primary, second]);
+        let config = |endpoints: &[&str]| darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: endpoints.iter().map(|s| s.to_string()).collect(),
+            fallback: false,
+            ..Default::default()
+        };
+        let check = |endpoints: &[&str], evidence: &Path| {
+            crosscheck_source(&config(endpoints), primary, evidence, 1001.0)
+        };
+        assert_eq!(
+            check(&[primary], &both),
+            Ok(Err("CROSSCHECK_SECOND_PROVIDER_MISSING"))
+        );
+        assert_eq!(
+            check(&[primary, primary], &both),
+            Ok(Err("CROSSCHECK_SECOND_PROVIDER_MISSING"))
+        );
+        assert_eq!(
+            check(&[primary, "http://archive-a.invalid/other"], &both),
+            Ok(Err("CROSSCHECK_PROVIDER_NOT_INDEPENDENT"))
+        );
+        assert_eq!(check(&[primary, second], &both), Ok(Ok(second.to_string())));
+        assert!(
+            check(&[primary, second], &evidence(&[primary])).is_err(),
+            "an unqualified second source is refused"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

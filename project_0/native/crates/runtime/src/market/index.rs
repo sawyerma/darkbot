@@ -990,15 +990,15 @@ fn report(
     }
 }
 
-/// One INDEX attempt of `job` against `url` (`None`: the cache only), compared with `bot`:
-/// pages, transactions and the result; the result is stored content-addressed in the job's
-/// output (`results/<sha256>.p0j`).
-pub fn run(
-    job: &Job,
-    max_pages: u64,
-    url: Option<String>,
-    bot: &BotEvidence,
-) -> Result<IndexResult, String> {
+/// One attempt's reading of a provider's history: what was read, why it stopped, its cost.
+struct Attempt {
+    reading: Reading,
+    reason: Option<&'static str>,
+    cost: (u64, u64),
+}
+
+/// Pages and transactions of one attempt of `job` against `url` (`None`: the cache only).
+fn attempt(job: &Job, max_pages: u64, url: Option<String>) -> Result<Attempt, String> {
     if job.invalid() || max_pages == 0 {
         return Err("VERIFICATION_CONFIG_INVALID".into());
     }
@@ -1029,21 +1029,214 @@ pub fn run(
         fetch_transactions(&mut c, &program, job, &mut r)
     })()
     .err();
-    let result = report(job, max_pages, &r, bot, reason, (c.calls, c.bytes));
-    // Every attempt's result is kept, content-addressed and immutable (as the strict results).
-    let bytes = payload::encode(&result).map_err(|e| e.to_string())?;
-    let dir = job.output.join("results");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    journal::write_typed_value(
-        &dir.join(format!(
-            "{}.p0j",
-            journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes())
-        )),
-        source::STRICT,
-        &result,
-    )
-    .map_err(|e| e.to_string())?;
+    Ok(Attempt {
+        reading: r,
+        reason,
+        cost: (c.calls, c.bytes),
+    })
+}
+
+/// Keeps a result content-addressed and immutable under `dir` (as the strict results); its id.
+fn store<P: Payload + PartialEq>(dir: &Path, value: &P) -> Result<String, String> {
+    let bytes = payload::encode(value).map_err(|e| e.to_string())?;
+    let id = journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes());
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    journal::write_typed_value(&dir.join(format!("{id}.p0j")), source::STRICT, value)
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// One INDEX attempt of `job` against `url` (`None`: the cache only), compared with `bot`:
+/// pages, transactions and the result; the result is stored content-addressed in the job's
+/// output (`results/<sha256>.p0j`).
+pub fn run(
+    job: &Job,
+    max_pages: u64,
+    url: Option<String>,
+    bot: &BotEvidence,
+) -> Result<IndexResult, String> {
+    let a = attempt(job, max_pages, url)?;
+    let result = report(job, max_pages, &a.reading, bot, a.reason, a.cost);
+    store(&job.output.join("results"), &result)?;
     Ok(result)
+}
+
+pub const CROSSCHECK_SCHEMA: &str = "Project0/CrosscheckVerification/1";
+
+/// A transaction of the window the two independent indexes read differently.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Disagreement {
+    pub signature: String,
+    pub slot: u64,
+    /// INDEXED_BY_PRIMARY_ONLY | INDEXED_BY_SECONDARY_ONLY | UNRESOLVED | SLOT | MEMBERSHIP |
+    /// CLASSIFICATION | PROGRAM_EVENTS | EVENTS.
+    pub field: String,
+}
+
+/// The CROSSCHECK result of one attempt (kind `CROSSCHECK_RESULT`): the INDEX of the window
+/// from two independently qualified FREE_ONLY sources and their agreement per transaction.
+/// `CROSSCHECK_VERIFIED` only when both are INDEX_VERIFIED and agree on every transaction;
+/// never canonical, never the C0-E1 master.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CrosscheckResult {
+    pub schema: String,
+    pub verification_spec_id: String,
+    /// CROSSCHECK_VERIFIED | HISTORICAL_INCOMPLETE.
+    pub status: String,
+    pub reason: Option<String>,
+    pub incomplete_reasons: Vec<String>,
+    pub primary: IndexResult,
+    pub secondary: IndexResult,
+    pub disagreements: Vec<Disagreement>,
+    pub canonical_verified: bool,
+    pub c0_e1_master_pass: bool,
+}
+impl Payload for CrosscheckResult {
+    const KIND: u16 = kind::CROSSCHECK_RESULT;
+}
+
+/// The window's transactions of one reading: indexed (signature → slot) and fetched readings.
+fn in_scope(job: &Job, r: &Reading) -> BTreeMap<String, u64> {
+    let (start_s, end_s) = (job.start_ns / 1_000_000_000, job.end_ns / 1_000_000_000);
+    r.pager
+        .rows()
+        .iter()
+        .filter(|row| {
+            row.block_time.is_none_or(|bt| {
+                let at = i128::from(bt) * NS;
+                (i128::from(job.start_ns) <= at && at < i128::from(job.end_ns))
+                    || bt == start_s as i64
+                    || bt == end_s as i64
+            })
+        })
+        .map(|row| (row.signature.clone(), row.slot))
+        .collect()
+}
+
+/// Every transaction of the window the two readings do not read identically.
+fn disagreements(job: &Job, primary: &Reading, secondary: &Reading) -> Vec<Disagreement> {
+    let (a, b) = (in_scope(job, primary), in_scope(job, secondary));
+    let mut out = Vec::new();
+    let mut push = |signature: &str, slot: u64, field: &str| {
+        out.push(Disagreement {
+            signature: signature.to_string(),
+            slot,
+            field: field.into(),
+        })
+    };
+    for (signature, slot) in &a {
+        let Some(other_slot) = b.get(signature) else {
+            push(signature, *slot, "INDEXED_BY_PRIMARY_ONLY");
+            continue;
+        };
+        if other_slot != slot {
+            push(signature, *slot, "SLOT");
+            continue;
+        }
+        match (
+            primary.fetched.get(signature),
+            secondary.fetched.get(signature),
+        ) {
+            (Some(Ok(x)), Some(Ok(y))) => {
+                for (differs, field) in [
+                    (x.membership != y.membership, "MEMBERSHIP"),
+                    (x.classification != y.classification, "CLASSIFICATION"),
+                    (x.program_events != y.program_events, "PROGRAM_EVENTS"),
+                    (x.events != y.events, "EVENTS"),
+                ] {
+                    if differs {
+                        push(signature, *slot, field);
+                    }
+                }
+            }
+            _ => push(signature, *slot, "UNRESOLVED"),
+        }
+    }
+    for (signature, slot) in &b {
+        if !a.contains_key(signature) {
+            push(signature, *slot, "INDEXED_BY_SECONDARY_ONLY");
+        }
+    }
+    out
+}
+
+/// One CROSSCHECK attempt: the INDEX of the window from `jobs[0]` against `urls[0]` and from
+/// `jobs[1]` against `urls[1]` (each its own cache, budget and result), compared with the
+/// capture and with each other; the result is kept content-addressed in `output`.
+pub fn crosscheck(
+    jobs: [&Job; 2],
+    max_pages: u64,
+    urls: [Option<String>; 2],
+    bot: &BotEvidence,
+    output: &Path,
+) -> Result<CrosscheckResult, String> {
+    let [primary_url, secondary_url] = urls;
+    let a = attempt(jobs[0], max_pages, primary_url)?;
+    let b = attempt(jobs[1], max_pages, secondary_url)?;
+    let primary = report(jobs[0], max_pages, &a.reading, bot, a.reason, a.cost);
+    let secondary = report(jobs[1], max_pages, &b.reading, bot, b.reason, b.cost);
+    store(&jobs[0].output.join("results"), &primary)?;
+    store(&jobs[1].output.join("results"), &secondary)?;
+    let disagreements = disagreements(jobs[0], &a.reading, &b.reading);
+    let mut incomplete = Vec::new();
+    if primary.status != "INDEX_VERIFIED" {
+        incomplete.push("CROSSCHECK_PRIMARY_INCOMPLETE".to_string());
+    }
+    if secondary.status != "INDEX_VERIFIED" {
+        incomplete.push("CROSSCHECK_SECONDARY_INCOMPLETE".to_string());
+    }
+    if !disagreements.is_empty() {
+        incomplete.push("CROSSCHECK_DISAGREEMENT".to_string());
+    }
+    let result = CrosscheckResult {
+        schema: CROSSCHECK_SCHEMA.into(),
+        verification_spec_id: jobs[0].verification_spec_id.clone(),
+        status: if incomplete.is_empty() {
+            "CROSSCHECK_VERIFIED"
+        } else {
+            "HISTORICAL_INCOMPLETE"
+        }
+        .into(),
+        reason: incomplete.first().cloned(),
+        incomplete_reasons: incomplete,
+        primary,
+        secondary,
+        disagreements,
+        canonical_verified: false,
+        c0_e1_master_pass: false,
+    };
+    store(&output.join("results"), &result)?;
+    Ok(result)
+}
+
+impl CrosscheckResult {
+    /// Human-readable terminal summary.
+    pub fn terminal(&self) -> String {
+        let mut out = String::from("PROJECT 0 CROSSCHECK VERIFICATION (native evidence)\n");
+        out.push_str(&format!(
+            "status={} reason={} incomplete={} disagreements={}\n",
+            self.status,
+            self.reason.as_deref().unwrap_or("none"),
+            if self.incomplete_reasons.is_empty() {
+                "none".to_string()
+            } else {
+                self.incomplete_reasons.join(",")
+            },
+            self.disagreements.len()
+        ));
+        for d in &self.disagreements {
+            out.push_str(&format!(
+                "disagreement {} {} {}\n",
+                d.signature, d.slot, d.field
+            ));
+        }
+        out.push_str("primary: ");
+        out.push_str(&self.primary.terminal());
+        out.push_str("secondary: ");
+        out.push_str(&self.secondary.terminal());
+        out.push_str("non_claims: CROSSCHECK scope only; CANONICAL_VERIFIED=false; C0_E1_MASTER_PASS=false\n");
+        out
+    }
 }
 
 impl IndexResult {

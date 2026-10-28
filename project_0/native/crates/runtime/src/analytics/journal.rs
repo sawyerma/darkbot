@@ -80,6 +80,9 @@ pub mod kind {
     /// DEC-08: the INDEX verifier's result (finalized signature index of the capture window,
     /// compared with the capture), content-addressed under `verification/native-<spec>/index/`.
     pub const INDEX_RESULT: u16 = 319;
+    /// DEC-08: the CROSSCHECK verifier's result (two independent INDEX readings and their
+    /// agreement), content-addressed under `verification/native-<spec>/crosscheck/results/`.
+    pub const CROSSCHECK_RESULT: u16 = 321;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
@@ -217,6 +220,7 @@ pub mod kind {
         STRICT_CHAIN_CACHE,
         INDEX_RESULT,
         CAPACITY_PREFLIGHT,
+        CROSSCHECK_RESULT,
         SEGMENT_LINK,
         SEGMENT_NEXT,
         SEGMENT_RECOVERY,
