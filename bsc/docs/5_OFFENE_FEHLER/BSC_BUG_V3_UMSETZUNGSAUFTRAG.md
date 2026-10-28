@@ -11,6 +11,18 @@ Claude, **behebe die im Register bestätigten BSC-Produktionsfehler Punkt für P
 
 Die 70 IDs sind ein **Auditregister, nicht 70 automatisch bestätigte Bugs**. Frühe Aussagen werden durch spätere, ausdrücklich belegte Nachprüfungen übersteuert. Die letzte konsolidierte Präzisierung im Register (N11) gilt vor einer widersprüchlichen historischen Formulierung. Vor jedem Eingriff: tatsächliche Datei am aktuellen Commit lesen, Auswirkung am realen Call-Path prüfen und Status je ID bestimmen.
 
+## 0a. Verbindliche Ausführungspräzisierung (28.10.2026)
+
+- **Start:** BSC3-041/055/024 am aktuellen LIVE-Rust-Pfad prüfen und bestätigte Fehler als erstes P0-Paket reproduzieren, korrigieren, testen, reviewen, committen und auf origin/main pushen. Dann die nächsten P0-IDs. Kein weiterer Audit als Ersatz für produktive Fixes.
+- **CI:** Die vorhandene `.github/workflows/bsc.yml` nutzt bereits macOS/Linux, `cargo test --locked --no-fail-fast --workspace --all-features` und prüft sieben `bsc_tools`-Skripte mit `SKIP 0`. BSC3-005/054 gezielt auf fehlende Release-/Werkzeug-Abdeckung prüfen und ergänzen; CI nicht neu erfinden. Test-PASS immer am finalen Commit nachweisen.
+- **Ignored:** `--include-ignored` niemals pauschal anwenden. Jeder Test wird zuerst auf externe Voraussetzungen und mögliche wirtschaftliche Wirkung geprüft. Nur sichere lokale Tests ausführen; blockierte Tests ehrlich als SKIP/EXTERNAL_BLOCKED ausweisen.
+- **G0.4:** BSC3-032/033/064 vor verbindlicher Kriterienauswertung behandeln. Laufende Kampagne und Rohdaten ohne Betreiberfreigabe nicht verändern, stoppen oder neu starten. Unbelegte Abdeckung bleibt UNKNOWN/NOT_EVALUABLE.
+- **BSC3-001:** Menschliche Bestätigung mit realem macOS- und Linux-Sicherheitskonzept; Touch ID ist ein Vorschlag, keine bereits getroffene Entscheidung.
+- **BSC3-058:** Vollständigen Not-Aus erhalten; EXIT-ONLY nur separat autorisiert. Nach Ablauf oder Neustart keine automatische wirtschaftliche Transaktion.
+- **BSC3-059:** Keine erfundene 10-Minuten-Regel für LIVE-Grants; nötige Maximaldauer vom Betreiber entscheiden lassen.
+- **BSC3-068:** Transportfrist vor Owner-Zulassung vorprüfen und unmittelbar vor dem tatsächlichen Write erneut prüfen. Persistente Attempts nur mit crash-/race-sicherem Nicht-Egress-Beweis rückgeben, sonst konservativ zählen.
+- **Abnahme:** Je ID Rot/Grün-Regression am Produktionspfad, Integration/Release soweit nichtsendend, unabhängiges Review, Commit, verifizierter origin/main-HEAD und knapper Bericht. Keine Mocks als Produktionsersatz, kein Fake-PASS, keine Legacy-Umgehungen, kein willkürliches Hardcoding, kein zweiter Bot-Core.
+
 ## 1. Unverhandelbare Qualitätsregeln
 
 1. **Keine Fake-Implementierung:** Kein Platzhalter, TODO, leeres Ok/PASS, stilles Ignorieren, Erfolgs-Flag, fingierter Receipt, simuliertes Guthaben, erfundener Preis, erdichtete On-Chain-Inclusion oder angebliche Produktivverbindung. UNKNOWN bleibt UNKNOWN, UNQUALIFIED bleibt UNQUALIFIED und fehlende Freigaben bleiben BLOCKED.
