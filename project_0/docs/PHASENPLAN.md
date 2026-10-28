@@ -5597,7 +5597,7 @@ Sämtliche 24 Owner-Parameter und verbleibende Doppeldefaults in `RuntimeConfig/
 
 ### DEC-06 — FS-C08/V2-13: **A, OFF/OBSERVE/ACTIVE + sicherer Hot-Change**
 
-> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** OFFEN laut BUGS.md: Threshold-Modus, sicherer Hot-Change und voller UI-/CLI-/Journal-Rundweg.
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: OFFLINE_VERIFIED `bd9a1ebf` (BUGS §22.5); ACTIVE real gesperrt bis B-8 (N, Nutzer) und reale OBSERVE-Evidenz.
 
 OFF: vorhandener Sweep autoritativ. OBSERVE: Sweep bleibt autoritativ; Threshold berechnet auf **derselben belegten State-/Input-Revision** parallel ohne zweite Candidate-Admission und persistiert Treffer-/Fehltreffer-/Latenz-/CPU-Differenzen. **OBSERVE darf den Sweep nicht verlangsamen**: separater Worker auf unveränderlichem State oder nachgewiesenes hartes CPU-/Owner-Zeitbudget; bei Budgetmangel nur OBSERVE sampeln, Sweep nicht bremsen; Owner-Blockzeit messen und anzeigen. ACTIVE: Threshold über **eine gemeinsame Repeat-/Admission-Policy**, nur Promotion **aus belegtem OBSERVE**, mit komplettem Index, Quiescence-/Generation-Barriere, qualifiziertem **Gate 0 fehlende Kandidaten**, festgelegtem CPU-/Health-/Queue-Budget und weiterlaufenden Stichproben-Gegenproben in ACTIVE. **Bis zum fertigen Index-Bootstrap, auch nach Recovery/Neustart: `requested` getrennt erhalten, `effective = SWEEP`, `block_reason = INDEX_BOOTSTRAP`. Ein einziger belegter Fehltreffer der Sweep-Stichprobe in ACTIVE muss automatisch auf SWEEP zurückschalten und einen typisierten Alarm-Record auslösen.** Bei Gap, unvollständiger Revision oder Budgetüberschreitung sichere Refusal/Fallback, keine verlorenen oder doppelt eingereihten Candidates. Native CAS, Policy-Version, dauerhafte Receipts, Restart-/Reconnect-Recovery. **Liquidator-Reiter**: requested/effective/qualification, Misses, Lanes, p50/p95/p99 und Fallbacks. Threshold ACTIVE autorisiert **kein** LIVE-Trading.
 
@@ -5645,7 +5645,7 @@ Jede arbeitende Session ein eigener Worktree/Index; bei gleichzeitigen Sessions 
 
 ### DEC-16 — Dauerbetrieb `UntilStopped`: **jetzt vollständig bauen** (Nutzerentscheidung 26.10.2026)
 
-> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Stufe 1/2 sind bereits OFFLINE_VERIFIED und bleiben unverändert; offener Rest Stufe 3 Shadow-Owner, Drains, Journale, Recovery und Gates.
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: Stufen 1–3 OFFLINE_VERIFIED (`202d4304`, `f80a3390`, `310ca31a`); reale Qualifikation NOT_RUN/BLOCKED_EXTERNAL.
 
 Dauerbetrieb `UntilStopped` (24/7) jetzt vollständig entwickeln, nach DEC-07 und vor DEC-06; keine neue Architektur, kein späterer Neuaufbau. `RunHorizon::admit()` bleibt der zentrale Admission-Prüfpunkt, aber nicht das einzige Gate; die bestehende Sperre wird nicht pauschal entfernt. Qualifikationen als typisierte, persistente, identitätsgebundene Nachweise: SK-07-Segmentierung und Recovery, rollierende Kapazität, Providerbudgets, verfügbare Provider-Evidence. Ohne vollständige Qualifikation `RUN_HORIZON_UNTIL_STOPPED_GATED`; mit ihr grundsätzlich zulässig, aber nur mit den Netzwerk-, Start- und Betriebsfreigaben. Ressourcen-, Provider- und Integritätsgates bleiben im Betrieb wirksam, Verstoß ⇒ sicherer HALT. Offline-Tests beider Fälle inkl. Crash, Restart, Recovery, Ressourcenerschöpfung; reale Mainnet-Qualifikation `NOT_RUN`/`BLOCKED_EXTERNAL`. Qualifizierter Dauerbetrieb ist **keine** Erlaubnis für unbeaufsichtigte Neustarts und **keine** LIVE-Freigabe.
 
