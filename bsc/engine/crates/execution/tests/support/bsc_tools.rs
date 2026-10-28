@@ -29,42 +29,37 @@ pub fn same_binary(name: &str, built: &str) {
     );
 }
 
-/// A binary of another package (no `CARGO_BIN_EXE_*` here) is at least as
-/// new as every source of the crates it is built from (qualification's use).
+/// A binary of another package (no `CARGO_BIN_EXE_*` here) is current in
+/// cargo's own sense: no input in its dep-info (`target/debug/<name>.d`,
+/// every source and included file it was built from) is newer than it, so
+/// cargo would not rebuild it (qualification's use).
 #[allow(dead_code)]
-pub fn current(name: &str, crates: &[&str]) {
+pub fn current(name: &str) {
     fn mtime(path: &Path) -> Option<SystemTime> {
         fs::metadata(path).and_then(|m| m.modified()).ok()
     }
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
-            let path = entry.expect("directory entry").path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else {
-                out.push(path);
-            }
-        }
-    }
-    let engine = repo().join("bsc/engine");
-    let bin = engine.join("target/debug").join(name);
-    let built = mtime(&bin).unwrap_or_else(|| {
+    let debug = repo().join("bsc/engine/target/debug");
+    let built = mtime(&debug.join(name)).unwrap_or_else(|| {
         panic!("{name} is not built: cargo build the package that owns it first")
     });
-    let mut sources = vec![engine.join("Cargo.lock"), engine.join("Cargo.toml")];
-    for c in crates {
-        let dir = engine.join("crates").join(c);
-        sources.push(dir.join("Cargo.toml"));
-        walk(&dir.join("src"), &mut sources);
-    }
-    for source in sources {
-        let changed = mtime(&source).unwrap_or_else(|| panic!("{} unreadable", source.display()));
+    let info = fs::read_to_string(debug.join(format!("{name}.d")))
+        .unwrap_or_else(|e| panic!("{name}.d (cargo's dep-info): {e}"));
+    let (_, inputs) = info
+        .split_once(": ")
+        .unwrap_or_else(|| panic!("{name}.d is not a dep-info rule"));
+    let inputs = inputs.replace("\\\n", " ").replace("\\ ", "\u{0}");
+    let mut seen = 0;
+    for input in inputs.split_whitespace() {
+        let input = PathBuf::from(input.replace('\u{0}', " "));
+        let changed = mtime(&input).unwrap_or_else(|| panic!("{} unreadable", input.display()));
         assert!(
             changed <= built,
-            "{name} is older than {}: rebuild it",
-            source.display()
+            "{name} is older than its input {}: rebuild it",
+            input.display()
         );
+        seen += 1;
     }
+    assert!(seen > 0, "{name}.d names no input");
 }
 
 /// Every npm dependency a tool directory declares is installed (`npm ci`).
