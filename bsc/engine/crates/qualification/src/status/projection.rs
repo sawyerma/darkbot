@@ -14,6 +14,8 @@ pub struct Snapshot {
     pub launch: BscLaunchState,
     pub monitoring: BscMonitoringState,
     pub wallets: BscWalletsState,
+    /// Plan 28.10.: the LIVE tab.
+    pub live: BscLiveState,
 }
 /// Seconds since 1970; `None` when the clock is before it (BSC-050: a clock
 /// fault is never time 0, which would make every deadline look unexpired).
@@ -1317,6 +1319,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         g04_gate(root, rundir),
     ];
     gates.extend(c1_gates(root, &records));
+    let live = super::live::live_state(root, rundir, clock_s().map(|s| s * 1_000));
     Snapshot {
         status: BscStatus {
             source_commit: fs::read_to_string(root.join("COMMIT"))
@@ -1324,7 +1327,14 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 .trim()
                 .into(),
             evaluated_unix_s: now(),
-            live_state: "BLOCKED".into(),
+            // Plan 28.10.: LIVE only while the owner's gate is clear and
+            // the runtime's LIVE path is armed.
+            live_state: if super::live::trading(&live) {
+                "LIVE"
+            } else {
+                "BLOCKED"
+            }
+            .into(),
             guard: Some(guard),
             gates,
             readiness: Some(readiness),
@@ -1341,6 +1351,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         launch,
         monitoring,
         wallets,
+        live,
     }
 }
 

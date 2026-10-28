@@ -245,6 +245,50 @@ pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 /// The same signed transaction again: never a second time (no retry).
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
 
+/// The LIVE gate's conditions in the order an operator meets them, each
+/// with the reasons that say it does not hold (plan 28.10.): the LIVE tab's
+/// checklist. The scope conditions (from GRANT_ATTEMPTS on) are judged only
+/// against a grant.
+pub const LIVE_CONDITIONS: [(&str, &[&str]); 18] = [
+    ("ECONOMIC_LIVE", &[ECONOMIC_LIVE_DISABLED]),
+    (
+        "LIVE_GRANT",
+        &[
+            LIVE_GRANT_MISSING,
+            LIVE_GRANT_RESET_BY_RESTART,
+            LIVE_GRANT_EXPIRED,
+        ],
+    ),
+    ("WALLET_LAUNCHER", &[WALLET_LAUNCHER_DISABLED]),
+    ("WALLET_BUYER", &[WALLET_BUYER_DISABLED]),
+    ("ECON_SIGN", &[ECON_SIGN_DISABLED]),
+    ("ECON_ARM", &[ECON_ARM_DISABLED]),
+    ("ECON_SEND", &[ECON_SEND_DISABLED]),
+    ("ECON_ATTEMPT", &[ECON_ATTEMPT_DISABLED]),
+    ("RUNTIME_LIVE", &[LIVE_RUNTIME_NOT_REQUESTED]),
+    (
+        "BUY_LIMIT_DAILY",
+        &[BUY_LIMIT_UNREADABLE, BUY_LIMIT_EXHAUSTED],
+    ),
+    (
+        "BUY_LIMIT_TOTAL",
+        &[ATTEMPT_TOTAL_UNREADABLE, ATTEMPT_TOTAL_EXHAUSTED],
+    ),
+    ("GRANT_ATTEMPTS", &[LIVE_GRANT_ATTEMPTS_EXHAUSTED]),
+    (
+        "GRANT_SPEND",
+        &[LIVE_SPEND_UNREADABLE, LIVE_GRANT_SPEND_EXHAUSTED],
+    ),
+    ("VENUE_QUALIFIED", &[LIVE_VENUE_UNQUALIFIED]),
+    ("SOURCES_QUALIFIED", &[LIVE_SOURCE_UNQUALIFIED]),
+    ("ADAPTERS_QUALIFIED", &[LIVE_ADAPTER_UNQUALIFIED]),
+    ("ACQUISITION_PROVEN", &[LIVE_ACQUISITION_UNPROVEN]),
+    ("RISK_DECISION", &[LIVE_RISK_DECISION_MISSING]),
+];
+
+/// The first of [`LIVE_CONDITIONS`] judged only against a grant.
+const SCOPE_CONDITIONS_FROM: usize = 11;
+
 /// What an exit of a position the grant opened does not need of the LIVE
 /// gate: BUY attempts (the attempt switch, the daily and campaign limits,
 /// the grant's attempts) and room for another BUY input. Its own gas must
@@ -1117,6 +1161,27 @@ impl Generation {
     /// other request reads as [`Generation::effective_now`].
     pub fn effective_live_now(&self, entity: Entity, ctx: &LiveContext<'_>) -> Effective {
         self.live_effective(entity, ctx, false)
+    }
+
+    /// Every condition of the LIVE gate with the reason it misses now (none:
+    /// it holds), in the order of [`LIVE_CONDITIONS`]. Without a usable
+    /// grant the scope conditions name the grant's reason.
+    pub fn live_checklist(
+        &self,
+        ctx: &LiveContext<'_>,
+    ) -> Vec<(&'static str, Option<&'static str>)> {
+        let blockers = self.live_blockers(ctx);
+        let grant = LIVE_CONDITIONS[1].1;
+        let no_grant = blockers.iter().find(|b| grant.contains(b)).copied();
+        LIVE_CONDITIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (id, reasons))| {
+                let missed = blockers.iter().find(|b| reasons.contains(b)).copied();
+                let missed = missed.or(no_grant.filter(|_| i >= SCOPE_CONDITIONS_FROM));
+                (*id, missed)
+            })
+            .collect()
     }
 
     /// [`Generation::live_blockers`] for an exit (approval or SELL) of a
@@ -4551,6 +4616,44 @@ pub(crate) mod tests {
             ECONOMIC_LIVE_DISABLED
         );
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 4_500);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Plan 28.10.: the LIVE tab's checklist names every condition once,
+    /// in order, with the gate's own reason; without a grant the scope
+    /// conditions cannot hold.
+    #[test]
+    fn the_live_checklist_names_every_condition_with_its_reason() {
+        let (dir, _s, now) = live_ready("live-checklist");
+        let (g, daily, total) = live_inputs(&dir, now).unwrap();
+        let q = qualified();
+        let ctx = LiveContext {
+            boot: Some("boot-1"),
+            now_unix_ms: now,
+            daily: Some(&daily),
+            total: Some(&total),
+            spent_wei: Some(0),
+            qualification: &q,
+        };
+        let all = g.live_checklist(&ctx);
+        assert_eq!(all.len(), LIVE_CONDITIONS.len());
+        assert!(all.iter().all(|(_, r)| r.is_none()));
+        let by = SetBy {
+            request_id: "x".into(),
+            generation: g.generation,
+        };
+        let mut off = g.clone();
+        off.set(SwitchId::Send.into(), Mode::Disabled, by.clone());
+        off.set(Entity::LiveGrant, Mode::Disabled, by);
+        let list = off.live_checklist(&LiveContext {
+            qualification: &LiveQualification::default(),
+            ..ctx
+        });
+        let reason = |id: &str| list.iter().find(|(c, _)| *c == id).unwrap().1;
+        assert_eq!(reason("ECON_SEND"), Some(ECON_SEND_DISABLED));
+        assert_eq!(reason("LIVE_GRANT"), Some(LIVE_GRANT_MISSING));
+        assert_eq!(reason("VENUE_QUALIFIED"), Some(LIVE_GRANT_MISSING));
+        assert_eq!(reason("WALLET_BUYER"), None);
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -53,6 +53,8 @@ enum TopicId {
   TOPIC_ID_BSC_MONITORING_STATE = 32;
   // bsc.wallets.state              STATE
   TOPIC_ID_BSC_WALLETS_STATE = 33;
+  // bsc.live.state                 STATE   LIVE-Gate, Grant, Positionen (Plan 28.10.)
+  TOPIC_ID_BSC_LIVE_STATE = 34;
   // bsc.execution.events           EVENT
   TOPIC_ID_BSC_EXECUTION_EVENTS = 40;
 

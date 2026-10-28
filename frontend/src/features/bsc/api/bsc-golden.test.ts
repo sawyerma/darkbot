@@ -2,7 +2,7 @@ import {bindingOf} from "@/core/realtime/topicTable";
 import {TopicId} from "@/core/realtime";
 import {describe,it,expect} from "vitest";
 import {readFileSync} from "node:fs";
-import {decodeStatus,decodeLaunch,decodeMonitoring,decodeWallets} from "./bscAdapter";
+import {decodeStatus,decodeLaunch,decodeMonitoring,decodeWallets,decodeLive} from "./bscAdapter";
 import {statusTone} from "../model/status";
 import {nativeRows,sectionRecords} from "../model/placement";
 const golden=(name:string)=>Uint8Array.from(Buffer.from(readFileSync(new URL(`../../../../../protocol/golden/bsc/${name}.hex`,import.meta.url),"utf8").trim(),"hex"));
@@ -13,6 +13,9 @@ describe("native BSC reporter contract",()=>{
   expect(decodeLaunch(golden("launch")).contractPresent).toBe(false);
   expect(decodeMonitoring(golden("monitoring")).state).toBe("NOT_EXECUTED");
   expect(decodeWallets(golden("wallets")).launcherBalanceWei).toBeUndefined();
+  // Plan 28.10.: without the owner's state the LIVE gate is UNKNOWN, never CLEAR.
+  expect(bindingOf(TopicId.BSC_LIVE_STATE)?.payloadType).toBe("darkbot.bsc.v1.BscLiveState");
+  const l=decodeLive(golden("live"));expect(l.gate).toBe("UNKNOWN");expect(l.warnings).toContain("OWNER_STATE_ABSENT");expect(l.qualification).toBe("NONE");expect(l.pathState).toBe("NOT_RUNNING");expect(l.grant).toBeUndefined();
  });
  it("shows the readiness record leaves without a typed field once, in Launch / BUY section 8",()=>{
   const records=decodeLaunch(golden("launch")).records;

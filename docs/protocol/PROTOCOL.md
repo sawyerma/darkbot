@@ -5,6 +5,8 @@
 
 - [darkbot/bsc/v1/status.proto](#darkbot_bsc_v1_status-proto)
     - [BscLaunchState](#darkbot-bsc-v1-BscLaunchState)
+    - [BscLiveGrantCommand](#darkbot-bsc-v1-BscLiveGrantCommand)
+    - [BscLiveState](#darkbot-bsc-v1-BscLiveState)
     - [BscMonitoringState](#darkbot-bsc-v1-BscMonitoringState)
     - [BscStatus](#darkbot-bsc-v1-BscStatus)
     - [BscWalletsState](#darkbot-bsc-v1-BscWalletsState)
@@ -16,6 +18,10 @@
     - [GateStatus](#darkbot-bsc-v1-GateStatus)
     - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
     - [JobStatus](#darkbot-bsc-v1-JobStatus)
+    - [LiveGrant](#darkbot-bsc-v1-LiveGrant)
+    - [LivePosition](#darkbot-bsc-v1-LivePosition)
+    - [LivePrecondition](#darkbot-bsc-v1-LivePrecondition)
+    - [LiveTransaction](#darkbot-bsc-v1-LiveTransaction)
     - [NativeField](#darkbot-bsc-v1-NativeField)
     - [NativeRecord](#darkbot-bsc-v1-NativeRecord)
     - [PublicField](#darkbot-bsc-v1-PublicField)
@@ -203,6 +209,73 @@ Bound launch plan, without signatures, raw transactions or execution authority.
 | economic_controls | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | The economic switches SIGN, ARM, SEND, ATTEMPT and LIVE of the native owner; absent before its state exists. |
 | buy_attempt_limit | [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit) |  | The daily BUY attempt limit and today&#39;s use; absent before the owner state exists. |
 | runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The global runtime mode BSC_RUNTIME_MODE (OFF, SHADOW, PAPER; LIVE stays BLOCKED) in the ControlSwitch shape; absent before the owner state exists. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscLiveGrantCommand"></a>
+
+### BscLiveGrantCommand
+The parameters of `bsc.live.grant`: the scope the operator confirmed and its digest.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| venue | [string](#string) |  | The venue, e.g. BSC_VENUE_FLAP. |
+| strategies | [string](#string) |  | C3, STRATEGY_C or C3&#43;STRATEGY_C. |
+| sources | [string](#string) | repeated | Source IDs. |
+| adapters | [string](#string) | repeated | Adapter names. |
+| max_input_wei | [string](#string) |  | Largest BUY input, decimal wei. |
+| max_spend_wei | [string](#string) |  | Whole spend limit, decimal wei. |
+| max_attempts | [uint32](#uint32) |  | BUY attempts the grant may take. |
+| expires_unix_ms | [uint64](#uint64) |  | Expiry, unix milliseconds. |
+| scope_sha256 | [string](#string) |  | SHA-256 of the canonical scope text the operator was shown, lowercase hex. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscLiveState"></a>
+
+### BscLiveState
+The BSC LIVE tab (plan 28.10.): the owner&#39;s LIVE gate with every precondition and its
+reason, the grant, attempts and spend, the LIVE path of the runtime, positions,
+transactions and the net result. A view of the native owner and ledger, never a permission.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| gate | [string](#string) |  | CLEAR when the gate holds now, BLOCKED otherwise, UNKNOWN without a readable owner state. |
+| blockers | [string](#string) | repeated | The gate&#39;s block reasons in order; the first decides. |
+| preconditions | [LivePrecondition](#darkbot-bsc-v1-LivePrecondition) | repeated | Every precondition with whether it holds. |
+| grant | [LiveGrant](#darkbot-bsc-v1-LiveGrant) |  | The grant on file; absent without one. |
+| generation | [uint64](#uint64) |  | The owner generation: the compare-and-swap of a grant, revoke or limit request. |
+| runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The runtime mode BSC_RUNTIME_MODE as it holds now. |
+| economic_live | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The economic LIVE switch BSC_ECON_LIVE. |
+| daily | [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit) |  | The daily BUY attempt limit and today&#39;s use. |
+| total_limit | [uint64](#uint64) |  | The campaign&#39;s total BUY attempt limit (at most ten) and its use. |
+| total_used | [uint64](#uint64) |  | Total attempts taken, every day and restart counted. |
+| grant_attempts_used | [uint64](#uint64) |  | Attempts the current grant took. |
+| spent_wei | [string](#string) |  | What the current grant has spent at most (admitted intents), decimal wei. |
+| qualification | [string](#string) |  | VERIFIED, NONE or INVALID: the LIVE qualification on file. |
+| qualification_detail | [string](#string) |  | Why it is not VERIFIED, or its SHA-256. |
+| path_state | [string](#string) |  | The runtime&#39;s LIVE path: OFF, BLOCKED, ARMED, ENDED and the arming states. |
+| path_reason | [string](#string) |  | Why the path is in that state. |
+| route | [string](#string) |  | BUILDERS or LOOPBACK. |
+| buyer | [string](#string) |  | The buyer wallet, 0x hex. |
+| buyer_balance_wei | [string](#string) | optional | The buyer&#39;s balance at the last probe, decimal wei. |
+| released | [uint64](#uint64) |  | Transactions the path released, and of them UNKNOWN. |
+| unknown | [uint64](#uint64) |  | Released transactions whose handoff did not complete. |
+| last_refusal | [string](#string) |  | The owner&#39;s or the release&#39;s last reason to refuse an intent. |
+| positions | [LivePosition](#darkbot-bsc-v1-LivePosition) | repeated | The ledger&#39;s positions. |
+| transactions | [LiveTransaction](#darkbot-bsc-v1-LiveTransaction) | repeated | The ledger&#39;s transactions, newest last. |
+| realized_pnl_wei | [string](#string) |  | Realized PnL of closed and failed positions, signed decimal wei. |
+| gas_wei | [string](#string) |  | All gas the ledger&#39;s transactions paid, decimal wei. |
+| warnings | [string](#string) | repeated | Unreadable inputs, made explicit. |
+| scope | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | Every entity the grant names (runtime, components, venue, sources) as requested and as it holds now under the gate: LIVE only while the gate is clear and the scope names it. |
 
 
 
@@ -448,6 +521,92 @@ Supervisor-owned read-only job lifecycle.
 
 
 
+<a name="darkbot-bsc-v1-LiveGrant"></a>
+
+### LiveGrant
+The operator&#39;s LIVE grant of one scope as the native owner holds it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| venue | [string](#string) |  | The venue, e.g. BSC_VENUE_FLAP. |
+| strategies | [string](#string) |  | C3, STRATEGY_C or C3&#43;STRATEGY_C. |
+| sources | [string](#string) | repeated | Source IDs whose verified full sightings may trigger a BUY. |
+| adapters | [string](#string) | repeated | Inclusion adapters, e.g. CLUB48_BUILDER_V1. |
+| max_input_wei | [string](#string) |  | Largest BUY input, decimal wei. |
+| max_spend_wei | [string](#string) |  | The grant&#39;s whole spend limit (inputs and gas), decimal wei. |
+| max_attempts | [uint32](#uint32) |  | BUY attempts the grant may take. |
+| expires_unix_ms | [uint64](#uint64) |  | Expiry, unix milliseconds. |
+| scope_sha256 | [string](#string) |  | SHA-256 of the canonical scope text the operator confirmed, lowercase hex. |
+| scope_text | [string](#string) |  | The canonical scope text itself. |
+| request_id | [string](#string) |  | The request that wrote the grant. |
+| set_generation | [uint64](#uint64) |  | The owner generation that request wrote. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LivePosition"></a>
+
+### LivePosition
+One LIVE position of the ledger: its BUY, exit and native result.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| token | [string](#string) |  | Token address, 0x hex. |
+| component | [string](#string) |  | BSC_EXEC or BSC_STRATEGY_C. |
+| state | [string](#string) |  | PENDING, OPEN, EXITING, CLOSED or FAILED. |
+| tokens | [string](#string) |  | Tokens the BUY received, decimal. |
+| input_wei | [string](#string) |  | The BUY&#39;s input, decimal wei. |
+| proceeds_wei | [string](#string) |  | The SELL&#39;s proceeds, decimal wei. |
+| gas_wei | [string](#string) |  | Gas of all its included or reverted transactions, decimal wei. |
+| pnl_wei | [string](#string) | optional | Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LivePrecondition"></a>
+
+### LivePrecondition
+One condition of the native owner&#39;s LIVE gate (plan 28.10.), in the order an operator meets
+them; LIVE is effective only while every one holds.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE, BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, VENUE_QUALIFIED, SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION. |
+| met | [bool](#bool) |  | Whether the condition holds now. |
+| reason | [string](#string) |  | The owner&#39;s reason when it does not (the gate&#39;s own block reason). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveTransaction"></a>
+
+### LiveTransaction
+One LIVE transaction whose bytes may have left, and what the chain made of it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| tx_hash | [string](#string) |  | Transaction hash, 0x hex. |
+| intent | [string](#string) |  | BUY, APPROVE or SELL. |
+| token | [string](#string) |  | Token address, 0x hex. |
+| nonce | [uint64](#uint64) |  | The buyer&#39;s nonce it used. |
+| state | [string](#string) |  | RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED. |
+| block_number | [uint64](#uint64) | optional | The block that included it. |
+
+
+
+
+
+
 <a name="darkbot-bsc-v1-NativeField"></a>
 
 ### NativeField
@@ -656,6 +815,7 @@ verbindlich in der TopicDescriptor-Tabelle, die das Gateway im Welcome liefert.
 | TOPIC_ID_BSC_LAUNCH_STATE | 31 | bsc.launch.state STATE plan_version |
 | TOPIC_ID_BSC_MONITORING_STATE | 32 | bsc.monitoring.state STATE |
 | TOPIC_ID_BSC_WALLETS_STATE | 33 | bsc.wallets.state STATE |
+| TOPIC_ID_BSC_LIVE_STATE | 34 | bsc.live.state STATE LIVE-Gate, Grant, Positionen (Plan 28.10.) |
 | TOPIC_ID_BSC_EXECUTION_EVENTS | 40 | bsc.execution.events EVENT |
 | TOPIC_ID_SOLANA_STATUS | 50 | solana.status STATE erst mit qualifiziertem Adapter |
 

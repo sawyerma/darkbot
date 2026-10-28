@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/status.proto.
  */
 export const file_darkbot_bsc_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiYgoLTmF0aXZlRmllbGQSDAoEbmFtZRgBIAEoCRIoCgRraW5kGAIgASgOMhouZGFya2JvdC5ic2MudjEuTmF0aXZlS2luZBINCgV2YWx1ZRgDIAEoCRIMCgR1bml0GAQgASgJIosBCgxOYXRpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USEgoKcHJvdmVuYW5jZRgDIAEoCRIrCgZmaWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5OYXRpdmVGaWVsZCK5AwoJQnNjU3RhdHVzEhUKDXNvdXJjZV9jb21taXQYASABKAkSGAoQZXZhbHVhdGVkX3VuaXhfcxgCIAEoBBISCgpsaXZlX3N0YXRlGAMgASgJEioKBWd1YXJkGAQgASgLMhsuZGFya2JvdC5ic2MudjEuR3VhcmRTdGF0dXMSKQoFZ2F0ZXMYBSADKAsyGi5kYXJrYm90LmJzYy52MS5HYXRlU3RhdHVzEjIKCXJlYWRpbmVzcxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlJlYWRpbmVzc1N0YXR1cxIuCgdidWlsZGVyGAcgASgLMh0uZGFya2JvdC5ic2MudjEuQnVpbGRlclN0YXR1cxIuCgd3aXRuZXNzGAggASgLMh0uZGFya2JvdC5ic2MudjEuV2l0bmVzc1N0YXR1cxImCgNkcnkYCSABKAsyGS5kYXJrYm90LmJzYy52MS5EcnlTdGF0dXMSJwoEam9icxgKIAMoCzIZLmRhcmtib3QuYnNjLnYxLkpvYlN0YXR1cxIQCgh3YXJuaW5ncxgLIAMoCRIZChFkYXRhX2FzX29mX3VuaXhfcxgMIAEoBCKvAQoNQ29udHJvbFN3aXRjaBIKCgJpZBgBIAEoCRIRCglyZXF1ZXN0ZWQYAiABKAkSEQoJZWZmZWN0aXZlGAMgASgJEhQKDGJsb2NrX3JlYXNvbhgEIAEoCRISCgpnZW5lcmF0aW9uGAUgASgEEhIKCnJlcXVlc3RfaWQYBiABKAkSGwoOc2V0X2dlbmVyYXRpb24YByABKARIAIgBAUIRCg9fc2V0X2dlbmVyYXRpb24irAEKD0J1eUF0dGVtcHRMaW1pdBIPCgdwZXJfZGF5GAEgASgEEg8KB2RheV91dGMYAiABKAkSDAoEdXNlZBgDIAEoBBIRCglyZW1haW5pbmcYBCABKAQSEgoKZ2VuZXJhdGlvbhgFIAEoBBISCgpyZXF1ZXN0X2lkGAYgASgJEhsKDnNldF9nZW5lcmF0aW9uGAcgASgESACIAQFCEQoPX3NldF9nZW5lcmF0aW9uIqsDCg5Cc2NMYXVuY2hTdGF0ZRIYChBjb250cmFjdF9wcmVzZW50GAEgASgIEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USNAoPY29udHJhY3RfZmllbGRzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSMwoOcnVudGltZV9maWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIOCgZyZWFzb24YBSABKAkSLQoHcmVjb3JkcxgGIAMoCzIcLmRhcmtib3QuYnNjLnYxLk5hdGl2ZVJlY29yZBI4ChFlY29ub21pY19jb250cm9scxgHIAMoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2gSOgoRYnV5X2F0dGVtcHRfbGltaXQYCCABKAsyHy5kYXJrYm90LmJzYy52MS5CdXlBdHRlbXB0TGltaXQSMwoMcnVudGltZV9tb2RlGAkgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaCKsAQoSQnNjTW9uaXRvcmluZ1N0YXRlEg0KBXN0YXRlGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USLAoHcmVzdWx0cxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEi0KB3JlY29yZHMYBCADKAsyHC5kYXJrYm90LmJzYy52MS5OYXRpdmVSZWNvcmQi8wQKD0JzY1dhbGxldHNTdGF0ZRIYChBleHBlY3RlZF9hZGRyZXNzGAEgASgJEhUKDXdhbGxldF9zdGF0dXMYAiABKAkSGAoQbGF1bmNoZXJfYWRkcmVzcxgDIAEoCRIVCg1idXllcl9hZGRyZXNzGAQgASgJEhUKCGNoYWluX2lkGAUgASgESACIAQESIQoUbGF1bmNoZXJfYmFsYW5jZV93ZWkYBiABKAlIAYgBARIeChFidXllcl9iYWxhbmNlX3dlaRgHIAEoCUgCiAEBEhsKDm9ic2VydmVkX2Jsb2NrGAggASgESAOIAQESFwoPb2JzZXJ2ZWRfdW5peF9zGAkgASgEEg4KBnNvdXJjZRgKIAEoCRIiChVyZXF1aXJlZF9sYXVuY2hlcl93ZWkYCyABKAlIBIgBARIfChJyZXF1aXJlZF9idXllcl93ZWkYDCABKAlIBYgBARIqCghldmlkZW5jZRgNIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEjcKEGxhdW5jaGVyX2NvbnRyb2wYDiABKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoEjQKDWJ1eWVyX2NvbnRyb2wYDyABKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoQgsKCV9jaGFpbl9pZEIXChVfbGF1bmNoZXJfYmFsYW5jZV93ZWlCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpQhEKD19vYnNlcnZlZF9ibG9ja0IYChZfcmVxdWlyZWRfbGF1bmNoZXJfd2VpQhUKE19yZXF1aXJlZF9idXllcl93ZWkqxAEKCk5hdGl2ZUtpbmQSGwoXTkFUSVZFX0tJTkRfVU5TUEVDSUZJRUQQABIUChBOQVRJVkVfS0lORF9CT09MEAESEwoPTkFUSVZFX0tJTkRfVTY0EAISEwoPTkFUSVZFX0tJTkRfSTY0EAMSFAoQTkFUSVZFX0tJTkRfVTI1NhAEEhcKE05BVElWRV9LSU5EX0FERFJFU1MQBRIUChBOQVRJVkVfS0lORF9CMjU2EAYSFAoQTkFUSVZFX0tJTkRfVEVYVBAHQnsKEmNvbS5kYXJrYm90LmJzYy52MUILU3RhdHVzUHJvdG9QAaICA0RCWKoCDkRhcmtib3QuQnNjLlYxygIORGFya2JvdFxCc2NcVjHiAhpEYXJrYm90XEJzY1xWMVxHUEJNZXRhZGF0YeoCEERhcmtib3Q6OkJzYzo6VjFiBnByb3RvMw");
+  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiYgoLTmF0aXZlRmllbGQSDAoEbmFtZRgBIAEoCRIoCgRraW5kGAIgASgOMhouZGFya2JvdC5ic2MudjEuTmF0aXZlS2luZBINCgV2YWx1ZRgDIAEoCRIMCgR1bml0GAQgASgJIosBCgxOYXRpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USEgoKcHJvdmVuYW5jZRgDIAEoCRIrCgZmaWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5OYXRpdmVGaWVsZCK5AwoJQnNjU3RhdHVzEhUKDXNvdXJjZV9jb21taXQYASABKAkSGAoQZXZhbHVhdGVkX3VuaXhfcxgCIAEoBBISCgpsaXZlX3N0YXRlGAMgASgJEioKBWd1YXJkGAQgASgLMhsuZGFya2JvdC5ic2MudjEuR3VhcmRTdGF0dXMSKQoFZ2F0ZXMYBSADKAsyGi5kYXJrYm90LmJzYy52MS5HYXRlU3RhdHVzEjIKCXJlYWRpbmVzcxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlJlYWRpbmVzc1N0YXR1cxIuCgdidWlsZGVyGAcgASgLMh0uZGFya2JvdC5ic2MudjEuQnVpbGRlclN0YXR1cxIuCgd3aXRuZXNzGAggASgLMh0uZGFya2JvdC5ic2MudjEuV2l0bmVzc1N0YXR1cxImCgNkcnkYCSABKAsyGS5kYXJrYm90LmJzYy52MS5EcnlTdGF0dXMSJwoEam9icxgKIAMoCzIZLmRhcmtib3QuYnNjLnYxLkpvYlN0YXR1cxIQCgh3YXJuaW5ncxgLIAMoCRIZChFkYXRhX2FzX29mX3VuaXhfcxgMIAEoBCKvAQoNQ29udHJvbFN3aXRjaBIKCgJpZBgBIAEoCRIRCglyZXF1ZXN0ZWQYAiABKAkSEQoJZWZmZWN0aXZlGAMgASgJEhQKDGJsb2NrX3JlYXNvbhgEIAEoCRISCgpnZW5lcmF0aW9uGAUgASgEEhIKCnJlcXVlc3RfaWQYBiABKAkSGwoOc2V0X2dlbmVyYXRpb24YByABKARIAIgBAUIRCg9fc2V0X2dlbmVyYXRpb24irAEKD0J1eUF0dGVtcHRMaW1pdBIPCgdwZXJfZGF5GAEgASgEEg8KB2RheV91dGMYAiABKAkSDAoEdXNlZBgDIAEoBBIRCglyZW1haW5pbmcYBCABKAQSEgoKZ2VuZXJhdGlvbhgFIAEoBBISCgpyZXF1ZXN0X2lkGAYgASgJEhsKDnNldF9nZW5lcmF0aW9uGAcgASgESACIAQFCEQoPX3NldF9nZW5lcmF0aW9uIqsDCg5Cc2NMYXVuY2hTdGF0ZRIYChBjb250cmFjdF9wcmVzZW50GAEgASgIEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USNAoPY29udHJhY3RfZmllbGRzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSMwoOcnVudGltZV9maWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIOCgZyZWFzb24YBSABKAkSLQoHcmVjb3JkcxgGIAMoCzIcLmRhcmtib3QuYnNjLnYxLk5hdGl2ZVJlY29yZBI4ChFlY29ub21pY19jb250cm9scxgHIAMoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2gSOgoRYnV5X2F0dGVtcHRfbGltaXQYCCABKAsyHy5kYXJrYm90LmJzYy52MS5CdXlBdHRlbXB0TGltaXQSMwoMcnVudGltZV9tb2RlGAkgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaCKsAQoSQnNjTW9uaXRvcmluZ1N0YXRlEg0KBXN0YXRlGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USLAoHcmVzdWx0cxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEi0KB3JlY29yZHMYBCADKAsyHC5kYXJrYm90LmJzYy52MS5OYXRpdmVSZWNvcmQi8wQKD0JzY1dhbGxldHNTdGF0ZRIYChBleHBlY3RlZF9hZGRyZXNzGAEgASgJEhUKDXdhbGxldF9zdGF0dXMYAiABKAkSGAoQbGF1bmNoZXJfYWRkcmVzcxgDIAEoCRIVCg1idXllcl9hZGRyZXNzGAQgASgJEhUKCGNoYWluX2lkGAUgASgESACIAQESIQoUbGF1bmNoZXJfYmFsYW5jZV93ZWkYBiABKAlIAYgBARIeChFidXllcl9iYWxhbmNlX3dlaRgHIAEoCUgCiAEBEhsKDm9ic2VydmVkX2Jsb2NrGAggASgESAOIAQESFwoPb2JzZXJ2ZWRfdW5peF9zGAkgASgEEg4KBnNvdXJjZRgKIAEoCRIiChVyZXF1aXJlZF9sYXVuY2hlcl93ZWkYCyABKAlIBIgBARIfChJyZXF1aXJlZF9idXllcl93ZWkYDCABKAlIBYgBARIqCghldmlkZW5jZRgNIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEjcKEGxhdW5jaGVyX2NvbnRyb2wYDiABKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoEjQKDWJ1eWVyX2NvbnRyb2wYDyABKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoQgsKCV9jaGFpbl9pZEIXChVfbGF1bmNoZXJfYmFsYW5jZV93ZWlCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpQhEKD19vYnNlcnZlZF9ibG9ja0IYChZfcmVxdWlyZWRfbGF1bmNoZXJfd2VpQhUKE19yZXF1aXJlZF9idXllcl93ZWkiOwoQTGl2ZVByZWNvbmRpdGlvbhIKCgJpZBgBIAEoCRILCgNtZXQYAiABKAgSDgoGcmVhc29uGAMgASgJIoQCCglMaXZlR3JhbnQSDQoFdmVudWUYASABKAkSEgoKc3RyYXRlZ2llcxgCIAEoCRIPCgdzb3VyY2VzGAMgAygJEhAKCGFkYXB0ZXJzGAQgAygJEhUKDW1heF9pbnB1dF93ZWkYBSABKAkSFQoNbWF4X3NwZW5kX3dlaRgGIAEoCRIUCgxtYXhfYXR0ZW1wdHMYByABKA0SFwoPZXhwaXJlc191bml4X21zGAggASgEEhQKDHNjb3BlX3NoYTI1NhgJIAEoCRISCgpzY29wZV90ZXh0GAogASgJEhIKCnJlcXVlc3RfaWQYCyABKAkSFgoOc2V0X2dlbmVyYXRpb24YDCABKAQiqwEKDExpdmVQb3NpdGlvbhINCgV0b2tlbhgBIAEoCRIRCgljb21wb25lbnQYAiABKAkSDQoFc3RhdGUYAyABKAkSDgoGdG9rZW5zGAQgASgJEhEKCWlucHV0X3dlaRgFIAEoCRIUCgxwcm9jZWVkc193ZWkYBiABKAkSDwoHZ2FzX3dlaRgHIAEoCRIUCgdwbmxfd2VpGAggASgJSACIAQFCCgoIX3BubF93ZWkiiwEKD0xpdmVUcmFuc2FjdGlvbhIPCgd0eF9oYXNoGAEgASgJEg4KBmludGVudBgCIAEoCRINCgV0b2tlbhgDIAEoCRINCgVub25jZRgEIAEoBBINCgVzdGF0ZRgFIAEoCRIZCgxibG9ja19udW1iZXIYBiABKARIAIgBAUIPCg1fYmxvY2tfbnVtYmVyItcGCgxCc2NMaXZlU3RhdGUSDAoEZ2F0ZRgBIAEoCRIQCghibG9ja2VycxgCIAMoCRI3Cg1wcmVjb25kaXRpb25zGAMgAygLMiAuZGFya2JvdC5ic2MudjEuTGl2ZVByZWNvbmRpdGlvbhIoCgVncmFudBgEIAEoCzIZLmRhcmtib3QuYnNjLnYxLkxpdmVHcmFudBISCgpnZW5lcmF0aW9uGAUgASgEEjMKDHJ1bnRpbWVfbW9kZRgGIAEoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2gSNAoNZWNvbm9taWNfbGl2ZRgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2gSLgoFZGFpbHkYCCABKAsyHy5kYXJrYm90LmJzYy52MS5CdXlBdHRlbXB0TGltaXQSEwoLdG90YWxfbGltaXQYCSABKAQSEgoKdG90YWxfdXNlZBgKIAEoBBIbChNncmFudF9hdHRlbXB0c191c2VkGAsgASgEEhEKCXNwZW50X3dlaRgMIAEoCRIVCg1xdWFsaWZpY2F0aW9uGA0gASgJEhwKFHF1YWxpZmljYXRpb25fZGV0YWlsGA4gASgJEhIKCnBhdGhfc3RhdGUYDyABKAkSEwoLcGF0aF9yZWFzb24YECABKAkSDQoFcm91dGUYESABKAkSDQoFYnV5ZXIYEiABKAkSHgoRYnV5ZXJfYmFsYW5jZV93ZWkYEyABKAlIAIgBARIQCghyZWxlYXNlZBgUIAEoBBIPCgd1bmtub3duGBUgASgEEhQKDGxhc3RfcmVmdXNhbBgWIAEoCRIvCglwb3NpdGlvbnMYFyADKAsyHC5kYXJrYm90LmJzYy52MS5MaXZlUG9zaXRpb24SNQoMdHJhbnNhY3Rpb25zGBggAygLMh8uZGFya2JvdC5ic2MudjEuTGl2ZVRyYW5zYWN0aW9uEhgKEHJlYWxpemVkX3BubF93ZWkYGSABKAkSDwoHZ2FzX3dlaRgaIAEoCRIQCgh3YXJuaW5ncxgbIAMoCRIsCgVzY29wZRgcIAMoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2hCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpIs4BChNCc2NMaXZlR3JhbnRDb21tYW5kEg0KBXZlbnVlGAEgASgJEhIKCnN0cmF0ZWdpZXMYAiABKAkSDwoHc291cmNlcxgDIAMoCRIQCghhZGFwdGVycxgEIAMoCRIVCg1tYXhfaW5wdXRfd2VpGAUgASgJEhUKDW1heF9zcGVuZF93ZWkYBiABKAkSFAoMbWF4X2F0dGVtcHRzGAcgASgNEhcKD2V4cGlyZXNfdW5peF9tcxgIIAEoBBIUCgxzY29wZV9zaGEyNTYYCSABKAkqxAEKCk5hdGl2ZUtpbmQSGwoXTkFUSVZFX0tJTkRfVU5TUEVDSUZJRUQQABIUChBOQVRJVkVfS0lORF9CT09MEAESEwoPTkFUSVZFX0tJTkRfVTY0EAISEwoPTkFUSVZFX0tJTkRfSTY0EAMSFAoQTkFUSVZFX0tJTkRfVTI1NhAEEhcKE05BVElWRV9LSU5EX0FERFJFU1MQBRIUChBOQVRJVkVfS0lORF9CMjU2EAYSFAoQTkFUSVZFX0tJTkRfVEVYVBAHQnsKEmNvbS5kYXJrYm90LmJzYy52MUILU3RhdHVzUHJvdG9QAaICA0RCWKoCDkRhcmtib3QuQnNjLlYxygIORGFya2JvdFxCc2NcVjHiAhpEYXJrYm90XEJzY1xWMVxHUEJNZXRhZGF0YeoCEERhcmtib3Q6OkJzYzo6VjFiBnByb3RvMw");
 
 /**
  * An explicitly selected public bound value, never a signed transaction or secret.
@@ -1079,6 +1079,558 @@ export type BscWalletsState = Message<"darkbot.bsc.v1.BscWalletsState"> & {
  */
 export const BscWalletsStateSchema: GenMessage<BscWalletsState> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_status, 16);
+
+/**
+ * One condition of the native owner's LIVE gate (plan 28.10.), in the order an operator meets
+ * them; LIVE is effective only while every one holds.
+ *
+ * @generated from message darkbot.bsc.v1.LivePrecondition
+ */
+export type LivePrecondition = Message<"darkbot.bsc.v1.LivePrecondition"> & {
+  /**
+   * Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE,
+   * BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, VENUE_QUALIFIED,
+   * SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Whether the condition holds now.
+   *
+   * @generated from field: bool met = 2;
+   */
+  met: boolean;
+
+  /**
+   * The owner's reason when it does not (the gate's own block reason).
+   *
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.LivePrecondition.
+ * Use `create(LivePreconditionSchema)` to create a new message.
+ */
+export const LivePreconditionSchema: GenMessage<LivePrecondition> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 17);
+
+/**
+ * The operator's LIVE grant of one scope as the native owner holds it.
+ *
+ * @generated from message darkbot.bsc.v1.LiveGrant
+ */
+export type LiveGrant = Message<"darkbot.bsc.v1.LiveGrant"> & {
+  /**
+   * The venue, e.g. BSC_VENUE_FLAP.
+   *
+   * @generated from field: string venue = 1;
+   */
+  venue: string;
+
+  /**
+   * C3, STRATEGY_C or C3+STRATEGY_C.
+   *
+   * @generated from field: string strategies = 2;
+   */
+  strategies: string;
+
+  /**
+   * Source IDs whose verified full sightings may trigger a BUY.
+   *
+   * @generated from field: repeated string sources = 3;
+   */
+  sources: string[];
+
+  /**
+   * Inclusion adapters, e.g. CLUB48_BUILDER_V1.
+   *
+   * @generated from field: repeated string adapters = 4;
+   */
+  adapters: string[];
+
+  /**
+   * Largest BUY input, decimal wei.
+   *
+   * @generated from field: string max_input_wei = 5;
+   */
+  maxInputWei: string;
+
+  /**
+   * The grant's whole spend limit (inputs and gas), decimal wei.
+   *
+   * @generated from field: string max_spend_wei = 6;
+   */
+  maxSpendWei: string;
+
+  /**
+   * BUY attempts the grant may take.
+   *
+   * @generated from field: uint32 max_attempts = 7;
+   */
+  maxAttempts: number;
+
+  /**
+   * Expiry, unix milliseconds.
+   *
+   * @generated from field: uint64 expires_unix_ms = 8;
+   */
+  expiresUnixMs: bigint;
+
+  /**
+   * SHA-256 of the canonical scope text the operator confirmed, lowercase hex.
+   *
+   * @generated from field: string scope_sha256 = 9;
+   */
+  scopeSha256: string;
+
+  /**
+   * The canonical scope text itself.
+   *
+   * @generated from field: string scope_text = 10;
+   */
+  scopeText: string;
+
+  /**
+   * The request that wrote the grant.
+   *
+   * @generated from field: string request_id = 11;
+   */
+  requestId: string;
+
+  /**
+   * The owner generation that request wrote.
+   *
+   * @generated from field: uint64 set_generation = 12;
+   */
+  setGeneration: bigint;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.LiveGrant.
+ * Use `create(LiveGrantSchema)` to create a new message.
+ */
+export const LiveGrantSchema: GenMessage<LiveGrant> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 18);
+
+/**
+ * One LIVE position of the ledger: its BUY, exit and native result.
+ *
+ * @generated from message darkbot.bsc.v1.LivePosition
+ */
+export type LivePosition = Message<"darkbot.bsc.v1.LivePosition"> & {
+  /**
+   * Token address, 0x hex.
+   *
+   * @generated from field: string token = 1;
+   */
+  token: string;
+
+  /**
+   * BSC_EXEC or BSC_STRATEGY_C.
+   *
+   * @generated from field: string component = 2;
+   */
+  component: string;
+
+  /**
+   * PENDING, OPEN, EXITING, CLOSED or FAILED.
+   *
+   * @generated from field: string state = 3;
+   */
+  state: string;
+
+  /**
+   * Tokens the BUY received, decimal.
+   *
+   * @generated from field: string tokens = 4;
+   */
+  tokens: string;
+
+  /**
+   * The BUY's input, decimal wei.
+   *
+   * @generated from field: string input_wei = 5;
+   */
+  inputWei: string;
+
+  /**
+   * The SELL's proceeds, decimal wei.
+   *
+   * @generated from field: string proceeds_wei = 6;
+   */
+  proceedsWei: string;
+
+  /**
+   * Gas of all its included or reverted transactions, decimal wei.
+   *
+   * @generated from field: string gas_wei = 7;
+   */
+  gasWei: string;
+
+  /**
+   * Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei.
+   *
+   * @generated from field: optional string pnl_wei = 8;
+   */
+  pnlWei?: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.LivePosition.
+ * Use `create(LivePositionSchema)` to create a new message.
+ */
+export const LivePositionSchema: GenMessage<LivePosition> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 19);
+
+/**
+ * One LIVE transaction whose bytes may have left, and what the chain made of it.
+ *
+ * @generated from message darkbot.bsc.v1.LiveTransaction
+ */
+export type LiveTransaction = Message<"darkbot.bsc.v1.LiveTransaction"> & {
+  /**
+   * Transaction hash, 0x hex.
+   *
+   * @generated from field: string tx_hash = 1;
+   */
+  txHash: string;
+
+  /**
+   * BUY, APPROVE or SELL.
+   *
+   * @generated from field: string intent = 2;
+   */
+  intent: string;
+
+  /**
+   * Token address, 0x hex.
+   *
+   * @generated from field: string token = 3;
+   */
+  token: string;
+
+  /**
+   * The buyer's nonce it used.
+   *
+   * @generated from field: uint64 nonce = 4;
+   */
+  nonce: bigint;
+
+  /**
+   * RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED.
+   *
+   * @generated from field: string state = 5;
+   */
+  state: string;
+
+  /**
+   * The block that included it.
+   *
+   * @generated from field: optional uint64 block_number = 6;
+   */
+  blockNumber?: bigint;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.LiveTransaction.
+ * Use `create(LiveTransactionSchema)` to create a new message.
+ */
+export const LiveTransactionSchema: GenMessage<LiveTransaction> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 20);
+
+/**
+ * The BSC LIVE tab (plan 28.10.): the owner's LIVE gate with every precondition and its
+ * reason, the grant, attempts and spend, the LIVE path of the runtime, positions,
+ * transactions and the net result. A view of the native owner and ledger, never a permission.
+ *
+ * @generated from message darkbot.bsc.v1.BscLiveState
+ */
+export type BscLiveState = Message<"darkbot.bsc.v1.BscLiveState"> & {
+  /**
+   * CLEAR when the gate holds now, BLOCKED otherwise, UNKNOWN without a readable owner state.
+   *
+   * @generated from field: string gate = 1;
+   */
+  gate: string;
+
+  /**
+   * The gate's block reasons in order; the first decides.
+   *
+   * @generated from field: repeated string blockers = 2;
+   */
+  blockers: string[];
+
+  /**
+   * Every precondition with whether it holds.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.LivePrecondition preconditions = 3;
+   */
+  preconditions: LivePrecondition[];
+
+  /**
+   * The grant on file; absent without one.
+   *
+   * @generated from field: darkbot.bsc.v1.LiveGrant grant = 4;
+   */
+  grant?: LiveGrant;
+
+  /**
+   * The owner generation: the compare-and-swap of a grant, revoke or limit request.
+   *
+   * @generated from field: uint64 generation = 5;
+   */
+  generation: bigint;
+
+  /**
+   * The runtime mode BSC_RUNTIME_MODE as it holds now.
+   *
+   * @generated from field: darkbot.bsc.v1.ControlSwitch runtime_mode = 6;
+   */
+  runtimeMode?: ControlSwitch;
+
+  /**
+   * The economic LIVE switch BSC_ECON_LIVE.
+   *
+   * @generated from field: darkbot.bsc.v1.ControlSwitch economic_live = 7;
+   */
+  economicLive?: ControlSwitch;
+
+  /**
+   * The daily BUY attempt limit and today's use.
+   *
+   * @generated from field: darkbot.bsc.v1.BuyAttemptLimit daily = 8;
+   */
+  daily?: BuyAttemptLimit;
+
+  /**
+   * The campaign's total BUY attempt limit (at most ten) and its use.
+   *
+   * @generated from field: uint64 total_limit = 9;
+   */
+  totalLimit: bigint;
+
+  /**
+   * Total attempts taken, every day and restart counted.
+   *
+   * @generated from field: uint64 total_used = 10;
+   */
+  totalUsed: bigint;
+
+  /**
+   * Attempts the current grant took.
+   *
+   * @generated from field: uint64 grant_attempts_used = 11;
+   */
+  grantAttemptsUsed: bigint;
+
+  /**
+   * What the current grant has spent at most (admitted intents), decimal wei.
+   *
+   * @generated from field: string spent_wei = 12;
+   */
+  spentWei: string;
+
+  /**
+   * VERIFIED, NONE or INVALID: the LIVE qualification on file.
+   *
+   * @generated from field: string qualification = 13;
+   */
+  qualification: string;
+
+  /**
+   * Why it is not VERIFIED, or its SHA-256.
+   *
+   * @generated from field: string qualification_detail = 14;
+   */
+  qualificationDetail: string;
+
+  /**
+   * The runtime's LIVE path: OFF, BLOCKED, ARMED, ENDED and the arming states.
+   *
+   * @generated from field: string path_state = 15;
+   */
+  pathState: string;
+
+  /**
+   * Why the path is in that state.
+   *
+   * @generated from field: string path_reason = 16;
+   */
+  pathReason: string;
+
+  /**
+   * BUILDERS or LOOPBACK.
+   *
+   * @generated from field: string route = 17;
+   */
+  route: string;
+
+  /**
+   * The buyer wallet, 0x hex.
+   *
+   * @generated from field: string buyer = 18;
+   */
+  buyer: string;
+
+  /**
+   * The buyer's balance at the last probe, decimal wei.
+   *
+   * @generated from field: optional string buyer_balance_wei = 19;
+   */
+  buyerBalanceWei?: string;
+
+  /**
+   * Transactions the path released, and of them UNKNOWN.
+   *
+   * @generated from field: uint64 released = 20;
+   */
+  released: bigint;
+
+  /**
+   * Released transactions whose handoff did not complete.
+   *
+   * @generated from field: uint64 unknown = 21;
+   */
+  unknown: bigint;
+
+  /**
+   * The owner's or the release's last reason to refuse an intent.
+   *
+   * @generated from field: string last_refusal = 22;
+   */
+  lastRefusal: string;
+
+  /**
+   * The ledger's positions.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.LivePosition positions = 23;
+   */
+  positions: LivePosition[];
+
+  /**
+   * The ledger's transactions, newest last.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.LiveTransaction transactions = 24;
+   */
+  transactions: LiveTransaction[];
+
+  /**
+   * Realized PnL of closed and failed positions, signed decimal wei.
+   *
+   * @generated from field: string realized_pnl_wei = 25;
+   */
+  realizedPnlWei: string;
+
+  /**
+   * All gas the ledger's transactions paid, decimal wei.
+   *
+   * @generated from field: string gas_wei = 26;
+   */
+  gasWei: string;
+
+  /**
+   * Unreadable inputs, made explicit.
+   *
+   * @generated from field: repeated string warnings = 27;
+   */
+  warnings: string[];
+
+  /**
+   * Every entity the grant names (runtime, components, venue, sources) as requested and as it
+   * holds now under the gate: LIVE only while the gate is clear and the scope names it.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.ControlSwitch scope = 28;
+   */
+  scope: ControlSwitch[];
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.BscLiveState.
+ * Use `create(BscLiveStateSchema)` to create a new message.
+ */
+export const BscLiveStateSchema: GenMessage<BscLiveState> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 21);
+
+/**
+ * The parameters of `bsc.live.grant`: the scope the operator confirmed and its digest.
+ *
+ * @generated from message darkbot.bsc.v1.BscLiveGrantCommand
+ */
+export type BscLiveGrantCommand = Message<"darkbot.bsc.v1.BscLiveGrantCommand"> & {
+  /**
+   * The venue, e.g. BSC_VENUE_FLAP.
+   *
+   * @generated from field: string venue = 1;
+   */
+  venue: string;
+
+  /**
+   * C3, STRATEGY_C or C3+STRATEGY_C.
+   *
+   * @generated from field: string strategies = 2;
+   */
+  strategies: string;
+
+  /**
+   * Source IDs.
+   *
+   * @generated from field: repeated string sources = 3;
+   */
+  sources: string[];
+
+  /**
+   * Adapter names.
+   *
+   * @generated from field: repeated string adapters = 4;
+   */
+  adapters: string[];
+
+  /**
+   * Largest BUY input, decimal wei.
+   *
+   * @generated from field: string max_input_wei = 5;
+   */
+  maxInputWei: string;
+
+  /**
+   * Whole spend limit, decimal wei.
+   *
+   * @generated from field: string max_spend_wei = 6;
+   */
+  maxSpendWei: string;
+
+  /**
+   * BUY attempts the grant may take.
+   *
+   * @generated from field: uint32 max_attempts = 7;
+   */
+  maxAttempts: number;
+
+  /**
+   * Expiry, unix milliseconds.
+   *
+   * @generated from field: uint64 expires_unix_ms = 8;
+   */
+  expiresUnixMs: bigint;
+
+  /**
+   * SHA-256 of the canonical scope text the operator was shown, lowercase hex.
+   *
+   * @generated from field: string scope_sha256 = 9;
+   */
+  scopeSha256: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.BscLiveGrantCommand.
+ * Use `create(BscLiveGrantCommandSchema)` to create a new message.
+ */
+export const BscLiveGrantCommandSchema: GenMessage<BscLiveGrantCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 22);
 
 /**
  * Kind of a native leaf; the value is its canonical text form.

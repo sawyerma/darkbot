@@ -59,6 +59,7 @@ fn read_only_projection_and_golden_frames() {
             TopicId::BscWalletsState,
             s.wallets.encode_to_vec(),
         ),
+        ("live", TopicId::BscLiveState, s.live.encode_to_vec()),
     ];
     let mut stream = Vec::new();
     let hello = EngineFrame {
@@ -1583,4 +1584,113 @@ fn a_live_reason_of_an_earlier_boot_is_projected_as_it_holds_now() {
         .unwrap();
     assert_eq!(live.block_reason, "RESET_BY_RESTART");
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// Plan 28.10.: the LIVE tab projects the owner's gate with every
+/// precondition and its reason, the grant's exact scope, the attempts and
+/// spend, the scope's entities and the ledger's positions; without the
+/// qualification on file the gate stays BLOCKED with that reason.
+#[test]
+fn the_live_tab_projects_the_gate_grant_and_ledger() {
+    use darkbot_bsc_execution::live_ledger::{Fact, FactKind, Ledger};
+    use darkbot_bsc_execution::sources::{
+        ComponentId, Entity, LiveAdapter, LiveGrant, LiveIntentKind, LiveStrategies, Mode,
+        SourceId, Store, SwitchId, VenueId,
+    };
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-live-tab-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join("bsc-sources");
+    fs::create_dir_all(&rundir).unwrap();
+    let store = Store::open(&dir, 8).unwrap();
+    let now = projection::clock_s().unwrap() * 1_000;
+    let mut g = 0;
+    let mut req = |e: Entity, m: Mode| {
+        let r = store.request(&format!("r{g}"), e, m, g, now).unwrap();
+        assert!(r.applied(), "{}", r.line());
+        g += 1;
+    };
+    for id in SwitchId::ALL {
+        req(Entity::Switch(id), Mode::Enabled);
+    }
+    req(Entity::Runtime, Mode::Live);
+    req(ComponentId::ExecC3.into(), Mode::Live);
+    req(ComponentId::StateC2.into(), Mode::Live);
+    req(VenueId::Flap.into(), Mode::Live);
+    req(SourceId::PublicNode.into(), Mode::Live);
+    req(Entity::BuyLimit, Mode::PerDay(2));
+    req(Entity::BuyTotal, Mode::PerDay(10));
+    let grant = LiveGrant {
+        venue: VenueId::Flap,
+        strategies: LiveStrategies::C3,
+        sources: vec![SourceId::PublicNode],
+        adapters: vec![LiveAdapter::Club48BuilderV1],
+        max_input_wei: 1_000_000_000_000_000,
+        max_spend_wei: 10_000_000_000_000_000,
+        max_attempts: 2,
+        expires_unix_ms: now + 3_600_000,
+    };
+    let r = store
+        .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
+        .unwrap();
+    assert!(r.applied(), "{}", r.line());
+    let buy = Fact {
+        kind: FactKind::Released,
+        tx_hash: [1; 32],
+        intent: LiveIntentKind::Buy,
+        component: ComponentId::ExecC3,
+        token: [0xAB; 20],
+        nonce: 0,
+        grant_generation: g + 1,
+        input_wei: Some(1_000u64.try_into().unwrap()),
+        max_wei: Some(2_000u64.try_into().unwrap()),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+    };
+    Ledger::open(&dir).append(&buy, now).unwrap();
+    let live = super::live::live_state(&root, &rundir, Some(now));
+    assert_eq!(live.gate, "BLOCKED");
+    assert_eq!(
+        live.blockers.first().map(String::as_str),
+        Some("LIVE_VENUE_UNQUALIFIED")
+    );
+    assert_eq!(live.qualification, "NONE");
+    assert_eq!(live.preconditions.len(), 18);
+    let met = |id: &str| live.preconditions.iter().find(|p| p.id == id).unwrap().met;
+    assert!(met("ECONOMIC_LIVE") && met("LIVE_GRANT") && met("WALLET_BUYER"));
+    assert!(!met("VENUE_QUALIFIED") && !met("RISK_DECISION"));
+    let shown = live.grant.as_ref().unwrap();
+    assert_eq!(shown.scope_text, grant.scope_text());
+    assert_eq!(
+        shown.scope_sha256,
+        darkbot_bsc_record::hex(&grant.scope_sha256())
+    );
+    assert_eq!((shown.max_attempts, shown.set_generation), (2, g + 1));
+    assert_eq!(live.generation, g + 1);
+    assert_eq!((live.total_limit, live.total_used), (10, 0));
+    assert_eq!(live.daily.as_ref().unwrap().per_day, 2);
+    assert_eq!(live.spent_wei, "0");
+    assert_eq!(live.runtime_mode.as_ref().unwrap().requested, "LIVE");
+    assert_eq!(
+        live.scope.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        [
+            "BSC_RUNTIME_MODE",
+            "BSC_STATE_C2",
+            "BSC_EXEC",
+            "BSC_VENUE_FLAP",
+            "BSC_INGRESS_PUBLICNODE"
+        ]
+    );
+    assert!(
+        live.scope
+            .iter()
+            .all(|s| s.effective == "BLOCKED" && s.block_reason == "LIVE_VENUE_UNQUALIFIED")
+    );
+    assert_eq!(live.positions.len(), 1);
+    assert_eq!(live.positions[0].state, "PENDING");
+    assert_eq!(live.transactions[0].state, "RELEASED");
+    assert_eq!(live.path_state, "NOT_RUNNING");
+    fs::remove_dir_all(root).unwrap();
 }

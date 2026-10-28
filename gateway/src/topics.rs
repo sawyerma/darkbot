@@ -141,6 +141,14 @@ pub const TOPICS: &[TopicSpec] = &[
         "bsc.wallets.state",
         "darkbot.bsc.v1.BscWalletsState",
     ),
+    // Plan 28.10.: the BSC LIVE tab.
+    s(
+        TopicId::BscLiveState,
+        TopicClass::State,
+        ProjectId::Bsc,
+        "bsc.live.state",
+        "darkbot.bsc.v1.BscLiveState",
+    ),
     s(
         TopicId::BscExecutionEvents,
         TopicClass::Event,

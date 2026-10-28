@@ -12,6 +12,7 @@ import { LaunchBuyPanel } from "./pages/LaunchBuyPanel";
 import { MonitoringPanel } from "./pages/MonitoringPanel";
 import { AnalyticsPanel } from "./pages/AnalyticsPanel";
 import { WalletsPanel } from "./pages/WalletsPanel";
+import { LivePanel } from "./pages/LivePanel";
 
 /**
  * BSC Birth Entry – Feature-Komposition.
@@ -20,7 +21,7 @@ import { WalletsPanel } from "./pages/WalletsPanel";
  * - bsc.status ist über die Route gebunden (projectRegistry); Panels binden ihre Topics selbst.
  */
 
-export type BscTab = "overview" | "launch" | "monitoring" | "analytics" | "wallets";
+export type BscTab = "overview" | "launch" | "monitoring" | "analytics" | "wallets" | "live";
 
 const TABS: ReadonlyArray<{ key: BscTab; label: string }> = [
   { key: "overview", label: "Overview" },
@@ -28,6 +29,7 @@ const TABS: ReadonlyArray<{ key: BscTab; label: string }> = [
   { key: "monitoring", label: "Monitoring" },
   { key: "analytics", label: "Analytics" },
   { key: "wallets", label: "Wallets" },
+  { key: "live", label: "LIVE" },
 ];
 
 function toNotice(topicStatus: string): NoticeState {
@@ -64,7 +66,7 @@ export default function BscPage() {
           <span className="g-badge bsc-state" data-tone={statusTone(guard)} data-testid="bsc-guard">Guard · {guard}</span>
         </span>
       }
-      footer="BSC · Readiness control and evidence · BUY execution unavailable"
+      footer="BSC · Readiness control and evidence · LIVE only under the native owner's gate"
     >
       <div className="bsc-page">
         <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="BSC areas" />
@@ -73,6 +75,7 @@ export default function BscPage() {
         {tab === "monitoring" ? <MonitoringPanel /> : null}
         {tab === "analytics" ? <AnalyticsPanel /> : null}
         {tab === "wallets" ? <WalletsPanel /> : null}
+        {tab === "live" ? <LivePanel /> : null}
       </div>
     </GraphiteShell>
   );

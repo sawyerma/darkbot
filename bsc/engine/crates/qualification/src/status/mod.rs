@@ -1,6 +1,7 @@
 //! Public read-only evidence projection. No signer, RPC client or builder submission.
 pub mod census;
 pub mod gui_readiness;
+pub mod live;
 pub mod projection;
 pub mod publisher;
 pub mod wire {

@@ -17,10 +17,10 @@ export const SWITCH_TEXT: Record<string, { label: string; hint: string }> = {
   BSC_ECON_ARM: { label: "ARM", hint: "Use of an armed acceptance guard (compiled V5 hash) by the G0.7 attempt" },
   BSC_ECON_SEND: { label: "SEND", hint: "Mainnet submission: the G0.7 release and a live builder probe" },
   BSC_ECON_ATTEMPT: { label: "Attempt", hint: "Consuming the one-attempt authority of a G0.7 attempt" },
-  BSC_ECON_LIVE: { label: "Economic LIVE", hint: "The global LIVE condition; every requested LIVE stays BLOCKED without an authorized LIVE executor (J)" },
-  BSC_RUNTIME_MODE: { label: "Runtime mode", hint: "Global execution mode: SHADOW runs the Strategy C ledger (no signature), PAPER also the C3 path to the PAPER sink (PAPER identity, nothing sent); LIVE stays BLOCKED; replay is the offline job" },
+  BSC_ECON_LIVE: { label: "Economic LIVE", hint: "The global LIVE condition: the first of the owner's LIVE gate (LIVE tab); DISABLED stops every LIVE intent at its next admission" },
+  BSC_RUNTIME_MODE: { label: "Runtime mode", hint: "Global execution mode: SHADOW runs the Strategy C ledger (no signature), PAPER also the C3 path to the PAPER sink (PAPER identity, nothing sent); LIVE only under the owner's LIVE gate (LIVE tab); replay is the offline job" },
 };
-/** The runtime mode's requestable modes; LIVE is recorded and stays BLOCKED natively. */
+/** The runtime mode's requestable modes; a requested LIVE is effective only under the owner's LIVE gate. */
 export const RUNTIME_MODES = ["OFF", "SHADOW", "PAPER", "LIVE"] as const;
 
 export interface SwitchRow {

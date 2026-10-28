@@ -4,6 +4,9 @@
 **Initialer Audit-Checkpoint:** `4f6d47bc` mit Nachträgen bis `18474739`/D2; **Repository-Ablage 2026-10-23:** spätere D3–D6-Commits sind hinzugekommen. Vor jeder Codeänderung stets das jeweilige aktuelle HEAD/Symbol erneut prüfen. Der historische Audit-Checkpoint ist ausdrücklich kein gültiger Runtime- oder Abnahme-SHA.  
 **Origin of truth:** `bsc/docs/1_PLAN/PHASENPLAN.md` v9.1 (§5a, v8/v9/v9.1), `bsc/docs/1_PLAN/GATE0_TESTPLAN_SHORT.md`, `bsc/docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md`, `frontend/docs/FRONTEND_PHASENPLAN.md`, `frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md`, `frontend/docs/GOVERNANCE_UND_SICHERHEIT.md`, `protocol/schemas/darkbot/{control,bsc}/v1/*.proto`, native implementation and reporter.
 
+## BSC-LIVE-ERGÄNZUNG (28.10.2026)
+`BscLiveState` (Topic 34 `bsc.live.state`) aus nativem Owner/Runtime/Ledger, Reiter LIVE (9 Abschnitte), Gateway `bsc.live.grant` (BscLiveGrantCommand + Scope-SHA-256), `bsc.live.revoke`, `bsc.attempt.total.set`; F0-VAR `IST_CONNECTED`.
+
 ## BSC-CONTROL-ERGÄNZUNG (27.10.2026) — zwei Wallets und schaltbare Wirtschaftsmodi
 
 Diese neuere technische SOLL-Vorgabe aus dem BSC-Phasenplan ersetzt ältere Entwicklungsverbote für die Erstellung von Controls; sie ist keine tatsächliche LIVE-Aktivierung.

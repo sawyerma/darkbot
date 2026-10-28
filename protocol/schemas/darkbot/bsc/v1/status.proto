@@ -321,3 +321,159 @@ message BscWalletsState {
   // The buyer wallet's native ENABLE/DISABLE switch; absent before the owner state exists.
   ControlSwitch buyer_control = 15;
 }
+// One condition of the native owner's LIVE gate (plan 28.10.), in the order an operator meets
+// them; LIVE is effective only while every one holds.
+message LivePrecondition {
+  // Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE,
+  // BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, VENUE_QUALIFIED,
+  // SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION.
+  string id = 1;
+  // Whether the condition holds now.
+  bool met = 2;
+  // The owner's reason when it does not (the gate's own block reason).
+  string reason = 3;
+}
+// The operator's LIVE grant of one scope as the native owner holds it.
+message LiveGrant {
+  // The venue, e.g. BSC_VENUE_FLAP.
+  string venue = 1;
+  // C3, STRATEGY_C or C3+STRATEGY_C.
+  string strategies = 2;
+  // Source IDs whose verified full sightings may trigger a BUY.
+  repeated string sources = 3;
+  // Inclusion adapters, e.g. CLUB48_BUILDER_V1.
+  repeated string adapters = 4;
+  // Largest BUY input, decimal wei.
+  string max_input_wei = 5;
+  // The grant's whole spend limit (inputs and gas), decimal wei.
+  string max_spend_wei = 6;
+  // BUY attempts the grant may take.
+  uint32 max_attempts = 7;
+  // Expiry, unix milliseconds.
+  uint64 expires_unix_ms = 8;
+  // SHA-256 of the canonical scope text the operator confirmed, lowercase hex.
+  string scope_sha256 = 9;
+  // The canonical scope text itself.
+  string scope_text = 10;
+  // The request that wrote the grant.
+  string request_id = 11;
+  // The owner generation that request wrote.
+  uint64 set_generation = 12;
+}
+// One LIVE position of the ledger: its BUY, exit and native result.
+message LivePosition {
+  // Token address, 0x hex.
+  string token = 1;
+  // BSC_EXEC or BSC_STRATEGY_C.
+  string component = 2;
+  // PENDING, OPEN, EXITING, CLOSED or FAILED.
+  string state = 3;
+  // Tokens the BUY received, decimal.
+  string tokens = 4;
+  // The BUY's input, decimal wei.
+  string input_wei = 5;
+  // The SELL's proceeds, decimal wei.
+  string proceeds_wei = 6;
+  // Gas of all its included or reverted transactions, decimal wei.
+  string gas_wei = 7;
+  // Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei.
+  optional string pnl_wei = 8;
+}
+// One LIVE transaction whose bytes may have left, and what the chain made of it.
+message LiveTransaction {
+  // Transaction hash, 0x hex.
+  string tx_hash = 1;
+  // BUY, APPROVE or SELL.
+  string intent = 2;
+  // Token address, 0x hex.
+  string token = 3;
+  // The buyer's nonce it used.
+  uint64 nonce = 4;
+  // RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED.
+  string state = 5;
+  // The block that included it.
+  optional uint64 block_number = 6;
+}
+// The BSC LIVE tab (plan 28.10.): the owner's LIVE gate with every precondition and its
+// reason, the grant, attempts and spend, the LIVE path of the runtime, positions,
+// transactions and the net result. A view of the native owner and ledger, never a permission.
+message BscLiveState {
+  // CLEAR when the gate holds now, BLOCKED otherwise, UNKNOWN without a readable owner state.
+  string gate = 1;
+  // The gate's block reasons in order; the first decides.
+  repeated string blockers = 2;
+  // Every precondition with whether it holds.
+  repeated LivePrecondition preconditions = 3;
+  // The grant on file; absent without one.
+  LiveGrant grant = 4;
+  // The owner generation: the compare-and-swap of a grant, revoke or limit request.
+  uint64 generation = 5;
+  // The runtime mode BSC_RUNTIME_MODE as it holds now.
+  ControlSwitch runtime_mode = 6;
+  // The economic LIVE switch BSC_ECON_LIVE.
+  ControlSwitch economic_live = 7;
+  // The daily BUY attempt limit and today's use.
+  BuyAttemptLimit daily = 8;
+  // The campaign's total BUY attempt limit (at most ten) and its use.
+  uint64 total_limit = 9;
+  // Total attempts taken, every day and restart counted.
+  uint64 total_used = 10;
+  // Attempts the current grant took.
+  uint64 grant_attempts_used = 11;
+  // What the current grant has spent at most (admitted intents), decimal wei.
+  string spent_wei = 12;
+  // VERIFIED, NONE or INVALID: the LIVE qualification on file.
+  string qualification = 13;
+  // Why it is not VERIFIED, or its SHA-256.
+  string qualification_detail = 14;
+  // The runtime's LIVE path: OFF, BLOCKED, ARMED, ENDED and the arming states.
+  string path_state = 15;
+  // Why the path is in that state.
+  string path_reason = 16;
+  // BUILDERS or LOOPBACK.
+  string route = 17;
+  // The buyer wallet, 0x hex.
+  string buyer = 18;
+  // The buyer's balance at the last probe, decimal wei.
+  optional string buyer_balance_wei = 19;
+  // Transactions the path released, and of them UNKNOWN.
+  uint64 released = 20;
+  // Released transactions whose handoff did not complete.
+  uint64 unknown = 21;
+  // The owner's or the release's last reason to refuse an intent.
+  string last_refusal = 22;
+  // The ledger's positions.
+  repeated LivePosition positions = 23;
+  // The ledger's transactions, newest last.
+  repeated LiveTransaction transactions = 24;
+  // Realized PnL of closed and failed positions, signed decimal wei.
+  string realized_pnl_wei = 25;
+  // All gas the ledger's transactions paid, decimal wei.
+  string gas_wei = 26;
+  // Unreadable inputs, made explicit.
+  repeated string warnings = 27;
+  // Every entity the grant names (runtime, components, venue, sources) as requested and as it
+  // holds now under the gate: LIVE only while the gate is clear and the scope names it.
+  repeated ControlSwitch scope = 28;
+}
+// The parameters of `bsc.live.grant`: the scope the operator confirmed and its digest.
+message BscLiveGrantCommand {
+  // The venue, e.g. BSC_VENUE_FLAP.
+  string venue = 1;
+  // C3, STRATEGY_C or C3+STRATEGY_C.
+  string strategies = 2;
+  // Source IDs.
+  repeated string sources = 3;
+  // Adapter names.
+  repeated string adapters = 4;
+  // Largest BUY input, decimal wei.
+  string max_input_wei = 5;
+  // Whole spend limit, decimal wei.
+  string max_spend_wei = 6;
+  // BUY attempts the grant may take.
+  uint32 max_attempts = 7;
+  // Expiry, unix milliseconds.
+  uint64 expires_unix_ms = 8;
+  // SHA-256 of the canonical scope text the operator was shown, lowercase hex.
+  string scope_sha256 = 9;
+}

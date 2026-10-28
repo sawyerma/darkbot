@@ -2,16 +2,19 @@ import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { create } from "zustand";
 import { CommandRequestSchema, CommandResponseSchema, CommandLookupResponseSchema, CommandStatus, CommandPhase } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
+import { BscLiveGrantCommandSchema } from "../generated/darkbot/bsc/v1/status_pb";
 // BSC owner requests (plan §5a.2, v9 §2, order V2 §5, plan 27.10.): source,
 // component and venue modes and the wallet and economic switches of the one
 // native bsc_runtime owner, which applies or refuses each with the shown
 // generation as CAS; its one-line receipt is the detail. A requested LIVE
-// stays effective BLOCKED in the native owner and an ENABLED switch is a
-// permission only: no request here can arm, sign or send.
+// is effective only while the owner's LIVE gate is clear (plan 28.10.: the
+// grant of a confirmed scope, every switch, the limits and the verified
+// qualification); an ENABLED switch or a grant is a permission only: every
+// LIVE intent is admitted by the owner again at its dispatch.
 export type SourceMode = "OFF" | "SHADOW" | "LIVE";
 export type SwitchMode = "DISABLED" | "ENABLED";
 /** The allowlisted gateway actions of the owner and the CAS each states. */
-export type OwnerAction = "bsc.source.mode.set" | "bsc.venue.mode.set" | "bsc.wallet.set" | "bsc.economic.set" | "bsc.runtime.mode.set" | "bsc.attempt.limit.set";
+export type OwnerAction = "bsc.source.mode.set" | "bsc.venue.mode.set" | "bsc.wallet.set" | "bsc.economic.set" | "bsc.runtime.mode.set" | "bsc.attempt.limit.set" | "bsc.attempt.total.set" | "bsc.live.revoke";
 /** `origin` names the control group that sent it; each shows only its own receipt. */
 interface Receipt { id: string; phase: string; detail: string; origin: string }
 interface SourceControlState { busy: boolean; receipt: Receipt | null }
@@ -40,17 +43,32 @@ async function lookup(id: string): Promise<void> {
 /** One request per user action; the generation is the CAS of the displayed native state
  *  (`walletPolicyVersion` for a wallet switch, `configVersion` otherwise). */
 export async function ownerCommand(origin: string, action: OwnerAction, id: string, mode: string, generation: bigint): Promise<void> {
+  const version = action === "bsc.wallet.set"
+    ? { case: "walletPolicyVersion" as const, value: generation }
+    : { case: "configVersion" as const, value: generation };
+  await send(origin, action, `${id}:${mode}`, new Uint8Array(), version, `${id} ${mode}`);
+}
+/** The scope of a LIVE grant as the operator confirms it (plan 28.10.). */
+export interface LiveGrantScope {
+  venue: string; strategies: string; sources: string[]; adapters: string[];
+  maxInputWei: string; maxSpendWei: string; maxAttempts: number; expiresUnixMs: bigint;
+}
+/** `bsc.live.grant`: the confirmed scope with the SHA-256 of its canonical text the operator was
+ *  shown, at the owner generation; the native owner recomputes the digest. */
+export async function liveGrantCommand(origin: string, scope: LiveGrantScope, scopeSha256: string, generation: bigint): Promise<void> {
+  const params = toBinary(BscLiveGrantCommandSchema, message(BscLiveGrantCommandSchema, { ...scope, scopeSha256 }));
+  await send(origin, "bsc.live.grant", "BSC_LIVE_GRANT", params, { case: "configVersion" as const, value: generation }, `BSC_LIVE_GRANT ${scopeSha256.slice(0, 12)}`);
+}
+async function send(origin: string, action: OwnerAction | "bsc.live.grant", resourceId: string, params: Uint8Array,
+  version: { case: "walletPolicyVersion" | "configVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();
-  useSourceControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail: `${id} ${mode}`, origin } });
+  useSourceControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail, origin } });
   let submitted = false;
   try {
     const token = await csrf();
-    const version = action === "bsc.wallet.set"
-      ? { case: "walletPolicyVersion" as const, value: generation }
-      : { case: "configVersion" as const, value: generation };
     const body = toBinary(CommandRequestSchema, message(CommandRequestSchema, {
-      project: ProjectId.BSC, requestId, action, resourceId: `${id}:${mode}`,
+      project: ProjectId.BSC, requestId, action, resourceId, params,
       expected: { version }, issuedAtUnixNs: BigInt(Date.now()) * 1_000_000n,
     }));
     submitted = true;

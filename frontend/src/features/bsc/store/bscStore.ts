@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { EventMeta, StateMeta, TopicStatus } from "@/core/realtime";
-import type { BscLaunchView, BscMonitoringView, BscStatusView, BscWalletsView, NativeRecordView } from "../model/types";
+import type { BscLaunchView, BscLiveView, BscMonitoringView, BscStatusView, BscWalletsView, NativeRecordView } from "../model/types";
 
 // Isolierter BSC-Store. Kein Import aus project0/*, keine Economics, keine Commands.
 // Jede STATE-Topic ist ein Slice mit Projektion (null = nicht decodiert/UNKNOWN) plus Transport-Meta.
@@ -29,6 +29,7 @@ type Projections = {
   launch: BscLaunchView;
   monitoring: BscMonitoringView;
   wallets: BscWalletsView;
+  live: BscLiveView;
 };
 
 export type BscStateKey = keyof Projections;
@@ -43,6 +44,7 @@ export interface BscStore {
   launch: TopicSlice<BscLaunchView>;
   monitoring: TopicSlice<BscMonitoringView>;
   wallets: TopicSlice<BscWalletsView>;
+  live: TopicSlice<BscLiveView>;
   executionEvents: EventSlice;
 
   applyState: <K extends BscStateKey>(key: K, meta: StateMeta, projection: Projections[K] | null) => void;
@@ -56,6 +58,7 @@ const initial = () => ({
   launch: emptySlice<BscLaunchView>(),
   monitoring: emptySlice<BscMonitoringView>(),
   wallets: emptySlice<BscWalletsView>(),
+  live: emptySlice<BscLiveView>(),
   executionEvents: { items: [] as BscEventRow[], status: "IDLE" as TopicStatus, reason: "" },
 });
 
@@ -83,6 +86,7 @@ export const selectStatus = (s: BscStore) => s.status;
 export const selectLaunch = (s: BscStore) => s.launch;
 export const selectMonitoring = (s: BscStore) => s.monitoring;
 export const selectWallets = (s: BscStore) => s.wallets;
+export const selectLive = (s: BscStore) => s.live;
 export const selectEvents = (s: BscStore) => s.executionEvents;
 export const selectGuardState = (s: BscStore) => s.status.projection?.guard?.guardState ?? "UNKNOWN";
 export const selectStatusQuality = (s: BscStore) => s.status.status;

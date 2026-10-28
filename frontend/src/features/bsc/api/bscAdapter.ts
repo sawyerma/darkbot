@@ -1,22 +1,24 @@
 import { TopicId, topics, type EventMeta, type StateMeta } from "@/core/realtime";
 import { useBscStore, type BscStateKey } from "../store/bscStore";
-import type { BscLaunchView, BscMonitoringView, BscStatusView, BscWalletsView } from "../model/types";
+import type { BscLaunchView, BscLiveView, BscMonitoringView, BscStatusView, BscWalletsView } from "../model/types";
 import { applyReadinessJob } from "@/core/realtime/readinessControl";
 import { candidateMirrorShows } from "@/core/realtime/candidateControl";
 
 import { fromBinary } from "@bufbuild/protobuf";
-import { BscStatusSchema, BscLaunchStateSchema, BscMonitoringStateSchema, BscWalletsStateSchema } from "@/core/generated/darkbot/bsc/v1/status_pb";
+import { BscStatusSchema, BscLaunchStateSchema, BscMonitoringStateSchema, BscWalletsStateSchema, BscLiveStateSchema } from "@/core/generated/darkbot/bsc/v1/status_pb";
 // Contract: frontend/contracts/bsc-fields.json. Decoding never computes a trading gate.
 export const decodeStatus = (bytes:Uint8Array): BscStatusView => fromBinary(BscStatusSchema,bytes);
 export const decodeLaunch = (bytes:Uint8Array): BscLaunchView => fromBinary(BscLaunchStateSchema,bytes);
 export const decodeMonitoring = (bytes:Uint8Array): BscMonitoringView => fromBinary(BscMonitoringStateSchema,bytes);
 export const decodeWallets = (bytes:Uint8Array): BscWalletsView => fromBinary(BscWalletsStateSchema,bytes);
+export const decodeLive = (bytes:Uint8Array): BscLiveView => fromBinary(BscLiveStateSchema,bytes);
 
 const STATE_BINDINGS: ReadonlyArray<{ topic: TopicId; key: BscStateKey; decode: (b: Uint8Array) => unknown }> = [
   { topic: TopicId.BSC_STATUS, key: "status", decode: decodeStatus },
   { topic: TopicId.BSC_LAUNCH_STATE, key: "launch", decode: decodeLaunch },
   { topic: TopicId.BSC_MONITORING_STATE, key: "monitoring", decode: decodeMonitoring },
   { topic: TopicId.BSC_WALLETS_STATE, key: "wallets", decode: decodeWallets },
+  { topic: TopicId.BSC_LIVE_STATE, key: "live", decode: decodeLive },
 ];
 
 let started = false;

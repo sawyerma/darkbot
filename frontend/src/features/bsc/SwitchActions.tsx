@@ -8,7 +8,7 @@ import { modeHeld, type SwitchRow } from "./model/switches";
 // with `darkbotctl bsc source request`. A switch is a permission only: the
 // confirmation says so; nothing here signs, arms or sends.
 const MODES: { mode: SwitchMode; label: string }[] = [{ mode: "ENABLED", label: "ENABLE" }, { mode: "DISABLED", label: "DISABLE" }];
-/** The runtime mode's choices (plan v9 §2.5); LIVE stays BLOCKED in the owner. */
+/** The runtime mode's choices (plan v9 §2.5); LIVE only under the owner's gate (plan 28.10.). */
 export const RUNTIME_CHOICES = (["OFF", "SHADOW", "PAPER", "LIVE"] as const).map(mode => ({ mode, label: mode }));
 const describe = (mode: string): string => ({
   ENABLED: "ENABLED ist nur die native Erlaubnis dieses Schalters: es wird nichts signiert oder gesendet, und kein anderer Schalter, kein LIVE und keine Freigabe wird dadurch aktiv. Jeder Mainnet-Pfad prüft zusätzlich Guard, V5-Vertrag, Nonce, Budget und Attempt-Autorität. Nach jedem Neustart ist der Schalter wieder DISABLED. ",
@@ -16,7 +16,7 @@ const describe = (mode: string): string => ({
   OFF: "OFF: weder das Strategy-C-Ledger noch der C3-PAPER-Pfad laufen. ",
   SHADOW: "SHADOW: Strategy C führt ihr PAPER-Ledger ohne Signatur; der C3-PAPER-Pfad bleibt aus. ",
   PAPER: "PAPER: zusätzlich der C3-Pfad bis zur PAPER-Senke (PAPER-Identität ohne Guthaben, nichts wird gesendet), soweit BSC_EXEC/BSC_STRATEGY_C und die Flap-Venue auf SHADOW stehen. ",
-  LIVE: "LIVE wird als Wunsch gespeichert und bleibt nativ BLOCKED, solange keine wirtschaftliche Freigabe existiert. ",
+  LIVE: "LIVE wird als Wunsch gespeichert und ist nur wirksam, solange das LIVE-Gate der nativen Verwaltung frei ist (Freigabe eines bestätigten Umfangs, alle Schalter, Limits, verifizierte Qualifikation; LIVE-Reiter). ",
 } as Record<string, string>)[mode] ?? "";
 export function SwitchActions({ rows, testId, action, modes = MODES }: { rows: SwitchRow[]; testId: string; action: Extract<OwnerAction, "bsc.wallet.set" | "bsc.economic.set" | "bsc.runtime.mode.set">; modes?: readonly { mode: string; label: string }[] }) {
   const { busy, receipt } = useSourceControl();

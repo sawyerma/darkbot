@@ -216,6 +216,7 @@ pub fn serve(
                             TopicId::BscLaunchState as i32,
                             TopicId::BscMonitoringState as i32,
                             TopicId::BscWalletsState as i32,
+                            TopicId::BscLiveState as i32,
                         ],
                     }),
                 )
@@ -255,7 +256,8 @@ pub fn serve(
                         seq,
                         &s.wallets,
                     )
-                });
+                })
+                .and_then(|_| state(stream, TopicId::BscLiveState, generation, seq, &s.live));
             if sent.is_err() {
                 client = None;
             }

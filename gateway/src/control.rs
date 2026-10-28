@@ -81,13 +81,28 @@ const BSC_RUNTIME_MODES: [&str; 4] = ["OFF", "SHADOW", "PAPER", "LIVE"];
 const BSC_ATTEMPT_LIMIT: &str = "bsc.attempt.limit.set";
 const BSC_ATTEMPT_LIMIT_IDS: [&str; 1] = ["BSC_BUY_ATTEMPTS_PER_DAY"];
 /// Every request the native mode/switch owner (`bsc_runtime source request`) takes.
-const BSC_OWNER_ACTIONS: [&str; 6] = [
+/// Plan 28.10.: the campaign's total BUY attempt limit (at most ten), the
+/// operator's LIVE grant of one confirmed scope and its revocation.
+const BSC_ATTEMPT_TOTAL: &str = "bsc.attempt.total.set";
+const BSC_ATTEMPT_TOTAL_IDS: [&str; 1] = ["BSC_BUY_ATTEMPTS_TOTAL"];
+const BSC_LIVE_GRANT: &str = "bsc.live.grant";
+const BSC_LIVE_REVOKE: &str = "bsc.live.revoke";
+const BSC_LIVE_REVOKE_IDS: [&str; 1] = ["BSC_LIVE_GRANT"];
+const BSC_LIVE_REVOKE_MODES: [&str; 1] = ["DISABLED"];
+const BSC_LIVE_STRATEGIES: [&str; 3] = ["C3", "STRATEGY_C", "C3+STRATEGY_C"];
+const BSC_LIVE_ADAPTERS: [&str; 2] = ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"];
+/// The campaign's limit is at most ten real BUY attempts (PHASENPLAN 28.10.).
+const BSC_MAX_ATTEMPTS_TOTAL: u32 = 10;
+
+const BSC_OWNER_ACTIONS: [&str; 8] = [
     BSC_SOURCE,
     BSC_VENUE,
     BSC_WALLET,
     BSC_ECONOMIC,
     BSC_RUNTIME,
     BSC_ATTEMPT_LIMIT,
+    BSC_ATTEMPT_TOTAL,
+    BSC_LIVE_REVOKE,
 ];
 
 /// A daily limit as the owner parses it: a plain decimal within u32, no sign or leading zero.
@@ -148,7 +163,7 @@ fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
         && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
-            && ([BSC_START, BSC_STOP, BSC_CANDIDATE].contains(&action)
+            && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
                 || BSC_OWNER_ACTIONS.contains(&action)))
 }
 /// The only accepted candidate request: a fixed profile as resource and the
@@ -178,12 +193,20 @@ fn source_request(req: &CommandRequest) -> Option<(&'static str, String, u64)> {
         BSC_ECONOMIC => (&BSC_ECONOMIC_IDS, &BSC_SWITCH_MODES),
         BSC_RUNTIME => (&BSC_RUNTIME_IDS, &BSC_RUNTIME_MODES),
         BSC_ATTEMPT_LIMIT => (&BSC_ATTEMPT_LIMIT_IDS, &[]),
+        BSC_ATTEMPT_TOTAL => (&BSC_ATTEMPT_TOTAL_IDS, &[]),
+        BSC_LIVE_REVOKE => (&BSC_LIVE_REVOKE_IDS, &BSC_LIVE_REVOKE_MODES),
         _ => return None,
     };
     let (id, mode) = req.resource_id.split_once(':')?;
     let id = ids.iter().copied().find(|s| *s == id)?;
     let mode = if req.action == BSC_ATTEMPT_LIMIT {
         per_day_ok(mode).then(|| mode.to_string())?
+    } else if req.action == BSC_ATTEMPT_TOTAL {
+        (per_day_ok(mode)
+            && mode
+                .parse::<u32>()
+                .is_ok_and(|n| n <= BSC_MAX_ATTEMPTS_TOTAL))
+        .then(|| mode.to_string())?
     } else {
         modes.iter().copied().find(|m| *m == mode)?.to_string()
     };
@@ -195,11 +218,72 @@ fn source_request(req: &CommandRequest) -> Option<(&'static str, String, u64)> {
             Some((id, mode, generation))
         }
         (
-            BSC_SOURCE | BSC_VENUE | BSC_ECONOMIC | BSC_RUNTIME | BSC_ATTEMPT_LIMIT,
+            BSC_SOURCE | BSC_VENUE | BSC_ECONOMIC | BSC_RUNTIME | BSC_ATTEMPT_LIMIT
+            | BSC_ATTEMPT_TOTAL | BSC_LIVE_REVOKE,
             expected_version::Version::ConfigVersion(g),
         ) => Some((id, mode, g)),
         _ => None,
     }
+}
+
+/// A plain decimal wei amount (no sign, no leading zero), within 128 bits.
+fn wei_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && (s == "0" || !s.starts_with('0'))
+        && s.parse::<u128>().is_ok()
+}
+
+/// Plan 28.10.: the only accepted LIVE grant: the fixed resource `BSC_LIVE_GRANT`, the scope
+/// the operator confirmed as `BscLiveGrantCommand` (every value from the fixed sets or a plain
+/// bound decimal, the scope's SHA-256 as shown) and the owner generation as CAS. The arguments
+/// of `darkbotctl bsc live grant` without the request id; the native owner recomputes the
+/// scope digest and refuses a grant whose digest differs.
+fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
+    use crate::proto::bsc::v1::BscLiveGrantCommand;
+    if req.action != BSC_LIVE_GRANT || req.resource_id != "BSC_LIVE_GRANT" {
+        return None;
+    }
+    let expected_version::Version::ConfigVersion(generation) = req.expected.as_ref()?.version?
+    else {
+        return None;
+    };
+    let c = BscLiveGrantCommand::decode(req.params.as_ref()).ok()?;
+    let ingress =
+        |s: &String| s.starts_with("BSC_INGRESS_") && BSC_SOURCE_IDS.contains(&s.as_str());
+    let ok = BSC_VENUE_IDS.contains(&c.venue.as_str())
+        && BSC_LIVE_STRATEGIES.contains(&c.strategies.as_str())
+        && (1..=5).contains(&c.sources.len())
+        && c.sources.iter().all(ingress)
+        && (1..=2).contains(&c.adapters.len())
+        && c.adapters
+            .iter()
+            .all(|a| BSC_LIVE_ADAPTERS.contains(&a.as_str()))
+        && wei_ok(&c.max_input_wei)
+        && wei_ok(&c.max_spend_wei)
+        && (1..=BSC_MAX_ATTEMPTS_TOTAL).contains(&c.max_attempts)
+        && c.expires_unix_ms > 0
+        && c.scope_sha256.len() == 64
+        && c.scope_sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    ok.then(|| {
+        vec![
+            "bsc".into(),
+            "live".into(),
+            "grant".into(),
+            c.venue,
+            c.strategies,
+            c.sources.join(","),
+            c.adapters.join(","),
+            c.max_input_wei,
+            c.max_spend_wei,
+            c.max_attempts.to_string(),
+            c.expires_unix_ms.to_string(),
+            c.scope_sha256,
+            generation.to_string(),
+        ]
+    })
 }
 
 /// A run id under the project's run roots: never a path.
@@ -1043,11 +1127,29 @@ impl Control {
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop, the offline BSC candidate request and the BSC owner's source, venue, wallet and economic switches are available",
+                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop, the offline BSC candidate request and the BSC owner's source, venue, wallet, economic, limit and LIVE grant requests are available",
             );
         }
-        let source = if BSC_OWNER_ACTIONS.contains(&req.action.as_str()) {
-            match source_request(req) {
+        let source = if req.action == BSC_LIVE_GRANT {
+            match grant_request(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, 1..=10 attempts, expiry, the confirmed scope SHA-256) and the config_version generation",
+                    );
+                }
+            }
+        } else if BSC_OWNER_ACTIONS.contains(&req.action.as_str()) {
+            match source_request(req).map(|(owner_id, mode, g)| {
+                ["bsc", "source", "request", owner_id]
+                    .into_iter()
+                    .map(String::from)
+                    .chain([mode, g.to_string()])
+                    .collect::<Vec<String>>()
+            }) {
                 Some(s) => Some(s),
                 None => {
                     return reply(
@@ -1060,6 +1162,8 @@ impl Control {
                             BSC_VENUE => "Venue request takes exactly <BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR>:<OFF|SHADOW|LIVE> and the config_version generation",
                             BSC_RUNTIME => "Runtime request takes exactly BSC_RUNTIME_MODE:<OFF|SHADOW|PAPER|LIVE> and the config_version generation",
                             BSC_ATTEMPT_LIMIT => "Limit request takes exactly BSC_BUY_ATTEMPTS_PER_DAY:<decimal count per UTC day> and the config_version generation",
+                            BSC_ATTEMPT_TOTAL => "Total limit request takes exactly BSC_BUY_ATTEMPTS_TOTAL:<0..=10> and the config_version generation",
+                            BSC_LIVE_REVOKE => "LIVE revoke takes exactly BSC_LIVE_GRANT:DISABLED and the config_version generation",
                             _ => "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
                         },
                     )
@@ -1459,13 +1563,14 @@ impl Control {
             ..accepted
         }
     }
-    /// One source request through the native owner; its one-line receipt becomes the detail.
+    /// One owner request through the native owner (`darkbotctl` with `args` and the request
+    /// id); its one-line receipt becomes the detail.
     async fn dispatch_source(
         &self,
         p: &Paths,
         id: &str,
         encoded: Vec<u8>,
-        (source, mode, generation): (&str, String, u64),
+        args: Vec<String>,
     ) -> CommandResponse {
         let accepted = reply(
             id,
@@ -1489,11 +1594,11 @@ impl Control {
                 "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
             );
         }
-        let generation = generation.to_string();
         let output = tokio::time::timeout(
             Duration::from_secs(50),
             Command::new(&p.ctl)
-                .args(["bsc", "source", "request", source, &mode, &generation, id])
+                .args(&args)
+                .arg(id)
                 .env("DARKBOT_STAGED", "1")
                 .env("DARKBOT_NO_OPEN", "1")
                 .kill_on_drop(true)
@@ -1524,7 +1629,7 @@ impl Control {
         if self.persist(id, &record).is_err() {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
-        tracing::info!(request_id=%id, phase=record.phase, source, mode=%mode, "bsc owner request");
+        tracing::info!(request_id=%id, phase=record.phase, request=%args[..args.len().min(4)].join(" "), "bsc owner request");
         CommandResponse {
             phase: record.phase,
             detail: record.detail,
@@ -2672,6 +2777,195 @@ mod tests {
     /// Plan 27.10.: the wallet, venue and economic switches are three more allowlisted actions
     /// of the same native owner: fixed IDs, their own modes, the wallet one with the
     /// `wallet_policy_version` CAS; each dispatches exactly `darkbotctl bsc source request`.
+    /// Plan 28.10.: the LIVE grant reaches the native owner as exactly the confirmed scope and
+    /// its digest with the owner generation as CAS; revoke and the campaign's total limit (at
+    /// most ten) are owner requests; anything else never reaches the owner.
+    #[tokio::test]
+    async fn the_live_grant_revoke_and_total_limit_reach_the_native_owner() {
+        use crate::proto::bsc::v1::BscLiveGrantCommand;
+        use crate::proto::expected_version::Version::{ConfigVersion, WalletPolicyVersion};
+        use std::os::unix::fs::PermissionsExt;
+        let request =
+            |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
+                project: ProjectId::Bsc as i32,
+                request_id: "62345678-1234-1234-1234-123456789abc".into(),
+                action: action.into(),
+                resource_id: resource.into(),
+                expected: v.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                params: Default::default(),
+                issued_at_unix_ns: crate::overview::unix_ns_now(),
+            };
+        let scope = BscLiveGrantCommand {
+            venue: "BSC_VENUE_FLAP".into(),
+            strategies: "C3+STRATEGY_C".into(),
+            sources: vec!["BSC_INGRESS_PUBLICNODE".into()],
+            adapters: vec!["CLUB48_BUILDER_V1".into()],
+            max_input_wei: "1000000000000000".into(),
+            max_spend_wei: "20000000000000000".into(),
+            max_attempts: 2,
+            expires_unix_ms: 1_793_000_000_000,
+            scope_sha256: "ab".repeat(32),
+        };
+        let grant = |c: &BscLiveGrantCommand, resource: &str, v| {
+            let mut r = request(BSC_LIVE_GRANT, resource, Some(v));
+            r.params = c.encode_to_vec().into();
+            r
+        };
+        assert_eq!(
+            grant_request(&grant(&scope, "BSC_LIVE_GRANT", ConfigVersion(9))).unwrap(),
+            [
+                "bsc",
+                "live",
+                "grant",
+                "BSC_VENUE_FLAP",
+                "C3+STRATEGY_C",
+                "BSC_INGRESS_PUBLICNODE",
+                "CLUB48_BUILDER_V1",
+                "1000000000000000",
+                "20000000000000000",
+                "2",
+                "1793000000000",
+                &"ab".repeat(32),
+                "9",
+            ]
+        );
+        for bad in [
+            BscLiveGrantCommand {
+                venue: "BSC_VENUE_X".into(),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                sources: vec!["BSC_STATE_C2".into()],
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                adapters: vec!["BLOCKRAZOR_RPC_V1".into()],
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                max_input_wei: "01".into(),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                max_attempts: 11,
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                scope_sha256: "AB".repeat(32),
+                ..scope.clone()
+            },
+        ] {
+            assert_eq!(
+                grant_request(&grant(&bad, "BSC_LIVE_GRANT", ConfigVersion(9))),
+                None
+            );
+        }
+        assert_eq!(
+            grant_request(&grant(&scope, "BSC_LIVE_GRANT", WalletPolicyVersion(9))),
+            None
+        );
+        assert_eq!(grant_request(&grant(&scope, "X", ConfigVersion(9))), None);
+        assert_eq!(
+            sr(&request(
+                BSC_LIVE_REVOKE,
+                "BSC_LIVE_GRANT:DISABLED",
+                Some(ConfigVersion(4))
+            )),
+            Some(("BSC_LIVE_GRANT", "DISABLED", 4))
+        );
+        assert_eq!(
+            sr(&request(
+                BSC_LIVE_REVOKE,
+                "BSC_LIVE_GRANT:ENABLED",
+                Some(ConfigVersion(4))
+            )),
+            None
+        );
+        assert_eq!(
+            sr(&request(
+                BSC_ATTEMPT_TOTAL,
+                "BSC_BUY_ATTEMPTS_TOTAL:10",
+                Some(ConfigVersion(4))
+            )),
+            Some(("BSC_BUY_ATTEMPTS_TOTAL", "10", 4))
+        );
+        assert_eq!(
+            sr(&request(
+                BSC_ATTEMPT_TOTAL,
+                "BSC_BUY_ATTEMPTS_TOTAL:11",
+                Some(ConfigVersion(4))
+            )),
+            None
+        );
+        for action in [BSC_LIVE_GRANT, BSC_LIVE_REVOKE, BSC_ATTEMPT_TOTAL] {
+            assert!(allowed(ProjectId::Bsc as i32, action));
+            assert!(!allowed(ProjectId::Project0 as i32, action));
+        }
+        // Through the controller: the owner gets exactly these arguments and the request id.
+        let dir = std::env::temp_dir().join(format!("gw-live-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        fs::write(
+            &ctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho \"outcome=APPLIED source=BSC_LIVE_GRANT requested=GRANTED generation=10\"\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let applied = control
+            .execute(&grant(&scope, "BSC_LIVE_GRANT", ConfigVersion(9)))
+            .await;
+        assert_eq!(
+            (applied.status, applied.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            applied.detail
+        );
+        let argv = fs::read_to_string(&log).unwrap();
+        assert!(
+            argv.starts_with("bsc\nlive\ngrant\nBSC_VENUE_FLAP\n"),
+            "{argv}"
+        );
+        assert!(
+            argv.ends_with("9\n62345678-1234-1234-1234-123456789abc\n"),
+            "{argv}"
+        );
+        // A malformed grant never reaches the owner.
+        fs::remove_file(&log).unwrap();
+        let mut bad = grant(
+            &BscLiveGrantCommand {
+                max_attempts: 0,
+                ..scope.clone()
+            },
+            "BSC_LIVE_GRANT",
+            ConfigVersion(9),
+        );
+        bad.request_id = "72345678-1234-1234-1234-123456789abc".into();
+        assert_eq!(
+            control.execute(&bad).await.reject_reason,
+            CommandRejectReason::InvalidParams as i32
+        );
+        assert!(!log.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[tokio::test]
     async fn the_wallet_venue_and_economic_switches_reach_the_one_native_owner() {
         use std::os::unix::fs::PermissionsExt;
