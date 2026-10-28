@@ -270,6 +270,7 @@ fn c3_paper_path_latency() {
         ExecConfig {
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
+            exit_slippage_bps: 100,
             gas_price_wei,
             gas_limit,
             session_cap_wei: one * launches as u128,

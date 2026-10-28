@@ -2424,6 +2424,8 @@ pub struct LiveIntent<'a> {
     /// the admission durable before any byte can leave (BSC3-024).
     pub token: [u8; 20],
     pub nonce: u64,
+    /// The last block its bundle may be included in (BSC3-048).
+    pub max_block: u64,
 }
 
 /// One LIVE intent the owner admitted, as its entry holds it: the
@@ -2439,6 +2441,8 @@ pub struct Admitted {
     /// Absent in an entry written before BSC3-024.
     pub token: Option<[u8; 20]>,
     pub nonce: Option<u64>,
+    /// Absent in an entry written before BSC3-048: the window is unknown.
+    pub max_block: Option<u64>,
 }
 
 /// Every LIVE intent the owner ever admitted, in no particular order. An
@@ -2492,6 +2496,7 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
                 .ok_or_else(bad)?,
             token: r.opt_address(ls::TOKEN).map_err(|_| bad())?,
             nonce: r.opt_u64(ls::NONCE).map_err(|_| bad())?,
+            max_block: r.opt_u64(ls::MAX_BLOCK).map_err(|_| bad())?,
         });
     }
     Ok(out)
@@ -2734,7 +2739,8 @@ impl Store {
             )
             .set(ls::MAX_WEI, darkbot_bsc_record::Value::u128(intent.max_wei))
             .set(ls::TOKEN, darkbot_bsc_record::Value::Address(intent.token))
-            .set(ls::NONCE, intent.nonce);
+            .set(ls::NONCE, intent.nonce)
+            .set(ls::MAX_BLOCK, intent.max_block);
         let bytes = d.encode().map_err(|e| e.to_string())?;
         create_durable_dir(&spend_dir(&self.dir))?;
         match write_new(&entry, &bytes) {
@@ -2759,6 +2765,29 @@ impl Store {
         qualification: &LiveQualification,
         now_ms: u64,
     ) -> Result<LiveNow, String> {
+        self.live_now_with(components, qualification, now_ms, false)
+    }
+
+    /// [`Store::live_now`] for the exits of positions the grant opened
+    /// (BSC3-071): without the BUY attempt and spend reasons an exit does
+    /// not need ([`Store::admit_live`] admits an exit the same way). A
+    /// revoked or expired grant, a switch off or a restart still refuse.
+    pub fn live_now_exits(
+        &self,
+        components: &[ComponentId],
+        qualification: &LiveQualification,
+        now_ms: u64,
+    ) -> Result<LiveNow, String> {
+        self.live_now_with(components, qualification, now_ms, true)
+    }
+
+    fn live_now_with(
+        &self,
+        components: &[ComponentId],
+        qualification: &LiveQualification,
+        now_ms: u64,
+        exit: bool,
+    ) -> Result<LiveNow, String> {
         let g = self.current()?;
         let (grant, by) = match (&g.live, &g.live_set_by) {
             (Some(grant), Some(by)) => (grant, by),
@@ -2780,7 +2809,7 @@ impl Store {
             .into_iter()
             .chain(components.iter().map(|c| Entity::Component(*c)))
             .collect();
-        g.live_clear(&entities, &ctx, false)?;
+        g.live_clear(&entities, &ctx, exit)?;
         Ok(LiveNow {
             grant: grant.clone(),
             grant_generation: by.generation,
@@ -4665,6 +4694,7 @@ pub(crate) mod tests {
             max_wei: most,
             token: [0x10 + n as u8; 20],
             nonce: 40 + n as u64,
+            max_block: 900 + n as u64,
         };
         let buy = |n| intent(n, LiveIntentKind::Buy, 1_000, 2_000);
         let first = s.admit_live(&armed, &buy(0), &q, now).unwrap();
@@ -4685,6 +4715,7 @@ pub(crate) mod tests {
                 max_wei: 2_000,
                 token: Some([0x10; 20]),
                 nonce: Some(40),
+                max_block: Some(900),
             }]
         );
         assert_eq!(

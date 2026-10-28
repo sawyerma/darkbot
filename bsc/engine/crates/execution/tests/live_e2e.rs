@@ -374,6 +374,7 @@ fn exec_setup() -> ExecSetup {
         exec: ExecConfig {
             input_wei: u128::from(INPUT),
             slippage_bps: 100,
+            exit_slippage_bps: 100,
             gas_price_wei: GAS_PRICE,
             gas_limit: 3_000_000,
             session_cap_wei: 1_150_000_000_000_000,

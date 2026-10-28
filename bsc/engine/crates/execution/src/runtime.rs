@@ -243,6 +243,7 @@ impl RuntimeConfig {
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
+        let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -345,62 +346,78 @@ impl RuntimeConfig {
                 if sender_paths.is_some() {
                     return Err("BSC_EXEC_SENDER_PATHS needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if exit_slippage.is_some() {
+                    return Err("BSC_EXEC_EXIT_SLIPPAGE_BPS needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
                 return Err("BSC_EXEC_PAPER_IDENTITY needs BSC_CANONICAL_RPC (C2)".into());
             }
-            Some(path) => Some(ExecSetup {
-                identity_path: ExecSetup::expand_home(path)?,
-                reprobe: ms(take("BSC_EXEC_REPROBE_MS", 1_000, 3_600_000)?),
-                reprobe_failures: take("BSC_EXEC_REPROBE_FAILURES", 0, 100)? as u32,
-                refused_accounts: StateConfig::parse_watched(
-                    refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
-                )
-                .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?,
-                exec: ExecConfig {
-                    input_wei: u128::from(take("BSC_EXEC_INPUT_WEI", 1, u64::MAX)?),
-                    slippage_bps: take("BSC_EXEC_SLIPPAGE_BPS", 0, 9_999)? as u16,
-                    gas_price_wei: take("BSC_EXEC_GAS_PRICE_WEI", 1, 1_000_000_000_000)?,
-                    gas_limit: take("BSC_EXEC_GAS_LIMIT", 21_000, 100_000_000)?,
-                    session_cap_wei: u128::from(take("BSC_EXEC_SESSION_CAP_WEI", 1, u64::MAX)?),
-                    lanes: take("BSC_EXEC_LANES", 1, 65_536)? as usize,
-                    max_calldata: take("BSC_EXEC_MAX_CALLDATA", 1_024, 1 << 20)? as usize,
-                    latency_samples: take("BSC_EXEC_LATENCY_SAMPLES", 1, 1 << 20)? as usize,
-                    policy_generation: take("BSC_EXEC_POLICY_GENERATION", 1, u64::from(u32::MAX))?,
-                    capability_generation: take(
-                        "BSC_EXEC_CAPABILITY_GENERATION",
-                        1,
-                        u64::from(u32::MAX),
-                    )?,
-                    validity_blocks: take(
-                        "BSC_EXEC_VALIDITY_BLOCKS",
-                        1,
-                        PAPER_PROFILE.max_block_window(),
-                    )?,
-                    start_limit_ns: take(
-                        "BSC_EXEC_START_LIMIT_NS",
-                        1,
-                        PAPER_PROFILE.max_transport_start_limit_ns(),
-                    )?,
-                    max_frame: take("BSC_EXEC_MAX_FRAME_BYTES", 4_096, 1 << 20)? as usize,
-                    strategy_lanes: take("BSC_EXEC_STRATEGY_LANES", 1, 65_536)? as usize,
-                    strategy_session_cap_wei: u128::from(take(
-                        "BSC_EXEC_STRATEGY_SESSION_CAP_WEI",
-                        1,
-                        u64::MAX,
-                    )?),
-                    approve_gas_limit: take("BSC_EXEC_APPROVE_GAS_LIMIT", 21_000, 100_000_000)?,
-                    sell_gas_limit: take("BSC_EXEC_SELL_GAS_LIMIT", 21_000, 100_000_000)?,
-                    strategy_max_head_age_ms: take(
-                        "BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS",
-                        1_000,
-                        600_000,
-                    )?,
-                    sender_paths: crate::paper_exec::SenderPaths::parse(
-                        sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
-                    )?,
-                },
+            Some(path) => Some({
+                let slippage_bps = take("BSC_EXEC_SLIPPAGE_BPS", 0, 9_999)? as u16;
+                // BSC3-069: an exit's own limit; the BUY's when not set.
+                let exit_slippage_bps = match exit_slippage {
+                    Some(v) => bounded("BSC_EXEC_EXIT_SLIPPAGE_BPS", v, 0, 9_999)? as u16,
+                    None => slippage_bps,
+                };
+                ExecSetup {
+                    identity_path: ExecSetup::expand_home(path)?,
+                    reprobe: ms(take("BSC_EXEC_REPROBE_MS", 1_000, 3_600_000)?),
+                    reprobe_failures: take("BSC_EXEC_REPROBE_FAILURES", 0, 100)? as u32,
+                    refused_accounts: StateConfig::parse_watched(
+                        refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
+                    )
+                    .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?,
+                    exec: ExecConfig {
+                        input_wei: u128::from(take("BSC_EXEC_INPUT_WEI", 1, u64::MAX)?),
+                        slippage_bps,
+                        exit_slippage_bps,
+                        gas_price_wei: take("BSC_EXEC_GAS_PRICE_WEI", 1, 1_000_000_000_000)?,
+                        gas_limit: take("BSC_EXEC_GAS_LIMIT", 21_000, 100_000_000)?,
+                        session_cap_wei: u128::from(take("BSC_EXEC_SESSION_CAP_WEI", 1, u64::MAX)?),
+                        lanes: take("BSC_EXEC_LANES", 1, 65_536)? as usize,
+                        max_calldata: take("BSC_EXEC_MAX_CALLDATA", 1_024, 1 << 20)? as usize,
+                        latency_samples: take("BSC_EXEC_LATENCY_SAMPLES", 1, 1 << 20)? as usize,
+                        policy_generation: take(
+                            "BSC_EXEC_POLICY_GENERATION",
+                            1,
+                            u64::from(u32::MAX),
+                        )?,
+                        capability_generation: take(
+                            "BSC_EXEC_CAPABILITY_GENERATION",
+                            1,
+                            u64::from(u32::MAX),
+                        )?,
+                        validity_blocks: take(
+                            "BSC_EXEC_VALIDITY_BLOCKS",
+                            1,
+                            PAPER_PROFILE.max_block_window(),
+                        )?,
+                        start_limit_ns: take(
+                            "BSC_EXEC_START_LIMIT_NS",
+                            1,
+                            PAPER_PROFILE.max_transport_start_limit_ns(),
+                        )?,
+                        max_frame: take("BSC_EXEC_MAX_FRAME_BYTES", 4_096, 1 << 20)? as usize,
+                        strategy_lanes: take("BSC_EXEC_STRATEGY_LANES", 1, 65_536)? as usize,
+                        strategy_session_cap_wei: u128::from(take(
+                            "BSC_EXEC_STRATEGY_SESSION_CAP_WEI",
+                            1,
+                            u64::MAX,
+                        )?),
+                        approve_gas_limit: take("BSC_EXEC_APPROVE_GAS_LIMIT", 21_000, 100_000_000)?,
+                        sell_gas_limit: take("BSC_EXEC_SELL_GAS_LIMIT", 21_000, 100_000_000)?,
+                        strategy_max_head_age_ms: take(
+                            "BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS",
+                            1_000,
+                            600_000,
+                        )?,
+                        sender_paths: crate::paper_exec::SenderPaths::parse(
+                            sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
+                        )?,
+                    },
+                }
             }),
         };
         if let Some(x) = &exec {
@@ -691,7 +708,13 @@ fn strategy_to_paper(
             }
         }
     }
-    for action in s.take_actions() {
+    let mut actions = s.take_actions();
+    // BSC3-048: on the LIVE path a block's exits go before its BUYs (a
+    // stable order otherwise; PAPER keeps the decisions' order).
+    if live.as_ref().is_some_and(LiveRuntime::armed) {
+        actions.sort_by_key(|a| !matches!(a, crate::runtime_strategy::StrategyAction::Exit { .. }));
+    }
+    for action in actions {
         // Plan 28.10.: the LIVE path takes the decision when it is armed.
         if let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref())
             && l.armed()
@@ -2492,12 +2515,25 @@ mod tests {
             ),
             (1_000_000_000_000_000, 50_000_000, 3_000_000, 100)
         );
+        // BSC3-069: an exit's own slippage; the BUY's when not set; the
+        // same bounds; only with the PAPER path.
+        assert_eq!(exec.exec.exit_slippage_bps, exec.exec.slippage_bps);
+        let exit =
+            |v: &str| RuntimeConfig::parse(&format!("{CONFIG}BSC_EXEC_EXIT_SLIPPAGE_BPS={v}\n"));
+        assert_eq!(
+            exit("300").unwrap().exec.unwrap().exec.exit_slippage_bps,
+            300
+        );
+        assert!(exit("10000").is_err());
         let no_exec: String = CONFIG
             .lines()
             .filter(|l| !l.starts_with("BSC_EXEC_"))
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(RuntimeConfig::parse(&no_exec).unwrap().exec, None);
+        assert!(
+            RuntimeConfig::parse(&format!("{no_exec}BSC_EXEC_EXIT_SLIPPAGE_BPS=300\n")).is_err()
+        );
         assert!(RuntimeConfig::parse(&format!("{without}BSC_STATE_WATCHED=\n")).is_err());
         for bad in [
             CONFIG.replace("wss://bsc-rpc", "ws://bsc-rpc"),

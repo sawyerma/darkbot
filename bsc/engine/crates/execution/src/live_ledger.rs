@@ -108,6 +108,11 @@ pub struct Fact {
     pub gas_wei: Option<U256>,
     pub tokens: Option<U256>,
     pub eth_wei: Option<U256>,
+    /// A released transaction's window: the last block its bundle may be
+    /// included in (BSC3-048). None: not known.
+    pub max_block: Option<u64>,
+    /// `Replaced`: the transaction that took its nonce, in `block`.
+    pub by_tx: Option<[u8; 32]>,
 }
 
 impl Fact {
@@ -121,6 +126,8 @@ impl Fact {
             gas_wei: None,
             tokens: None,
             eth_wei: None,
+            max_block: None,
+            by_tx: None,
             ..of.clone()
         }
     }
@@ -142,6 +149,8 @@ impl Fact {
             gas_wei: None,
             tokens: None,
             eth_wei: None,
+            max_block: a.max_block,
+            by_tx: None,
         })
     }
 }
@@ -192,7 +201,9 @@ impl Ledger {
             .set_opt(k::BLOCK_MS, fact.block.map(|b| b.2))
             .set_opt(k::GAS_WEI, fact.gas_wei.map(word))
             .set_opt(k::TOKENS, fact.tokens.map(word))
-            .set_opt(k::ETH_WEI, fact.eth_wei.map(word));
+            .set_opt(k::ETH_WEI, fact.eth_wei.map(word))
+            .set_opt(k::MAX_BLOCK, fact.max_block)
+            .set_opt(k::BY_TX_HASH, fact.by_tx.map(Value::B256));
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -308,6 +319,8 @@ impl Ledger {
                 gas_wei: u(k::GAS_WEI)?,
                 tokens: u(k::TOKENS)?,
                 eth_wei: u(k::ETH_WEI)?,
+                max_block: r.opt_u64(k::MAX_BLOCK).map_err(e)?,
+                by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
             });
         }
         Ok(out)
@@ -323,9 +336,21 @@ pub struct Tx {
     /// `Replaced`.
     pub state: FactKind,
     pub inclusion: Option<Fact>,
+    /// A block that included it (not one that replaced it) left the chain:
+    /// its bytes were public in a block and may be included at any height;
+    /// its window bounds nothing any more (BSC3-048).
+    pub orphaned: bool,
 }
 
 impl Tx {
+    /// Whether its bundle's window is over at `head`: no block after its
+    /// last one includes it (BSC3-048). An unknown window is never over,
+    /// nor is that of a transaction once included in a block that left the
+    /// chain (its bytes are public).
+    pub fn window_over(&self, head: u64) -> bool {
+        !self.orphaned && self.released.max_block.is_some_and(|last| head > last)
+    }
+
     /// Its gas: the receipt's, or the most it could cost.
     fn gas(&self) -> U256 {
         let stated = self.inclusion.as_ref().and_then(|f| f.gas_wei);
@@ -421,6 +446,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                         released: f.clone(),
                         state: f.kind,
                         inclusion: None,
+                        orphaned: false,
                     });
                 }
             }
@@ -430,13 +456,15 @@ pub fn fold(facts: &[Fact]) -> Book {
                 };
                 match kind {
                     FactKind::Orphaned => {
+                        // Its own inclusion left the chain (not one that
+                        // replaced it): its bytes were public.
+                        t.orphaned |= matches!(t.state, FactKind::Included | FactKind::Reverted);
                         t.state = t.released.kind;
                         t.inclusion = None;
                     }
-                    FactKind::Replaced => {
-                        t.state = kind;
-                        t.inclusion = None;
-                    }
+                    // Included, reverted, or replaced: the fact names the
+                    // block (and, replaced, the transaction that took the
+                    // nonce); a reorg of that block opens it again.
                     _ => {
                         t.state = kind;
                         t.inclusion = Some(f.clone());
@@ -531,6 +559,8 @@ mod tests {
             gas_wei: None,
             tokens: None,
             eth_wei: None,
+            max_block: Some(100),
+            by_tx: None,
         }
     }
 
@@ -642,6 +672,7 @@ mod tests {
             max_wei: 1_300,
             token,
             nonce: token.map(|_| u64::from(n)),
+            max_block: token.map(|_| 100),
         }
     }
 

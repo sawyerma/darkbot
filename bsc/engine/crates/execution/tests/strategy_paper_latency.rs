@@ -166,6 +166,7 @@ fn strategy_paper_path_latency() {
         ExecConfig {
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
+            exit_slippage_bps: 100,
             gas_price_wei: 50_000_000,
             gas_limit: 3_000_000,
             session_cap_wei: 1_150_000_000_000_000,

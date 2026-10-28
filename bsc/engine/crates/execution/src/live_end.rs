@@ -506,6 +506,7 @@ impl End for LiveEnd {
                 max_wei,
                 token,
                 nonce,
+                max_block: last_block,
             },
             &self.qualification.view,
             (self.wall_ms)(),
@@ -581,6 +582,8 @@ impl End for LiveEnd {
             gas_wei: None,
             tokens: None,
             eth_wei: None,
+            max_block: Some(last_block),
+            by_tx: None,
         };
         match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => self.facts += 1,

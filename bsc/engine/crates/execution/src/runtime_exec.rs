@@ -406,7 +406,9 @@ impl ExecRuntime {
         owner: &StateOwner,
         clock: &dyn Clock,
     ) -> Option<PaperBuy> {
-        launch_to(self.executor.as_mut()?, hash, raw, ingress_ns, owner, clock)
+        let x = self.executor.as_mut()?;
+        let next_nonce = owner.clean_next_nonce(&x.sender());
+        launch_to(x, hash, raw, ingress_ns, owner, next_nonce, clock)
     }
 
     /// Phase I: one Strategy C decision on the PAPER path, when armed:
@@ -423,10 +425,13 @@ impl ExecRuntime {
         Vec<crate::paper_exec::PaperIntent>,
         Option<crate::paper_exec::Refusal>,
     )> {
+        let x = self.executor.as_mut()?;
+        let next_nonce = owner.clean_next_nonce(&x.sender());
         Some(strategy_to(
-            self.executor.as_mut()?,
+            x,
             action,
             owner,
+            next_nonce,
             clock,
             now_unix_ms,
         ))
@@ -558,20 +563,21 @@ impl ExecRuntime {
 }
 
 /// A verified pending C1-scope launch through `executor`, whichever its
-/// end (PAPER or LIVE, plan 28.10.): the one production path.
+/// end (PAPER or LIVE, plan 28.10.): the one production path. `next_nonce`:
+/// the nonce a new transaction of the sender may take now (BSC3-048).
 pub fn launch_to<E: End>(
     executor: &mut Executor<E>,
     hash: [u8; 32],
     raw: &[u8],
     ingress_ns: u64,
     owner: &StateOwner,
+    next_nonce: Option<u64>,
     clock: &dyn Clock,
 ) -> Option<ExecBuy<E::Handoff>> {
     let Ok(target) = decode_tx_target(raw) else {
         executor.refuse_undecodable();
         return None;
     };
-    let next_nonce = owner.clean_next_nonce(&executor.sender());
     executor
         .on_launch(
             PendingLaunch {
@@ -593,11 +599,12 @@ pub fn launch_to<E: End>(
 
 /// One Strategy C decision through `executor`, whichever its end: the
 /// intents that reached it (an exit's approval even when its SELL was
-/// refused) and the refusal.
+/// refused) and the refusal. `next_nonce` as in [`launch_to`].
 pub fn strategy_to<E: End>(
     executor: &mut Executor<E>,
     action: &crate::runtime_strategy::StrategyAction,
     owner: &StateOwner,
+    next_nonce: Option<u64>,
     clock: &dyn Clock,
     now_unix_ms: u64,
 ) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
@@ -607,7 +614,7 @@ pub fn strategy_to<E: End>(
         snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
         head: owner.head(),
         now_unix_ms,
-        next_nonce: owner.clean_next_nonce(&executor.sender()),
+        next_nonce,
     };
     match *action {
         StrategyAction::Buy {
@@ -650,6 +657,7 @@ pub(crate) mod tests {
             exec: ExecConfig {
                 input_wei: 1_000_000_000_000_000,
                 slippage_bps: 100,
+                exit_slippage_bps: 100,
                 gas_price_wei: 50_000_000,
                 gas_limit: 3_000_000,
                 session_cap_wei: 1_150_000_000_000_000,

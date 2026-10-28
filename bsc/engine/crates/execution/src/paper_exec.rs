@@ -128,6 +128,8 @@ impl SenderPaths {
 pub struct ExecConfig {
     pub input_wei: u128,
     pub slippage_bps: u16,
+    /// An exit's (the SELL's) slippage, its own limit (BSC3-069).
+    pub exit_slippage_bps: u16,
     pub gas_price_wei: u64,
     pub gas_limit: u64,
     /// Cumulative exposure cap of the whole PAPER session (Unit 4, E5-1),
@@ -299,6 +301,9 @@ pub enum Refusal {
     /// lower nonce is consumed on chain. Nothing was consumed; the intent
     /// may come again once the lower nonce is.
     SenderNonce,
+    /// BSC3-048: an open position's exit waits for the sender's nonce; no
+    /// new BUY takes it first.
+    ExitFirst,
 }
 
 impl Refusal {
@@ -325,6 +330,7 @@ impl Refusal {
             Self::Unqualified => "UNQUALIFIED",
             Self::Owner => "OWNER",
             Self::SenderNonce => "SENDER_NONCE",
+            Self::ExitFirst => "EXIT_FIRST",
         }
     }
 }
@@ -1135,7 +1141,7 @@ impl<E: End> Executor<E> {
         .map_err(|e| ArmError::Policy(format!("{e:?}")))?;
         let exit_policy = ExitPolicy::new(
             config.policy_generation,
-            config.slippage_bps,
+            config.exit_slippage_bps,
             config.gas_price_wei,
             config.approve_gas_limit,
             config.sell_gas_limit,
@@ -1454,6 +1460,24 @@ impl<E: End> Executor<E> {
     /// for this arm).
     pub fn exited(&self, token: &[u8; 20]) -> bool {
         self.exited.contains(token)
+    }
+
+    /// An approval of `token` for `amount` the chain included before this
+    /// arm (BSC3-048): the exit sells without approving again.
+    pub fn adopt_approval(&mut self, token: [u8; 20], amount: U256) {
+        if !self.approved.iter().any(|(t, _)| *t == token) {
+            self.approved.push((token, amount));
+        }
+    }
+
+    /// Another transaction took the nonce of this arm's exit transaction
+    /// of `token` (BSC3-048): it never happened, the exit is open again.
+    /// A replaced approval approved nothing.
+    pub fn reopen_exit(&mut self, token: [u8; 20], approval: bool) {
+        self.exited.retain(|t| *t != token);
+        if approval {
+            self.approved.retain(|(t, _)| *t != token);
+        }
     }
 
     /// Tokens whose exit's approval went and whose SELL did not (a chain
@@ -2074,6 +2098,7 @@ pub(crate) mod tests {
             // The amount covered by witnessed evidence.
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 500,
+            exit_slippage_bps: 500,
             gas_price_wei,
             gas_limit,
             session_cap_wei: one * buys,
@@ -2819,6 +2844,22 @@ pub(crate) mod tests {
         assert_eq!(exec.strategy_lanes().1, 2);
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// BSC3-069: the BUY policy and the exit policy each from their own
+    /// configured slippage.
+    #[test]
+    fn the_exit_has_its_own_slippage() {
+        let mut cfg = config(1, 1);
+        cfg.slippage_bps = 50;
+        cfg.exit_slippage_bps = 700;
+        let (exec, d) = armed("exit-slippage", cfg);
+        assert_eq!(
+            (exec.policy.slippage_bps(), exec.exit_policy.slippage_bps()),
+            (50, 700)
+        );
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
     }
 
     /// Phase I gate M1: an exit of a token without a handed-off BUY is

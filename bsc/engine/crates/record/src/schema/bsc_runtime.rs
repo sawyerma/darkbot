@@ -463,6 +463,10 @@ pub mod live_spend {
     /// recovered and keeps LIVE from arming).
     pub const TOKEN: u16 = 9;
     pub const NONCE: u16 = 10;
+    /// The last block its bundle may be included in (BSC3-048): after it,
+    /// with no inclusion, the nonce may be taken again (absent in entries
+    /// written before: the window is unknown and nothing reuses the nonce).
+    pub const MAX_BLOCK: u16 = 11;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-spend.v1",
@@ -483,6 +487,7 @@ pub mod live_spend {
             Field::req(MAX_WEI, "max_wei", U256),
             Field::opt(TOKEN, "token", Address),
             Field::opt(NONCE, "nonce", U64),
+            Field::opt(MAX_BLOCK, "max_block", U64),
         ],
     };
 }
@@ -524,6 +529,12 @@ pub mod live_ledger {
     pub const TOKENS: u16 = 16;
     /// A BUY's native amount spent, a SELL's received (the Portal's trade).
     pub const ETH_WEI: u16 = 17;
+    /// A released transaction's window: the last block its bundle may be
+    /// included in (BSC3-048).
+    pub const MAX_BLOCK: u16 = 18;
+    /// `REPLACED`: the transaction that took its nonce (its block is the
+    /// fact's block).
+    pub const BY_TX_HASH: u16 = 19;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
@@ -551,6 +562,8 @@ pub mod live_ledger {
             Field::opt(GAS_WEI, "gas_wei", U256),
             Field::opt(TOKENS, "tokens", U256),
             Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
         ],
     };
 }
