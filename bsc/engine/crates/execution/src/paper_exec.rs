@@ -50,12 +50,15 @@ use crate::submission::transport::{Clock, ConnectionState, Transport};
 use crate::submission::{club48, local_geth};
 use alloy_primitives::{Address, B256, U256};
 use darkbot_bsc_trading::chain_state::SnapshotId;
+use darkbot_bsc_trading::chain_state::canonical::{FinalityProof, InclusionProof, OrphanProof};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
     CurveState, PricedToken, QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms,
     admit_curve_buy, admit_curve_sell, admit_native_buy,
 };
 use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
-use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, IntentLane, Ticket};
+use darkbot_bsc_trading::intent::{
+    AdapterId, AdapterSet, ArmedFence, IntentLane, IntentState, Ticket,
+};
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterTable, CapabilityId, SubmissionMode,
@@ -590,10 +593,35 @@ pub struct Executor<E: End> {
     exited: Vec<[u8; 20]>,
     exit_policy: ExitPolicy,
     strategy_counters: ExecCounters,
+    /// The arming's next nonce: every C3 lane's nonce.
+    first_nonce: u64,
+    evidence: EvidenceCounters,
 }
 
 /// The armed PAPER path.
 pub type PaperExecutor = Executor<PaperEnd>;
+
+/// C2's evidence about one of the sender's nonces (plan 28.10.).
+#[derive(Clone, Copy, Debug)]
+pub enum NonceEvidence<'a> {
+    Inclusion(&'a InclusionProof),
+    Finality(&'a FinalityProof),
+    Orphan(&'a OrphanProof),
+}
+
+/// What C2's evidence did to the executor's intents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EvidenceCounters {
+    pub included: u64,
+    pub reverted: u64,
+    /// Another transaction consumed an intent's nonce.
+    pub replaced: u64,
+    pub finalized: u64,
+    pub orphaned: u64,
+    /// A nonce of the sender no lane of this arm assigned (consumed by a
+    /// transaction this executor never made).
+    pub unassigned: u64,
+}
 
 /// Why the executor could not be armed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1161,6 +1189,8 @@ impl<E: End> Executor<E> {
             strategy_lanes,
             exit_policy,
             strategy_counters: ExecCounters::default(),
+            first_nonce: next_nonce,
+            evidence: EvidenceCounters::default(),
             config,
         })
     }
@@ -1759,6 +1789,72 @@ impl<E: End> Executor<E> {
         // gas spent stays (gate L1).
         self.strategy_spent_wei = self.strategy_spent_wei.saturating_sub(held.input_wei);
         Ok(())
+    }
+
+    /// Applies C2's evidence about one of the sender's nonces to the lanes
+    /// that hold that nonce (plan 28.10.): every C3 lane and the first
+    /// strategy lane at the arming's nonce, strategy lane `i` at its own.
+    /// An inclusion of the intent's own transaction makes it `Included` or
+    /// `Reverted`, another transaction `Replaced` (the lane stops); an
+    /// orphan rewinds and stops it. Returns the state an inclusion gave the
+    /// intent that was dispatched, if one was.
+    pub fn apply_evidence(&mut self, evidence: NonceEvidence<'_>) -> Option<IntentState> {
+        let sender = Address::from(self.end.address());
+        let (proof_sender, nonce) = match evidence {
+            NonceEvidence::Inclusion(p) => (p.sender(), p.nonce()),
+            NonceEvidence::Finality(p) => (p.sender(), p.nonce()),
+            NonceEvidence::Orphan(p) => (p.sender(), p.nonce()),
+        };
+        if proof_sender != sender {
+            return None;
+        }
+        let strategy = nonce
+            .checked_sub(self.strategy_first_nonce)
+            .and_then(|i| usize::try_from(i).ok())
+            .filter(|i| *i < self.strategy_lanes.len());
+        let c3 = nonce == self.first_nonce;
+        if strategy.is_none() && !c3 {
+            if nonce >= self.first_nonce {
+                self.evidence.unassigned += 1;
+            }
+            return None;
+        }
+        let lanes = self
+            .lanes
+            .iter_mut()
+            .filter(|_| c3)
+            .chain(strategy.and_then(|i| self.strategy_lanes.get_mut(i)));
+        let mut ours = None;
+        let mut applied = false;
+        for lane in lanes {
+            match evidence {
+                NonceEvidence::Inclusion(p) => match lane.apply_inclusion(p) {
+                    Ok(s @ (IntentState::Included | IntentState::Reverted)) => ours = Some(s),
+                    Ok(s) => {
+                        applied = true;
+                        ours = ours.or(Some(s));
+                    }
+                    Err(_) => {}
+                },
+                NonceEvidence::Finality(p) => applied |= lane.apply_finality(p).is_ok(),
+                NonceEvidence::Orphan(p) => applied |= lane.apply_orphan(p).is_ok(),
+            }
+        }
+        let e = &mut self.evidence;
+        match (evidence, ours) {
+            (NonceEvidence::Inclusion(_), Some(IntentState::Included)) => e.included += 1,
+            (NonceEvidence::Inclusion(_), Some(IntentState::Reverted)) => e.reverted += 1,
+            (NonceEvidence::Inclusion(_), _) if applied => e.replaced += 1,
+            (NonceEvidence::Finality(_), _) if applied => e.finalized += 1,
+            (NonceEvidence::Orphan(_), _) if applied => e.orphaned += 1,
+            _ => {}
+        }
+        ours
+    }
+
+    /// What C2's evidence did to this arm's intents.
+    pub fn evidence(&self) -> EvidenceCounters {
+        self.evidence
     }
 
     /// Strategy C's PAPER counters (Phase I): intents asked for, handed

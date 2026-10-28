@@ -1224,6 +1224,62 @@ pub mod runtime_status {
         };
     }
 
+    /// The LIVE path (plan 28.10.): its arming, what it released and what
+    /// C2's evidence did to it.
+    pub mod live {
+        use super::*;
+
+        pub const STATE: u16 = 1;
+        pub const REASON: u16 = 2;
+        /// The buyer wallet, `0x` hex.
+        pub const BUYER: u16 = 3;
+        pub const BALANCE_WEI: u16 = 4;
+        pub const NEXT_NONCE: u16 = 5;
+        /// The owner generation of the grant the path is armed under.
+        pub const GRANT_GENERATION: u16 = 6;
+        /// `BUILDERS` or `LOOPBACK`.
+        pub const ROUTE: u16 = 7;
+        /// Transactions whose bytes may have left, and of them the UNKNOWN.
+        pub const RELEASED: u16 = 8;
+        pub const UNKNOWN: u16 = 9;
+        /// C2 evidence applied to the path's intents.
+        pub const INCLUDED: u16 = 10;
+        pub const REVERTED: u16 = 11;
+        pub const REPLACED: u16 = 12;
+        pub const FINAL: u16 = 13;
+        pub const ORPHANED: u16 = 14;
+        /// The owner's or the release's last reason to refuse an intent.
+        pub const LAST_REFUSAL: u16 = 15;
+        /// Refusals by stage, `NAME=n`.
+        pub const REFUSALS: u16 = 16;
+        pub const PROBES: u16 = 17;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.live",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(STATE, "state", Text),
+                Field::opt(REASON, "reason", Text),
+                Field::opt(BUYER, "buyer", Text),
+                Field::opt(BALANCE_WEI, "balance_wei", U256),
+                Field::opt(NEXT_NONCE, "next_nonce", U64),
+                Field::opt(GRANT_GENERATION, "grant_generation", U64),
+                Field::req(ROUTE, "route", Text),
+                Field::req(RELEASED, "released", U64),
+                Field::req(UNKNOWN, "unknown", U64),
+                Field::req(INCLUDED, "included", U64),
+                Field::req(REVERTED, "reverted", U64),
+                Field::req(REPLACED, "replaced", U64),
+                Field::req(FINAL, "final", U64),
+                Field::req(ORPHANED, "orphaned", U64),
+                Field::opt(LAST_REFUSAL, "last_refusal", Text),
+                Field::rep(REFUSALS, "refusals", Text),
+                Field::req(PROBES, "probes", U64),
+            ],
+        };
+    }
+
     /// The source-modes generation the runtime applies.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -1238,7 +1294,8 @@ pub mod runtime_status {
     pub const JOURNAL_RECORDS: u16 = 8;
     /// Records the bounded journal queue could not take (never silent).
     pub const JOURNAL_LOST: u16 = 9;
-    /// `READ_ONLY`: observation only, no build, signature or send exists.
+    /// `READ_ONLY`: observation only, no build, signature or send exists;
+    /// `LIVE` while the LIVE path is armed (plan 28.10.).
     pub const MODE: u16 = 10;
     /// Absent when no canonical endpoint is configured (then no denominator).
     pub const CANONICAL: u16 = 11;
@@ -1252,11 +1309,13 @@ pub mod runtime_status {
     pub const CAPTURE: u16 = 15;
     /// Present while `BSC_STRATEGY_C` runs or is refused (Phase H).
     pub const STRATEGY: u16 = 16;
+    /// Present while a LIVE path is configured (plan 28.10.).
+    pub const LIVE: u16 = 17;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 19,
+        schema_version: 20,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -1283,6 +1342,7 @@ pub mod runtime_status {
             Field::nested(EXEC, "exec", Presence::Optional, &exec::SCHEMA),
             Field::nested(CAPTURE, "capture", Presence::Optional, &capture::SCHEMA),
             Field::nested(STRATEGY, "strategy", Presence::Optional, &strategy::SCHEMA),
+            Field::nested(LIVE, "live", Presence::Optional, &live::SCHEMA),
         ],
     };
 }

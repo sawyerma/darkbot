@@ -4403,6 +4403,18 @@
     },
     {
       "schemas": [
+        "darkbot.bsc.runtime-status.v1"
+      ],
+      "match": "prefix:live[].",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "plan 28.10. package 5: the LIVE path's runtime status (arming, releases, C2 evidence); package 7 projects it into BscLiveState"
+    },
+    {
+      "schemas": [
         "darkbot.bsc.source-modes.v1"
       ],
       "match": "prefix:live[].",

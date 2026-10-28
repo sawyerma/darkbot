@@ -23,7 +23,8 @@
 use crate::chain_follower::FollowerLimits;
 use crate::paper::PaperIdentity;
 use crate::paper_exec::{
-    Arming, ExecConfig, LaunchContext, PaperBuy, PaperExecutor, PendingLaunch,
+    Arming, End, ExecBuy, ExecConfig, ExecIntent, Executor, LaunchContext, PaperBuy, PaperExecutor,
+    PendingLaunch, Refusal,
 };
 use crate::runtime::state::StateOwner;
 use crate::submission::transport::Clock;
@@ -74,7 +75,7 @@ impl ExecSetup {
 pub type Prober =
     fn(&str, &FollowerLimits, &FlapDeployment, Address) -> Result<VenueObservation, String>;
 
-fn live_probe(
+pub(crate) fn live_probe(
     endpoint: &str,
     limits: &FollowerLimits,
     deployment: &FlapDeployment,
@@ -405,27 +406,7 @@ impl ExecRuntime {
         owner: &StateOwner,
         clock: &dyn Clock,
     ) -> Option<PaperBuy> {
-        let executor = self.executor.as_mut()?;
-        let Ok(target) = decode_tx_target(raw) else {
-            executor.refuse_undecodable();
-            return None;
-        };
-        executor
-            .on_launch(
-                PendingLaunch {
-                    hash,
-                    raw,
-                    to: target.to,
-                    input: target.data,
-                    ingress_ns,
-                },
-                &LaunchContext {
-                    snapshot: &|c, p, g| owner.snapshot(c, p, g),
-                    head: owner.head(),
-                },
-                clock,
-            )
-            .ok()
+        launch_to(self.executor.as_mut()?, hash, raw, ingress_ns, owner, clock)
     }
 
     /// Phase I: one Strategy C decision on the PAPER path, when armed:
@@ -442,31 +423,13 @@ impl ExecRuntime {
         Vec<crate::paper_exec::PaperIntent>,
         Option<crate::paper_exec::Refusal>,
     )> {
-        use crate::paper_exec::CanonicalContext;
-        use crate::runtime_strategy::StrategyAction;
-        let executor = self.executor.as_mut()?;
-        let c2 = CanonicalContext {
-            snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
-            head: owner.head(),
+        Some(strategy_to(
+            self.executor.as_mut()?,
+            action,
+            owner,
+            clock,
             now_unix_ms,
-        };
-        Some(match *action {
-            StrategyAction::Buy {
-                token,
-                curve,
-                input_wei,
-                decided_ns,
-            } => match executor.on_strategy_buy(token, curve, input_wei, &c2, clock, decided_ns) {
-                Ok(i) => (vec![i], None),
-                Err(r) => (Vec::new(), Some(r)),
-            },
-            StrategyAction::Exit {
-                token,
-                tokens,
-                curve,
-                decided_ns,
-            } => executor.on_strategy_exit(token, tokens, curve, &c2, clock, decided_ns),
-        })
+        ))
     }
 
     pub fn draft(&self) -> Draft {
@@ -594,8 +557,76 @@ impl ExecRuntime {
     }
 }
 
+/// A verified pending C1-scope launch through `executor`, whichever its
+/// end (PAPER or LIVE, plan 28.10.): the one production path.
+pub fn launch_to<E: End>(
+    executor: &mut Executor<E>,
+    hash: [u8; 32],
+    raw: &[u8],
+    ingress_ns: u64,
+    owner: &StateOwner,
+    clock: &dyn Clock,
+) -> Option<ExecBuy<E::Handoff>> {
+    let Ok(target) = decode_tx_target(raw) else {
+        executor.refuse_undecodable();
+        return None;
+    };
+    executor
+        .on_launch(
+            PendingLaunch {
+                hash,
+                raw,
+                to: target.to,
+                input: target.data,
+                ingress_ns,
+            },
+            &LaunchContext {
+                snapshot: &|c, p, g| owner.snapshot(c, p, g),
+                head: owner.head(),
+            },
+            clock,
+        )
+        .ok()
+}
+
+/// One Strategy C decision through `executor`, whichever its end: the
+/// intents that reached it (an exit's approval even when its SELL was
+/// refused) and the refusal.
+pub fn strategy_to<E: End>(
+    executor: &mut Executor<E>,
+    action: &crate::runtime_strategy::StrategyAction,
+    owner: &StateOwner,
+    clock: &dyn Clock,
+    now_unix_ms: u64,
+) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
+    use crate::paper_exec::CanonicalContext;
+    use crate::runtime_strategy::StrategyAction;
+    let c2 = CanonicalContext {
+        snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
+        head: owner.head(),
+        now_unix_ms,
+    };
+    match *action {
+        StrategyAction::Buy {
+            token,
+            curve,
+            input_wei,
+            decided_ns,
+        } => match executor.on_strategy_buy(token, curve, input_wei, &c2, clock, decided_ns) {
+            Ok(i) => (vec![i], None),
+            Err(r) => (Vec::new(), Some(r)),
+        },
+        StrategyAction::Exit {
+            token,
+            tokens,
+            curve,
+            decided_ns,
+        } => executor.on_strategy_exit(token, tokens, curve, &c2, clock, decided_ns),
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::chain_follower::CanonicalEvent;
     use crate::paper_exec::FnClock;
@@ -609,7 +640,7 @@ mod tests {
     use darkbot_bsc_trading::venues::flap::abi::{LaunchParamsV6, encode_new_token_v6};
     use std::cell::Cell;
 
-    fn setup(path: PathBuf, reprobe: Duration) -> ExecSetup {
+    pub(crate) fn setup(path: PathBuf, reprobe: Duration) -> ExecSetup {
         ExecSetup {
             identity_path: path,
             refused_accounts: Vec::new(),
@@ -651,7 +682,7 @@ mod tests {
         )
     }
 
-    fn limits() -> FollowerLimits {
+    pub(crate) fn limits() -> FollowerLimits {
         FollowerLimits {
             poll: Duration::from_millis(100),
             reorg_depth: 8,
@@ -669,7 +700,7 @@ mod tests {
         }
     }
 
-    fn owner(dir: &Path, sender: [u8; 20]) -> StateOwner {
+    pub(crate) fn owner(dir: &Path, sender: [u8; 20]) -> StateOwner {
         StateOwner::fresh(
             &StateConfig {
                 limits: StateLimits {
@@ -688,10 +719,10 @@ mod tests {
         .unwrap()
     }
 
-    const HEAD: u64 = 129_900_000;
+    pub(crate) const HEAD: u64 = 129_900_000;
 
     /// The live deployment exactly as the constants witness it.
-    fn observation(version: &str, implementation: Address) -> VenueObservation {
+    pub(crate) fn observation(version: &str, implementation: Address) -> VenueObservation {
         let d = bsc_mainnet_v5_27_0();
         let fingerprint = |sha256| CodeFingerprint {
             sha256,
@@ -742,7 +773,7 @@ mod tests {
     }
 
     /// The witnessed self-launch, really signed by a third party.
-    fn launch() -> ([u8; 32], Vec<u8>, [u8; 20]) {
+    pub(crate) fn launch() -> ([u8; 32], Vec<u8>, [u8; 20]) {
         let mut beneficiary = [0u8; 20];
         beneficiary[18] = 0xa1;
         beneficiary[19] = 0x1c;
@@ -1244,9 +1275,12 @@ mod tests {
                 .unwrap(),
         );
         let (mut owner, mut exec) = (Some(owner), Some(x));
+        let mut live = None;
         let mut apply = |c: &mut Canonical, journal: &mut RuntimeJournal, event| {
             // Every record is dated at 0, before the processing.
-            apply_canonical(c, &mut owner, &mut exec, journal, clock, 0, event)
+            apply_canonical(
+                c, &mut owner, &mut exec, &mut live, journal, clock, 0, event,
+            )
         };
         let token = [0xAB; 20];
         let creator = [0xCC; 20];

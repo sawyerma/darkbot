@@ -21,7 +21,9 @@ use crate::wss::BSC_MAINNET_CHAIN_ID;
 use alloy_primitives::{Address, B256};
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status::state as e;
-use darkbot_bsc_trading::chain_state::canonical::ExecutionStatus;
+use darkbot_bsc_trading::chain_state::canonical::{
+    ExecutionStatus, FinalityProof, InclusionProof, OrphanProof,
+};
 use darkbot_bsc_trading::chain_state::engine::{ChainState, Conflict, StateLimits};
 use darkbot_bsc_trading::chain_state::input::{
     CanonicalBlock, CanonicalTx, ChainInput, FirstSeen, PendingObservation,
@@ -74,6 +76,15 @@ impl StateConfig {
     }
 }
 
+/// C2's evidence about a watched sender's nonce (plan 28.10.): what the
+/// LIVE path's lanes resolve their intents by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaneEvidence {
+    Inclusion(InclusionProof),
+    Finality(FinalityProof),
+    Orphan(OrphanProof),
+}
+
 /// The owner and what the runtime adds around it.
 pub struct StateOwner {
     state: ChainState,
@@ -88,6 +99,9 @@ pub struct StateOwner {
     /// The latest refused input's kind (a later non-refusing conflict never
     /// hides it).
     last_refused: Option<&'static str>,
+    /// Evidence about the watched senders since the runtime last took it
+    /// ([`StateOwner::take_evidence`], after every canonical event).
+    evidence: Vec<LaneEvidence>,
 }
 
 impl StateOwner {
@@ -165,6 +179,7 @@ impl StateOwner {
             checkpoint_errors: 0,
             last_conflict: None,
             last_refused: None,
+            evidence: Vec::new(),
         }
     }
 
@@ -227,8 +242,32 @@ impl StateOwner {
         self.watched.binary_search(sender).is_ok()
     }
 
+    /// The evidence of the inputs applied since the last call, in order:
+    /// inclusions, finalities and orphans as the owner produced them.
+    pub fn take_evidence(&mut self) -> Vec<LaneEvidence> {
+        std::mem::take(&mut self.evidence)
+    }
+
     fn apply(&mut self, input: &ChainInput) {
         let applied = self.state.apply(input);
+        // Orphans first: a reorg's orphaned nonces before the new chain's
+        // inclusions (the engine's order within one input).
+        self.evidence
+            .extend(applied.orphans.iter().copied().map(LaneEvidence::Orphan));
+        self.evidence.extend(
+            applied
+                .inclusions
+                .iter()
+                .copied()
+                .map(LaneEvidence::Inclusion),
+        );
+        self.evidence.extend(
+            applied
+                .finalities
+                .iter()
+                .copied()
+                .map(LaneEvidence::Finality),
+        );
         if let Some(c) = applied.conflicts.last() {
             self.last_conflict = Some(conflict_kind(c));
         }

@@ -128,6 +128,72 @@ pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
     out
 }
 
+/// One LIVE transaction the release took (plan 28.10.), a `Runtime`
+/// record: `l | kind u8 (0 C3 BUY, 1 BUY, 2 approval, 3 SELL) | builders
+/// u8 | tx_hash [32] | launch hash [32] (zero for Strategy C) | token [20]
+/// | head block u64 (0 for C3) | ingress or decision, admitted, signed,
+/// handoff ns u64 | the signed bytes`.
+#[allow(clippy::too_many_arguments)]
+pub fn live_release_payload(
+    kind: u8,
+    handoff: &crate::live_end::LiveHandoff,
+    launch_hash: [u8; 32],
+    token: [u8; 20],
+    block: u64,
+    times: &crate::paper_exec::StageTimes,
+    raw: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(1 + 1 + 1 + 32 + 32 + 20 + 8 + 4 * 8 + raw.len());
+    out.push(b'l');
+    out.push(kind);
+    out.push(handoff.adapters);
+    out.extend_from_slice(&handoff.tx_hash);
+    out.extend_from_slice(&launch_hash);
+    out.extend_from_slice(&token);
+    out.extend_from_slice(&block.to_le_bytes());
+    for ns in [
+        times.ingress_ns,
+        times.admitted_ns,
+        times.signed_ns,
+        times.sink_ns,
+    ] {
+        out.extend_from_slice(&ns.to_le_bytes());
+    }
+    out.extend_from_slice(raw);
+    out
+}
+
+/// C2's evidence about the LIVE buyer's nonce and what it did to the
+/// intent (plan 28.10.), a `Runtime` record: `i | kind u8 (1 inclusion, 2
+/// finality, 3 orphan) | nonce u64 | tx_hash [32] (zero unless an
+/// inclusion) | block hash [32] | outcome u8 (0 none, 1 included, 2
+/// reverted, 3 replaced)`.
+pub fn lane_evidence_payload(
+    evidence: &crate::runtime::state::LaneEvidence,
+    outcome: Option<darkbot_bsc_trading::intent::IntentState>,
+) -> Vec<u8> {
+    use crate::runtime::state::LaneEvidence;
+    use darkbot_bsc_trading::intent::IntentState;
+    let (kind, nonce, tx, block) = match evidence {
+        LaneEvidence::Inclusion(p) => (1u8, p.nonce(), p.tx_hash().0, p.block_hash().0),
+        LaneEvidence::Finality(p) => (2, p.nonce(), [0; 32], p.block_hash().0),
+        LaneEvidence::Orphan(p) => (3, p.nonce(), [0; 32], p.block_hash().0),
+    };
+    let mut out = Vec::with_capacity(1 + 1 + 8 + 32 + 32 + 1);
+    out.push(b'i');
+    out.push(kind);
+    out.extend_from_slice(&nonce.to_le_bytes());
+    out.extend_from_slice(&tx);
+    out.extend_from_slice(&block);
+    out.push(match outcome {
+        Some(IntentState::Included) => 1,
+        Some(IntentState::Reverted) => 2,
+        Some(IntentState::Replaced) => 3,
+        _ => 0,
+    });
+    out
+}
+
 /// The cumulative count of a source's events the ingress queue dropped.
 pub fn ingress_drop_payload(source: SourceId, total: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(10);

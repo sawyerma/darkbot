@@ -64,7 +64,11 @@ pub mod state;
 #[path = "runtime_exec.rs"]
 pub mod exec;
 
+#[path = "runtime_live.rs"]
+pub mod live;
+
 use exec::{ExecRuntime, ExecSetup};
+use live::LiveRuntime;
 use state::{StateConfig, StateOwner};
 
 /// Strategy C's configuration (`BSC_STRATEGY_C_*`): the engine's policy
@@ -171,6 +175,9 @@ pub struct RuntimeConfig {
     pub stop_timeout_ms: u64,
     /// The C3 PAPER path (`BSC_EXEC_*`; it needs the canonical follower).
     pub exec: Option<ExecSetup>,
+    /// The LIVE path (`BSC_LIVE_*`, plan 28.10.; it needs the executor's
+    /// configuration and the buyer watched by C2).
+    pub live: Option<live::LiveSetup>,
     /// The largest launch calldata the venue decoder accepts, at ingress
     /// and for the follower's C1 scope.
     pub max_launch_calldata: usize,
@@ -236,6 +243,10 @@ impl RuntimeConfig {
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
+        let live_key = values.remove("BSC_LIVE_KEY");
+        let live_buyer = values.remove("BSC_LIVE_BUYER");
+        let live_route = values.remove("BSC_LIVE_ROUTE");
+        let live_token = values.remove("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE");
         let capture_pending = CaptureScope::parse(
             values
                 .remove("BSC_RUNTIME_CAPTURE_PENDING")
@@ -403,6 +414,38 @@ impl RuntimeConfig {
                 ));
             }
         }
+        let live = match (live_key, live_buyer, live_route) {
+            (None, None, None) => {
+                if live_token.is_some() {
+                    return Err("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE needs BSC_LIVE_ROUTE".into());
+                }
+                None
+            }
+            (Some(key), Some(buyer), Some(route)) => {
+                if exec.is_none() {
+                    return Err("BSC_LIVE_* needs the executor's BSC_EXEC_* keys".into());
+                }
+                let [buyer] = <[[u8; 20]; 1]>::try_from(
+                    StateConfig::parse_watched(buyer)
+                        .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_LIVE_BUYER"))?,
+                )
+                .map_err(|_| "BSC_LIVE_BUYER is one 0x address")?;
+                if !canonical
+                    .as_ref()
+                    .is_some_and(|c| c.state.watched.contains(&buyer))
+                {
+                    return Err("BSC_LIVE_BUYER must be one of BSC_STATE_WATCHED (C2)".into());
+                }
+                let token = live_token.map(ExecSetup::expand_home).transpose()?;
+                Some(live::LiveSetup {
+                    key_path: ExecSetup::expand_home(key)?,
+                    buyer,
+                    route: live::LiveRouteConfig::parse(route, token)?,
+                    connect_timeout: ms(take("BSC_LIVE_CONNECT_TIMEOUT_MS", 100, 60_000)?),
+                })
+            }
+            _ => return Err("BSC_LIVE_KEY, BSC_LIVE_BUYER and BSC_LIVE_ROUTE go together".into()),
+        };
         let wss = WssLimits {
             connect_timeout: ms(take("BSC_RUNTIME_CONNECT_TIMEOUT_MS", 100, 60_000)?),
             handshake_timeout: ms(take("BSC_RUNTIME_HANDSHAKE_TIMEOUT_MS", 100, 120_000)?),
@@ -442,6 +485,7 @@ impl RuntimeConfig {
             // ops/bsc-control.sh, so a SIGTERM stop is never cut by SIGKILL.
             stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
             exec,
+            live,
             max_launch_calldata,
             strategy: {
                 use darkbot_bsc_trading::strategy::{filters::parse_rules, fixed};
@@ -583,6 +627,7 @@ struct Adapter {
 fn strategy_to_paper(
     c: &mut Canonical,
     exec: &mut Option<ExecRuntime>,
+    live: &mut Option<LiveRuntime>,
     owner: &Option<StateOwner>,
     clock: Clock,
     journal: &mut RuntimeJournal,
@@ -608,6 +653,33 @@ fn strategy_to_paper(
         .and_then(|d| u64::try_from(d.as_millis()).ok())
         .unwrap_or(u64::MAX);
     for action in s.take_actions() {
+        // Plan 28.10.: the LIVE path takes the decision when it is armed.
+        if let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref())
+            && l.armed()
+        {
+            let clk = FnClock {
+                id: CLOCK_ID_MONOTONIC,
+                now: || clock.now_ns(),
+            };
+            if let Some((intents, _refused)) = l.on_strategy(&action, o, &clk, now_unix_ms) {
+                for i in &intents {
+                    journal.record(
+                        RecordKind::Runtime,
+                        i.times.sink_ns,
+                        crate::runtime_journal::live_release_payload(
+                            i.kind.code(),
+                            &i.handoff,
+                            [0; 32],
+                            i.token,
+                            i.block,
+                            &i.times,
+                            &i.raw,
+                        ),
+                    );
+                }
+            }
+            continue;
+        }
         let handed = match (exec.as_mut(), owner.as_ref()) {
             (Some(x), Some(o)) => x.on_strategy(
                 &action,
@@ -642,10 +714,12 @@ fn strategy_to_paper(
 /// (and the strategy fed from them); once the block's events are all
 /// applied (`BlockComplete`), the strategy's decisions go to the PAPER
 /// path on that complete state (Phase I gate M2).
+#[allow(clippy::too_many_arguments)]
 fn apply_canonical(
     c: &mut Canonical,
     owner: &mut Option<StateOwner>,
     exec: &mut Option<ExecRuntime>,
+    live: &mut Option<LiveRuntime>,
     journal: &mut RuntimeJournal,
     clock: Clock,
     at: u64,
@@ -657,10 +731,24 @@ fn apply_canonical(
     };
     if let Some(o) = owner.as_mut() {
         o.canonical(&event);
+        // Plan 28.10.: C2's evidence about the LIVE buyer resolves the
+        // LIVE lanes' intents, journaled with what it did.
+        let evidence = o.take_evidence();
+        if let Some(l) = live.as_mut()
+            && !evidence.is_empty()
+        {
+            for (e, outcome) in evidence.iter().zip(l.apply_evidence(&evidence)) {
+                journal.record(
+                    RecordKind::Runtime,
+                    at,
+                    crate::runtime_journal::lane_evidence_payload(e, outcome),
+                );
+            }
+        }
     }
     c.event(at, event, journal);
     if let Some(block) = complete {
-        strategy_to_paper(c, exec, owner, clock, journal, block);
+        strategy_to_paper(c, exec, live, owner, clock, journal, block);
     }
 }
 
@@ -671,6 +759,7 @@ fn drain_canonical(
     crx: Option<&std::sync::mpsc::Receiver<(u64, CanonicalEvent)>>,
     owner: &mut Option<StateOwner>,
     exec: &mut Option<ExecRuntime>,
+    live: &mut Option<LiveRuntime>,
     journal: &mut RuntimeJournal,
     clock: Clock,
 ) {
@@ -678,7 +767,59 @@ fn drain_canonical(
         return;
     };
     while let Ok((at, event)) = crx.try_recv() {
-        apply_canonical(c, owner, exec, journal, clock, at, event);
+        apply_canonical(c, owner, exec, live, journal, clock, at, event);
+    }
+}
+
+/// The owner's LIVE gate inputs of one reconcile pass (plan 28.10.): what
+/// a requested LIVE reads as now. Without a LIVE path configured nothing
+/// is read or qualified, so a requested LIVE stays BLOCKED.
+struct LiveView {
+    boot: Option<String>,
+    now_ms: u64,
+    daily: Option<crate::sources::BuyUsage>,
+    total: Option<crate::sources::TotalUsage>,
+    spent: Option<u128>,
+    qualification: crate::sources::LiveQualification,
+}
+
+impl LiveView {
+    fn read(g: &Generation, state: &Path, repo_root: &Path, configured: bool, now_ms: u64) -> Self {
+        if !configured {
+            return LiveView {
+                boot: None,
+                now_ms,
+                daily: None,
+                total: None,
+                spent: None,
+                qualification: Default::default(),
+            };
+        }
+        LiveView {
+            boot: crate::sources::boot_session().ok(),
+            now_ms,
+            daily: crate::sources::buy_usage(state, now_ms).ok(),
+            total: crate::sources::total_usage(state).ok(),
+            spent: match &g.live_set_by {
+                Some(by) => crate::sources::spent_by_grant(state, by.generation).ok(),
+                None => Some(0),
+            },
+            qualification: crate::live_qualification::view(repo_root).0.view,
+        }
+    }
+
+    fn effective(&self, g: &Generation, e: crate::sources::Entity) -> Effective {
+        g.effective_live_now(
+            e,
+            &crate::sources::LiveContext {
+                boot: self.boot.as_deref(),
+                now_unix_ms: self.now_ms,
+                daily: self.daily.as_ref(),
+                total: self.total.as_ref(),
+                spent_wei: self.spent,
+                qualification: &self.qualification,
+            },
+        )
     }
 }
 
@@ -1381,6 +1522,7 @@ fn status_bytes(
     canonical: Option<&Canonical>,
     owner: Option<&StateOwner>,
     exec: Option<&ExecRuntime>,
+    live: Option<&LiveRuntime>,
     status_interval_ms: u64,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
@@ -1393,7 +1535,15 @@ fn status_bytes(
         .set(rs::JOURNAL_PATH, journal)
         .set(rs::JOURNAL_RECORDS, journal_records)
         .set(rs::JOURNAL_LOST, journal_lost)
-        .set(rs::MODE, "READ_ONLY")
+        .set(
+            rs::MODE,
+            // Plan 28.10.: LIVE while the LIVE path is armed.
+            if live.is_some_and(LiveRuntime::armed) {
+                "LIVE"
+            } else {
+                "READ_ONLY"
+            },
+        )
         .set(rs::STATUS_INTERVAL_MS, status_interval_ms);
     if let Some(c) = capture {
         use rs::capture as k;
@@ -1446,6 +1596,9 @@ fn status_bytes(
     }
     if let Some(x) = exec {
         d.set(rs::EXEC, x.draft().into_nested());
+    }
+    if let Some(l) = live {
+        d.set(rs::LIVE, l.draft().into_nested());
     }
     if let Some((c, cfg)) = canonical.and_then(|c| c.strategy_config.as_ref().map(|k| (c, k))) {
         d.set(
@@ -1545,6 +1698,21 @@ pub fn run(
         .exec
         .clone()
         .map(|setup| ExecRuntime::new(setup, repo_root, dir.join("paper")));
+    // Plan 28.10.: the LIVE path; its buyer is a watched C2 sender (config).
+    let mut live = config
+        .exec
+        .clone()
+        .zip(config.live.clone())
+        .map(|(x, setup)| {
+            LiveRuntime::new(
+                setup,
+                x,
+                repo_root,
+                sources_dir.to_path_buf(),
+                dir.join("live"),
+                exec.as_ref().and_then(ExecRuntime::sender),
+            )
+        });
     let mut canonical_config = config.canonical.clone();
     if let (Some(c), Some(sender)) = (
         canonical_config.as_mut(),
@@ -1595,6 +1763,8 @@ pub fn run(
     let status_every = Duration::from_millis(config.status_ms);
     let index = |s: SourceId| SourceId::ALL.iter().position(|x| *x == s).unwrap_or(0);
     let mut stop_journaled = false;
+    // Which sources run this pass (the reconcile sets it; LIVE included).
+    let mut source_on = SourceId::ALL.map(|s| generation.source(s).effective == Effective::Shadow);
     loop {
         let stopping = stop_file.exists();
         // One fresh monotonic/wall pair per pass for the sightings' wall time.
@@ -1617,17 +1787,33 @@ pub fn run(
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
                 generation = store.current()?;
+                // Plan 28.10.: what the owner's LIVE gate makes effective
+                // now; a requested LIVE runs only while it is clear.
+                let now_ms = observed_now().unwrap_or(u64::MAX);
+                let live_view =
+                    LiveView::read(&generation, sources_dir, repo_root, live.is_some(), now_ms);
+                let eff = |e: crate::sources::Entity| live_view.effective(&generation, e);
+                let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
                 // Plan v9 §2.3: Flap launches reach the C3 PAPER path and
-                // Strategy C only while the Flap venue is effective SHADOW.
-                let flap_admitted = generation.venue(VenueId::Flap).effective == Effective::Shadow;
+                // Strategy C only while the Flap venue is effective SHADOW
+                // (or LIVE).
+                let flap_admitted = running(eff(VenueId::Flap.into()));
                 // Plan v9 §2.5: the global runtime mode bounds the components:
-                // SHADOW lets the strategy ledger run, PAPER also the C3 path.
-                let runtime_mode = generation.runtime.effective;
-                // Phase H: BSC_STRATEGY_C runs (SHADOW) or not; switched off,
-                // its PAPER ledger ends.
+                // SHADOW lets the strategy ledger run, PAPER also the C3 path,
+                // LIVE the LIVE path.
+                let runtime_mode = eff(crate::sources::Entity::Runtime);
+                // Phase H: BSC_STRATEGY_C runs (SHADOW or LIVE) or not;
+                // switched off, its ledger ends.
                 let strategy_on = flap_admitted
-                    && matches!(runtime_mode, Effective::Shadow | Effective::Paper)
-                    && generation.component(ComponentId::StrategyC).effective == Effective::Shadow;
+                    && matches!(
+                        runtime_mode,
+                        Effective::Shadow | Effective::Paper | Effective::Live
+                    )
+                    && running(eff(ComponentId::StrategyC.into()));
+                let c2_on = running(eff(ComponentId::StateC2.into()));
+                for source in SourceId::ALL {
+                    source_on[index(source)] = running(eff(source.into()));
+                }
                 if let Some(c) = canonical.as_mut() {
                     // Each switch is journaled: a replay starts and ends its
                     // engine at the same record.
@@ -1661,13 +1847,7 @@ pub fn run(
                     c.strategy_config = strategy_on.then(|| config.strategy.engine.clone());
                 }
                 if let Some(c) = &canonical_config {
-                    StateOwner::switch(
-                        &mut owner,
-                        c2_wanted(&generation),
-                        &c.state,
-                        &checkpoint_path,
-                        replace,
-                    )?;
+                    StateOwner::switch(&mut owner, c2_on, &c.state, &checkpoint_path, replace)?;
                 }
                 if let Some(x) = exec.as_mut() {
                     let wanted = flap_admitted
@@ -1678,12 +1858,16 @@ pub fn run(
                         .map(|c| (c.endpoint.as_str(), &c.limits));
                     x.tick(wanted, owner.as_ref(), follower, started_ms);
                 }
+                if let Some(l) = live.as_mut() {
+                    let follower = canonical_config
+                        .as_ref()
+                        .map(|c| (c.endpoint.as_str(), &c.limits));
+                    l.tick(owner.as_ref(), follower, started_ms, now_ms);
+                }
             }
             for source in SourceId::ALL {
                 let i = index(source);
-                let want = !stopping
-                    && generation.source(source).effective == Effective::Shadow
-                    && config.endpoint(source).is_some();
+                let want = !stopping && source_on[i] && config.endpoint(source).is_some();
                 match (want, adapters.contains_key(&i)) {
                     (true, false) => {
                         let url = config.endpoint(source).unwrap_or_default().to_string();
@@ -1748,6 +1932,7 @@ pub fn run(
                 canonical_rx.as_ref(),
                 &mut owner,
                 &mut exec,
+                &mut live,
                 &mut journal,
                 clock,
             );
@@ -1797,9 +1982,51 @@ pub fn run(
                 // Source lanes are indexed as in `SourceId::ALL` (five).
                 o.pending(*hash, *from, *nonce, index(source) as u8, at);
             }
+            // Plan 28.10.: on the LIVE path when it is armed, the first
+            // verified full sighting from a granted source (never a
+            // hash-only one: it carries no transaction).
+            if let (
+                Some(l),
+                Some(o),
+                Some(Launch::First {
+                    hash,
+                    source: first,
+                    venue: Venue::Flap,
+                    ..
+                }),
+                Event::Full { raw, .. },
+            ) = (live.as_mut(), owner.as_ref(), decided, &event)
+                && l.armed()
+            {
+                if let Some(buy) = l.on_launch(
+                    first,
+                    hash,
+                    raw,
+                    at,
+                    o,
+                    &FnClock {
+                        id: CLOCK_ID_MONOTONIC,
+                        now: || clock.now_ns(),
+                    },
+                ) {
+                    journal.record(
+                        RecordKind::Runtime,
+                        buy.times.sink_ns,
+                        crate::runtime_journal::live_release_payload(
+                            0,
+                            &buy.handoff,
+                            buy.launch_hash,
+                            buy.token,
+                            0,
+                            &buy.times,
+                            &buy.raw,
+                        ),
+                    );
+                }
+            }
             // C3: the first verified sighting of a C1-scope launch runs the
             // production path to the PAPER sink (when armed).
-            if let (
+            else if let (
                 Some(x),
                 Some(o),
                 Some(Launch::First {
@@ -1875,6 +2102,7 @@ pub fn run(
                             c,
                             &mut owner,
                             &mut exec,
+                            &mut live,
                             &mut journal,
                             clock,
                             at,
@@ -1887,7 +2115,16 @@ pub fn run(
                 let _ = f.handle.join();
             }
             while let Ok((at, event)) = crx.try_recv() {
-                apply_canonical(c, &mut owner, &mut exec, &mut journal, clock, at, event);
+                apply_canonical(
+                    c,
+                    &mut owner,
+                    &mut exec,
+                    &mut live,
+                    &mut journal,
+                    clock,
+                    at,
+                    event,
+                );
             }
             let now = if stopping { u64::MAX } else { clock.now_ns() };
             c.join(now, &core, &mut journal);
@@ -1948,6 +2185,7 @@ pub fn run(
                 canonical.as_ref(),
                 owner.as_ref(),
                 exec.as_ref(),
+                live.as_ref(),
                 config.status_ms,
             )?;
             replace(&status_path, &bytes)?;
@@ -2052,9 +2290,13 @@ pub fn run(
         }
         if stopping && adapters.is_empty() {
             drop(tx);
-            // A clean stop disarms the PAPER path (its fence goes).
+            // A clean stop disarms the PAPER path (its fence goes) and the
+            // LIVE path (its key goes).
             if let Some(x) = exec.as_mut() {
                 x.shutdown();
+            }
+            if let Some(l) = live.as_mut() {
+                l.shutdown();
             }
             journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
             journal.record(RecordKind::Runtime, clock.now_ns(), EXIT_PAYLOAD.to_vec());
@@ -2085,6 +2327,56 @@ mod tests {
     const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
     /// The shipped refused accounts: the frozen G0.7 launcher and buyer.
     const REFUSED: &str = "BSC_EXEC_REFUSED_ACCOUNTS=0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd,0x9c8a0Db41914beEE52Dd49790c4F087E252743DE\n";
+
+    /// Plan 28.10.: the LIVE keys go together, need the executor's keys
+    /// and a buyer C2 watches; the route is the builders or a loopback port.
+    #[test]
+    fn the_live_keys_go_together_and_need_a_watched_buyer() {
+        assert_eq!(RuntimeConfig::parse(CONFIG).unwrap().live, None);
+        let buyer = "0x00000000000000000000000000000000000000aB";
+        let watched = CONFIG.replace(
+            "BSC_STATE_WATCHED=\n",
+            &format!("BSC_STATE_WATCHED={buyer}\n"),
+        );
+        let keys = |route: &str| {
+            format!(
+                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
+                 BSC_LIVE_ROUTE={route}\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+            )
+        };
+        let live = RuntimeConfig::parse(&format!("{watched}{}", keys("LOOPBACK:18545")))
+            .unwrap()
+            .live
+            .unwrap();
+        assert_eq!(live.route, live::LiveRouteConfig::Loopback { port: 18545 });
+        assert_eq!(live.buyer[19], 0xab);
+        assert!(live.key_path.is_absolute() && live.key_path.ends_with("live/buyer.key"));
+        let builders = RuntimeConfig::parse(&format!("{watched}{}", keys("BUILDERS")))
+            .unwrap()
+            .live
+            .unwrap();
+        assert_eq!(
+            builders.route,
+            live::LiveRouteConfig::Builders {
+                blockrazor_token: None
+            }
+        );
+        for bad in [
+            // Not watched by C2.
+            format!("{CONFIG}{}", keys("BUILDERS")),
+            // Not all three.
+            format!("{watched}BSC_LIVE_BUYER={buyer}\n"),
+            format!("{watched}{}", keys("LOOPBACK:0")),
+            format!("{watched}{}", keys("TLS")),
+            format!(
+                "{watched}{}BSC_LIVE_BLOCKRAZOR_TOKEN_FILE=/tmp/t\n",
+                keys("LOOPBACK:1")
+            ),
+            format!("{watched}{}", keys("BUILDERS").replace("5000", "50")),
+        ] {
+            assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn the_config_is_strict() {
@@ -2500,6 +2792,7 @@ mod tests {
                 ..CaptureStatus::default()
             }),
             Some(&c),
+            None,
             None,
             None,
             config.status_ms,

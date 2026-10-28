@@ -248,6 +248,38 @@ impl LiveEnd {
         failed
     }
 
+    /// One maintenance pass outside any dispatch: a TLS owner probes,
+    /// gives up and replaces its connection as its policy says; a loopback
+    /// link that is not ready connects again. Which adapter failed and why.
+    pub fn maintain(&mut self, timeout: Duration) -> Vec<(LiveAdapter, String)> {
+        use crate::submission::transport::{ConnectionState, Transport};
+        let mut failed = Vec::new();
+        for slot in &mut self.slots {
+            let result = match &mut slot.link {
+                Link::Tls(owner) => match owner.maintain() {
+                    crate::submission::tls::Maintenance::Failed(e) => Err(e.to_string()),
+                    _ => Ok(()),
+                },
+                Link::Loopback(t) if t.state() != ConnectionState::Ready => {
+                    t.connect(timeout).map_err(|e| e.to_string())
+                }
+                Link::Loopback(_) => Ok(()),
+            };
+            if let Err(e) = result {
+                failed.push((slot.live, e));
+            }
+        }
+        failed
+    }
+
+    /// `BUILDERS` or `LOOPBACK`.
+    pub fn route(&self) -> &'static str {
+        match self.slots.first().map(|s| &s.link) {
+            Some(Link::Loopback(_)) => "LOOPBACK",
+            _ => "BUILDERS",
+        }
+    }
+
     /// The grant this end was armed under.
     pub fn armed(&self) -> &LiveNow {
         &self.armed
@@ -517,7 +549,7 @@ impl End for LiveEnd {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::paper_exec::tests::{
         HEAD, c2, clock, config, curve_after, dir, launch, strategy_c2, validated,
@@ -548,7 +580,7 @@ mod tests {
 
     /// The builder stand-in on 127.0.0.1: every complete HTTP request it
     /// reads, whole. It answers nothing.
-    fn stand_in() -> (u16, mpsc::Receiver<Vec<u8>>) {
+    pub(crate) fn stand_in() -> (u16, mpsc::Receiver<Vec<u8>>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = mpsc::channel();
@@ -586,7 +618,7 @@ mod tests {
     }
 
     /// 48Club measured for the birth entry and the single transaction.
-    fn verified() -> Verified {
+    pub(crate) fn club48_findings() -> Vec<Finding> {
         let properties = [
             (PropertyName::PreservesOrder, Knowledge::Yes),
             (PropertyName::Atomic, Knowledge::Yes),
@@ -597,7 +629,7 @@ mod tests {
             (PropertyName::ReachesOtherBuilders, Knowledge::No),
             (PropertyName::PublicMempoolExposure, Knowledge::No),
         ];
-        let findings: Vec<Finding> = properties
+        properties
             .into_iter()
             .map(|(p, k)| Finding::Property(p, k))
             .chain([
@@ -607,7 +639,11 @@ mod tests {
                 Finding::Mode(SubmissionMode::SingleRawBuy),
                 Finding::SendTime,
             ])
-            .collect();
+            .collect()
+    }
+
+    pub(crate) fn verified() -> Verified {
+        let findings = club48_findings();
         Verified {
             view: qualified(),
             adapters: vec![
@@ -619,7 +655,7 @@ mod tests {
     }
 
     /// A private buyer key file in `d`, and its address.
-    fn key_file(d: &Path) -> (PathBuf, [u8; 20]) {
+    pub(crate) fn key_file(d: &Path) -> (PathBuf, [u8; 20]) {
         let keys = d.join("keys");
         fs::DirBuilder::new()
             .mode(0o700)

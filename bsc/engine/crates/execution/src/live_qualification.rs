@@ -262,7 +262,7 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use darkbot_bsc_record::{Kind, Presence, Schema, Value};
     use darkbot_bsc_trading::submission_policy::capability::Knowledge;
@@ -270,7 +270,7 @@ mod tests {
     use std::path::PathBuf;
 
     /// Every required field of `s` with a fixed value.
-    fn filled(s: &'static Schema) -> Draft {
+    pub(crate) fn filled(s: &'static Schema) -> Draft {
         let mut d = Draft::new(s);
         for f in s.fields.iter().filter(|f| f.presence == Presence::Required) {
             let v = match f.kind {
@@ -293,7 +293,7 @@ mod tests {
     }
 
     /// A root with a G0.8 result of `verdict` and one other evidence record.
-    fn fixture(tag: &str, verdict: &str) -> PathBuf {
+    pub(crate) fn fixture(tag: &str, verdict: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("bsc-live-q-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ev")).unwrap();
