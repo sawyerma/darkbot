@@ -245,6 +245,8 @@ pub enum OwnerEvidence {
     SimulationFailure(Box<super::record::SimulationFailureRecord>),
     /// DEC-16: one window of an unbounded run.
     Window(OwnerWindow),
+    /// DEC-06: one change of the threshold mode.
+    ThresholdTransition(ThresholdTransition),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -284,6 +286,30 @@ pub struct OwnerWindow {
 impl Payload for OwnerWindow {
     const KIND: u16 = journal::kind::OWNER_WINDOW;
 }
+
+/// DEC-06 (kind `THRESHOLD_TRANSITION`): one change of the owner's threshold mode — the operator's
+/// requested mode, the owner's effective one and why it differs, under a new generation. A
+/// resumed run restores its requested mode and its OBSERVE evidence from the last one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThresholdTransition {
+    pub generation: u64,
+    /// OFF | OBSERVE | ACTIVE.
+    pub requested: String,
+    /// OFF | SWEEP | OBSERVE | ACTIVE.
+    pub effective: String,
+    /// "" when effective is what was requested.
+    pub block_reason: String,
+    /// What changed it (START, REQUEST, INDEX, STATE, MISS, RESUME …).
+    pub cause: String,
+    /// Comparable oracle ticks in OBSERVE: in all, since the last miss; a latched miss fallback.
+    pub ticks: u64,
+    pub streak: u64,
+    pub latched: bool,
+    pub at_unix_ms: Option<u64>,
+}
+impl Payload for ThresholdTransition {
+    const KIND: u16 = journal::kind::THRESHOLD_TRANSITION;
+}
 /// One encoded owner event: kind, payload version, bytes and frame provenance.
 struct Encoded {
     kind: u16,
@@ -319,6 +345,7 @@ impl OwnerEvidence {
             }
             Self::SimulationFailure(v) => Encoded::of(v.as_ref(), v.rx_slot, None),
             Self::Window(v) => Encoded::of(v, None, None),
+            Self::ThresholdTransition(v) => Encoded::of(v, None, None),
         }
     }
 }

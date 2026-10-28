@@ -831,10 +831,16 @@ pub(super) fn prepare(
     let threshold_bootstrap: VecDeque<Pubkey> = VecDeque::new();
     #[cfg(feature = "crate_health")]
     let threshold_bootstrap_batch = usize::try_from(operational.threshold_bootstrap_batch)?;
-    #[cfg(feature = "crate_health")]
-    let use_threshold_trigger = darkbot_solana::runtime_config::active().threshold_trigger;
-    #[cfg(feature = "crate_health")]
-    let threshold_ready = !use_threshold_trigger;
+    // DEC-06: the start request of the threshold mode; effective only through OBSERVE.
+    let threshold = super::threshold::ThresholdControl::new(
+        crate::orchestration::threshold_mode::Requested::from_config(
+            darkbot_solana::runtime_config::active().threshold_trigger,
+        ),
+        darkbot_solana::runtime_config::active().threshold_min_ticks,
+    );
+    let threshold_requested =
+        threshold.requested != crate::orchestration::threshold_mode::Requested::Off;
+    let threshold_ready = !threshold_requested;
     #[cfg(feature = "crate_health")]
     let health_sweep_checks: u64 = 0;
     #[cfg(feature = "crate_health")]
@@ -1102,7 +1108,7 @@ pub(super) fn prepare(
         },
         eval_slippage_bps,
         zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
-        c0_census: match super::census::config(&census_journal, use_threshold_trigger)? {
+        c0_census: match super::census::config(&census_journal, threshold_requested)? {
             Some(c) => Some(super::census::spawn(c, shutdown.clone(), &wake)?),
             None => None,
         },
@@ -1189,7 +1195,7 @@ pub(super) fn prepare(
         threshold_fallback,
         threshold_bootstrap,
         threshold_bootstrap_batch,
-        use_threshold_trigger,
+        threshold,
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,
@@ -1270,6 +1276,8 @@ pub(super) fn prepare(
         threshold_ready,
         mt0_owner,
     };
+    // DEC-06: the threshold mode the run starts with (generation 0).
+    owner.threshold_record("START");
     owner.start_sources()?;
     Ok((owner, fetch, ingress))
 }

@@ -104,6 +104,13 @@ impl ShadowOwner {
             let base_slot = done.base_slot;
             let base_bank_hash = done.base_bank_hash;
             let latest = self.oracle_bank_projection_pending.remove(&bank);
+            // DEC-06: a projection of the threshold trigger after ACTIVE was left admits nothing:
+            // the full sweep at that change covers its bank.
+            if !self.threshold_authority() {
+                self.metrics.oracle_bank_projection_stale =
+                    self.metrics.oracle_bank_projection_stale.saturating_add(1);
+                continue;
+            }
             // P6-MT.5 lanes: threshold-index hits from the projected price (potential
             // transition) → L0; accounts with unknown thresholds → L2 (hits stay hits). A failed
             // or stale projection re-checks the whole bank (L2, maintenance work without a

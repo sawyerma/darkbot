@@ -316,22 +316,13 @@ impl ShadowOwner {
                         self.candidate_force_rearm.clear();
                         self.candidate_input_epoch = 0;
                         self.bank_input_revision.clear();
-                        self.threshold_index = ThresholdIndex::new();
-                        self.threshold_fallback.clear();
-                        self.threshold_bootstrap.clear();
-                        if self.use_threshold_trigger {
-                            for (pk, record) in self.st.iter_owned_by(&self.program) {
-                                if liability_account_in_group(&record.data, &self.group) {
-                                    self.threshold_bootstrap.push_back(*pk);
-                                }
-                            }
-                            self.threshold_ready = self.threshold_bootstrap.is_empty();
-                        } else {
-                            self.threshold_ready = true;
-                        }
+                        // DEC-06: every Ready rebuilds the threshold index; the effective mode
+                        // follows it (SWEEP, INDEX_BOOTSTRAP until bootstrapped).
+                        self.threshold_index_reset();
+                        self.threshold_refresh("INDEX");
                         owner_log!(self,
                         "reverse_index_ready: banks={} accounts={} unsupported_bank_oracle_layouts={} threshold_bootstrap={} threshold_trigger={}",
-                        indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.use_threshold_trigger
+                        indexed_banks, indexed_accounts, unsupported_banks, self.threshold_bootstrap.len(), self.threshold_authority()
                     );
                         // [C0-FIX-01] The census rides on the startup sweep batch below (setup
                         // admits a census only in R127 sweep mode); force that batch.
@@ -349,38 +340,12 @@ impl ShadowOwner {
                             self.sweep_batch_started_ns
                                 .get_or_insert(self.clock.now_ns());
                         }
-                        if !self.use_threshold_trigger {
+                        if !self.threshold_authority() {
                             // [R127c] eva01 parity: one full debtor scan at startup so an account
                             // already underwater before StreamReady cannot wait forever for a future
                             // unrelated write. Reuse the same batched/parallel Health admission path
                             // by marking every current group Bank dirty exactly once.
-                            let startup_t_rx_ns = self.clock.now_ns();
-                            let startup_slot = self.slot_watch.get();
-                            let view = StateView(&self.st);
-                            let mut startup_banks = 0usize;
-                            for (pk, record) in self.st.iter_owned_by(&self.program) {
-                                let Some(bank) = bank_from_state(&view, &self.program, pk) else {
-                                    continue;
-                                };
-                                if bank.group != self.group
-                                    || classify_account(&record.data) != AccountType::Bank
-                                {
-                                    continue;
-                                }
-                                self.sweep_dirty_banks
-                                    .insert(*pk, (startup_t_rx_ns, startup_slot));
-                                startup_banks = startup_banks.saturating_add(1);
-                            }
-                            if startup_banks > 0 {
-                                // Force one immediate startup batch; runtime batches use the normal
-                                // event-count/time bounds.
-                                self.sweep_batch_events = self.sweep_batch_max_events;
-                                self.sweep_batch_started_ns = Some(startup_t_rx_ns);
-                                self.metrics.sweep_max_dirty_banks = self
-                                    .metrics
-                                    .sweep_max_dirty_banks
-                                    .max(self.sweep_dirty_banks.len());
-                            }
+                            let startup_banks = self.mark_all_banks_dirty();
                             owner_log!(self,
                             "r127_health_sweep_ready: reverse_accounts={} startup_banks={} threshold_trigger=false",
                             indexed_accounts, startup_banks
@@ -634,9 +599,9 @@ impl ShadowOwner {
                 {
                     Some(banks) => {
                         self.reverse_index.set_account_banks(account_pk, &banks);
-                        if !self.use_threshold_trigger {
-                            // R127 Long-Tail admission uses targeted exact-health sweeps.
-                        } else {
+                        // DEC-06: the threshold index is kept while a threshold mode is
+                        // requested; without one the R127 sweep alone admits.
+                        if self.threshold_indexing() {
                             // [C0-FIX-03] canonical chain clock, never local or zero time
                             let clock = chain_clock(&self.st);
                             let view = StateView(&self.st);
@@ -654,6 +619,8 @@ impl ShadowOwner {
                                 Ok(t) => {
                                     self.threshold_index.set_account(account_pk, &t.thresholds);
                                     self.threshold_fallback.remove(&account_pk);
+                                    self.threshold.stats.index_evaluations =
+                                        self.threshold.stats.index_evaluations.saturating_add(1);
                                 }
                                 Err(e) => {
                                     self.threshold_index.remove_account(&account_pk);
@@ -671,7 +638,7 @@ impl ShadowOwner {
                     None => {
                         self.reverse_index.remove_account(&account_pk);
                         self.time_schedule.remove_account(&account_pk);
-                        if self.use_threshold_trigger {
+                        if self.threshold_indexing() {
                             self.threshold_index.remove_account(&account_pk);
                             self.threshold_fallback.remove(&account_pk);
                         }
@@ -685,14 +652,15 @@ impl ShadowOwner {
                     .accounts_for_bank(&bank_pk)
                     .copied()
                     .collect();
-                if self.use_threshold_trigger {
+                if self.threshold_indexing() {
                     for account in affected_accounts.iter().copied() {
                         self.threshold_index.remove_account(&account);
                         self.threshold_fallback.insert(account);
                         self.threshold_bootstrap.push_back(account);
                     }
                     self.threshold_ready = self.threshold_bootstrap.is_empty();
-                } else if self.st.run_state().is_tradable() {
+                }
+                if !self.threshold_authority() && self.st.run_state().is_tradable() {
                     // A canonical Bank write can change weights, fees, operational state or
                     // integration configuration without changing the debtor account bytes.
                     // [FIX-134] Record a causal revision in addition to the existing force-rearm.
@@ -879,7 +847,7 @@ impl ShadowOwner {
                         }
                     }
 
-                    if !self.use_threshold_trigger {
+                    if !self.threshold_authority() {
                         if self.sweep_batch_started_ns.is_none() {
                             self.sweep_batch_started_ns = Some(self.clock.now_ns());
                         }

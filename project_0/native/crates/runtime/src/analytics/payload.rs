@@ -858,6 +858,9 @@ macro_rules! typed_kinds {
                 $f::<super::record::SimulationFailureRecord>($kind, $schema, $bytes)
             }
             k::OWNER_WINDOW => $f::<super::evidence::OwnerWindow>($kind, $schema, $bytes),
+            k::THRESHOLD_TRANSITION => {
+                $f::<super::evidence::ThresholdTransition>($kind, $schema, $bytes)
+            }
             k::ECON_SHADOW_EVALUATION => {
                 $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
             }

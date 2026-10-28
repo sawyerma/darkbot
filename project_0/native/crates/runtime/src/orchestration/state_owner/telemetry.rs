@@ -77,7 +77,7 @@ impl ShadowOwner {
                 self.metrics.oracle_bank_projection_stale,
                 self.consumer.stats().sent.saturating_sub(self.consumer.stats().received),
                 self.ingress_since_detect,
-                self.use_threshold_trigger,
+                self.threshold_authority(),
                 self.metrics.health_sweep_checks,
                 self.metrics.health_sweep_healthy,
                 self.metrics.health_sweep_liquidatable,

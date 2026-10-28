@@ -38,6 +38,8 @@ pub mod kind {
     pub const OWNER_SIMULATION_FAILURE: u16 = 105;
     /// DEC-16: one window of an unbounded Shadow owner run (`OwnerWindow`).
     pub const OWNER_WINDOW: u16 = 106;
+    /// DEC-06: one change of the owner's threshold mode (`ThresholdTransition`).
+    pub const THRESHOLD_TRANSITION: u16 = 107;
     /// FE-04 single-flight automaton: one full state version per durable transition.
     pub const FE04_TRANSITION: u16 = 200;
     /// FE-04 import of a pre-binary JSON wallet journal; the JSON file itself stays unchanged.
@@ -186,6 +188,7 @@ pub mod kind {
         OWNER_DIAGNOSTIC,
         OWNER_SIMULATION_FAILURE,
         OWNER_WINDOW,
+        THRESHOLD_TRANSITION,
         FE04_TRANSITION,
         FE04_LEGACY_IMPORT,
         MARKET_TRANSACTION,

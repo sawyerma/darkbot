@@ -91,6 +91,7 @@ mod sources;
 mod status;
 mod sweep;
 mod telemetry;
+mod threshold;
 mod windows;
 
 mod metrics;
@@ -237,7 +238,8 @@ pub(super) struct ShadowOwner {
     threshold_fallback: HashSet<Pubkey>,
     threshold_bootstrap: VecDeque<Pubkey>,
     threshold_bootstrap_batch: usize,
-    use_threshold_trigger: bool,
+    /// DEC-06: the threshold mode (requested/effective, generation, OBSERVE evidence).
+    threshold: threshold::ThresholdControl,
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,

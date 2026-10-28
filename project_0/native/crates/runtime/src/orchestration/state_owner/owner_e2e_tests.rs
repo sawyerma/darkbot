@@ -157,7 +157,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_fallback: HashSet::new(),
         threshold_bootstrap: VecDeque::new(),
         threshold_bootstrap_batch: 64,
-        use_threshold_trigger: false,
+        threshold: super::threshold::ThresholdControl::new(Default::default(), None),
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -3375,8 +3375,7 @@ fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
 fn v2_13_a_repeated_bank_recheck_without_a_new_cause_is_suppressed() {
     use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
     let mut f = fixture_with("v2_13_repeat", None);
-    f.owner.use_threshold_trigger = true;
-    f.owner.threshold_ready = true;
+    f.owner.threshold_test_active();
     let account = p2_state(&mut f, 85.0, 1_700_000_000);
     let bank = Pubkey::new_unique();
     f.owner.reverse_index.set_account_banks(account, &[bank]);
@@ -3434,8 +3433,7 @@ fn v2_03_threshold_mode_consumes_premium_wakeups() {
 #[test]
 fn v2_03_threshold_detection_plans_the_premium_wakeup() {
     let mut f = fixture("v2_03_detect");
-    f.owner.use_threshold_trigger = true;
-    f.owner.threshold_ready = true;
+    f.owner.threshold_test_active();
     let t0 = 1_700_000_000u64;
     let account = p2_state(&mut f, 85.0, t0);
     assert!(f.owner.time_schedule.is_empty());
@@ -3454,7 +3452,9 @@ fn v2_03_threshold_detection_plans_the_premium_wakeup() {
 fn p2_04_case(threshold: bool) {
     use darkbot_project0::schedule::Trigger;
     let mut f = fixture(if threshold { "v2_03_p2_04" } else { "p2_04" });
-    f.owner.use_threshold_trigger = threshold;
+    if threshold {
+        f.owner.threshold_test_active();
+    }
     f.owner.threshold_ready = true;
     let t0 = 1_700_000_000u64;
     // ≈ 10 %/year on 85 USD against a 5 USD maintenance margin: liquidatable in about 7 months.
@@ -3513,7 +3513,9 @@ fn v2_03_threshold_mode_consumes_tag_wakeups() {
 fn p2_05_case(threshold: bool) {
     use darkbot_project0::schedule::Trigger;
     let mut f = fixture(if threshold { "v2_03_p2_05" } else { "p2_05" });
-    f.owner.use_threshold_trigger = threshold;
+    if threshold {
+        f.owner.threshold_test_active();
+    }
     f.owner.threshold_ready = true;
     let t0 = 1_700_000_000u64;
     // 90 USD maintenance collateral against 95 USD debt: liquidatable now.
@@ -4593,4 +4595,197 @@ fn dec16_a_window_ending_with_the_stop_is_part_of_the_run_result() {
     assert_eq!(verdicts, ["UNTIL_STOPPED_RUNWAY_EXHAUSTED"]);
     assert!(r.sealed && !r.complete);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-06: `p2_state` as the Ready leaves it — the reverse index rebuilt from the state.
+fn dec06_ready(f: &mut Fixture, liab: f64) -> Pubkey {
+    let account = p2_state(f, liab, 1_700_000_000);
+    f.owner.reverse_index =
+        rebuild_reverse_index(&f.owner.st, &f.owner.program, &f.owner.group, None).0;
+    account
+}
+
+/// DEC-06: the threshold-mode records of a finished owner's journal (generation, effective,
+/// block reason, cause).
+fn dec06_transitions(dir: &std::path::Path) -> Vec<(u64, String, String, String)> {
+    use crate::analytics::evidence::ThresholdTransition;
+    use crate::analytics::payload::{decode, Payload};
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut out = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == ThresholdTransition::KIND {
+            let t: ThresholdTransition = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            out.push((t.generation, t.effective, t.block_reason, t.cause));
+        }
+    }
+    out
+}
+
+/// DEC-06: a requested ACTIVE (the configuration's `threshold_trigger = on`) follows the index —
+/// SWEEP with INDEX_BOOTSTRAP until every account's thresholds are known — and without the user's
+/// N (B-8) stays OBSERVE: the sweep stays authoritative, the requested mode is kept apart, and
+/// every change is a new generation with its record.
+#[test]
+fn dec06_a_requested_active_follows_the_index_and_stays_observe_without_n() {
+    use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
+    let mut f = fixture("dec06_follow");
+    f.owner.threshold = super::threshold::ThresholdControl::new(Requested::Active, None);
+    let account = dec06_ready(&mut f, 95.0);
+    f.owner.threshold_index_reset();
+    f.owner.threshold_refresh("INDEX");
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Sweep, tm::INDEX_BOOTSTRAP)
+    );
+    assert_eq!(
+        Vec::from(f.owner.threshold_bootstrap.clone()),
+        vec![account]
+    );
+    assert!(f.owner.lifecycle());
+    assert!(f.owner.threshold_bootstrap.is_empty() && f.owner.threshold.bootstrapped);
+    assert_eq!(
+        f.owner.threshold_index.tracked_accounts() + f.owner.threshold_fallback.len(),
+        1
+    );
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::B8_UNDECIDED)
+    );
+    assert!(!f.owner.threshold_authority(), "the sweep admits");
+    assert_eq!(f.owner.threshold.requested, Requested::Active);
+    // The sweep evaluates and admits the liquidatable account; nothing else does.
+    assert_eq!(f.owner.mark_all_banks_dirty(), 2);
+    f.owner.sweep();
+    assert_eq!(f.owner.oracle_lanes.len(), 1);
+    assert_eq!(
+        f.owner.threshold.effective,
+        Effective::Observe,
+        "N stays undecided"
+    );
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    assert_eq!(
+        dec06_transitions(&dir),
+        [
+            (
+                1,
+                "SWEEP".into(),
+                tm::INDEX_BOOTSTRAP.into(),
+                "INDEX".into()
+            ),
+            (2, "OBSERVE".into(), tm::B8_UNDECIDED.into(), "STATE".into()),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-06: ACTIVE needs N comparable ticks without a miss and waits for the open sweep batch (the
+/// barrier); the batch's flush lets it in. Leaving ACTIVE re-sweeps every bank: an account the
+/// threshold trigger did not wake is admitted exactly once, a pending one is coalesced, none is
+/// lost or doubled.
+#[test]
+fn dec06_active_waits_for_the_batch_and_its_fallback_resweeps_every_bank() {
+    use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
+    let mut f = fixture("dec06_barrier");
+    f.owner.threshold = super::threshold::ThresholdControl::new(Requested::Active, Some(3));
+    let account = dec06_ready(&mut f, 95.0);
+    f.owner.threshold_index_reset();
+    assert!(f.owner.lifecycle());
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::EVIDENCE_SHORT)
+    );
+    f.owner.threshold.stats.streak = 3;
+    assert_eq!(f.owner.mark_all_banks_dirty(), 2);
+    f.owner.threshold_refresh("STATE");
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::BARRIER)
+    );
+    f.owner.sweep();
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Active, ""),
+        "the flushed batch opens the barrier"
+    );
+    assert!(!f.owner.sweep_batch_pending());
+    assert!(f.owner.threshold_authority());
+    assert_eq!(
+        f.owner.oracle_lanes.len(),
+        1,
+        "the batch admitted the account once"
+    );
+    // The threshold trigger "missed" the account: no pending entry, no forward on record.
+    while f.owner.oracle_lanes.next().is_some() {}
+    f.owner.candidate_cache.clear();
+    f.owner.threshold.latched = true;
+    f.owner.threshold_refresh("MISS");
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::MISS_FALLBACK)
+    );
+    assert_eq!(f.owner.threshold.stats.fallbacks, 1);
+    assert_eq!(f.owner.sweep_dirty_banks.len(), 2, "every bank is dirty");
+    f.owner.sweep();
+    let admitted: Vec<Pubkey> = std::iter::from_fn(|| f.owner.oracle_lanes.next())
+        .map(|e| e.work.0)
+        .collect();
+    assert_eq!(admitted, vec![account], "the full sweep admits it once");
+    // A candidate the threshold trigger admitted and that still waits is coalesced by the full
+    // sweep of the next fallback, never doubled.
+    f.owner.threshold.latched = false;
+    f.owner.threshold_refresh("REQUEST");
+    assert_eq!(f.owner.threshold.effective, Effective::Active);
+    f.owner.candidate_cache.clear();
+    f.owner
+        .admit_oracle_accounts(HashSet::from([account]), HashSet::new(), (0, 100), 1);
+    assert_eq!(f.owner.oracle_lanes.len(), 1);
+    f.owner.candidate_cache.clear();
+    let coalesced = f.owner.metrics.candidate_pending_coalesced;
+    f.owner.threshold.min_ticks = None;
+    f.owner.threshold_refresh("STATE");
+    assert_eq!(f.owner.threshold.stats.fallbacks, 2);
+    f.owner.sweep();
+    assert_eq!(f.owner.oracle_lanes.len(), 1, "one entry per account");
+    assert_eq!(f.owner.metrics.candidate_pending_coalesced, coalesced + 1);
+    cleanup(f);
+}
+
+/// DEC-06: a gap (state not tradable) takes ACTIVE back to the sweep; the next Ready rebuilds the
+/// index — SWEEP with INDEX_BOOTSTRAP, the requested ACTIVE kept — and the effective mode follows
+/// the index back to ACTIVE.
+#[test]
+fn dec06_a_gap_falls_back_to_the_sweep_and_the_ready_follows_the_index() {
+    use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
+    let mut f = fixture("dec06_gap");
+    dec06_ready(&mut f, 95.0);
+    f.owner.threshold_test_active();
+    f.owner.threshold_refresh("STATE");
+    assert!(f.owner.threshold_authority());
+    f.owner.st.halt(darkbot_common::error::HaltReason::FeedGap);
+    f.owner.threshold_refresh("STATE");
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Sweep, tm::STATE_NOT_TRADABLE)
+    );
+    assert_eq!(f.owner.threshold.stats.fallbacks, 1);
+    // The Ready after the recovery (events.rs) clears the batch and rebuilds the index.
+    dec06_ready(&mut f, 95.0);
+    f.owner.sweep_dirty_banks.clear();
+    f.owner.sweep_batch_started_ns = None;
+    f.owner.threshold_index_reset();
+    f.owner.threshold_refresh("INDEX");
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Sweep, tm::INDEX_BOOTSTRAP)
+    );
+    assert_eq!(f.owner.threshold.requested, Requested::Active);
+    assert!(f.owner.lifecycle());
+    assert_eq!(
+        f.owner.threshold.effective,
+        Effective::Active,
+        "follows the index"
+    );
+    cleanup(f);
 }

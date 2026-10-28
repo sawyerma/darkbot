@@ -8,7 +8,7 @@ impl ShadowOwner {
     #[cfg(feature = "crate_health")]
     pub(super) fn sweep_batch_open(&self) -> bool {
         self.st.run_state().is_tradable()
-            && if self.use_threshold_trigger {
+            && if self.threshold_authority() {
                 self.wake_due()
             } else {
                 !self.sweep_dirty_banks.is_empty()
@@ -621,6 +621,9 @@ impl ShadowOwner {
                     self.metrics.sweep_batch_ns_max = blocked_ns;
                     self.metrics.sweep_batch_ns_max_accounts = unique;
                 }
+                // DEC-06: the batch is evaluated — ACTIVE's barrier is open now (under steady
+                // oracle traffic a batch is always open at the loop's start).
+                self.threshold_refresh("BATCH");
             }
         }
     }

@@ -121,7 +121,7 @@ impl ShadowOwner {
         }
 
         #[cfg(feature = "crate_health")]
-        if self.use_threshold_trigger
+        if self.threshold_indexing()
             && self.st.run_state().is_tradable()
             && !self.threshold_ready
             && !self.threshold_bootstrap.is_empty()
@@ -159,6 +159,7 @@ impl ShadowOwner {
             }
             if self.threshold_bootstrap.is_empty() {
                 self.threshold_ready = true;
+                self.threshold.bootstrapped = true;
                 owner_log!(
                     self,
                     "threshold_index_ready: tracked={} fallback={}",
@@ -167,6 +168,9 @@ impl ShadowOwner {
                 );
             }
         }
+        // DEC-06: the effective threshold mode follows the state, the index and the evidence.
+        #[cfg(feature = "crate_health")]
+        self.threshold_refresh("STATE");
 
         true
     }

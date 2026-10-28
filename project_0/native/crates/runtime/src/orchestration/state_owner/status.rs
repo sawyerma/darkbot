@@ -42,7 +42,7 @@ impl ShadowOwner {
             end_result: self.end_result.map(String::from),
             engine: self.engine_status(),
             trigger: OwnerTrigger {
-                mode: if self.use_threshold_trigger {
+                mode: if self.threshold_authority() {
                     "threshold"
                 } else {
                     "sweep"
@@ -259,11 +259,12 @@ impl ShadowOwner {
                     ""
                 },
             ),
+            // DEC-06: requested OFF|OBSERVE|ACTIVE, effective OFF|SWEEP|OBSERVE|ACTIVE.
             cap(
-                "THRESHOLD_TRIGGER",
-                on(self.use_threshold_trigger),
-                on(self.use_threshold_trigger),
-                "",
+                crate::orchestration::threshold_mode::THRESHOLD_TRIGGER,
+                self.threshold.requested.code(),
+                self.threshold.effective.code(),
+                self.threshold.block,
             ),
         ]
     }

@@ -489,7 +489,7 @@ impl ShadowOwner {
         // V2-03 (P2-04): in the threshold mode this exact evaluation plans the account's premium
         // wake-up — renewed or removed by every evaluation, exactly as the sweep plans it.
         #[cfg(feature = "crate_health")]
-        if self.use_threshold_trigger {
+        if self.threshold_authority() {
             let boundary = match &health_result {
                 Ok(h) if !h.liquidatable => engine
                     .premium_decay_per_second(&acct, protocol_now as i64, protocol_slot)

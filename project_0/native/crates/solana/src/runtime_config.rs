@@ -13,6 +13,14 @@ pub mod defaults {
     pub const BOOT_TOKEN_TTL_SECONDS: u64 = 60;
     pub const BOOT_TOKEN_TTL_MIN_SECONDS: u64 = 10;
     pub const BOOT_TOKEN_TTL_MAX_SECONDS: u64 = 120;
+    /// DEC-06 (B-9): the owner time OBSERVE may use, in ppm of the owner's wall time — a
+    /// conservative start value until the owner block time in OBSERVE is measured.
+    pub const THRESHOLD_OBSERVE_BUDGET_PPM: u64 = 20_000;
+    pub const THRESHOLD_OBSERVE_BUDGET_PPM_MAX: u64 = 1_000_000;
+    /// DEC-06: the not-woken accounts of an ACTIVE oracle tick the sweep cross-check evaluates
+    /// off the owner, and their bound.
+    pub const THRESHOLD_CROSSCHECK_ACCOUNTS: u64 = 4;
+    pub const THRESHOLD_CROSSCHECK_ACCOUNTS_MAX: u64 = 1_024;
     /// D11: the owner's recovery waits for the finalized-root catch-up before Snapshot B (the
     /// 2026-10-10 smoke exceeded 30 s; the wait never skips reconciliation), the real root stall
     /// and the absolute phase cap — the one default of every launcher (`P0_RECOVERY_ROOT_*`).
@@ -211,6 +219,10 @@ parameters! {
     fe04_approval_max_lifetime_seconds = 86400, "s", "P0_FE04_APPROVAL_MAX_LIFETIME_SECS";
     // DEC-07: the network boot audit's TTL from its oldest network read (revision 13).
     boot_token_ttl_seconds = defaults::BOOT_TOKEN_TTL_SECONDS, "s", "P0_BOOT_TOKEN_TTL_SECONDS";
+    // DEC-06: OBSERVE's owner time budget (B-9) and ACTIVE's cross-check accounts per oracle tick
+    // (revision 14).
+    threshold_observe_budget_ppm = defaults::THRESHOLD_OBSERVE_BUDGET_PPM, "ppm", "P0_THRESHOLD_OBSERVE_BUDGET_PPM";
+    threshold_crosscheck_accounts = defaults::THRESHOLD_CROSSCHECK_ACCOUNTS, "accounts", "P0_THRESHOLD_CROSSCHECK_ACCOUNTS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -225,8 +237,9 @@ parameters! {
 /// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01); 11: the
 /// state owner's parameters `max_total_capital` … `recovery_root_hard_max_seconds` and the typed
 /// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]); 12:
-/// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07).
-pub const LIMITS_REVISION: u16 = 13;
+/// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07); 14:
+/// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06).
+pub const LIMITS_REVISION: u16 = 14;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -247,6 +260,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("threshold_observe_budget_ppm") => 14,
         f if position(f) >= position("boot_token_ttl_seconds") => 13,
         f if position(f) >= position("fe04_approval_max_lifetime_seconds") => 12,
         f if position(f) >= position("max_total_capital") => 11,
@@ -359,6 +373,8 @@ impl Parameter {
             "recovery_root_stall_seconds" => 180,
             "recovery_root_hard_max_seconds" => 900,
             "boot_token_ttl_seconds" => defaults::BOOT_TOKEN_TTL_MAX_SECONDS,
+            "threshold_observe_budget_ppm" => defaults::THRESHOLD_OBSERVE_BUDGET_PPM_MAX,
+            "threshold_crosscheck_accounts" => defaults::THRESHOLD_CROSSCHECK_ACCOUNTS_MAX,
             _ => u64::from(u32::MAX),
         }
     }
@@ -373,6 +389,7 @@ impl Parameter {
             }
             "lane_weight_l0" | "lane_weight_l1" | "lane_weight_l2" => Some("B-4"),
             "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => Some("B-5"),
+            "threshold_observe_budget_ppm" => Some("B-9"),
             _ => None,
         }
     }
@@ -424,8 +441,9 @@ pub struct RuntimeConfig {
     pub fe_mode: String,
     pub fe_targets: Vec<String>,
     pub fe_group: String,
-    /// DEC-05: the owner's typed settings. `P0_USE_THRESHOLD_TRIGGER`: the threshold trigger
-    /// instead of the R127 sweep (DEC-06 turns it into the threshold mode).
+    /// DEC-05: the owner's typed settings. `P0_USE_THRESHOLD_TRIGGER`: the start request of the
+    /// threshold mode (DEC-06): `on` requests ACTIVE, effective only through OBSERVE with N
+    /// (`threshold_min_ticks`); `off` keeps the R127 sweep alone.
     pub threshold_trigger: bool,
     /// `P0_C0_CENSUS`: the C0 census on the startup sweep.
     pub c0_census: bool,
@@ -442,6 +460,10 @@ pub struct RuntimeConfig {
     /// may be ACTIVE (`P0_HOLD_B_MIN_ATTEMPTS`). The user's decision, no default: unset keeps B
     /// in OBSERVE.
     pub hold_b_min_attempts: Option<u64>,
+    /// DEC-06 (B-8): N, the comparable oracle ticks without a miss in OBSERVE before the threshold
+    /// trigger may be ACTIVE (`P0_THRESHOLD_MIN_TICKS`). The user's decision, no default: unset
+    /// keeps the threshold mode in OBSERVE.
+    pub threshold_min_ticks: Option<u64>,
     /// DEC-11: the Jito block engine of the bundle path (`P0_JITO_BLOCK_ENGINE_URL`, redacted);
     /// unset: no Jito adapter is built. This build never sends (no FE-06 authorization).
     pub jito_block_engine_url: Option<String>,
@@ -464,6 +486,7 @@ impl Default for RuntimeConfig {
             wss_endpoints: vec![],
             non_landing_sources: vec![],
             hold_b_min_attempts: None,
+            threshold_min_ticks: None,
             jito_block_engine_url: None,
             bundle_sim_rpc_url: None,
             jito_tip_account: None,
@@ -763,6 +786,9 @@ impl RuntimeConfig {
         if self.hold_b_min_attempts == Some(0) {
             return Err("hold_b_min_attempts must be at least 1 (B-8)".into());
         }
+        if self.threshold_min_ticks == Some(0) {
+            return Err("threshold_min_ticks must be at least 1 (B-8)".into());
+        }
         for (name, url) in [
             ("jito_block_engine_url", &self.jito_block_engine_url),
             ("bundle_sim_rpc_url", &self.bundle_sim_rpc_url),
@@ -976,6 +1002,7 @@ struct ConfigFile {
     wss_endpoints: Option<Vec<String>>,
     non_landing_sources: Option<Vec<String>>,
     hold_b_min_attempts: Option<u64>,
+    threshold_min_ticks: Option<u64>,
     jito_block_engine_url: Option<String>,
     bundle_sim_rpc_url: Option<String>,
     jito_tip_account: Option<String>,
@@ -1031,6 +1058,9 @@ impl ConfigFile {
                 "non_landing_sources" => f.non_landing_sources = Some(list(&value)),
                 "hold_b_min_attempts" => {
                     f.hold_b_min_attempts = Some(number("hold_b_min_attempts", &value)?)
+                }
+                "threshold_min_ticks" => {
+                    f.threshold_min_ticks = Some(number("threshold_min_ticks", &value)?)
                 }
                 "jito_block_engine_url" => f.jito_block_engine_url = Some(value),
                 "bundle_sim_rpc_url" => f.bundle_sim_rpc_url = Some(value),
@@ -1205,6 +1235,14 @@ impl Resolved {
             );
             sources.insert("hold_b_min_attempts".into(), "environment".into());
         }
+        if let Some(raw) = env("P0_THRESHOLD_MIN_TICKS") {
+            c.threshold_min_ticks = Some(
+                raw.trim()
+                    .parse()
+                    .map_err(|_| "invalid P0_THRESHOLD_MIN_TICKS: expected a count".to_string())?,
+            );
+            sources.insert("threshold_min_ticks".into(), "environment".into());
+        }
         // DEC-11: the bundle path's endpoints and tip account.
         for (field, key) in [
             ("jito_block_engine_url", "P0_JITO_BLOCK_ENGINE_URL"),
@@ -1282,6 +1320,10 @@ impl Resolved {
             c.hold_b_min_attempts = Some(n);
             sources.insert("hold_b_min_attempts".into(), "config_file".into());
         }
+        if let Some(n) = file.threshold_min_ticks {
+            c.threshold_min_ticks = Some(n);
+            sources.insert("threshold_min_ticks".into(), "config_file".into());
+        }
         for (field, v) in [
             ("jito_block_engine_url", file.jito_block_engine_url),
             ("bundle_sim_rpc_url", file.bundle_sim_rpc_url),
@@ -1343,6 +1385,10 @@ impl Resolved {
                     "non_landing_sources" => c.non_landing_sources = list(&val),
                     "hold_b_min_attempts" => {
                         c.hold_b_min_attempts =
+                            Some(val.parse().map_err(|_| "configuration type mismatch")?)
+                    }
+                    "threshold_min_ticks" => {
+                        c.threshold_min_ticks =
                             Some(val.parse().map_err(|_| "configuration type mismatch")?)
                     }
                     "jito_block_engine_url" | "bundle_sim_rpc_url" | "jito_tip_account" => {
@@ -1416,7 +1462,7 @@ impl Resolved {
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1466,6 +1512,13 @@ impl Resolved {
                 src("hold_b_min_attempts")
             ),
             None => "hold-b-min-attempts = undecided (B-8: B ACTIVE blocked)\n".to_string(),
+        };
+        s += &match self.config.threshold_min_ticks {
+            Some(n) => format!(
+                "threshold-min-ticks = {n} [source {}]\n",
+                src("threshold_min_ticks")
+            ),
+            None => "threshold-min-ticks = undecided (B-8: threshold ACTIVE blocked)\n".to_string(),
         };
         for (name, field, set) in [
             (
@@ -1836,6 +1889,58 @@ mod tests {
             assert!(parse(&["--hold-b-min-attempts", bad]).is_err(), "{bad}");
         }
     }
+    /// DEC-06 (B-8): the threshold mode's N has no default (undecided keeps ACTIVE blocked), comes
+    /// from environment, file or CLI, is at least 1 and is printed with its source; OBSERVE's
+    /// budget (B-9, provisional) and the cross-check accounts are typed parameters with bounds.
+    #[test]
+    fn dec06_threshold_min_ticks_has_no_default() {
+        let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+        let r = Resolved::parse(&[], &env).unwrap();
+        assert_eq!(r.config.threshold_min_ticks, None);
+        assert!(r
+            .text()
+            .contains("threshold-min-ticks = undecided (B-8: threshold ACTIVE blocked)"));
+        let r = Resolved::parse(&["--threshold-min-ticks".into(), "500".into()], &env).unwrap();
+        assert_eq!(r.config.threshold_min_ticks, Some(500));
+        assert!(r.text().contains("threshold-min-ticks = 500 [source cli]"));
+        let env9 = |k: &str| match k {
+            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_THRESHOLD_MIN_TICKS" => Some("9".to_string()),
+            _ => None,
+        };
+        let r = Resolved::parse(&[], &env9).unwrap();
+        assert_eq!(
+            (
+                r.config.threshold_min_ticks,
+                r.sources["threshold_min_ticks"].as_str()
+            ),
+            (Some(9), "environment")
+        );
+        for bad in ["0", "-1", "x"] {
+            assert!(parse(&["--threshold-min-ticks", bad]).is_err(), "{bad}");
+        }
+        let d = parse(&[]).unwrap().config.limits;
+        assert_eq!(
+            (
+                d.threshold_observe_budget_ppm,
+                d.threshold_crosscheck_accounts
+            ),
+            (20_000, 4)
+        );
+        for (flag, ok, bad) in [
+            ("--threshold-observe-budget-ppm", "1000000", "1000001"),
+            ("--threshold-crosscheck-accounts", "1024", "1025"),
+        ] {
+            assert!(parse(&[flag, ok]).is_ok(), "{flag} {ok}");
+            assert!(parse(&[flag, bad]).is_err(), "{flag} {bad}");
+            assert!(parse(&[flag, "0"]).is_err(), "{flag} 0");
+        }
+        let p = PARAMETERS
+            .iter()
+            .find(|p| p.field == "threshold_observe_budget_ppm")
+            .unwrap();
+        assert_eq!(p.provisional(), Some("B-9"));
+    }
     /// DEC-03: the non-landing B sources (`operator=URL`) from environment and CLI in the common
     /// precedence, validated (a lowercase operator label of at most 32, an http(s) URL with a
     /// host) and printed only as a count.
@@ -1998,9 +2103,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                13,
-                142,
-                "8PksZayVUJ39c24LMUmoesz1kNDhy4BwZ6g2Beav4PFu".to_string()
+                14,
+                144,
+                "Dfo7Zzd4ee7S8bhiLCknSFH33yc5birp3zt134XzqtAe".to_string()
             )
         );
     }

@@ -77,14 +77,14 @@ impl CensusRequest {
 
 pub(super) fn config(
     journal_path: &std::path::Path,
-    use_threshold_trigger: bool,
+    threshold_requested: bool,
 ) -> Result<Option<CensusConfig>, Box<dyn std::error::Error>> {
     if !darkbot_solana::runtime_config::active().c0_census {
         return Ok(None);
     }
-    // The census rides on the R127 startup sweep; threshold-trigger mode has none, and a census
-    // must not create a second detection pass.
-    if use_threshold_trigger {
+    // The census rides on the R127 startup sweep; a threshold mode (DEC-06) has none once
+    // ACTIVE, and a census must not create a second detection pass.
+    if threshold_requested {
         return Err("C0_CENSUS_REQUIRES_R127_SWEEP_MODE: unset P0_USE_THRESHOLD_TRIGGER".into());
     }
     let c = CensusConfig {
