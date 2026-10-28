@@ -656,6 +656,9 @@ pub(super) fn prepare(
         if rebalance_mode == crate::execution::inventory::RebalanceMode::Observe {
             remote.start_rebalance_quoter(routes.clone(), &shutdown)?;
         }
+        // DEC-06: ACTIVE's sweep cross-check runs off the owner.
+        #[cfg(feature = "crate_health")]
+        remote.start_threshold_crosscheck(&shutdown)?;
         remote
     };
 
@@ -838,6 +841,7 @@ pub(super) fn prepare(
         ),
         darkbot_solana::runtime_config::active().threshold_min_ticks,
         operational.threshold_observe_budget_ppm,
+        usize::try_from(operational.threshold_crosscheck_accounts)?,
         clock.now_ns(),
     );
     let threshold_requested =

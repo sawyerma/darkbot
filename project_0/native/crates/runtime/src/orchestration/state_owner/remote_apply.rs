@@ -98,6 +98,17 @@ impl ShadowOwner {
             }
         }
 
+        // DEC-06: ACTIVE's sweep cross-check results.
+        #[cfg(feature = "crate_health")]
+        while let Some(done) = self
+            .remote
+            .crosscheck
+            .as_ref()
+            .and_then(|q| q.results.try_pop())
+        {
+            self.threshold_crosscheck_result(done);
+        }
+
         #[cfg(feature = "crate_health")]
         while let Some(done) = self.remote.oracle_price_projection_results.try_pop() {
             let bank = done.bank;

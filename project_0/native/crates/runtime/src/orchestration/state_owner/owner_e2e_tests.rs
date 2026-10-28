@@ -157,12 +157,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_fallback: HashSet::new(),
         threshold_bootstrap: VecDeque::new(),
         threshold_bootstrap_batch: 64,
-        threshold: super::threshold::ThresholdControl::new(
-            Default::default(),
-            None,
-            OPERATIONAL.threshold_observe_budget_ppm,
-            0,
-        ),
+        threshold: dec06_control(Default::default(), None),
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -4626,6 +4621,7 @@ fn dec06_control(
         requested,
         min_ticks,
         OPERATIONAL.threshold_observe_budget_ppm,
+        usize::try_from(OPERATIONAL.threshold_crosscheck_accounts).unwrap(),
         0,
     )
 }
@@ -5010,4 +5006,198 @@ fn dec06_observe_defers_the_index_upkeep_without_budget() {
     );
     assert!(f.owner.threshold_ready && !f.owner.threshold_fallback.contains(&account));
     cleanup(f);
+}
+
+/// DEC-06 ACTIVE fixture: `dec06_observe`'s state with an oracle key of both banks (an account
+/// update of it is an oracle tick of `events()`), the threshold trigger effective ACTIVE and the
+/// cross-check queues answered by the test. Returns the account, its banks and the oracle.
+#[allow(clippy::type_complexity)]
+fn dec06_active(
+    f: &mut Fixture,
+    liab: f64,
+) -> (
+    Pubkey,
+    Pubkey,
+    Pubkey,
+    Pubkey,
+    darkbot_common::channel::Consumer<crate::orchestration::remote_workers::CrossCheckWork>,
+    darkbot_common::channel::Producer<crate::orchestration::remote_workers::CrossCheckResult>,
+) {
+    let (account, asset_bank, liab_bank) = dec06_observe(f, liab);
+    let oracle = Pubkey::new_unique();
+    f.owner
+        .reverse_index
+        .set_bank_oracles(asset_bank, &[oracle]);
+    f.owner.reverse_index.set_bank_oracles(liab_bank, &[oracle]);
+    f.owner.threshold_test_active();
+    f.owner.threshold_refresh("STATE");
+    assert!(f.owner.threshold_authority());
+    let (jobs, results) = f.owner.remote.detached_crosscheck();
+    (account, asset_bank, liab_bank, oracle, jobs, results)
+}
+
+/// DEC-06: an oracle tick of `oracle` through `events()`.
+fn dec06_oracle_tick(f: &mut Fixture, oracle: Pubkey, slot: u64) {
+    f.producer
+        .try_push(IngressEvent::Account(AccountUpdate {
+            pubkey: oracle,
+            owner: Pubkey::new_unique(),
+            lamports: 1,
+            data: slot.to_le_bytes().to_vec(),
+            slot,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: f.owner.clock.now_ns(),
+        }))
+        .unwrap();
+    let mut fetch = || Err("no recovery".to_string());
+    assert_eq!(drive(f, &mut fetch), Ok(()));
+}
+
+/// DEC-06 ACTIVE: on an oracle tick the threshold trigger misses a liquidatable account (a stale
+/// index); the sweep cross-check samples it off the owner and finds it liquidatable on the
+/// unchanged state — a miss: the alarm record, the latch, ACTIVE back to the sweep with a full
+/// sweep that admits the account exactly once. In OBSERVE the same tick is looked up beside the
+/// sweep and marks its banks dirty.
+#[test]
+fn dec06_active_crosscheck_miss_alarms_latches_and_resweeps() {
+    use crate::analytics::evidence::ThresholdMiss;
+    use crate::analytics::payload::{decode, Payload};
+    use crate::orchestration::threshold_mode::{self as tm, Effective};
+    use darkbot_project0::index::Side;
+    let mut f = fixture("dec06_crosscheck_miss");
+    let (account, asset_bank, _, oracle, jobs, results) = dec06_active(&mut f, 95.0);
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    dec06_oracle_tick(&mut f, oracle, 101);
+    assert!(
+        f.owner.oracle_lanes.is_empty(),
+        "the stale index woke nothing"
+    );
+    let work = jobs.try_pop().expect("the not-woken account is sampled");
+    assert_eq!(work.account, account);
+    assert_eq!(f.owner.threshold.stats.crosscheck_samples, 1);
+    let result = crate::orchestration::remote_workers::crosscheck_evaluate(work);
+    assert_eq!(result.liquidatable, Ok(true));
+    assert!(results.try_push(result).is_ok());
+    f.owner.remote_apply().unwrap();
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (s.crosscheck_misses, s.misses, s.streak, s.fallbacks),
+        (1, 1, 0, 1)
+    );
+    assert!(f.owner.threshold.latched);
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Observe, tm::MISS_FALLBACK)
+    );
+    assert_eq!(f.owner.sweep_dirty_banks.len(), 2);
+    f.owner.sweep();
+    let admitted: Vec<Pubkey> = std::iter::from_fn(|| f.owner.oracle_lanes.next())
+        .map(|e| e.work.0)
+        .collect();
+    assert_eq!(admitted, vec![account], "the full sweep admits it once");
+    // OBSERVE: the tick is looked up beside the sweep and marks its banks dirty.
+    dec06_oracle_tick(&mut f, oracle, 102);
+    assert_eq!(f.owner.threshold.batch.ticks, 1);
+    assert_eq!(f.owner.sweep_dirty_banks.len(), 2);
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut alarms = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == ThresholdMiss::KIND {
+            let m: ThresholdMiss = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            alarms.push((m.account, m.phase, m.alarm));
+        }
+    }
+    assert_eq!(alarms, [(account, "ACTIVE".to_string(), true)]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-06 ACTIVE: no alarm without a miss — a healthy sample; a liquidatable one whose state
+/// changed since the tick, or of an earlier generation (stale); one the trigger wakes on another
+/// of its banks (covered). A full cross-check queue skips the sample, counted.
+#[test]
+fn dec06_active_crosscheck_ignores_healthy_stale_and_covered_samples() {
+    use crate::orchestration::remote_workers::crosscheck_evaluate;
+    use darkbot_project0::index::Side;
+    let mut f = fixture("dec06_crosscheck_quiet");
+    let (account, asset_bank, liab_bank, _, jobs, results) = dec06_active(&mut f, 95.0);
+    let none = HashSet::new();
+    let answer = |f: &mut Fixture, change: &dyn Fn(&mut Fixture)| {
+        f.owner
+            .threshold_crosscheck_sample(&[asset_bank], &none, &none);
+        let result = crosscheck_evaluate(jobs.try_pop().unwrap());
+        change(f);
+        assert!(results.try_push(result).is_ok());
+        f.owner.remote_apply().unwrap();
+    };
+    // Covered: the trigger wakes the account on its liability bank.
+    f.owner.threshold_index.set_account(
+        account,
+        &[
+            (asset_bank, Side::Asset, 0),
+            (liab_bank, Side::Liability, 0),
+        ],
+    );
+    answer(&mut f, &|_| {});
+    // Stale: the account changed since the tick.
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    answer(&mut f, &|f| {
+        let mut r = f.owner.st.get(&account).unwrap().clone();
+        r.slot += 1;
+        f.owner.st.on_event(IngressEvent::Account(AccountUpdate {
+            pubkey: account,
+            owner: r.owner,
+            lamports: r.lamports,
+            data: r.data,
+            slot: 102,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+    });
+    // Stale: an earlier generation.
+    answer(&mut f, &|f| f.owner.threshold.generation += 1);
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (
+            s.crosscheck_samples,
+            s.crosscheck_misses,
+            s.crosscheck_stale
+        ),
+        (3, 0, 2)
+    );
+    assert!(f.owner.threshold_authority() && !f.owner.threshold.latched);
+    // Healthy: no miss.
+    let mut h = fixture("dec06_crosscheck_healthy");
+    let (_, asset_bank, _, _, jobs, results) = dec06_active(&mut h, 85.0);
+    h.owner
+        .threshold_crosscheck_sample(&[asset_bank], &HashSet::new(), &HashSet::new());
+    let result = crosscheck_evaluate(jobs.try_pop().unwrap());
+    assert_eq!(result.liquidatable, Ok(false));
+    assert!(results.try_push(result).is_ok());
+    h.owner.remote_apply().unwrap();
+    assert_eq!(h.owner.threshold.stats.crosscheck_misses, 0);
+    assert!(h.owner.threshold_authority());
+    // A full queue skips (capacity 16, one sample per call).
+    h.owner.threshold.crosscheck_accounts = 1;
+    for _ in 0..17 {
+        h.owner
+            .threshold_crosscheck_sample(&[asset_bank], &HashSet::new(), &HashSet::new());
+    }
+    assert_eq!(
+        (
+            h.owner.threshold.stats.crosscheck_samples,
+            h.owner.threshold.stats.crosscheck_skipped
+        ),
+        (17, 1)
+    );
+    cleanup(f);
+    cleanup(h);
 }

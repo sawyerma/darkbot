@@ -22,6 +22,10 @@ pub(super) struct ThresholdControl {
     pub(super) budget: tm::ObserveBudget,
     /// OBSERVE: the threshold trigger's wake-ups of the open sweep batch.
     pub(super) batch: ObserveBatch,
+    /// ACTIVE: the not-woken accounts per oracle tick the sweep cross-check evaluates, and where
+    /// in each bank's accounts the next sample starts.
+    pub(super) crosscheck_accounts: usize,
+    pub(super) crosscheck_cursor: usize,
 }
 
 /// OBSERVE: what the threshold trigger woke during the open sweep batch, on the same state and
@@ -44,6 +48,7 @@ impl ThresholdControl {
         requested: Requested,
         min_ticks: Option<u64>,
         budget_ppm: u64,
+        crosscheck_accounts: usize,
         now_ns: u64,
     ) -> Self {
         Self {
@@ -65,6 +70,8 @@ impl ThresholdControl {
             stats: Default::default(),
             budget: tm::ObserveBudget::new(budget_ppm, now_ns),
             batch: Default::default(),
+            crosscheck_accounts,
+            crosscheck_cursor: 0,
         }
     }
 }
@@ -392,6 +399,135 @@ impl ShadowOwner {
                 at_unix_ms: crate::status_tap::unix_ms_now(),
             },
         ));
+    }
+
+    /// ACTIVE: samples up to `crosscheck_accounts` accounts of the tick's looked-up banks that the
+    /// threshold trigger did not wake (a rotating start covers each bank's accounts in turn),
+    /// copies what their exact health reads and hands them to the cross-check worker off the
+    /// owner; a full queue skips the sample (counted).
+    pub(super) fn threshold_crosscheck_sample(
+        &mut self,
+        banks: &[Pubkey],
+        candidates: &HashSet<Pubkey>,
+        fallback: &HashSet<Pubkey>,
+    ) {
+        let Ok(clock) = chain_clock(&self.st) else {
+            return;
+        };
+        if self.remote.crosscheck.is_none() {
+            return;
+        }
+        let k = self.threshold.crosscheck_accounts;
+        let mut picked: Vec<Pubkey> = Vec::with_capacity(k);
+        for bank in banks {
+            let n = self.reverse_index.bank_account_count(bank);
+            let start = self.threshold.crosscheck_cursor % n.max(1);
+            let index = &self.reverse_index;
+            for a in index
+                .accounts_for_bank(bank)
+                .skip(start)
+                .chain(index.accounts_for_bank(bank).take(start))
+            {
+                if picked.len() >= k {
+                    break;
+                }
+                if !candidates.contains(a) && !fallback.contains(a) && !picked.contains(a) {
+                    picked.push(*a);
+                }
+            }
+        }
+        self.threshold.crosscheck_cursor = self.threshold.crosscheck_cursor.wrapping_add(k);
+        let view = StateView(&self.st);
+        let engine = darkbot_project0::health::crate_impl::CrateHealth {
+            state: &view,
+            group: self.group,
+        };
+        let mut works = Vec::with_capacity(picked.len());
+        for account in picked {
+            // An undecodable account has unknown thresholds: the trigger re-checks it already.
+            let Ok(observed) = engine.observation_accounts(&account) else {
+                continue;
+            };
+            let mut keys = vec![account, self.group];
+            keys.extend(observed);
+            keys.sort_unstable();
+            keys.dedup();
+            let accounts = keys
+                .iter()
+                .filter_map(|k| {
+                    self.st
+                        .get(k)
+                        .map(|r| (*k, r.owner, r.lamports, r.data.clone()))
+                })
+                .collect();
+            works.push(crate::orchestration::remote_workers::CrossCheckWork {
+                generation: self.threshold.generation,
+                account,
+                group: self.group,
+                slot: clock.slot,
+                unix_timestamp: clock.unix_timestamp,
+                input_revision: self.candidate_input_epoch,
+                fingerprint: dependency_fingerprint(&self.st, &keys),
+                keys,
+                accounts,
+            });
+        }
+        let Some(queues) = self.remote.crosscheck.as_ref() else {
+            return;
+        };
+        let s = &mut self.threshold.stats;
+        for work in works {
+            if queues.jobs.try_push(work).is_ok() {
+                s.crosscheck_samples = s.crosscheck_samples.saturating_add(1);
+            } else {
+                s.crosscheck_skipped = s.crosscheck_skipped.saturating_add(1);
+            }
+        }
+    }
+
+    /// ACTIVE: whether the threshold trigger wakes `account` at the current state on any of its
+    /// banks — an index hit, an unknown threshold, or a bank it cannot look up (which ACTIVE
+    /// projects or re-checks bank-wide).
+    pub(super) fn threshold_wakes(&self, account: &Pubkey) -> bool {
+        if !self.threshold_ready {
+            return true;
+        }
+        let clock = chain_clock(&self.st);
+        self.reverse_index.banks_for_account(account).any(|bank| {
+            match self.threshold_hits(bank, clock) {
+                Ok((hits, rechecks)) => hits.contains(account) || rechecks.contains(account),
+                Err(_) => true,
+            }
+        })
+    }
+
+    /// ACTIVE: a cross-check result. A liquidatable sample on its unchanged state (same generation,
+    /// same E9 fingerprint) that the threshold trigger wakes on none of its banks is a miss: the
+    /// alarm (`THRESHOLD_MISS`), the latch and the way back to the sweep with a full sweep of every
+    /// bank. A sample of another generation or a changed state, or one that failed, is stale.
+    pub(super) fn threshold_crosscheck_result(
+        &mut self,
+        r: crate::orchestration::remote_workers::CrossCheckResult,
+    ) {
+        let current = r.generation == self.threshold.generation
+            && self.threshold_authority()
+            && dependency_fingerprint(&self.st, &r.keys) == r.fingerprint;
+        match r.liquidatable {
+            Ok(true) if current && !self.threshold_wakes(&r.account) => {
+                let s = &mut self.threshold.stats;
+                s.crosscheck_misses = s.crosscheck_misses.saturating_add(1);
+                s.misses = s.misses.saturating_add(1);
+                s.streak = 0;
+                self.threshold.latched = true;
+                self.threshold_miss(r.account, r.slot, r.input_revision, true);
+                self.threshold_refresh("MISS");
+            }
+            Ok(_) if current => {}
+            _ => {
+                let s = &mut self.threshold.stats;
+                s.crosscheck_stale = s.crosscheck_stale.saturating_add(1);
+            }
+        }
     }
 
     /// Journals the threshold mode's cumulative counters (`THRESHOLD_STATS`).

@@ -45,6 +45,82 @@ pub struct RebalanceQuoteResult {
     pub minimum_out: Result<Option<u64>, String>,
 }
 
+/// DEC-06 ACTIVE: one sweep cross-check sample — an account the threshold trigger did not wake on
+/// an oracle tick, with every account its exact health reads, copied from the owner's state at
+/// that tick (the evaluation runs off the owner on an immutable copy).
+#[cfg(feature = "crate_health")]
+pub struct CrossCheckWork {
+    pub generation: u64,
+    pub account: Pubkey,
+    pub group: Pubkey,
+    pub slot: u64,
+    pub unix_timestamp: i64,
+    pub input_revision: u64,
+    /// The keys the evaluation reads and their canonical revisions at the tick (E9).
+    pub keys: Vec<Pubkey>,
+    pub fingerprint: Hash,
+    /// (key, owner, lamports, data) of each key.
+    pub accounts: Vec<(Pubkey, Pubkey, u64, Vec<u8>)>,
+}
+
+/// The cross-check's exact evaluation of a sample: liquidatable or not, or why it failed.
+#[cfg(feature = "crate_health")]
+pub struct CrossCheckResult {
+    pub generation: u64,
+    pub account: Pubkey,
+    pub slot: u64,
+    pub input_revision: u64,
+    pub keys: Vec<Pubkey>,
+    pub fingerprint: Hash,
+    pub liquidatable: Result<bool, String>,
+}
+
+/// The owner's ends of the cross-check queues.
+#[cfg(feature = "crate_health")]
+pub struct CrossCheckQueues {
+    pub jobs: Producer<CrossCheckWork>,
+    pub results: Consumer<CrossCheckResult>,
+}
+
+/// The sample's copied accounts as the health engine's account source.
+#[cfg(feature = "crate_health")]
+struct CopiedState(std::collections::HashMap<Pubkey, (Pubkey, u64, Vec<u8>)>);
+#[cfg(feature = "crate_health")]
+impl darkbot_project0::health::AccountSource for CopiedState {
+    fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+        self.0.get(key).map(|(o, l, d)| (*o, *l, d.as_slice()))
+    }
+}
+
+/// DEC-06: the exact health of a cross-check sample on its copied accounts (the worker's work).
+#[cfg(feature = "crate_health")]
+pub fn crosscheck_evaluate(work: CrossCheckWork) -> CrossCheckResult {
+    use darkbot_project0::health::HealthEngine;
+    let state = CopiedState(
+        work.accounts
+            .into_iter()
+            .map(|(k, o, l, d)| (k, (o, l, d)))
+            .collect(),
+    );
+    let engine = darkbot_project0::health::crate_impl::CrateHealth {
+        state: &state,
+        group: work.group,
+    };
+    let liquidatable = engine
+        .health(&work.account, work.unix_timestamp, work.slot)
+        .map(|h| h.liquidatable)
+        .map_err(|e| e.to_string());
+    CrossCheckResult {
+        generation: work.generation,
+        account: work.account,
+        slot: work.slot,
+        input_revision: work.input_revision,
+        keys: work.keys,
+        fingerprint: work.fingerprint,
+        liquidatable,
+    }
+}
+
 /// The owner's ends of the rebalance quote queues (present in OBSERVE only).
 #[cfg(feature = "crate_health")]
 pub struct RebalanceQueues {
@@ -151,6 +227,9 @@ pub struct RemoteWorkers {
     /// B01 OBSERVE: the rebalance quote queues, once `start_rebalance_quoter` ran.
     #[cfg(feature = "crate_health")]
     pub rebalance: Option<RebalanceQueues>,
+    /// DEC-06: the ACTIVE cross-check queues, once `start_threshold_crosscheck` ran.
+    #[cfg(feature = "crate_health")]
+    pub crosscheck: Option<CrossCheckQueues>,
     /// The doorbells of later attached workers (the owner's `wake`, the workers' `space`).
     #[cfg(feature = "crate_health")]
     wake: Wakeup,
@@ -474,6 +553,8 @@ impl RemoteWorkers {
             #[cfg(feature = "crate_health")]
             rebalance: None,
             #[cfg(feature = "crate_health")]
+            crosscheck: None,
+            #[cfg(feature = "crate_health")]
             wake: wake.clone(),
             #[cfg(feature = "crate_health")]
             space,
@@ -542,6 +623,53 @@ impl RemoteWorkers {
         Ok(())
     }
 
+    /// DEC-06: starts the ACTIVE cross-check worker — the exact health of each sample on its
+    /// copied accounts, off the owner (bounded queues; a full one skips the sample); stopped and
+    /// joined with the other workers.
+    #[cfg(feature = "crate_health")]
+    pub fn start_threshold_crosscheck(&mut self, shutdown: &Shutdown) -> std::io::Result<()> {
+        let (jobs, job_rx) = bounded::<CrossCheckWork>("threshold-crosscheck-jobs", self.capacity);
+        let (done_tx, results) = result_queue::<CrossCheckResult>(
+            "threshold-crosscheck-results",
+            self.capacity,
+            &self.wake,
+            &self.space,
+        );
+        let (shutdown, space) = (shutdown.clone(), self.space.clone());
+        self.threads.push(
+            std::thread::Builder::new()
+                .name("threshold-crosscheck".into())
+                .spawn(move || {
+                    while !shutdown.is_requested() {
+                        let Some(work) = job_rx.pop_timeout(Duration::from_millis(250)) else {
+                            continue;
+                        };
+                        if !push_result(&done_tx, crosscheck_evaluate(work), &shutdown, &space) {
+                            return;
+                        }
+                    }
+                })?,
+        );
+        self.crosscheck = Some(CrossCheckQueues { jobs, results });
+        Ok(())
+    }
+
+    /// Test seam: the cross-check queues without a worker; the test answers the jobs.
+    #[cfg(all(test, feature = "crate_health"))]
+    pub(crate) fn detached_crosscheck(
+        &mut self,
+    ) -> (Consumer<CrossCheckWork>, Producer<CrossCheckResult>) {
+        let (jobs, job_rx) = bounded("threshold-crosscheck-jobs", self.capacity);
+        let (done_tx, results) = result_queue(
+            "threshold-crosscheck-results",
+            self.capacity,
+            &self.wake,
+            &self.space,
+        );
+        self.crosscheck = Some(CrossCheckQueues { jobs, results });
+        (job_rx, done_tx)
+    }
+
     /// Test seam: the rebalance quote queues without a worker; the test answers the jobs.
     #[cfg(all(test, feature = "crate_health"))]
     pub(crate) fn detached_rebalance(
@@ -591,6 +719,8 @@ impl RemoteWorkers {
             fe04_settlement_results,
             #[cfg(feature = "crate_health")]
             rebalance: None,
+            #[cfg(feature = "crate_health")]
+            crosscheck: None,
             #[cfg(feature = "crate_health")]
             wake: wake.clone(),
             #[cfg(feature = "crate_health")]

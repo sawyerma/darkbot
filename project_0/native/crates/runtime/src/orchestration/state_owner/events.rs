@@ -884,12 +884,15 @@ impl ShadowOwner {
                         // threshold-unknown re-checks without a per-account signal → L2.
                         let mut candidates: HashSet<Pubkey> = HashSet::new();
                         let mut fallback: HashSet<Pubkey> = HashSet::new();
+                        // DEC-06: the banks looked up on this tick (the cross-check's samples).
+                        let mut looked_up: Vec<Pubkey> = Vec::new();
                         for bank in banks {
                             if self.threshold_ready {
                                 match self.threshold_hits(&bank, clock) {
                                     Ok((hits, rechecks)) => {
                                         candidates.extend(hits);
                                         fallback.extend(rechecks);
+                                        looked_up.push(bank);
                                     }
                                     Err(e) => {
                                         // [R126] Integration pricing may be stale in canonical state even
@@ -1087,6 +1090,8 @@ impl ShadowOwner {
                             }
                         }
 
+                        // DEC-06: the sweep cross-check samples what this tick did not wake.
+                        self.threshold_crosscheck_sample(&looked_up, &candidates, &fallback);
                         // This tick's input revision (FIX-134): a new cause for every hit.
                         self.admit_oracle_accounts(
                             candidates,

@@ -105,6 +105,11 @@ impl ReverseIndex {
             .flat_map(|s| s.iter())
     }
 
+    /// DEC-06: the number of accounts holding `bank` — O(1), no bank-wide list.
+    pub fn bank_account_count(&self, bank: &Pubkey) -> usize {
+        self.bank_to_accounts.get(bank).map_or(0, HashSet::len)
+    }
+
     /// V2-13: whether `account` holds `bank` — O(1), no bank-wide list.
     pub fn bank_has_account(&self, bank: &Pubkey, account: &Pubkey) -> bool {
         self.bank_to_accounts
