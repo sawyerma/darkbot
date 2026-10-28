@@ -254,6 +254,13 @@ test('E: main() simulates only through simulatePrepared, which never signs, send
     'takeKeys', 'process.env', 'PRIVATE_KEY', 'eth_sendRawTransaction', 'eth_sendBundle', 'sendTransaction']) {
     assert.ok(!simulation.includes(never), never);
   }
+  // The pin's inputs are the preflight's block (number and hash), and the egress guard is up before the signature.
+  assert.equal(main.split("const parentNumber = dec('DARKBOT_G06A_SEND_HEAD');").length - 1, 1);
+  assert.equal(main.split("parentHash: req('DARKBOT_G06A_SEND_HEAD_HASH'),").length - 1, 1);
+  assert.equal(main.split('parentNumber =').length - 1, 1);
+  assert.equal(main.split('parentHash').length - 1, 1);
+  const guarded = main.indexOf('guardEgress([salt, launchData, token]);');
+  assert.ok(guarded > 0 && guarded < main.indexOf('.signTransaction(') && guarded < main.indexOf('await simulatePrepared('));
   // Evidence: written once, by main(), after the switch check, the signature, the simulation and the closing pin.
   assert.equal(source.split('dbrec.writeNew(').length - 1, 1);
   const write = main.indexOf('dbrec.writeNew(');

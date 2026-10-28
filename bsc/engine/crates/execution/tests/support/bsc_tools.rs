@@ -7,7 +7,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
 
 /// The repository root (every crate sits at `bsc/engine/crates/<crate>`).
 pub fn repo() -> PathBuf {
@@ -27,39 +26,6 @@ pub fn same_binary(name: &str, built: &str) {
         "{name}: the tools call {} but this build is {built} ({a:?} vs {b:?})",
         used.display()
     );
-}
-
-/// A binary of another package (no `CARGO_BIN_EXE_*` here) is current in
-/// cargo's own sense: no input in its dep-info (`target/debug/<name>.d`,
-/// every source and included file it was built from) is newer than it, so
-/// cargo would not rebuild it (qualification's use).
-#[allow(dead_code)]
-pub fn current(name: &str) {
-    fn mtime(path: &Path) -> Option<SystemTime> {
-        fs::metadata(path).and_then(|m| m.modified()).ok()
-    }
-    let debug = repo().join("bsc/engine/target/debug");
-    let built = mtime(&debug.join(name)).unwrap_or_else(|| {
-        panic!("{name} is not built: cargo build the package that owns it first")
-    });
-    let info = fs::read_to_string(debug.join(format!("{name}.d")))
-        .unwrap_or_else(|e| panic!("{name}.d (cargo's dep-info): {e}"));
-    let (_, inputs) = info
-        .split_once(": ")
-        .unwrap_or_else(|| panic!("{name}.d is not a dep-info rule"));
-    let inputs = inputs.replace("\\\n", " ").replace("\\ ", "\u{0}");
-    let mut seen = 0;
-    for input in inputs.split_whitespace() {
-        let input = PathBuf::from(input.replace('\u{0}', " "));
-        let changed = mtime(&input).unwrap_or_else(|| panic!("{} unreadable", input.display()));
-        assert!(
-            changed <= built,
-            "{name} is older than its input {}: rebuild it",
-            input.display()
-        );
-        seen += 1;
-    }
-    assert!(seen > 0, "{name}.d names no input");
 }
 
 /// Every npm dependency a tool directory declares is installed (`npm ci`).
