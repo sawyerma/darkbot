@@ -107,6 +107,8 @@ pub mod rows;
 mod sink;
 #[path = "strict_driver.rs"]
 pub mod strict_driver;
+#[path = "verification_view.rs"]
+pub mod verification_view;
 #[cfg(all(test, feature = "historical"))]
 pub use sink::JsonlSink;
 pub use sink::{JournalSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};

@@ -4,14 +4,16 @@
 use crate::proto::control::{SignedDecimal, UnsignedDecimal};
 use crate::proto::project0::{
     analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, AutostartGrant, BacktestResult,
-    BootFlow, BootStep, CapitalScenario, FundingSet, JobGrid, JobParams, OptimizeResult,
-    OptimizeScore, PostCaptureResult, PostCaptureSpec, RunQualification, ShadowCounterfactual,
-    UntilStopped, UntilStoppedQualification, UntilStoppedRun,
+    BootFlow, BootStep, CapitalScenario, FundingSet, JobGrid, JobParams, NamedCount,
+    OptimizeResult, OptimizeScore, PostCaptureResult, PostCaptureSpec, RunQualification,
+    ShadowCounterfactual, UntilStopped, UntilStoppedQualification, UntilStoppedRun,
+    VerificationMethod,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
     AnalyticsSnapshot, JobResult, JobSpec, JobState, JobStatus, RunEntry,
 };
+use darkbot_runner::market_observer::verification_view::MethodState;
 
 fn signed(v: i128) -> SignedDecimal {
     SignedDecimal {
@@ -64,6 +66,43 @@ fn score(s: &Score) -> OptimizeScore {
     }
 }
 
+fn counts(c: &[(String, u64)]) -> Vec<NamedCount> {
+    c.iter()
+        .map(|(name, count)| NamedCount {
+            name: name.clone(),
+            count: *count,
+        })
+        .collect()
+}
+
+/// DEC-08: one chain verification method of a run, exactly as its typed records hold it.
+fn method(m: &MethodState) -> VerificationMethod {
+    VerificationMethod {
+        method: m.method.clone(),
+        spec_id: m.spec_id.clone(),
+        attempts: m.attempts,
+        running: m.running,
+        status: m.status.clone(),
+        reason: m.reason.clone(),
+        result_id: m.result_id.clone(),
+        offline: m.offline,
+        provider_binding: m.provider_binding.clone(),
+        checkpoint_reads: m.checkpoint_reads,
+        calls: m.calls,
+        bytes: m.bytes,
+        progress_unit: m.progress_unit.into(),
+        progress_done: m.progress_done,
+        progress_total: m.progress_total,
+        qualified: counts(&m.qualified),
+        observed: counts(&m.observed),
+        markers: counts(&m.markers),
+        comparison: counts(&m.comparison),
+        disagreements: m.disagreements,
+        unresolved: m.unresolved,
+        unknown: m.unknown,
+    }
+}
+
 fn run(r: &RunEntry) -> AnalyticsRun {
     AnalyticsRun {
         run_id: r.run_id.clone(),
@@ -86,6 +125,7 @@ fn run(r: &RunEntry) -> AnalyticsRun {
         }),
         modified_unix_ms: r.modified_unix_ms,
         running: r.running,
+        verification: r.verification.iter().map(method).collect(),
     }
 }
 

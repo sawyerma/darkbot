@@ -58,9 +58,9 @@ Commitstand: Code `98254f75` (Rohinventar `F0_VAR_MANIFEST.json` `source_head` `
 | CAP-01 | Running-Badge, Feed, Run, Configured duration, Stream, Tx/Liq-Events, Verdict, Result | Topic 13 | 8 IST_CONNECTED | Live-Verdict ≠ Strict-Verifikation |
 | CAP-02…04 | Dauer-Presets/Custom, Source, Observation | Browser-State, nur CLI-Vorschau (`run start` = Market + Shadow, andere Observation → Vorschau verweigert); Desktop-Start ist Market-only | 3 FUTURE_PHASE_BLOCKED | Gateway-Start nimmt keine Parameter (`start-configured`); typisierter Command + Engine-Bestätigung nötig |
 | CAP-05 | Check & start, Stop | bestehender `captureControl` (`project0.capture.start/stop`), nur nach launchd-Prozesszustand freigegeben, Stop-Bestätigung je Run (nennt Autostart-Suspend + BSC-Readiness-Stopp von `darkbotctl capture stop`), Receipt + Prozesszustand | 2 IST_CONNECTED | Paket 1 (F0-P0UI-2); Panel-Auswahl wird nicht gesendet |
-| CAP-06 | Verify Off/Index/Strict/Crosscheck | Entwurf für CLI-Vorschau; Index/Crosscheck DISABLED (`CHAIN_VERIFY_*_BLOCKED`) | 1 IST_CONNECTED | Paket 1 |
+| CAP-06 | Verify Off/Index/Strict/Crosscheck | Entwurf für CLI-Vorschau; DEC-08: alle vier aktiv (History-Lesung mit `--provider-evidence`) | 1 IST_CONNECTED | Paket 1; DEC-08 |
 | CAP-07 | Sechs Report-Marker, All/None | Browser-State | 1 SOLL_MISSING | Report-Job-Pfad fehlt (C-AN-1); nur Reportfilter |
-| CAP-07b | CLI-Vorschau | `p0ctl run start --duration --capture-source --chain-verify off|strict --report-markers` (`model/capturePreview.ts`) | 1 IST_CONNECTED | Paket 1; Mainnet-Freigabeoptionen nur als Hinweis |
+| CAP-07b | CLI-Vorschau | `p0ctl run start --duration --capture-source --chain-verify off|index|strict|crosscheck [--provider-evidence] --report-markers` (`model/capturePreview.ts`) | 1 IST_CONNECTED | Paket 1; DEC-08; Mainnet-Freigabeoptionen nur als Hinweis |
 | CAP-07c | „Selected report markers N / 6“ | lokal | 1 IST_CONNECTED | — |
 | CAP-07d | Hinweise Start/Vorschau | Wahrheitstext (`start-configured`, Entwürfe nicht gesendet) | 1 IST_CONNECTED | Paket 1 |
 | CAP-08 | Vier Klassen, vier Related-Types, Provenance/Cost/Time-Filter | fehlt | 1 SOLL_MISSING | `LiquidationType`/`RelatedKind`/`ReportQuery` (C-AN-2) |

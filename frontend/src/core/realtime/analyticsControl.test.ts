@@ -45,6 +45,15 @@ describe("Analytics job commands", () => {
     expect("problem" in verifyCommand({ runId: "run-a", mode: "off", resume: false, maxSeconds: "", maxRamMib: "1" })).toBe(true);
   });
 
+  it("DEC-08: types index and crosscheck from their checkpoints as strict (never online)", () => {
+    for (const [mode, chain] of [["index-cache", "index"], ["crosscheck-cache", "crosscheck"]] as const) {
+      const v = verifyCommand({ runId: "run-a", mode, resume: true, maxSeconds: "60", maxRamMib: "1" });
+      if (!("params" in v)) throw new Error(v.problem);
+      const c = fromBinary(PostCaptureJobCommandSchema, v.params);
+      expect([c.chainVerify, c.offline, c.resumeVerification]).toEqual([chain, true, true]);
+    }
+  });
+
   it("DEC-07: names the network audit's provider evidence by its record id, never by a path", () => {
     const v = { flowId: "flow-1", token: "0123456789abcdef", genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", captureSource: "logs" as const };
     for (const providerEvidence of ["/data/provider_evidence/89abcdef01234567.p0j", "relative.p0j", "89ABCDEF01234567", "89abcdef0123456", ""]) {

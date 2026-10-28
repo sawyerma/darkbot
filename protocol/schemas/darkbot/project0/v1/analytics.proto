@@ -206,6 +206,69 @@ message AnalyticsRun {
   optional uint64 modified_unix_ms = 6;
   // The runtime owner runs it now.
   bool running = 7;
+  // DEC-08: every chain verification method of the run (its typed verification records): the
+  // Capture tab's state and the Analytics tab's methods side by side.
+  repeated VerificationMethod verification = 8;
+}
+
+// DEC-08 (ENTSCHEIDUNGEN §8.6): one chain verification method of a run, its spec with the
+// newest attempt and its newest finished result. Never a promotion: INDEX_VERIFIED <
+// CROSSCHECK_VERIFIED < CANONICAL_VERIFIED, only STRICT is canonical; an absent count is unknown.
+message VerificationMethod {
+  // off | index | strict | crosscheck
+  string method = 1;
+  // The verification spec (content id).
+  string spec_id = 2;
+  // Attempts of the spec.
+  uint64 attempts = 3;
+  // The newest attempt has started and not ended.
+  bool running = 4;
+  // RUNNING, NOT_RUN, INDEX_VERIFIED, CROSSCHECK_VERIFIED, CANONICAL_VERIFIED or
+  // HISTORICAL_INCOMPLETE.
+  string status = 5;
+  // The newest attempt's block or incompleteness reason (block_reason).
+  optional string reason = 6;
+  // The newest finished attempt's result id (the counts below are its).
+  optional string result_id = 7;
+  // The newest attempt read its checkpoint only.
+  bool offline = 8;
+  // SHA-256 of the provider endpoint(s) the spec binds (never the endpoint); unset offline.
+  optional string provider_binding = 9;
+  // Typed chain reads held in the checkpoint (a resume reads them without the network).
+  uint64 checkpoint_reads = 10;
+  // Requests of the newest result.
+  optional uint64 calls = 11;
+  // Response bytes of the newest result.
+  optional uint64 bytes = 12;
+  // pages (INDEX, CROSSCHECK: both sources) or slots (STRICT).
+  string progress_unit = 13;
+  // Progress done.
+  uint64 progress_done = 14;
+  // Progress expected; unset when unknown.
+  optional uint64 progress_total = 15;
+  // Qualified events per liquidation kind (empty: unknown).
+  repeated NamedCount qualified = 16;
+  // Program events per kind including unqualified transactions (empty: unknown).
+  repeated NamedCount observed = 17;
+  // The six markers (empty: unknown).
+  repeated NamedCount markers = 18;
+  // Found and missing events and deviations against the capture (detection and transaction
+  // statuses of the INDEX comparison).
+  repeated NamedCount comparison = 19;
+  // CROSSCHECK: transactions the two sources read differently.
+  optional uint64 disagreements = 20;
+  // Transactions of the window the provider left unresolved (null or pruned).
+  optional uint64 unresolved = 21;
+  // Transactions of the window that stayed unqualified.
+  optional uint64 unknown = 22;
+}
+
+// A count under a bounded name.
+message NamedCount {
+  // Bounded name (a kind, marker or status code).
+  string name = 1;
+  // Occurrences.
+  uint64 count = 2;
 }
 
 // The newest C0-E1 master qualification record of a run.
@@ -265,13 +328,13 @@ message AnalyticsJob {
 
 // The verification request of a post-capture job (A08/F-02).
 message PostCaptureSpec {
-  // off (identities only, no chain read) or strict.
+  // off (identities only, no chain read), index, strict or crosscheck (DEC-08).
   string chain_verify = 1;
-  // Strict from the verification cache only (no network).
+  // A history read from the verification checkpoint only (no network).
   bool offline = 2;
   // Resume an incomplete verification.
   bool resume = 3;
-  // An operator provider evidence was given (online strict; terminal only).
+  // An operator provider evidence was given (an online history read; terminal only).
   bool provider_evidence = 4;
 }
 
@@ -482,7 +545,8 @@ message BootStartCommand {
   string duration = 3;
   // logs | transactions
   string capture_source = 4;
-  // off | strict
+  // off (the GUI start; a history read online needs the operator's provider evidence and stays
+  // terminal: `p0ctl boot start --chain-verify index|strict|crosscheck --provider-evidence`)
   string chain_verify = 5;
   // DEC-16: an unbounded flow's qualification id (16 hex digits); required for until-stopped.
   optional string qualification = 6;
@@ -521,9 +585,10 @@ message AutostartGrantCommand {
 message PostCaptureJobCommand {
   // The run id under the project's run roots (never a path).
   string run_id = 1;
-  // off or strict (strict only with offline).
+  // off, or index | strict | crosscheck from the checkpoint only (with offline; online needs the
+  // operator's provider evidence and stays terminal).
   string chain_verify = 2;
-  // Strict from the verification cache only (no network).
+  // A history read from the verification checkpoint only (no network).
   bool offline = 3;
   // Resume an incomplete verification.
   bool resume_verification = 4;

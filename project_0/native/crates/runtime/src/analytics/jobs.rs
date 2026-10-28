@@ -798,6 +798,8 @@ pub struct RunEntry {
     pub modified_unix_ms: Option<u64>,
     /// The runtime owner runs it now.
     pub running: bool,
+    /// DEC-08: every chain verification method of the run (its typed verification records).
+    pub verification: Vec<crate::market::observer::verification_view::MethodState>,
 }
 
 /// The analytics projection (topic project0.analytics.jobs): runs a job can read and the jobs.
@@ -854,6 +856,7 @@ pub fn projection(
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|d| u64::try_from(d.as_millis()).ok()),
             running: running == Some(r.run_id.as_str()),
+            verification: crate::market::observer::verification_view::methods(&r.path),
             run_id: r.run_id,
             root: r.root,
         })

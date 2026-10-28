@@ -85,15 +85,19 @@ export function optimizeCommand(p: PointInput, g: GridInput): { params: Uint8Arr
   };
 }
 
-/** A08/F-02: verification off, or strict from the cache (online strict is a terminal action). */
-export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; resume: boolean; maxSeconds: string; maxRamMib: string }): { params: Uint8Array } | { problem: string } {
+/** A08/F-02, DEC-08: the GUI's verification modes — off, or a history read from its checkpoint
+ *  (an online history read is a terminal action with the operator's provider evidence). */
+export type VerifyMode = "off" | "index-cache" | "strict-cache" | "crosscheck-cache";
+
+/** A08/F-02, DEC-08: verification off, or index|strict|crosscheck from the checkpoint. */
+export function verifyCommand(v: { runId: string; mode: VerifyMode; resume: boolean; maxSeconds: string; maxRamMib: string }): { params: Uint8Array } | { problem: string } {
   const seconds = positive(v.maxSeconds);
   const mib = positive(v.maxRamMib);
   if (!v.runId) return { problem: "Select a run." };
   if (seconds === null || mib === null) return { problem: "Verification budget: positive seconds and MiB are required." };
   return {
     params: toBinary(PostCaptureJobCommandSchema, message(PostCaptureJobCommandSchema, {
-      runId: v.runId, chainVerify: v.mode === "off" ? "off" : "strict", offline: v.mode === "strict-cache", resumeVerification: v.resume,
+      runId: v.runId, chainVerify: v.mode === "off" ? "off" : v.mode.replace(/-cache$/, ""), offline: v.mode !== "off", resumeVerification: v.resume,
       maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
     })),
   };

@@ -5,7 +5,7 @@ import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import {
   AnalyticsJobsSchema, AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema,
-  type AnalyticsJobs,
+  PostCaptureJobCommandSchema, type AnalyticsJobs,
 } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
@@ -248,9 +248,10 @@ test("DEC-07: Check & start is the boot flow's; a running raw capture stops thro
   await tab(page, "Capture");
   await page.getByRole("button", { name: "10m", exact: true }).click();
   await page.getByLabel("Source").selectOption("transactions");
+  // DEC-08: every chain verification mode is native; none is blocked any more.
   const verify = page.getByRole("tablist", { name: "Verification mode" });
-  await expect(verify.getByRole("tab", { name: "Index" })).toBeDisabled();
-  await expect(verify.getByRole("tab", { name: "Crosscheck" })).toBeDisabled();
+  await expect(verify.getByRole("tab", { name: "Index" })).toBeEnabled();
+  await expect(verify.getByRole("tab", { name: "Crosscheck" })).toBeEnabled();
   const preview = page.locator(".p0-code");
   await expect(preview).toHaveText("p0ctl run start --duration 10m --network-audit <FILE> --mainnet-approved <TOKEN> --capture-source transactions --chain-verify off --report-markers all");
   await page.getByLabel("Observation").selectOption("market");
@@ -407,6 +408,65 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
   expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(errors).toEqual([]);
+});
+
+test("DEC-08: the chain verification methods reach the Capture and Analytics tabs; index from its checkpoint and a cancel take the one command path", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // The golden post-capture job is still running (a verification is cancelled like every job).
+  await feed(page, true, true, golden("system_status"), "wallets_state", (a) => {
+    const pc = a.jobs.find((j) => j.jobId === "pc-1")!;
+    pc.state = "RUNNING";
+    pc.result = { case: undefined };
+  });
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    if (r.request().method() === "POST") {
+      const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+      sent.push(req);
+      return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema,
+        { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+    }
+    const id = new URL(r.request().url()).searchParams.get("request_id") ?? "";
+    return r.fulfill(proto(toBinary(CommandLookupResponseSchema, create(CommandLookupResponseSchema,
+      { found: true, commandId: id, phase: CommandPhase.COMPLETED, detail: "Job recorded and its worker started" }))));
+  });
+  // Capture: each method with status, progress, provider, requests, bytes, checkpoint, block reason.
+  await tab(page, "Capture");
+  await expect(page.locator(".p0-line", { hasText: "run-a · verification index" }))
+    .toContainText(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 · bytes 65248 · checkpoint 7 reads · 2 attempts`);
+  await expect(page.locator(".p0-line", { hasText: "run-a · verification crosscheck" }))
+    .toContainText("NOT_RUN (CROSSCHECK_SECOND_PROVIDER_MISSING) · progress 0 pages");
+  // The run start preview names the operator's provider evidence for a history read.
+  await page.getByRole("tablist", { name: "Verification mode" }).getByRole("tab", { name: "Index" }).click();
+  await expect(page.locator(".p0-code")).toContainText("--chain-verify index --provider-evidence <EVIDENCE>");
+  // Index from its checkpoint through the one controller (never online from the GUI).
+  const runs = page.locator(".p0-section", { hasText: "Recorded runs · post-capture" });
+  await runs.getByLabel("Verification").selectOption("index-cache");
+  await runs.getByLabel("Budget · seconds").fill("60");
+  await runs.getByLabel("Budget · RAM MiB").fill("256");
+  await runs.getByRole("button", { name: "Verify, report & qualify" }).click();
+  await expect(page.getByTestId("p0-verify-command-receipt")).toContainText("COMPLETED");
+  const verify = sent.at(-1)!;
+  expect(verify.action).toBe("project0.capture.verify.start");
+  const v = fromBinary(PostCaptureJobCommandSchema, verify.params);
+  expect([v.runId, v.chainVerify, v.offline, v.resumeVerification, v.maxSeconds, v.maxRamBytes]).toEqual(["run-a", "index", true, true, 60n, 256n * 1_048_576n]);
+  // Analytics: the three methods side by side; nothing is promoted.
+  await tab(page, "Analytics");
+  await expect(page.locator(".p0-line", { hasText: "Verification · status" }))
+    .toContainText("index INDEX_VERIFIED · crosscheck NOT_RUN (CROSSCHECK_SECOND_PROVIDER_MISSING) · strict —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · RECEIVERSHIP" })).toContainText("index 1 · crosscheck — · strict —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · marker Receivership · end" })).toContainText("index 2 · crosscheck —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · missing" })).toContainText("index 3 · crosscheck —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · costs" })).toContainText("index 5 requests · 65248 bytes");
+  // The running verification job is cancelled through the job controller.
+  await page.locator(".p0-line", { hasText: "POST_CAPTURE · run-a" }).locator("xpath=following-sibling::div[1]")
+    .getByRole("button", { name: "Cancel job" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect([sent.at(-1)!.action, sent.at(-1)!.resourceId]).toEqual(["project0.analytics.job.cancel", "pc-1"]);
   expect(errors).toEqual([]);
 });
 

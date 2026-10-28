@@ -16,7 +16,7 @@ import { counterOf, phaseLabel } from "../model/statusSelectors";
 import { RUN_START_VERIFY, runStartPreview } from "../model/capturePreview";
 
 const modes = ([{ value: "off", label: "Off" }, { value: "index", label: "Index" }, { value: "strict", label: "Strict" }, { value: "crosscheck", label: "Crosscheck" }] as const)
-  .map(m => RUN_START_VERIFY.has(m.value) ? m : { ...m, disabled: true, title: `Blocked by p0ctl run start (CHAIN_VERIFY_${m.value}_BLOCKED)` });
+  .map(m => RUN_START_VERIFY.has(m.value) ? m : { ...m, disabled: true, title: `Not accepted by p0ctl run start (CHAIN_VERIFY_${m.value}_INVALID)` });
 const PRESETS = ["4h", "30s", "10m", "1h", "24h", "custom"] as const;
 
 function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null; topicStatus: TopicStatus }) {
@@ -78,7 +78,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
   </Section>
   <Section title="Chain verification" aside={<span className="p0-quiet">After capture</span>}>
     <TabStrip options={modes.map(x => ({ ...x }))} value={verify} onChange={setVerify} label="Verification mode"/>
-    <p className="p0-note">p0ctl run start accepts off and strict (strict needs provider evidence); index and crosscheck are blocked there.</p></Section>
+    <p className="p0-note">Every mode runs natively after the capture (DEC-08); index, strict and crosscheck read the chain with the operator's provider evidence, crosscheck from a second, separately qualified endpoint (else NOT_RUN). Nothing is promoted: INDEX_VERIFIED &lt; CROSSCHECK_VERIFIED &lt; CANONICAL_VERIFIED.</p></Section>
   <Section title="Report markers" aside={<div className="p0-actions"><button className="p0-secondary" onClick={() => setMarkers(REPORT_MARKERS.map(x => x.id))}>All</button><button className="p0-secondary" onClick={() => setMarkers([])}>None</button></div>}>
     <div className="p0-formgrid">{REPORT_MARKERS.map(m => <label key={m.id} className="p0-check"><input type="checkbox" checked={markers.includes(m.id)} onChange={e => setMarkers(old => e.target.checked ? [...old, m.id] : old.filter(x => x !== m.id))}/>{m.label}</label>)}</div>
     <p className="p0-note">Only report visibility changes; raw capture is always unfiltered.</p></Section>

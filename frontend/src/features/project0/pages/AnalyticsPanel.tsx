@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorDraft, Project0Tab } from "../model/contracts";
-import { jobCommandBlock, jobReadableRuns, type AnalyticsJobView, type AnalyticsView, type JobResultView } from "../model/analytics";
+import { comparisonSum, countOf, jobCommandBlock, jobReadableRuns, sideBySide, type AnalyticsJobView, type AnalyticsRunView, type AnalyticsView, type JobResultView } from "../model/analytics";
+import { REPORT_MARKERS } from "../model/contracts";
 import { usdMicroDisplay } from "../model/format";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
 import { analyticsCommand, backtestCommand, optimizeCommand, recheck, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
@@ -26,8 +27,29 @@ function resultLine(r: JobResultView | null): string {
 function JobRow({ job, cancelBlock }: { job: AnalyticsJobView; cancelBlock: string }) {
   return <><DetailRow title={`${job.kind} · ${job.run} · ${job.jobId.slice(0, 8)}`}
     value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result)}`}/>
-    {job.state === "RUNNING" && job.kind !== "POST_CAPTURE" ? <div className="p0-actions"><button className="p0-secondary" disabled={cancelBlock !== ""} title={cancelBlock || undefined}
+    {job.state === "RUNNING" ? <div className="p0-actions"><button className="p0-secondary" disabled={cancelBlock !== ""} title={cancelBlock || undefined}
       onClick={() => void analyticsCommand("project0.analytics.job.cancel", { resourceId: job.jobId })}>Cancel job</button></div> : null}</>;
+}
+
+const KINDS = ["CLASSIC", "RECEIVERSHIP", "FORCED_DELEVERAGE", "BANKRUPTCY_SETTLEMENT"] as const;
+
+/** DEC-08: the run's chain verification methods side by side (index, crosscheck, strict): their
+ *  status, the four liquidation kinds, the six markers, found and missing events, deviations and
+ *  costs, each as its records hold it ("—": unknown or never run). */
+function MethodsCompared({ run }: { run: AnalyticsRunView | null }) {
+  const m = run?.verification ?? [];
+  if (m.length === 0) return <DetailRow title="Chain verification" value="No native verification recorded for this run"/>;
+  return <>
+    <DetailRow title="Verification · status" value={sideBySide(m, x => `${x.status}${x.reason ? ` (${x.reason})` : ""}`)}/>
+    {KINDS.map(k => <DetailRow key={k} title={`Verification · ${k}`} value={sideBySide(m, x => countOf(x.qualified, k))}/>)}
+    {REPORT_MARKERS.map(k => <DetailRow key={k.id} title={`Verification · marker ${k.label}`} value={sideBySide(m, x => countOf(x.markers, k.id))}/>)}
+    <DetailRow title="Verification · found (MATCH)" value={sideBySide(m, x => countOf(x.comparison, "MATCH"))}/>
+    <DetailRow title="Verification · missing" value={sideBySide(m, x => comparisonSum(x, ["MISSING_", "BOT_ONLY_"]))}/>
+    <DetailRow title="Verification · deviations" value={sideBySide(m, x => `${comparisonSum(x, ["TYPE_MISMATCH", "TARGET_OR_ACTOR_MISMATCH", "AMOUNT_MISMATCH", "SLOT_MISMATCH"])}${x.disagreements != null ? ` · ${x.disagreements} disagreements` : ""}`)}/>
+    <DetailRow title="Verification · unresolved / unknown" value={sideBySide(m, x => `${x.unresolved ?? "—"} / ${x.unknown ?? "—"}`)}/>
+    <DetailRow title="Verification · costs" value={sideBySide(m, x => `${x.calls ?? "—"} requests · ${x.bytes ?? "—"} bytes`)}/>
+    <p className="p0-note">Nothing is promoted: INDEX_VERIFIED &lt; CROSSCHECK_VERIFIED &lt; CANONICAL_VERIFIED; only strict's canonical result can count toward the C0-E1 master, with every other gate.</p>
+  </>;
 }
 
 /** The inputs of one backtest point; empty until the operator enters them (no hidden default). */
@@ -78,6 +100,7 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
     <TabStrip minor label="Analysis mode" options={tabs} value={tab} onChange={setTab}/>
     {tab === "report" ? <>
       <DetailRow title="Qualification" value={run?.qualification ? `${run.qualification.verdict} · verification ${run.qualification.verification}` : "—"}/>
+      <MethodsCompared run={run}/>
       <DetailRow title="Market liquidations (verified)" value={backtest ? backtest.liquidations.toString() : "—"}/>
       <DetailRow title="Counterfactual Shadow wins / matched" value={backtest?.counterfactual ? `${backtest.counterfactual.wins} / ${backtest.counterfactual.matched}` : "—"}/>
       {backtest?.counterfactual?.scenarios.map(s => <DetailRow key={s.capitalUsdMicro.toString()} title={`Shadow net · capital ${usdMicroDisplay(s.capitalUsdMicro.toString())}`} value={usdMicroDisplay(s.netUsdMicro)}/>)}

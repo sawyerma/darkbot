@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/project0/v1/analytics.proto.
  */
 export const file_darkbot_project0_v1_analytics: GenFile = /*@__PURE__*/
-  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSLHAgoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCRIrCgRib290GAcgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290RmxvdxISCgpib290X2Vycm9yGAggASgJEjgKDXVudGlsX3N0b3BwZWQYCSABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZCKGAgoMVW50aWxTdG9wcGVkEjYKCWF1dG9zdGFydBgBIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSNAoHcHJldmlldxgCIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSRQoNcXVhbGlmaWNhdGlvbhgDIAEoCzIuLmRhcmtib3QucHJvamVjdDAudjEuVW50aWxTdG9wcGVkUXVhbGlmaWNhdGlvbhIxCgNydW4YBCABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZFJ1bhIOCgZlcnJvcnMYBSADKAkinAMKDkF1dG9zdGFydEdyYW50Eg4KBmRpZ2VzdBgBIAEoCRIMCgRtb2RlGAIgASgJEhUKDWNvbmZpZ19zaGEyNTYYAyABKAkSFQoNYmluYXJ5X3NoYTI1NhgEIAEoCRIQCghkdXJhdGlvbhgFIAEoCRIaChJjaGVja3BvaW50X3NlY29uZHMYBiABKAQSHgoWbWluaW11bV9ydW53YXlfc2Vjb25kcxgHIAEoBBIYChBxdWFsaWZpY2F0aW9uX2lkGAggASgJEhwKFHByb3ZpZGVyX2V2aWRlbmNlX2lkGAkgASgJEhQKDGdlbmVzaXNfaGFzaBgKIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgLIAEoCRIPCgdycGNfcnBzGAwgASgEEhQKDG1heF9yZXF1ZXN0cxgNIAEoBBIVCg1tYXhfdG90YWxfbWliGA4gASgEEhsKE21heF9ydW50aW1lX3NlY29uZHMYDyABKAQSFgoOZXhwaXJlc191bml4X3MYECABKAQSFwoPcmVjb3JkZWRfdW5peF9zGBEgASgEIqICChlVbnRpbFN0b3BwZWRRdWFsaWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBG1vZGUYAiABKAkSGgoSY2hlY2twb2ludF9zZWNvbmRzGAMgASgEEh4KFm1pbmltdW1fcnVud2F5X3NlY29uZHMYBCABKAQSEAoIY29tcGxldGUYBSABKAgSDAoEb3BlbhgGIAMoCRIYCgtldmlkZW5jZV9pZBgHIAEoCUgAiAEBEigKG2V2aWRlbmNlX3ZhbGlkX3VudGlsX3VuaXhfcxgIIAEoBEgBiAEBEhsKE3F1YWxpZmllZF9hdF91bml4X3MYCSABKARCDgoMX2V2aWRlbmNlX2lkQh4KHF9ldmlkZW5jZV92YWxpZF91bnRpbF91bml4X3MiuQIKD1VudGlsU3RvcHBlZFJ1bhIOCgZydW5faWQYASABKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgCIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgDIAEoBBIaChJjaGVja3BvaW50X3NlY29uZHMYBCABKAQSDwoHd2luZG93cxgFIAEoBBIZCgxsYXN0X3ZlcmRpY3QYBiABKAlIAIgBARITCgtsYXN0X2RldGFpbBgHIAEoCRIeChFsYXN0X2VuZGVkX3VuaXhfcxgIIAEoBEgBiAEBEhMKBmhhbHRlZBgJIAEoCUgCiAEBEg4KBnNlYWxlZBgKIAEoCBIQCghjb21wbGV0ZRgLIAEoCEIPCg1fbGFzdF92ZXJkaWN0QhQKEl9sYXN0X2VuZGVkX3VuaXhfc0IJCgdfaGFsdGVkIpgECghCb290RmxvdxIPCgdmbG93X2lkGAEgASgJEgwKBG1vZGUYAiABKAkSHAoPY3JlYXRlZF91bml4X21zGAMgASgESACIAQESFwoPb2ZmbGluZV92ZXJkaWN0GAQgASgJEhUKDW9mZmxpbmVfdG9rZW4YBSABKAkSFwoPb2ZmbGluZV9ibG9ja2VkGAYgAygJEhMKC3R0bF9zZWNvbmRzGAcgASgEEhIKCnR0bF9zb3VyY2UYCCABKAkSLgoHbmV0d29yaxgJIAEoCzIdLmRhcmtib3QucHJvamVjdDAudjEuQm9vdFN0ZXASHAoPbmV0d29ya192ZXJkaWN0GAogASgJSAGIAQESGgoNbmV0d29ya190b2tlbhgLIAEoCUgCiAEBEhcKD25ldHdvcmtfYmxvY2tlZBgMIAMoCRIcCg9vYnNlcnZlZF91bml4X3MYDSABKARIA4gBARIbCg5leHBpcmVzX3VuaXhfcxgOIAEoBEgEiAEBEiwKBXN0YXJ0GA8gASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290U3RlcBIQCghkdXJhdGlvbhgQIAEoCUISChBfY3JlYXRlZF91bml4X21zQhIKEF9uZXR3b3JrX3ZlcmRpY3RCEAoOX25ldHdvcmtfdG9rZW5CEgoQX29ic2VydmVkX3VuaXhfc0IRCg9fZXhwaXJlc191bml4X3MirQEKCEJvb3RTdGVwEg0KBXN0YXRlGAEgASgJEgwKBGNvZGUYAiABKAkSEwoGcnVuX2lkGAMgASgJSACIAQESHAoPc3RhcnRlZF91bml4X21zGAQgASgESAGIAQESHQoQZmluaXNoZWRfdW5peF9tcxgFIAEoBEgCiAEBQgkKB19ydW5faWRCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyLZAQoMQW5hbHl0aWNzUnVuEg4KBnJ1bl9pZBgBIAEoCRIMCgRyb290GAIgASgJEg4KBmxheW91dBgDIAEoCRIYChBjYXB0dXJlX2NvbXBsZXRlGAQgASgIEjwKDXF1YWxpZmljYXRpb24YBSABKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJ1blF1YWxpZmljYXRpb24SHQoQbW9kaWZpZWRfdW5peF9tcxgGIAEoBEgAiAEBEg8KB3J1bm5pbmcYByABKAhCEwoRX21vZGlmaWVkX3VuaXhfbXMicgoQUnVuUXVhbGlmaWNhdGlvbhIPCgd2ZXJkaWN0GAEgASgJEhQKDHZlcmlmaWNhdGlvbhgCIAEoCRIOCgZmYWlsZWQYAyADKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgEIAEoCRINCgVlcnJvchgFIAEoCSKUBQoMQW5hbHl0aWNzSm9iEg4KBmpvYl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEgsKA3J1bhgDIAEoCRINCgVzdGF0ZRgEIAEoCRIMCgRjb2RlGAUgASgJEh4KEXJlcXVlc3RlZF91bml4X21zGAYgASgESAGIAQESHAoPc3RhcnRlZF91bml4X21zGAcgASgESAKIAQESHQoQZmluaXNoZWRfdW5peF9tcxgIIAEoBEgDiAEBEhMKC21heF9zZWNvbmRzGAkgASgEEhUKDW1heF9yYW1fYnl0ZXMYCiABKAQSLgoGcGFyYW1zGAsgASgLMh4uZGFya2JvdC5wcm9qZWN0MC52MS5Kb2JQYXJhbXMSKgoEZ3JpZBgMIAEoCzIcLmRhcmtib3QucHJvamVjdDAudjEuSm9iR3JpZBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GA0gASgJEjcKCGJhY2t0ZXN0GA4gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5CYWNrdGVzdFJlc3VsdEgAEjcKCG9wdGltaXplGA8gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVJlc3VsdEgAEj4KDHBvc3RfY2FwdHVyZRgRIAEoCzImLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVSZXN1bHRIABI/ChFwb3N0X2NhcHR1cmVfc3BlYxgQIAEoCzIkLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVTcGVjQggKBnJlc3VsdEIUChJfcmVxdWVzdGVkX3VuaXhfbXNCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyJjCg9Qb3N0Q2FwdHVyZVNwZWMSFAoMY2hhaW5fdmVyaWZ5GAEgASgJEg8KB29mZmxpbmUYAiABKAgSDgoGcmVzdW1lGAMgASgIEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgIIlAKEVBvc3RDYXB0dXJlUmVzdWx0EhcKD3ZlcmlmaWNhdGlvbl9vaxgBIAEoCBIRCglyZXBvcnRfb2sYAiABKAgSDwoHdmVyZGljdBgDIAEoCSJ/CglKb2JQYXJhbXMSRgobbWluX3Byb2ZpdF91c2RfbWljcm9fc2lnbmVkGAEgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSGQoRY2FwaXRhbF91c2RfbWljcm8YAiADKAQSDwoHZnVuZGluZxgDIAMoCSLHAQoHSm9iR3JpZBJGChttaW5fcHJvZml0X3VzZF9taWNyb19zaWduZWQYASADKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBI1CgxmdW5kaW5nX3NldHMYAiADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLkZ1bmRpbmdTZXQSEwoLaG9sZG91dF9icHMYAyABKAQSEgoKbWF4X3BvaW50cxgEIAEoBBIUCgxzYXZlX3Byb2ZpbGUYBSABKAgiHQoKRnVuZGluZ1NldBIPCgdjbGFzc2VzGAEgAygJIt0BCg5CYWNrdGVzdFJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDAoEcm93cxgDIAEoBBIQCghhdHRlbXB0cxgEIAEoBBIUCgxsaXF1aWRhdGlvbnMYBSABKAQSQQoOY291bnRlcmZhY3R1YWwYBiABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlNoYWRvd0NvdW50ZXJmYWN0dWFsEhAKCHJlYWxpemVkGAcgASgJEhUKDXJlc3VsdF9zaGEyNTYYCCABKAwi/QEKFFNoYWRvd0NvdW50ZXJmYWN0dWFsEg8KB21hdGNoZWQYASABKAQSDwoHdW5rbm93bhgCIAEoBBIYChBmdW5kaW5nX2V4Y2x1ZGVkGAMgASgEEhUKDWJlbG93X21pbmltdW0YBCABKAQSDAoEd2lucxgFIAEoBBISCgpsb3N0X3JhY2VzGAYgASgEEhYKDm5vX2NoYWluX2V2ZW50GAcgASgEEjcKCXNjZW5hcmlvcxgIIAMoCzIkLmRhcmtib3QucHJvamVjdDAudjEuQ2FwaXRhbFNjZW5hcmlvEg8KB2xhbmRpbmcYCSABKAkSDgoGc2FmZXR5GAogASgJItMCCg9DYXBpdGFsU2NlbmFyaW8SGQoRY2FwaXRhbF91c2RfbWljcm8YASABKAQSDAoEd2lucxgCIAEoBBJDChh3aW5fbmV0X3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIXCg9mYWlsZWRfYXR0ZW1wdHMYBCABKAQSRgoZZmFpbGVkX2Nvc3RfdXNkX21pY3JvX3N1bRgFIAEoCzIjLmRhcmtib3QuY29udHJvbC52MS5VbnNpZ25lZERlY2ltYWwSGwoTZmFpbGVkX2Nvc3RfdW5rbm93bhgGIAEoBBITCgtvdmVyX2J1ZGdldBgHIAEoBBI/ChRuZXRfdXNkX21pY3JvX3NpZ25lZBgIIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIp0CCg5PcHRpbWl6ZVJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDgoGcG9pbnRzGAMgASgEEi4KBmNob3NlbhgEIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEjoKDmNob3Nlbl9ob2xkb3V0GAUgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVNjb3JlEjwKEGJhc2VsaW5lX2hvbGRvdXQYBiABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplU2NvcmUSFQoNcmVzdWx0X3NoYTI1NhgHIAEoDBIPCgdwcm9maWxlGAggASgJIpMBCg1PcHRpbWl6ZVNjb3JlEkEKDmNvdW50ZXJmYWN0dWFsGAEgASgLMikuZGFya2JvdC5wcm9qZWN0MC52MS5TaGFkb3dDb3VudGVyZmFjdHVhbBI/ChRvYmplY3RpdmVfYnBzX3NpZ25lZBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIqsBChJCYWNrdGVzdEpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhYKDm1pbl9wcm9maXRfdXNkGAIgASgJEhMKC2NhcGl0YWxfdXNkGAMgAygEEg8KB2Z1bmRpbmcYBCADKAkSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GAcgASgJIuIBChJPcHRpbWl6ZUpvYkNvbW1hbmQSOQoIYmFzZWxpbmUYASABKAsyJy5kYXJrYm90LnByb2plY3QwLnYxLkJhY2t0ZXN0Sm9iQ29tbWFuZBIbChNtaW5fcHJvZml0X3VzZF9ncmlkGAIgAygJEjUKDGZ1bmRpbmdfc2V0cxgDIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuRnVuZGluZ1NldBITCgtob2xkb3V0X2JwcxgEIAEoBBISCgptYXhfcG9pbnRzGAUgASgEEhQKDHNhdmVfcHJvZmlsZRgGIAEoCCJeChJCb290T2ZmbGluZUNvbW1hbmQSDAoEbW9kZRgBIAEoCRIYCgt0dGxfc2Vjb25kcxgCIAEoBEgAiAEBEhAKCGR1cmF0aW9uGAMgASgJQg4KDF90dGxfc2Vjb25kcyKGAQoSQm9vdE5ldHdvcmtDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSFAoMZ2VuZXNpc19oYXNoGAMgASgJEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgJEhYKDmNhcHR1cmVfc291cmNlGAUgASgJIqkBChBCb290U3RhcnRDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSEAoIZHVyYXRpb24YAyABKAkSFgoOY2FwdHVyZV9zb3VyY2UYBCABKAkSFAoMY2hhaW5fdmVyaWZ5GAUgASgJEhoKDXF1YWxpZmljYXRpb24YBiABKAlIAIgBAUIQCg5fcXVhbGlmaWNhdGlvbiKyAQoXQXV0b3N0YXJ0UHJldmlld0NvbW1hbmQSFQoNcXVhbGlmaWNhdGlvbhgBIAEoCRISCgpjaGVja3BvaW50GAIgASgJEhYKDm1pbmltdW1fcnVud2F5GAMgASgJEhQKDGdlbmVzaXNfaGFzaBgEIAEoCRITCgttYXhfcnVudGltZRgFIAEoCRIRCgl2YWxpZF9mb3IYBiABKAkSFgoOY2FwdHVyZV9zb3VyY2UYByABKAkiLwoVQXV0b3N0YXJ0R3JhbnRDb21tYW5kEhYKDmNvbmZpcm1fZGlnZXN0GAEgASgJIpcBChVQb3N0Q2FwdHVyZUpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhQKDGNoYWluX3ZlcmlmeRgCIAEoCRIPCgdvZmZsaW5lGAMgASgIEhsKE3Jlc3VtZV92ZXJpZmljYXRpb24YBCABKAgSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBEKXAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCDkFuYWx5dGljc1Byb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw", [file_darkbot_control_v1_numeric]);
+  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSLHAgoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCRIrCgRib290GAcgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290RmxvdxISCgpib290X2Vycm9yGAggASgJEjgKDXVudGlsX3N0b3BwZWQYCSABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZCKGAgoMVW50aWxTdG9wcGVkEjYKCWF1dG9zdGFydBgBIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSNAoHcHJldmlldxgCIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSRQoNcXVhbGlmaWNhdGlvbhgDIAEoCzIuLmRhcmtib3QucHJvamVjdDAudjEuVW50aWxTdG9wcGVkUXVhbGlmaWNhdGlvbhIxCgNydW4YBCABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZFJ1bhIOCgZlcnJvcnMYBSADKAkinAMKDkF1dG9zdGFydEdyYW50Eg4KBmRpZ2VzdBgBIAEoCRIMCgRtb2RlGAIgASgJEhUKDWNvbmZpZ19zaGEyNTYYAyABKAkSFQoNYmluYXJ5X3NoYTI1NhgEIAEoCRIQCghkdXJhdGlvbhgFIAEoCRIaChJjaGVja3BvaW50X3NlY29uZHMYBiABKAQSHgoWbWluaW11bV9ydW53YXlfc2Vjb25kcxgHIAEoBBIYChBxdWFsaWZpY2F0aW9uX2lkGAggASgJEhwKFHByb3ZpZGVyX2V2aWRlbmNlX2lkGAkgASgJEhQKDGdlbmVzaXNfaGFzaBgKIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgLIAEoCRIPCgdycGNfcnBzGAwgASgEEhQKDG1heF9yZXF1ZXN0cxgNIAEoBBIVCg1tYXhfdG90YWxfbWliGA4gASgEEhsKE21heF9ydW50aW1lX3NlY29uZHMYDyABKAQSFgoOZXhwaXJlc191bml4X3MYECABKAQSFwoPcmVjb3JkZWRfdW5peF9zGBEgASgEIqICChlVbnRpbFN0b3BwZWRRdWFsaWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBG1vZGUYAiABKAkSGgoSY2hlY2twb2ludF9zZWNvbmRzGAMgASgEEh4KFm1pbmltdW1fcnVud2F5X3NlY29uZHMYBCABKAQSEAoIY29tcGxldGUYBSABKAgSDAoEb3BlbhgGIAMoCRIYCgtldmlkZW5jZV9pZBgHIAEoCUgAiAEBEigKG2V2aWRlbmNlX3ZhbGlkX3VudGlsX3VuaXhfcxgIIAEoBEgBiAEBEhsKE3F1YWxpZmllZF9hdF91bml4X3MYCSABKARCDgoMX2V2aWRlbmNlX2lkQh4KHF9ldmlkZW5jZV92YWxpZF91bnRpbF91bml4X3MiuQIKD1VudGlsU3RvcHBlZFJ1bhIOCgZydW5faWQYASABKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgCIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgDIAEoBBIaChJjaGVja3BvaW50X3NlY29uZHMYBCABKAQSDwoHd2luZG93cxgFIAEoBBIZCgxsYXN0X3ZlcmRpY3QYBiABKAlIAIgBARITCgtsYXN0X2RldGFpbBgHIAEoCRIeChFsYXN0X2VuZGVkX3VuaXhfcxgIIAEoBEgBiAEBEhMKBmhhbHRlZBgJIAEoCUgCiAEBEg4KBnNlYWxlZBgKIAEoCBIQCghjb21wbGV0ZRgLIAEoCEIPCg1fbGFzdF92ZXJkaWN0QhQKEl9sYXN0X2VuZGVkX3VuaXhfc0IJCgdfaGFsdGVkIpgECghCb290RmxvdxIPCgdmbG93X2lkGAEgASgJEgwKBG1vZGUYAiABKAkSHAoPY3JlYXRlZF91bml4X21zGAMgASgESACIAQESFwoPb2ZmbGluZV92ZXJkaWN0GAQgASgJEhUKDW9mZmxpbmVfdG9rZW4YBSABKAkSFwoPb2ZmbGluZV9ibG9ja2VkGAYgAygJEhMKC3R0bF9zZWNvbmRzGAcgASgEEhIKCnR0bF9zb3VyY2UYCCABKAkSLgoHbmV0d29yaxgJIAEoCzIdLmRhcmtib3QucHJvamVjdDAudjEuQm9vdFN0ZXASHAoPbmV0d29ya192ZXJkaWN0GAogASgJSAGIAQESGgoNbmV0d29ya190b2tlbhgLIAEoCUgCiAEBEhcKD25ldHdvcmtfYmxvY2tlZBgMIAMoCRIcCg9vYnNlcnZlZF91bml4X3MYDSABKARIA4gBARIbCg5leHBpcmVzX3VuaXhfcxgOIAEoBEgEiAEBEiwKBXN0YXJ0GA8gASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290U3RlcBIQCghkdXJhdGlvbhgQIAEoCUISChBfY3JlYXRlZF91bml4X21zQhIKEF9uZXR3b3JrX3ZlcmRpY3RCEAoOX25ldHdvcmtfdG9rZW5CEgoQX29ic2VydmVkX3VuaXhfc0IRCg9fZXhwaXJlc191bml4X3MirQEKCEJvb3RTdGVwEg0KBXN0YXRlGAEgASgJEgwKBGNvZGUYAiABKAkSEwoGcnVuX2lkGAMgASgJSACIAQESHAoPc3RhcnRlZF91bml4X21zGAQgASgESAGIAQESHQoQZmluaXNoZWRfdW5peF9tcxgFIAEoBEgCiAEBQgkKB19ydW5faWRCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyKYAgoMQW5hbHl0aWNzUnVuEg4KBnJ1bl9pZBgBIAEoCRIMCgRyb290GAIgASgJEg4KBmxheW91dBgDIAEoCRIYChBjYXB0dXJlX2NvbXBsZXRlGAQgASgIEjwKDXF1YWxpZmljYXRpb24YBSABKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJ1blF1YWxpZmljYXRpb24SHQoQbW9kaWZpZWRfdW5peF9tcxgGIAEoBEgAiAEBEg8KB3J1bm5pbmcYByABKAgSPQoMdmVyaWZpY2F0aW9uGAggAygLMicuZGFya2JvdC5wcm9qZWN0MC52MS5WZXJpZmljYXRpb25NZXRob2RCEwoRX21vZGlmaWVkX3VuaXhfbXMi7QUKElZlcmlmaWNhdGlvbk1ldGhvZBIOCgZtZXRob2QYASABKAkSDwoHc3BlY19pZBgCIAEoCRIQCghhdHRlbXB0cxgDIAEoBBIPCgdydW5uaW5nGAQgASgIEg4KBnN0YXR1cxgFIAEoCRITCgZyZWFzb24YBiABKAlIAIgBARIWCglyZXN1bHRfaWQYByABKAlIAYgBARIPCgdvZmZsaW5lGAggASgIEh0KEHByb3ZpZGVyX2JpbmRpbmcYCSABKAlIAogBARIYChBjaGVja3BvaW50X3JlYWRzGAogASgEEhIKBWNhbGxzGAsgASgESAOIAQESEgoFYnl0ZXMYDCABKARIBIgBARIVCg1wcm9ncmVzc191bml0GA0gASgJEhUKDXByb2dyZXNzX2RvbmUYDiABKAQSGwoOcHJvZ3Jlc3NfdG90YWwYDyABKARIBYgBARIyCglxdWFsaWZpZWQYECADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSMQoIb2JzZXJ2ZWQYESADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSMAoHbWFya2VycxgSIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuTmFtZWRDb3VudBIzCgpjb21wYXJpc29uGBMgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5OYW1lZENvdW50EhoKDWRpc2FncmVlbWVudHMYFCABKARIBogBARIXCgp1bnJlc29sdmVkGBUgASgESAeIAQESFAoHdW5rbm93bhgWIAEoBEgIiAEBQgkKB19yZWFzb25CDAoKX3Jlc3VsdF9pZEITChFfcHJvdmlkZXJfYmluZGluZ0IICgZfY2FsbHNCCAoGX2J5dGVzQhEKD19wcm9ncmVzc190b3RhbEIQCg5fZGlzYWdyZWVtZW50c0INCgtfdW5yZXNvbHZlZEIKCghfdW5rbm93biIpCgpOYW1lZENvdW50EgwKBG5hbWUYASABKAkSDQoFY291bnQYAiABKAQicgoQUnVuUXVhbGlmaWNhdGlvbhIPCgd2ZXJkaWN0GAEgASgJEhQKDHZlcmlmaWNhdGlvbhgCIAEoCRIOCgZmYWlsZWQYAyADKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgEIAEoCRINCgVlcnJvchgFIAEoCSKUBQoMQW5hbHl0aWNzSm9iEg4KBmpvYl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEgsKA3J1bhgDIAEoCRINCgVzdGF0ZRgEIAEoCRIMCgRjb2RlGAUgASgJEh4KEXJlcXVlc3RlZF91bml4X21zGAYgASgESAGIAQESHAoPc3RhcnRlZF91bml4X21zGAcgASgESAKIAQESHQoQZmluaXNoZWRfdW5peF9tcxgIIAEoBEgDiAEBEhMKC21heF9zZWNvbmRzGAkgASgEEhUKDW1heF9yYW1fYnl0ZXMYCiABKAQSLgoGcGFyYW1zGAsgASgLMh4uZGFya2JvdC5wcm9qZWN0MC52MS5Kb2JQYXJhbXMSKgoEZ3JpZBgMIAEoCzIcLmRhcmtib3QucHJvamVjdDAudjEuSm9iR3JpZBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GA0gASgJEjcKCGJhY2t0ZXN0GA4gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5CYWNrdGVzdFJlc3VsdEgAEjcKCG9wdGltaXplGA8gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVJlc3VsdEgAEj4KDHBvc3RfY2FwdHVyZRgRIAEoCzImLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVSZXN1bHRIABI/ChFwb3N0X2NhcHR1cmVfc3BlYxgQIAEoCzIkLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVTcGVjQggKBnJlc3VsdEIUChJfcmVxdWVzdGVkX3VuaXhfbXNCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyJjCg9Qb3N0Q2FwdHVyZVNwZWMSFAoMY2hhaW5fdmVyaWZ5GAEgASgJEg8KB29mZmxpbmUYAiABKAgSDgoGcmVzdW1lGAMgASgIEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgIIlAKEVBvc3RDYXB0dXJlUmVzdWx0EhcKD3ZlcmlmaWNhdGlvbl9vaxgBIAEoCBIRCglyZXBvcnRfb2sYAiABKAgSDwoHdmVyZGljdBgDIAEoCSJ/CglKb2JQYXJhbXMSRgobbWluX3Byb2ZpdF91c2RfbWljcm9fc2lnbmVkGAEgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSGQoRY2FwaXRhbF91c2RfbWljcm8YAiADKAQSDwoHZnVuZGluZxgDIAMoCSLHAQoHSm9iR3JpZBJGChttaW5fcHJvZml0X3VzZF9taWNyb19zaWduZWQYASADKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBI1CgxmdW5kaW5nX3NldHMYAiADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLkZ1bmRpbmdTZXQSEwoLaG9sZG91dF9icHMYAyABKAQSEgoKbWF4X3BvaW50cxgEIAEoBBIUCgxzYXZlX3Byb2ZpbGUYBSABKAgiHQoKRnVuZGluZ1NldBIPCgdjbGFzc2VzGAEgAygJIt0BCg5CYWNrdGVzdFJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDAoEcm93cxgDIAEoBBIQCghhdHRlbXB0cxgEIAEoBBIUCgxsaXF1aWRhdGlvbnMYBSABKAQSQQoOY291bnRlcmZhY3R1YWwYBiABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlNoYWRvd0NvdW50ZXJmYWN0dWFsEhAKCHJlYWxpemVkGAcgASgJEhUKDXJlc3VsdF9zaGEyNTYYCCABKAwi/QEKFFNoYWRvd0NvdW50ZXJmYWN0dWFsEg8KB21hdGNoZWQYASABKAQSDwoHdW5rbm93bhgCIAEoBBIYChBmdW5kaW5nX2V4Y2x1ZGVkGAMgASgEEhUKDWJlbG93X21pbmltdW0YBCABKAQSDAoEd2lucxgFIAEoBBISCgpsb3N0X3JhY2VzGAYgASgEEhYKDm5vX2NoYWluX2V2ZW50GAcgASgEEjcKCXNjZW5hcmlvcxgIIAMoCzIkLmRhcmtib3QucHJvamVjdDAudjEuQ2FwaXRhbFNjZW5hcmlvEg8KB2xhbmRpbmcYCSABKAkSDgoGc2FmZXR5GAogASgJItMCCg9DYXBpdGFsU2NlbmFyaW8SGQoRY2FwaXRhbF91c2RfbWljcm8YASABKAQSDAoEd2lucxgCIAEoBBJDChh3aW5fbmV0X3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIXCg9mYWlsZWRfYXR0ZW1wdHMYBCABKAQSRgoZZmFpbGVkX2Nvc3RfdXNkX21pY3JvX3N1bRgFIAEoCzIjLmRhcmtib3QuY29udHJvbC52MS5VbnNpZ25lZERlY2ltYWwSGwoTZmFpbGVkX2Nvc3RfdW5rbm93bhgGIAEoBBITCgtvdmVyX2J1ZGdldBgHIAEoBBI/ChRuZXRfdXNkX21pY3JvX3NpZ25lZBgIIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIp0CCg5PcHRpbWl6ZVJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDgoGcG9pbnRzGAMgASgEEi4KBmNob3NlbhgEIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEjoKDmNob3Nlbl9ob2xkb3V0GAUgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVNjb3JlEjwKEGJhc2VsaW5lX2hvbGRvdXQYBiABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplU2NvcmUSFQoNcmVzdWx0X3NoYTI1NhgHIAEoDBIPCgdwcm9maWxlGAggASgJIpMBCg1PcHRpbWl6ZVNjb3JlEkEKDmNvdW50ZXJmYWN0dWFsGAEgASgLMikuZGFya2JvdC5wcm9qZWN0MC52MS5TaGFkb3dDb3VudGVyZmFjdHVhbBI/ChRvYmplY3RpdmVfYnBzX3NpZ25lZBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIqsBChJCYWNrdGVzdEpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhYKDm1pbl9wcm9maXRfdXNkGAIgASgJEhMKC2NhcGl0YWxfdXNkGAMgAygEEg8KB2Z1bmRpbmcYBCADKAkSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GAcgASgJIuIBChJPcHRpbWl6ZUpvYkNvbW1hbmQSOQoIYmFzZWxpbmUYASABKAsyJy5kYXJrYm90LnByb2plY3QwLnYxLkJhY2t0ZXN0Sm9iQ29tbWFuZBIbChNtaW5fcHJvZml0X3VzZF9ncmlkGAIgAygJEjUKDGZ1bmRpbmdfc2V0cxgDIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuRnVuZGluZ1NldBITCgtob2xkb3V0X2JwcxgEIAEoBBISCgptYXhfcG9pbnRzGAUgASgEEhQKDHNhdmVfcHJvZmlsZRgGIAEoCCJeChJCb290T2ZmbGluZUNvbW1hbmQSDAoEbW9kZRgBIAEoCRIYCgt0dGxfc2Vjb25kcxgCIAEoBEgAiAEBEhAKCGR1cmF0aW9uGAMgASgJQg4KDF90dGxfc2Vjb25kcyKGAQoSQm9vdE5ldHdvcmtDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSFAoMZ2VuZXNpc19oYXNoGAMgASgJEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgJEhYKDmNhcHR1cmVfc291cmNlGAUgASgJIqkBChBCb290U3RhcnRDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSEAoIZHVyYXRpb24YAyABKAkSFgoOY2FwdHVyZV9zb3VyY2UYBCABKAkSFAoMY2hhaW5fdmVyaWZ5GAUgASgJEhoKDXF1YWxpZmljYXRpb24YBiABKAlIAIgBAUIQCg5fcXVhbGlmaWNhdGlvbiKyAQoXQXV0b3N0YXJ0UHJldmlld0NvbW1hbmQSFQoNcXVhbGlmaWNhdGlvbhgBIAEoCRISCgpjaGVja3BvaW50GAIgASgJEhYKDm1pbmltdW1fcnVud2F5GAMgASgJEhQKDGdlbmVzaXNfaGFzaBgEIAEoCRITCgttYXhfcnVudGltZRgFIAEoCRIRCgl2YWxpZF9mb3IYBiABKAkSFgoOY2FwdHVyZV9zb3VyY2UYByABKAkiLwoVQXV0b3N0YXJ0R3JhbnRDb21tYW5kEhYKDmNvbmZpcm1fZGlnZXN0GAEgASgJIpcBChVQb3N0Q2FwdHVyZUpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhQKDGNoYWluX3ZlcmlmeRgCIAEoCRIPCgdvZmZsaW5lGAMgASgIEhsKE3Jlc3VtZV92ZXJpZmljYXRpb24YBCABKAgSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBEKXAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCDkFuYWx5dGljc1Byb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw", [file_darkbot_control_v1_numeric]);
 
 /**
  * project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
@@ -684,6 +684,14 @@ export type AnalyticsRun = Message<"darkbot.project0.v1.AnalyticsRun"> & {
    * @generated from field: bool running = 7;
    */
   running: boolean;
+
+  /**
+   * DEC-08: every chain verification method of the run (its typed verification records): the
+   * Capture tab's state and the Analytics tab's methods side by side.
+   *
+   * @generated from field: repeated darkbot.project0.v1.VerificationMethod verification = 8;
+   */
+  verification: VerificationMethod[];
 };
 
 /**
@@ -692,6 +700,206 @@ export type AnalyticsRun = Message<"darkbot.project0.v1.AnalyticsRun"> & {
  */
 export const AnalyticsRunSchema: GenMessage<AnalyticsRun> = /*@__PURE__*/
   messageDesc(file_darkbot_project0_v1_analytics, 7);
+
+/**
+ * DEC-08 (ENTSCHEIDUNGEN §8.6): one chain verification method of a run, its spec with the
+ * newest attempt and its newest finished result. Never a promotion: INDEX_VERIFIED <
+ * CROSSCHECK_VERIFIED < CANONICAL_VERIFIED, only STRICT is canonical; an absent count is unknown.
+ *
+ * @generated from message darkbot.project0.v1.VerificationMethod
+ */
+export type VerificationMethod = Message<"darkbot.project0.v1.VerificationMethod"> & {
+  /**
+   * off | index | strict | crosscheck
+   *
+   * @generated from field: string method = 1;
+   */
+  method: string;
+
+  /**
+   * The verification spec (content id).
+   *
+   * @generated from field: string spec_id = 2;
+   */
+  specId: string;
+
+  /**
+   * Attempts of the spec.
+   *
+   * @generated from field: uint64 attempts = 3;
+   */
+  attempts: bigint;
+
+  /**
+   * The newest attempt has started and not ended.
+   *
+   * @generated from field: bool running = 4;
+   */
+  running: boolean;
+
+  /**
+   * RUNNING, NOT_RUN, INDEX_VERIFIED, CROSSCHECK_VERIFIED, CANONICAL_VERIFIED or
+   * HISTORICAL_INCOMPLETE.
+   *
+   * @generated from field: string status = 5;
+   */
+  status: string;
+
+  /**
+   * The newest attempt's block or incompleteness reason (block_reason).
+   *
+   * @generated from field: optional string reason = 6;
+   */
+  reason?: string;
+
+  /**
+   * The newest finished attempt's result id (the counts below are its).
+   *
+   * @generated from field: optional string result_id = 7;
+   */
+  resultId?: string;
+
+  /**
+   * The newest attempt read its checkpoint only.
+   *
+   * @generated from field: bool offline = 8;
+   */
+  offline: boolean;
+
+  /**
+   * SHA-256 of the provider endpoint(s) the spec binds (never the endpoint); unset offline.
+   *
+   * @generated from field: optional string provider_binding = 9;
+   */
+  providerBinding?: string;
+
+  /**
+   * Typed chain reads held in the checkpoint (a resume reads them without the network).
+   *
+   * @generated from field: uint64 checkpoint_reads = 10;
+   */
+  checkpointReads: bigint;
+
+  /**
+   * Requests of the newest result.
+   *
+   * @generated from field: optional uint64 calls = 11;
+   */
+  calls?: bigint;
+
+  /**
+   * Response bytes of the newest result.
+   *
+   * @generated from field: optional uint64 bytes = 12;
+   */
+  bytes?: bigint;
+
+  /**
+   * pages (INDEX, CROSSCHECK: both sources) or slots (STRICT).
+   *
+   * @generated from field: string progress_unit = 13;
+   */
+  progressUnit: string;
+
+  /**
+   * Progress done.
+   *
+   * @generated from field: uint64 progress_done = 14;
+   */
+  progressDone: bigint;
+
+  /**
+   * Progress expected; unset when unknown.
+   *
+   * @generated from field: optional uint64 progress_total = 15;
+   */
+  progressTotal?: bigint;
+
+  /**
+   * Qualified events per liquidation kind (empty: unknown).
+   *
+   * @generated from field: repeated darkbot.project0.v1.NamedCount qualified = 16;
+   */
+  qualified: NamedCount[];
+
+  /**
+   * Program events per kind including unqualified transactions (empty: unknown).
+   *
+   * @generated from field: repeated darkbot.project0.v1.NamedCount observed = 17;
+   */
+  observed: NamedCount[];
+
+  /**
+   * The six markers (empty: unknown).
+   *
+   * @generated from field: repeated darkbot.project0.v1.NamedCount markers = 18;
+   */
+  markers: NamedCount[];
+
+  /**
+   * Found and missing events and deviations against the capture (detection and transaction
+   * statuses of the INDEX comparison).
+   *
+   * @generated from field: repeated darkbot.project0.v1.NamedCount comparison = 19;
+   */
+  comparison: NamedCount[];
+
+  /**
+   * CROSSCHECK: transactions the two sources read differently.
+   *
+   * @generated from field: optional uint64 disagreements = 20;
+   */
+  disagreements?: bigint;
+
+  /**
+   * Transactions of the window the provider left unresolved (null or pruned).
+   *
+   * @generated from field: optional uint64 unresolved = 21;
+   */
+  unresolved?: bigint;
+
+  /**
+   * Transactions of the window that stayed unqualified.
+   *
+   * @generated from field: optional uint64 unknown = 22;
+   */
+  unknown?: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.VerificationMethod.
+ * Use `create(VerificationMethodSchema)` to create a new message.
+ */
+export const VerificationMethodSchema: GenMessage<VerificationMethod> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 8);
+
+/**
+ * A count under a bounded name.
+ *
+ * @generated from message darkbot.project0.v1.NamedCount
+ */
+export type NamedCount = Message<"darkbot.project0.v1.NamedCount"> & {
+  /**
+   * Bounded name (a kind, marker or status code).
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Occurrences.
+   *
+   * @generated from field: uint64 count = 2;
+   */
+  count: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.NamedCount.
+ * Use `create(NamedCountSchema)` to create a new message.
+ */
+export const NamedCountSchema: GenMessage<NamedCount> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 9);
 
 /**
  * The newest C0-E1 master qualification record of a run.
@@ -740,7 +948,7 @@ export type RunQualification = Message<"darkbot.project0.v1.RunQualification"> &
  * Use `create(RunQualificationSchema)` to create a new message.
  */
 export const RunQualificationSchema: GenMessage<RunQualification> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 8);
+  messageDesc(file_darkbot_project0_v1_analytics, 10);
 
 /**
  * One analytics job of the controller's store.
@@ -883,7 +1091,7 @@ export type AnalyticsJob = Message<"darkbot.project0.v1.AnalyticsJob"> & {
  * Use `create(AnalyticsJobSchema)` to create a new message.
  */
 export const AnalyticsJobSchema: GenMessage<AnalyticsJob> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 9);
+  messageDesc(file_darkbot_project0_v1_analytics, 11);
 
 /**
  * The verification request of a post-capture job (A08/F-02).
@@ -892,14 +1100,14 @@ export const AnalyticsJobSchema: GenMessage<AnalyticsJob> = /*@__PURE__*/
  */
 export type PostCaptureSpec = Message<"darkbot.project0.v1.PostCaptureSpec"> & {
   /**
-   * off (identities only, no chain read) or strict.
+   * off (identities only, no chain read), index, strict or crosscheck (DEC-08).
    *
    * @generated from field: string chain_verify = 1;
    */
   chainVerify: string;
 
   /**
-   * Strict from the verification cache only (no network).
+   * A history read from the verification checkpoint only (no network).
    *
    * @generated from field: bool offline = 2;
    */
@@ -913,7 +1121,7 @@ export type PostCaptureSpec = Message<"darkbot.project0.v1.PostCaptureSpec"> & {
   resume: boolean;
 
   /**
-   * An operator provider evidence was given (online strict; terminal only).
+   * An operator provider evidence was given (an online history read; terminal only).
    *
    * @generated from field: bool provider_evidence = 4;
    */
@@ -925,7 +1133,7 @@ export type PostCaptureSpec = Message<"darkbot.project0.v1.PostCaptureSpec"> & {
  * Use `create(PostCaptureSpecSchema)` to create a new message.
  */
 export const PostCaptureSpecSchema: GenMessage<PostCaptureSpec> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 10);
+  messageDesc(file_darkbot_project0_v1_analytics, 12);
 
 /**
  * A completed post-capture chain: each stage's outcome (the qualification record is the run's).
@@ -960,7 +1168,7 @@ export type PostCaptureResult = Message<"darkbot.project0.v1.PostCaptureResult">
  * Use `create(PostCaptureResultSchema)` to create a new message.
  */
 export const PostCaptureResultSchema: GenMessage<PostCaptureResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 11);
+  messageDesc(file_darkbot_project0_v1_analytics, 13);
 
 /**
  * Economic parameters of a backtest point.
@@ -995,7 +1203,7 @@ export type JobParams = Message<"darkbot.project0.v1.JobParams"> & {
  * Use `create(JobParamsSchema)` to create a new message.
  */
 export const JobParamsSchema: GenMessage<JobParams> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 12);
+  messageDesc(file_darkbot_project0_v1_analytics, 14);
 
 /**
  * The bounded explicit grid of an optimization.
@@ -1044,7 +1252,7 @@ export type JobGrid = Message<"darkbot.project0.v1.JobGrid"> & {
  * Use `create(JobGridSchema)` to create a new message.
  */
 export const JobGridSchema: GenMessage<JobGrid> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 13);
+  messageDesc(file_darkbot_project0_v1_analytics, 15);
 
 /**
  * Admitted funding classes; empty: every class.
@@ -1065,7 +1273,7 @@ export type FundingSet = Message<"darkbot.project0.v1.FundingSet"> & {
  * Use `create(FundingSetSchema)` to create a new message.
  */
 export const FundingSetSchema: GenMessage<FundingSet> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 14);
+  messageDesc(file_darkbot_project0_v1_analytics, 16);
 
 /**
  * A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
@@ -1135,7 +1343,7 @@ export type BacktestResult = Message<"darkbot.project0.v1.BacktestResult"> & {
  * Use `create(BacktestResultSchema)` to create a new message.
  */
 export const BacktestResultSchema: GenMessage<BacktestResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 15);
+  messageDesc(file_darkbot_project0_v1_analytics, 17);
 
 /**
  * Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVALUATED.
@@ -1219,7 +1427,7 @@ export type ShadowCounterfactual = Message<"darkbot.project0.v1.ShadowCounterfac
  * Use `create(ShadowCounterfactualSchema)` to create a new message.
  */
 export const ShadowCounterfactualSchema: GenMessage<ShadowCounterfactual> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 16);
+  messageDesc(file_darkbot_project0_v1_analytics, 18);
 
 /**
  * One capital scenario of the counterfactual.
@@ -1289,7 +1497,7 @@ export type CapitalScenario = Message<"darkbot.project0.v1.CapitalScenario"> & {
  * Use `create(CapitalScenarioSchema)` to create a new message.
  */
 export const CapitalScenarioSchema: GenMessage<CapitalScenario> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 17);
+  messageDesc(file_darkbot_project0_v1_analytics, 19);
 
 /**
  * A completed optimization: the point chosen on the training part and its holdout score.
@@ -1359,7 +1567,7 @@ export type OptimizeResult = Message<"darkbot.project0.v1.OptimizeResult"> & {
  * Use `create(OptimizeResultSchema)` to create a new message.
  */
 export const OptimizeResultSchema: GenMessage<OptimizeResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 18);
+  messageDesc(file_darkbot_project0_v1_analytics, 20);
 
 /**
  * The score of one point on one part of the window.
@@ -1387,7 +1595,7 @@ export type OptimizeScore = Message<"darkbot.project0.v1.OptimizeScore"> & {
  * Use `create(OptimizeScoreSchema)` to create a new message.
  */
 export const OptimizeScoreSchema: GenMessage<OptimizeScore> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 19);
+  messageDesc(file_darkbot_project0_v1_analytics, 21);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.backtest.start: the options of
@@ -1452,7 +1660,7 @@ export type BacktestJobCommand = Message<"darkbot.project0.v1.BacktestJobCommand
  * Use `create(BacktestJobCommandSchema)` to create a new message.
  */
 export const BacktestJobCommandSchema: GenMessage<BacktestJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 20);
+  messageDesc(file_darkbot_project0_v1_analytics, 22);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of
@@ -1509,7 +1717,7 @@ export type OptimizeJobCommand = Message<"darkbot.project0.v1.OptimizeJobCommand
  * Use `create(OptimizeJobCommandSchema)` to create a new message.
  */
 export const OptimizeJobCommandSchema: GenMessage<OptimizeJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 21);
+  messageDesc(file_darkbot_project0_v1_analytics, 23);
 
 /**
  * Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
@@ -1545,7 +1753,7 @@ export type BootOfflineCommand = Message<"darkbot.project0.v1.BootOfflineCommand
  * Use `create(BootOfflineCommandSchema)` to create a new message.
  */
 export const BootOfflineCommandSchema: GenMessage<BootOfflineCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 22);
+  messageDesc(file_darkbot_project0_v1_analytics, 24);
 
 /**
  * Parameters of project0.boot.network: the operator's approval of exactly this offline token;
@@ -1597,7 +1805,7 @@ export type BootNetworkCommand = Message<"darkbot.project0.v1.BootNetworkCommand
  * Use `create(BootNetworkCommandSchema)` to create a new message.
  */
 export const BootNetworkCommandSchema: GenMessage<BootNetworkCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 23);
+  messageDesc(file_darkbot_project0_v1_analytics, 25);
 
 /**
  * Parameters of project0.boot.start: the operator's approval of exactly this network token.
@@ -1634,7 +1842,8 @@ export type BootStartCommand = Message<"darkbot.project0.v1.BootStartCommand"> &
   captureSource: string;
 
   /**
-   * off | strict
+   * off (the GUI start; a history read online needs the operator's provider evidence and stays
+   * terminal: `p0ctl boot start --chain-verify index|strict|crosscheck --provider-evidence`)
    *
    * @generated from field: string chain_verify = 5;
    */
@@ -1653,7 +1862,7 @@ export type BootStartCommand = Message<"darkbot.project0.v1.BootStartCommand"> &
  * Use `create(BootStartCommandSchema)` to create a new message.
  */
 export const BootStartCommandSchema: GenMessage<BootStartCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 24);
+  messageDesc(file_darkbot_project0_v1_analytics, 26);
 
 /**
  * DEC-16: parameters of project0.autostart.preview — the terms of a standing autostart
@@ -1718,7 +1927,7 @@ export type AutostartPreviewCommand = Message<"darkbot.project0.v1.AutostartPrev
  * Use `create(AutostartPreviewCommandSchema)` to create a new message.
  */
 export const AutostartPreviewCommandSchema: GenMessage<AutostartPreviewCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 25);
+  messageDesc(file_darkbot_project0_v1_analytics, 27);
 
 /**
  * DEC-16: parameters of project0.autostart.grant — the operator confirms exactly the previewed
@@ -1740,7 +1949,7 @@ export type AutostartGrantCommand = Message<"darkbot.project0.v1.AutostartGrantC
  * Use `create(AutostartGrantCommandSchema)` to create a new message.
  */
 export const AutostartGrantCommandSchema: GenMessage<AutostartGrantCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 26);
+  messageDesc(file_darkbot_project0_v1_analytics, 28);
 
 /**
  * Parameters (CommandRequest.params) of project0.capture.verify.start: the options of
@@ -1758,14 +1967,15 @@ export type PostCaptureJobCommand = Message<"darkbot.project0.v1.PostCaptureJobC
   runId: string;
 
   /**
-   * off or strict (strict only with offline).
+   * off, or index | strict | crosscheck from the checkpoint only (with offline; online needs the
+   * operator's provider evidence and stays terminal).
    *
    * @generated from field: string chain_verify = 2;
    */
   chainVerify: string;
 
   /**
-   * Strict from the verification cache only (no network).
+   * A history read from the verification checkpoint only (no network).
    *
    * @generated from field: bool offline = 3;
    */
@@ -1798,4 +2008,4 @@ export type PostCaptureJobCommand = Message<"darkbot.project0.v1.PostCaptureJobC
  * Use `create(PostCaptureJobCommandSchema)` to create a new message.
  */
 export const PostCaptureJobCommandSchema: GenMessage<PostCaptureJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 27);
+  messageDesc(file_darkbot_project0_v1_analytics, 29);

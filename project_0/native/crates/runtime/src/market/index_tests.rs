@@ -1215,6 +1215,62 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
     );
     assert_eq!(std::fs::read_dir(out.join("attempts")).unwrap().count(), 2);
     no_promotion(&root, &index.join("results"));
+    // DEC-08: the Capture/Analytics state of the method, as its records hold it.
+    let methods = super::super::verification_view::methods(&root);
+    let [m] = &methods[..] else {
+        panic!("{methods:?}")
+    };
+    assert_eq!(
+        (m.method.as_str(), m.status.as_str(), m.attempts, m.running),
+        ("index", "INDEX_VERIFIED", 2, false)
+    );
+    assert_eq!(
+        (
+            m.offline,
+            m.provider_binding.as_ref(),
+            m.calls,
+            m.checkpoint_reads
+        ),
+        (true, None, Some(0), 3)
+    );
+    assert_eq!(
+        m.qualified[1],
+        ("RECEIVERSHIP".to_string(), verified.qualified[1])
+    );
+    assert_eq!(m.markers.len(), 6);
+    assert_eq!(
+        m.comparison,
+        verified
+            .comparison_counts
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect::<Vec<_>>()
+    );
+    // A started attempt that has not ended is RUNNING (its counts stay the newest result's).
+    let running = out.join("attempts").join("z-running");
+    std::fs::create_dir_all(&running).unwrap();
+    let mut start: strict_driver::AttemptRecord = journal::read_typed_value(
+        &std::fs::read_dir(out.join("attempts"))
+            .unwrap()
+            .flatten()
+            .find(|e| e.path() != running)
+            .unwrap()
+            .path()
+            .join("start.p0j"),
+    )
+    .unwrap();
+    start.at_unix_ns = u64::MAX;
+    journal::write_typed_value(&running.join("start.p0j"), source::STRICT, &start).unwrap();
+    let methods = super::super::verification_view::methods(&root);
+    assert_eq!(
+        (
+            methods[0].status.as_str(),
+            methods[0].running,
+            methods[0].attempts
+        ),
+        ("RUNNING", true, 3)
+    );
+    assert_eq!(methods[0].qualified, m.qualified);
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -1571,5 +1627,19 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
         .iter()
         .any(|r| r.status == "CROSSCHECK_VERIFIED" && r.primary.calls == 0));
     no_promotion(&root, &out.join("crosscheck/results"));
+    let methods = super::super::verification_view::methods(&root);
+    let [m] = &methods[..] else {
+        panic!("{methods:?}")
+    };
+    assert_eq!(
+        (
+            m.method.as_str(),
+            m.status.as_str(),
+            m.disagreements,
+            m.checkpoint_reads
+        ),
+        ("crosscheck", "CROSSCHECK_VERIFIED", Some(0), 6)
+    );
+    assert_eq!(m.progress_done, 4, "two pages from each source");
     let _ = std::fs::remove_dir_all(&d);
 }

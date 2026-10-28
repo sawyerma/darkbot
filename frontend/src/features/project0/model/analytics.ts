@@ -19,6 +19,76 @@ export interface AnalyticsRunView {
   qualification: RunQualificationView | null;
   modifiedUnixMs: bigint | null;
   running: boolean;
+  /** DEC-08: every chain verification method of the run (its typed verification records). */
+  verification: readonly VerificationMethodView[];
+}
+
+/** A count under a bounded name (a liquidation kind, a marker or a status code). */
+export interface NamedCountView { name: string; count: bigint }
+
+/**
+ * DEC-08: one chain verification method of a run — its spec with the newest attempt and its
+ * newest finished result. Never a promotion (only strict reaches CANONICAL_VERIFIED); an
+ * unknown count is null or an empty list, never 0.
+ */
+export interface VerificationMethodView {
+  /** off | index | strict | crosscheck */
+  method: string;
+  specId: string;
+  attempts: bigint;
+  running: boolean;
+  /** RUNNING, NOT_RUN, INDEX_VERIFIED, CROSSCHECK_VERIFIED, CANONICAL_VERIFIED or HISTORICAL_INCOMPLETE. */
+  status: string;
+  /** The newest attempt's block or incompleteness reason (block_reason). */
+  reason: string | null;
+  resultId: string | null;
+  offline: boolean;
+  /** SHA-256 of the provider endpoint(s), never the endpoint; null offline. */
+  providerBinding: string | null;
+  checkpointReads: bigint;
+  calls: bigint | null;
+  bytes: bigint | null;
+  progressUnit: string;
+  progressDone: bigint;
+  progressTotal: bigint | null;
+  qualified: readonly NamedCountView[];
+  observed: readonly NamedCountView[];
+  markers: readonly NamedCountView[];
+  comparison: readonly NamedCountView[];
+  disagreements: bigint | null;
+  unresolved: bigint | null;
+  unknown: bigint | null;
+}
+
+/** DEC-08: the Capture tab's line of one method: status, progress, provider, requests, bytes,
+ *  checkpoint and block reason as the records hold them. */
+export function methodLine(m: VerificationMethodView): string {
+  const progress = `${m.progressDone}${m.progressTotal != null ? ` / ${m.progressTotal}` : ""} ${m.progressUnit}`;
+  const provider = m.offline ? "checkpoint only" : m.providerBinding ? `provider ${m.providerBinding.slice(0, 12)}` : "no provider";
+  return `${m.status}${m.reason ? ` (${m.reason})` : ""} · progress ${progress} · ${provider} · requests ${m.calls ?? "—"} · bytes ${m.bytes ?? "—"} · checkpoint ${m.checkpointReads} reads · ${m.attempts} attempt${m.attempts === 1n ? "" : "s"}`;
+}
+
+/** DEC-08: the methods the Analytics tab shows side by side, in their rank order. */
+export const COMPARED_METHODS = ["index", "crosscheck", "strict"] as const;
+
+/** One value per compared method (`—` for a method the run never ran). */
+export function sideBySide(methods: readonly VerificationMethodView[], value: (m: VerificationMethodView) => string): string {
+  return COMPARED_METHODS.map((name) => {
+    const m = methods.find((x) => x.method === name);
+    return `${name} ${m ? value(m) : "—"}`;
+  }).join(" · ");
+}
+
+/** The count of `name` in a complete list; `—` when the list is unknown (empty). */
+export function countOf(list: readonly NamedCountView[], name: string): string {
+  if (list.length === 0) return "—";
+  return (list.find((c) => c.name === name)?.count ?? 0n).toString();
+}
+
+/** The sum of the comparison counts whose name starts with one of `prefixes`; `—` when unknown. */
+export function comparisonSum(m: VerificationMethodView, prefixes: readonly string[]): string {
+  if (m.comparison.length === 0) return "—";
+  return m.comparison.filter((c) => prefixes.some((p) => c.name.startsWith(p))).reduce((n, c) => n + c.count, 0n).toString();
 }
 
 export interface JobParamsView {

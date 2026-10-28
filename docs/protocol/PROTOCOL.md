@@ -115,6 +115,7 @@
     - [FundingSet](#darkbot-project0-v1-FundingSet)
     - [JobGrid](#darkbot-project0-v1-JobGrid)
     - [JobParams](#darkbot-project0-v1-JobParams)
+    - [NamedCount](#darkbot-project0-v1-NamedCount)
     - [OptimizeJobCommand](#darkbot-project0-v1-OptimizeJobCommand)
     - [OptimizeResult](#darkbot-project0-v1-OptimizeResult)
     - [OptimizeScore](#darkbot-project0-v1-OptimizeScore)
@@ -126,6 +127,7 @@
     - [UntilStopped](#darkbot-project0-v1-UntilStopped)
     - [UntilStoppedQualification](#darkbot-project0-v1-UntilStoppedQualification)
     - [UntilStoppedRun](#darkbot-project0-v1-UntilStoppedRun)
+    - [VerificationMethod](#darkbot-project0-v1-VerificationMethod)
 
 - [darkbot/project0/v1/capture.proto](#darkbot_project0_v1_capture-proto)
     - [CaptureState](#darkbot-project0-v1-CaptureState)
@@ -1849,6 +1851,7 @@ One run directory under the project&#39;s run roots.
 | qualification | [RunQualification](#darkbot-project0-v1-RunQualification) |  | The newest post-capture qualification (A12/F-03); unset when none is recorded. |
 | modified_unix_ms | [uint64](#uint64) | optional | Directory modification time; unset when unreadable. |
 | running | [bool](#bool) |  | The runtime owner runs it now. |
+| verification | [VerificationMethod](#darkbot-project0-v1-VerificationMethod) | repeated | DEC-08: every chain verification method of the run (its typed verification records): the Capture tab&#39;s state and the Analytics tab&#39;s methods side by side. |
 
 
 
@@ -2052,7 +2055,7 @@ Parameters of project0.boot.start: the operator&#39;s approval of exactly this n
 | approved_token | [string](#string) |  | The flow&#39;s network token (16 characters) as the operator saw it. |
 | duration | [string](#string) |  | Must equal the flow&#39;s duration (`p0ctl boot start` refuses another one). |
 | capture_source | [string](#string) |  | logs | transactions |
-| chain_verify | [string](#string) |  | off | strict |
+| chain_verify | [string](#string) |  | off (the GUI start; a history read online needs the operator&#39;s provider evidence and stays terminal: `p0ctl boot start --chain-verify index|strict|crosscheck --provider-evidence`) |
 | qualification | [string](#string) | optional | DEC-16: an unbounded flow&#39;s qualification id (16 hex digits); required for until-stopped. |
 
 
@@ -2152,6 +2155,22 @@ Economic parameters of a backtest point.
 
 
 
+<a name="darkbot-project0-v1-NamedCount"></a>
+
+### NamedCount
+A count under a bounded name.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | Bounded name (a kind, marker or status code). |
+| count | [uint64](#uint64) |  | Occurrences. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-OptimizeJobCommand"></a>
 
 ### OptimizeJobCommand
@@ -2222,8 +2241,8 @@ evidence and stays terminal-only).
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | run_id | [string](#string) |  | The run id under the project&#39;s run roots (never a path). |
-| chain_verify | [string](#string) |  | off or strict (strict only with offline). |
-| offline | [bool](#bool) |  | Strict from the verification cache only (no network). |
+| chain_verify | [string](#string) |  | off, or index | strict | crosscheck from the checkpoint only (with offline; online needs the operator&#39;s provider evidence and stays terminal). |
+| offline | [bool](#bool) |  | A history read from the verification checkpoint only (no network). |
 | resume_verification | [bool](#bool) |  | Resume an incomplete verification. |
 | max_seconds | [uint64](#uint64) |  | The verification&#39;s time budget. |
 | max_ram_bytes | [uint64](#uint64) |  | The verification&#39;s memory budget. |
@@ -2258,10 +2277,10 @@ The verification request of a post-capture job (A08/F-02).
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| chain_verify | [string](#string) |  | off (identities only, no chain read) or strict. |
-| offline | [bool](#bool) |  | Strict from the verification cache only (no network). |
+| chain_verify | [string](#string) |  | off (identities only, no chain read), index, strict or crosscheck (DEC-08). |
+| offline | [bool](#bool) |  | A history read from the verification checkpoint only (no network). |
 | resume | [bool](#bool) |  | Resume an incomplete verification. |
-| provider_evidence | [bool](#bool) |  | An operator provider evidence was given (online strict; terminal only). |
+| provider_evidence | [bool](#bool) |  | An operator provider evidence was given (an online history read; terminal only). |
 
 
 
@@ -2374,6 +2393,44 @@ DEC-16: an unbounded raw capture&#39;s windows journal as far as it is written.
 | halted | [string](#string) | optional | The verdict that halted the run; unset while every window held. |
 | sealed | [bool](#bool) |  | The run ended: its windows journal is sealed. |
 | complete | [bool](#bool) |  | Sealed complete: an ordered end (operator stop or maximum runtime) of a run that never halted. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-VerificationMethod"></a>
+
+### VerificationMethod
+DEC-08 (ENTSCHEIDUNGEN §8.6): one chain verification method of a run, its spec with the
+newest attempt and its newest finished result. Never a promotion: INDEX_VERIFIED &lt;
+CROSSCHECK_VERIFIED &lt; CANONICAL_VERIFIED, only STRICT is canonical; an absent count is unknown.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| method | [string](#string) |  | off | index | strict | crosscheck |
+| spec_id | [string](#string) |  | The verification spec (content id). |
+| attempts | [uint64](#uint64) |  | Attempts of the spec. |
+| running | [bool](#bool) |  | The newest attempt has started and not ended. |
+| status | [string](#string) |  | RUNNING, NOT_RUN, INDEX_VERIFIED, CROSSCHECK_VERIFIED, CANONICAL_VERIFIED or HISTORICAL_INCOMPLETE. |
+| reason | [string](#string) | optional | The newest attempt&#39;s block or incompleteness reason (block_reason). |
+| result_id | [string](#string) | optional | The newest finished attempt&#39;s result id (the counts below are its). |
+| offline | [bool](#bool) |  | The newest attempt read its checkpoint only. |
+| provider_binding | [string](#string) | optional | SHA-256 of the provider endpoint(s) the spec binds (never the endpoint); unset offline. |
+| checkpoint_reads | [uint64](#uint64) |  | Typed chain reads held in the checkpoint (a resume reads them without the network). |
+| calls | [uint64](#uint64) | optional | Requests of the newest result. |
+| bytes | [uint64](#uint64) | optional | Response bytes of the newest result. |
+| progress_unit | [string](#string) |  | pages (INDEX, CROSSCHECK: both sources) or slots (STRICT). |
+| progress_done | [uint64](#uint64) |  | Progress done. |
+| progress_total | [uint64](#uint64) | optional | Progress expected; unset when unknown. |
+| qualified | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Qualified events per liquidation kind (empty: unknown). |
+| observed | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Program events per kind including unqualified transactions (empty: unknown). |
+| markers | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | The six markers (empty: unknown). |
+| comparison | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Found and missing events and deviations against the capture (detection and transaction statuses of the INDEX comparison). |
+| disagreements | [uint64](#uint64) | optional | CROSSCHECK: transactions the two sources read differently. |
+| unresolved | [uint64](#uint64) | optional | Transactions of the window the provider left unresolved (null or pruned). |
+| unknown | [uint64](#uint64) | optional | Transactions of the window that stayed unqualified. |
 
 
 

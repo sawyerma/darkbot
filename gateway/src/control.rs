@@ -151,13 +151,14 @@ const JOB_ACTIONS: [&str; 13] = [
     AUTOSTART_GRANT,
     AUTOSTART_REVOKE,
 ];
-/// Online strict verification reads the chain with the operator's provider evidence: a terminal
-/// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
-fn online_strict(req: &CommandRequest) -> bool {
+/// An online chain verification (index, strict, crosscheck; DEC-08) reads the chain with the
+/// operator's provider evidence: a terminal action (`p0ctl job start post-capture
+/// --provider-evidence`), never a GUI one.
+fn online_history_read(req: &CommandRequest) -> bool {
     use crate::proto::project0::v1::PostCaptureJobCommand;
     req.action == VERIFY_START
         && PostCaptureJobCommand::decode(req.params.as_ref())
-            .is_ok_and(|c| c.chain_verify == "strict" && !c.offline)
+            .is_ok_and(|c| c.chain_verify != "off" && !c.offline)
 }
 fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
@@ -468,9 +469,11 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         }
         VERIFY_START if req.resource_id.is_empty() => {
             let c = PostCaptureJobCommand::decode(req.params.as_ref()).ok()?;
-            let offline_strict = c.chain_verify == "strict" && c.offline;
+            // DEC-08: off, or a history read (index, strict, crosscheck) from its checkpoint.
+            let cached_read =
+                matches!(c.chain_verify.as_str(), "index" | "strict" | "crosscheck") && c.offline;
             if !run_id_ok(&c.run_id)
-                || !(c.chain_verify == "off" || offline_strict)
+                || !(c.chain_verify == "off" || cached_read)
                 || (c.offline && c.chain_verify == "off")
                 || c.max_seconds == 0
                 || c.max_ram_bytes == 0
@@ -1188,12 +1191,12 @@ impl Control {
         } else {
             None
         };
-        if online_strict(req) {
+        if online_history_read(req) {
             return reply(
                 id,
                 CommandStatus::Rejected,
                 CommandRejectReason::GateBlocked,
-                "Online strict verification needs the operator's provider evidence: p0ctl job start post-capture --provider-evidence FILE (terminal); the GUI verifies off or strict from the cache",
+                "An online chain verification needs the operator's provider evidence: p0ctl job start post-capture --provider-evidence FILE (terminal); the GUI verifies off, or index|strict|crosscheck from the checkpoint",
             );
         }
         // DEC-07: project0.capture.start with the start approval of a market flow is the boot
@@ -4028,7 +4031,8 @@ mod tests {
             argv(),
             "p0\njob\ncancel\n--id\n12345678-1234-1234-1234-123456789abc\n"
         );
-        // A08/F-02: verification off, or strict from the cache; online strict is gate-blocked.
+        // A08/F-02, DEC-08: verification off, or index|strict|crosscheck from the checkpoint; an
+        // online history read is gate-blocked.
         use crate::proto::project0::v1::PostCaptureJobCommand;
         let verify = PostCaptureJobCommand {
             run_id: "run-a".into(),
@@ -4060,6 +4064,47 @@ mod tests {
                 CommandRejectReason::GateBlocked as i32
             )
         );
+        // DEC-08: index and crosscheck from their checkpoints run as strict does; online each is
+        // gate-blocked.
+        for (id, mode) in [("a", "index"), ("b", "crosscheck")] {
+            let cached = PostCaptureJobCommand {
+                chain_verify: mode.into(),
+                ..verify.clone()
+            };
+            let mut req = request(5, VERIFY_START, "", cached.encode_to_vec());
+            req.request_id = format!("{id}2345678-1234-1234-1234-123456789abc");
+            let r = control.execute(&req).await;
+            assert_eq!(
+                r.phase,
+                CommandPhase::Completed as i32,
+                "{mode}: {}",
+                r.detail
+            );
+            assert_eq!(
+                argv(),
+                format!("p0\njob\nstart\npost-capture\n--id\n{id}2345678-1234-1234-1234-123456789abc\n--run\nrun-a\n--chain-verify\n{mode}\n--max-seconds\n60\n--max-ram-bytes\n1048576\n--offline\n--resume-verification\n")
+            );
+            let mut req = request(
+                6,
+                VERIFY_START,
+                "",
+                PostCaptureJobCommand {
+                    offline: false,
+                    ..cached
+                }
+                .encode_to_vec(),
+            );
+            req.request_id = format!("{id}2345678-1234-1234-1234-000000000006");
+            let r = control.execute(&req).await;
+            assert_eq!(
+                (r.status, r.reject_reason),
+                (
+                    CommandStatus::Rejected as i32,
+                    CommandRejectReason::GateBlocked as i32
+                ),
+                "{mode}"
+            );
+        }
         // S1-02: a source mode request maps onto `p0ctl source set`.
         use crate::proto::project0::v1::SourceControlCommand;
         let source = SourceControlCommand {
@@ -4167,7 +4212,7 @@ mod tests {
                     VERIFY_START,
                     "",
                     PostCaptureJobCommand {
-                        chain_verify: "index".into(),
+                        chain_verify: "full".into(),
                         ..verify.clone()
                     }
                     .encode_to_vec(),

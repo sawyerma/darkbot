@@ -1330,13 +1330,75 @@ mod contract_tests {
             qualification,
             modified_unix_ms: Some(1_760_000_000_100),
             running: false,
+            verification: vec![],
         };
+        // DEC-08: run-a's chain verification methods — a verified INDEX with its counts and a
+        // CROSSCHECK that could not run (no second source: its counts stay unknown).
+        let named = |v: &[(&str, u64)]| -> Vec<(String, u64)> {
+            v.iter().map(|(n, c)| (n.to_string(), *c)).collect()
+        };
+        let kinds = [
+            ("CLASSIC", 0),
+            ("RECEIVERSHIP", 1),
+            ("FORCED_DELEVERAGE", 0),
+            ("BANKRUPTCY_SETTLEMENT", 0),
+        ];
+        let methods = vec![
+            darkbot_runner::market_observer::verification_view::MethodState {
+                method: "index".into(),
+                spec_id: "a".repeat(64),
+                attempts: 2,
+                running: false,
+                status: "INDEX_VERIFIED".into(),
+                reason: None,
+                result_id: Some("b".repeat(64)),
+                offline: false,
+                provider_binding: Some("c".repeat(64)),
+                checkpoint_reads: 7,
+                calls: Some(5),
+                bytes: Some(65_248),
+                progress_unit: "pages",
+                progress_done: 2,
+                progress_total: None,
+                qualified: named(&kinds),
+                observed: named(&kinds),
+                markers: named(&[
+                    ("lending_account_liquidate", 0),
+                    ("start_liquidation", 2),
+                    ("end_liquidation", 2),
+                    ("start_deleverage", 0),
+                    ("end_deleverage", 0),
+                    ("lending_pool_handle_bankruptcy", 0),
+                ]),
+                comparison: named(&[
+                    ("MATCH", 2),
+                    ("MISSING_LIQUIDATION_WITHIN_OBSERVED_INTERVAL", 1),
+                    ("MISSING_LIVE", 2),
+                ]),
+                disagreements: None,
+                unresolved: Some(0),
+                unknown: Some(0),
+            },
+            darkbot_runner::market_observer::verification_view::MethodState {
+                method: "crosscheck".into(),
+                spec_id: "d".repeat(64),
+                attempts: 1,
+                status: "NOT_RUN".into(),
+                reason: Some("CROSSCHECK_SECOND_PROVIDER_MISSING".into()),
+                provider_binding: Some("c".repeat(64)),
+                progress_unit: "pages",
+                ..Default::default()
+            },
+        ];
         AnalyticsSnapshot {
             at_unix_ms: 1_760_000_003_000,
             runner_busy: true,
             runner_error: None,
             runs: vec![
-                run("run-a", None),
+                RunEntry {
+                    verification: methods,
+                    ..run("run-a", None)
+                },
                 run(
                     "run-b",
                     Some(Err("QUALIFICATION_UNREADABLE: FRAME_CRC".into())),
@@ -2028,6 +2090,23 @@ mod contract_tests {
         let a = analytics::analytics_jobs(&golden_analytics());
         assert!(a.runner_busy && a.store_error.is_empty());
         assert_eq!(a.runs[0].qualification, None);
+        // DEC-08: the methods as recorded; unknown counts stay unset or empty, never 0.
+        let [index, crosscheck] = &a.runs[0].verification[..] else {
+            panic!("{:?}", a.runs[0].verification)
+        };
+        assert_eq!(
+            (index.status.as_str(), index.calls, index.progress_total),
+            ("INDEX_VERIFIED", Some(5), None)
+        );
+        assert_eq!(index.qualified[1].name, "RECEIVERSHIP");
+        assert_eq!((index.qualified[1].count, index.markers.len()), (1, 6));
+        assert_eq!(
+            (crosscheck.status.as_str(), crosscheck.reason.as_deref()),
+            ("NOT_RUN", Some("CROSSCHECK_SECOND_PROVIDER_MISSING"))
+        );
+        assert!(crosscheck.qualified.is_empty() && crosscheck.calls.is_none());
+        assert!(crosscheck.unresolved.is_none() && crosscheck.disagreements.is_none());
+        assert!(a.runs[1].verification.is_empty());
         let unreadable = a.runs[1].qualification.as_ref().unwrap();
         assert_eq!(
             (unreadable.verdict.as_str(), unreadable.error.as_str()),

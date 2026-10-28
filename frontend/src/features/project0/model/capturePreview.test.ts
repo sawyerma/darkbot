@@ -8,8 +8,13 @@ const APPROVAL = "--network-audit <FILE> --mainnet-approved <TOKEN>";
 
 describe("CLI preview mirrors p0ctl run start", () => {
   it("uses only flags run start accepts, never --mode, and names the always-required approval", () => {
-    expect(runStartPreview(draft({ verify: "strict" }))).toEqual({
-      command: `p0ctl run start --duration 4h ${APPROVAL} --capture-source logs --chain-verify strict --report-markers all`, problem: null });
+    expect(runStartPreview(draft())).toEqual({
+      command: `p0ctl run start --duration 4h ${APPROVAL} --capture-source logs --chain-verify off --report-markers all`, problem: null });
+  });
+  it("DEC-08: every chain verification mode is accepted; a history read names the operator's provider evidence", () => {
+    for (const verify of ["index", "strict", "crosscheck"] as const)
+      expect(runStartPreview(draft({ verify }))).toEqual({
+        command: `p0ctl run start --duration 4h ${APPROVAL} --capture-source logs --chain-verify ${verify} --provider-evidence <EVIDENCE> --report-markers all`, problem: null });
   });
   it("names report markers in contract order and keeps none distinct from all", () => {
     expect(markerSelector([])).toBe("none");
@@ -22,9 +27,6 @@ describe("CLI preview mirrors p0ctl run start", () => {
       expect(runStartPreview(draft({ duration: bad })).command, bad).toBeNull();
   });
   it("refuses what run start refuses instead of printing a command that fails", () => {
-    const blocked = runStartPreview(draft({ verify: "index" }));
-    expect(blocked.command).toBeNull();
-    expect(blocked.problem).toContain("CHAIN_VERIFY_index_BLOCKED");
     for (const mode of ["market", "shadow"] as const) expect(runStartPreview(draft({ mode })).command).toBeNull();
   });
 });

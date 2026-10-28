@@ -1353,6 +1353,29 @@ mod tests {
         let o2 = drive(&off(true)).unwrap();
         assert_eq!(o2.verification_spec_id, o1.verification_spec_id);
         assert_ne!(o2.verification_attempt_id, o1.verification_attempt_id);
+        // DEC-08: the run's methods as shown — off NOT_RUN, strict incomplete with its scope
+        // unresolved (its kinds and markers unknown, never 0).
+        let methods = super::super::verification_view::methods(&root);
+        let [off_state, strict_state] = &methods[..] else {
+            panic!("{methods:?}")
+        };
+        assert_eq!(
+            (
+                off_state.method.as_str(),
+                off_state.status.as_str(),
+                off_state.reason.as_deref()
+            ),
+            ("off", "NOT_RUN", Some("VERIFICATION_OFF"))
+        );
+        assert_eq!(
+            (strict_state.method.as_str(), strict_state.status.as_str()),
+            ("strict", "HISTORICAL_INCOMPLETE")
+        );
+        assert!(strict_state.qualified.is_empty() && strict_state.markers.is_empty());
+        assert_eq!(
+            (strict_state.progress_unit, strict_state.progress_total),
+            ("slots", None)
+        );
         std::fs::write(root.join("capture/late_file.bin"), b"x").unwrap();
         assert_eq!(drive(&req(true)).unwrap_err(), "CAPTURE_EVIDENCE_CHANGED");
         std::fs::remove_dir_all(d).unwrap();

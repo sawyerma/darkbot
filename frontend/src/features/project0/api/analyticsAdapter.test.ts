@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { durationText, jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
+import { comparisonSum, countOf, durationText, jobCommandBlock, jobReadableRuns, methodLine, sideBySide, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -24,6 +24,7 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(view.runs.map((r) => r.runId)).toEqual(["run-a", "run-b"]);
     expect(view.runs[0]?.qualification).toBeNull();
     expect(view.runs[1]?.qualification?.verdict).toBe("UNREADABLE");
+    expect(view.runs[1]?.verification).toEqual([]);
     expect(view.jobs.map((j) => [j.jobId, j.kind, j.state])).toEqual([
       ["opt-1", "OPTIMIZE", "RUNNING"],
       ["bt-1", "BACKTEST", "COMPLETED"],
@@ -34,6 +35,19 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(view.jobs[2]?.params).toBeNull();
     expect(view.jobs[0]?.result).toBeNull();
     expect(view.jobs[0]?.params?.minProfitUsdMicro).toBe("1500000");
+  });
+
+  it("DEC-08: decodes each chain verification method as recorded; unknown counts stay unknown", () => {
+    const [index, crosscheck] = view.runs[0]!.verification;
+    expect([index?.method, index?.status, index?.calls, index?.bytes, index?.progressTotal, index?.checkpointReads])
+      .toEqual(["index", "INDEX_VERIFIED", 5n, 65_248n, null, 7n]);
+    expect(countOf(index!.qualified, "RECEIVERSHIP")).toBe("1");
+    expect(countOf(index!.markers, "end_liquidation")).toBe("2");
+    expect(comparisonSum(index!, ["MISSING_"])).toBe("3");
+    expect(methodLine(index!)).toBe(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 · bytes 65248 · checkpoint 7 reads · 2 attempts`);
+    expect([crosscheck?.status, crosscheck?.reason, crosscheck?.calls, crosscheck?.disagreements]).toEqual(["NOT_RUN", "CROSSCHECK_SECOND_PROVIDER_MISSING", null, null]);
+    expect(countOf(crosscheck!.qualified, "RECEIVERSHIP")).toBe("—");
+    expect(sideBySide(view.runs[0]!.verification, (m) => m.status)).toBe("index INDEX_VERIFIED · crosscheck NOT_RUN · strict —");
   });
 
   it("keeps amounts exact and an unknown net null", () => {
