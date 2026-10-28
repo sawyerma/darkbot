@@ -4,6 +4,16 @@
 
 **Eine zentrale PASS/FAIL/OPEN-Matrix:** [BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md](BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md). Enthält historische Teilmessungen, konkrete Belegpfade, tatsächlich fehlende BUY-/SELL-/Timing-/Kosten-/Safety-Qualifikationen sowie den ereignisgesteuerten 1+bis-zu-10-Versuchsplan. Dieser Verweis ersetzt keine einzelnen Originalbelege und erteilt keine Mainnet-Freigabe.
 
+## Fortschritt Bug-V3-Umsetzung (verbindlich: [BSC_BUG_V3_UMSETZUNGSAUFTRAG.md](../5_OFFENE_FEHLER/BSC_BUG_V3_UMSETZUNGSAUFTRAG.md))
+
+| ID | Status | SHA | Rest |
+|---|---|---|---|
+| BSC3-024 | FIX_VERIFIED (Admission = Write-ahead mit Token/Nonce, Fakt direkt nach Dispatch, Recovery als UNKNOWN; ROT→GRÜN, Review) | `bf871fa9` | dauerhaft unschreibbares Ledger: fail-closed, Inclusion dann erst nach Neustart sichtbar |
+| BSC3-041 | FIX_VERIFIED (kein Arm bei unaufgelöster/unbekannter Tx oder C2≠Ledger, Fence bleibt, `.settled` erst danach) | `bf871fa9` | nie inkludierte Tx bleibt unaufgelöst → Betreiberentscheidung (Nonce-Auflösung) |
+| BSC3-055 | FIX_VERIFIED (LIVE nur an C2-nächster Nonce, SELL nach kanonischem Approve, Exit-Fortsetzung, Token-Dedup beider Pools) | `bf871fa9` | revertierter/ersetzter SELL ohne Re-Exit → BSC3-048 |
+
+Belege `bf871fa9`: CI bsc 40766234326 + Project-0-Contract 40766234293 grün; lokal Workspace 1418 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2886; unabhängiges Review + Nachprüfung: kein offenes HIGH/CRITICAL.
+
 ## Ergänzter verbindlicher Arbeitsauftrag (27.10.2026) — Wallet-/Wirtschaftscontrols
 
 `PHASENPLAN.md` verlangt jetzt die vollständige technische Schaltbarkeit einschließlich **LAUNCHER** und **BUYER** mit zwei voneinander unabhängigen nativen `ENABLE/DISABLE`-Controls, Initial-/Recovery-Default jeweils `DISABLED`, identischer Terminal-/Frontend-Autorität und vollständigem Native→Protobuf→Gateway→BSC-Wallets-Panel-Rundweg. Alle wirtschaftlichen Controls initial `DISABLED/OFF`, keine automatische Freigabe anderer Modi. Technische Implementierung und nichtwirtschaftliche E2E-Abnahme sind vor G0.7/G0.8 erlaubt; deren reale Erwerbs-/Timing-Evidence bleibt ausstehend.

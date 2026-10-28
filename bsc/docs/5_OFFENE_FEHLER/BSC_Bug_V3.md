@@ -1108,3 +1108,13 @@ Die als `Eingefügter Text(20261028-182222).txt` eingereichte 426-Zeilen-Fassung
 **Zusammengefasster Stand:** **70 eindeutige Befund-IDs** BSC3-001–070. Vor LIVE priorisieren: dokumentierte Neustart-/Nonce-Quarantäne (041), Ledger-Korruption und Write-Ahead-Fakten (045/024), EXIT-Freigabe/-Gas/-Recovery (057/058/048), LIVE-Evidence-/Builder-Antworten (049/051), Scope-/Qualifikationsdrift (065) und 10er-Cap-/Deadline-Semantik (068). BSC3-070 ist eine gezielte Git-Trust-Härtung, kein Auftrag, die Autorität neu zu entwickeln.
 
 **Weiter offen:** `startup.rs`, `venue_probe.rs` vollständige Kern-/Integrationsprüfung, Curve/Admission, Four-Venue und Strategy-Trading-Engine; danach Replay, Journal, Capture, BSC-Reporter/Gateway/Frontend und Werkzeuge/CI. **Keine eigenen Cargo-, E2E-, Mainnet- oder Git-Schreibtests. Kein Git-Push.**
+
+---
+
+## U1 — Umsetzung 28.10.2026 (Nachtrag, historische Befunde unverändert)
+
+| ID | Ergebnis | Commit | Tests (ROT an `cd1a1386`, GRÜN an `bf871fa9`) | Rest |
+|---|---|---|---|---|
+| BSC3-024 | **FIX_VERIFIED** | `bf871fa9` | `runtime_live::a_release_lost_in_a_crash_is_recovered_and_blocks_the_next_arm`, `…a_fact_the_end_cannot_write_ends_the_arm_and_is_recovered`, `live_end::an_admitted_intent_that_never_left_is_withdrawn`, `live_ledger::admitted_transactions_without_a_fact_are_recovered_as_unknown` | dauerhaft unschreibbares Ledger fail-closed; Receipt-Recovery außerhalb des Follower-Fensters offen |
+| BSC3-041 | **FIX_VERIFIED** | `bf871fa9` | `runtime_live::a_disarm_with_an_unresolved_release_keeps_its_fence_and_blocks_the_next_arm` (inkl. REPLACED/Orphan), `…an_unreadable_ledger_blocks_the_arm` | nie inkludierte Tx: EXTERNAL_BLOCKED (Betreiberentscheidung Nonce-Auflösung); Facts ohne Sender-Bindung (LOW) |
+| BSC3-055 | **FIX_VERIFIED** | `bf871fa9` | `live_end::one_sender_releases_one_nonce_after_the_other`, `…a_token_is_bought_once_by_one_sender`, `runtime_live::an_exit_refused_for_the_nonce_order_continues_once_it_may` | revertierter/ersetzter SELL ohne Re-Exit → BSC3-048 |
