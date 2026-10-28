@@ -19,6 +19,11 @@ name = "p0-parity"
 path = "src/bin/p0-parity.rs"
 required-features = ["historical"]
 
+# DEC-08: the pinned INDEX parity gate runs the pinned Python verifier against `p0-parity`.
+[[test]]
+name = "dec08_index_parity"
+required-features = ["historical"]
+
 [dependencies]
 darkbot-common = { path = "../common" }
 darkbot-solana = { path = "../solana" }

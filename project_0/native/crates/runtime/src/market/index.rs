@@ -19,7 +19,6 @@ use super::{decode_receiver_events, LogEventRef};
 use crate::analytics::journal::{self, kind, source};
 use crate::analytics::payload::{self, Payload};
 use crate::market::history::{PageEnd, SignaturePager};
-use crate::market::winner::WinnerIdentity;
 use darkbot_solana::chain::{ChainTx, SignatureEntry, TxStatus};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -175,41 +174,7 @@ impl BotEvidence {
     }
     /// The events of a live payload's logs (only a successful, completely decoded log).
     fn payload(&mut self, signature: &str, slot: u64, logs: &[String], program: &Pubkey) {
-        let d = decode_receiver_events(logs, program);
-        if d.decoder_errors != 0 || d.truncated {
-            return;
-        }
-        for (index, r) in d.sequence.iter().enumerate() {
-            let e = match *r {
-                LogEventRef::Receiver(i) => {
-                    let ev = &d.events[i];
-                    BotEvent {
-                        source: BotSource::LivePayload,
-                        index: index as u32,
-                        kind: LiquidationType::Receivership,
-                        target: ev.target.to_string(),
-                        actor: ev.receiver.to_string(),
-                        seized: Some(ev.seized_equity_usd),
-                        repaid: Some(ev.repaid_equity_usd),
-                        protocol_fee: Some(u64::from(ev.protocol_flat_fee_lamports)),
-                        native: None,
-                    }
-                }
-                LogEventRef::Additional(i) => {
-                    let ev = &d.additional_events[i];
-                    BotEvent {
-                        source: BotSource::LivePayload,
-                        index: index as u32,
-                        kind: ev.kind,
-                        target: ev.target.clone(),
-                        actor: ev.actor.clone(),
-                        seized: None,
-                        repaid: None,
-                        protocol_fee: None,
-                        native: None,
-                    }
-                }
-            };
+        for e in live_payload(logs, program).unwrap_or_default() {
             self.event(signature, slot, e);
         }
     }
@@ -217,9 +182,9 @@ impl BotEvidence {
     /// The capture side of a native run, the pinned verifier's import over the typed records:
     /// the market journal's live transactions (with their payload events), the observer's
     /// receivership rows (live or recovered) and its coverage; the run's `ECON_CANONICAL` rows
-    /// (canonical events and their exact Shadow joins) and `ECON_OPPORTUNITY` rows (Shadow
-    /// evidence without an event identity; they replace a join of the same target, as in the
-    /// pinned verifier's import order). Canonical truth rows of the market journal carry no
+    /// (canonical events and their exact Shadow joins) and `ECON_OPPORTUNITY` rows with a
+    /// strongly joined market event (Shadow evidence without an event identity; they replace a
+    /// join of the same key, as in the pinned verifier's import order). Canonical truth rows of the market journal carry no
     /// row identity of their own there and are not imported (the joins are their import).
     pub fn from_run(run: &Path, program: &Pubkey) -> Result<Self, String> {
         use super::rows::{
@@ -350,19 +315,16 @@ impl BotEvidence {
                     kind::ECON_OPPORTUNITY => {
                         let row: crate::analytics::econ::OpportunityRow =
                             frame.typed().map_err(|_| "ECON_OPPORTUNITY_INVALID")?;
+                        // Keyed by its strongly joined market event only (the pinned rows nest
+                        // the winner's signature in its identity: no key of their own).
                         let (_, strong) = row.race_join();
-                        let market = row.market.as_ref().filter(|_| strong);
-                        let winner = row.winner.as_ref();
-                        let signature = market.map(|m| m.signature.clone()).or_else(|| {
-                            winner.and_then(|w| match &w.identity {
-                                WinnerIdentity::Unique { signature, .. } => Some(signature.clone()),
-                                _ => None,
-                            })
-                        });
-                        let slot = market.map(|m| m.slot).or(winner.map(|w| w.slot));
-                        if let (Some(signature), Some(slot)) = (signature, slot) {
+                        if let Some(m) = row.market.as_ref().filter(|_| strong) {
                             if !row.rec.account.is_empty() {
-                                opportunities.push((signature, slot, row.rec.account.clone()));
+                                opportunities.push((
+                                    m.signature.clone(),
+                                    m.slot,
+                                    row.rec.account.clone(),
+                                ));
                             }
                         }
                     }
@@ -395,6 +357,51 @@ fn read(
         }
     }
     Ok(())
+}
+
+/// The capture-side events of a live payload's logs (`LIVE_PAYLOAD`, all-kind log order), or
+/// `None` when the log is undecodable or truncated (the pinned import keeps no event then).
+pub fn live_payload(logs: &[String], program: &Pubkey) -> Option<Vec<BotEvent>> {
+    let d = decode_receiver_events(logs, program);
+    if d.decoder_errors != 0 || d.truncated {
+        return None;
+    }
+    Some(
+        d.sequence
+            .iter()
+            .enumerate()
+            .map(|(index, r)| match *r {
+                LogEventRef::Receiver(i) => {
+                    let ev = &d.events[i];
+                    BotEvent {
+                        source: BotSource::LivePayload,
+                        index: index as u32,
+                        kind: LiquidationType::Receivership,
+                        target: ev.target.to_string(),
+                        actor: ev.receiver.to_string(),
+                        seized: Some(ev.seized_equity_usd),
+                        repaid: Some(ev.repaid_equity_usd),
+                        protocol_fee: Some(u64::from(ev.protocol_flat_fee_lamports)),
+                        native: None,
+                    }
+                }
+                LogEventRef::Additional(i) => {
+                    let ev = &d.additional_events[i];
+                    BotEvent {
+                        source: BotSource::LivePayload,
+                        index: index as u32,
+                        kind: ev.kind,
+                        target: ev.target.clone(),
+                        actor: ev.actor.clone(),
+                        seized: None,
+                        repaid: None,
+                        protocol_fee: None,
+                        native: None,
+                    }
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Where a transaction lies relative to the window.
@@ -609,9 +616,15 @@ pub fn classify(tx: &ChainTx, program: &Pubkey, block_time: Option<i64>) -> Inde
         }
         (_, Err(code)) => {
             out.unknown_reason = Some(code);
-            // Observed only: the events the logs carry, though the transaction is unqualified
-            // (never compared: their identity is the classifier's).
-            if let Some(logs) = tx.meta.as_ref().and_then(|m| m.log_messages.as_ref()) {
+            // Observed only: the events the logs of a successful transaction carry, though it is
+            // unqualified (never compared: their identity is the classifier's). Without a proven
+            // success the logged effects may have been rolled back: none is observed.
+            if let Some(logs) = tx
+                .meta
+                .as_ref()
+                .and_then(|m| m.log_messages.as_ref())
+                .filter(|_| tx.status().is_success())
+            {
                 let d = decode_receiver_events(logs, program);
                 out.program_events[kind_slot(LiquidationType::Receivership)] +=
                     d.events.len() as u64;

@@ -35,7 +35,7 @@ PINNED = {
     'runtime/src/analytics/payload.rs': (1, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/analytics/renders.rs': (13, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/bin/p0-fe-qualify.rs': (2, 'W'),  # getMultipleAccounts wire params only (JSON config input removed 25.10., F6)
-    'runtime/src/bin/p0-parity.rs': (4, 'H'),
+    'runtime/src/bin/p0-parity.rs': (8, 'H'),  # DEC-08: + the historical INDEX/PAYLOAD source reads (parity gate)
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/execution/one_shot/approval_file.rs': (2, 'H'),  # DEC-10: historical JSON approval shown by the historical build only (never authorizes); the approval is native key = value
     'runtime/src/execution/one_shot/non_landing.rs': (13, 'W'),  # DEC-03: B/C non-landing reads on the deadline-bound JSON-RPC wire
@@ -177,7 +177,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 311)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 315)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

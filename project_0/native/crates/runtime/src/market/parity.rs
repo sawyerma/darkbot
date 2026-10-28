@@ -145,6 +145,57 @@ pub fn transaction_line(tx: &ChainTx, program: &Pubkey) -> String {
     )
 }
 
+/// DEC-08: `INDEX <sig> <slot> class= program_events=C,R,F,B events= reasons=` — the INDEX
+/// verifier's reading of one transaction (`index::classify`): its classification, the program
+/// events per kind (`index::KINDS` order, observed also in unqualified transactions) and the
+/// qualified events `TYPE:target:actor:event_index`.
+pub fn index_line(tx: &ChainTx, program: &Pubkey) -> String {
+    let r = super::index::classify(tx, program, tx.block_time);
+    let events: Vec<String> = r
+        .events
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}:{}:{}",
+                e.liquidation_type.as_str(),
+                e.target,
+                e.liquidator,
+                e.event_index
+            )
+        })
+        .collect();
+    let counts: Vec<String> = r.program_events.iter().map(u64::to_string).collect();
+    format!(
+        "INDEX {} {} class={} program_events={} events={} reasons={}",
+        tx.signature().unwrap_or("-"),
+        tx.slot,
+        r.classification,
+        counts.join(","),
+        events.join(";"),
+        r.unknown_reason.unwrap_or("")
+    )
+}
+
+/// DEC-08: `PAYLOAD <sig> <slot> events=` — the capture-side `LIVE_PAYLOAD` events of a live
+/// logs notification (`index::live_payload`, all-kind log order `TYPE:target:actor:index`);
+/// `NONE` for a failed, absent, undecodable or truncated log.
+pub fn payload_line(l: &ChainLogs, program: &Pubkey) -> String {
+    let events = l
+        .logs
+        .as_deref()
+        .filter(|_| l.status.is_success())
+        .and_then(|logs| super::index::live_payload(logs, program));
+    let text = match events {
+        None => "NONE".to_string(),
+        Some(events) => events
+            .iter()
+            .map(|e| format!("{}:{}:{}:{}", e.kind.as_str(), e.target, e.actor, e.index))
+            .collect::<Vec<_>>()
+            .join(";"),
+    };
+    format!("PAYLOAD {} {} events={text}", l.signature, l.slot)
+}
+
 /// `LOGS <sig> <slot> status= truncated= events= reasons=`: events `TYPE:target:actor` in log
 /// order (receiver events, then the other classes, each in log order).
 pub fn logs_line(l: &ChainLogs, program: &Pubkey) -> String {

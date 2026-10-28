@@ -16,7 +16,7 @@ W external wire · R offline render/stdout/export · H historical reader or expl
 | runtime/src/analytics/payload.rs | 1 | H | read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4) |
 | runtime/src/analytics/renders.rs | 13 | H | read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4) |
 | runtime/src/bin/p0-fe-qualify.rs | 2 | W | getMultipleAccounts wire params only (JSON config input removed 25.10., F6) |
-| runtime/src/bin/p0-parity.rs | 4 | H |  |
+| runtime/src/bin/p0-parity.rs | 8 | H | DEC-08: + the historical INDEX/PAYLOAD source reads (parity gate) |
 | runtime/src/bin/p0-probe-costs.rs | 12 | WR |  |
 | runtime/src/execution/one_shot/approval_file.rs | 2 | H | DEC-10: historical JSON approval shown by the historical build only, never authorizing |
 | runtime/src/execution/one_shot/non_landing.rs | 13 | W | DEC-03: B/C non-landing reads (`getBlockHeight`, `minimumLedgerSlot`, `getSignatureStatuses`, `getTransaction`, `getBlocksWithLimit`, `getBlock`) on the deadline-bound JSON-RPC wire |

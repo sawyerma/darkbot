@@ -877,26 +877,41 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
             joined(other.clone(), None),
         ],
     );
-    let mut opportunity = rec.clone();
-    opportunity.account = events[0].target.clone();
-    write_frames(
-        &mut reports,
-        source::ECON,
-        &[crate::analytics::econ::OpportunityRow {
-            rec: opportunity,
+    let opportunity = |account: &str, market: bool| {
+        let mut r = rec.clone();
+        r.account = account.to_string();
+        crate::analytics::econ::OpportunityRow {
+            rec: r,
             winner: Some(crate::market::winner::Winner {
                 slot: SLOT,
-                identity: WinnerIdentity::Unique {
+                identity: crate::market::winner::WinnerIdentity::Unique {
                     signature: f.clone(),
-                    receiver: "r".into(),
-                    tx_version: "1".into(),
+                    receiver: receiver.receiver.to_string(),
+                    tx_version: "V1".into(),
                 },
             }),
-            market: None,
+            market: market.then(|| crate::analytics::econ::MarketEvent {
+                signature: f.clone(),
+                slot: SLOT,
+                t_rx_ns: Some(5),
+                source: crate::analytics::econ::MarketEvidenceSource::Live,
+                transaction_index: None,
+                event: receiver.clone(),
+            }),
             slot_seen: None,
             capital: vec![],
             market_commitment: "finalized".into(),
-        }],
+        }
+    };
+    // A winner alone is no key (the pinned rows nest its signature); a strongly joined market
+    // event is, and it replaces the exact join of the same key.
+    write_frames(
+        &mut reports,
+        source::ECON,
+        &[
+            opportunity("winner-only", false),
+            opportunity(&events[0].target, true),
+        ],
     );
     reports.seal(true).unwrap();
 
@@ -926,6 +941,9 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
     assert!(!bot
         .shadow
         .contains_key(&("other".to_string(), SLOT, other.target.clone())));
+    assert!(!bot
+        .shadow
+        .contains_key(&(f.clone(), SLOT, "winner-only".to_string())));
     let s = |sec: i64| i128::from(sec) * NS;
     assert_eq!(bot.coverage.gaps, vec![(s(BT - 30), s(BT - 20))]);
     assert_eq!(
