@@ -54,7 +54,10 @@ fn main() {
         let out = out.ok_or("--out required")?;
         darkbot_runner::analytics::measurement::MeasurementPlan::new(duration)?;
         let mut req = Request::from_active(duration, &out, &source);
-        req.verify.mode = mode;
+        req.verify = darkbot_runner::storage::preflight::VerifyBudget::for_mode(
+            mode,
+            &darkbot_solana::runtime_config::active().limits,
+        );
         for (flag, n) in verify {
             let v = &mut req.verify;
             match flag.as_str() {

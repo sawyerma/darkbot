@@ -369,13 +369,16 @@ fn validate(project: &Path, r: &JobRequest) -> Result<PathBuf, String> {
             provider_evidence,
             ..
         } => {
-            if !matches!(chain_verify.as_str(), "off" | "strict") {
+            if !matches!(
+                chain_verify.as_str(),
+                "off" | "index" | "strict" | "crosscheck"
+            ) {
                 return Err(format!(
-                    "CHAIN_VERIFY_{chain_verify}_BLOCKED: a native run verifies strict or off"
+                    "CHAIN_VERIFY_{chain_verify}_INVALID: off|index|strict|crosscheck"
                 ));
             }
-            if chain_verify == "strict" && !offline && provider_evidence.is_none() {
-                return Err("STRICT_PROVIDER_EVIDENCE_REQUIRED: online strict verification needs the operator's --provider-evidence (else --offline)".into());
+            if chain_verify != "off" && !offline && provider_evidence.is_none() {
+                return Err("STRICT_PROVIDER_EVIDENCE_REQUIRED: an online chain verification needs the operator's --provider-evidence (else --offline)".into());
             }
         }
     }
@@ -722,7 +725,8 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
             }
         }
         "post-capture" => JobSpec::PostCapture {
-            chain_verify: flag("--chain-verify")?.ok_or("--chain-verify off|strict required")?,
+            chain_verify: flag("--chain-verify")?
+                .ok_or("--chain-verify off|index|strict|crosscheck required")?,
             offline: args.iter().any(|a| a == "--offline"),
             resume: args.iter().any(|a| a == "--resume-verification"),
             provider_evidence: flag("--provider-evidence")?,
@@ -1072,9 +1076,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
-    /// A08/F-02: a post-capture job verifies strict or off; online strict needs the operator's
-    /// provider evidence (the GUI can only ask for strict from the cache); a running
-    /// verification is not cancellable (it ends at its own budget).
+    /// A08/F-02, DEC-08: a post-capture job verifies off, index, strict or crosscheck; an online
+    /// chain verification needs the operator's provider evidence (the GUI can only ask for one
+    /// from the cache); a running verification is not cancellable (it ends at its own budget).
     #[test]
     fn post_capture_jobs_are_validated_and_not_cancellable() {
         let d = project("post_capture");
@@ -1088,9 +1092,15 @@ mod tests {
             spec: s,
             ..request(id)
         };
-        assert!(submit(&d, &with("a", spec("index", false, None)))
+        assert!(submit(&d, &with("a", spec("full", true, None)))
             .unwrap_err()
-            .starts_with("CHAIN_VERIFY_index_BLOCKED"));
+            .starts_with("CHAIN_VERIFY_full_INVALID"));
+        for mode in ["index", "crosscheck"] {
+            assert!(submit(&d, &with(mode, spec(mode, false, None)))
+                .unwrap_err()
+                .starts_with("STRICT_PROVIDER_EVIDENCE_REQUIRED"));
+            submit(&d, &with(&format!("{mode}-cache"), spec(mode, true, None))).unwrap();
+        }
         assert!(submit(&d, &with("b", spec("strict", false, None)))
             .unwrap_err()
             .starts_with("STRICT_PROVIDER_EVIDENCE_REQUIRED"));

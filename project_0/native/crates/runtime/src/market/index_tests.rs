@@ -1109,7 +1109,7 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
         "index",
         "--offline",
         "--resume-verification",
-        "--verify-pages",
+        "--verify-max-pages",
         "5",
         "--verify-rps",
         "100",
@@ -1160,7 +1160,26 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
         "tx + event"
     );
     assert_eq!(std::fs::read_dir(out.join("attempts")).unwrap().count(), 2);
+    no_promotion(&root, &index.join("results"));
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// DEC-08 (no promotion): the report's verification is the strict result only — a verified
+/// INDEX or CROSSCHECK result is never selected, and naming one is refused (the master gate's
+/// own refusal of INDEX_VERIFIED/CROSSCHECK_VERIFIED is `econ_tests`' qualification test).
+fn no_promotion(run: &std::path::Path, results: &std::path::Path) {
+    let binding = super::super::strict_driver::bind_capture(run).unwrap();
+    assert!(crate::analytics::report::select_result(&binding, None)
+        .unwrap()
+        .is_none());
+    for e in std::fs::read_dir(results).unwrap() {
+        let name = e.unwrap().file_name().into_string().unwrap();
+        let id = name.strip_suffix(".p0j").unwrap();
+        assert_eq!(
+            crate::analytics::report::select_result(&binding, Some(id)).err(),
+            Some("RESULT_NOT_FOUND_OR_AMBIGUOUS".to_string())
+        );
+    }
 }
 
 /// A V2 run with its manifest, CAPTURE window and a market journal that received the real
@@ -1426,7 +1445,7 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
             "--mode",
             "crosscheck",
             "--offline",
-            "--verify-pages",
+            "--verify-max-pages",
             "5",
             "--verify-rps",
             "100",
@@ -1490,5 +1509,6 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
     assert!(results
         .iter()
         .any(|r| r.status == "CROSSCHECK_VERIFIED" && r.primary.calls == 0));
+    no_promotion(&root, &out.join("crosscheck/results"));
     let _ = std::fs::remove_dir_all(&d);
 }

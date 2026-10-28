@@ -166,7 +166,7 @@ esac
 # Native, typed launch arguments (JFI-04): no JSON configuration handoff.
 usage() {
   echo 'Usage: capture.sh econ4h-launcher --duration 10m|1h|5h|24h [--capture-source logs|transactions]
-         [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N] [--verify-bytes N]
+         [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N] [--verify-bytes N]
          [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N] [--verify-max-pages N]
          [--provider-evidence FILE.p0j]
          [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]' >&2
@@ -193,7 +193,7 @@ while [[ "$#" -gt 0 ]]; do
     --chain-verify|--verify) CHAIN_VERIFY="$2" ;;
     --verify-rps|--verify-calls|--verify-seconds|--verify-bytes|--verify-disk-bytes)
       CAPACITY_VERIFY+=("$1" "$2"); STRICT_VERIFY+=("$1" "$2") ;;
-    --verify-max-pages) CAPACITY_VERIFY+=("$1" "$2") ;;
+    --verify-max-pages) CAPACITY_VERIFY+=("$1" "$2"); STRICT_VERIFY+=("$1" "$2") ;;
     --verify-ram-bytes|--verify-min-free-bytes|--provider-evidence) STRICT_VERIFY+=("$1" "$2") ;;
     --report-*|--format|--verification-result) REPORT_ARGS+=("$1" "$2") ;;
     *) usage ;;
@@ -201,11 +201,10 @@ while [[ "$#" -gt 0 ]]; do
   shift 2
 done
 [[ -n "$DURATION" ]] || usage
+# DEC-08: every mode runs through the native verifier (post-capture); a historical run keeps
+# scripts/verify.sh (the pinned Python reader, read only).
 case "$CHAIN_VERIFY" in
-  off|strict) ;;
-  index|crosscheck)
-    echo "CHAIN_VERIFY_${CHAIN_VERIFY}_BLOCKED: the index/crosscheck verifier exists only as the pinned Python reader, which writes JSON evidence (JFI-03); capture with --chain-verify strict or off. Historical index verification stays an explicit offline run of scripts/verify.sh." >&2
-    exit 2 ;;
+  off|index|strict|crosscheck) ;;
   *) usage ;;
 esac
 export P0_MEASUREMENT_DURATION="$DURATION"

@@ -21,13 +21,13 @@
 //! p0ctl [--project DIR] optimize --run RUN_ID --capital-usd LIST [--min-profit-usd X] [--funding …] --min-profit-usd-grid X,Y --funding-sets all;A,B --holdout-bps N --max-points N --max-seconds N --max-ram-bytes N [--save-profile]
 //! p0ctl [--project DIR] profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N
 //! p0ctl [--project DIR] job start backtest|optimize [--id ID] (the backtest|optimize options)
-//! p0ctl [--project DIR] job start post-capture [--id ID] --run RUN_ID --chain-verify off|strict [--offline] [--resume-verification] [--provider-evidence FILE] --max-seconds N --max-ram-bytes N
+//! p0ctl [--project DIR] job start post-capture [--id ID] --run RUN_ID --chain-verify off|index|strict|crosscheck [--offline] [--resume-verification] [--provider-evidence FILE] --max-seconds N --max-ram-bytes N
 //! p0ctl [--project DIR] job cancel --id ID
 //! p0ctl [--project DIR] job status [--id ID]
-//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|strict [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
+//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict|crosscheck [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
-//! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
+//! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|index|strict|crosscheck [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
 //! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
@@ -161,9 +161,12 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let root = project.join("data/runs");
     let out = root.join(format!(".p0ctl-preflight-{}", std::process::id()));
     let mut req = preflight::Request::from_active(seconds, &out, &source);
-    req.verify.mode = preflight::VerifyMode::parse(
-        &value(args, "--chain-verify").unwrap_or_else(|| "off".into()),
-    )?;
+    req.verify = preflight::VerifyBudget::for_mode(
+        preflight::VerifyMode::parse(
+            &value(args, "--chain-verify").unwrap_or_else(|| "off".into()),
+        )?,
+        &darkbot_solana::runtime_config::active().limits,
+    );
     for (flag, slot) in [
         ("--verify-rps", &mut req.verify.rps),
         ("--verify-calls", &mut req.verify.calls),
@@ -193,12 +196,12 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 
 const RUN_START_USAGE: &str =
     "p0ctl run start [--mode econ4h|shadow] --duration 10m|1h|5h|24h [--profile NAME] [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
-    [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
+    [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
     [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
     [--verify-max-pages N] [--provider-evidence FILE.p0j] [--report-* VALUE ...] [--format table|csv]
     [-- OPERATIONAL_ARGS...]
 Typed C0-E1 measurement: offline boot audit, owner lock, capture, then the post-capture chain
-(verification off|strict — online strict only with provider evidence —, native report, master
+(verification off|index|strict|crosscheck — online only with provider evidence —, native report, master
 qualification). LIVE and submission stay disabled.
 --mode shadow: a bounded Mainnet Shadow run (P6-MT MT11/MT12) through the same audit, approval
 and owner lock; only --duration, --profile, the approval and OPERATIONAL_ARGS apply.
@@ -423,9 +426,6 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         darkbot_solana::runtime_config::Horizon::UntilStopped { .. } => {
             return Err(format!("RUN_HORIZON_UNTIL_STOPPED: --duration {duration} starts only as --until-stopped --checkpoint W --minimum-runway R --qualification ID"))
         }
-    }
-    if let Some(mode @ ("index" | "crosscheck")) = value(options, "--chain-verify").as_deref() {
-        return Err(format!("CHAIN_VERIFY_{mode}_BLOCKED: the index/crosscheck verifier exists only as the pinned Python reader, which writes JSON evidence (JFI-03); use --chain-verify strict or off"));
     }
     let lock = lock_path(project);
     if let OwnerState::Running { pid, run_id, .. } = control::owner_state(&lock)? {
@@ -1303,10 +1303,11 @@ fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         return Err(not_native(project, "verify.sh", args));
     };
     native_layout(&run)?;
-    let mode = value(args, "--mode").ok_or("VERIFY_MODE_REQUIRED: --mode strict|off")?;
-    if !matches!(mode.as_str(), "strict" | "off") {
+    let mode =
+        value(args, "--mode").ok_or("VERIFY_MODE_REQUIRED: --mode off|index|strict|crosscheck")?;
+    if !matches!(mode.as_str(), "off" | "index" | "strict" | "crosscheck") {
         return Err(format!(
-            "VERIFY_MODE_REFUSED: {mode} exists only as the pinned historical reader; a native run verifies strict or off"
+            "VERIFY_MODE_REFUSED: {mode}: a native run verifies off|index|strict|crosscheck"
         ));
     }
     let mut request = vec!["--run".to_string(), run.display().to_string()];
@@ -1320,7 +1321,8 @@ fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
     let (text, verified) = strict_driver::cli(&request)?;
     print!("{text}");
-    // `off` is a complete outcome (NOT_RUN); strict passes only CANONICAL_VERIFIED.
+    // `off` is a complete outcome (NOT_RUN); a history read passes only its own verified status
+    // (CANONICAL_VERIFIED, INDEX_VERIFIED, CROSSCHECK_VERIFIED — never promoted).
     Ok(verified || mode == "off")
 }
 
@@ -1438,7 +1440,7 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 
 const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow|market] --duration D|until-stopped:W:R [-- OPERATIONAL_ARGS...]
   | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence RECORD_ID|FILE.p0j [--capture-source logs|transactions]
-  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence RECORD_ID|FILE.p0j] [--qualification ID (an until-stopped flow)]
+  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|index|strict|crosscheck --provider-evidence RECORD_ID|FILE.p0j] [--qualification ID (an until-stopped flow)]
   | p0ctl boot evidence import FILE.p0j
   | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]
 The flow's duration, mode and operational arguments are fixed at its offline step and its capture
@@ -1779,9 +1781,9 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 worker_args.extend(["--chain-verify".to_string(), verify.clone()]);
                 match verify.as_str() {
                     "off" => {}
-                    "strict" => {
+                    "index" | "strict" | "crosscheck" => {
                         let evidence = given(options, "--provider-evidence")?.ok_or(
-                            "STRICT_PROVIDER_EVIDENCE_REQUIRED: online strict verification needs the operator's --provider-evidence",
+                            "STRICT_PROVIDER_EVIDENCE_REQUIRED: an online chain verification needs the operator's --provider-evidence",
                         )?;
                         bc::check_approval(&s, bc::START, &token)?;
                         worker_args.extend([
@@ -1789,7 +1791,11 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             evidence_id(project, &evidence)?,
                         ])
                     }
-                    other => return Err(format!("CHAIN_VERIFY_{other}_BLOCKED: off|strict")),
+                    other => {
+                        return Err(format!(
+                            "CHAIN_VERIFY_{other}_INVALID: off|index|strict|crosscheck"
+                        ))
+                    }
                 }
                 bc::START
             };
@@ -2589,8 +2595,9 @@ mod tests {
     }
 
     /// JFI-01/03, P0-PROD-CTRL-02: a run with native records is never handed to a pinned Python
-    /// reader (report and verify stay native; `index`/`crosscheck` are refused for it), and a
-    /// historical run is refused with its isolated pinned reader named, never started (A09).
+    /// reader (report and verify stay native; DEC-08: `index`/`crosscheck` too, through the
+    /// native driver), and a historical run is refused with its isolated pinned reader named,
+    /// never started (A09).
     #[test]
     fn native_runs_never_reach_the_pinned_python_readers() {
         let project = std::env::temp_dir().join(format!("p0ctl_route_{}", std::process::id()));
@@ -2626,13 +2633,20 @@ mod tests {
         .starts_with("CAPTURE_NOT_FINALIZED"));
         assert!(err(verify_cmd(&project, &strings(&["--run", "n"])))
             .starts_with("VERIFY_MODE_REQUIRED"));
+        // DEC-08: index/crosscheck reach the native driver (here: its manifest check), never
+        // the pinned reader; an unknown mode is refused.
         for mode in ["index", "crosscheck"] {
-            assert!(err(verify_cmd(
+            let e = err(verify_cmd(
                 &project,
-                &strings(&["--run", "n", "--mode", mode])
-            ))
-            .starts_with("VERIFY_MODE_REFUSED"));
+                &strings(&["--run", "n", "--mode", mode]),
+            ));
+            assert!(e.starts_with("NATIVE_MANIFEST_MISSING"), "{mode}: {e}");
         }
+        assert!(err(verify_cmd(
+            &project,
+            &strings(&["--run", "n", "--mode", "full"])
+        ))
+        .starts_with("VERIFY_MODE_REFUSED"));
         let _ = std::fs::remove_dir_all(project);
     }
 

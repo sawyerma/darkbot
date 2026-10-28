@@ -1,6 +1,7 @@
 //! C0E1-P5-AUTO (PHASENPLAN L.5): the one production chain after a capture's drain and manifest —
-//! the selected verification (`off`: identities only, no chain RPC; `strict`: the native driver,
-//! online only with provider evidence), the native report and the separate master qualification.
+//! the selected verification (`off`: identities only, no chain RPC; `index`, `strict`,
+//! `crosscheck`: the native driver (DEC-08), online only with provider evidence), the native
+//! report and the separate master qualification.
 //! A failed or incomplete verification never suppresses the report or the qualification.
 use crate::analytics::{qualification, report};
 use crate::market::observer::strict_driver;
@@ -15,6 +16,7 @@ const VERIFY_VALUE_FLAGS: &[&str] = &[
     "--verify-disk-bytes",
     "--verify-ram-bytes",
     "--verify-min-free-bytes",
+    "--verify-max-pages",
     "--provider-evidence",
 ];
 const VERIFY_SWITCHES: &[&str] = &["--offline", "--resume-verification"];
@@ -22,7 +24,8 @@ const VERIFY_SWITCHES: &[&str] = &["--offline", "--resume-verification"];
 /// What the chain did: its terminal text and each stage's outcome.
 pub struct Outcome {
     pub text: String,
-    /// `off` (NOT_RUN recorded) or a CANONICAL_VERIFIED strict result.
+    /// `off` (NOT_RUN recorded) or the mode's own verified result (CANONICAL_VERIFIED,
+    /// INDEX_VERIFIED, CROSSCHECK_VERIFIED; never promoted).
     pub verification_ok: bool,
     pub report_ok: bool,
     /// The master verdict, `None` if the qualification could not run.
@@ -30,9 +33,9 @@ pub struct Outcome {
 }
 
 pub fn post_capture(run: &Path, mode: &str, args: &[String]) -> Result<Outcome, String> {
-    if !matches!(mode, "off" | "strict") {
+    if !matches!(mode, "off" | "index" | "strict" | "crosscheck") {
         return Err(format!(
-            "CHAIN_VERIFY_{mode}_BLOCKED: index/crosscheck stay with the pinned Python verifier"
+            "CHAIN_VERIFY_{mode}_INVALID: off|index|strict|crosscheck"
         ));
     }
     // DEC-16: an unbounded run is measured window by window, never as one capture.

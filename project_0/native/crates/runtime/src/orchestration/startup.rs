@@ -1287,9 +1287,26 @@ mod supervise_tests {
                 assert!(!online.verification_ok && online.report_ok);
                 assert!(online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"));
                 assert!(online.verdict.is_some());
-                assert!(post_capture(&run, "index", &[])
+                // DEC-08: index and crosscheck run natively — online likewise only with the
+                // provider evidence, offline from the cache (none here: never verified).
+                for mode in ["index", "crosscheck"] {
+                    let online = post_capture(&run, mode, &[]).unwrap();
+                    assert!(!online.verification_ok && online.report_ok, "{mode}");
+                    assert!(
+                        online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"),
+                        "{mode}"
+                    );
+                    let cached = post_capture(&run, mode, &["--offline".into()]).unwrap();
+                    assert!(!cached.verification_ok, "{mode}");
+                    assert!(
+                        cached.text.contains("status=HISTORICAL_INCOMPLETE"),
+                        "{mode}"
+                    );
+                    assert!(cached.verdict.is_some(), "{mode}");
+                }
+                assert!(post_capture(&run, "full", &[])
                     .err()
-                    .is_some_and(|e| e.starts_with("CHAIN_VERIFY_index_BLOCKED")));
+                    .is_some_and(|e| e.starts_with("CHAIN_VERIFY_full_INVALID")));
             }
             let _ = std::fs::remove_dir_all(run.parent().unwrap());
         }

@@ -92,6 +92,27 @@ impl VerifyMode {
     }
 }
 
+impl VerifyBudget {
+    /// The typed budget of a verification method (DEC-08: requests, bytes and RPS per method,
+    /// the same as the verifier's `StrictBudget::of_mode`; pages, time and disk shared).
+    pub fn for_mode(mode: VerifyMode, l: &darkbot_solana::runtime_config::Limits) -> Self {
+        let (rps, calls, mib) = match mode {
+            VerifyMode::Off | VerifyMode::Strict => (l.verify_rps, l.verify_calls, l.verify_mib),
+            VerifyMode::Index => (l.index_rps, l.index_calls, l.index_mib),
+            VerifyMode::Crosscheck => (l.crosscheck_rps, l.crosscheck_calls, l.crosscheck_mib),
+        };
+        VerifyBudget {
+            mode,
+            rps,
+            calls,
+            seconds: l.verify_seconds,
+            max_pages: l.verify_pages,
+            bytes: mib * MIB,
+            disk_bytes: l.verify_disk_mib * MIB,
+        }
+    }
+}
+
 /// The verifier budget the run will actually use (measurement config, else operational config).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VerifyBudget {
@@ -242,15 +263,7 @@ impl Request {
             duration_s,
             out_dir: out_dir.into(),
             capture_source: capture_source.into(),
-            verify: VerifyBudget {
-                mode: VerifyMode::Off,
-                rps: l.verify_rps,
-                calls: l.verify_calls,
-                seconds: l.verify_seconds,
-                max_pages: 50,
-                bytes: l.verify_mib * MIB,
-                disk_bytes: l.verify_disk_mib * MIB,
-            },
+            verify: VerifyBudget::for_mode(VerifyMode::Off, l),
             initial_bytes: w.initial_bytes,
             max_bytes: w.max_bytes,
             system_reserve_bytes: w.system_reserve_bytes,

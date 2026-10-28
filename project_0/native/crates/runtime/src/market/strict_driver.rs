@@ -126,6 +126,31 @@ pub struct StrictBudget {
     pub min_free_bytes: u64,
 }
 
+impl StrictBudget {
+    /// DEC-08: the typed FREE_ONLY budget of a verification method — requests, bytes and RPS
+    /// per method (`verify_*` strict, `index_*`, `crosscheck_*` per source), time, disk, RAM and
+    /// free space the verifiers' shared bounds.
+    pub fn of_mode(mode: VerifyMode, l: &darkbot_solana::runtime_config::Limits) -> Self {
+        let (rps, calls, mib) = match mode {
+            VerifyMode::Off | VerifyMode::Strict => (l.verify_rps, l.verify_calls, l.verify_mib),
+            VerifyMode::Index { .. } => (l.index_rps, l.index_calls, l.index_mib),
+            VerifyMode::Crosscheck { .. } => {
+                (l.crosscheck_rps, l.crosscheck_calls, l.crosscheck_mib)
+            }
+        };
+        let mib_bytes = 1024 * 1024;
+        StrictBudget {
+            rps,
+            max_calls: calls,
+            max_seconds: l.verify_seconds,
+            max_bytes: mib * mib_bytes,
+            max_disk_bytes: l.verify_disk_mib * mib_bytes,
+            max_ram_bytes: l.verify_ram_mib * mib_bytes,
+            min_free_bytes: l.verify_free_mib * mib_bytes,
+        }
+    }
+}
+
 /// Stable identity of one strict verification definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationSpec {
@@ -782,8 +807,8 @@ fn drive_history(
 }
 
 /// A3/C0E1-P5-CLI: the one typed request of a native verification (`p0-strict-verify --run`,
-/// `p0ctl verify`): budgets default to the operational config; online strict needs
-/// `--provider-evidence`.
+/// `p0ctl verify`): budgets default to the mode's typed budget of the operational config
+/// (DEC-08: per method); every online history read needs `--provider-evidence`.
 pub fn cli(args: &[String]) -> Result<(String, bool), String> {
     if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
         || std::env::var_os("P0_PROFILE").is_some()
@@ -796,19 +821,11 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         resolved.activate()?;
     }
     let l = &darkbot_solana::runtime_config::active().limits;
-    let mib = 1024 * 1024;
-    let mut budget = StrictBudget {
-        rps: l.verify_rps,
-        max_calls: l.verify_calls,
-        max_seconds: l.verify_seconds,
-        max_bytes: l.verify_mib * mib,
-        max_disk_bytes: l.verify_disk_mib * mib,
-        max_ram_bytes: l.verify_ram_mib * mib,
-        min_free_bytes: l.verify_free_mib * mib,
-    };
     let (mut run, mut offline, mut resume, mut mode) = (None, false, false, VerifyMode::Strict);
     let mut pages = l.verify_pages;
     let mut provider_evidence = None;
+    // Explicit bounds override the mode's typed budget (`StrictBudget::of_mode`).
+    let mut set: Vec<(&'static str, u64)> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut number = || -> Result<u64, String> {
@@ -834,7 +851,7 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
                     _ => return Err("--mode strict|index|crosscheck|off".into()),
                 }
             }
-            "--verify-pages" => {
+            "--verify-max-pages" => {
                 pages = number()?;
                 if let VerifyMode::Index { max_pages } | VerifyMode::Crosscheck { max_pages } =
                     &mut mode
@@ -843,15 +860,41 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
                 }
             }
             "--resume-verification" => resume = true,
-            "--verify-rps" => budget.rps = number()?,
-            "--verify-calls" => budget.max_calls = number()?,
-            "--verify-seconds" => budget.max_seconds = number()?,
-            "--verify-bytes" => budget.max_bytes = number()?,
-            "--verify-disk-bytes" => budget.max_disk_bytes = number()?,
-            "--verify-ram-bytes" => budget.max_ram_bytes = number()?,
-            "--verify-min-free-bytes" => budget.min_free_bytes = number()?,
+            flag @ ("--verify-rps"
+            | "--verify-calls"
+            | "--verify-seconds"
+            | "--verify-bytes"
+            | "--verify-disk-bytes"
+            | "--verify-ram-bytes"
+            | "--verify-min-free-bytes") => {
+                let n = number()?;
+                set.push((
+                    match flag {
+                        "--verify-rps" => "rps",
+                        "--verify-calls" => "calls",
+                        "--verify-seconds" => "seconds",
+                        "--verify-bytes" => "bytes",
+                        "--verify-disk-bytes" => "disk",
+                        "--verify-ram-bytes" => "ram",
+                        _ => "free",
+                    },
+                    n,
+                ))
+            }
             other => return Err(format!("UNKNOWN_ARGUMENT: {other}")),
         }
+    }
+    let mut budget = StrictBudget::of_mode(mode, l);
+    for (field, n) in set {
+        *match field {
+            "rps" => &mut budget.rps,
+            "calls" => &mut budget.max_calls,
+            "seconds" => &mut budget.max_seconds,
+            "bytes" => &mut budget.max_bytes,
+            "disk" => &mut budget.max_disk_bytes,
+            "ram" => &mut budget.max_ram_bytes,
+            _ => &mut budget.min_free_bytes,
+        } = n;
     }
     let outcome = drive(&DriverRequest {
         run: run.ok_or("--run required")?.into(),

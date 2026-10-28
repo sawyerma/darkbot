@@ -223,6 +223,15 @@ parameters! {
     // (revision 14).
     threshold_observe_budget_ppm = defaults::THRESHOLD_OBSERVE_BUDGET_PPM, "ppm", "P0_THRESHOLD_OBSERVE_BUDGET_PPM";
     threshold_crosscheck_accounts = defaults::THRESHOLD_CROSSCHECK_ACCOUNTS, "accounts", "P0_THRESHOLD_CROSSCHECK_ACCOUNTS";
+    // DEC-08: the typed FREE_ONLY provider budgets of the INDEX and CROSSCHECK verifiers
+    // (requests, bytes, RPS per method; CROSSCHECK per source; revision 15). Time, disk, RAM,
+    // free space and pages stay the verifiers' shared `verify_*` bounds.
+    index_rps = 2, "requests/s", "P0_INDEX_RPS";
+    index_calls = 2000, "requests", "P0_INDEX_CALLS";
+    index_mib = 256, "MiB", "P0_INDEX_MIB";
+    crosscheck_rps = 2, "requests/s", "P0_CROSSCHECK_RPS";
+    crosscheck_calls = 2000, "requests", "P0_CROSSCHECK_CALLS";
+    crosscheck_mib = 256, "MiB", "P0_CROSSCHECK_MIB";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -238,8 +247,9 @@ parameters! {
 /// state owner's parameters `max_total_capital` … `recovery_root_hard_max_seconds` and the typed
 /// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]); 12:
 /// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07); 14:
-/// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06).
-pub const LIMITS_REVISION: u16 = 14;
+/// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06); 15: `index_rps` …
+/// `crosscheck_mib` (DEC-08, the verifiers' budgets per method).
+pub const LIMITS_REVISION: u16 = 15;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -260,6 +270,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("index_rps") => 15,
         f if position(f) >= position("threshold_observe_budget_ppm") => 14,
         f if position(f) >= position("boot_token_ttl_seconds") => 13,
         f if position(f) >= position("fe04_approval_max_lifetime_seconds") => 12,
@@ -2103,9 +2114,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                14,
-                144,
-                "Dfo7Zzd4ee7S8bhiLCknSFH33yc5birp3zt134XzqtAe".to_string()
+                15,
+                150,
+                "ZYNEy846aL8rFKigE6G1ftg8pX15hqT6JGYkTrMZN72".to_string()
             )
         );
     }
