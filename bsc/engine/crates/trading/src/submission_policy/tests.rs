@@ -2339,3 +2339,275 @@ fn one_adapter_expired_unstarted_while_another_disclosed() {
     // The intent is unresolved because of A, whatever B did not do.
     assert!([a, b].iter().any(|view| view.may_still_execute()));
 }
+
+/// The findings that establish a birth entry on a builder, minus `skip`.
+fn birth_entry_findings(
+    skip: Option<super::qualification::PropertyName>,
+) -> Vec<super::qualification::Finding> {
+    use super::qualification::{FeatureName, Finding, PropertyName};
+    [
+        (PropertyName::PreservesOrder, Knowledge::Yes),
+        (PropertyName::Atomic, Knowledge::Yes),
+        (PropertyName::SameBlock, Knowledge::Yes),
+        (PropertyName::ExtractsTransactions, Knowledge::No),
+        (PropertyName::ProviderRebroadcast, Knowledge::No),
+        (PropertyName::ProviderPublicFallback, Knowledge::No),
+        (PropertyName::ReachesOtherBuilders, Knowledge::No),
+        (PropertyName::PublicMempoolExposure, Knowledge::No),
+    ]
+    .into_iter()
+    .filter(|(p, _)| Some(*p) != skip)
+    .map(|(p, k)| Finding::Property(p, k))
+    .chain([
+        Finding::Feature(FeatureName::NoMerge),
+        Finding::Feature(FeatureName::PositionFirst),
+        Finding::Feature(FeatureName::MaxBlockNumber),
+        Finding::SendTime,
+    ])
+    .collect()
+}
+
+/// Plan 28.10.: what this product measured about an adapter establishes
+/// what its frozen record cannot, and exactly that; without it nothing is
+/// released, as before.
+#[test]
+fn a_measured_qualification_releases_exactly_what_it_establishes() {
+    use super::qualification::{AdapterQualification, FeatureName, Finding, PropertyName};
+    let (ticket, expected) = public_intent();
+    let frozen = table();
+    let plan = SubmissionPlan::new(&frozen, &expected, &budget(), public_inputs(ticket)).unwrap();
+    let q = |id: CapabilityId, findings: &[Finding]| {
+        AdapterQualification::from_findings(id, findings).unwrap()
+    };
+    let club48 = q(CapabilityId::Club48BuilderV1, &birth_entry_findings(None));
+    let blockrazor = q(
+        CapabilityId::BlockRazorBuilderV1,
+        &birth_entry_findings(None),
+    );
+    assert_eq!(
+        plan.qualify_for_release_with(&frozen, &[]),
+        Err(ReleaseRefusal {
+            adapter: Some(adapter(0)),
+            blocker: ReleaseBlocker::OrderNotEstablished,
+        })
+    );
+    assert_eq!(
+        plan.qualify_for_release_with(&frozen, std::slice::from_ref(&club48)),
+        Err(ReleaseRefusal {
+            adapter: Some(adapter(1)),
+            blocker: ReleaseBlocker::OrderNotEstablished,
+        })
+    );
+    let release = plan
+        .qualify_for_release_with(&frozen, &[club48.clone(), blockrazor.clone()])
+        .unwrap();
+    assert_eq!(*release.plan(), plan);
+    // Each property not measured blocks with its own reason.
+    for (property, blocker) in [
+        (
+            PropertyName::PreservesOrder,
+            ReleaseBlocker::OrderNotEstablished,
+        ),
+        (
+            PropertyName::Atomic,
+            ReleaseBlocker::AtomicityNotEstablished,
+        ),
+        (
+            PropertyName::SameBlock,
+            ReleaseBlocker::SameBlockNotEstablished,
+        ),
+        (
+            PropertyName::ExtractsTransactions,
+            ReleaseBlocker::ExtractionNotExcluded,
+        ),
+        (
+            PropertyName::ProviderRebroadcast,
+            ReleaseBlocker::RebroadcastNotExcluded,
+        ),
+        (
+            PropertyName::ProviderPublicFallback,
+            ReleaseBlocker::PublicFallbackNotExcluded,
+        ),
+        (
+            PropertyName::ReachesOtherBuilders,
+            ReleaseBlocker::DownstreamNotExcluded,
+        ),
+        (
+            PropertyName::PublicMempoolExposure,
+            ReleaseBlocker::PublicExposureNotExcluded,
+        ),
+    ] {
+        let partial = q(
+            CapabilityId::Club48BuilderV1,
+            &birth_entry_findings(Some(property)),
+        );
+        assert_eq!(
+            plan.qualify_for_release_with(&frozen, &[partial, blockrazor.clone()])
+                .err()
+                .map(|r| r.blocker),
+            Some(blocker),
+            "{}",
+            property.name()
+        );
+    }
+    // A property measured the unwanted way blocks as well.
+    let mut leaky = birth_entry_findings(Some(PropertyName::ExtractsTransactions));
+    leaky.push(Finding::Property(
+        PropertyName::ExtractsTransactions,
+        Knowledge::Yes,
+    ));
+    assert_eq!(
+        plan.qualify_for_release_with(
+            &frozen,
+            &[q(CapabilityId::Club48BuilderV1, &leaky), blockrazor.clone()]
+        )
+        .err()
+        .map(|r| r.blocker),
+        Some(ReleaseBlocker::ExtractionNotExcluded)
+    );
+    // A feature the plan uses must be qualified, and so must the boundary.
+    for (missing, blocker) in [
+        (
+            Finding::Feature(FeatureName::NoMerge),
+            ReleaseBlocker::NoMergeNotEstablished,
+        ),
+        (
+            Finding::Feature(FeatureName::PositionFirst),
+            ReleaseBlocker::PositionFirstNotEstablished,
+        ),
+        (
+            Finding::Feature(FeatureName::MaxBlockNumber),
+            ReleaseBlocker::ExpiryByBlockNotEstablished,
+        ),
+        (Finding::SendTime, ReleaseBlocker::SendTimeNotQualified),
+    ] {
+        let without: Vec<_> = birth_entry_findings(None)
+            .into_iter()
+            .filter(|f| *f != missing)
+            .collect();
+        assert_eq!(
+            plan.qualify_for_release_with(
+                &frozen,
+                &[
+                    q(CapabilityId::Club48BuilderV1, &without),
+                    blockrazor.clone()
+                ]
+            )
+            .err()
+            .map(|r| r.blocker),
+            Some(blocker),
+            "{}",
+            missing.name()
+        );
+    }
+    // A qualification of another record does not count for this one.
+    let local = q(CapabilityId::LocalGethV1, &[Finding::SendTime]);
+    assert!(
+        plan.qualify_for_release_with(&frozen, &[local, blockrazor])
+            .is_err()
+    );
+}
+
+/// A single transaction (approval, SELL, a BUY on canonical state) claims
+/// no placement: its mode and its send boundary must be qualified.
+#[test]
+fn a_single_transaction_needs_its_mode_and_send_boundary_qualified() {
+    use super::qualification::{AdapterQualification, Finding};
+    let single = SubmissionMode::SingleRawBuy;
+    let profile = ReleaseProfile::SingleRawV1;
+    let club48 = CapabilityId::Club48BuilderV1.record();
+    let local = CapabilityId::LocalGethV1.record();
+    let q = |id: CapabilityId, findings: &[Finding]| {
+        AdapterQualification::from_findings(id, findings).unwrap()
+    };
+    assert_eq!(
+        profile.release_blocker_with(club48, None, single),
+        Some(ReleaseBlocker::ModeNotEnabled)
+    );
+    let mode = q(CapabilityId::Club48BuilderV1, &[Finding::Mode(single)]);
+    assert_eq!(
+        profile.release_blocker_with(club48, Some(&mode), single),
+        Some(ReleaseBlocker::SendTimeNotQualified)
+    );
+    let both = q(
+        CapabilityId::Club48BuilderV1,
+        &[Finding::Mode(single), Finding::SendTime],
+    );
+    assert_eq!(
+        profile.release_blocker_with(club48, Some(&both), single),
+        None
+    );
+    assert_eq!(
+        profile.release_blocker_with(club48, Some(&both), SubmissionMode::PublicFullLaunchBundle),
+        Some(ReleaseBlocker::ModeNotEnabled)
+    );
+    assert_eq!(
+        profile.release_blocker_with(local, None, single),
+        Some(ReleaseBlocker::SendTimeNotQualified)
+    );
+    assert_eq!(
+        profile.release_blocker_with(local, Some(&both), single),
+        Some(ReleaseBlocker::SendTimeNotQualified),
+        "another record's qualification is not this one's"
+    );
+    assert_eq!(
+        ReleaseProfile::BirthEntryV1.release_blocker_with(club48, Some(&both), single),
+        Some(ReleaseBlocker::NoOrderedPlacement)
+    );
+}
+
+/// Findings read as they are named; what a record never offers cannot be
+/// qualified, and nothing is measured twice.
+#[test]
+fn findings_cannot_qualify_what_a_record_never_offers() {
+    use super::qualification::{AdapterQualification, FeatureName, Finding, PropertyName};
+    for finding in birth_entry_findings(None).into_iter().chain([
+        Finding::Mode(SubmissionMode::SingleRawBuy),
+        Finding::Mode(SubmissionMode::PrivateTarget),
+        Finding::Feature(FeatureName::PreSubmission),
+        Finding::Property(PropertyName::Atomic, Knowledge::No),
+    ]) {
+        assert_eq!(
+            Finding::parse(&finding.name()),
+            Some(finding),
+            "{}",
+            finding.name()
+        );
+    }
+    for bad in [
+        "PROPERTY:ATOMIC=MAYBE",
+        "PROPERTY:ATOMIC",
+        "FEATURE:X",
+        "MODE:X",
+        "SEND",
+    ] {
+        assert_eq!(Finding::parse(bad), None, "{bad}");
+    }
+    let local = CapabilityId::LocalGethV1;
+    assert!(
+        AdapterQualification::from_findings(local, &[Finding::Feature(FeatureName::NoMerge)])
+            .is_err()
+    );
+    assert!(
+        AdapterQualification::from_findings(
+            local,
+            &[Finding::Mode(SubmissionMode::PublicFullLaunchBundle)]
+        )
+        .is_err()
+    );
+    let club48 = CapabilityId::Club48BuilderV1;
+    assert!(
+        AdapterQualification::from_findings(club48, &[Finding::SendTime, Finding::SendTime])
+            .is_err()
+    );
+    assert!(
+        AdapterQualification::from_findings(
+            club48,
+            &[
+                Finding::Property(PropertyName::Atomic, Knowledge::Yes),
+                Finding::Property(PropertyName::Atomic, Knowledge::No)
+            ]
+        )
+        .is_err()
+    );
+}

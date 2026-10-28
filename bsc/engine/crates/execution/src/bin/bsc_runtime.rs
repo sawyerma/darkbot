@@ -129,6 +129,124 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Every value of a repeated flag.
+fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
+    args.windows(2)
+        .filter(|w| w[0] == name)
+        .map(|w| w[1].as_str())
+        .collect()
+}
+
+/// `NAME@A,B[@C,D]`: a name and its comma lists.
+fn at_lists(value: &str) -> (&str, Vec<Vec<String>>) {
+    let mut parts = value.split('@');
+    let name = parts.next().unwrap_or_default();
+    let lists = parts
+        .map(|p| {
+            p.split(',')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .collect();
+    (name, lists)
+}
+
+/// The LIVE qualification a `live qualify` command names (plan 28.10.).
+fn qualify_args(
+    rest: &[String],
+    now: u64,
+) -> Result<darkbot_bsc_execution::live_qualification::Spec, String> {
+    use darkbot_bsc_execution::sources::{LiveAdapter, SourceId, VenueId};
+    use darkbot_bsc_trading::submission_policy::qualification::Finding;
+    let mut spec = darkbot_bsc_execution::live_qualification::Spec::default();
+    for value in flags(rest, "--venue") {
+        let (name, lists) = at_lists(value);
+        let venue = VenueId::parse(name).ok_or(format!("--venue: unknown venue {name}"))?;
+        let [evidence] = <[Vec<String>; 1]>::try_from(lists).map_err(|_| "--venue V@EV,EV")?;
+        spec.venues.push((venue, evidence));
+    }
+    for value in flags(rest, "--source") {
+        let (name, lists) = at_lists(value);
+        let source = SourceId::parse(name).ok_or(format!("--source: unknown source {name}"))?;
+        let [evidence] = <[Vec<String>; 1]>::try_from(lists).map_err(|_| "--source S@EV,EV")?;
+        spec.sources.push((source, evidence));
+    }
+    for value in flags(rest, "--adapter") {
+        let (name, lists) = at_lists(value);
+        let adapter =
+            LiveAdapter::parse(name).ok_or(format!("--adapter: unknown adapter {name}"))?;
+        let [findings, evidence] =
+            <[Vec<String>; 2]>::try_from(lists).map_err(|_| "--adapter A@FINDING,FINDING@EV,EV")?;
+        let findings = findings
+            .iter()
+            .map(|f| Finding::parse(f).ok_or(format!("--adapter: unknown finding {f}")))
+            .collect::<Result<_, _>>()?;
+        spec.adapters.push((adapter, findings, evidence));
+    }
+    spec.acquisition = flags(rest, "--acquisition").first().map(|p| p.to_string());
+    if let Some(by) = flags(rest, "--risk-by").first() {
+        let evidence = flag(rest, "--risk-evidence")?
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        spec.risk = Some((
+            by.to_string(),
+            now,
+            flag(rest, "--risk-statement")?.into(),
+            evidence,
+        ));
+    }
+    Ok(spec)
+}
+
+/// The verified LIVE qualification in `--root` (none: nothing qualified),
+/// printed as its scope.
+fn print_qualification(rest: &[String]) -> darkbot_bsc_execution::sources::LiveQualification {
+    use darkbot_bsc_execution::live_qualification::{LIVE_QUALIFICATION_PATH, view};
+    let Some(root) = flags(rest, "--root")
+        .first()
+        .copied()
+        .map(std::path::Path::new)
+    else {
+        println!("qualification=NONE root=UNSET");
+        return Default::default();
+    };
+    let (v, why) = view(root);
+    match why {
+        Some(why) => println!("qualification=INVALID path={LIVE_QUALIFICATION_PATH} reason={why}"),
+        None if v.sha256 == [0; 32] => {
+            println!("qualification=NONE path={LIVE_QUALIFICATION_PATH}")
+        }
+        None => println!(
+            "qualification=VERIFIED sha256={} venues={} sources={} adapters={} acquisition={} risk_decision={}",
+            hex(&v.sha256),
+            v.view
+                .venues
+                .iter()
+                .map(|x| x.name())
+                .collect::<Vec<_>>()
+                .join(","),
+            v.view
+                .sources
+                .iter()
+                .map(|x| x.name())
+                .collect::<Vec<_>>()
+                .join(","),
+            v.view
+                .adapters
+                .iter()
+                .map(|x| x.name())
+                .collect::<Vec<_>>()
+                .join(","),
+            v.view.acquisition,
+            v.view.risk_decision,
+        ),
+    }
+    v.view
+}
+
 fn run(args: &[String]) -> Result<bool, String> {
     match args {
         // Plan 28.10.: the canonical scope text of a LIVE grant and its
@@ -178,15 +296,37 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
+        // Plan 28.10.: the LIVE qualification record of a scope, each
+        // evidence file bound by path and SHA-256; written create-new to
+        // `--root`/bsc/config/live_qualification.dbrec (or `--out`).
+        [area, cmd, rest @ ..] if area == "live" && cmd == "qualify" => {
+            use darkbot_bsc_execution::live_qualification::{LIVE_QUALIFICATION_PATH, build};
+            use std::io::Write;
+            let root = std::path::Path::new(flag(rest, "--root")?);
+            let now = darkbot_bsc_record::observed_now()?;
+            let bytes = build(root, &qualify_args(rest, now)?, now)?;
+            let out = match flags(rest, "--out").first() {
+                Some(out) => std::path::PathBuf::from(out),
+                None => root.join(LIVE_QUALIFICATION_PATH),
+            };
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out)
+                .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            println!("written={} sha256={}", out.display(), hex(&darkbot_bsc_record::sha256(&bytes)));
+            Ok(true)
+        }
         // The LIVE gate as it holds now: every missing condition, then
         // what each LIVE request is now.
         [area, cmd, rest @ ..] if area == "live" && cmd == "status" => {
-            use darkbot_bsc_execution::sources::{LiveContext, LiveQualification, live_inputs};
+            use darkbot_bsc_execution::sources::{LiveContext, live_inputs};
             let dir = std::path::Path::new(flag(rest, "--state")?);
             let now = darkbot_bsc_record::observed_now()?;
             let (g, daily, total) = live_inputs(dir, now)?;
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
-            let qualification = LiveQualification::default();
+            let qualification = print_qualification(rest);
             let ctx = LiveContext {
                 boot: boot.as_deref(),
                 now_unix_ms: now,
@@ -538,7 +678,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live status --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

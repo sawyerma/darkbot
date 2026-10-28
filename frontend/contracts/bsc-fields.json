@@ -2847,7 +2847,7 @@
   "command_bindings": [
     {
       "source_path": "ops/bsc-control.sh",
-      "source_sha": "06d8492724c4372d0f6be3d9af5345a2c2cb86099bf0957bc93e5f984c464e39",
+      "source_sha": "5aac13aaddc2f04dd82c085eeefdd95f3476f4cc4550dfca59c915373c5eb40b",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
@@ -4376,6 +4376,18 @@
       "wire": "none",
       "topic": "none",
       "reason": "plan 28.10.: one taken slot of the campaign's total BUY limit per attempt (at most ten); projected as counts in the LIVE tab"
+    },
+    {
+      "schemas": [
+        "darkbot.bsc.live-qualification.v1"
+      ],
+      "match": "*",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "plan 28.10.: the LIVE qualification of a scope, verified against its evidence on each load; projected as the qualification preconditions in the LIVE tab"
     },
     {
       "schemas": [

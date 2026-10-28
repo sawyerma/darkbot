@@ -548,7 +548,7 @@ fn validate_config(config: &StartupConfig, table: &AdapterTable) -> Result<(), S
         return Err(StartupError::WrongChain);
     }
     match config.profile {
-        ReleaseProfile::BirthEntryV1 => {}
+        ReleaseProfile::BirthEntryV1 | ReleaseProfile::SingleRawV1 => {}
     }
     if [
         config.policy_generation,

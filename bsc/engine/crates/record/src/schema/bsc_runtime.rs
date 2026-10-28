@@ -435,6 +435,131 @@ pub mod buy_attempt_total_slot {
     };
 }
 
+/// The LIVE qualification of a scope (plan 28.10., `0a647175`): what this
+/// product qualified about venues, sources and inclusion adapters, its
+/// acquisition and its operator's risk decision, each bound by path and
+/// SHA-256 to the evidence records it rests on. The native owner's LIVE
+/// gate counts only what verifies.
+pub mod live_qualification {
+    use super::*;
+
+    /// One evidence record: its repository path, file SHA-256 and schema.
+    pub mod evidence {
+        use super::*;
+
+        pub const PATH: u16 = 1;
+        pub const SHA256: u16 = 2;
+        pub const SCHEMA_NAME: u16 = 3;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-qualification.evidence",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(PATH, "path", Text),
+                Field::req(SHA256, "sha256", B256),
+                Field::req(SCHEMA_NAME, "schema", Text),
+            ],
+        };
+    }
+
+    /// A qualified venue or source.
+    pub mod item {
+        use super::*;
+
+        /// `VENUE` or `SOURCE`.
+        pub const KIND: u16 = 1;
+        pub const ID: u16 = 2;
+        pub const EVIDENCE: u16 = 3;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-qualification.item",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(KIND, "kind", Text),
+                Field::req(ID, "id", Text),
+                Field::nested(EVIDENCE, "evidence", Presence::Repeated, &evidence::SCHEMA),
+            ],
+        };
+    }
+
+    /// A qualified inclusion adapter and its measured findings
+    /// (`PROPERTY:<NAME>=YES|NO`, `FEATURE:<NAME>`, `MODE:<NAME>`,
+    /// `SEND_TIME`).
+    pub mod adapter {
+        use super::*;
+
+        pub const ADAPTER: u16 = 1;
+        pub const FINDINGS: u16 = 2;
+        pub const EVIDENCE: u16 = 3;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-qualification.adapter",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(ADAPTER, "adapter", Text),
+                Field::rep(FINDINGS, "findings", Text),
+                Field::nested(EVIDENCE, "evidence", Presence::Repeated, &evidence::SCHEMA),
+            ],
+        };
+    }
+
+    /// The operator's documented J risk decision for the scope.
+    pub mod risk {
+        use super::*;
+
+        pub const DECIDED_BY: u16 = 1;
+        pub const DECIDED_UNIX_MS: u16 = 2;
+        pub const STATEMENT: u16 = 3;
+        pub const EVIDENCE: u16 = 4;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-qualification.risk",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(DECIDED_BY, "decided_by", Text),
+                Field::req(DECIDED_UNIX_MS, "decided_unix_ms", U64),
+                Field::req(STATEMENT, "statement", Text),
+                Field::nested(EVIDENCE, "evidence", Presence::Repeated, &evidence::SCHEMA),
+            ],
+        };
+    }
+
+    pub const ITEMS: u16 = 1;
+    pub const ADAPTERS: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// The G0.8 result whose verdict PASS is the scope's acquisition.
+    pub const ACQUISITION: u16 = 5;
+    pub const RISK: u16 = 6;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-qualification.v1",
+        record_type: 66,
+        schema_version: 1,
+        fields: &[
+            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
+            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::nested(
+                ACQUISITION,
+                "acquisition",
+                Presence::Optional,
+                &evidence::SCHEMA,
+            ),
+            Field::nested(RISK, "risk", Presence::Optional, &risk::SCHEMA),
+        ],
+    };
+}
+
 /// The receipt of one source-mode request.
 pub mod source_mode_receipt {
     use super::*;
@@ -1395,6 +1520,7 @@ pub const ALL: &[&Schema] = &[
     &source_mode_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
+    &live_qualification::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,

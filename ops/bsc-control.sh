@@ -165,7 +165,7 @@ bsc_live() {
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live revoke --expect-generation "$1" --request-id "$2" \
         --state "$RUNDIR/bsc-sources" ;;
     status) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
-      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" ;;
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" ;;
     *) die "$BSC_LIVE_USAGE" ;;
   esac
 }

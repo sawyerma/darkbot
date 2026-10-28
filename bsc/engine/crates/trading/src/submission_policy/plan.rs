@@ -63,6 +63,7 @@
 use alloy_primitives::{Address, B256, U256};
 
 use super::capability::{AdapterTable, SubmissionMode, Support};
+use super::qualification::AdapterQualification;
 use super::release::{ReleaseBlocker, ReleaseProfile, ReleaseRefusal, UsedFeatures};
 use crate::chain_state::SnapshotId;
 use crate::economics::arith::add;
@@ -1009,6 +1010,18 @@ impl SubmissionPlan {
         &self,
         table: &AdapterTable,
     ) -> Result<QualifiedReleasePlan, ReleaseRefusal> {
+        self.qualify_for_release_with(table, &[])
+    }
+
+    /// [`SubmissionPlan::qualify_for_release`] with what this product
+    /// qualified about the adapters (plan 28.10.): each adapter is judged
+    /// with the qualification of its own record, if one is given. Without
+    /// one, exactly as before: nothing is qualified, nothing is released.
+    pub fn qualify_for_release_with(
+        &self,
+        table: &AdapterTable,
+        qualifications: &[AdapterQualification],
+    ) -> Result<QualifiedReleasePlan, ReleaseRefusal> {
         if table.generation() != self.capability_generation {
             return Err(ReleaseRefusal {
                 adapter: None,
@@ -1034,7 +1047,11 @@ impl SubmissionPlan {
             if !carried {
                 return Err(refuse(ReleaseBlocker::EnvelopeOptionMissing));
             }
-            if let Some(blocker) = self.profile.release_blocker(record, self.mode) {
+            let qualification = qualifications.iter().find(|q| q.id() == record.id());
+            if let Some(blocker) =
+                self.profile
+                    .release_blocker_with(record, qualification, self.mode)
+            {
                 return Err(refuse(blocker));
             }
             // The provider features this very plan relies on for this
@@ -1049,7 +1066,10 @@ impl SubmissionPlan {
                 max_timestamp: validity.is_some_and(|v| v.max_timestamp.is_some()),
                 pre_submission: self.pre_submission == PreSubmission::BeforeLaunchExecution,
             };
-            if let Some(blocker) = self.profile.feature_blocker(record, used) {
+            if let Some(blocker) = self
+                .profile
+                .feature_blocker_with(record, qualification, used)
+            {
                 return Err(refuse(blocker));
             }
         }

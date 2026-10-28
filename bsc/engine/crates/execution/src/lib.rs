@@ -57,6 +57,9 @@ pub mod qualification_capture;
 /// tools check their switches through it.
 #[cfg(any(feature = "runtime", feature = "g07-mainnet"))]
 pub mod sources;
+/// The LIVE qualification record, verified against its evidence (plan 28.10.).
+#[cfg(any(feature = "runtime", feature = "g07-mainnet"))]
+pub mod live_qualification;
 /// The native WSS pending-transaction source adapter (verified full txs).
 #[cfg(feature = "runtime")]
 pub mod wss;

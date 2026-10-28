@@ -13,6 +13,8 @@
 //! - [`release`]: release profiles: the envelope options and the block
 //!   window a release requires, and what must be established about an
 //!   adapter before it counts for a release.
+//! - [`qualification`]: what this product qualified about an adapter, the
+//!   measured half a release needs besides the frozen record.
 //! - [`plan`]: the immutable submission plan of one economic intent, its
 //!   final check before dispatch, and the after-handoff validity model.
 //!
@@ -24,6 +26,7 @@
 
 pub mod capability;
 pub mod plan;
+pub mod qualification;
 pub mod release;
 
 #[cfg(test)]

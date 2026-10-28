@@ -53,6 +53,7 @@
 
 use super::capability::{AdapterKind, CapabilityRecord, Knowledge, SubmissionMode, Support};
 use super::plan::{LOCAL_REACTION_LIMIT_NS, PlanError};
+use super::qualification::{AdapterQualification, FeatureName, PropertyName};
 use crate::intent::AdapterId;
 
 /// A versioned release profile.
@@ -60,6 +61,11 @@ use crate::intent::AdapterId;
 pub enum ReleaseProfile {
     /// Same-block entry directly behind the launch, version 1.
     BirthEntryV1,
+    /// One signed transaction alone (plan 28.10.): an approval, a SELL, or
+    /// a BUY on canonical state (Strategy C), version 1. No placement is
+    /// claimed; the adapter must take the single transaction and its send
+    /// boundary be qualified.
+    SingleRawV1,
 }
 
 /// Envelope options a profile requires of one adapter kind.
@@ -154,7 +160,7 @@ impl ReleaseProfile {
     /// provider's last valid block.
     pub fn max_block_window(self) -> u64 {
         match self {
-            Self::BirthEntryV1 => 2,
+            Self::BirthEntryV1 | Self::SingleRawV1 => 2,
         }
     }
 
@@ -162,7 +168,7 @@ impl ReleaseProfile {
     /// profile may have. A deadline may be tighter, never wider.
     pub fn max_transport_start_limit_ns(self) -> u64 {
         match self {
-            Self::BirthEntryV1 => LOCAL_REACTION_LIMIT_NS,
+            Self::BirthEntryV1 | Self::SingleRawV1 => LOCAL_REACTION_LIMIT_NS,
         }
     }
 
@@ -173,7 +179,7 @@ impl ReleaseProfile {
                 no_merge: true,
                 position_first: true,
             },
-            (Self::BirthEntryV1, _) => RequiredOptions {
+            (Self::BirthEntryV1 | Self::SingleRawV1, _) => RequiredOptions {
                 no_merge: false,
                 position_first: false,
             },
@@ -218,40 +224,87 @@ impl ReleaseProfile {
         record: &CapabilityRecord,
         mode: SubmissionMode,
     ) -> Option<ReleaseBlocker> {
-        match self {
-            Self::BirthEntryV1 => {}
-        }
-        if record.mode(mode) != Support::Enabled {
+        self.release_blocker_with(record, None, mode)
+    }
+
+    /// [`ReleaseProfile::release_blocker`] with what this product qualified
+    /// about the adapter (plan 28.10.): a property, mode or send boundary
+    /// counts as established when the frozen record or the qualification
+    /// establishes it. A single transaction (`SingleRawV1`) claims no
+    /// placement: it needs its mode and its send boundary, nothing else.
+    pub fn release_blocker_with(
+        self,
+        record: &CapabilityRecord,
+        qualification: Option<&AdapterQualification>,
+        mode: SubmissionMode,
+    ) -> Option<ReleaseBlocker> {
+        let q = qualification.filter(|q| q.id() == record.id());
+        let property = |p: PropertyName, wanted: Knowledge| {
+            p.of(record).established(wanted) || q.is_some_and(|q| q.property_established(p, wanted))
+        };
+        let mode_ok =
+            record.mode(mode) == Support::Enabled || q.is_some_and(|q| q.mode_established(mode));
+        let send_time =
+            record.qualified_as_t_send() || q.is_some_and(|q| q.send_time_established());
+        if !mode_ok {
             return Some(ReleaseBlocker::ModeNotEnabled);
+        }
+        if self == Self::SingleRawV1 {
+            if mode != SubmissionMode::SingleRawBuy {
+                return Some(ReleaseBlocker::ModeNotEnabled);
+            }
+            return (!send_time).then_some(ReleaseBlocker::SendTimeNotQualified);
         }
         if mode == SubmissionMode::SingleRawBuy {
             return Some(ReleaseBlocker::NoOrderedPlacement);
         }
-        if !record.preserves_order().established(Knowledge::Yes) {
-            return Some(ReleaseBlocker::OrderNotEstablished);
+        for (p, wanted, blocker) in [
+            (
+                PropertyName::PreservesOrder,
+                Knowledge::Yes,
+                ReleaseBlocker::OrderNotEstablished,
+            ),
+            (
+                PropertyName::Atomic,
+                Knowledge::Yes,
+                ReleaseBlocker::AtomicityNotEstablished,
+            ),
+            (
+                PropertyName::SameBlock,
+                Knowledge::Yes,
+                ReleaseBlocker::SameBlockNotEstablished,
+            ),
+            (
+                PropertyName::ExtractsTransactions,
+                Knowledge::No,
+                ReleaseBlocker::ExtractionNotExcluded,
+            ),
+            (
+                PropertyName::ProviderRebroadcast,
+                Knowledge::No,
+                ReleaseBlocker::RebroadcastNotExcluded,
+            ),
+            (
+                PropertyName::ProviderPublicFallback,
+                Knowledge::No,
+                ReleaseBlocker::PublicFallbackNotExcluded,
+            ),
+            (
+                PropertyName::ReachesOtherBuilders,
+                Knowledge::No,
+                ReleaseBlocker::DownstreamNotExcluded,
+            ),
+            (
+                PropertyName::PublicMempoolExposure,
+                Knowledge::No,
+                ReleaseBlocker::PublicExposureNotExcluded,
+            ),
+        ] {
+            if !property(p, wanted) {
+                return Some(blocker);
+            }
         }
-        if !record.atomic().established(Knowledge::Yes) {
-            return Some(ReleaseBlocker::AtomicityNotEstablished);
-        }
-        if !record.same_block().established(Knowledge::Yes) {
-            return Some(ReleaseBlocker::SameBlockNotEstablished);
-        }
-        if !record.extracts_transactions().established(Knowledge::No) {
-            return Some(ReleaseBlocker::ExtractionNotExcluded);
-        }
-        if !record.provider_rebroadcast().established(Knowledge::No) {
-            return Some(ReleaseBlocker::RebroadcastNotExcluded);
-        }
-        if !record.provider_public_fallback().established(Knowledge::No) {
-            return Some(ReleaseBlocker::PublicFallbackNotExcluded);
-        }
-        if !record.reaches_other_builders().established(Knowledge::No) {
-            return Some(ReleaseBlocker::DownstreamNotExcluded);
-        }
-        if !record.public_mempool_exposure().established(Knowledge::No) {
-            return Some(ReleaseBlocker::PublicExposureNotExcluded);
-        }
-        if !record.qualified_as_t_send() {
+        if !send_time {
             return Some(ReleaseBlocker::SendTimeNotQualified);
         }
         None
@@ -270,30 +323,57 @@ impl ReleaseProfile {
         record: &CapabilityRecord,
         used: UsedFeatures,
     ) -> Option<ReleaseBlocker> {
-        match self {
-            Self::BirthEntryV1 => {}
-        }
-        if used.no_merge && !record.no_merge().established() {
-            return Some(ReleaseBlocker::NoMergeNotEstablished);
-        }
-        if used.position_first && !record.position_first().established() {
-            return Some(ReleaseBlocker::PositionFirstNotEstablished);
-        }
-        if used.max_block_number && !record.max_block_number().established() {
-            return Some(ReleaseBlocker::ExpiryByBlockNotEstablished);
-        }
-        if used.min_timestamp && !record.min_timestamp().established() {
-            return Some(ReleaseBlocker::MinTimestampNotEstablished);
-        }
-        if used.max_timestamp && !record.max_timestamp().established() {
-            return Some(ReleaseBlocker::MaxTimestampNotEstablished);
-        }
-        if used.pre_submission
-            && !record
-                .pre_submission_before_launch_execution()
-                .established()
-        {
-            return Some(ReleaseBlocker::PreSubmissionNotEstablished);
+        self.feature_blocker_with(record, None, used)
+    }
+
+    /// [`ReleaseProfile::feature_blocker`] with what this product qualified
+    /// about the adapter: a feature the plan uses counts when the frozen
+    /// record or the qualification establishes it.
+    pub fn feature_blocker_with(
+        self,
+        record: &CapabilityRecord,
+        qualification: Option<&AdapterQualification>,
+        used: UsedFeatures,
+    ) -> Option<ReleaseBlocker> {
+        let q = qualification.filter(|q| q.id() == record.id());
+        let established = |f: FeatureName| {
+            f.of(record).established() || q.is_some_and(|q| q.feature_established(f))
+        };
+        for (in_use, feature, blocker) in [
+            (
+                used.no_merge,
+                FeatureName::NoMerge,
+                ReleaseBlocker::NoMergeNotEstablished,
+            ),
+            (
+                used.position_first,
+                FeatureName::PositionFirst,
+                ReleaseBlocker::PositionFirstNotEstablished,
+            ),
+            (
+                used.max_block_number,
+                FeatureName::MaxBlockNumber,
+                ReleaseBlocker::ExpiryByBlockNotEstablished,
+            ),
+            (
+                used.min_timestamp,
+                FeatureName::MinTimestamp,
+                ReleaseBlocker::MinTimestampNotEstablished,
+            ),
+            (
+                used.max_timestamp,
+                FeatureName::MaxTimestamp,
+                ReleaseBlocker::MaxTimestampNotEstablished,
+            ),
+            (
+                used.pre_submission,
+                FeatureName::PreSubmission,
+                ReleaseBlocker::PreSubmissionNotEstablished,
+            ),
+        ] {
+            if in_use && !established(feature) {
+                return Some(blocker);
+            }
         }
         None
     }
