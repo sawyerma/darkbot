@@ -31,10 +31,19 @@
 //! adapter (`SingleRawBuy`), whose transport is the sink. Their lanes are
 //! their own pool behind the same fence: BUYs and approvals at the next
 //! nonce, SELLs at the one after.
+//!
+//! Plan 28.10. (package 3): the executor is generic over its [`End`], the
+//! one place PAPER and LIVE differ. Every stage up to the lane's final
+//! binding check is this executor's; the end holds the sender's signer and
+//! plans, frames and dispatches the prepared transaction. [`PaperEnd`] is
+//! the PAPER identity and the sink over the diagnostic dispatch, as
+//! before; the LIVE end (the operator's key, the release dispatch over
+//! qualified transports) lives outside this module, which has no transport
+//! but the sink.
 
 use crate::paper::{PaperHandoff, PaperIdentity, PaperSink};
 use crate::submission::send::{
-    Armed, DispatchContext, DispatchError, SendOutcome, dispatch_diagnostic,
+    Armed, DispatchContext, DispatchError, FanoutReport, SendOutcome, dispatch_diagnostic,
 };
 use crate::submission::tls::{CLUB48_DOCUMENTED_HOST, HTTPS_PORT, ProviderTarget, TlsEndpoint};
 use crate::submission::transport::{Clock, ConnectionState, Transport};
@@ -47,6 +56,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 };
 use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
 use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, IntentLane, Ticket};
+use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterTable, CapabilityId, SubmissionMode,
 };
@@ -371,19 +381,22 @@ impl CanonicalContext<'_> {
     }
 }
 
-/// One Strategy C PAPER transaction that reached the sink (Phase I). Its
-/// `times.ingress_ns` is the decision's record time.
+/// One Strategy C transaction that reached the executor's end (Phase I).
+/// Its `times.ingress_ns` is the decision's record time.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PaperIntent {
+pub struct ExecIntent<H> {
     pub kind: IntentKind,
     pub token: [u8; 20],
     /// The canonical head block it was formed on.
     pub block: u64,
-    pub handoff: PaperHandoff,
+    pub handoff: H,
     pub times: StageTimes,
-    /// The signed transaction (a local test artefact, never sent).
+    /// The signed transaction (PAPER: a local test artefact, never sent).
     pub raw: Vec<u8>,
 }
+
+/// One Strategy C PAPER transaction that reached the sink.
+pub type PaperIntent = ExecIntent<PaperHandoff>;
 
 /// The stage times of one PAPER BUY on the runtime's monotonic clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -397,20 +410,24 @@ pub struct StageTimes {
     pub prepared_ns: u64,
     /// Plan formed and the adapter request built.
     pub planned_ns: u64,
-    /// The sink took the complete request: `T_shadow_sink`.
+    /// The end took the complete request: `T_shadow_sink` (PAPER) or the
+    /// release handoff boundary (LIVE).
     pub sink_ns: u64,
 }
 
-/// One PAPER BUY that reached the sink.
+/// One C3 BUY that reached the executor's end.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PaperBuy {
+pub struct ExecBuy<H> {
     pub launch_hash: [u8; 32],
     pub token: [u8; 20],
-    pub handoff: PaperHandoff,
+    pub handoff: H,
     pub times: StageTimes,
-    /// The signed BUY (a local test artefact, never sent).
+    /// The signed BUY (PAPER: a local test artefact, never sent).
     pub raw: Vec<u8>,
 }
+
+/// One PAPER BUY that reached the sink.
+pub type PaperBuy = ExecBuy<PaperHandoff>;
 
 /// The executor's counters.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -527,16 +544,14 @@ impl Transport for SinkTransport<'_> {
     }
 }
 
-/// The armed PAPER path.
-pub struct PaperExecutor {
-    identity: PaperIdentity,
+/// The armed path towards its end.
+pub struct Executor<E: End> {
+    end: E,
     deployment: ValidatedDeployment,
     terms: VenueBuyTerms,
     policy: BuyPolicy,
     config: ExecConfig,
-    table: AdapterTable,
     budget: BudgetEnvelope,
-    target: ProviderTarget,
     lanes: Vec<IntentLane>,
     used: usize,
     /// Exposure dispatched in this session, against `session_cap_wei`.
@@ -544,7 +559,6 @@ pub struct PaperExecutor {
     /// Tokens bought in this session (at most one per lane).
     bought: Vec<[u8; 20]>,
     fence: PathBuf,
-    sink: PaperSink,
     scratch: Vec<u8>,
     raw: Vec<u8>,
     counters: ExecCounters,
@@ -571,6 +585,9 @@ pub struct PaperExecutor {
     exit_policy: ExitPolicy,
     strategy_counters: ExecCounters,
 }
+
+/// The armed PAPER path.
+pub type PaperExecutor = Executor<PaperEnd>;
 
 /// Why the executor could not be armed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -612,32 +629,304 @@ fn durable_fence(path: &Path, bytes: &[u8]) -> Result<(), ArmError> {
     Ok(())
 }
 
-/// The executor parts one single raw transaction needs (Phase I).
-struct RawSink<'a> {
-    lane: &'a mut IntentLane,
-    sink: &'a mut PaperSink,
-    table: &'a AdapterTable,
-    config: &'a ExecConfig,
-    scratch: &'a mut Vec<u8>,
+/// What one hand-over takes to its end.
+#[derive(Clone, Copy, Debug)]
+pub enum Submission<'a> {
+    /// C3: the original launch's signed bytes, then the BUY.
+    LaunchBundle(&'a [u8]),
+    /// Strategy C: the transaction alone (a BUY, an approval or a SELL).
+    Single,
 }
 
-/// What one dispatch to the sink consumed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Consumed {
+/// One transaction its lane holds, bound to `expected` and `snapshot`, for
+/// the end to plan, frame and dispatch.
+pub struct Handover<'a> {
+    pub lane: &'a mut IntentLane,
+    pub ticket: Ticket,
+    pub raw: &'a [u8],
+    pub tx_hash: [u8; 32],
+    pub expected: ExpectedTx<'a>,
+    pub budget: &'a BudgetEnvelope,
+    pub snapshot: &'a SnapshotId,
+    pub head: ChainHead,
+    pub clock: &'a dyn Clock,
+    /// Where the transport start deadline runs from.
+    pub start_ns: u64,
+    pub submission: Submission<'a>,
+    pub config: &'a ExecConfig,
+}
+
+/// What an end made of one hand-over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Handed<H> {
+    pub result: Result<H, Refusal>,
+    /// Plan formed and the adapter request built (0: not reached).
+    pub planned_ns: u64,
+    /// The economic admission was consumed: the exposure counts.
+    pub admitted: bool,
     /// A permit's write was started (or the dispatch broke after the
     /// economic admission): the bytes may be out, their nonce is taken and
     /// their exposure counts. Otherwise the nonce is taken again (gate N1)
     /// and nothing is spent (gate L2).
-    disclosed: bool,
+    pub disclosed: bool,
 }
 
-/// Binds a signed transaction in its lane, plans it as the single raw
-/// transaction of the local node's adapter and dispatches it to the sink.
-/// Returns the handoff, the prepared and planned times, and what the
-/// dispatch consumed.
+impl<H> Handed<H> {
+    /// Refused before the dispatch: nothing consumed.
+    pub fn refused(r: Refusal) -> Self {
+        Handed {
+            result: Err(r),
+            planned_ns: 0,
+            admitted: false,
+            disclosed: false,
+        }
+    }
+}
+
+/// What a dispatch consumed: (the economic admission, a disclosure).
+pub fn consumed_by(dispatched: &Result<FanoutReport, DispatchError>) -> (bool, bool) {
+    match dispatched {
+        Ok(report) => (
+            report.admitted(),
+            report.admitted() && !report.admitted_without_disclosure,
+        ),
+        Err(DispatchError::DispatchBinding(_)) => (true, true),
+        Err(_) => (false, false),
+    }
+}
+
+/// When an end took a hand-over, on the runtime's monotonic clock.
+pub trait HandoffTime {
+    fn at_ns(&self) -> u64;
+}
+
+impl HandoffTime for PaperHandoff {
+    fn at_ns(&self) -> u64 {
+        self.at_ns
+    }
+}
+
+/// Where the executor's path ends (plan 28.10.): the sender's signer, and
+/// the plan, frame and dispatch of each prepared transaction.
+pub trait End {
+    type Handoff: HandoffTime + Copy + core::fmt::Debug + PartialEq + Eq;
+    /// The fence file prefix and the fence body's magic of this end.
+    const FENCE: (&'static str, [u8; 8]);
+
+    fn address(&self) -> [u8; 20];
+    fn signer(&self) -> &Signer;
+    fn hand_over(&mut self, h: Handover<'_>) -> Handed<Self::Handoff>;
+}
+
+/// The PAPER end: the PAPER identity signs; the 48Club bundle (C3) and the
+/// local node's single raw transaction (Strategy C) are planned under the
+/// PAPER profile and dispatched diagnostically to the sink. Never a
+/// release.
+pub struct PaperEnd {
+    identity: PaperIdentity,
+    table: AdapterTable,
+    target: ProviderTarget,
+    sink: PaperSink,
+}
+
+impl PaperEnd {
+    /// The PAPER end of `chain_id` under the capability generation.
+    pub fn new(
+        identity: PaperIdentity,
+        chain_id: u64,
+        capability_generation: u64,
+    ) -> Result<Self, ArmError> {
+        let table = AdapterTable::new(
+            chain_id,
+            capability_generation,
+            &[
+                AdapterBinding {
+                    adapter: paper_adapter(),
+                    capability: CapabilityId::Club48BuilderV1,
+                },
+                // Phase I: Strategy C's single raw transactions.
+                AdapterBinding {
+                    adapter: paper_raw_adapter(),
+                    capability: CapabilityId::LocalGethV1,
+                },
+            ],
+        )
+        .map_err(|e| ArmError::Config(e.to_string()))?;
+        let target = ProviderTarget::club48(
+            TlsEndpoint::new(CLUB48_DOCUMENTED_HOST, HTTPS_PORT)
+                .map_err(|e| ArmError::Config(format!("{e:?}")))?,
+        );
+        Ok(PaperEnd {
+            identity,
+            table,
+            target,
+            sink: PaperSink::default(),
+        })
+    }
+
+    pub fn sink(&self) -> &PaperSink {
+        &self.sink
+    }
+}
+
+impl End for PaperEnd {
+    type Handoff = PaperHandoff;
+    const FENCE: (&'static str, [u8; 8]) = ("paper", *b"DBPAPFN3");
+
+    fn address(&self) -> [u8; 20] {
+        self.identity.address()
+    }
+
+    fn signer(&self) -> &Signer {
+        self.identity.signer()
+    }
+
+    fn hand_over(&mut self, h: Handover<'_>) -> Handed<PaperHandoff> {
+        let Handover {
+            lane,
+            ticket,
+            raw,
+            tx_hash,
+            expected,
+            budget,
+            snapshot,
+            head,
+            clock,
+            start_ns,
+            submission,
+            config,
+        } = h;
+        let (adapter, mode, launch, merge) = match submission {
+            Submission::LaunchBundle(launch_raw) => (
+                paper_adapter(),
+                SubmissionMode::PublicFullLaunchBundle,
+                Launch::PublicOriginal(TxRef::of(launch_raw)),
+                MergePolicy::NoMerge,
+            ),
+            Submission::Single => (
+                paper_raw_adapter(),
+                SubmissionMode::SingleRawBuy,
+                Launch::None,
+                MergePolicy::ProviderDefault,
+            ),
+        };
+        let table = &self.table;
+        let target = &self.target;
+        let planned = (|| {
+            let adapters = AdapterSet::new(&[adapter]).ok_or(Refusal::Plan)?;
+            let last_block = head
+                .number
+                .checked_add(config.validity_blocks)
+                .ok_or(Refusal::Plan)?;
+            let bundle = matches!(submission, Submission::LaunchBundle(_));
+            let plan = SubmissionPlan::new(
+                table,
+                expected,
+                budget,
+                PlanInputs {
+                    ticket,
+                    buy: TxRef::of(raw),
+                    launch,
+                    mode,
+                    profile: PAPER_PROFILE,
+                    adapters,
+                    local_block_deadline: LocalBlockStartDeadline {
+                        last_head_block: last_block,
+                    },
+                    provider_validity: bundle.then_some(ProviderValidity {
+                        max_block_number: last_block,
+                        min_timestamp: None,
+                        max_timestamp: None,
+                    }),
+                    merge,
+                    pre_submission: PreSubmission::No,
+                    provider_payment_wei: U256::ZERO,
+                },
+            )
+            .map_err(|_| Refusal::Plan)?;
+            let frame = match submission {
+                Submission::LaunchBundle(launch_raw) => club48::frame(
+                    &plan,
+                    table,
+                    adapter,
+                    &target.frame_endpoint(),
+                    launch_raw,
+                    config.max_frame,
+                ),
+                Submission::Single => local_geth::frame(&plan, table, adapter, config.max_frame),
+            }
+            .map_err(|_| Refusal::Plan)?;
+            let deadline = TransportStartDeadline::for_profile(
+                PAPER_PROFILE,
+                clock.id(),
+                start_ns,
+                config.start_limit_ns,
+            )
+            .map_err(|_| Refusal::Plan)?;
+            Ok((plan, frame, deadline))
+        })();
+        let (plan, mut frame, deadline) = match planned {
+            Ok(p) => p,
+            Err(r) => return Handed::refused(r),
+        };
+        let planned_ns = clock.now_ns();
+        let mut transport = SinkTransport {
+            sink: &mut self.sink,
+            clock,
+            tx_hash,
+            max_request_len: config.max_frame,
+            state: ConnectionState::Ready,
+            handoff: None,
+        };
+        let dispatched = dispatch_diagnostic(
+            lane,
+            &plan,
+            &DispatchContext {
+                table,
+                current: snapshot,
+                head,
+            },
+            clock,
+            &deadline,
+            &mut [Armed {
+                adapter,
+                transport: &mut transport,
+                frame: &mut frame,
+            }],
+        );
+        let handoff = transport.handoff;
+        let (admitted, disclosed) = consumed_by(&dispatched);
+        let result = match dispatched {
+            Err(_) => Err(Refusal::Dispatch),
+            Ok(report) => match report.adapter(adapter).map(|r| r.outcome) {
+                Some(SendOutcome::HandedOff) => handoff.ok_or(Refusal::Dispatch),
+                Some(SendOutcome::SkippedDeadline(_)) => Err(Refusal::Deadline),
+                _ => Err(Refusal::Dispatch),
+            },
+        };
+        Handed {
+            result,
+            planned_ns,
+            admitted,
+            disclosed,
+        }
+    }
+}
+
+/// The executor parts one hand-over needs.
+struct Parts<'a, E: End> {
+    end: &'a mut E,
+    lane: &'a mut IntentLane,
+    config: &'a ExecConfig,
+    scratch: &'a mut Vec<u8>,
+}
+
+/// Binds a signed transaction in its lane (its final binding check) and
+/// hands it to the end. Returns the handoff, the prepared and planned
+/// times, and what the dispatch consumed: (admission, disclosure).
 #[allow(clippy::too_many_arguments)]
-fn raw_to_sink(
-    parts: RawSink<'_>,
+fn to_end<E: End>(
+    parts: Parts<'_, E>,
     ticket: Ticket,
     raw: &[u8],
     expected: ExpectedTx<'_>,
@@ -646,104 +935,39 @@ fn raw_to_sink(
     head: ChainHead,
     clock: &dyn Clock,
     start_ns: u64,
-) -> (Result<PaperHandoff, Refusal>, u64, u64, Consumed) {
-    let RawSink {
+    submission: Submission<'_>,
+) -> (Result<E::Handoff, Refusal>, u64, u64, (bool, bool)) {
+    let Parts {
+        end,
         lane,
-        sink,
-        table,
         config,
         scratch,
     } = parts;
     let tx_hash = match lane.prepare(ticket, raw, expected, snapshot, scratch) {
         Ok(h) => h,
-        Err(_) => return (Err(Refusal::Lane), 0, 0, Consumed::default()),
+        Err(_) => return (Err(Refusal::Lane), 0, 0, (false, false)),
     };
     let prepared_ns = clock.now_ns();
-    let adapter = paper_raw_adapter();
-    let planned = (|| {
-        let adapters = AdapterSet::new(&[adapter]).ok_or(Refusal::Plan)?;
-        let last_block = head
-            .number
-            .checked_add(config.validity_blocks)
-            .ok_or(Refusal::Plan)?;
-        let plan = SubmissionPlan::new(
-            table,
-            expected,
-            budget,
-            PlanInputs {
-                ticket,
-                buy: TxRef::of(raw),
-                launch: Launch::None,
-                mode: SubmissionMode::SingleRawBuy,
-                profile: PAPER_PROFILE,
-                adapters,
-                local_block_deadline: LocalBlockStartDeadline {
-                    last_head_block: last_block,
-                },
-                provider_validity: None,
-                merge: MergePolicy::ProviderDefault,
-                pre_submission: PreSubmission::No,
-                provider_payment_wei: U256::ZERO,
-            },
-        )
-        .map_err(|_| Refusal::Plan)?;
-        let frame = local_geth::frame(&plan, table, adapter, config.max_frame)
-            .map_err(|_| Refusal::Plan)?;
-        let deadline = TransportStartDeadline::for_profile(
-            PAPER_PROFILE,
-            clock.id(),
-            start_ns,
-            config.start_limit_ns,
-        )
-        .map_err(|_| Refusal::Plan)?;
-        Ok((plan, frame, deadline))
-    })();
-    let (plan, mut frame, deadline) = match planned {
-        Ok(p) => p,
-        Err(r) => return (Err(r), prepared_ns, 0, Consumed::default()),
-    };
-    let planned_ns = clock.now_ns();
-    let mut transport = SinkTransport {
-        sink,
-        clock,
-        tx_hash: tx_hash.0,
-        max_request_len: config.max_frame,
-        state: ConnectionState::Ready,
-        handoff: None,
-    };
-    let dispatched = dispatch_diagnostic(
+    let handed = end.hand_over(Handover {
         lane,
-        &plan,
-        &DispatchContext {
-            table,
-            current: snapshot,
-            head,
-        },
+        ticket,
+        raw,
+        tx_hash: tx_hash.0,
+        expected,
+        budget,
+        snapshot,
+        head,
         clock,
-        &deadline,
-        &mut [Armed {
-            adapter,
-            transport: &mut transport,
-            frame: &mut frame,
-        }],
-    );
-    let handoff = transport.handoff;
-    let consumed = match &dispatched {
-        Ok(report) => Consumed {
-            disclosed: report.admitted() && !report.admitted_without_disclosure,
-        },
-        Err(DispatchError::DispatchBinding(_)) => Consumed { disclosed: true },
-        Err(_) => Consumed::default(),
-    };
-    let result = match dispatched {
-        Err(_) => Err(Refusal::Dispatch),
-        Ok(report) => match report.adapter(adapter).map(|r| r.outcome) {
-            Some(SendOutcome::HandedOff) => handoff.ok_or(Refusal::Dispatch),
-            Some(SendOutcome::SkippedDeadline(_)) => Err(Refusal::Deadline),
-            _ => Err(Refusal::Dispatch),
-        },
-    };
-    (result, prepared_ns, planned_ns, consumed)
+        start_ns,
+        submission,
+        config,
+    });
+    (
+        handed.result,
+        prepared_ns,
+        handed.planned_ns,
+        (handed.admitted, handed.disclosed),
+    )
 }
 
 /// One single-intent lane at `nonce` behind the arm's durable fence.
@@ -804,14 +1028,34 @@ pub struct LaunchContext<'a> {
     pub head: Option<ChainHead>,
 }
 
-impl PaperExecutor {
-    /// Arms the PAPER path: the policy, the adapter table and the selected
-    /// builder target, then one durable fence `paper-<session>-<arm>.fence`
-    /// in `fence_dir` (unique per arm) and behind it `config.lanes`
-    /// single-intent lanes at the sender's canonical `next_nonce` (a C2
-    /// nonce fact).
+impl Executor<PaperEnd> {
+    /// Arms the PAPER path: the PAPER end (its adapter table and the
+    /// selected builder target), then [`Executor::arm_end`].
     pub fn arm(
         identity: PaperIdentity,
+        deployment: ValidatedDeployment,
+        terms: VenueBuyTerms,
+        config: ExecConfig,
+        arming: Arming<'_>,
+    ) -> Result<Self, ArmError> {
+        config.validate().map_err(ArmError::Config)?;
+        let chain_id = deployment.deployment().chain_id;
+        let end = PaperEnd::new(identity, chain_id, config.capability_generation)?;
+        Self::arm_end(end, deployment, terms, config, arming)
+    }
+
+    pub fn sink(&self) -> &PaperSink {
+        self.end.sink()
+    }
+}
+
+impl<E: End> Executor<E> {
+    /// Arms the path towards `end`: the policy, then one durable fence
+    /// `<end>-<session>-<arm>.fence` in `fence_dir` (unique per arm) and
+    /// behind it `config.lanes` single-intent lanes at the sender's
+    /// canonical `next_nonce` (a C2 nonce fact).
+    pub fn arm_end(
+        end: E,
         deployment: ValidatedDeployment,
         terms: VenueBuyTerms,
         config: ExecConfig,
@@ -841,38 +1085,18 @@ impl PaperExecutor {
         )
         .map_err(|e| ArmError::Policy(format!("{e:?}")))?;
         let chain_id = deployment.deployment().chain_id;
-        let table = AdapterTable::new(
-            chain_id,
-            config.capability_generation,
-            &[
-                AdapterBinding {
-                    adapter: paper_adapter(),
-                    capability: CapabilityId::Club48BuilderV1,
-                },
-                // Phase I: Strategy C's single raw transactions.
-                AdapterBinding {
-                    adapter: paper_raw_adapter(),
-                    capability: CapabilityId::LocalGethV1,
-                },
-            ],
-        )
-        .map_err(|e| ArmError::Config(e.to_string()))?;
-        let target = ProviderTarget::club48(
-            TlsEndpoint::new(CLUB48_DOCUMENTED_HOST, HTTPS_PORT)
-                .map_err(|e| ArmError::Config(format!("{e:?}")))?,
-        );
         fs::DirBuilder::new()
             .mode(0o700)
             .recursive(true)
             .create(fence_dir)
             .map_err(|e| ArmError::Fence(format!("{}: {e}", fence_dir.display())))?;
-        let sender = Address::from(identity.address());
+        let sender = Address::from(end.address());
         // The strategy's nonces: one lane per nonce of the sequence.
         next_nonce
             .checked_add(config.strategy_lanes as u64)
             .ok_or_else(|| ArmError::Config("the strategy nonces overflow".into()))?;
         let mut body = Vec::with_capacity(8 + 8 + 20 + 8 + 16 + 8 + 8 + 8 + 8 + 16);
-        body.extend_from_slice(b"DBPAPFN3");
+        body.extend_from_slice(&E::FENCE.1);
         body.extend_from_slice(&chain_id.to_le_bytes());
         body.extend_from_slice(sender.as_slice());
         body.extend_from_slice(&next_nonce.to_le_bytes());
@@ -882,7 +1106,7 @@ impl PaperExecutor {
         body.extend_from_slice(&config.capability_generation.to_le_bytes());
         body.extend_from_slice(&(config.strategy_lanes as u64).to_le_bytes());
         body.extend_from_slice(&config.strategy_session_cap_wei.to_le_bytes());
-        let fence = fence_dir.join(format!("paper-{session}-{arm}.fence"));
+        let fence = fence_dir.join(format!("{}-{session}-{arm}.fence", E::FENCE.0));
         durable_fence(&fence, &body)?;
         let lane_at = |nonce: u64, cap: u128| fenced_lane(chain_id, sender, nonce, cap);
         // C3's pool: alternative BUYs from the same canonical state, all
@@ -904,20 +1128,17 @@ impl PaperExecutor {
         };
         let samples = config.latency_samples;
         let budget = config.budget();
-        Ok(PaperExecutor {
-            identity,
+        Ok(Executor {
+            end,
             deployment,
             terms,
             policy,
-            table,
             budget,
-            target,
             lanes,
             used: 0,
             spent_wei: U256::ZERO,
             bought: Vec::with_capacity(config.lanes),
             fence,
-            sink: PaperSink::default(),
             scratch: Vec::with_capacity(512),
             raw: Vec::with_capacity(512),
             counters: ExecCounters::default(),
@@ -939,7 +1160,8 @@ impl PaperExecutor {
     }
 
     /// Disarms: the lanes go and the arm's fence is removed (a PAPER BUY
-    /// never leaves the process, so nothing waits for reconciliation).
+    /// never leaves the process, so nothing waits for reconciliation; the
+    /// LIVE owner disarms only what its reconciliation resolved).
     pub fn disarm(self) -> Result<(), String> {
         fs::remove_file(&self.fence).map_err(|e| format!("{}: {e}", self.fence.display()))
     }
@@ -957,7 +1179,7 @@ impl PaperExecutor {
         launch: PendingLaunch<'_>,
         c2: &LaunchContext<'_>,
         clock: &dyn Clock,
-    ) -> Result<PaperBuy, Refusal> {
+    ) -> Result<ExecBuy<E::Handoff>, Refusal> {
         self.counters.launches += 1;
         let result = self.path(launch, c2, clock);
         match &result {
@@ -976,7 +1198,7 @@ impl PaperExecutor {
         launch: PendingLaunch<'_>,
         c2: &LaunchContext<'_>,
         clock: &dyn Clock,
-    ) -> Result<PaperBuy, Refusal> {
+    ) -> Result<ExecBuy<E::Handoff>, Refusal> {
         if !self.config.sender_paths.c3() {
             return Err(Refusal::PathOff);
         }
@@ -1032,7 +1254,7 @@ impl PaperExecutor {
         // The token is taken at the reservation, as the production lane
         // burns it there: a replacement launch of it is refused.
         self.bought.push(token);
-        let sender = Address::from(self.identity.address());
+        let sender = Address::from(self.end.address());
         let expected = ExpectedBuy::from_admitted(
             &self.deployment,
             &admitted,
@@ -1041,109 +1263,35 @@ impl PaperExecutor {
             ticket.nonce(),
         )
         .map_err(|_| Refusal::Intent)?;
-        let tx_hash = expected
-            .sign(self.identity.signer(), &mut self.scratch, &mut self.raw)
+        expected
+            .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
             .map_err(|_| Refusal::Build)?;
         let signed_ns = clock.now_ns();
-        lane.prepare(ticket, &self.raw, &expected, &snapshot, &mut self.scratch)
-            .map_err(|_| Refusal::Lane)?;
-        let prepared_ns = clock.now_ns();
-        let adapter = paper_adapter();
-        let adapters = AdapterSet::new(&[adapter]).ok_or(Refusal::Plan)?;
-        let last_block = head
-            .number
-            .checked_add(self.config.validity_blocks)
-            .ok_or(Refusal::Plan)?;
-        let plan = SubmissionPlan::new(
-            &self.table,
-            &expected,
+        let (handoff, prepared_ns, planned_ns, (admitted, disclosed)) = to_end(
+            Parts {
+                end: &mut self.end,
+                lane,
+                config: &self.config,
+                scratch: &mut self.scratch,
+            },
+            ticket,
+            &self.raw,
+            ExpectedTx::Buy(&expected),
             &self.budget,
-            PlanInputs {
-                ticket,
-                buy: TxRef::of(&self.raw),
-                launch: Launch::PublicOriginal(TxRef::of(launch_raw)),
-                mode: SubmissionMode::PublicFullLaunchBundle,
-                profile: PAPER_PROFILE,
-                adapters,
-                local_block_deadline: LocalBlockStartDeadline {
-                    last_head_block: last_block,
-                },
-                provider_validity: Some(ProviderValidity {
-                    max_block_number: last_block,
-                    min_timestamp: None,
-                    max_timestamp: None,
-                }),
-                merge: MergePolicy::NoMerge,
-                pre_submission: PreSubmission::No,
-                provider_payment_wei: U256::ZERO,
-            },
-        )
-        .map_err(|_| Refusal::Plan)?;
-        let mut frame = club48::frame(
-            &plan,
-            &self.table,
-            adapter,
-            &self.target.frame_endpoint(),
-            launch_raw,
-            self.config.max_frame,
-        )
-        .map_err(|_| Refusal::Plan)?;
-        let deadline = TransportStartDeadline::for_profile(
-            PAPER_PROFILE,
-            clock.id(),
+            &snapshot,
+            head,
+            clock,
             ingress_ns,
-            self.config.start_limit_ns,
-        )
-        .map_err(|_| Refusal::Plan)?;
-        let planned_ns = clock.now_ns();
-        let mut transport = SinkTransport {
-            sink: &mut self.sink,
-            clock,
-            tx_hash: tx_hash.0,
-            max_request_len: self.config.max_frame,
-            state: ConnectionState::Ready,
-            handoff: None,
-        };
-        let dispatched = dispatch_diagnostic(
-            lane,
-            &plan,
-            &DispatchContext {
-                table: &self.table,
-                current: &snapshot,
-                head,
-            },
-            clock,
-            &deadline,
-            &mut [Armed {
-                adapter,
-                transport: &mut transport,
-                frame: &mut frame,
-            }],
+            Submission::LaunchBundle(launch_raw),
         );
-        let handoff = transport.handoff;
         // The exposure is the session's once the economic admission was
         // consumed (`begin_send`), whatever followed.
-        let (admitted, disclosed) = match &dispatched {
-            Ok(report) => (
-                report.admitted(),
-                report.admitted() && !report.admitted_without_disclosure,
-            ),
-            Err(DispatchError::DispatchBinding(_)) => (true, true),
-            Err(_) => (false, false),
-        };
         if admitted {
             self.spent_wei += exposure;
         }
         self.c3_took_nonce |= disclosed;
-        let report = dispatched.map_err(|_| Refusal::Dispatch)?;
-
-        match report.adapter(adapter).map(|r| r.outcome) {
-            Some(SendOutcome::HandedOff) => {}
-            Some(SendOutcome::SkippedDeadline(_)) => return Err(Refusal::Deadline),
-            _ => return Err(Refusal::Dispatch),
-        }
-        let handoff = handoff.ok_or(Refusal::Dispatch)?;
-        Ok(PaperBuy {
+        let handoff = handoff?;
+        Ok(ExecBuy {
             launch_hash: hash,
             token,
             handoff,
@@ -1154,7 +1302,7 @@ impl PaperExecutor {
                 signed_ns,
                 prepared_ns,
                 planned_ns,
-                sink_ns: handoff.at_ns,
+                sink_ns: handoff.at_ns(),
             },
             raw: self.raw.clone(),
         })
@@ -1174,7 +1322,7 @@ impl PaperExecutor {
         c2: &CanonicalContext<'_>,
         clock: &dyn Clock,
         decided_ns: u64,
-    ) -> Result<PaperIntent, Refusal> {
+    ) -> Result<ExecIntent<E::Handoff>, Refusal> {
         self.strategy_counters.launches += 1;
         let start_ns = clock.now_ns();
         let result = self.strategy_buy(token, curve, input_wei, c2, clock, decided_ns, start_ns);
@@ -1200,7 +1348,7 @@ impl PaperExecutor {
         c2: &CanonicalContext<'_>,
         clock: &dyn Clock,
         triggered_ns: u64,
-    ) -> (Vec<PaperIntent>, Option<Refusal>) {
+    ) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
         self.strategy_counters.launches += 1;
         let start_ns = clock.now_ns();
         let mut out = Vec::with_capacity(2);
@@ -1253,7 +1401,7 @@ impl PaperExecutor {
             return;
         }
         let chain_id = self.deployment.deployment().chain_id;
-        let sender = Address::from(self.identity.address());
+        let sender = Address::from(self.end.address());
         for index in from..self.strategy_used {
             let nonce = self.strategy_first_nonce + index as u64;
             match fenced_lane(
@@ -1282,7 +1430,7 @@ impl PaperExecutor {
         clock: &dyn Clock,
         decided_ns: u64,
         start_ns: u64,
-    ) -> Result<PaperIntent, Refusal> {
+    ) -> Result<ExecIntent<E::Handoff>, Refusal> {
         if !self.config.sender_paths.strategy() {
             return Err(Refusal::PathOff);
         }
@@ -1332,7 +1480,7 @@ impl PaperExecutor {
             self.strategy_refused(index, true);
             return Err(Refusal::Lane);
         };
-        let sender = Address::from(self.identity.address());
+        let sender = Address::from(self.end.address());
         let built = ExpectedBuy::from_admitted(
             &self.deployment,
             &admitted,
@@ -1343,7 +1491,7 @@ impl PaperExecutor {
         .map_err(|_| Refusal::Intent)
         .and_then(|expected| {
             expected
-                .sign(self.identity.signer(), &mut self.scratch, &mut self.raw)
+                .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
                 .map(|_| expected)
                 .map_err(|_| Refusal::Build)
         });
@@ -1355,11 +1503,10 @@ impl PaperExecutor {
             }
         };
         let signed_ns = clock.now_ns();
-        let (handoff, prepared_ns, planned_ns, consumed) = raw_to_sink(
-            RawSink {
+        let (handoff, prepared_ns, planned_ns, (_, disclosed)) = to_end(
+            Parts {
+                end: &mut self.end,
                 lane: &mut self.strategy_lanes[index],
-                sink: &mut self.sink,
-                table: &self.table,
                 config: &self.config,
                 scratch: &mut self.scratch,
             },
@@ -1371,16 +1518,17 @@ impl PaperExecutor {
             head,
             clock,
             start_ns,
+            Submission::Single,
         );
         // Gate L2: the exposure counts once the BUY may be out; a nonce
         // taken again (nothing disclosed) spends nothing.
-        if consumed.disclosed {
+        if disclosed {
             self.strategy_spent_wei += budget.max_total_wei;
         }
         let handoff = match handoff {
             Ok(h) => h,
             Err(r) => {
-                self.strategy_refused(index, consumed.disclosed);
+                self.strategy_refused(index, disclosed);
                 return Err(r);
             }
         };
@@ -1389,7 +1537,7 @@ impl PaperExecutor {
             min_tokens: admitted.min_output_amount(),
             input_wei,
         });
-        Ok(PaperIntent {
+        Ok(ExecIntent {
             kind: IntentKind::Buy,
             token,
             block: head.number,
@@ -1401,7 +1549,7 @@ impl PaperExecutor {
                 signed_ns,
                 prepared_ns,
                 planned_ns,
-                sink_ns: handoff.at_ns,
+                sink_ns: handoff.at_ns(),
             },
             raw: self.raw.clone(),
         })
@@ -1417,7 +1565,7 @@ impl PaperExecutor {
         clock: &dyn Clock,
         triggered_ns: u64,
         start_ns: u64,
-        out: &mut Vec<PaperIntent>,
+        out: &mut Vec<ExecIntent<E::Handoff>>,
     ) -> Result<(), Refusal> {
         if !self.config.sender_paths.strategy() {
             return Err(Refusal::PathOff);
@@ -1514,7 +1662,7 @@ impl PaperExecutor {
             self.strategy_refused(first, true);
             return Err(Refusal::Intent);
         };
-        let sender = Address::from(self.identity.address());
+        let sender = Address::from(self.end.address());
         let Ok(expected) = ExpectedExit::from_admitted(
             &self.deployment,
             &admitted,
@@ -1534,9 +1682,9 @@ impl PaperExecutor {
         for (kind, index, ticket, gas) in steps.into_iter().flatten() {
             let built = match kind {
                 IntentKind::Approve => {
-                    expected.sign_approve(self.identity.signer(), &mut self.scratch, &mut self.raw)
+                    expected.sign_approve(self.end.signer(), &mut self.scratch, &mut self.raw)
                 }
-                _ => expected.sign_sell(self.identity.signer(), &mut self.scratch, &mut self.raw),
+                _ => expected.sign_sell(self.end.signer(), &mut self.scratch, &mut self.raw),
             };
             if built.is_err() {
                 self.strategy_refused(index, false);
@@ -1547,11 +1695,10 @@ impl PaperExecutor {
                 IntentKind::Approve => ExpectedTx::Approve(&expected),
                 _ => ExpectedTx::Sell(&expected),
             };
-            let (handoff, prepared_ns, planned_ns, consumed) = raw_to_sink(
-                RawSink {
+            let (handoff, prepared_ns, planned_ns, (_, disclosed)) = to_end(
+                Parts {
+                    end: &mut self.end,
                     lane: &mut self.strategy_lanes[index],
-                    sink: &mut self.sink,
-                    table: &self.table,
                     config: &self.config,
                     scratch: &mut self.scratch,
                 },
@@ -1563,18 +1710,19 @@ impl PaperExecutor {
                 head,
                 clock,
                 start_ns,
+                Submission::Single,
             );
             // Gate L2: gas counts once something may be out; a nonce taken
             // again spends nothing.
-            if consumed.disclosed {
+            if disclosed {
                 self.strategy_spent_wei += gas;
             }
             let handoff = match handoff {
                 Ok(h) => h,
                 Err(r) => {
-                    self.strategy_refused(index, consumed.disclosed);
+                    self.strategy_refused(index, disclosed);
                     // A SELL that may be out ends the position's exits.
-                    if kind == IntentKind::Sell && consumed.disclosed {
+                    if kind == IntentKind::Sell && disclosed {
                         self.exited.push(token);
                     }
                     return Err(r);
@@ -1583,7 +1731,7 @@ impl PaperExecutor {
             if kind == IntentKind::Approve {
                 self.approved.push((token, admitted.input_tokens()));
             }
-            out.push(PaperIntent {
+            out.push(ExecIntent {
                 kind,
                 token,
                 block: head.number,
@@ -1595,7 +1743,7 @@ impl PaperExecutor {
                     signed_ns,
                     prepared_ns,
                     planned_ns,
-                    sink_ns: handoff.at_ns,
+                    sink_ns: handoff.at_ns(),
                 },
                 raw: self.raw.clone(),
             });
@@ -1627,7 +1775,12 @@ impl PaperExecutor {
     }
 
     pub fn sender(&self) -> [u8; 20] {
-        self.identity.address()
+        self.end.address()
+    }
+
+    /// The end the path hands over to.
+    pub fn end(&self) -> &E {
+        &self.end
     }
 
     pub fn counters(&self) -> &ExecCounters {
@@ -1653,10 +1806,6 @@ impl PaperExecutor {
     pub fn exhausted(&self) -> bool {
         self.used == self.lanes.len()
             || self.spent_wei + self.budget.max_total_wei > U256::from(self.config.session_cap_wei)
-    }
-
-    pub fn sink(&self) -> &PaperSink {
-        &self.sink
     }
 
     pub fn fence(&self) -> &Path {
@@ -2705,5 +2854,198 @@ mod tests {
         assert_eq!(exec.strategy_counters().handoffs, 3);
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A second end for the one executor (plan 28.10., package 3): it
+    /// records what reaches it and answers as told, as the LIVE end may
+    /// (handed off, refused before the write, or possibly sent).
+    struct RecordingEnd {
+        signer: Signer,
+        seen: Vec<(bool, u64, [u8; 32], Vec<u8>)>,
+        /// None: handed off. Some(disclosed): refused, the bytes possibly
+        /// out when `disclosed`.
+        fail: Option<bool>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct Recorded(u64);
+
+    impl HandoffTime for Recorded {
+        fn at_ns(&self) -> u64 {
+            self.0
+        }
+    }
+
+    impl End for RecordingEnd {
+        type Handoff = Recorded;
+        const FENCE: (&'static str, [u8; 8]) = ("recording", *b"DBTSTFN1");
+
+        fn address(&self) -> [u8; 20] {
+            self.signer.address().into_array()
+        }
+
+        fn signer(&self) -> &Signer {
+            &self.signer
+        }
+
+        fn hand_over(&mut self, h: Handover<'_>) -> Handed<Recorded> {
+            let bundle = match h.submission {
+                Submission::LaunchBundle(launch) => {
+                    assert!(!launch.is_empty());
+                    true
+                }
+                Submission::Single => false,
+            };
+            self.seen
+                .push((bundle, h.ticket.nonce(), h.tx_hash, h.raw.to_vec()));
+            let at = h.clock.now_ns();
+            match self.fail {
+                None => Handed {
+                    result: Ok(Recorded(at)),
+                    planned_ns: at,
+                    admitted: true,
+                    disclosed: true,
+                },
+                Some(disclosed) => Handed {
+                    result: Err(Refusal::Dispatch),
+                    planned_ns: at,
+                    admitted: disclosed,
+                    disclosed,
+                },
+            }
+        }
+    }
+
+    fn recording(name: &str, fail: Option<bool>) -> (Executor<RecordingEnd>, PathBuf) {
+        let d = dir(name);
+        let end = RecordingEnd {
+            signer: Signer::from_secret_bytes(&[0x11; 32]).unwrap(),
+            seen: Vec::new(),
+            fail,
+        };
+        let exec = Executor::arm_end(
+            end,
+            validated(),
+            WITNESSED_MAINNET_TERMS,
+            config(2, 2),
+            Arming {
+                next_nonce: 4,
+                fence_dir: &d.join("fences"),
+                session: 1,
+                arm: 0,
+            },
+        )
+        .unwrap();
+        (exec, d)
+    }
+
+    /// Plan 28.10.: the one path (decoder, C2, admission, signature, lane,
+    /// final binding check) reaches whichever end it is armed with; the
+    /// end gets the prepared transaction, signed by its own signer, and
+    /// what it takes is the BUY's handoff. Its fence is its own.
+    #[test]
+    fn the_one_path_reaches_any_end() {
+        let (mut paper, pd) = armed("end-paper", config(2, 2));
+        let (mut other, od) = recording("end-other", None);
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        let a = paper
+            .on_launch(pending, &c2(Some(HEAD)), &clock(100, 7))
+            .unwrap();
+        let b = other
+            .on_launch(pending, &c2(Some(HEAD)), &clock(100, 7))
+            .unwrap();
+        let (x, y) = (
+            decode_signed(&a.raw).unwrap(),
+            decode_signed(&b.raw).unwrap(),
+        );
+        assert_eq!((x.tx.nonce, y.tx.nonce), (0, 4));
+        assert_eq!((x.tx.to, x.tx.value), (y.tx.to, y.tx.value));
+        assert_eq!(
+            decode_swap_exact_input_native(x.tx.input)
+                .unwrap()
+                .output_token,
+            decode_swap_exact_input_native(y.tx.input)
+                .unwrap()
+                .output_token
+        );
+        let from = darkbot_bsc_trading::signer::recover_legacy_sender(&y, 56, &mut Vec::new());
+        assert_eq!(from.unwrap().into_array(), other.sender());
+        assert_eq!(a.token, b.token);
+        let seen = &other.end().seen;
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0], (true, 4, keccak256(&b.raw).0, b.raw.clone()));
+        assert_eq!(b.times.sink_ns, b.handoff.0);
+        assert_eq!(other.spent_wei(), other.budget.max_total_wei);
+        // A Strategy C BUY is the transaction alone.
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let intent = other
+            .on_strategy_buy(
+                token,
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(500, 3),
+                500,
+            )
+            .unwrap();
+        let seen = &other.end().seen;
+        assert_eq!((seen[1].0, seen[1].1), (false, 5));
+        assert_eq!(seen[1].3, intent.raw);
+        let fence = other.fence().to_path_buf();
+        assert_eq!(fence.file_name().unwrap(), "recording-1-0.fence");
+        assert_eq!(&fs::read(&fence).unwrap()[..8], b"DBTSTFN1");
+        paper.disarm().unwrap();
+        other.disarm().unwrap();
+        fs::remove_dir_all(pd).unwrap();
+        fs::remove_dir_all(od).unwrap();
+    }
+
+    /// What the end says it consumed decides, not the end's kind: a
+    /// refusal before the write gives the nonce back and spends nothing; a
+    /// transaction possibly out (LIVE: UNKNOWN) spends its exposure and
+    /// stops the sender's sequence, with no retry.
+    #[test]
+    fn what_an_end_consumed_decides_nonce_and_exposure() {
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let buy = |e: &mut Executor<RecordingEnd>, t: [u8; 20]| {
+            e.on_strategy_buy(
+                t,
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(500, 3),
+                500,
+            )
+        };
+        let (mut clean, d1) = recording("end-clean", Some(false));
+        assert_eq!(buy(&mut clean, token), Err(Refusal::Dispatch));
+        assert_eq!(buy(&mut clean, [0xAC; 20]), Err(Refusal::Dispatch));
+        let seen = &clean.end().seen;
+        // The same nonce again, nothing spent, no hole.
+        assert_eq!((seen[0].1, seen[1].1), (4, 4));
+        let (_, _, next, spent, gap) = clean.strategy_lanes();
+        assert_eq!((next, spent, gap), (4, U256::ZERO, false));
+        let (mut unknown, d2) = recording("end-unknown", Some(true));
+        assert_eq!(buy(&mut unknown, token), Err(Refusal::Dispatch));
+        let (_, _, _, spent, gap) = unknown.strategy_lanes();
+        assert!(gap && spent > U256::ZERO);
+        assert_eq!(buy(&mut unknown, [0xAC; 20]), Err(Refusal::NonceGap));
+        assert_eq!(unknown.end().seen.len(), 1);
+        clean.disarm().unwrap();
+        unknown.disarm().unwrap();
+        fs::remove_dir_all(d1).unwrap();
+        fs::remove_dir_all(d2).unwrap();
     }
 }
