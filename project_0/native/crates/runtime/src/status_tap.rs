@@ -388,6 +388,42 @@ pub struct OwnerTrigger {
     pub blockhash_rearmed: u64,
     pub blockhash_superseded: u64,
     pub blockhash_refresh_requests: u64,
+    /// DEC-06: the threshold mode.
+    pub threshold: OwnerThreshold,
+}
+
+/// DEC-06: the threshold mode as the Liquidator tab shows it (`OwnerThreshold`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerThreshold {
+    pub requested: &'static str,
+    pub requested_source: String,
+    pub effective: &'static str,
+    pub block_reason: &'static str,
+    pub generation: u64,
+    pub min_ticks: Option<u64>,
+    pub ticks: u64,
+    pub streak: u64,
+    pub uncomparable_ticks: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub extra: u64,
+    pub sampled_out: u64,
+    pub fallbacks: u64,
+    pub index_tracked: u64,
+    pub index_fallback: u64,
+    pub index_bootstrap_pending: u64,
+    pub index_evaluations: u64,
+    pub crosscheck_samples: u64,
+    pub crosscheck_skipped: u64,
+    pub crosscheck_stale: u64,
+    pub crosscheck_misses: u64,
+    pub sweep_detect: crate::analytics::evidence::LatencyNs,
+    pub threshold_detect: crate::analytics::evidence::LatencyNs,
+    pub observe_owner: crate::analytics::evidence::LatencyNs,
+    pub observe_owner_ns_total: u64,
+    pub observe_budget_ppm: u64,
+    pub sweep_health_evaluations: u64,
+    pub sweep_owner_ns_total: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

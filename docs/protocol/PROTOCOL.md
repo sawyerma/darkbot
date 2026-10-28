@@ -152,6 +152,7 @@
     - [HoldAttempt](#darkbot-project0-v1-HoldAttempt)
     - [HoldB](#darkbot-project0-v1-HoldB)
     - [HoldFlow](#darkbot-project0-v1-HoldFlow)
+    - [LatencyNs](#darkbot-project0-v1-LatencyNs)
     - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
     - [LossCount](#darkbot-project0-v1-LossCount)
     - [NonLanding](#darkbot-project0-v1-NonLanding)
@@ -160,6 +161,7 @@
     - [OwnerPipeline](#darkbot-project0-v1-OwnerPipeline)
     - [OwnerRun](#darkbot-project0-v1-OwnerRun)
     - [OwnerSafety](#darkbot-project0-v1-OwnerSafety)
+    - [OwnerThreshold](#darkbot-project0-v1-OwnerThreshold)
     - [OwnerTrigger](#darkbot-project0-v1-OwnerTrigger)
     - [ProgramPin](#darkbot-project0-v1-ProgramPin)
     - [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked)
@@ -2887,6 +2889,25 @@ the finalized delta and whether B underestimated it.
 
 
 
+<a name="darkbot-project0-v1-LatencyNs"></a>
+
+### LatencyNs
+A latency distribution in ns; percentiles unset without a sample (never 0).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| count | [uint64](#uint64) |  | Samples. |
+| p50 | [uint64](#uint64) | optional | Median (conservative bucket bound). |
+| p95 | [uint64](#uint64) | optional | 95th percentile. |
+| p99 | [uint64](#uint64) | optional | 99th percentile. |
+| max | [uint64](#uint64) | optional | Largest sample. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-LiquidatorState"></a>
 
 ### LiquidatorState
@@ -3070,6 +3091,52 @@ Safety layer.
 
 
 
+<a name="darkbot-project0-v1-OwnerThreshold"></a>
+
+### OwnerThreshold
+DEC-06: the threshold mode — the operator&#39;s request, the owner&#39;s effective mode and why it
+differs; OBSERVE&#39;s comparison with the sweep on the same oracle ticks (hits, misses, extra
+wake-ups, both detection times) and the cost of both paths; ACTIVE&#39;s sweep cross-check. Counters
+are the owner run&#39;s (a resumed run continues them). ACTIVE is no LIVE.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| requested | [string](#string) |  | OFF | OBSERVE | ACTIVE. |
+| requested_source | [string](#string) |  | config | controller seq N | resume. |
+| effective | [string](#string) |  | OFF | SWEEP | OBSERVE | ACTIVE. |
+| block_reason | [string](#string) |  | Why effective is not the requested mode (INDEX_BOOTSTRAP, STATE_NOT_TRADABLE, B8_UNDECIDED, THRESHOLD_EVIDENCE_SHORT, THRESHOLD_MISS_FALLBACK, THRESHOLD_BARRIER); empty when it is. |
+| generation | [uint64](#uint64) |  | Bumped by every change of the effective mode or its block reason. |
+| min_ticks | [uint64](#uint64) | optional | N (B-8, threshold_min_ticks); unset while the user has not decided it (ACTIVE blocked). |
+| ticks | [uint64](#uint64) |  | Comparable oracle ticks in OBSERVE (same state and input revision as the sweep). |
+| streak | [uint64](#uint64) |  | Comparable oracle ticks since the last miss (ACTIVE needs N). |
+| uncomparable_ticks | [uint64](#uint64) |  | Oracle ticks not comparable (sampled, a price ACTIVE projects first, generation change). |
+| hits | [uint64](#uint64) |  | Liquidatable accounts found by the sweep and woken by the threshold trigger. |
+| misses | [uint64](#uint64) |  | Liquidatable accounts the threshold trigger did not wake (OBSERVE and the ACTIVE cross-check). |
+| extra | [uint64](#uint64) |  | Accounts the threshold trigger woke that the sweep found healthy. |
+| sampled_out | [uint64](#uint64) |  | OBSERVE work skipped for want of budget (B-9). |
+| fallbacks | [uint64](#uint64) |  | Times the effective mode left ACTIVE (each with a full sweep of every bank). |
+| index_tracked | [uint64](#uint64) |  | Index accounts with exact thresholds. |
+| index_fallback | [uint64](#uint64) |  | Index accounts with unknown thresholds, re-checked bank-wide. |
+| index_bootstrap_pending | [uint64](#uint64) |  | Accounts waiting for their thresholds (bootstrap queue). |
+| index_evaluations | [uint64](#uint64) |  | Exact threshold evaluations of the index. |
+| crosscheck_samples | [uint64](#uint64) |  | ACTIVE cross-check samples evaluated off the owner. |
+| crosscheck_skipped | [uint64](#uint64) |  | ACTIVE cross-check samples skipped (queue full). |
+| crosscheck_stale | [uint64](#uint64) |  | ACTIVE cross-check samples whose state or generation changed (or failed). |
+| crosscheck_misses | [uint64](#uint64) |  | ACTIVE cross-check misses (each an alarm and a fallback). |
+| sweep_detect | [LatencyNs](#darkbot-project0-v1-LatencyNs) |  | t_rx → exact sweep evaluation of the liquidatable accounts of compared OBSERVE ticks. |
+| threshold_detect | [LatencyNs](#darkbot-project0-v1-LatencyNs) |  | t_rx → threshold wake-up of the same accounts. |
+| observe_owner | [LatencyNs](#darkbot-project0-v1-LatencyNs) |  | Owner time of one unit of threshold work beside the sweep (lookup, comparison, index upkeep, bootstrap batch). |
+| observe_owner_ns_total | [uint64](#uint64) |  | The total owner time of that work. |
+| observe_budget_ppm | [uint64](#uint64) |  | The budget it is held to, in ppm of the owner&#39;s wall time (B-9). |
+| sweep_health_evaluations | [uint64](#uint64) |  | The sweep&#39;s exact health evaluations. |
+| sweep_owner_ns_total | [uint64](#uint64) |  | The owner time of the sweep&#39;s batches. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-OwnerTrigger"></a>
 
 ### OwnerTrigger
@@ -3092,6 +3159,7 @@ Candidate trigger and its lanes.
 | blockhash_rearmed | [uint64](#uint64) |  | DEC-01: parked candidates returned to their lane after a newer blockhash in this run. |
 | blockhash_superseded | [uint64](#uint64) |  | DEC-01: parked candidates covered by a later evaluation of the account in this run. |
 | blockhash_refresh_requests | [uint64](#uint64) |  | DEC-01: refresh wake-ups sent to the blockhash worker in this run (pending ones coalesced). |
+| threshold | [OwnerThreshold](#darkbot-project0-v1-OwnerThreshold) |  | DEC-06: the threshold mode. |
 
 
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
-import type { LiquidatorView } from "../model/owner";
+import type { LatencyView, LiquidatorView, OwnerThresholdView } from "../model/owner";
 import type { SystemView } from "../model/status";
 import { nsToMs, programPinStatus } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
@@ -12,6 +12,9 @@ const ms = (ns: bigint | null) => {
   const v = nsToMs(ns);
   return v == null ? "—" : `${v} ms`;
 };
+/** DEC-06: a duration below a millisecond in µs (the threshold path's wake-ups). */
+const dur = (ns: bigint | null) => ns == null ? "—" : ns < 1_000_000n ? `${ns / 1_000n} µs` : `${ns / 1_000_000n} ms`;
+const percentiles = (l: LatencyView) => l.count === 0n ? "no sample" : `${dur(l.p50)} / ${dur(l.p95)} / ${dur(l.p99)} (n ${l.count})`;
 
 /** D01/DEC-05: the owner and liquidator parameters of the engine's registry shown in this tab. */
 const OWNER_PARAMETERS = [
@@ -26,7 +29,7 @@ const OWNER_PARAMETERS = [
   "threshold_bootstrap_batch", "candidate_recheck_slots", "candidate_error_recheck_slots", "candidate_repeat_soft_cap",
   "rpc_candidates_per_drain", "candidate_network_deadline_ms", "mt0_interval_seconds",
   "recovery_root_catchup_seconds", "recovery_root_stall_seconds", "recovery_root_hard_max_seconds",
-  "fe04_approval_max_lifetime_seconds",
+  "fe04_approval_max_lifetime_seconds", "threshold_observe_budget_ppm", "threshold_crosscheck_accounts",
 ] as const;
 
 /** The owner's typed settings (DEC-05). */
@@ -65,6 +68,7 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
     <DetailRow title="Same-slot updates · unversioned refused / unordered" value={e ? `${orDash(e.counters.get("same_slot_unversioned_refused"))} / ${orDash(e.counters.get("same_slot_no_wv"))}` : "—"}/>
     <DetailRow title="Trigger · lanes L0/L1/L2 · detect" value={t ? `${t.mode} · ${t.lanes.join("/")} · ${t.detectQueue}` : "—"}/>
     <DetailRow title="Repeats suppressed · soft cap" value={t ? `${t.suppressed} · ${t.softcapSuppressed}` : "—"}/>
+    {t?.threshold ? <ThresholdRows th={t.threshold}/> : null}
     <DetailRow title="Loss Build · BLOCKHASH_STALE before planning · parked / re-armed / superseded · refresh wake-ups"
       value={t ? `${t.blockhashRefused} · ${t.blockhashParked} / ${t.blockhashRearmed} / ${t.blockhashSuperseded} · ${t.blockhashRefreshRequests}` : "—"}/>
     <DetailRow title="Day · health / liquidatable / plans" value={p ? `${p.healthChecked} / ${p.liquidatable} / ${p.plansBuilt} built, ${p.plansRejected} rejected` : "—"}/>
@@ -91,11 +95,38 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
       active="Active (needs N and the evidence)"/>
     <ModeRequest owner={owner} live={live} capability="JITO_BUNDLE" label="Bundle path" action="Request bundle path"
       active="Active (needs a qualified bundle simulator)"/>
+    <ModeRequest owner={owner} live={live} capability="THRESHOLD_TRIGGER" label="Threshold trigger" action="Request threshold mode"
+      active="Active (from Observe; needs N and the evidence)"/>
     {params}
   </Section>;
 }
 
 type Mode = "OFF" | "OBSERVE" | "ACTIVE";
+
+/**
+ * DEC-06: the threshold mode on the Liquidator tab — requested/effective, generation and block
+ * reason; OBSERVE's comparison with the sweep on the same ticks (hits found by both, misses, extra
+ * wake-ups, detection p50/p95/p99 of both paths), the effort of both paths and the owner time of
+ * the threshold work beside the sweep against its budget; ACTIVE's cross-check and fallbacks.
+ */
+function ThresholdRows({ th }: { th: OwnerThresholdView }) {
+  return <>
+    <DetailRow title="Threshold mode · requested / effective · generation"
+      value={`${th.requested} (${th.requestedSource}) / ${th.effective}${th.blockReason ? ` · ${th.blockReason}` : ""} · gen ${th.generation}`}/>
+    <DetailRow title="Threshold · comparable ticks / since last miss / N · not comparable"
+      value={`${th.ticks} / ${th.streak} / ${th.minTicks ?? "undecided (B-8)"} · ${th.uncomparableTicks}`}/>
+    <DetailRow title="Threshold · hits (sweep and threshold) / misses / extra wake-ups" value={`${th.hits} / ${th.misses} / ${th.extra}`}/>
+    <DetailRow title="Detection p50 / p95 / p99 · sweep" value={percentiles(th.sweepDetect)}/>
+    <DetailRow title="Detection p50 / p95 / p99 · threshold" value={percentiles(th.thresholdDetect)}/>
+    <DetailRow title="Owner time beside the sweep · p50 / p95 / p99 · total · budget · sampled"
+      value={`${percentiles(th.observeOwner)} · ${dur(th.observeOwnerNsTotal)} · ${th.observeBudgetPpm} ppm · ${th.sampledOut}`}/>
+    <DetailRow title="Effort · sweep health evaluations / owner time · threshold index evaluations"
+      value={`${th.sweepHealthEvaluations} / ${dur(th.sweepOwnerNsTotal)} · ${th.indexEvaluations}`}/>
+    <DetailRow title="Threshold index · exact / unknown / pending" value={`${th.indexTracked} / ${th.indexFallback} / ${th.indexBootstrapPending}`}/>
+    <DetailRow title="Cross-check (ACTIVE) · samples / skipped / stale / misses · fallbacks"
+      value={`${th.crosscheckSamples} / ${th.crosscheckSkipped} / ${th.crosscheckStale} / ${th.crosscheckMisses} · ${th.fallbacks}`}/>
+  </>;
+}
 
 /**
  * DEC-04/DEC-11 (N-5): a capability mode through the same controller (`p0ctl capability set
@@ -105,7 +136,7 @@ type Mode = "OFF" | "OBSERVE" | "ACTIVE";
  * simulator — and the capability row shows the reason.
  */
 function ModeRequest({ owner, live, capability, label, action, active }: {
-  owner: LiquidatorView; live: boolean; capability: "HOLD_B" | "JITO_BUNDLE"; label: string; action: string; active: string;
+  owner: LiquidatorView; live: boolean; capability: "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER"; label: string; action: string; active: string;
 }) {
   const { busy } = useAnalyticsControl();
   const row = owner.capabilities.find((c) => c.name === capability) ?? null;

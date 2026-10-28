@@ -617,6 +617,44 @@ impl ShadowOwner {
         }
     }
 
+    /// DEC-06: the threshold mode as the Liquidator tab shows it.
+    pub(super) fn threshold_status(&self) -> crate::status_tap::OwnerThreshold {
+        use crate::analytics::evidence::LatencyNs;
+        let t = &self.threshold;
+        let s = &t.stats;
+        crate::status_tap::OwnerThreshold {
+            requested: t.requested.code(),
+            requested_source: t.requested_source.clone(),
+            effective: t.effective.code(),
+            block_reason: t.block,
+            generation: t.generation,
+            min_ticks: t.min_ticks,
+            ticks: s.ticks,
+            streak: s.streak,
+            uncomparable_ticks: s.uncomparable_ticks,
+            hits: s.hits,
+            misses: s.misses,
+            extra: s.extra,
+            sampled_out: s.sampled_out,
+            fallbacks: s.fallbacks,
+            index_tracked: self.threshold_index.tracked_accounts() as u64,
+            index_fallback: self.threshold_fallback.len() as u64,
+            index_bootstrap_pending: self.threshold_bootstrap.len() as u64,
+            index_evaluations: s.index_evaluations,
+            crosscheck_samples: s.crosscheck_samples,
+            crosscheck_skipped: s.crosscheck_skipped,
+            crosscheck_stale: s.crosscheck_stale,
+            crosscheck_misses: s.crosscheck_misses,
+            sweep_detect: LatencyNs::of(&s.sweep_detect_ns),
+            threshold_detect: LatencyNs::of(&s.threshold_detect_ns),
+            observe_owner: LatencyNs::of(&s.observe_owner_ns),
+            observe_owner_ns_total: s.observe_owner_ns_total,
+            observe_budget_ppm: t.budget.ppm(),
+            sweep_health_evaluations: self.metrics.health_sweep_checks,
+            sweep_owner_ns_total: self.metrics.sweep_batch_ns_total,
+        }
+    }
+
     /// Journals the threshold mode's cumulative counters (`THRESHOLD_STATS`).
     pub(super) fn threshold_stats_record(&mut self) {
         use crate::analytics::evidence::LatencyNs;

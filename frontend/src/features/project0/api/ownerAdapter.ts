@@ -5,11 +5,12 @@ import {
   StateCountersSchema,
   WalletsStateSchema,
   type FinanceSummary,
+  type LatencyNs,
   type LiquidatorState,
   type WalletsState,
 } from "@/core/generated/darkbot/project0/v1/owner_pb";
 import type { FinanceSnapshot } from "../model/contracts";
-import type { LiquidatorView, WalletsView } from "../model/owner";
+import type { LatencyView, LiquidatorView, WalletsView } from "../model/owner";
 
 /** Throws on invalid bytes, so the registry never acknowledges a broken state. */
 export function decodeLiquidatorState(bytes: Uint8Array): LiquidatorState {
@@ -24,6 +25,9 @@ export function decodeFinanceSummary(bytes: Uint8Array): FinanceSummary {
 
 const decimal = (v: bigint | undefined): string | null => (v === undefined ? null : v.toString());
 const optional = (v: bigint | undefined): bigint | null => (v === undefined ? null : v);
+const latency = (l: LatencyNs | undefined): LatencyView => ({
+  count: l?.count ?? 0n, p50: optional(l?.p50), p95: optional(l?.p95), p99: optional(l?.p99), max: optional(l?.max),
+});
 
 export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
   const { run, engine, trigger, pipeline, safety } = m;
@@ -76,6 +80,39 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           blockhashRearmed: trigger.blockhashRearmed,
           blockhashSuperseded: trigger.blockhashSuperseded,
           blockhashRefreshRequests: trigger.blockhashRefreshRequests,
+          threshold: trigger.threshold
+            ? {
+                requested: trigger.threshold.requested,
+                requestedSource: trigger.threshold.requestedSource,
+                effective: trigger.threshold.effective,
+                blockReason: trigger.threshold.blockReason,
+                generation: trigger.threshold.generation,
+                minTicks: optional(trigger.threshold.minTicks),
+                ticks: trigger.threshold.ticks,
+                streak: trigger.threshold.streak,
+                uncomparableTicks: trigger.threshold.uncomparableTicks,
+                hits: trigger.threshold.hits,
+                misses: trigger.threshold.misses,
+                extra: trigger.threshold.extra,
+                sampledOut: trigger.threshold.sampledOut,
+                fallbacks: trigger.threshold.fallbacks,
+                indexTracked: trigger.threshold.indexTracked,
+                indexFallback: trigger.threshold.indexFallback,
+                indexBootstrapPending: trigger.threshold.indexBootstrapPending,
+                indexEvaluations: trigger.threshold.indexEvaluations,
+                crosscheckSamples: trigger.threshold.crosscheckSamples,
+                crosscheckSkipped: trigger.threshold.crosscheckSkipped,
+                crosscheckStale: trigger.threshold.crosscheckStale,
+                crosscheckMisses: trigger.threshold.crosscheckMisses,
+                sweepDetect: latency(trigger.threshold.sweepDetect),
+                thresholdDetect: latency(trigger.threshold.thresholdDetect),
+                observeOwner: latency(trigger.threshold.observeOwner),
+                observeOwnerNsTotal: trigger.threshold.observeOwnerNsTotal,
+                observeBudgetPpm: trigger.threshold.observeBudgetPpm,
+                sweepHealthEvaluations: trigger.threshold.sweepHealthEvaluations,
+                sweepOwnerNsTotal: trigger.threshold.sweepOwnerNsTotal,
+              }
+            : null,
         }
       : null,
     pipeline: pipeline

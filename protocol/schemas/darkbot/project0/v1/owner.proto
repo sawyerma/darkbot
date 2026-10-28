@@ -256,6 +256,89 @@ message OwnerTrigger {
   uint64 blockhash_superseded = 13;
   // DEC-01: refresh wake-ups sent to the blockhash worker in this run (pending ones coalesced).
   uint64 blockhash_refresh_requests = 14;
+  // DEC-06: the threshold mode.
+  OwnerThreshold threshold = 15;
+}
+
+// DEC-06: the threshold mode — the operator's request, the owner's effective mode and why it
+// differs; OBSERVE's comparison with the sweep on the same oracle ticks (hits, misses, extra
+// wake-ups, both detection times) and the cost of both paths; ACTIVE's sweep cross-check. Counters
+// are the owner run's (a resumed run continues them). ACTIVE is no LIVE.
+message OwnerThreshold {
+  // OFF | OBSERVE | ACTIVE.
+  string requested = 1;
+  // config | controller seq N | resume.
+  string requested_source = 2;
+  // OFF | SWEEP | OBSERVE | ACTIVE.
+  string effective = 3;
+  // Why effective is not the requested mode (INDEX_BOOTSTRAP, STATE_NOT_TRADABLE, B8_UNDECIDED,
+  // THRESHOLD_EVIDENCE_SHORT, THRESHOLD_MISS_FALLBACK, THRESHOLD_BARRIER); empty when it is.
+  string block_reason = 4;
+  // Bumped by every change of the effective mode or its block reason.
+  uint64 generation = 5;
+  // N (B-8, threshold_min_ticks); unset while the user has not decided it (ACTIVE blocked).
+  optional uint64 min_ticks = 6;
+  // Comparable oracle ticks in OBSERVE (same state and input revision as the sweep).
+  uint64 ticks = 7;
+  // Comparable oracle ticks since the last miss (ACTIVE needs N).
+  uint64 streak = 8;
+  // Oracle ticks not comparable (sampled, a price ACTIVE projects first, generation change).
+  uint64 uncomparable_ticks = 9;
+  // Liquidatable accounts found by the sweep and woken by the threshold trigger.
+  uint64 hits = 10;
+  // Liquidatable accounts the threshold trigger did not wake (OBSERVE and the ACTIVE cross-check).
+  uint64 misses = 11;
+  // Accounts the threshold trigger woke that the sweep found healthy.
+  uint64 extra = 12;
+  // OBSERVE work skipped for want of budget (B-9).
+  uint64 sampled_out = 13;
+  // Times the effective mode left ACTIVE (each with a full sweep of every bank).
+  uint64 fallbacks = 14;
+  // Index accounts with exact thresholds.
+  uint64 index_tracked = 15;
+  // Index accounts with unknown thresholds, re-checked bank-wide.
+  uint64 index_fallback = 16;
+  // Accounts waiting for their thresholds (bootstrap queue).
+  uint64 index_bootstrap_pending = 17;
+  // Exact threshold evaluations of the index.
+  uint64 index_evaluations = 18;
+  // ACTIVE cross-check samples evaluated off the owner.
+  uint64 crosscheck_samples = 19;
+  // ACTIVE cross-check samples skipped (queue full).
+  uint64 crosscheck_skipped = 20;
+  // ACTIVE cross-check samples whose state or generation changed (or failed).
+  uint64 crosscheck_stale = 21;
+  // ACTIVE cross-check misses (each an alarm and a fallback).
+  uint64 crosscheck_misses = 22;
+  // t_rx → exact sweep evaluation of the liquidatable accounts of compared OBSERVE ticks.
+  LatencyNs sweep_detect = 23;
+  // t_rx → threshold wake-up of the same accounts.
+  LatencyNs threshold_detect = 24;
+  // Owner time of one unit of threshold work beside the sweep (lookup, comparison, index upkeep,
+  // bootstrap batch).
+  LatencyNs observe_owner = 25;
+  // The total owner time of that work.
+  uint64 observe_owner_ns_total = 26;
+  // The budget it is held to, in ppm of the owner's wall time (B-9).
+  uint64 observe_budget_ppm = 27;
+  // The sweep's exact health evaluations.
+  uint64 sweep_health_evaluations = 28;
+  // The owner time of the sweep's batches.
+  uint64 sweep_owner_ns_total = 29;
+}
+
+// A latency distribution in ns; percentiles unset without a sample (never 0).
+message LatencyNs {
+  // Samples.
+  uint64 count = 1;
+  // Median (conservative bucket bound).
+  optional uint64 p50 = 2;
+  // 95th percentile.
+  optional uint64 p95 = 3;
+  // 99th percentile.
+  optional uint64 p99 = 4;
+  // Largest sample.
+  optional uint64 max = 5;
 }
 
 // Pipeline evaluations and decisions of the current day (Shadow ledger) and this process (MT0).

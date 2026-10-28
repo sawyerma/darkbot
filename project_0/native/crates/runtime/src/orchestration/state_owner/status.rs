@@ -59,6 +59,7 @@ impl ShadowOwner {
                 blockhash_rearmed: self.blockhash_parking.stats.rearmed,
                 blockhash_superseded: self.blockhash_parking.stats.superseded,
                 blockhash_refresh_requests: self.blockhash_parking.stats.refresh_requests,
+                threshold: self.threshold_status(),
             },
             pipeline: self.pipeline_status(),
             safety: self.safety_status(),

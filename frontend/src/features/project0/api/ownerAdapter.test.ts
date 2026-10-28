@@ -34,6 +34,14 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     // DEC-01: early blockhash refusals and the parking of their candidates.
     expect(liquidator.trigger).toMatchObject({ blockhashRefused: 6n, blockhashParked: 1n, blockhashRearmed: 4n,
       blockhashSuperseded: 1n, blockhashRefreshRequests: 2n });
+    // DEC-06: the threshold mode (ACTIVE requested, OBSERVE while N is undecided) and its comparison.
+    expect(liquidator.trigger?.threshold).toMatchObject({ requested: "ACTIVE", requestedSource: "controller seq 3",
+      effective: "OBSERVE", blockReason: "B8_UNDECIDED", generation: 4n, minTicks: null, ticks: 1_200n, streak: 800n,
+      hits: 9n, misses: 1n, extra: 14n, indexTracked: 83_000n, observeBudgetPpm: 20_000n });
+    expect(liquidator.trigger?.threshold?.sweepDetect).toEqual({ count: 10n, p50: 4_000_000n, p95: 9_000_000n, p99: 12_000_000n, max: 12_500_000n });
+    expect(liquidator.trigger?.threshold?.thresholdDetect.p50).toBe(60_000n);
+    expect(liquidator.trigger?.threshold?.observeOwner).toEqual({ count: 0n, p50: null, p95: null, p99: null, max: null });
+    expect(liquidator.capabilities.find((c) => c.name === "THRESHOLD_TRIGGER")).toMatchObject({ requested: "ACTIVE", effective: "OBSERVE", blockReason: "B8_UNDECIDED" });
     expect(liquidator.pipeline?.losses).toEqual([{ reason: "ROUTING", count: 2n }]);
     expect(liquidator.pipeline?.simulationP95Ns).toBeNull();
     expect(liquidator.safety?.maxTotalCapitalUsdMicro).toBe("100000000");

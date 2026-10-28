@@ -18,12 +18,12 @@ use proto::control::{
 };
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
-    EffectiveRecord, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow, LiquidatorState,
-    LossCount, MarketAssessment, MarketCounters, NonLanding, NonLandingSource, OperationalConfig,
-    OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerTrigger,
-    PhaseStatus, ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan,
-    RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters,
-    SystemStatus, TransportStatus, WalletsState, WriterLane,
+    EffectiveRecord, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow, LatencyNs,
+    LiquidatorState, LossCount, MarketAssessment, MarketCounters, NonLanding, NonLandingSource,
+    OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
+    OwnerThreshold, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount,
+    RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision,
+    SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -217,6 +217,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             blockhash_rearmed: o.trigger.blockhash_rearmed,
             blockhash_superseded: o.trigger.blockhash_superseded,
             blockhash_refresh_requests: o.trigger.blockhash_refresh_requests,
+            threshold: Some(threshold(&o.trigger.threshold)),
         }),
         pipeline: Some(OwnerPipeline {
             evaluations: o.pipeline.evaluations,
@@ -1220,6 +1221,48 @@ pub fn config_from_env(
     Ok(Some(config))
 }
 
+/// DEC-06: the threshold mode's projection.
+fn threshold(t: &darkbot_runner::status_tap::OwnerThreshold) -> OwnerThreshold {
+    let latency = |l: &darkbot_runner::analytics::evidence::LatencyNs| LatencyNs {
+        count: l.count,
+        p50: l.p50,
+        p95: l.p95,
+        p99: l.p99,
+        max: l.max,
+    };
+    OwnerThreshold {
+        requested: t.requested.into(),
+        requested_source: t.requested_source.clone(),
+        effective: t.effective.into(),
+        block_reason: t.block_reason.into(),
+        generation: t.generation,
+        min_ticks: t.min_ticks,
+        ticks: t.ticks,
+        streak: t.streak,
+        uncomparable_ticks: t.uncomparable_ticks,
+        hits: t.hits,
+        misses: t.misses,
+        extra: t.extra,
+        sampled_out: t.sampled_out,
+        fallbacks: t.fallbacks,
+        index_tracked: t.index_tracked,
+        index_fallback: t.index_fallback,
+        index_bootstrap_pending: t.index_bootstrap_pending,
+        index_evaluations: t.index_evaluations,
+        crosscheck_samples: t.crosscheck_samples,
+        crosscheck_skipped: t.crosscheck_skipped,
+        crosscheck_stale: t.crosscheck_stale,
+        crosscheck_misses: t.crosscheck_misses,
+        sweep_detect: Some(latency(&t.sweep_detect)),
+        threshold_detect: Some(latency(&t.threshold_detect)),
+        observe_owner: Some(latency(&t.observe_owner)),
+        observe_owner_ns_total: t.observe_owner_ns_total,
+        observe_budget_ppm: t.observe_budget_ppm,
+        sweep_health_evaluations: t.sweep_health_evaluations,
+        sweep_owner_ns_total: t.sweep_owner_ns_total,
+    }
+}
+
 #[cfg(test)]
 mod contract_tests {
     use super::*;
@@ -1568,6 +1611,50 @@ mod contract_tests {
                 blockhash_rearmed: 4,
                 blockhash_superseded: 1,
                 blockhash_refresh_requests: 2,
+                // DEC-06: OBSERVE with ACTIVE requested, N undecided.
+                threshold: darkbot_runner::status_tap::OwnerThreshold {
+                    requested: "ACTIVE",
+                    requested_source: "controller seq 3".into(),
+                    effective: "OBSERVE",
+                    block_reason: "B8_UNDECIDED",
+                    generation: 4,
+                    min_ticks: None,
+                    ticks: 1_200,
+                    streak: 800,
+                    uncomparable_ticks: 30,
+                    hits: 9,
+                    misses: 1,
+                    extra: 14,
+                    sampled_out: 3,
+                    fallbacks: 0,
+                    index_tracked: 83_000,
+                    index_fallback: 274,
+                    index_bootstrap_pending: 0,
+                    index_evaluations: 90_000,
+                    crosscheck_samples: 0,
+                    crosscheck_skipped: 0,
+                    crosscheck_stale: 0,
+                    crosscheck_misses: 0,
+                    sweep_detect: darkbot_runner::analytics::evidence::LatencyNs {
+                        count: 10,
+                        p50: Some(4_000_000),
+                        p95: Some(9_000_000),
+                        p99: Some(12_000_000),
+                        max: Some(12_500_000),
+                    },
+                    threshold_detect: darkbot_runner::analytics::evidence::LatencyNs {
+                        count: 9,
+                        p50: Some(60_000),
+                        p95: Some(150_000),
+                        p99: Some(200_000),
+                        max: Some(210_000),
+                    },
+                    observe_owner: darkbot_runner::analytics::evidence::LatencyNs::default(),
+                    observe_owner_ns_total: 2_500_000_000,
+                    observe_budget_ppm: 20_000,
+                    sweep_health_evaluations: 400_000,
+                    sweep_owner_ns_total: 90_000_000_000,
+                },
             },
             pipeline: P {
                 evaluations: 7,
@@ -1611,6 +1698,13 @@ mod contract_tests {
                     effective: "OBSERVE",
                     block_reason:
                         darkbot_runner::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED,
+                },
+                // DEC-06: the threshold mode requested ACTIVE, OBSERVE while N is undecided.
+                OwnerCapability {
+                    name: darkbot_runner::orchestration::threshold_mode::THRESHOLD_TRIGGER,
+                    requested: "ACTIVE",
+                    effective: "OBSERVE",
+                    block_reason: darkbot_runner::orchestration::threshold_mode::B8_UNDECIDED,
                 },
             ],
             wallets: OwnerWallets {

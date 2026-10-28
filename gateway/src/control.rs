@@ -513,13 +513,14 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             args.extend(["--expect-version".into(), expect_version?.to_string()]);
             Some(args)
         }
-        // DEC-13/DEC-04/DEC-11: the capability and its requested value, with the version the
-        // view showed: LIVE OFF|LIVE, HOLD_B and JITO_BUNDLE OFF|OBSERVE|ACTIVE.
+        // DEC-13/DEC-04/DEC-11/DEC-06: the capability and its requested value, with the version
+        // the view showed: LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE and THRESHOLD_TRIGGER
+        // OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF → ACTIVE).
         CAPABILITY_SET if req.resource_id.is_empty() => {
             let c = CapabilityControlCommand::decode(req.params.as_ref()).ok()?;
             let values: &[&str] = match c.capability.as_str() {
                 "LIVE" => &["OFF", "LIVE"],
-                "HOLD_B" | "JITO_BUNDLE" => &["OFF", "OBSERVE", "ACTIVE"],
+                "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" => &["OFF", "OBSERVE", "ACTIVE"],
                 _ => return None,
             };
             if !values.contains(&c.requested.as_str()) {
@@ -3613,6 +3614,17 @@ mod tests {
             .unwrap()[3..],
             ["JITO_BUNDLE", "OBSERVE", "--expect-version", "4"]
         );
+        // DEC-06: the threshold mode's hot change.
+        assert_eq!(
+            job_args(&req(
+                CAPABILITY_SET,
+                "",
+                capability("THRESHOLD_TRIGGER", "ACTIVE"),
+                Some(ConfigVersion(5)),
+            ))
+            .unwrap()[3..],
+            ["THRESHOLD_TRIGGER", "ACTIVE", "--expect-version", "5"]
+        );
         for (c, v, expected) in [
             ("LIVE", "LIVE", None),
             ("JITO", "LIVE", Some(ConfigVersion(2))),
@@ -3621,6 +3633,8 @@ mod tests {
             ("HOLD_B", "LIVE", Some(ConfigVersion(2))),
             ("JITO_BUNDLE", "LIVE", Some(ConfigVersion(2))),
             ("JITO_BUNDLE", "OBSERVE", None),
+            ("THRESHOLD_TRIGGER", "SWEEP", Some(ConfigVersion(2))),
+            ("THRESHOLD_TRIGGER", "OBSERVE", None),
         ] {
             assert_eq!(
                 job_args(&req(CAPABILITY_SET, "", capability(c, v), expected)),

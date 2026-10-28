@@ -57,6 +57,56 @@ export interface OwnerTriggerView {
   blockhashRearmed: bigint;
   blockhashSuperseded: bigint;
   blockhashRefreshRequests: bigint;
+  /** DEC-06: the threshold mode; null from an owner before DEC-06. */
+  threshold: OwnerThresholdView | null;
+}
+
+/** DEC-06: a latency distribution in ns; percentiles null without a sample (never 0). */
+export interface LatencyView {
+  count: bigint;
+  p50: bigint | null;
+  p95: bigint | null;
+  p99: bigint | null;
+  max: bigint | null;
+}
+
+/**
+ * DEC-06: the threshold mode — requested (OFF|OBSERVE|ACTIVE, with its source), the owner's
+ * effective mode (OFF|SWEEP|OBSERVE|ACTIVE), its block reason and generation; OBSERVE's comparison
+ * with the sweep on the same ticks (hits, misses, extra wake-ups, detection times) and the cost of
+ * both paths; ACTIVE's sweep cross-check. ACTIVE is no LIVE.
+ */
+export interface OwnerThresholdView {
+  requested: string;
+  requestedSource: string;
+  effective: string;
+  blockReason: string;
+  generation: bigint;
+  /** N (B-8); null while the user has not decided it. */
+  minTicks: bigint | null;
+  ticks: bigint;
+  streak: bigint;
+  uncomparableTicks: bigint;
+  hits: bigint;
+  misses: bigint;
+  extra: bigint;
+  sampledOut: bigint;
+  fallbacks: bigint;
+  indexTracked: bigint;
+  indexFallback: bigint;
+  indexBootstrapPending: bigint;
+  indexEvaluations: bigint;
+  crosscheckSamples: bigint;
+  crosscheckSkipped: bigint;
+  crosscheckStale: bigint;
+  crosscheckMisses: bigint;
+  sweepDetect: LatencyView;
+  thresholdDetect: LatencyView;
+  observeOwner: LatencyView;
+  observeOwnerNsTotal: bigint;
+  observeBudgetPpm: bigint;
+  sweepHealthEvaluations: bigint;
+  sweepOwnerNsTotal: bigint;
 }
 
 export interface OwnerPipelineView {

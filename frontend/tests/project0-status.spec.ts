@@ -365,6 +365,22 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const jb = fromBinary(CapabilityControlCommandSchema, bundle.params);
   expect([jb.capability, jb.requested]).toEqual(["JITO_BUNDLE", "OFF"]);
   expect(bundle.expected?.version).toEqual({ case: "configVersion", value: 1n });
+  // DEC-06: the threshold mode with its comparison; its hot change through the same controller.
+  await expect(page.locator(".p0-line", { hasText: /^THRESHOLD_TRIGGER/ }).first()).toContainText("OBSERVE (requested ACTIVE) · B8_UNDECIDED");
+  await expect(page.locator(".p0-line", { hasText: "Threshold mode · requested / effective" }))
+    .toContainText("ACTIVE (controller seq 3) / OBSERVE · B8_UNDECIDED · gen 4");
+  await expect(page.locator(".p0-line", { hasText: "comparable ticks / since last miss" })).toContainText("1200 / 800 / undecided (B-8) · 30");
+  await expect(page.locator(".p0-line", { hasText: "hits (sweep and threshold)" })).toContainText("9 / 1 / 14");
+  await expect(page.locator(".p0-line", { hasText: "Detection p50 / p95 / p99 · threshold" })).toContainText("60 µs / 150 µs / 200 µs (n 9)");
+  await expect(page.locator(".p0-line", { hasText: "Owner time beside the sweep" })).toContainText("no sample · 2500 ms · 20000 ppm · 3");
+  await page.getByRole("combobox", { name: "Threshold trigger" }).selectOption("OBSERVE");
+  await page.getByRole("button", { name: "Request threshold mode" }).click();
+  await expect.poll(() => sent.length).toBe(4);
+  const thr = sent.at(-1)!;
+  expect(thr.action).toBe("project0.capability.set");
+  const th = fromBinary(CapabilityControlCommandSchema, thr.params);
+  expect([th.capability, th.requested]).toEqual(["THRESHOLD_TRIGGER", "OBSERVE"]);
+  expect(thr.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();
@@ -390,7 +406,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });
 
