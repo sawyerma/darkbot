@@ -30,7 +30,7 @@ pub const WIRE_DECODER_VERSION: u16 = 1;
 
 /// The closed set of reasons this module's JSON-RPC/WSS decoder produces; a stored `ChainError`
 /// maps back onto it or fails to decode, so a typed cache never invents a reason.
-pub const DECODER_CODES: [&str; 14] = [
+pub const DECODER_CODES: [&str; 16] = [
     "BLOCK_DECODE",
     "BLOCK_HEADER_INVALID",
     "BLOCK_TRANSACTIONS_MISSING",
@@ -40,6 +40,8 @@ pub const DECODER_CODES: [&str; 14] = [
     "LOGS_NOTIFICATION_DECODE",
     "NOTIFICATION_DECODE",
     "NOTIFICATION_SIGNATURE_MISMATCH",
+    "SIGNATURE_PAGE_DECODE",
+    "SIGNATURE_ROW_LAYOUT",
     "TOKEN_AMOUNT_INVALID",
     "TX_DECODE",
     "TX_SLOT_MISMATCH",
@@ -745,6 +747,46 @@ fn status(err: Field<Option<WireErr>>) -> TxStatus {
     }
 }
 
+/// DEC-08: one row of a `getSignaturesForAddress` page (newest first). `block_time` is `None`
+/// when the provider omitted or nulled it; the status follows the transaction table (`err`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SignatureEntry {
+    pub signature: String,
+    pub slot: u64,
+    pub block_time: Option<i64>,
+    pub status: TxStatus,
+}
+
+/// DEC-08: a `getSignaturesForAddress` result — an array of rows `{signature, slot, blockTime,
+/// err}`. A page that is no array, or a row without its signature, slot or `err` field, fails as
+/// a whole (a page is never kept in part).
+pub fn decode_signature_page(value: &serde_json::Value) -> Result<Vec<SignatureEntry>, ChainError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Row {
+        signature: String,
+        slot: u64,
+        #[serde(default)]
+        block_time: Option<i64>,
+        #[serde(default)]
+        err: Field<Option<WireErr>>,
+    }
+    let rows = Vec::<Row>::deserialize(value).map_err(|_| ChainError("SIGNATURE_PAGE_DECODE"))?;
+    rows.into_iter()
+        .map(|r| {
+            if r.signature.is_empty() || matches!(r.err, Field::Absent) {
+                return Err(ChainError("SIGNATURE_ROW_LAYOUT"));
+            }
+            Ok(SignatureEntry {
+                signature: r.signature,
+                slot: r.slot,
+                block_time: r.block_time,
+                status: status(r.err),
+            })
+        })
+        .collect()
+}
+
 // ---- wire re-encoding: offline compatibility renders of typed evidence only ----
 
 #[cfg(feature = "historical")]
@@ -1119,6 +1161,33 @@ mod stored_tests {
                 {"transaction": 1}
             ]
         })
+    }
+
+    /// DEC-08: a signature page decodes rows with their status (success, failed, undecodable),
+    /// a null block time stays unknown, and a row without `err` or a non-array fails the page.
+    #[test]
+    fn signature_page_decodes_rows_and_fails_whole() {
+        let page = serde_json::json!([
+            {"signature": "a", "slot": 9, "blockTime": 100, "err": null},
+            {"signature": "b", "slot": 9, "blockTime": null,
+             "err": {"InstructionError": [0, {"Custom": 1}]}},
+            {"signature": "c", "slot": 8, "err": {"FutureVariant": 1}}
+        ]);
+        let rows = decode_signature_page(&page).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!((rows[0].slot, rows[0].block_time), (9, Some(100)));
+        assert_eq!(rows[0].status, TxStatus::Success);
+        assert!(matches!(rows[1].status, TxStatus::Failed(_)) && rows[1].block_time.is_none());
+        assert_eq!(rows[2].status, TxStatus::Unknown("TX_ERROR_UNDECODABLE"));
+        let no_err = serde_json::json!([{"signature": "a", "slot": 1, "blockTime": 1}]);
+        assert_eq!(
+            decode_signature_page(&no_err),
+            Err(ChainError("SIGNATURE_ROW_LAYOUT"))
+        );
+        assert_eq!(
+            decode_signature_page(&serde_json::json!({"signature": "a"})),
+            Err(ChainError("SIGNATURE_PAGE_DECODE"))
+        );
     }
 
     /// F10: every reason this decoder constructs is registered, a decoded block (entry errors

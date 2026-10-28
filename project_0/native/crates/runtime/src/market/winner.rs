@@ -385,10 +385,17 @@ pub fn find_winner(
     account: &Pubkey,
     since_slot: u64,
 ) -> Result<Option<Winner>, String> {
-    let mut before: Option<Signature> = None;
-    let mut candidates: Vec<(u64, String)> = Vec::new();
-    let mut reached_since = false;
-    for _ in 0..MAX_PAGES {
+    // DEC-08: the one signature-history reader (cursor, order, de-duplication, end).
+    let mut pager = super::history::SignaturePager::new();
+    // The history ends at the first page that reaches below `since_slot` or is short.
+    let reaches_since = |page: &[darkbot_solana::chain::SignatureEntry]| {
+        page.len() < PAGE || page.iter().any(|s| s.slot < since_slot)
+    };
+    while pager.end().is_none() && pager.pages() < MAX_PAGES as u64 {
+        let before = pager
+            .before()
+            .map(|b| Signature::from_str(b).map_err(|e| format!("winner cursor {b}: {e:?}")))
+            .transpose()?;
         let cfg = GetConfirmedSignaturesForAddress2Config {
             before,
             until: None,
@@ -408,32 +415,32 @@ pub fn find_winner(
             mt0_start.elapsed(),
             mt0_outcome,
         );
-        let sigs = sigs?;
-        if sigs.is_empty() {
-            reached_since = true;
-            break;
-        }
-        for s in &sigs {
-            if s.slot < since_slot {
-                reached_since = true;
-                continue;
-            }
-            if s.err.is_some() {
-                continue;
-            } // [FIX-44] nur erfolgreiche TXs
-            candidates.push((s.slot, s.signature.clone()));
-        }
-        if reached_since || sigs.len() < PAGE {
-            reached_since = true;
-            break;
-        }
-        before = sigs
-            .last()
-            .and_then(|s| Signature::from_str(&s.signature).ok());
+        let page = sigs?
+            .into_iter()
+            .map(|s| darkbot_solana::chain::SignatureEntry {
+                signature: s.signature,
+                slot: s.slot,
+                block_time: s.block_time,
+                status: match s.err {
+                    None => darkbot_solana::chain::TxStatus::Success,
+                    Some(e) => darkbot_solana::chain::TxStatus::Failed(e.into()),
+                },
+            })
+            .collect();
+        pager
+            .accept(page, reaches_since)
+            .map_err(|e| format!("winner signatures: {e}"))?;
     }
-    if !reached_since {
+    if pager.end().is_none() {
         return Err(format!("winner search truncated after {} pages", MAX_PAGES));
     }
+    // [FIX-44] nur erfolgreiche TXs, ab `since_slot`.
+    let mut candidates: Vec<(u64, String)> = pager
+        .rows()
+        .iter()
+        .filter(|s| s.slot >= since_slot && s.status.is_success())
+        .map(|s| (s.slot, s.signature.clone()))
+        .collect();
     candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     let mut hits: Vec<(u64, String, EndLiquidationHit)> = Vec::new();
     let mut earliest_hit_slot: Option<u64> = None;
@@ -497,6 +504,176 @@ pub fn race_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DEC-08 loopback JSON-RPC: every request is answered by `answer(method, params)`; the
+    /// requests are recorded in order.
+    fn loopback(
+        answer: impl Fn(&str, &serde_json::Value) -> serde_json::Value + Send + 'static,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    ) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0u8; length];
+                let _ = reader.read_exact(&mut body);
+                let request: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                log.lock().unwrap().push(request.clone());
+                let result = answer(request["method"].as_str().unwrap_or(""), &request["params"]);
+                let body =
+                    serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                        .to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        (url, seen)
+    }
+
+    const WINNER: &str =
+        "2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf";
+    const WINNER_SLOT: u64 = 451703584;
+    const TARGET: &str = "3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx";
+
+    fn signature_row(slot: u64, err: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"signature": Signature::new_unique().to_string(), "slot": slot,
+            "blockTime": slot, "err": err, "memo": null, "confirmationStatus": "confirmed"})
+    }
+
+    /// DEC-08: the winner consumer reads its history through the shared pager — the second page
+    /// at the first page's last signature, the end at the first page reaching below `since_slot`,
+    /// only successful candidates fetched, the earliest one the real `end_liquidation` winner.
+    #[test]
+    fn dec08_the_winner_pages_through_the_shared_reader() {
+        let first: Vec<serde_json::Value> = (0..PAGE as u64)
+            .map(|i| signature_row(WINNER_SLOT + 400 - i, serde_json::Value::Null))
+            .collect();
+        let cursor = first.last().unwrap()["signature"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let winner_row = serde_json::json!({"signature": WINNER, "slot": WINNER_SLOT,
+            "blockTime": 1, "err": null, "memo": null, "confirmationStatus": "confirmed"});
+        let second = vec![
+            signature_row(WINNER_SLOT + 50, serde_json::Value::Null),
+            winner_row,
+            signature_row(
+                WINNER_SLOT - 10,
+                serde_json::json!({"InstructionError": [0, {"Custom": 1}]}),
+            ),
+            signature_row(WINNER_SLOT - 200, serde_json::Value::Null),
+        ];
+        let expected_cursor = cursor.clone();
+        let (url, seen) = loopback(move |method, params| {
+            match method {
+            "getSignaturesForAddress" => match params[1]["before"].as_str() {
+                None => serde_json::Value::Array(first.clone()),
+                Some(b) if b == expected_cursor => serde_json::Value::Array(second.clone()),
+                Some(_) => serde_json::json!([]),
+            },
+            "getTransaction" if params[0] == WINNER => serde_json::from_str(include_str!(
+                "../../../../../docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json"
+            ))
+            .unwrap(),
+            _ => serde_json::Value::Null,
+        }
+        });
+        let rpc = RpcClient::new(url);
+        let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap();
+        let account = Pubkey::from_str(TARGET).unwrap();
+        let winner = find_winner(&rpc, &program, &account, WINNER_SLOT - 100)
+            .unwrap()
+            .expect("the real winner");
+        assert_eq!(winner.slot, WINNER_SLOT);
+        assert!(
+            matches!(&winner.identity, WinnerIdentity::Unique { signature, .. } if signature == WINNER)
+        );
+        let requests = seen.lock().unwrap().clone();
+        let methods: Vec<&str> = requests
+            .iter()
+            .map(|r| r["method"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            methods,
+            [
+                "getSignaturesForAddress",
+                "getSignaturesForAddress",
+                "getTransaction"
+            ],
+            "two pages, one candidate before the hit"
+        );
+        assert_eq!(
+            requests[1]["params"][1]["before"],
+            serde_json::json!(cursor)
+        );
+    }
+
+    /// DEC-08: a history that never reaches `since_slot` within the page bound is truncated, and
+    /// a history whose slots rise is refused — both fail closed, never a guessed winner.
+    #[test]
+    fn dec08_the_winner_history_fails_closed() {
+        let (url, _) = loopback(move |method, _| match method {
+            "getSignaturesForAddress" => serde_json::Value::Array(
+                (0..PAGE as u64)
+                    .map(|i| signature_row(WINNER_SLOT + 10_000 - i, serde_json::Value::Null))
+                    .collect(),
+            ),
+            _ => serde_json::Value::Null,
+        });
+        let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap();
+        let account = Pubkey::from_str(TARGET).unwrap();
+        let err = find_winner(&RpcClient::new(url), &program, &account, WINNER_SLOT).unwrap_err();
+        assert!(err.contains("INDEX_SLOT_ORDER"), "{err}");
+        let pages = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let count = pages.clone();
+        let (url, _) = loopback(move |method, _| match method {
+            "getSignaturesForAddress" => {
+                let n = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                serde_json::Value::Array(
+                    (0..PAGE as u64)
+                        .map(|i| {
+                            signature_row(
+                                WINNER_SLOT + 100_000 - n * PAGE as u64 - i,
+                                serde_json::Value::Null,
+                            )
+                        })
+                        .collect(),
+                )
+            }
+            _ => serde_json::Value::Null,
+        });
+        let err = find_winner(&RpcClient::new(url), &program, &account, WINNER_SLOT).unwrap_err();
+        assert_eq!(
+            err,
+            format!("winner search truncated after {MAX_PAGES} pages")
+        );
+        assert_eq!(
+            pages.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_PAGES as u64
+        );
+    }
 
     #[test]
     fn outcomes() {
