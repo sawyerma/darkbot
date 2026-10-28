@@ -82,8 +82,139 @@ fn flag<'a>(args: &'a [String], name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("{name} needs a value"))
 }
 
+/// The LIVE grant a `live scope|grant` command names (plan 28.10.).
+fn grant_args(rest: &[String]) -> Result<darkbot_bsc_execution::sources::LiveGrant, String> {
+    use darkbot_bsc_execution::sources::{
+        LiveAdapter, LiveGrant, LiveStrategies, SourceId, VenueId,
+    };
+    let list = |name: &str| -> Result<Vec<&str>, String> {
+        Ok(flag(rest, name)?
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .collect())
+    };
+    let number = |name: &str| -> Result<u128, String> {
+        let text = flag(rest, name)?;
+        if text.is_empty()
+            || !text.bytes().all(|b| b.is_ascii_digit())
+            || (text.len() > 1 && text.starts_with('0'))
+        {
+            return Err(format!("{name} is a plain decimal"));
+        }
+        text.parse::<u128>()
+            .map_err(|_| format!("{name} out of range"))
+    };
+    Ok(LiveGrant {
+        venue: VenueId::parse(flag(rest, "--venue")?).ok_or("--venue: unknown venue")?,
+        strategies: LiveStrategies::parse(flag(rest, "--strategies")?)
+            .ok_or("--strategies: C3, STRATEGY_C or C3+STRATEGY_C")?,
+        sources: list("--sources")?
+            .into_iter()
+            .map(|s| SourceId::parse(s).ok_or(format!("--sources: unknown source {s}")))
+            .collect::<Result<_, _>>()?,
+        adapters: list("--adapters")?
+            .into_iter()
+            .map(|a| LiveAdapter::parse(a).ok_or(format!("--adapters: unknown adapter {a}")))
+            .collect::<Result<_, _>>()?,
+        max_input_wei: number("--max-input-wei")?,
+        max_spend_wei: number("--max-spend-wei")?,
+        max_attempts: u32::try_from(number("--max-attempts")?)
+            .map_err(|_| "--max-attempts out of range")?,
+        expires_unix_ms: u64::try_from(number("--expires-unix-ms")?)
+            .map_err(|_| "--expires-unix-ms out of range")?,
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn run(args: &[String]) -> Result<bool, String> {
     match args {
+        // Plan 28.10.: the canonical scope text of a LIVE grant and its
+        // SHA-256, the value an operator confirms with `live grant`.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "scope" => {
+            let grant = grant_args(rest)?;
+            grant.validate()?;
+            print!("{}", grant.scope_text());
+            println!("scope_sha256={}", hex(&grant.scope_sha256()));
+            Ok(true)
+        }
+        [area, cmd, rest @ ..] if area == "live" && cmd == "grant" => {
+            let grant = grant_args(rest)?;
+            let confirmed = flag(rest, "--scope-sha256")?;
+            let digest = (confirmed.len() == 64)
+                .then(|| {
+                    (0..32)
+                        .map(|i| u8::from_str_radix(&confirmed[2 * i..2 * i + 2], 16).ok())
+                        .collect::<Option<Vec<u8>>>()
+                })
+                .flatten()
+                .and_then(|v| <[u8; 32]>::try_from(v).ok())
+                .filter(|_| confirmed.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+                .ok_or("--scope-sha256 is 64 lowercase hex digits (from `live scope`)")?;
+            let expected = flag(rest, "--expect-generation")?
+                .parse::<u64>()
+                .map_err(|_| "--expect-generation is an unsigned integer")?;
+            let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
+            let now = darkbot_bsc_record::observed_now()?;
+            let receipt = store.grant_live(flag(rest, "--request-id")?, grant, digest, expected, now)?;
+            println!("{}", receipt.line());
+            Ok(receipt.applied())
+        }
+        [area, cmd, rest @ ..] if area == "live" && cmd == "revoke" => {
+            let expected = flag(rest, "--expect-generation")?
+                .parse::<u64>()
+                .map_err(|_| "--expect-generation is an unsigned integer")?;
+            let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
+            let now = darkbot_bsc_record::observed_now()?;
+            let receipt = store.request(
+                flag(rest, "--request-id")?,
+                Entity::LiveGrant,
+                Mode::Disabled,
+                expected,
+                now,
+            )?;
+            println!("{}", receipt.line());
+            Ok(receipt.applied())
+        }
+        // The LIVE gate as it holds now: every missing condition, then
+        // what each LIVE request is now.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "status" => {
+            use darkbot_bsc_execution::sources::{LiveContext, LiveQualification, live_inputs};
+            let dir = std::path::Path::new(flag(rest, "--state")?);
+            let now = darkbot_bsc_record::observed_now()?;
+            let (g, daily, total) = live_inputs(dir, now)?;
+            let boot = darkbot_bsc_execution::sources::boot_session().ok();
+            let qualification = LiveQualification::default();
+            let ctx = LiveContext {
+                boot: boot.as_deref(),
+                now_unix_ms: now,
+                daily: Some(&daily),
+                total: Some(&total),
+                spent_wei: Some(0),
+                qualification: &qualification,
+            };
+            println!("generation={}", g.generation);
+            match &g.live {
+                Some(grant) => {
+                    print!("{}", grant.scope_text());
+                    println!("scope_sha256={}", hex(&grant.scope_sha256()));
+                }
+                None => println!("grant=NONE"),
+            }
+            let blockers = g.live_blockers(&ctx);
+            println!(
+                "live={} blockers={}",
+                if blockers.is_empty() { "CLEAR" } else { "BLOCKED" },
+                blockers.join(",")
+            );
+            println!(
+                "buy_attempts day_utc={} used={} limit={} total_used={} total_limit={}",
+                daily.day.utc, daily.used, daily.limit, total.used, total.limit
+            );
+            Ok(blockers.is_empty())
+        }
         [cmd, rest @ ..] if cmd == "run" => {
             let config_path = flag(rest, "--config")?;
             let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
@@ -347,6 +478,16 @@ fn run(args: &[String]) -> Result<bool, String> {
                         g.buy_limit.requested,
                         Entity::BuyLimit,
                     ),
+                    (
+                        darkbot_bsc_execution::sources::BUY_ATTEMPTS_TOTAL,
+                        g.buy_total.requested,
+                        Entity::BuyTotal,
+                    ),
+                    (
+                        darkbot_bsc_execution::sources::LIVE_GRANT,
+                        g.requested_of(Entity::LiveGrant),
+                        Entity::LiveGrant,
+                    ),
                 ])
                 .collect::<Vec<_>>();
             for (name, requested, entity) in rows {
@@ -373,6 +514,13 @@ fn run(args: &[String]) -> Result<bool, String> {
                 usage.limit,
                 usage.remaining()
             );
+            let total = darkbot_bsc_execution::sources::total_usage(std::path::Path::new(flag(rest, "--state")?))?;
+            println!(
+                "buy_attempts_total used={} limit={} remaining={}",
+                total.used,
+                total.limit,
+                total.remaining()
+            );
             Ok(true)
         }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {
@@ -390,7 +538,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live status --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

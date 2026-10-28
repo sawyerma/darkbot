@@ -1922,9 +1922,11 @@ pub fn run(
                         | Effective::Disabled
                         | Effective::Enabled
                         | Effective::PerDay(_) => Health::Off,
-                        Effective::Shadow if config.endpoint(s).is_none() => Health::Unqualified,
-                        Effective::Shadow if stopping => Health::Off,
-                        Effective::Shadow => {
+                        Effective::Shadow | Effective::Live if config.endpoint(s).is_none() => {
+                            Health::Unqualified
+                        }
+                        Effective::Shadow | Effective::Live if stopping => Health::Off,
+                        Effective::Shadow | Effective::Live => {
                             health(&st, rate_limited_last[i], now, config.quiet_ms * 1_000_000)
                         }
                     };

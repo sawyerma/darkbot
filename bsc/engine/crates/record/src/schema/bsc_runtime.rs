@@ -152,6 +152,56 @@ pub mod source_modes {
         };
     }
 
+    /// The operator's LIVE grant (plan 28.10., `0a647175`, schema version
+    /// 5): the one economic approval of a LIVE scope, or its revocation.
+    /// It counts only in the boot session of the generation that holds it
+    /// and until it expires; a restart revokes it.
+    pub mod live {
+        use super::*;
+
+        /// `GRANTED` or `REVOKED`.
+        pub const STATE: u16 = 1;
+        /// The venue the grant may buy on (`BSC_VENUE_FLAP`).
+        pub const VENUE: u16 = 2;
+        /// `C3`, `STRATEGY_C` or `C3+STRATEGY_C`.
+        pub const STRATEGIES: u16 = 3;
+        /// The sources whose verified full launches may act (repeated).
+        pub const SOURCES: u16 = 4;
+        /// The inclusion adapters it may send through (repeated).
+        pub const ADAPTERS: u16 = 5;
+        /// The largest input of one BUY.
+        pub const MAX_INPUT_WEI: u16 = 6;
+        /// The most the grant may spend in all (inputs, gas, fees).
+        pub const MAX_SPEND_WEI: u16 = 7;
+        /// The most BUY attempts under this grant.
+        pub const MAX_ATTEMPTS: u16 = 8;
+        pub const EXPIRES_UNIX_MS: u16 = 9;
+        /// SHA-256 of the canonical scope text the operator confirmed.
+        pub const SCOPE_SHA256: u16 = 10;
+        pub const REQUEST_ID: u16 = 11;
+        pub const SET_GENERATION: u16 = 12;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.source-modes.live",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(STATE, "state", Text),
+                Field::opt(VENUE, "venue", Text),
+                Field::opt(STRATEGIES, "strategies", Text),
+                Field::rep(SOURCES, "sources", Text),
+                Field::rep(ADAPTERS, "adapters", Text),
+                Field::opt(MAX_INPUT_WEI, "max_input_wei", U256),
+                Field::opt(MAX_SPEND_WEI, "max_spend_wei", U256),
+                Field::opt(MAX_ATTEMPTS, "max_attempts", U64),
+                Field::opt(EXPIRES_UNIX_MS, "expires_unix_ms", U64),
+                Field::opt(SCOPE_SHA256, "scope_sha256", B256),
+                Field::opt(REQUEST_ID, "request_id", Text),
+                Field::opt(SET_GENERATION, "set_generation", U64),
+            ],
+        };
+    }
+
     /// Strictly increasing; the CAS every change states.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -171,10 +221,43 @@ pub mod source_modes {
     /// switch counts only within it (a restart disables every switch).
     /// Bytes, so the host identity never leaves the reporter.
     pub const BOOT_SESSION: u16 = 9;
-    /// The runtime mode and the daily BUY limit (schema version 4).
+    /// The runtime mode and the daily BUY limit (schema version 4), the
+    /// campaign's total BUY limit (version 5).
     pub const SETTINGS: u16 = 10;
+    /// The LIVE grant or its revocation (schema version 5).
+    pub const LIVE: u16 = 11;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.source-modes.v1",
+        record_type: 38,
+        schema_version: 5,
+        fields: &[
+            Field::req(GENERATION, "generation", U64),
+            Field::nested(SOURCES, "sources", Presence::Repeated, &entry::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::nested(
+                COMPONENTS,
+                "components",
+                Presence::Repeated,
+                &component::SCHEMA,
+            ),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::nested(SWITCHES, "switches", Presence::Repeated, &switch::SCHEMA),
+            Field::opt(BOOT_SESSION, "boot_session", Bytes).max(128),
+            Field::nested(SETTINGS, "settings", Presence::Repeated, &setting::SCHEMA),
+            Field::nested(LIVE, "live", Presence::Optional, &live::SCHEMA),
+        ],
+    };
+
+    /// Generations written before the LIVE grant and the total BUY limit
+    /// (read only; no grant, the total limit 0).
+    pub const SCHEMA_V4: Schema = Schema {
         name: "darkbot.bsc.source-modes.v1",
         record_type: 38,
         schema_version: 4,
@@ -310,6 +393,44 @@ pub mod buy_attempt_slot {
             Field::req(SLOT, "slot", U64),
             Field::req(LIMIT, "limit", U64),
             Field::req(GENERATION, "generation", U64),
+        ],
+    };
+}
+
+/// One consumed slot of the campaign's total BUY attempt limit (plan
+/// 28.10., `0a647175`: at most ten real BUY attempts, G0.7 included):
+/// `buy-attempts-total/<slot>.dbrec`, created create-new; never freed.
+pub mod buy_attempt_total_slot {
+    use super::*;
+
+    pub const ATTEMPT_ID: u16 = 1;
+    /// 0-based; below the total limit in force when taken.
+    pub const SLOT: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const LIMIT: u16 = 5;
+    /// The owner generation the limit was read from.
+    pub const GENERATION: u16 = 6;
+    /// The generation of the LIVE grant the attempt ran under (0: none,
+    /// a G0.7 attempt).
+    pub const GRANT_GENERATION: u16 = 7;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.buy-attempt-total-slot.v1",
+        record_type: 65,
+        schema_version: 1,
+        fields: &[
+            Field::req(ATTEMPT_ID, "attempt_id", Text),
+            Field::req(SLOT, "slot", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(LIMIT, "limit", U64),
+            Field::req(GENERATION, "generation", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
         ],
     };
 }
@@ -1267,11 +1388,13 @@ pub mod strategy_replay {
 
 pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA,
+    &source_modes::SCHEMA_V4,
     &source_modes::SCHEMA_V3,
     &source_modes::SCHEMA_V2,
     &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
+    &buy_attempt_total_slot::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,

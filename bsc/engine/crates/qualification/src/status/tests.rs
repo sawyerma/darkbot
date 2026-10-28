@@ -1499,6 +1499,10 @@ fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
     store
         .request("bl", Entity::BuyLimit, Mode::PerDay(3), 1, 3)
         .unwrap();
+    // Plan 28.10.: the campaign's total leaves room for it.
+    store
+        .request("bt", Entity::BuyTotal, Mode::PerDay(3), 2, 3)
+        .unwrap();
     store
         .consume_buy_attempt("attempt-1", projection::now() * 1_000)
         .unwrap();
@@ -1521,7 +1525,7 @@ fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
             limit.generation,
             limit.request_id.as_str()
         ),
-        (3, 1, 2, 2, "bl")
+        (3, 1, 2, 3, "bl")
     );
     assert_eq!(limit.day_utc.len(), 10);
     fs::remove_dir_all(&root).unwrap();

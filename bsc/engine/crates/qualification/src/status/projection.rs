@@ -158,11 +158,14 @@ fn native_leaves(
         if name.contains("journal_error") || name.starts_with("preflight[]") {
             continue;
         }
-        // Plan 27.10.: the owner's switches and settings travel typed
-        // (ControlSwitch / BuyAttemptLimit, with the boot-session rule); the
-        // raw leaves could show an ENABLED of an earlier boot.
+        // Plan 27.10./28.10.: the owner's switches, settings and LIVE grant
+        // travel typed (ControlSwitch / BuyAttemptLimit / the LIVE state,
+        // with the boot-session rule); the raw leaves could show an ENABLED
+        // or a grant of an earlier boot.
         if top.name == schema::bsc_runtime::source_modes::SCHEMA.name
-            && (name.starts_with("switches[]") || name.starts_with("settings[]"))
+            && (name.starts_with("switches[]")
+                || name.starts_with("settings[]")
+                || name.starts_with("live[]"))
         {
             continue;
         }

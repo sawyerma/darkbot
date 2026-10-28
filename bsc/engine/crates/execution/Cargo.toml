@@ -48,7 +48,7 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 rpc-wire = []
 # The BSC runtime's native configuration owners (C0/C1): binary records only.
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
-runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize"]
+runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 
 [dev-dependencies]
