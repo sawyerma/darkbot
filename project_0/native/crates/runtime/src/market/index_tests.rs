@@ -1,0 +1,1196 @@
+use super::*;
+use crate::analytics::journal::Provenance;
+use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
+
+/// A real `end_liquidation` receivership (v1, finalized `getTransaction` bytes).
+const FIXTURE: &str = include_str!(
+    "../../../../../docs/evidence/AUDIT_20261005/2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf.json"
+);
+const SLOT: u64 = 451_703_584;
+const BT: i64 = 1_790_701_461;
+const NS_U: u64 = 1_000_000_000;
+
+fn program() -> Pubkey {
+    Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET).unwrap()
+}
+fn fixture() -> Value {
+    serde_json::from_str(FIXTURE).unwrap()
+}
+fn fixture_signature() -> String {
+    fixture()["transaction"]["signatures"][0]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+/// The fixture moved to another identity (signature, slot, time, status).
+fn variant(signature: &str, slot: u64, bt: i64, err: Value) -> Value {
+    let mut tx = fixture();
+    tx["transaction"]["signatures"][0] = json!(signature);
+    tx["slot"] = json!(slot);
+    tx["blockTime"] = json!(bt);
+    tx["meta"]["err"] = err;
+    tx
+}
+fn row(signature: &str, slot: u64, bt: i64, err: Value) -> Value {
+    json!({"signature": signature, "slot": slot, "blockTime": bt, "err": err, "memo": null,
+        "confirmationStatus": "finalized"})
+}
+
+/// The window `[BT - 100 s, BT + 100 s)` and its history: page 1 (head) `A` after the end, `E` at
+/// the end second (fetched: coarse chain time), the real liquidation `F` and the failed `B`;
+/// page 2 (at `B`) `C`, `D` before the start (the start is crossed).
+struct History {
+    a: String,
+    e: String,
+    f: String,
+    b: String,
+    c: String,
+    d: String,
+}
+impl History {
+    fn new() -> Self {
+        let s = || Signature::new_unique().to_string();
+        History {
+            a: s(),
+            e: s(),
+            f: fixture_signature(),
+            b: s(),
+            c: s(),
+            d: s(),
+        }
+    }
+    fn failed() -> Value {
+        json!({"InstructionError": [0, {"Custom": 1}]})
+    }
+    fn page(&self, before: Option<&str>) -> Value {
+        match before {
+            None => json!([
+                row(&self.a, SLOT + 300, BT + 300, Value::Null),
+                row(&self.e, SLOT + 100, BT + 100, Value::Null),
+                row(&self.f, SLOT, BT, Value::Null),
+                row(&self.b, SLOT - 5, BT - 5, Self::failed()),
+            ]),
+            Some(b) if b == self.b => json!([
+                row(&self.c, SLOT - 200, BT - 200, Value::Null),
+                row(&self.d, SLOT - 201, BT - 201, Value::Null),
+            ]),
+            Some(_) => json!([]),
+        }
+    }
+    fn transaction(&self, signature: &str) -> Reply {
+        if signature == self.f {
+            Reply::Result(fixture())
+        } else if signature == self.e {
+            Reply::Result(variant(&self.e, SLOT + 100, BT + 100, Value::Null))
+        } else if signature == self.b {
+            Reply::Result(variant(&self.b, SLOT - 5, BT - 5, Self::failed()))
+        } else {
+            Reply::Result(Value::Null)
+        }
+    }
+    fn answer(&self, method: &str, params: &Value) -> Reply {
+        match method {
+            "getSignaturesForAddress" => Reply::Result(self.page(params[1]["before"].as_str())),
+            "getTransaction" => self.transaction(params[0].as_str().unwrap()),
+            _ => Reply::Result(Value::Null),
+        }
+    }
+}
+
+enum Reply {
+    Result(Value),
+    Error(i64),
+}
+
+type Seen = Arc<Mutex<Vec<Value>>>;
+
+/// Loopback JSON-RPC endpoint answering every request with `answer(method, params)`.
+fn loopback(answer: impl Fn(&str, &Value) -> Reply + Send + 'static) -> (String, Seen) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut length = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = v.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut body = vec![0u8; length];
+            let _ = reader.read_exact(&mut body);
+            let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            log.lock().unwrap().push(request.clone());
+            let body = match answer(request["method"].as_str().unwrap_or(""), &request["params"]) {
+                Reply::Result(result) => {
+                    json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                }
+                Reply::Error(code) => json!({"jsonrpc": "2.0", "id": request["id"],
+                    "error": {"code": code, "message": "fixture"}}),
+            }
+            .to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+        }
+    });
+    (url, seen)
+}
+
+fn job(tag: &str) -> Job {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    Job {
+        verification_spec_id: format!("index-{tag}"),
+        output: std::env::temp_dir().join(format!("p0-index-{tag}-{stamp}")),
+        start_ns: (BT as u64 - 100) * NS_U,
+        end_ns: (BT as u64 + 100) * NS_U,
+        program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+        max_calls: 100,
+        max_seconds: 60,
+        max_bytes: 64 * 1024 * 1024,
+        max_disk_bytes: 1024 * 1024 * 1024,
+        max_ram_bytes: 64 * 1024 * 1024 * 1024,
+        min_free_bytes: 0,
+        rps: 1000,
+        offline: false,
+    }
+}
+
+fn methods(seen: &Seen) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .map(|r| r["method"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// The fixture's own events (the classifier's reading of the real transaction).
+fn fixture_events() -> Vec<TruthEvent> {
+    let tx = darkbot_solana::chain::decode_transaction(&fixture()).unwrap();
+    truth::classify(&tx, &program(), Some(BT), None).unwrap()
+}
+
+/// A capture that received `F` live with its receivership row, and one live transaction the
+/// index does not hold.
+fn live_capture(h: &History) -> BotEvidence {
+    let mut bot = BotEvidence::default();
+    bot.live.insert((h.f.clone(), SLOT));
+    bot.live_signatures.insert(h.f.clone());
+    bot.live.insert(("bot-only".into(), 7));
+    bot.live_signatures.insert("bot-only".into());
+    for (rank, e) in fixture_events()
+        .iter()
+        .filter(|e| e.liquidation_type == LiquidationType::Receivership)
+        .enumerate()
+    {
+        bot.event(
+            &h.f,
+            SLOT,
+            BotEvent {
+                source: BotSource::Live,
+                index: rank as u32,
+                kind: LiquidationType::Receivership,
+                target: e.target.clone(),
+                actor: e.liquidator.clone(),
+                seized: e.seized_value_usd,
+                repaid: e.repaid_value_usd,
+                protocol_fee: e.protocol_fee_lamports,
+                native: None,
+            },
+        );
+    }
+    bot.complete = true;
+    bot
+}
+
+/// DEC-08: the INDEX pages the program's finalized history back over the window start through
+/// the shared pager (second page at the first page's last signature), fetches every transaction
+/// that may lie in the window (the end second too, never the rows outside), classifies with the
+/// one classifier and compares with the capture: the window is INDEX_VERIFIED, the real
+/// receivership MATCHes its live row, the failed transaction is in the window without events,
+/// the capture's own live transaction the index lacks is BOT_ONLY — and nothing is promoted.
+#[test]
+fn dec08_index_pages_fetches_classifies_and_compares() {
+    let h = Arc::new(History::new());
+    let server = h.clone();
+    let (url, seen) = loopback(move |m, p| server.answer(m, p));
+    let j = job("verified");
+    let bot = live_capture(&h);
+    let r = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(r.status, "INDEX_VERIFIED", "{r:?}");
+    assert_eq!(r.reason, None);
+    assert!(r.incomplete_reasons.is_empty());
+    assert!(r.crossed_start && r.head_after_end);
+    assert_eq!(
+        (r.pages, r.indexed_signatures, r.in_window_transactions),
+        (2, 6, 2)
+    );
+    assert_eq!((r.unresolved_transactions, r.unknown_transactions), (0, 0));
+    let receiverships = fixture_events()
+        .iter()
+        .filter(|e| e.liquidation_type == LiquidationType::Receivership)
+        .count() as u64;
+    assert!(receiverships > 0);
+    assert_eq!(r.qualified, [0, receiverships, 0, 0]);
+    assert_eq!(r.observed, r.qualified);
+    assert!(r.markers.iter().sum::<u64>() > 0, "the window's markers");
+    assert_eq!(r.comparisons.len(), 1, "the liquidation transaction only");
+    let c = &r.comparisons[0];
+    assert_eq!(
+        (c.transaction_status.as_str(), c.classification.as_str()),
+        ("MATCH", "CLASSIFIED")
+    );
+    assert!(c.events.iter().all(|e| e.detection == "MATCH"
+        && e.shadow_status == "SHADOW_NO_EVIDENCE"
+        && e.matched.iter().any(|m| m.source == BotSource::Live)));
+    assert_eq!(r.comparison_counts.get("MISSING_LIVE"), Some(&1), "B");
+    assert_eq!(
+        r.comparison_counts.get("MATCH"),
+        Some(&(1 + receiverships)),
+        "F and its events"
+    );
+    assert_eq!(r.bot_only, vec![("bot-only".to_string(), 7)]);
+    assert_eq!(r.comparison_counts.get("BOT_ONLY_INDEX_MISSING"), Some(&1));
+    assert!(!r.zero_liquidations_proven);
+    assert!(!r.canonical_verified && !r.c0_e1_master_pass);
+    // Two pages, the end second, F and B — never A, C or D (outside the window).
+    assert_eq!((r.signature_calls, r.transaction_calls, r.calls), (2, 3, 5));
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests[1]["params"][1]["before"], json!(h.b));
+    assert_eq!(requests[0]["params"][1]["limit"], json!(1000));
+    assert_eq!(requests[0]["params"][1]["commitment"], json!("finalized"));
+    let fetched: Vec<&str> = requests[2..]
+        .iter()
+        .map(|q| q["params"][0].as_str().unwrap())
+        .collect();
+    assert_eq!(fetched, [h.e.as_str(), h.f.as_str(), h.b.as_str()]);
+    assert!(r.terminal().contains("CANONICAL_VERIFIED=false"));
+    // Resume: every page and transaction is answered from the typed cache, without the network.
+    let again = run(&j, 10, None, &bot).unwrap();
+    assert_eq!(
+        (again.status.as_str(), again.calls, again.signature_calls),
+        ("INDEX_VERIFIED", 0, 0)
+    );
+    assert_eq!(
+        (again.qualified, again.comparisons.clone()),
+        (r.qualified, r.comparisons.clone())
+    );
+    assert_eq!(methods(&seen).len(), 5, "the resume read nothing");
+    let results = std::fs::read_dir(j.output.join("results")).unwrap().count();
+    assert_eq!(results, 2, "every attempt's result is kept");
+    std::fs::remove_dir_all(&j.output).unwrap();
+}
+
+/// DEC-08: the page budget ends an attempt INDEX_PAGE_BUDGET (resumable, the held pages still
+/// worked); the next attempt replays the cached page without counting it and verifies.
+#[test]
+fn dec08_index_page_budget_is_resumable() {
+    let h = Arc::new(History::new());
+    let server = h.clone();
+    let (url, seen) = loopback(move |m, p| server.answer(m, p));
+    let j = job("budget");
+    let bot = live_capture(&h);
+    let first = run(&j, 1, Some(url.clone()), &bot).unwrap();
+    assert_eq!(
+        (first.status.as_str(), first.reason.as_deref()),
+        ("HISTORICAL_INCOMPLETE", Some("INDEX_PAGE_BUDGET"))
+    );
+    assert_eq!(
+        first.incomplete_reasons,
+        ["INDEX_PAGE_BUDGET", "INDEX_START_NOT_CROSSED"]
+    );
+    assert_eq!((first.signature_calls, first.transaction_calls), (1, 3));
+    let second = run(&j, 1, Some(url), &bot).unwrap();
+    assert_eq!(second.status, "INDEX_VERIFIED", "{second:?}");
+    assert_eq!(
+        (second.signature_calls, second.transaction_calls),
+        (1, 0),
+        "page 2 only"
+    );
+    assert_eq!(methods(&seen).len(), 5);
+    std::fs::remove_dir_all(&j.output).unwrap();
+}
+
+/// DEC-08 (pruning): a transaction the provider answers `null` or as pruned (-32009) stays
+/// unresolved — HISTORICAL_INCOMPLETE with HISTORICAL_PAYLOAD_UNKNOWN, never zero — and is read
+/// again by the next attempt (unresolved answers are not cached).
+#[test]
+fn dec08_index_pruned_transactions_stay_unresolved_until_resolved() {
+    let h = Arc::new(History::new());
+    let pruned = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (server, gate) = (h.clone(), pruned.clone());
+    let (url, _) = loopback(move |m, p| {
+        let sig = p[0].as_str().unwrap_or("");
+        if m == "getTransaction" && gate.load(std::sync::atomic::Ordering::SeqCst) {
+            if sig == server.f {
+                return Reply::Result(Value::Null);
+            }
+            if sig == server.b {
+                return Reply::Error(-32009);
+            }
+        }
+        server.answer(m, p)
+    });
+    let j = job("pruned");
+    let bot = live_capture(&h);
+    let first = run(&j, 10, Some(url.clone()), &bot).unwrap();
+    assert_eq!(first.status, "HISTORICAL_INCOMPLETE");
+    assert_eq!(first.reason, None);
+    assert_eq!(first.unresolved_transactions, 2);
+    assert_eq!(first.incomplete_reasons, ["HISTORICAL_PAYLOAD_UNKNOWN"]);
+    assert_eq!(
+        first.qualified, [0; 4],
+        "nothing is qualified from a missing payload"
+    );
+    pruned.store(false, std::sync::atomic::Ordering::SeqCst);
+    let second = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(second.status, "INDEX_VERIFIED", "{second:?}");
+    assert_eq!(
+        (second.signature_calls, second.transaction_calls),
+        (0, 2),
+        "F and B again, E from the cache"
+    );
+    std::fs::remove_dir_all(&j.output).unwrap();
+}
+
+/// DEC-08: a history exhausted before the start is incomplete (resumable); an inconsistent one
+/// (a rising slot) and a transaction that is not the indexed one end the attempt with their
+/// reason — every attempt still writes its typed result.
+#[test]
+fn dec08_index_incomplete_histories_fail_closed_with_their_reason() {
+    let h = Arc::new(History::new());
+    let bot = live_capture(&h);
+    let server = h.clone();
+    let (url, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
+        ("getSignaturesForAddress", Some(_)) => Reply::Result(json!([])),
+        _ => server.answer(m, p),
+    });
+    let j = job("exhausted");
+    let r = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(
+        (r.status.as_str(), r.reason.as_deref()),
+        (
+            "HISTORICAL_INCOMPLETE",
+            Some("INDEX_HISTORY_EXHAUSTED_BEFORE_START")
+        )
+    );
+    assert_eq!(r.transaction_calls, 3, "the held page is still worked");
+    std::fs::remove_dir_all(&j.output).unwrap();
+
+    let server = h.clone();
+    let (url, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
+        ("getSignaturesForAddress", Some(_)) => {
+            Reply::Result(json!([row(&server.c, SLOT + 1, BT - 200, Value::Null)]))
+        }
+        _ => server.answer(m, p),
+    });
+    let j = job("order");
+    let r = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(r.reason.as_deref(), Some("INDEX_SLOT_ORDER"));
+    assert_eq!(
+        r.transaction_calls, 0,
+        "an inconsistent history is not worked"
+    );
+    assert_eq!(
+        std::fs::read_dir(j.output.join("results")).unwrap().count(),
+        1
+    );
+    std::fs::remove_dir_all(&j.output).unwrap();
+
+    let server = h.clone();
+    let (url, _) = loopback(move |m, p| match m {
+        "getTransaction" if p[0].as_str() == Some(server.f.as_str()) => {
+            Reply::Result(variant(&server.f, SLOT + 1, BT, Value::Null))
+        }
+        _ => server.answer(m, p),
+    });
+    let j = job("identity");
+    let r = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(r.reason.as_deref(), Some("TRANSACTION_IDENTITY_MISMATCH"));
+    assert_eq!(r.status, "HISTORICAL_INCOMPLETE");
+    std::fs::remove_dir_all(&j.output).unwrap();
+
+    // An invalid job is refused before any read.
+    let mut bad = job("config");
+    bad.end_ns = bad.start_ns;
+    assert_eq!(
+        run(&bad, 10, None, &bot).unwrap_err(),
+        "VERIFICATION_CONFIG_INVALID"
+    );
+    assert_eq!(
+        run(&job("pages"), 0, None, &bot).unwrap_err(),
+        "VERIFICATION_CONFIG_INVALID"
+    );
+}
+
+fn truth_event(kind: LiquidationType, index: u32, target: &str, actor: &str) -> TruthEvent {
+    TruthEvent {
+        signature: "sig".into(),
+        slot: 9,
+        transaction_index: 0,
+        event_index: index,
+        liquidation_type: kind,
+        target: target.into(),
+        liquidator: actor.into(),
+        liquidator_marginfi_account: None,
+        asset_bank: None,
+        liability_bank: None,
+        asset_mint: None,
+        liability_mint: None,
+        seized_asset_native_exact: None,
+        native_evidence: None,
+        seized_value_usd: Some(105.),
+        repaid_value_usd: Some(100.),
+        gross_edge_usd: Some(5.),
+        protocol_fee_lamports: Some(5000),
+        transaction_fee_lamports: None,
+        fee_payer: None,
+        visible_payments: None,
+        incremental_rent_lamports: None,
+        priority_fee_lamports: None,
+        winner_net_edge_usd: None,
+        winner_net_edge_complete: false,
+        economic_provenance: "FIXTURE".into(),
+        block_time: Some(BT),
+        live_t_rx_ns: None,
+        discovery_source: "INDEX".into(),
+        permissionless_profit_opportunity: false,
+    }
+}
+fn bot_event(source: BotSource, index: u32, kind: LiquidationType, target: &str) -> BotEvent {
+    BotEvent {
+        source,
+        index,
+        kind,
+        target: target.into(),
+        actor: "actor".into(),
+        seized: Some(105.),
+        repaid: Some(100.),
+        protocol_fee: Some(5000),
+        native: None,
+    }
+}
+fn indexed(events: Vec<TruthEvent>) -> IndexedTx {
+    IndexedTx {
+        signature: "sig".into(),
+        slot: 9,
+        block_time: Some(BT),
+        membership: Membership::InWindow,
+        boundary_second: false,
+        classification: "CLASSIFIED",
+        unknown_reason: None,
+        events,
+        program_events: [0; 4],
+        markers: [0; 6],
+    }
+}
+
+/// DEC-08 (`compare`, the pinned verifier's rules): canonical and payload rows match by the
+/// all-kind event index, the observer's receivership rows by the receivership-only index; kind,
+/// target/actor and amounts decide the status in that order; a live receivership without its
+/// row is a missing record, another kind with only its payload is unproven; Shadow evidence is
+/// exact only with the joined event's identity.
+#[test]
+fn dec08_compare_follows_the_pinned_matching_rules() {
+    use LiquidationType::*;
+    let tx = indexed(vec![
+        truth_event(Classic, 0, "t0", "actor"),
+        truth_event(Receivership, 1, "t1", "actor"),
+        truth_event(ForcedDeleverage, 2, "t2", "actor"),
+    ]);
+    let mut bot = BotEvidence::default();
+    bot.live.insert(("sig".into(), 9));
+    bot.live_signatures.insert("sig".into());
+    let mut payload_wrong_target = bot_event(BotSource::LivePayload, 1, Receivership, "x");
+    payload_wrong_target.seized = None;
+    let mut backfill_amount = bot_event(BotSource::Backfill, 0, Receivership, "t1");
+    backfill_amount.repaid = Some(99.);
+    for e in [
+        bot_event(BotSource::Canonical, 0, Classic, "t0"),
+        // The observer's first receivership row is the transaction's second event.
+        bot_event(BotSource::Live, 0, Receivership, "t1"),
+        payload_wrong_target,
+        backfill_amount,
+        bot_event(BotSource::Canonical, 2, Classic, "t2"),
+        bot_event(BotSource::LivePayload, 2, ForcedDeleverage, "t2"),
+    ] {
+        bot.event("sig", 9, e);
+    }
+    // A repeated row of the same source, index and kind replaces the earlier one.
+    bot.event("sig", 9, bot_event(BotSource::Canonical, 0, Classic, "t0"));
+    bot.shadow
+        .insert(("sig".into(), 9, "t1".into()), Some((1, Receivership)));
+    bot.shadow.insert(("sig".into(), 9, "t2".into()), None);
+    let c = compare(&tx, &bot);
+    assert_eq!(c.transaction_status, "MATCH");
+    let status = |e: &EventComparison, s: BotSource| {
+        e.matched
+            .iter()
+            .find(|m| m.source == s)
+            .map(|m| m.status.clone())
+    };
+    let [classic, receivership, deleverage] = &c.events[..] else {
+        panic!("{c:?}")
+    };
+    assert_eq!(
+        classic.matched.len(),
+        1,
+        "one canonical row (replaced, not doubled)"
+    );
+    assert_eq!(
+        status(classic, BotSource::Canonical).as_deref(),
+        Some("MATCH")
+    );
+    assert_eq!(
+        classic.detection, "DETECTION_UNPROVEN",
+        "a live classic without a payload"
+    );
+    assert_eq!(classic.shadow_status, "SHADOW_NO_EVIDENCE");
+    assert_eq!(
+        status(receivership, BotSource::Live).as_deref(),
+        Some("MATCH")
+    );
+    assert_eq!(
+        status(receivership, BotSource::LivePayload).as_deref(),
+        Some("TARGET_OR_ACTOR_MISMATCH")
+    );
+    let payload = receivership
+        .matched
+        .iter()
+        .find(|m| m.source == BotSource::LivePayload)
+        .unwrap();
+    assert_eq!(payload.unknown_amounts, ["seized_value_usd"]);
+    let backfill = receivership
+        .matched
+        .iter()
+        .find(|m| m.source == BotSource::Backfill)
+        .unwrap();
+    assert_eq!(
+        (backfill.status.as_str(), backfill.different_amounts.clone()),
+        ("AMOUNT_MISMATCH", vec!["repaid_value_usd".to_string()])
+    );
+    assert_eq!(receivership.detection, "MATCH", "the live row decides");
+    assert_eq!(receivership.shadow_status, "SHADOW_MATCH");
+    assert_eq!(
+        status(deleverage, BotSource::Canonical).as_deref(),
+        Some("TYPE_MISMATCH")
+    );
+    assert_eq!(
+        deleverage.detection,
+        "LIVE_PAYLOAD_PRESENT_DETECTION_UNPROVEN"
+    );
+    assert_eq!(deleverage.shadow_status, "SHADOW_IDENTITY_UNKNOWN");
+
+    // A live transaction without the receivership row; a payload carries no native amounts.
+    let mut bot = BotEvidence::default();
+    bot.live.insert(("sig".into(), 9));
+    let mut classic = truth_event(Classic, 0, "t0", "actor");
+    classic.native_evidence = Some(NativeEvidence::Flows {
+        scope: "s".into(),
+        flows: vec![],
+        units: "u".into(),
+    });
+    bot.event(
+        "sig",
+        9,
+        bot_event(BotSource::LivePayload, 0, Classic, "t0"),
+    );
+    let c = compare(
+        &indexed(vec![classic, truth_event(Receivership, 1, "t1", "actor")]),
+        &bot,
+    );
+    assert_eq!(c.events[0].matched[0].status, "MATCH");
+    assert!(c.events[0].matched[0]
+        .unknown_amounts
+        .contains(&"native_amount_semantics".to_string()));
+    assert_eq!(
+        c.events[1].detection,
+        "MISSING_LIQUIDATION_RECORD_WITH_LIVE_TX"
+    );
+
+    // The same signature at another slot.
+    let mut bot = BotEvidence::default();
+    bot.live_signatures.insert("sig".into());
+    assert_eq!(
+        compare(&indexed(vec![]), &bot).transaction_status,
+        "SLOT_MISMATCH"
+    );
+}
+
+/// DEC-08 (`coverage_at`): an event the capture missed is a miss within the observed slot
+/// interval, during a proven outage (a counted gap, acknowledged by a reconnect, closed by the
+/// next slot boundary; or still open), at an unknown boundary (the second, the window edge, a
+/// gap edge) or outside the proven live coverage.
+#[test]
+fn dec08_missed_events_are_attributed_by_the_live_coverage() {
+    let s = |sec: i64| i128::from(sec) * NS;
+    let mut cov = Coverage::default();
+    cov.slot_boundary(s(BT - 50), 1);
+    cov.gap(s(BT + 10));
+    cov.slot_boundary(s(BT + 15), 2);
+    cov.reconnected(s(BT + 20));
+    cov.gap(s(BT + 21)); // a later gap before the boundary clears the acknowledgement
+    cov.slot_boundary(s(BT + 22), 3);
+    cov.reconnected(s(BT + 25));
+    cov.slot_boundary(s(BT + 30), 4);
+    cov.slot_boundary(s(BT + 50), 5);
+    assert_eq!(
+        (cov.first_live_ns, cov.last_live_ns, cov.last_live_slot),
+        (Some(s(BT - 50)), Some(s(BT + 50)), Some(5))
+    );
+    assert_eq!(cov.gap_open, None);
+    assert_eq!(cov.at(Some(BT), false), "WITHIN_OBSERVED_SLOT_INTERVAL");
+    assert_eq!(
+        cov.at(Some(BT + 20), false),
+        "PROVEN_WEBSOCKET_OUTAGE_INTERVAL"
+    );
+    assert_eq!(
+        cov.at(Some(BT + 10), false),
+        "TIME_BOUNDARY_UNKNOWN",
+        "the gap edge"
+    );
+    assert_eq!(cov.at(Some(BT), true), "TIME_BOUNDARY_UNKNOWN");
+    assert_eq!(cov.at(None, false), "TIME_BOUNDARY_UNKNOWN");
+    assert_eq!(cov.at(Some(BT + 49), false), "LIVE_COVERAGE_UNPROVEN");
+    assert_eq!(cov.at(Some(BT - 60), false), "LIVE_COVERAGE_UNPROVEN");
+    cov.gap(s(BT + 60));
+    assert_eq!(
+        cov.at(Some(BT + 62), false),
+        "PROVEN_WEBSOCKET_OUTAGE_INTERVAL"
+    );
+
+    // The detection of a liquidation the capture did not receive follows its coverage.
+    let tx = indexed(vec![truth_event(
+        LiquidationType::Receivership,
+        0,
+        "t",
+        "a",
+    )]);
+    let mut bot = BotEvidence {
+        coverage: cov.clone(),
+        ..Default::default()
+    };
+    bot.coverage.gap_open = None;
+    assert_eq!(
+        compare(&tx, &bot).events[0].detection,
+        "MISSING_LIQUIDATION_WITHIN_OBSERVED_INTERVAL"
+    );
+    let mut outage = indexed(vec![truth_event(
+        LiquidationType::Receivership,
+        0,
+        "t",
+        "a",
+    )]);
+    outage.block_time = Some(BT + 20);
+    assert_eq!(
+        compare(&outage, &bot).events[0].detection,
+        "MISSING_DURING_OUTAGE"
+    );
+    bot.coverage = Coverage::default();
+    let c = compare(&tx, &bot);
+    assert_eq!(
+        (
+            c.transaction_status.as_str(),
+            c.events[0].detection.as_str()
+        ),
+        ("MISSING_LIVE", "MISSING_LIVE_LIQUIDATION_COVERAGE_UNPROVEN")
+    );
+}
+
+fn write_frames<P: Payload>(w: &mut journal::Writer, source: u32, rows: &[P]) {
+    for r in rows {
+        w.append_typed(
+            Provenance {
+                source,
+                ..Default::default()
+            },
+            r,
+        )
+        .unwrap();
+    }
+}
+
+/// DEC-08: the capture side of a native run is read from its typed records — live rows (with
+/// their payload events; a failed payload is live without events, a recovered block is not
+/// live), the observer's receivership rows (live or recovered; canonical truth rows are not a
+/// row identity), the coverage (a counted gap, a reconnect, slot boundaries; an uncounted gap is
+/// ignored), the ECON_CANONICAL joins (canonical events, exact Shadow only with an evaluation)
+/// and the ECON_OPPORTUNITY rows (Shadow without identity, replacing a join of the same key).
+#[test]
+fn dec08_the_capture_side_is_imported_from_the_typed_run() {
+    use super::super::rows::{
+        MarketCoverage, MarketLiquidation, MarketTransaction, ReceiverRow, TxOrigin, WindowEvent,
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let run_dir = std::env::temp_dir().join(format!("p0-index-run-{stamp}"));
+    assert_eq!(
+        BotEvidence::from_run(&run_dir, &program()).unwrap_err(),
+        "RUN_ARTIFACT_MISSING"
+    );
+    let paths = crate::run_layout::RunPaths::new(&run_dir, crate::run_layout::RunLayout::V2);
+    std::fs::create_dir_all(paths.market_dir()).unwrap();
+    std::fs::create_dir_all(paths.snapshot("")).unwrap();
+    let f = fixture_signature();
+    let tx = darkbot_solana::chain::decode_transaction(&fixture()).unwrap();
+    let events = fixture_events();
+    let logs = tx.meta.as_ref().unwrap().log_messages.clone().unwrap();
+    let receiver = decode_receiver_events(&logs, &program()).events[0].clone();
+    let mut w =
+        journal::Writer::create(&paths.market_dir().join(super::super::MARKET_JOURNAL)).unwrap();
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[
+            MarketTransaction {
+                signature: f.clone(),
+                slot: SLOT,
+                origin: TxOrigin::TransactionSubscribe {
+                    observed_unix_s: BT as u64,
+                    t_rx_ns: 1,
+                    tx: Ok(tx.clone()),
+                },
+            },
+            MarketTransaction {
+                signature: "failed-live".into(),
+                slot: 3,
+                origin: TxOrigin::LogsSubscribe {
+                    observed_unix_s: BT as u64,
+                    t_rx_ns: 2,
+                    logs: darkbot_solana::chain::ChainLogs {
+                        slot: 3,
+                        signature: "failed-live".into(),
+                        status: TxStatus::Failed(
+                            solana_sdk::transaction::TransactionError::AccountInUse,
+                        ),
+                        logs: Some(logs.clone()),
+                    },
+                },
+            },
+            MarketTransaction {
+                signature: "recovered".into(),
+                slot: 4,
+                origin: TxOrigin::GapBackfill {
+                    transaction_index: 0,
+                    tx: tx.clone(),
+                },
+            },
+        ],
+    );
+    let liquidation = |t_rx_ns| {
+        MarketLiquidation::Receiver(Box::new(ReceiverRow {
+            signature: f.clone(),
+            slot: SLOT,
+            t_rx_ns,
+            observed_unix_s: BT as u64,
+            event: receiver.clone(),
+            enrichment: Default::default(),
+            enrichment_status: "COMPLETE".into(),
+        }))
+    };
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[
+            liquidation(Some(5)),
+            liquidation(None),
+            MarketLiquidation::Canonical(Box::new(events[0].clone())),
+        ],
+    );
+    let window = |s: i64, counted, event| MarketCoverage::Window {
+        observed_unix_s: s as u64,
+        t_rx_ns: None,
+        observing: true,
+        counted,
+        event,
+    };
+    let boundary = |s: i64, slot| MarketCoverage::SlotBoundary {
+        slot,
+        t_rx_ns: 0,
+        observed_unix_s: s as u64,
+        start: None,
+        end: None,
+    };
+    let gap = || WindowEvent::Gap {
+        from_slot: None,
+        to_slot: None,
+    };
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[
+            boundary(BT - 50, 10),
+            window(BT - 40, false, gap()),
+            window(BT - 30, true, gap()),
+            window(BT - 29, true, WindowEvent::Reconnect { attempt: 1 }),
+            boundary(BT - 20, 11),
+            boundary(BT + 50, 12),
+        ],
+    );
+    w.seal(true).unwrap();
+
+    // The run's derived rows: a join with its evaluation, one without, and an opportunity of
+    // the first join's target with a unique winner (it replaces the exact Shadow evidence).
+    let mut reports =
+        journal::Writer::create(&paths.snapshot(crate::analytics::econ::REPORT_JOURNAL)).unwrap();
+    let rec = crate::analytics::econ::tests::rec();
+    let joined = |market: TruthEvent, our| crate::analytics::econ::CanonicalJoin {
+        market,
+        target_seen: false,
+        target_seen_without_slot: false,
+        health_liquidatable: None,
+        candidates_created: None,
+        plan_validated: None,
+        built: None,
+        identity_status: "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT",
+        our,
+        diagnostic: None,
+        market_commitment: "finalized".into(),
+        winner_slot_first_seen_ns: None,
+        capital: vec![],
+    };
+    let mut other = events[0].clone();
+    other.signature = "other".into();
+    other.target = "other-target".into();
+    write_frames(
+        &mut reports,
+        source::ECON,
+        &[
+            joined(events[0].clone(), Some(rec.clone())),
+            joined(other.clone(), None),
+        ],
+    );
+    let mut opportunity = rec.clone();
+    opportunity.account = events[0].target.clone();
+    write_frames(
+        &mut reports,
+        source::ECON,
+        &[crate::analytics::econ::OpportunityRow {
+            rec: opportunity,
+            winner: Some(crate::market::winner::Winner {
+                slot: SLOT,
+                identity: WinnerIdentity::Unique {
+                    signature: f.clone(),
+                    receiver: "r".into(),
+                    tx_version: "1".into(),
+                },
+            }),
+            market: None,
+            slot_seen: None,
+            capital: vec![],
+            market_commitment: "finalized".into(),
+        }],
+    );
+    reports.seal(true).unwrap();
+
+    let bot = BotEvidence::from_run(&run_dir, &program()).unwrap();
+    assert!(bot.complete);
+    assert!(bot.live.contains(&(f.clone(), SLOT)));
+    assert!(bot.live.contains(&("failed-live".to_string(), 3)));
+    assert!(!bot.live.contains(&("recovered".to_string(), 4)));
+    assert!(!bot.events.contains_key(&("failed-live".to_string(), 3)));
+    let mine = &bot.events[&(f.clone(), SLOT)];
+    let count = |s: BotSource| mine.iter().filter(|e| e.source == s).count();
+    let payload = decode_receiver_events(&logs, &program()).sequence.len();
+    assert!(payload > 0);
+    assert_eq!(count(BotSource::LivePayload), payload);
+    assert_eq!((count(BotSource::Live), count(BotSource::Backfill)), (1, 1));
+    assert_eq!(
+        count(BotSource::Canonical),
+        1,
+        "the join's event, not the truth row"
+    );
+    assert_eq!(bot.events[&("other".to_string(), SLOT)].len(), 1);
+    assert_eq!(
+        bot.shadow.get(&(f.clone(), SLOT, events[0].target.clone())),
+        Some(&None),
+        "the opportunity row replaced the exact join"
+    );
+    assert!(!bot
+        .shadow
+        .contains_key(&("other".to_string(), SLOT, other.target.clone())));
+    let s = |sec: i64| i128::from(sec) * NS;
+    assert_eq!(bot.coverage.gaps, vec![(s(BT - 30), s(BT - 20))]);
+    assert_eq!(
+        (bot.coverage.first_live_ns, bot.coverage.last_live_slot),
+        (Some(s(BT - 50)), Some(12))
+    );
+    std::fs::remove_dir_all(&run_dir).unwrap();
+}
+
+/// U-8 (PERSIST-04): the binary layout of `INDEX_RESULT` (319) is pinned. A failing pin is a
+/// layout change: bump `SCHEMA` and renew the pin — never silently.
+#[test]
+fn index_result_layout_is_pinned() {
+    let mut counts = BTreeMap::new();
+    counts.insert("MATCH".to_string(), 2);
+    let r = IndexResult {
+        schema: SCHEMA.into(),
+        verification_spec_id: "spec".into(),
+        status: "HISTORICAL_INCOMPLETE".into(),
+        reason: Some("INDEX_PAGE_BUDGET".into()),
+        incomplete_reasons: vec!["INDEX_PAGE_BUDGET".into()],
+        window_start_ns: 1,
+        window_end_ns: 2,
+        crossed_start: false,
+        head_after_end: true,
+        pages: 3,
+        indexed_signatures: 4,
+        in_window_transactions: 5,
+        unresolved_transactions: 6,
+        unknown_transactions: 7,
+        qualified: [1, 2, 3, 4],
+        observed: [5, 6, 7, 8],
+        markers: [1, 2, 3, 4, 5, 6],
+        comparison_counts: counts,
+        comparisons: vec![TxComparison {
+            signature: "s".into(),
+            slot: 9,
+            transaction_status: "MATCH".into(),
+            live_coverage: "WITHIN_OBSERVED_SLOT_INTERVAL".into(),
+            classification: "CLASSIFIED".into(),
+            events: vec![EventComparison {
+                event_index: 0,
+                kind: LiquidationType::Receivership,
+                target: "t".into(),
+                actor: "a".into(),
+                detection: "MATCH".into(),
+                matched: vec![SourceMatch {
+                    source: BotSource::Live,
+                    status: "MATCH".into(),
+                    unknown_amounts: vec![],
+                    different_amounts: vec![],
+                }],
+                shadow_status: "SHADOW_NO_EVIDENCE".into(),
+            }],
+        }],
+        bot_only: vec![("b".into(), 1)],
+        bot_import_complete: true,
+        zero_liquidations_proven: false,
+        first_live_ns: Some(1),
+        last_live_ns: Some(2),
+        last_live_slot: Some(3),
+        open_gap_start_ns: None,
+        calls: 10,
+        bytes: 11,
+        signature_calls: 4,
+        transaction_calls: 6,
+        max_pages: 50,
+        canonical_verified: false,
+        c0_e1_master_pass: false,
+    };
+    let bytes = payload::encode(&r).unwrap();
+    let back: IndexResult =
+        payload::decode(IndexResult::KIND, IndexResult::SCHEMA, &bytes).unwrap();
+    assert_eq!(back, r);
+    let hash = solana_sdk::hash::hash(&bytes).to_string();
+    assert_eq!(
+        (IndexResult::KIND, IndexResult::SCHEMA, hash.as_str()),
+        (319, 2, "9nuochqhzfDT8ah9fzg2cjCYJYFaFfkoHi9NZtuneFDq")
+    );
+}
+
+/// DEC-08 end to end through the one driver (offline, no network): a V2 run with its manifest,
+/// CAPTURE window and market journal; the first INDEX attempt has no checkpoint
+/// (`OFFLINE_CACHE_MISS`, HISTORICAL_INCOMPLETE, its result bound to the attempt); the typed
+/// cache is the checkpoint — the resumed attempt (the CLI, `--mode index`) answers every read
+/// from it and verifies the window; the spec is the `index` mode's, nothing is canonical.
+#[test]
+fn dec08_the_driver_runs_and_resumes_the_index() {
+    use super::super::strict_driver::{self, DriverRequest, StrictBudget, VerifyMode};
+    use crate::analytics::measurement::{
+        journal as phase, persist_manifest, MeasurementPlan, Phase,
+    };
+    use crate::run_layout::{RunLayout, RunPaths};
+    let d = std::env::temp_dir().join(format!("p0_index_drv_{}_{}", std::process::id(), line!()));
+    let _ = std::fs::remove_dir_all(&d);
+    let root = d.join("run_i");
+    let paths = RunPaths::new(&root, RunLayout::V2);
+    paths.create().unwrap();
+    let plan = MeasurementPlan::new(60).unwrap();
+    let clock = darkbot_common::timing::Clock::new();
+    persist_manifest(&paths, "run_i", "test", &plan, clock).unwrap();
+    let window = plan.capture_window(clock, 1_000 * NS_U).unwrap();
+    let start_s = (window.capture_start_unix_ns / u128::from(NS_U)) as i64;
+    let end_s = (window.capture_cutoff_unix_ns / u128::from(NS_U)) as i64;
+    phase(&paths, clock, Phase::Capture(window)).unwrap();
+    // The capture received the liquidation live (the fixture inside this window).
+    let f = fixture_signature();
+    let live = variant(&f, 1_000, start_s + 10, Value::Null);
+    let tx = darkbot_solana::chain::decode_transaction(&live).unwrap();
+    let logs = tx.meta.as_ref().unwrap().log_messages.clone().unwrap();
+    let receiver = decode_receiver_events(&logs, &program()).events[0].clone();
+    std::fs::create_dir_all(paths.market_dir()).unwrap();
+    let mut w =
+        journal::Writer::create(&paths.market_dir().join(super::super::MARKET_JOURNAL)).unwrap();
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[super::super::rows::MarketTransaction {
+            signature: f.clone(),
+            slot: 1_000,
+            origin: super::super::rows::TxOrigin::TransactionSubscribe {
+                observed_unix_s: (start_s + 10) as u64,
+                t_rx_ns: 1,
+                tx: Ok(tx),
+            },
+        }],
+    );
+    write_frames(
+        &mut w,
+        source::MARKET,
+        &[super::super::rows::MarketLiquidation::Receiver(Box::new(
+            super::super::rows::ReceiverRow {
+                signature: f.clone(),
+                slot: 1_000,
+                t_rx_ns: Some(1),
+                observed_unix_s: (start_s + 10) as u64,
+                event: receiver,
+                enrichment: Default::default(),
+                enrichment_status: "COMPLETE".into(),
+            },
+        ))],
+    );
+    w.seal(true).unwrap();
+    let budget = StrictBudget {
+        rps: 100,
+        max_calls: 10,
+        max_seconds: 30,
+        max_bytes: 1 << 26,
+        max_disk_bytes: 1 << 26,
+        max_ram_bytes: 1 << 36,
+        min_free_bytes: 1,
+    };
+    let first = strict_driver::drive(&DriverRequest {
+        run: root.clone(),
+        budget: budget.clone(),
+        offline: true,
+        resume: false,
+        mode: VerifyMode::Index { max_pages: 5 },
+        provider_evidence: None,
+    })
+    .unwrap();
+    assert_eq!(
+        (first.status.as_str(), first.reason.as_deref()),
+        ("HISTORICAL_INCOMPLETE", Some("OFFLINE_CACHE_MISS"))
+    );
+    assert!(first.verification_result_id.is_some());
+    let out = root
+        .canonicalize()
+        .unwrap()
+        .join("verification")
+        .join(format!(
+            "{}{}",
+            strict_driver::NATIVE_PREFIX,
+            first.verification_spec_id
+        ));
+    let spec: strict_driver::VerificationSpec =
+        journal::read_typed_value(&out.join("spec.p0j")).unwrap();
+    assert_eq!(spec.mode, "index");
+    // The checkpoint: the head page (after the end, the liquidation), the page at its cursor
+    // (before the start) and the transaction.
+    let index = out.join("index");
+    let (a, c) = (Signature::new_unique(), Signature::new_unique());
+    crate::market::observer::verification::cache_fixture(
+        &index,
+        ChainRead::Signatures {
+            address: program(),
+            before: None,
+        },
+        &json!([
+            row(&a.to_string(), 2_000, end_s + 50, Value::Null),
+            row(&f, 1_000, start_s + 10, Value::Null)
+        ]),
+    );
+    crate::market::observer::verification::cache_fixture(
+        &index,
+        ChainRead::Signatures {
+            address: program(),
+            before: Some(Signature::from_str(&f).unwrap()),
+        },
+        &json!([row(&c.to_string(), 900, start_s - 50, Value::Null)]),
+    );
+    crate::market::observer::verification::cache_fixture(
+        &index,
+        ChainRead::Transaction {
+            signature: Signature::from_str(&f).unwrap(),
+        },
+        &live,
+    );
+    let args: Vec<String> = [
+        "--run",
+        root.to_str().unwrap(),
+        "--mode",
+        "index",
+        "--offline",
+        "--resume-verification",
+        "--verify-pages",
+        "5",
+        "--verify-rps",
+        "100",
+        "--verify-calls",
+        "10",
+        "--verify-seconds",
+        "30",
+        "--verify-bytes",
+        &(1u64 << 26).to_string(),
+        "--verify-disk-bytes",
+        &(1u64 << 26).to_string(),
+        "--verify-ram-bytes",
+        &(1u64 << 36).to_string(),
+        "--verify-min-free-bytes",
+        "1",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let (text, verified) = strict_driver::cli(&args).unwrap();
+    assert!(verified, "{text}");
+    assert!(text.contains("status=INDEX_VERIFIED reason=none"), "{text}");
+    assert!(text.contains("CANONICAL_VERIFIED=false"), "{text}");
+    assert!(text.contains(&format!(
+        "verification_spec_id={}",
+        first.verification_spec_id
+    )));
+    let results: Vec<IndexResult> = std::fs::read_dir(index.join("results"))
+        .unwrap()
+        .map(|e| journal::read_typed_value(&e.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(results.len(), 2);
+    let verified = results
+        .iter()
+        .find(|r| r.status == "INDEX_VERIFIED")
+        .unwrap();
+    assert_eq!(
+        (
+            verified.calls,
+            verified.max_pages,
+            verified.in_window_transactions
+        ),
+        (0, 5, 1)
+    );
+    assert_eq!(
+        verified.comparison_counts.get("MATCH").copied(),
+        Some(2),
+        "tx + event"
+    );
+    assert_eq!(std::fs::read_dir(out.join("attempts")).unwrap().count(), 2);
+    let _ = std::fs::remove_dir_all(&d);
+}

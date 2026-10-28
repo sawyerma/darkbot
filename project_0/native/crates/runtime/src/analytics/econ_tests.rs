@@ -39,7 +39,7 @@ pub(super) fn costs(capital: u64) -> CandidateCostRecord {
         None,
     )
 }
-pub(super) fn rec() -> OpportunityRecord {
+pub(crate) fn rec() -> OpportunityRecord {
     let c = costs(100_000_000);
     OpportunityRecord {
         progress: Default::default(),

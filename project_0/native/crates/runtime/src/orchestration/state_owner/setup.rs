@@ -1611,7 +1611,7 @@ mod blockhash_tests {
     use super::*;
     use std::sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
-        mpsc, Arc,
+        mpsc, Arc, Mutex,
     };
     use std::time::Instant;
     /// Runs the loop on its own thread; `done` fires when it returns.
@@ -1649,6 +1649,27 @@ mod blockhash_tests {
         requests: &BlockhashCache,
         outcomes: &[Result<(), &'static str>],
     ) -> (Arc<AtomicU64>, Arc<AtomicU64>, mpsc::Receiver<()>) {
+        let (calls, stored, _, rx) =
+            start_timed(shutdown, closed_from_check, refresh_ms, requests, outcomes);
+        (calls, stored, rx)
+    }
+    /// `start_stored` that also keeps the start instant of every refresh call (a spacing is
+    /// measured between the worker's own calls, not from the test thread's polling).
+    #[allow(clippy::type_complexity)]
+    fn start_timed(
+        shutdown: &Shutdown,
+        closed_from_check: Option<u64>,
+        refresh_ms: u64,
+        requests: &BlockhashCache,
+        outcomes: &[Result<(), &'static str>],
+    ) -> (
+        Arc<AtomicU64>,
+        Arc<AtomicU64>,
+        Arc<Mutex<Vec<Instant>>>,
+        mpsc::Receiver<()>,
+    ) {
+        let times = Arc::new(Mutex::new(Vec::new()));
+        let at = times.clone();
         let calls = Arc::new(AtomicU64::new(0));
         let stored = Arc::new(AtomicU64::new(0));
         let (done, rx) = mpsc::channel();
@@ -1663,6 +1684,7 @@ mod blockhash_tests {
                 &s,
                 &closed,
                 || {
+                    at.lock().unwrap().push(Instant::now());
                     let n = c.fetch_add(1, SeqCst) as usize;
                     std::thread::sleep(Duration::from_millis(refresh_ms));
                     outcomes
@@ -1680,7 +1702,7 @@ mod blockhash_tests {
             );
             let _ = done.send(());
         });
-        (calls, stored, rx)
+        (calls, stored, times, rx)
     }
     fn calls_reach(calls: &AtomicU64, n: u64, within: Duration) -> bool {
         let t0 = Instant::now();
@@ -1718,7 +1740,7 @@ mod blockhash_tests {
     fn dec01_after_a_refusal_a_request_waits_for_the_retry_spacing() {
         let shutdown = Shutdown::new();
         let cache = BlockhashCache::new();
-        let (calls, done) = start_with(
+        let (calls, _, times, done) = start_timed(
             &shutdown,
             None,
             0,
@@ -1726,14 +1748,15 @@ mod blockhash_tests {
             &[Err("HTTP 429 Too Many Requests")],
         );
         first_refresh(&calls);
-        let failed_at = Instant::now();
         cache.request_refresh();
         assert!(calls_reach(&calls, 2, Duration::from_secs(2)));
-        assert!(
-            failed_at.elapsed() >= Duration::from_millis(350),
-            "{:?}",
-            failed_at.elapsed()
-        );
+        // Measured between the failed call and the next one (the test thread observes the first
+        // call late under load, which made a bound from its own clock flaky).
+        let spacing = {
+            let t = times.lock().unwrap();
+            t[1] - t[0]
+        };
+        assert!(spacing >= Duration::from_millis(350), "{spacing:?}");
         shutdown.request();
         done.recv_timeout(Duration::from_secs(1)).unwrap();
     }

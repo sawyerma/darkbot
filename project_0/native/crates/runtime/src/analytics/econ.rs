@@ -818,6 +818,26 @@ pub struct OpportunityRow {
     /// A2: commitment of the market capture (decides whether the winner rx margin is valid).
     pub market_commitment: String,
 }
+impl OpportunityRow {
+    /// The row's race and whether its market event is a strong join (a live-timestamp qualified
+    /// race, or a market event agreeing with a unique winner): the opportunity view's `market`
+    /// and `strong_join`, and the INDEX verifier's shadow identity (DEC-08).
+    pub fn race_join(&self) -> (Race, bool) {
+        let (w, m) = (self.winner.as_ref(), self.market.as_ref());
+        let r = race(
+            &self.rec,
+            w,
+            m,
+            self.slot_seen,
+            rx_margin_valid(&self.market_commitment),
+        );
+        let strong = r.live_timestamp_qualified
+            || (m.is_some()
+                && !r.identity_mismatch
+                && matches!(w.map(|w| &w.identity), Some(WinnerIdentity::Unique { .. })));
+        (r, strong)
+    }
+}
 /// Layout of schema 2 (before A2): no market commitment; the record before DEC-12.
 #[derive(Deserialize)]
 struct OpportunityRowV2 {
@@ -875,17 +895,7 @@ impl crate::analytics::payload::Payload for OpportunityRow {
 pub fn opportunity_view(row: &OpportunityRow) -> Value {
     let rec = &row.rec;
     let (w, m) = (row.winner.as_ref(), row.market.as_ref());
-    let r = race(
-        rec,
-        w,
-        m,
-        row.slot_seen,
-        rx_margin_valid(&row.market_commitment),
-    );
-    let strong = r.live_timestamp_qualified
-        || (m.is_some()
-            && !r.identity_mismatch
-            && matches!(w.map(|w| &w.identity), Some(WinnerIdentity::Unique { .. })));
+    let (r, strong) = row.race_join();
     let cost = rec.selected_costs.as_ref();
     let member: Vec<u64> = row
         .capital

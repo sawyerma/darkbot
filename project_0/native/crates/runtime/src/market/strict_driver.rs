@@ -8,6 +8,7 @@
 //! result (`verification_result_id`). Resume reuses the same spec and its checkpoints; a changed
 //! capture, manifest, window or decoder is a different spec. Nothing here is JSON: every record is
 //! a typed single-value journal. Layout V2 runs only; historical runs keep the Python driver.
+//! DEC-08: the INDEX mode runs through the same binding, spec, attempt and lock (`drive_index`).
 use super::verification::{read_report, run as run_strict, Job, StrictResult};
 use crate::analytics::journal::{self, hex, kind, source};
 use crate::analytics::measurement::{Phase, PhaseRecord, RunManifest, NS, RUN_MANIFEST_JOURNAL};
@@ -220,19 +221,33 @@ pub fn strict_provider_gate(
     Ok(())
 }
 
-/// Post-capture verification mode of the native driver (PHASENPLAN L.2). `index`/`crosscheck`
-/// stay with the pinned Python verifier.
+/// Post-capture verification mode of the native driver (PHASENPLAN L.2, DEC-08).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerifyMode {
     /// No historical chain RPC: spec and attempt identities, status `NOT_RUN`, no result.
     Off,
     Strict,
+    /// DEC-08: the finalized signature index of the window (`index::run`), at most `max_pages`
+    /// new pages per attempt (a per-attempt bound recorded in its result, not in the spec:
+    /// a resume continues the same index).
+    Index {
+        max_pages: u64,
+    },
 }
 impl VerifyMode {
     pub fn as_str(self) -> &'static str {
         match self {
             VerifyMode::Off => "off",
             VerifyMode::Strict => "strict",
+            VerifyMode::Index { .. } => "index",
+        }
+    }
+    /// The status a successful attempt of this mode reaches (none for `off`).
+    pub fn verified_status(self) -> Option<&'static str> {
+        match self {
+            VerifyMode::Off => None,
+            VerifyMode::Strict => Some("CANONICAL_VERIFIED"),
+            VerifyMode::Index { .. } => Some("INDEX_VERIFIED"),
         }
     }
 }
@@ -521,6 +536,31 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             terminal: "verification off: no historical chain RPC, no chain proof\n".into(),
         });
     }
+    if let VerifyMode::Index { max_pages } = req.mode {
+        return drive_index(
+            req,
+            &run,
+            &evidence,
+            Job {
+                verification_spec_id: spec_id.clone(),
+                output: out.join("index"),
+                start_ns: start,
+                end_ns: end,
+                program: spec.program.clone(),
+                max_calls: req.budget.max_calls,
+                max_seconds: req.budget.max_seconds,
+                max_bytes: req.budget.max_bytes,
+                max_disk_bytes: req.budget.max_disk_bytes,
+                max_ram_bytes: req.budget.max_ram_bytes,
+                min_free_bytes: req.budget.min_free_bytes,
+                rps: req.budget.rps,
+                offline: req.offline,
+            },
+            max_pages,
+            record,
+            &attempt_dir,
+        );
+    }
     let job = Job {
         verification_spec_id: spec_id.clone(),
         output: out.join("strict"),
@@ -577,6 +617,65 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     })
 }
 
+/// DEC-08: one INDEX attempt of a bound capture — the capture side from the run's typed records,
+/// the index through the verifier's budgeted chain client (cache = checkpoint), the result
+/// content-addressed under `index/results/`; the attempt end binds it like a strict result.
+#[allow(clippy::too_many_arguments)]
+fn drive_index(
+    req: &DriverRequest,
+    run: &Path,
+    evidence: &CaptureEvidence,
+    job: Job,
+    max_pages: u64,
+    mut record: AttemptRecord,
+    attempt_dir: &Path,
+) -> Result<DriverOutcome, String> {
+    use super::index;
+    use std::str::FromStr;
+    let url = if req.offline {
+        None
+    } else {
+        Some(
+            darkbot_solana::runtime_config::active()
+                .rpc_url(&|k| std::env::var(k).ok())
+                .ok_or("RPC_URL_MISSING")?,
+        )
+    };
+    let program =
+        solana_sdk::pubkey::Pubkey::from_str(&job.program).map_err(|_| "PROGRAM_INVALID")?;
+    let outcome = index::BotEvidence::from_run(run, &program)
+        .and_then(|bot| index::run(&job, max_pages, url, &bot));
+    record.at_unix_ns = now_unix_ns()?;
+    match &outcome {
+        Ok(result) => {
+            let bytes = payload::encode(result).map_err(|e| e.to_string())?;
+            record.verification_result_id = Some(hex(&solana_sdk::hash::hash(&bytes).to_bytes()));
+            record.status = Some(result.status.clone());
+            record.reason = result.reason.clone();
+        }
+        Err(e) => {
+            record.status = Some("HISTORICAL_INCOMPLETE".into());
+            record.reason = Some(e.clone());
+        }
+    }
+    journal::write_typed_value(&attempt_dir.join("end.p0j"), source::STRICT, &record)
+        .map_err(|e| format!("ATTEMPT_END: {e}"))?;
+    if capture_files(run)? != evidence.files {
+        return Err("CAPTURE_EVIDENCE_CHANGED_DURING_VERIFICATION".into());
+    }
+    Ok(DriverOutcome {
+        verification_spec_id: record.verification_spec_id,
+        verification_attempt_id: record.verification_attempt_id,
+        verification_result_id: record.verification_result_id,
+        status: record.status.unwrap_or_default(),
+        reason: record.reason,
+        terminal: match &outcome {
+            Ok(result) => result.terminal(),
+            Err(e) => format!("PROJECT 0 INDEX VERIFICATION: {e}\n"),
+        },
+    })
+}
+
 /// A3/C0E1-P5-CLI: the one typed request of a native verification (`p0-strict-verify --run`,
 /// `p0ctl verify`): budgets default to the operational config; online strict needs
 /// `--provider-evidence`.
@@ -603,6 +702,7 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         min_free_bytes: l.verify_free_mib * mib,
     };
     let (mut run, mut offline, mut resume, mut mode) = (None, false, false, VerifyMode::Strict);
+    let mut pages = l.verify_pages;
     let mut provider_evidence = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -624,8 +724,14 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
                 mode = match it.next().map(String::as_str) {
                     Some("strict") => VerifyMode::Strict,
                     Some("off") => VerifyMode::Off,
-                    // index/crosscheck: the pinned Python verifier (verify.sh).
-                    _ => return Err("--mode strict|off (index/crosscheck: verify.sh)".into()),
+                    Some("index") => VerifyMode::Index { max_pages: pages },
+                    _ => return Err("--mode strict|index|off".into()),
+                }
+            }
+            "--verify-pages" => {
+                pages = number()?;
+                if let VerifyMode::Index { max_pages } = &mut mode {
+                    *max_pages = pages;
                 }
             }
             "--resume-verification" => resume = true,
@@ -656,7 +762,10 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         outcome.status,
         outcome.reason.as_deref().unwrap_or("none")
     );
-    Ok((text, outcome.status == "CANONICAL_VERIFIED"))
+    Ok((
+        text,
+        mode.verified_status() == Some(outcome.status.as_str()),
+    ))
 }
 
 #[cfg(test)]

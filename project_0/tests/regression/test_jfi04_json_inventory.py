@@ -46,7 +46,7 @@ PINNED = {
     'runtime/src/market/summary.rs': (4, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/market/winner.rs': (3, 'W'),
     'runtime/src/market_gap.rs': (3, 'W'),
-    'runtime/src/market_reconcile.rs': (5, 'W'),  # wire_params/wire_answer: the one JSON-RPC edge of verifier and reconcile; engine and strict cache typed, verifier file JSON-free (F10, 25.10.)
+    'runtime/src/market_reconcile.rs': (9, 'W'),  # wire_params/wire_answer: the one JSON-RPC edge of verifier and reconcile (DEC-08: + getSignaturesForAddress/getTransaction); engine and strict cache typed, verifier file JSON-free (F10, 25.10.)
     'runtime/src/market_truth.rs': (2, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
@@ -177,7 +177,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 307)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 311)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

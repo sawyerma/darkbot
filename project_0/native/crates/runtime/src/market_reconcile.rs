@@ -178,6 +178,16 @@ pub enum ChainRead {
     FullBlock {
         slot: u64,
     },
+    /// DEC-08: one `getSignaturesForAddress` page of `address` (finalized, newest first, the
+    /// provider maximum per page) before `before` (`None`: the newest page).
+    Signatures {
+        address: Pubkey,
+        before: Option<solana_sdk::signature::Signature>,
+    },
+    /// DEC-08: `getTransaction` of `signature` (finalized, `encoding = json`, v0/v1).
+    Transaction {
+        signature: solana_sdk::signature::Signature,
+    },
 }
 
 /// The typed answer of a `ChainRead`. Decode failures stay part of the answer (never a transport
@@ -193,6 +203,12 @@ pub enum ChainAnswer {
         header: Result<darkbot_solana::chain::BlockHeader, darkbot_solana::chain::ChainError>,
         block: Result<darkbot_solana::chain::ChainBlock, darkbot_solana::chain::ChainError>,
     },
+    /// DEC-08: a signature page, decoded by the one wire decoder (`decode_signature_page`).
+    Signatures(
+        Result<Vec<darkbot_solana::chain::SignatureEntry>, darkbot_solana::chain::ChainError>,
+    ),
+    /// DEC-08: a finalized transaction (`decode_transaction`).
+    Transaction(Box<Result<ChainTx, darkbot_solana::chain::ChainError>>),
 }
 
 /// The JSON-RPC wire request of a read (JFI-02 wire edge; the exact params of the provider API).
@@ -211,6 +227,22 @@ pub fn wire_params(read: &ChainRead) -> (&'static str, Value) {
             "getBlock",
             json!([slot, {"encoding":"json","transactionDetails":"full",
                 "rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
+        ),
+        ChainRead::Signatures { address, before } => {
+            let mut options = json!({"commitment": "finalized",
+                "limit": crate::market::history::PAGE_LIMIT});
+            if let Some(before) = before {
+                options["before"] = json!(before.to_string());
+            }
+            (
+                "getSignaturesForAddress",
+                json!([address.to_string(), options]),
+            )
+        }
+        ChainRead::Transaction { signature } => (
+            "getTransaction",
+            json!([signature.to_string(), {"encoding":"json","commitment":"finalized",
+                "maxSupportedTransactionVersion":1}]),
         ),
     }
 }
@@ -232,6 +264,12 @@ pub fn wire_answer(read: &ChainRead, value: &Value) -> ChainAnswer {
             header: decode_block_header(value, slot),
             block: decode_block(value, slot),
         },
+        ChainRead::Signatures { .. } => {
+            ChainAnswer::Signatures(darkbot_solana::chain::decode_signature_page(value))
+        }
+        ChainRead::Transaction { .. } => {
+            ChainAnswer::Transaction(Box::new(darkbot_solana::chain::decode_transaction(value)))
+        }
     }
 }
 

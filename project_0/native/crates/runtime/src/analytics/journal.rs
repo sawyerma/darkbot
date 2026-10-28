@@ -77,6 +77,9 @@ pub mod kind {
     /// Strict verifier typed chain-read cache (F10): read, decoder version, decoded answer.
     /// Replaces `STRICT_RPC_CACHE` (311), which stays readable for earlier runs only.
     pub const STRICT_CHAIN_CACHE: u16 = 318;
+    /// DEC-08: the INDEX verifier's result (finalized signature index of the capture window,
+    /// compared with the capture), content-addressed under `verification/native-<spec>/index/`.
+    pub const INDEX_RESULT: u16 = 319;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
@@ -212,6 +215,7 @@ pub mod kind {
         STRICT_ATTEMPT,
         DEPLOYMENT_PROOF,
         STRICT_CHAIN_CACHE,
+        INDEX_RESULT,
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,

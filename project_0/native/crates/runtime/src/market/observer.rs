@@ -93,6 +93,8 @@ pub use decoding::{decode_receiver_events, LogDecode, LogEventRef, ReceiverEvent
 #[path = "enrichment.rs"]
 mod enrichment;
 pub use enrichment::{enrich, TokenDelta, TxEnrichment};
+#[path = "index.rs"]
+pub mod index;
 #[path = "markers.rs"]
 pub mod markers;
 #[path = "parity.rs"]

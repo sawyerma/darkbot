@@ -29,6 +29,38 @@ fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
     v.map_or("-".into(), |v| v.to_string())
 }
 
+/// The six markers of `tx` in execution order: (index into `MARKERS`, top-level instruction,
+/// inner instruction) of every `program` instruction that carries one (DEC-08: the INDEX counts
+/// them per window). Without account keys or meta there is nothing to attribute: empty.
+pub fn markers(tx: &ChainTx, program: &Pubkey) -> Vec<(usize, usize, Option<usize>)> {
+    let mut marks = Vec::new();
+    let keys = tx.account_keys().ok();
+    if let (Some(keys), Some(meta)) = (&keys, &tx.meta) {
+        let inner = meta.inner_instructions.as_deref().unwrap_or(&[]);
+        for (i, ix) in tx.message.instructions.iter().enumerate() {
+            let group = inner.iter().find(|g| usize::from(g.index) == i);
+            let all = std::iter::once((None, ix)).chain(group.into_iter().flat_map(|g| {
+                g.instructions
+                    .iter()
+                    .enumerate()
+                    .map(|(j, ix)| (Some(j), ix))
+            }));
+            for (j, ix) in all {
+                if keys.get(usize::from(ix.program_id_index)) != Some(program) {
+                    continue;
+                }
+                if let Some(m) = MARKERS
+                    .iter()
+                    .position(|(d, _)| ix.data.get(..8) == Some(d))
+                {
+                    marks.push((m, i, j));
+                }
+            }
+        }
+    }
+    marks
+}
+
 /// Line of a transaction the Rust boundary cannot decode (kept aligned, never dropped).
 pub fn decode_error_line(signature: &str, slot: u64, code: &str) -> String {
     format!("TX {signature} {slot} status=UNKNOWN fee=- priority=- version=- payer=- sigs=- markers= events= class=UNKNOWN reasons={code}")
@@ -56,27 +88,10 @@ pub fn transaction_line(tx: &ChainTx, program: &Pubkey) -> String {
         Some(TxWireVersion::Legacy) | None => "legacy".to_string(),
         Some(TxWireVersion::Number(n)) => n.to_string(),
     };
-    let mut marks = Vec::new();
-    if let (Some(keys), Some(meta)) = (&keys, &tx.meta) {
-        let inner = meta.inner_instructions.as_deref().unwrap_or(&[]);
-        for (i, ix) in tx.message.instructions.iter().enumerate() {
-            let group = inner.iter().find(|g| usize::from(g.index) == i);
-            let all = std::iter::once((None, ix)).chain(group.into_iter().flat_map(|g| {
-                g.instructions
-                    .iter()
-                    .enumerate()
-                    .map(|(j, ix)| (Some(j), ix))
-            }));
-            for (j, ix) in all {
-                if keys.get(usize::from(ix.program_id_index)) != Some(program) {
-                    continue;
-                }
-                if let Some((_, name)) = MARKERS.iter().find(|(d, _)| ix.data.get(..8) == Some(d)) {
-                    marks.push(format!("{name}@{i}.{}", opt(j)));
-                }
-            }
-        }
-    }
+    let marks: Vec<String> = markers(tx, program)
+        .into_iter()
+        .map(|(m, i, j)| format!("{}@{i}.{}", MARKERS[m].1, opt(j)))
+        .collect();
     // RELATED_NON_LIQUIDATION instructions with position and pinned roles (UNKNOWN when the
     // decode fails closed).
     let related = match super::related::decode(tx, program, tx.slot, None) {

@@ -37,6 +37,20 @@ pub struct Job {
     pub offline: bool,
 }
 
+impl Job {
+    /// An empty window or a zero/out-of-range budget (every verifier refuses it before a read).
+    pub(super) fn invalid(&self) -> bool {
+        self.start_ns >= self.end_ns
+            || self.max_calls == 0
+            || self.max_seconds == 0
+            || self.max_seconds > u64::from(u32::MAX)
+            || self.rps == 0
+            || self.rps > u64::from(u32::MAX)
+            || self.max_ram_bytes == 0
+            || self.max_bytes == 0
+    }
+}
+
 /// Slots per batch (one checkpoint each).
 /// Slots per strict batch (also sizes the verifier budget in the capacity preflight).
 pub const BATCH_SLOTS: u64 = 32;
@@ -147,6 +161,12 @@ fn cache_path(output: &Path, read: &ChainRead) -> PathBuf {
         ChainRead::Blocks { start, end } => format!("blocks_{start}_{end}"),
         ChainRead::BlockHeader { slot } => format!("header_{slot}"),
         ChainRead::FullBlock { slot } => format!("block_{slot}"),
+        // DEC-08: the INDEX/CROSSCHECK reads (a page by its cursor, a transaction by its id).
+        ChainRead::Signatures { address, before } => format!(
+            "signatures_{address}_{}",
+            before.map_or("head".to_string(), |b| b.to_string())
+        ),
+        ChainRead::Transaction { signature } => format!("transaction_{signature}"),
     };
     output.join("cache").join(format!("{name}.p0j"))
 }
@@ -207,22 +227,56 @@ fn read_ahead_group(
     }
 }
 
-struct Client<'a> {
+/// The budgeted chain client of the post-capture verifiers (STRICT, and DEC-08 INDEX and
+/// CROSSCHECK): one wire edge, the typed cache of every read, the call/byte/time/disk/RAM budgets.
+pub(super) struct Client<'a> {
     job: &'a Job,
     rpc: Option<RpcFetcher>,
     deadline: Instant,
     pacer: RequestPacer,
-    calls: u64,
-    bytes: u64,
+    pub(super) calls: u64,
+    pub(super) bytes: u64,
     disk: u64,
     produced: Vec<u64>,
     held: BTreeMap<u64, Result<ChainAnswer, &'static str>>,
     previous_block: Option<u64>,
     completed_batches: Vec<BatchRef>,
 }
-impl Client<'_> {
+impl<'a> Client<'a> {
+    /// The client of `job` against `url` (`None` offline: cache only).
+    pub(super) fn new(job: &'a Job, url: Option<String>) -> Result<Self, &'static str> {
+        Ok(Client {
+            rpc: match url {
+                None => None,
+                Some(url) => Some(
+                    RpcFetcher::new(
+                        url,
+                        darkbot_solana::runtime_config::active()
+                            .limits
+                            .rpc_timeout_ms,
+                        "finalized",
+                    )
+                    .map_err(|_| "RPC_INIT")?,
+                ),
+            },
+            deadline: Instant::now() + Duration::from_secs(job.max_seconds),
+            pacer: RequestPacer::new(job.rps),
+            calls: 0,
+            bytes: 0,
+            disk: disk_bytes(&job.output).map_err(|_| "RESOURCE_IO")?,
+            produced: Vec::new(),
+            held: BTreeMap::new(),
+            previous_block: None,
+            completed_batches: Vec::new(),
+            job,
+        })
+    }
+    /// The read is answered from the cache, without the network.
+    pub(super) fn is_cached(&self, read: &ChainRead) -> bool {
+        cache_path(&self.job.output, read).exists()
+    }
     /// Time, disk, RAM and free-space budgets (no subprocess; disk usage tracked incrementally).
-    fn guard(&self) -> Result<(), &'static str> {
+    pub(super) fn guard(&self) -> Result<(), &'static str> {
         if Instant::now() >= self.deadline {
             return Err("VERIFICATION_TIME_BUDGET");
         }
@@ -288,7 +342,7 @@ impl Client<'_> {
     }
     /// One typed chain read (F10): JSON exists only inside `fetch`; the cache, the read-ahead and
     /// every caller see the typed answer.
-    fn read(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
+    pub(super) fn read(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
         self.guard()?;
         if let ChainRead::FullBlock { slot } = *read {
             return self.block(slot);
@@ -577,48 +631,21 @@ fn verified_checkpoint(
 /// Single job, no wallet or send methods. Each committed batch is immutable.
 /// A killed batch is replayed from verified cached RPC responses on resume.
 pub fn run(job: Job) -> Result<StrictResult, String> {
-    if job.start_ns >= job.end_ns
-        || job.max_calls == 0
-        || job.max_seconds == 0
-        || job.max_seconds > u64::from(u32::MAX)
-        || job.rps == 0
-        || job.rps > u64::from(u32::MAX)
-        || job.max_ram_bytes == 0
-        || job.max_bytes == 0
-    {
+    if job.invalid() {
         return Err("VERIFICATION_CONFIG_INVALID".into());
     }
     let program = Pubkey::from_str(&job.program).map_err(|_| "PROGRAM_INVALID")?;
     fs::create_dir_all(job.output.join("cache")).map_err(|_| "VERIFICATION_IO")?;
-    let mut c = Client {
-        rpc: if job.offline {
-            None
-        } else {
-            let url = darkbot_solana::runtime_config::active()
+    let url = if job.offline {
+        None
+    } else {
+        Some(
+            darkbot_solana::runtime_config::active()
                 .rpc_url(&|k| std::env::var(k).ok())
-                .ok_or("RPC_URL_MISSING")?;
-            Some(
-                RpcFetcher::new(
-                    url,
-                    darkbot_solana::runtime_config::active()
-                        .limits
-                        .rpc_timeout_ms,
-                    "finalized",
-                )
-                .map_err(|_| "RPC_INIT")?,
-            )
-        },
-        deadline: Instant::now() + Duration::from_secs(job.max_seconds),
-        pacer: RequestPacer::new(job.rps),
-        calls: 0,
-        bytes: 0,
-        disk: disk_bytes(&job.output).map_err(|_| "RESOURCE_IO")?,
-        produced: Vec::new(),
-        held: BTreeMap::new(),
-        previous_block: None,
-        completed_batches: Vec::new(),
-        job: &job,
+                .ok_or("RPC_URL_MISSING")?,
+        )
     };
+    let mut c = Client::new(&job, url)?;
     let mut scope_seen = None;
     let work = (|| -> Result<(), &'static str> {
         c.guard()?;
