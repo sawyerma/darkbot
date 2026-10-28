@@ -379,10 +379,18 @@ export P0_ZERO_PREFUND_SHADOW_PROBE=true
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$PROJECT_DIR/data/.p0-runtime.lock}"
 # The run's code identity (head, source hashes) is read from this checkout, not the build path.
 export P0_PROJECT_DIR="$PROJECT_DIR"
-# One directory per Shadow run, created exactly once: journals are never appended across runs.
+# One directory per Shadow run, created exactly once: journals are never appended across runs —
+# except by the continuation of exactly this crashed unbounded run (DEC-16, decided by p0ctl and
+# admitted again natively by the runtime before anything is read).
 RUN_DIR="$PROJECT_DIR/data/shadow/$P0_SHADOW_RUN_ID"
 mkdir -p "$PROJECT_DIR/data/shadow"
-mkdir "$RUN_DIR" 2>/dev/null || { echo "RUN_EXISTS: $RUN_DIR" >&2; exit 2; }
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" ]]; then
+  [[ "$P0_UNTIL_STOPPED_RESUME" == "$P0_SHADOW_RUN_ID" && -d "$RUN_DIR" ]] || {
+    echo "UNTIL_STOPPED_RESUME_DRIFT: $P0_UNTIL_STOPPED_RESUME is not the run $RUN_DIR" >&2; exit 2;
+  }
+else
+  mkdir "$RUN_DIR" 2>/dev/null || { echo "RUN_EXISTS: $RUN_DIR" >&2; exit 2; }
+fi
 export P0_RECORD_PATH="$RUN_DIR/opportunities.p0j"
 
 cd "$REPO_ROOT"
@@ -393,7 +401,12 @@ cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" 
 BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
 BIN_DIR="$(dirname "$BIN")"
 # JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
-SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$RUN_DIR/measurement_plan.p0j")" || exit 2
+# A continued run keeps its own plan (the persisted plan is authoritative).
+if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" && -f "$RUN_DIR/measurement_plan.p0j" ]]; then
+  SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --runway)" || exit 2
+else
+  SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$RUN_DIR/measurement_plan.p0j")" || exit 2
+fi
 export P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.p0j"
 
 echo "Project_0 Mainnet Shadow (run $P0_SHADOW_RUN_ID, ${SHADOW_SECS}s from Ready)"

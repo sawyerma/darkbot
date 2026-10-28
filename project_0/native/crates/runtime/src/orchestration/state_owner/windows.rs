@@ -28,6 +28,74 @@ struct Pending {
     requested: std::time::Instant,
 }
 
+/// DEC-16: the run directory of a Shadow run whose record journal is `record_path`
+/// (`P0_RECORD_PATH`); a continuation names exactly this run.
+pub(crate) fn resume_dir(
+    record_path: &std::path::Path,
+    resume: &str,
+) -> Result<std::path::PathBuf, String> {
+    let dir = record_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
+    if dir.file_name().and_then(|n| n.to_str()) != Some(resume) {
+        return Err(format!(
+            "UNTIL_STOPPED_RESUME_DRIFT: the start continues {resume}, its record is {}",
+            record_path.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// DEC-16 (D-3 for Shadow): the windows of the crashed unbounded Shadow run `rolling` continues
+/// in `run_dir`: only the same admitted run that never halted; the window the crash interrupted
+/// — from its last recorded end to `now_s` — is checked like any window before anything is read
+/// (`CRASH_RECOVERED`, or its HALT, which ends the run here and stays final).
+pub(crate) fn resume_windows(
+    rolling: &Rolling,
+    run_dir: &std::path::Path,
+    now_s: u64,
+    environment: fn(&std::path::Path) -> preflight::Environment,
+    budget: &darkbot_solana::provider::Budget,
+) -> Result<(RollingWindows, us::WindowCheck), String> {
+    let (windows, check) = RollingWindows::resume(
+        run_dir,
+        rolling.binding.clone(),
+        &rolling.qualification_id,
+        &rolling.config,
+        super::super::boot_audit::SHADOW_CAPTURE_SOURCE,
+        us::Measured {
+            now: now_s,
+            bytes: us::run_bytes(run_dir),
+            run_volume: run_dir,
+            environment: environment(run_dir),
+            // What this process used so far (nothing read yet); the crashed one's use ended
+            // with it.
+            provider: budget.roll_window(),
+            evidence: us::newest_evidence(
+                &rolling.project,
+                &rolling.config,
+                &rolling.binding,
+                now_s.saturating_add(rolling.binding.checkpoint_seconds),
+            ),
+            sealed: None,
+        },
+    )
+    .map_err(|e| format!("UNTIL_STOPPED_RESUME: {e}"))?;
+    crate::console::line(format!(
+        "[UNTIL_STOPPED] window={} verdict={} {}",
+        check.window, check.verdict, check.detail
+    ));
+    if let Some(verdict) = windows.halted().map(str::to_string) {
+        rolling.suspend_autostart(&verdict, now_s);
+        if let Err(e) = windows.finish(false) {
+            crate::console::line(format!("UNTIL_STOPPED_WINDOWS_INCOMPLETE {e}"));
+        }
+        return Err(format!("{}: {verdict}", us::HALT_STOP));
+    }
+    Ok((windows, check))
+}
+
 /// Whose windows these are.
 // One value per run, held in place by its owner (never moved on a hot path).
 #[allow(clippy::large_enum_variant)]
@@ -82,6 +150,27 @@ impl OwnerWindows {
             mt0_window,
             stall,
         )
+    }
+
+    /// The windows of a crashed Shadow-only run continued by [`resume_windows`]: the next
+    /// window is open from `now_s` (the MT0 journal follows it).
+    pub(crate) fn resumed(
+        rolling: Rolling,
+        run_dir: std::path::PathBuf,
+        mt0_window: std::sync::Arc<AtomicU64>,
+        windows: RollingWindows,
+        now_ns: u64,
+        now_s: u64,
+    ) -> Self {
+        let mut this = Self::new(rolling, run_dir, mt0_window);
+        this.open = windows.window();
+        this.mt0_window.store(this.open, Ordering::Release);
+        if let Driver::Own { windows: w, .. } = &mut this.driver {
+            *w = Some(windows);
+        }
+        this.started_unix_s = now_s;
+        this.last_ns = Some(now_ns);
+        this
     }
 
     /// The owner's side of an econ4h run's windows (the econ grid; `stall` as its writers').
@@ -833,6 +922,180 @@ mod tests {
         );
         assert!(!complete);
         let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    /// The windows journal's verdicts, and whether it is sealed and complete.
+    fn verdicts(run_dir: &Path) -> (Vec<(u64, String)>, bool, bool) {
+        let mut r = crate::storage::segments::ChainReader::open(&run_dir.join(us::WINDOWS_JOURNAL))
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(f) = r.next_frame().unwrap() {
+            if f.kind == kind::UNTIL_STOPPED_WINDOW {
+                let c: us::WindowCheck = f.typed().unwrap();
+                out.push((c.window, c.verdict));
+            }
+        }
+        (out, r.sealed, r.complete)
+    }
+
+    /// A run whose window 1 closed (`environment`), then a crash: the windows journal and the
+    /// evidence stay unsealed (nothing ends in order).
+    fn crashed(tag: &str, environment: fn(&Path) -> preflight::Environment) -> Run {
+        let mut r = run(tag, environment, true);
+        r.tick(true, 1_000).unwrap();
+        r.tick(true, 1_060).unwrap();
+        let _ = r.settle(1_060);
+        r
+    }
+
+    /// DEC-16 (D-3 for Shadow): a crashed unbounded Shadow run continues as itself — the window
+    /// the crash interrupted is checked before anything is read (CRASH_RECOVERED) and the
+    /// windows go on from the restart; another run directory, binding or qualification never
+    /// continues it, and the continued chain is never complete.
+    #[test]
+    fn dec16_a_crashed_shadow_run_continues_the_same_run() {
+        let r = crashed("resume", plenty);
+        let Run {
+            dir,
+            run_dir,
+            evidence,
+            windows,
+            budget,
+            ..
+        } = r;
+        let rolling = match &windows.driver {
+            Driver::Own { rolling, .. } => (**rolling).clone(),
+            Driver::Econ => unreachable!(),
+        };
+        drop(windows);
+        drop(evidence);
+        let record = run_dir.join(crate::orchestration::until_stopped_view::SHADOW_RECORD);
+        assert_eq!(resume_dir(&record, "r1").unwrap(), run_dir);
+        assert!(resume_dir(&record, "r2")
+            .unwrap_err()
+            .starts_with("UNTIL_STOPPED_RESUME_DRIFT"));
+        let mut other = rolling.clone();
+        other.binding.checkpoint_seconds = 120;
+        assert!(resume_windows(&other, &run_dir, 1_100, plenty, &budget)
+            .err()
+            .unwrap()
+            .contains("UNTIL_STOPPED_RESUME_DRIFT"));
+        let mut foreign = rolling.clone();
+        foreign.qualification_id = "fedcba9876543210".into();
+        assert!(resume_windows(&foreign, &run_dir, 1_100, plenty, &budget)
+            .err()
+            .unwrap()
+            .contains("UNTIL_STOPPED_RESUME_DRIFT"));
+        let (resumed, check) = resume_windows(&rolling, &run_dir, 1_100, plenty, &budget).unwrap();
+        assert_eq!(
+            (
+                check.window,
+                check.verdict.as_str(),
+                check.started_unix_s,
+                check.ended_unix_s
+            ),
+            (2, us::CRASH_RECOVERED, 1_060, 1_100)
+        );
+        let mt0 = Arc::new(AtomicU64::new(0));
+        let mut w = OwnerWindows::resumed(
+            rolling,
+            run_dir.clone(),
+            mt0.clone(),
+            resumed,
+            1_100_000_000_000,
+            1_100,
+        )
+        .with_environment(plenty)
+        .with_budget(budget);
+        assert_eq!(
+            mt0.load(Ordering::Acquire),
+            3,
+            "window 3 is open from the restart"
+        );
+        let (mut evidence, _) = OwnerEvidenceWriter::start_rolling(
+            run_dir.join("continued.p0j"),
+            run_dir.join("recovery.p0j"),
+            64,
+            Duration::from_secs(60),
+            0,
+            false,
+        )
+        .unwrap();
+        let at = |now_s: u64, w: &mut OwnerWindows, e: &mut OwnerEvidenceWriter| {
+            let now_ns = now_s * 1_000_000_000;
+            let counters = w.due(now_ns, now_s, None).then(OwnerCounters::default);
+            w.tick(true, now_ns, now_s, e, counters, None)
+        };
+        assert_eq!(at(1_159, &mut w, &mut evidence), Ok(None));
+        assert!(!w.due(1_159_000_000_000, 1_159, None));
+        assert_eq!(at(1_160, &mut w, &mut evidence), Ok(None));
+        for _ in 0..1_000 {
+            at(1_160, &mut w, &mut evidence).unwrap();
+            if w.pending.is_none() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        w.request_stop(us::OPERATOR_STOP);
+        w.end(
+            "RUN_COMPLETE",
+            1_170,
+            &mut evidence,
+            OwnerCounters::default(),
+        );
+        evidence.finish(None).unwrap();
+        w.finish(true);
+        let (seen, sealed, complete) = verdicts(&run_dir);
+        assert_eq!(
+            seen,
+            [
+                (1, us::CONTINUE.to_string()),
+                (2, us::CRASH_RECOVERED.to_string()),
+                (3, us::CONTINUE.to_string())
+            ]
+        );
+        assert!(sealed && !complete, "a continued chain is never complete");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// DEC-16: a crashed run whose interrupted window fails its gates halts before anything is
+    /// read (the windows journal sealed, never complete) and is never continued again; a run
+    /// that halted before its crash is never continued either.
+    #[test]
+    fn dec16_a_crashed_shadow_run_whose_interrupted_window_fails_halts_before_any_read() {
+        let r = crashed("resume_halt", plenty);
+        let (dir, run_dir, budget) = (r.dir.clone(), r.run_dir.clone(), r.budget.clone());
+        let rolling = match &r.windows.driver {
+            Driver::Own { rolling, .. } => (**rolling).clone(),
+            Driver::Econ => unreachable!(),
+        };
+        drop(r);
+        let err = resume_windows(&rolling, &run_dir, 1_100, full, &budget)
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            format!("{}: UNTIL_STOPPED_RUNWAY_EXHAUSTED", us::HALT_STOP)
+        );
+        let (seen, sealed, complete) = verdicts(&run_dir);
+        assert_eq!(seen.last().unwrap().1, "UNTIL_STOPPED_RUNWAY_EXHAUSTED");
+        assert!(sealed && !complete);
+        assert!(resume_windows(&rolling, &run_dir, 1_200, plenty, &budget).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+        // A run that halted at a window and then crashed (its journal unsealed).
+        let r = crashed("resume_halted", full);
+        let (dir, run_dir, budget) = (r.dir.clone(), r.run_dir.clone(), r.budget.clone());
+        let rolling = match &r.windows.driver {
+            Driver::Own { rolling, .. } => (**rolling).clone(),
+            Driver::Econ => unreachable!(),
+        };
+        assert_eq!(r.windows.result(), Err(us::HALT_STOP));
+        drop(r);
+        assert!(resume_windows(&rolling, &run_dir, 1_100, plenty, &budget)
+            .err()
+            .unwrap()
+            .contains(us::HALTED));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// DEC-16: an unbounded econ4h run's owner follows the econ grid (its capture checks the

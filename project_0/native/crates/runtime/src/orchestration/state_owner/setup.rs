@@ -137,6 +137,25 @@ pub(super) fn prepare(
     refuse_unadmitted_unbounded(econ.is_some(), rolling.is_some(), &|k| {
         std::env::var(k).ok()
     })?;
+    // DEC-16: a crashed unbounded Shadow run continues only as itself — the window the crash
+    // interrupted re-checked before anything is read (its HALT ends the run here).
+    let resumed = match rolling.as_ref().and_then(|r| Some((r, r.resume.as_ref()?))) {
+        Some((r, run)) => {
+            let record = crate::analytics::journal::binary_path(std::path::Path::new(
+                &config::require("P0_RECORD_PATH")?,
+            ));
+            let dir = super::windows::resume_dir(&record, run)?;
+            let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
+            Some(super::windows::resume_windows(
+                r,
+                &dir,
+                now_s,
+                crate::storage::preflight::environment,
+                &darkbot_solana::provider::shared(),
+            )?)
+        }
+        None => None,
+    };
     let stop_poll: fn() -> bool = if econ.is_none() {
         crate::orchestration::control::stop_requested
     } else {
@@ -731,13 +750,15 @@ pub(super) fn prepare(
     let econ_rolling = econ.as_ref().is_some_and(|h| h.cfg.unbounded);
     let segmented = rolling.is_some() || econ_rolling;
     let segment_bytes = operational.econ_segment_mib * crate::storage::budget::MIB;
-    let mt0_window = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mt0_window = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+        resumed.as_ref().map_or(0, |(w, _)| w.window()),
+    ));
     let evidence_sync = Duration::from_millis(
         darkbot_solana::runtime_config::active()
             .limits
             .owner_evidence_sync_ms,
     );
-    let evidence = match segmented {
+    let mut evidence = match segmented {
         false => OwnerEvidenceWriter::start(
             journal_path,
             recovery_path,
@@ -751,11 +772,25 @@ pub(super) fn prepare(
                 crate::analytics::evidence::OWNER_EVIDENCE_CAPACITY,
                 evidence_sync,
                 segment_bytes,
-                false,
+                resumed.is_some(),
             )?
             .0
         }
     };
+    // The window the crash interrupted, in the continued evidence chain (its counters ended
+    // with the crashed process).
+    if let Some((_, check)) = &resumed {
+        evidence.emit(crate::analytics::evidence::OwnerEvidence::Window(
+            crate::analytics::evidence::OwnerWindow {
+                window: check.window,
+                started_unix_s: check.started_unix_s,
+                ended_unix_s: check.ended_unix_s,
+                ready_ns: 0,
+                end: Some(crate::orchestration::until_stopped::CRASH_RECOVERED.into()),
+                counters: Default::default(),
+            },
+        ))?;
+    }
 
     let counts = [0u64; 6];
     let last_reported_update_total = 0u64; // [FIX-81]
@@ -941,7 +976,7 @@ pub(super) fn prepare(
             &mt0_path,
             segment_bytes,
             mt0_window.clone(),
-            false,
+            resumed.is_some(),
         )?,
     };
     let mt0_reporter = darkbot_common::mt0::spawn_reporter(
@@ -949,14 +984,21 @@ pub(super) fn prepare(
         shutdown.clone(),
         mt0_journal,
     )?;
-    let windows = match rolling {
-        Some(r) => Some(super::windows::OwnerWindows::new(r, run_dir, mt0_window)),
-        None if econ_rolling => Some(super::windows::OwnerWindows::econ(
+    let windows = match (rolling, resumed) {
+        (Some(r), Some((w, _))) => {
+            let now_ns = clock.now_ns();
+            let now_s = (clock.unix_ns(now_ns) / 1_000_000_000) as u64;
+            Some(super::windows::OwnerWindows::resumed(
+                r, run_dir, mt0_window, w, now_ns, now_s,
+            ))
+        }
+        (Some(r), None) => Some(super::windows::OwnerWindows::new(r, run_dir, mt0_window)),
+        (None, _) if econ_rolling => Some(super::windows::OwnerWindows::econ(
             run_dir,
             mt0_window,
             Duration::from_millis(operational.market_writer_stall_ms),
         )),
-        None => None,
+        (None, _) => None,
     };
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.

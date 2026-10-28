@@ -354,6 +354,9 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     // admitted only by `RunHorizon::admit` with its complete qualification bound to exactly this
     // run (`--qualification ID`, p0ctl horizon qualify), and then still needs its approvals.
     let mut until_stopped_qualification = None;
+    // DEC-16: the crashed run of exactly this binding and qualification an unbounded start
+    // continues (its run id; never a halted or an ended one) — the runtime admits that again.
+    let mut resumed = None;
     let admitted;
     let args = if options.iter().any(|a| a == "--until-stopped") {
         if options.iter().any(|a| a == "--duration") {
@@ -383,6 +386,11 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             &binding,
             unix_now()?,
         )?;
+        if let Some(id) = value(options, "--qualification") {
+            resumed = darkbot_runner::orchestration::until_stopped_view::resumable(
+                project, &binding, &id,
+            );
+        }
         // The admitted run launches exactly its horizon, its qualification beside it.
         until_stopped_qualification = value(options, "--qualification");
         admitted = until_stopped_launch(args, &spec);
@@ -465,9 +473,13 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
                 .into(),
         );
     }
-    let run_id = match std::env::var(mode.run_id_env()) {
-        Ok(id) => id,
-        Err(_) => format!(
+    let run_id = match (resumed.clone(), std::env::var(mode.run_id_env())) {
+        (Some(run), _) => {
+            println!("[p0ctl] the start continues the crashed unbounded run {run}");
+            run
+        }
+        (None, Ok(id)) => id,
+        (None, Err(_)) => format!(
             "{}_{}",
             mode.prefix(),
             darkbot_runner::market_observer::utc_compact(
@@ -495,8 +507,19 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         std::fs::canonicalize(&network_path).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
     control::install_stop_handler()?;
     let mut launcher = Command::new(project.join("scripts/capture.sh"));
+    // Only what this start decides reaches the runtime, never an inherited value.
+    for key in [
+        boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION,
+        until_stopped::ENV_RESUME,
+        darkbot_runner::orchestration::autostart::ENV_AUTOSTART,
+    ] {
+        launcher.env_remove(key);
+    }
     if let Some(id) = &until_stopped_qualification {
         launcher.env(boot_audit::ENV_UNTIL_STOPPED_QUALIFICATION, id);
+    }
+    if let Some(run) = &resumed {
+        launcher.env(until_stopped::ENV_RESUME, run);
     }
     let mut child = launcher
         .arg(mode.launcher())
@@ -1540,11 +1563,8 @@ fn start_raw_capture(
             &|k| std::env::var(k).ok(),
             &boot_audit::binary_identity_for,
         )?;
-        resumed = darkbot_runner::orchestration::until_stopped_view::resumable(
-            &project.join("data/market"),
-            &binding,
-            id,
-        );
+        resumed =
+            darkbot_runner::orchestration::until_stopped_view::resumable(project, &binding, id);
         if let Some(run) = &resumed {
             println!("[p0ctl] the start continues the crashed unbounded run {run}");
             command.env(until_stopped::ENV_RESUME, run);

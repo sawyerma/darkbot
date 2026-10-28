@@ -1907,10 +1907,15 @@ pub(crate) fn rolling_admission(
     let config = config()?;
     let autostart = get(super::autostart::ENV_AUTOSTART).filter(|v| !v.is_empty());
     let resume = get(super::until_stopped::ENV_RESUME).filter(|v| !v.is_empty());
-    if mode != MARKET_MODE && (autostart.is_some() || resume.is_some()) {
-        crate::console::line(format!(
-            "{gated}: {mode} has no autostart and no continuation after a crash"
-        ));
+    // D-5: only the raw capture autostarts (a qualified unbounded run is no permission for an
+    // unattended restart of an owner that holds a signer); a crashed run of a mode with a known
+    // run layout is continued by an approved start.
+    if mode != MARKET_MODE && autostart.is_some() {
+        crate::console::line(format!("{gated}: {mode} has no autostart"));
+        return Err(gated);
+    }
+    if resume.is_some() && super::until_stopped_view::layout(mode).is_none() {
+        crate::console::line(format!("{gated}: {mode} has no continuation after a crash"));
         return Err(gated);
     }
     // An autostarted capture runs under its standing approval: exactly this run with its

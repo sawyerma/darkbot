@@ -111,21 +111,44 @@ fn newest_qualification(project: &Path, mode: &str) -> Option<QualificationView>
     None
 }
 
+/// The record journal of a Shadow run in its directory (`P0_RECORD_PATH`, `capture.sh shadow`).
+pub const SHADOW_RECORD: &str = "opportunities.p0j";
+
+/// DEC-16: where the unbounded runs of `mode` live below the project and the journal a crashed
+/// run leaves unsealed in its directory beside its windows journal; `None`: the mode's runs
+/// are never continued after a crash.
+pub fn layout(mode: &str) -> Option<(&'static str, &'static str)> {
+    match mode {
+        super::boot_audit::MARKET_MODE => {
+            Some(("data/market", crate::market_observer::MARKET_JOURNAL))
+        }
+        "shadow" => Some(("data/shadow", SHADOW_RECORD)),
+        _ => None,
+    }
+}
+
 /// DEC-16: the crashed run a new approved start of `binding` with `qualification_id` continues:
-/// the newest unbounded run under `root` when it never ended (its windows journal unsealed),
+/// the newest unbounded run of its mode when it never ended (its windows journal unsealed),
 /// never halted and was admitted as exactly this run; otherwise the start is a new run.
-pub fn resumable(root: &Path, binding: &us::Binding, qualification_id: &str) -> Option<String> {
+pub fn resumable(project: &Path, binding: &us::Binding, qualification_id: &str) -> Option<String> {
+    let (root, journal) = layout(&binding.mode)?;
+    resumable_in(&project.join(root), journal, binding, qualification_id)
+}
+
+/// [`resumable`] among the runs below `root`, whose crash leaves `journal` unsealed.
+pub fn resumable_in(
+    root: &Path,
+    journal: &str,
+    binding: &us::Binding,
+    qualification_id: &str,
+) -> Option<String> {
     newest_run(root)
         .filter(|r| {
             !r.sealed
                 && r.halted.is_none()
                 && &r.record.binding == binding
                 && r.record.qualification_id == qualification_id
-                && unsealed(
-                    &root
-                        .join(&r.run_id)
-                        .join(crate::market_observer::MARKET_JOURNAL),
-                )
+                && unsealed(&root.join(&r.run_id).join(journal))
         })
         .map(|r| r.run_id)
 }
@@ -286,19 +309,22 @@ mod tests {
         assert_eq!(r.record.qualification_id, id);
         // Never ended, never halted, admitted as exactly this run: a start continues it — not
         // without its market journal, nor once that was sealed.
-        let market = d.join("data/market");
-        assert_eq!(resumable(&market, &b, &id), None, "no market journal");
+        assert_eq!(resumable(&d, &b, &id), None, "no market journal");
         let journal = run.join(crate::market_observer::MARKET_JOURNAL);
         let mut sealed = crate::storage::segments::SegmentedWriter::create(&journal, 0).unwrap();
         sealed.seal(false).unwrap();
-        assert_eq!(resumable(&market, &b, &id), None, "a sealed market journal");
+        assert_eq!(resumable(&d, &b, &id), None, "a sealed market journal");
         std::fs::remove_file(&journal).unwrap();
         drop(crate::storage::segments::SegmentedWriter::create(&journal, 0).unwrap());
-        assert_eq!(resumable(&market, &b, &id), Some("r1".into()));
-        assert_eq!(resumable(&market, &b, "fedcba9876543210"), None);
+        assert_eq!(resumable(&d, &b, &id), Some("r1".into()));
+        assert_eq!(resumable(&d, &b, "fedcba9876543210"), None);
         let mut other = b.clone();
         other.binary_sha256 = "other".into();
-        assert_eq!(resumable(&market, &other, &id), None);
+        assert_eq!(resumable(&d, &other, &id), None);
+        // Another mode's runs live elsewhere: a Shadow binding never continues a raw capture.
+        let mut shadow = b.clone();
+        shadow.mode = "shadow".into();
+        assert_eq!(resumable(&d, &shadow, &id), None);
         // Granted: in force; a closed window that halted, then the seal.
         autostart::record(
             &d,
@@ -332,7 +358,7 @@ mod tests {
             .unwrap();
         assert_ne!(check.verdict, us::CONTINUE);
         assert_eq!(
-            resumable(&market, &b, &id),
+            resumable(&d, &b, &id),
             None,
             "a halted run is never continued"
         );
@@ -347,6 +373,40 @@ mod tests {
         let r = v.run.unwrap();
         assert_eq!((r.windows, r.sealed, r.complete), (1, true, false));
         assert_eq!(r.halted.as_deref(), Some(check.verdict.as_str()));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// DEC-16 (stage 3): a crashed unbounded Shadow run is continued by a start of exactly its
+    /// binding and qualification while its record journal is unsealed; an econ4h run is never
+    /// continued (no layout yet), nor a run of another mode.
+    #[test]
+    fn dec16_resumable_continues_only_an_unsealed_unhalted_run_of_its_mode() {
+        let d = std::env::temp_dir().join(format!("p0_us_resumable_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let mut b = binding(60, 120);
+        b.mode = "shadow".into();
+        let id = "0123456789abcdef";
+        let run = d.join("data/shadow/s1");
+        std::fs::create_dir_all(&run).unwrap();
+        let w = us::RollingWindows::start(&run, b.clone(), id, 1_000, 0).unwrap();
+        assert_eq!(resumable(&d, &b, id), None, "no record journal");
+        drop(
+            crate::storage::segments::SegmentedWriter::create(&run.join(SHADOW_RECORD), 0).unwrap(),
+        );
+        assert_eq!(resumable(&d, &b, id), Some("s1".into()));
+        let mut market = b.clone();
+        market.mode = "market".into();
+        assert_eq!(resumable(&d, &market, id), None, "another mode's runs");
+        let mut econ = b.clone();
+        econ.mode = "econ4h".into();
+        assert_eq!(resumable(&d, &econ, id), None);
+        assert_eq!(layout("econ4h"), None);
+        w.finish(true).unwrap();
+        assert_eq!(
+            resumable(&d, &b, id),
+            None,
+            "a run that ended is never continued"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }

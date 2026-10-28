@@ -3427,8 +3427,9 @@ fn dec16_a_crashed_run_whose_interrupted_window_fails_halts_before_any_read() {
     let rows = market_rows(&u.run_dir);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(
-        crate::orchestration::until_stopped_view::resumable(
+        crate::orchestration::until_stopped_view::resumable_in(
             u.run_dir.parent().unwrap(),
+            crate::market_observer::MARKET_JOURNAL,
             &us::tests::binding(1, 2),
             "0123456789abcdef"
         ),
