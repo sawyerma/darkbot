@@ -98,7 +98,7 @@ impl RunHorizon {
         // DEC-16: a mode whose runtime runs no rolling windows stays gated whatever a record says.
         if !crate::orchestration::until_stopped::ROLLING_MODES.contains(&current.mode.as_str()) {
             gaps.push(format!(
-                "the {} runtime's Shadow owner has no windows yet (DEC-16 stage 3)",
+                "the {} runtime runs no rolling windows",
                 current.mode
             ));
         }

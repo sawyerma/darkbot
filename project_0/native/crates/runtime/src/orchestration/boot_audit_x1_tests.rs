@@ -845,8 +845,9 @@ fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
     )
     .unwrap();
     assert_eq!(admit(&autostarted).err(), Some("AUTOSTART_NOT_PERMITTED"));
-    // DEC-16: the same admission for an unbounded econ4h run — its own complete
-    // qualification; it has no autostart and no continuation after a crash.
+    // DEC-16 (stage 3): the same admission for an unbounded econ4h and Shadow run — its own
+    // complete qualification admits it, a crashed run of it is continued, and it never
+    // autostarts (D-5: only the raw capture does).
     let mut econ_binding = binding.clone();
     econ_binding.mode = "econ4h".into();
     let econ = us::put(
@@ -871,16 +872,28 @@ fn dec16_an_unbounded_raw_capture_is_admitted_only_with_its_qualification() {
             1002,
         )
     };
-    // Its own complete record still does not admit it: its Shadow owner has no windows yet.
-    assert_eq!(rolling_for(&econ_env).err(), Some(gated));
-    let _ = econ_binding;
-    for (key, value) in [
-        (auto::ENV_AUTOSTART, "0123456789abcdef"),
-        (us::ENV_RESUME, "crashed"),
-    ] {
-        let mut refused = econ_env.clone();
-        refused.insert(key, value.into());
-        assert_eq!(rolling_for(&refused).err(), Some(gated), "{key}");
-    }
+    let admitted = rolling_for(&econ_env).unwrap();
+    assert_eq!(
+        (
+            admitted.binding,
+            admitted.qualification_id,
+            admitted.resume,
+            admitted.autostart
+        ),
+        (econ_binding, econ.clone(), None, None)
+    );
+    let mut resumed = econ_env.clone();
+    resumed.insert(us::ENV_RESUME, "crashed".into());
+    assert_eq!(
+        rolling_for(&resumed).unwrap().resume.as_deref(),
+        Some("crashed")
+    );
+    let mut autostarted = econ_env.clone();
+    autostarted.insert(auto::ENV_AUTOSTART, "0123456789abcdef".into());
+    assert_eq!(
+        rolling_for(&autostarted).err(),
+        Some(gated),
+        "econ4h never autostarts"
+    );
     let _ = std::fs::remove_dir_all(d);
 }

@@ -179,12 +179,8 @@ fn unsealed(first: &Path) -> bool {
     !r.sealed
 }
 
-/// The newest run under `root` with a windows journal, read as far as it is written.
-fn newest_run(root: &Path) -> Option<RunView> {
-    newest_run_below(root, "")
-}
-
-/// [`newest_run`] with each run's windows journal in its subdirectory `sub`.
+/// The newest run under `root` with a windows journal (in each run's subdirectory `sub`), read
+/// as far as it is written.
 fn newest_run_below(root: &Path, sub: &str) -> Option<RunView> {
     for dir in newest_first(root) {
         let first = dir.join(sub).join(us::WINDOWS_JOURNAL);
@@ -254,8 +250,19 @@ pub fn projection(project: &Path) -> UntilStoppedView {
         }
         Err(e) => v.errors.push(e),
     }
-    v.qualification = newest_qualification(project, super::boot_audit::MARKET_MODE);
-    v.run = newest_run(&project.join("data/market"));
+    // DEC-16 (stage 3, D-8): the newest qualification of any mode (its mode shown with it) and
+    // the newest unbounded run of any mode's runs.
+    v.qualification = us::MODES
+        .iter()
+        .filter_map(|m| newest_qualification(project, m))
+        .max_by_key(|q| q.qualification.qualified_at_unix_s);
+    v.run = us::MODES
+        .iter()
+        .filter_map(|m| {
+            let (root, dir, _) = layout(m)?;
+            newest_run_below(&project.join(root), dir)
+        })
+        .max_by_key(|r| r.record.started_unix_s);
     v
 }
 
@@ -283,7 +290,7 @@ mod tests {
         let id = us::put(&d, &q).unwrap();
         let mut econ = qualified(&binding(60, 120));
         econ.binding.mode = "econ4h".into();
-        econ.qualified_at_unix_s += 1;
+        econ.qualified_at_unix_s -= 1;
         us::put(&d, &econ).unwrap();
         let grant = Grant {
             binding: b.clone(),
@@ -319,6 +326,14 @@ mod tests {
         assert_eq!(
             qv.open,
             vec!["capacity: NOT_RUN · no runway measurement".to_string()]
+        );
+        // DEC-16 (stage 3, D-8): the newest qualification of any mode is the one shown.
+        econ.qualified_at_unix_s = q.qualified_at_unix_s + 10;
+        let econ_id = us::put(&d, &econ).unwrap();
+        let newest = projection(&d).qualification.unwrap();
+        assert_eq!(
+            (newest.id, newest.qualification.binding.mode.as_str()),
+            (econ_id, "econ4h")
         );
         let p = v.preview.unwrap();
         assert_eq!(

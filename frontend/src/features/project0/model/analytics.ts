@@ -166,13 +166,14 @@ export function durationSeconds(d: string): bigint | null {
 /**
  * DEC-16: why "Until stopped" is locked for this boot (empty: it may be chosen). The start
  * admits it again natively (RunHorizon::admit against the run and the clock); this only shows
- * what the projection already decides: the newest raw-capture qualification, every part passed,
- * the same window and runway, its provider evidence still fresh at `nowS`.
+ * what the projection already decides: the newest qualification, of the chosen mode, every
+ * part passed, the same window and runway, its provider evidence still fresh at `nowS`.
  */
 export function untilStoppedBlock(v: { mode: string; window: string; runway: string; qualificationId: string; nowS: bigint },
   q: UntilStoppedQualificationView | null): string {
-  if (v.mode !== "market") return `${v.mode}: RUN_HORIZON_UNTIL_STOPPED_GATED — the Shadow owner's windows come with DEC-16 stage 3; only the raw capture (market) is qualifiable now`;
-  if (!q) return "No qualification of the raw capture (p0ctl horizon qualify --mode market --checkpoint W --minimum-runway R)";
+  const qualify = `p0ctl horizon qualify --mode ${v.mode} --checkpoint W --minimum-runway R`;
+  if (!q) return `No qualification (${qualify})`;
+  if (q.mode !== v.mode) return `The newest qualification ${q.id} is the ${q.mode} run's, not ${v.mode}'s (${qualify})`;
   if (v.qualificationId.trim() !== q.id) return `Qualification ${v.qualificationId.trim() || "—"} is not the newest one shown (${q.id}); only that one is checked here`;
   if (!q.complete) return `Qualification ${q.id} incomplete: ${q.open.join("; ")}`;
   const w = durationSeconds(v.window);
@@ -181,6 +182,13 @@ export function untilStoppedBlock(v: { mode: string; window: string; runway: str
   if (w !== q.checkpointSeconds || r !== q.minimumRunwaySeconds) return `Window/runway differ from the qualification (${q.checkpointSeconds} s / ${q.minimumRunwaySeconds} s)`;
   if (q.evidenceValidUntilUnixS === null || q.evidenceValidUntilUnixS < v.nowS) return `The qualification's provider evidence is no longer fresh (${q.evidenceValidUntilUnixS ?? "unknown"}); qualify again`;
   return "";
+}
+
+/** DEC-16: the command that stops a running unbounded run in order (drain, seal, final
+ *  status): an econ4h or Shadow run started by a boot flow ends through that flow's running
+ *  start step, the raw capture through the desktop capture control. */
+export function untilStoppedStopAction(flow: { mode: string; start: { state: string } } | null): "project0.boot.cancel" | "project0.capture.stop" {
+  return flow != null && flow.mode !== "market" && flow.start.state === "RUNNING" ? "project0.boot.cancel" : "project0.capture.stop";
 }
 
 /** DEC-16: the final status of an unbounded run as its windows journal shows it. */

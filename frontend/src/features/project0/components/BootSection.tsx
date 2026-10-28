@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import { analyticsCommand, autostartGrantCommand, autostartPreviewCommand, bootNetworkCommand, bootOfflineCommand, bootStartCommand, untilStoppedDuration, useAnalyticsControl } from "@/core/realtime/analyticsControl";
 import { captureButtons, captureCommand, useCaptureControl } from "@/core/realtime/captureControl";
-import { UNTIL_STOPPED, durationText, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
+import { UNTIL_STOPPED, durationText, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
 import type { AnalyticsView, AutostartGrantView, BootFlowView } from "../model/analytics";
 import type { ParameterView } from "../model/status";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
@@ -99,10 +99,14 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
       : left === 0n ? "The network audit's TTL has expired; a new attempt is a new offline preflight"
         : "problem" in start ? start.problem : "";
   const running = flow != null && [flow.network.state, flow.start.state].some(s => s === "RUNNING");
-  // DEC-16: the running unbounded capture ends only by its stop (drain, seal, final status).
+  // DEC-16: a running unbounded run ends only by its stop (drain, seal, final status) — an
+  // econ4h or Shadow run through its boot flow's start step, the raw capture through the
+  // desktop capture control.
   const run = live ? until?.run ?? null : null;
+  const stopAction = untilStoppedStopAction(flow);
   const stop = captureButtons(capture.process, capture.busy).stop;
-  const stopWhy = !run ? "No unbounded run" : run.sealed ? "The run has ended" : stop.reason;
+  const stopWhy = !run ? "No unbounded run" : run.sealed ? "The run has ended"
+    : stopAction === "project0.boot.cancel" ? blocked : stop.reason;
   const preview = live ? until?.preview ?? null : null;
   const granted = live ? until?.autostart ?? null : null;
   const previewCmd = autostartPreviewCommand({ qualification: qualificationId, window: windowValue, runway: runwayValue, genesisHash: genesis, maxRuntime, validFor, captureSource: source });
@@ -125,7 +129,7 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
       <label>Until stopped · qualification id<input value={qualificationId} onChange={e => setQualification(e.target.value)} placeholder="16 hex digits (p0ctl horizon qualify)"/></label>
     </div>
     <DetailRow title="Until stopped" value={untilWhy ? `locked · ${untilWhy}` : `available · qualification ${qualificationId} · window ${windowValue} · runway ${runwayValue} · the start admits it again (RunHorizon::admit)`}/>
-    {q ? <DetailRow title="Qualification · raw capture" value={`${q.id} · ${q.complete ? "every part PASS" : `open: ${q.open.join("; ")}`} · evidence ${q.evidenceId ?? "—"}${q.evidenceValidUntilUnixS != null ? ` fresh until ${utc(q.evidenceValidUntilUnixS)} UTC` : ""}`}/> : null}
+    {q ? <DetailRow title={`Qualification · ${q.mode}`} value={`${q.id} · ${q.complete ? "every part PASS" : `open: ${q.open.join("; ")}`} · evidence ${q.evidenceId ?? "—"}${q.evidenceValidUntilUnixS != null ? ` fresh until ${utc(q.evidenceValidUntilUnixS)} UTC` : ""}`}/> : null}
     {live && analytics?.bootError ? <DetailRow title="Boot store" value={analytics.bootError}/> : null}
     <div className="p0-actions"><button className="p0-secondary" disabled={blocked !== "" || offlineWhy !== ""} title={blocked || offlineWhy || undefined}
       onClick={() => { if ("params" in offline) void analyticsCommand("project0.boot.offline", { params: offline.params }); }}>Run offline preflight</button></div>
@@ -157,8 +161,12 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
       <DetailRow title="Until stopped · last window" value={run.lastVerdict ? `${run.lastVerdict}${run.lastEndedUnixS != null ? ` · ${utc(run.lastEndedUnixS)} UTC` : ""}${run.lastDetail ? ` · ${run.lastDetail}` : ""}` : "none closed yet"}/>
       <DetailRow title="Until stopped · status" value={untilStoppedRunStatus(run)}/>
       <div className="p0-actions"><button className="p0-secondary" disabled={stopWhy !== ""} title={stopWhy || undefined} onClick={() => setArmed("stop")}>Stop run · drain and seal</button></div>
-      {armed === "stop" && stopWhy === "" ? <><Notice>The capture drains, seals its journals and its windows journal, and records its final status (complete for an ordered end of a run that never halted).</Notice>
-        <div className="p0-actions"><button className="p0-secondary" onClick={() => { setArmed(null); void captureCommand("project0.capture.stop"); }}>Confirm stop</button>
+      {armed === "stop" && stopWhy === "" ? <><Notice>The run drains (its capture, its winner watches), seals its journals and its windows journal, and records its final status (complete for an ordered end of a run that never halted).</Notice>
+        <div className="p0-actions"><button className="p0-secondary" onClick={() => {
+          setArmed(null);
+          if (stopAction === "project0.boot.cancel" && flow) void analyticsCommand("project0.boot.cancel", { resourceId: flow.flowId });
+          else void captureCommand("project0.capture.stop");
+        }}>Confirm stop</button>
           <button className="p0-secondary" onClick={() => setArmed(null)}>Cancel</button></div></> : null}
     </> : null}
     <DetailRow title="Standing autostart approval" value={granted ? `in force · digest ${granted.digest}${granted.expiresUnixS < nowS ? " · expired" : ""}` : "none · the app autostarts nothing (AUTOSTART_BOOT_REQUIRED)"}/>

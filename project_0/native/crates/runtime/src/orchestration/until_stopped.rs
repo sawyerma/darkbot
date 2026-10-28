@@ -22,10 +22,10 @@ pub const SCHEMA: u32 = 1;
 /// The controller's store of qualifications, content-addressed like the provider evidence:
 /// `<id>.p0j`, the id the first 16 hex digits of the record's SHA-256.
 pub const STORE: &str = "data/until_stopped";
-/// The modes whose runtime runs rolling windows. A mode outside stays gated whatever else is
-/// qualified: econ4h measures its windows (DEC-16 stage 2) but stays gated until its Shadow
-/// owner's windows exist (stage 3: owner windows, drains, owner journals).
-pub const ROLLING_MODES: &[&str] = &["market"];
+/// The modes whose runtime runs rolling windows (DEC-16: the raw capture since stage 2; econ4h
+/// and Shadow with the Shadow owner's windows, drains and journals of stage 3). A mode outside
+/// stays gated whatever else is qualified.
+pub const ROLLING_MODES: &[&str] = &["econ4h", "market", "shadow"];
 /// The modes an unbounded run may be qualified for.
 pub const MODES: &[&str] = &["econ4h", "market", "shadow"];
 
@@ -429,10 +429,7 @@ pub fn qualify(
     } else {
         Part::of(
             PartState::NotRun,
-            format!(
-                "the {} runtime's Shadow owner has no windows yet (DEC-16 stage 3: owner windows, drains, owner journals)",
-                binding.mode
-            ),
+            format!("the {} runtime runs no rolling windows", binding.mode),
         )
     };
     let sk07 = sk07_selftest(&work.join("sk07"));
@@ -1235,12 +1232,13 @@ pub(crate) mod tests {
             f(&mut current);
             gated(&q, &current, 1_500)
         };
-        // Another mode: drifted — and econ4h, whose Shadow owner has no windows yet, gated as such.
+        // Another mode is another run: drifted (every mode runs rolling windows now).
         let econ = drifted(&|c| c.mode = "econ4h".into());
         assert!(
-            econ.contains("drift: mode") && econ.contains("DEC-16 stage 3"),
+            econ.contains("drift: mode") && !econ.contains("rolling windows"),
             "{econ}"
         );
+        assert!(drifted(&|c| c.mode = "live".into()).contains("runs no rolling windows"));
         assert!(
             drifted(&|c| c.identity.runtime_config_sha256 = "other".into())
                 .contains("drift: runtime_config")
@@ -1423,40 +1421,39 @@ pub(crate) mod tests {
         assert_eq!(e.state, PartState::Fail, "{e:?}");
     }
 
-    /// DEC-16: a qualification of a mode whose runtime has no rolling windows stays gated on
-    /// that part, whatever else it holds; without measured runs and evidence those stay NOT_RUN.
+    /// DEC-16 (stage 3): every mode's runtime runs rolling windows — its qualification's
+    /// runtime part passes — and it still stays gated on what was not measured: without
+    /// measured runs and evidence those parts stay NOT_RUN.
     #[test]
-    fn dec16_qualify_records_every_part_and_stays_gated_without_rolling_windows() {
+    fn dec16_qualify_marks_every_mode_runtime_rolling_and_stays_gated_without_evidence() {
         let d = temp("qualify");
         let c = darkbot_solana::runtime_config::RuntimeConfig::default();
-        let mut b = binding(3_600, 86_400);
-        b.mode = "econ4h".into();
-        let q = qualify(
-            b.clone(),
-            &c,
-            "logs",
-            &Inputs {
-                project: &d,
-                runs_root: d.join("data/runs"),
-                evidence_id: None,
-                now: 1_000,
-            },
-        )
-        .unwrap();
-        assert_eq!(q.runtime.state, PartState::NotRun, "{:?}", q.runtime);
-        assert_eq!(q.sk07.state, PartState::Pass, "{:?}", q.sk07);
-        assert_eq!(q.capacity.state, PartState::NotRun, "{:?}", q.capacity);
-        assert_eq!(q.provider_evidence.state, PartState::NotRun);
-        let h = RunHorizon::until_stopped("1h", "24h").unwrap();
-        let e = h.admit(Some(&q), &b, 1_000).unwrap_err();
-        for part in [
-            "runtime NOT_RUN",
-            "capacity NOT_RUN",
-            "provider_evidence NOT_RUN",
-        ] {
-            assert!(e.contains(part), "{e}");
+        for mode in MODES {
+            let mut b = binding(3_600, 86_400);
+            b.mode = (*mode).into();
+            let q = qualify(
+                b.clone(),
+                &c,
+                "logs",
+                &Inputs {
+                    project: &d,
+                    runs_root: d.join("data/runs"),
+                    evidence_id: None,
+                    now: 1_000,
+                },
+            )
+            .unwrap();
+            assert_eq!(q.runtime.state, PartState::Pass, "{mode}: {:?}", q.runtime);
+            assert_eq!(q.sk07.state, PartState::Pass, "{:?}", q.sk07);
+            assert_eq!(q.capacity.state, PartState::NotRun, "{:?}", q.capacity);
+            assert_eq!(q.provider_evidence.state, PartState::NotRun);
+            let h = RunHorizon::until_stopped("1h", "24h").unwrap();
+            let e = h.admit(Some(&q), &b, 1_000).unwrap_err();
+            for part in ["capacity NOT_RUN", "provider_evidence NOT_RUN"] {
+                assert!(e.contains(part), "{mode}: {e}");
+            }
+            assert!(!e.contains("runtime") && !e.contains("sk07"), "{mode}: {e}");
         }
-        assert!(!e.contains("sk07"), "{e}");
         // The self-test and the probe ran on the run volume and left nothing.
         assert!(!d
             .join("data/runs")

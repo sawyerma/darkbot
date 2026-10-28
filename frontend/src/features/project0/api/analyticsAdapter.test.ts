@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { durationText, jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus } from "../model/analytics";
+import { durationText, jobCommandBlock, jobReadableRuns, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -81,7 +81,9 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(untilStoppedBlock(input, q)).toMatch(/incomplete: capacity: NOT_RUN/);
     const complete = { ...q, complete: true, open: [] };
     expect(untilStoppedBlock(input, complete)).toBe("");
-    expect(untilStoppedBlock({ ...input, mode: "econ4h" }, complete)).toMatch(/RUN_HORIZON_UNTIL_STOPPED_GATED/);
+    // DEC-16 (stage 3): every mode runs until stopped, each with a qualification of its own mode.
+    expect(untilStoppedBlock({ ...input, mode: "econ4h" }, complete)).toMatch(/is the market run's, not econ4h's/);
+    expect(untilStoppedBlock({ ...input, mode: "shadow" }, { ...complete, mode: "shadow" })).toBe("");
     expect(untilStoppedBlock(input, null)).toMatch(/No qualification/);
     expect(untilStoppedBlock({ ...input, qualificationId: "fedcba9876543210" }, complete)).toMatch(/not the newest/);
     expect(untilStoppedBlock({ ...input, window: "30m" }, complete)).toMatch(/differ from the qualification/);
@@ -92,6 +94,15 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     const halted = { ...view.untilStopped.run!, complete: false, halted: "UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING" };
     expect(untilStoppedRunStatus(halted)).toBe("SEALED_INCOMPLETE · HALT UNTIL_STOPPED_PROVIDER_EVIDENCE_MISSING");
     expect(untilStoppedRunStatus({ ...halted, sealed: false, halted: null })).toBe("RUNNING");
+  });
+
+  it("DEC-16 (stage 3): a running econ4h or Shadow run stops through its boot flow, the raw capture through the desktop control", () => {
+    const flow = (mode: string, state: string) => ({ mode, start: { state } });
+    expect(untilStoppedStopAction(flow("shadow", "RUNNING"))).toBe("project0.boot.cancel");
+    expect(untilStoppedStopAction(flow("econ4h", "RUNNING"))).toBe("project0.boot.cancel");
+    expect(untilStoppedStopAction(flow("market", "RUNNING"))).toBe("project0.capture.stop");
+    expect(untilStoppedStopAction(flow("shadow", "COMPLETED"))).toBe("project0.capture.stop");
+    expect(untilStoppedStopAction(null)).toBe("project0.capture.stop");
   });
 
   it("rejects malformed wire bytes", () => {

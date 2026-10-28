@@ -251,7 +251,7 @@ impl RunMode {
 }
 
 /// Options of the C0-E1 capture and its post-capture chain; a Shadow run has neither.
-const ECON4H_ONLY: [&str; 15] = [
+const ECON4H_ONLY: [&str; 14] = [
     "--capture-source",
     "--chain-verify",
     "--verify",
@@ -266,7 +266,6 @@ const ECON4H_ONLY: [&str; 15] = [
     "--provider-evidence",
     "--format",
     "--verification-result",
-    "--until-stopped",
 ];
 
 /// The run mode and the launcher's arguments: p0ctl's own options (`--mode`, the approval) are
@@ -2681,13 +2680,17 @@ mod tests {
                 "off",
             ][..],
             &["--mode", "shadow", "--report-top", "5"],
-            &["--mode", "shadow", "--until-stopped"],
             &["--mode", "live", "--duration", "3m"],
             &["--mode"],
             &["--mode", "shadow", "--mode", "shadow"],
         ] {
             assert!(plan(bad).is_err(), "{bad:?}");
         }
+        // DEC-16 (stage 3): a Shadow run runs until stopped like econ4h (admitted by run start).
+        assert_eq!(
+            plan(&["--mode", "shadow", "--until-stopped"]).unwrap().0,
+            RunMode::Shadow
+        );
     }
 
     /// Review 1: a native run in layout V1 (typed manifest at the run root) has no native reader;

@@ -457,8 +457,9 @@ const line = (page: Page, title: string) => page.locator(".p0-line", { hasText: 
 test("DEC-16: Until stopped is visible but locked with its reason; the standing approval is granted for exactly its previewed binding and revoked", async ({ page }) => {
   const sent = await untilStoppedTab(page, false);
   const row = (title: string) => line(page, title);
-  // econ4h has no rolling windows yet: locked with its reason, the option visible but disabled.
-  await expect(row("Until stopped")).toContainText("locked · econ4h: RUN_HORIZON_UNTIL_STOPPED_GATED");
+  // econ4h runs until stopped only with a qualification of its own: the newest one is the raw
+  // capture's — locked with its reason, the option visible but disabled.
+  await expect(row("Until stopped")).toContainText("locked · The newest qualification 0123456789abcdef is the market run's, not econ4h's");
   await expect(page.getByLabel("Boot duration").locator("option", { hasText: "Until stopped" })).toHaveAttribute("disabled", "");
   await page.getByLabel("Boot mode").selectOption("market");
   await expect(row("Until stopped")).toContainText("locked · Qualification 0123456789abcdef incomplete: capacity: NOT_RUN · free disk unknown");

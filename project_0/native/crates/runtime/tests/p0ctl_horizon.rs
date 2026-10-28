@@ -65,7 +65,7 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
     let (code, out, err) = qualify(&[]);
     assert_eq!(code, 2, "{err}");
     for part in [
-        "runtime            NOT_RUN",
+        "runtime            PASS",
         "sk07               PASS",
         "capacity           NOT_RUN",
         "provider_evidence  NOT_RUN",
@@ -112,8 +112,12 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
         );
     };
     gated(&[], "no qualification");
-    gated(&["--qualification", &id], "runtime NOT_RUN");
     gated(&["--qualification", &id], "capacity NOT_RUN");
+    let (_, _, err) = start(&["--qualification", &id]);
+    assert!(
+        !err.contains("runtime NOT_RUN"),
+        "the econ4h runtime runs rolling windows: {err}"
+    );
     // Another window is another horizon: the qualification does not bind it.
     let (code, _, err) = ctl.run(&[
         "run",
@@ -146,75 +150,93 @@ fn dec16_an_unbounded_run_is_admitted_only_with_its_complete_qualification() {
         "--minimum-runway",
         "24h",
     ]);
+    // DEC-16 (stage 3): a Shadow run is admitted the same way — only with its qualification.
     assert_eq!(code, 2);
-    assert!(err.contains("RUN_MODE_OPTION_REFUSED"), "{err}");
+    assert!(
+        err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED") && err.contains("no qualification"),
+        "{err}"
+    );
 }
 
-/// DEC-16 (review M1): econ4h stays gated until its Shadow owner's windows exist (stage 3) —
-/// also with a record that claims every part passed; strict verification of an unbounded run
-/// and a bare unbounded `--duration` are refused.
+/// DEC-16 (stage 3): an unbounded econ4h or Shadow start with its complete qualification is
+/// admitted — it goes on to its next gate, the offline boot audit; strict verification of
+/// an unbounded run and a bare unbounded `--duration` are refused.
 #[test]
-fn dec16_an_unbounded_econ4h_start_stays_gated_until_stage_3() {
+fn dec16_an_unbounded_econ4h_or_shadow_start_is_admitted_with_its_complete_qualification() {
     use darkbot_runner::orchestration::until_stopped as us;
-    let ctl = Ctl::new("launch");
-    let (_, out, err) = ctl.run(&[
-        "horizon",
-        "qualify",
-        "--mode",
-        "econ4h",
-        "--checkpoint",
-        "1h",
-        "--minimum-runway",
-        "24h",
-    ]);
-    let open = out
-        .lines()
-        .find_map(|l| l.strip_prefix("UNTIL_STOPPED_QUALIFICATION "))
-        .and_then(|l| l.split_whitespace().next())
-        .unwrap_or_else(|| panic!("{out}{err}"))
-        .to_string();
-    // The fixture completes the open parts (the gating under test, never a production path).
-    let mut q = us::get(&ctl.project, &open).unwrap();
-    let pass = us::Part {
-        state: us::PartState::Pass,
-        reason: "fixture".into(),
-    };
-    (
-        q.runtime,
-        q.capacity,
-        q.provider_budget,
-        q.provider_evidence,
-    ) = (pass.clone(), pass.clone(), pass.clone(), pass);
-    q.evidence_id = Some("0123456789abcdef".into());
-    q.evidence_valid_until_unix_s = Some(u64::MAX / 2);
-    let id = us::put(&ctl.project, &q).unwrap();
-    let start = |extra: &[&str]| {
-        let mut args = vec![
-            "run",
-            "start",
-            "--until-stopped",
+    for mode in ["econ4h", "shadow"] {
+        let ctl = Ctl::new(&format!("launch_{mode}"));
+        let (_, out, err) = ctl.run(&[
+            "horizon",
+            "qualify",
+            "--mode",
+            mode,
             "--checkpoint",
             "1h",
             "--minimum-runway",
             "24h",
-            "--qualification",
-            &id,
-        ];
-        args.extend(extra);
-        ctl.run(&args)
-    };
-    let (code, _, err) = start(&[]);
-    assert_eq!(code, 2);
-    assert!(
-        err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED") && err.contains("DEC-16 stage 3"),
-        "{err}"
-    );
-    let (code, _, err) = start(&["--chain-verify", "strict"]);
-    assert_eq!(code, 2);
-    assert!(err.contains("UNTIL_STOPPED_STRICT_NOT_AVAILABLE"), "{err}");
-    let (code, _, err) = ctl.run(&["run", "start", "--duration", "until-stopped:1h:24h"]);
-    assert_eq!(code, 2);
-    assert!(err.contains("RUN_HORIZON_UNTIL_STOPPED:"), "{err}");
+        ]);
+        let open = out
+            .lines()
+            .find_map(|l| l.strip_prefix("UNTIL_STOPPED_QUALIFICATION "))
+            .and_then(|l| l.split_whitespace().next())
+            .unwrap_or_else(|| panic!("{out}{err}"))
+            .to_string();
+        // The fixture completes the open parts (the gating under test, never a production path).
+        let mut q = us::get(&ctl.project, &open).unwrap();
+        assert_eq!(
+            q.runtime.state,
+            us::PartState::Pass,
+            "{mode}: {:?}",
+            q.runtime
+        );
+        let pass = us::Part {
+            state: us::PartState::Pass,
+            reason: "fixture".into(),
+        };
+        (q.capacity, q.provider_budget, q.provider_evidence) = (pass.clone(), pass.clone(), pass);
+        q.evidence_id = Some("0123456789abcdef".into());
+        q.evidence_valid_until_unix_s = Some(u64::MAX / 2);
+        let id = us::put(&ctl.project, &q).unwrap();
+        let start = |extra: &[&str]| {
+            let mut args = vec![
+                "run",
+                "start",
+                "--mode",
+                mode,
+                "--until-stopped",
+                "--checkpoint",
+                "1h",
+                "--minimum-runway",
+                "24h",
+                "--qualification",
+                &id,
+            ];
+            args.extend(extra);
+            ctl.run(&args)
+        };
+        let (code, _, err) = start(&[]);
+        assert_eq!(code, 2);
+        assert!(
+            !err.contains("RUN_HORIZON_UNTIL_STOPPED_GATED") && err.contains("BOOT_AUDIT_BLOCKED"),
+            "{mode}: {err}"
+        );
+        if mode == "econ4h" {
+            let (code, _, err) = start(&["--chain-verify", "strict"]);
+            assert_eq!(code, 2);
+            assert!(err.contains("UNTIL_STOPPED_STRICT_NOT_AVAILABLE"), "{err}");
+        }
+        let (code, _, err) = ctl.run(&[
+            "run",
+            "start",
+            "--mode",
+            mode,
+            "--duration",
+            "until-stopped:1h:24h",
+        ]);
+        assert_eq!(code, 2);
+        assert!(err.contains("RUN_HORIZON_UNTIL_STOPPED:"), "{err}");
+    }
 }
 
 /// DEC-16: the plan compiler of an unbounded run compiles the plan of its window and names its
