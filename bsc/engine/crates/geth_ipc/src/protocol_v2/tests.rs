@@ -1644,6 +1644,13 @@ fn shutdown_refuses_binds_and_publishes_while_live_handles_stay_valid() {
 // K14: exclusive runtime role leases
 // -----------------------------------------------------------------
 
+/// A spawned child holds a copy of every descriptor of this process until
+/// its exec closes it (`O_CLOEXEC`), and a copy keeps the flock of its open
+/// file description: on Linux (glibc posix_spawn) a lease dropped in that
+/// window is still held. A test that drops a lease and takes it again holds
+/// this shared; a test that spawns holds it exclusively around the spawn.
+static SPAWN_WINDOW: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
 fn tmp_dir(name: &str) -> std::path::PathBuf {
     let id = ID.fetch_add(1, TestOrdering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
@@ -1657,6 +1664,7 @@ fn tmp_dir(name: &str) -> std::path::PathBuf {
 
 #[test]
 fn role_leases_are_exclusive_per_role_and_coexist_across_roles() {
+    let _no_spawn = SPAWN_WINDOW.read().unwrap_or_else(|e| e.into_inner());
     let dir = tmp_dir("lease");
     let geth = RoleLeaseV2::acquire(&dir, RuntimeRoleV2::GethOwner, 7).unwrap();
     let rust = RoleLeaseV2::acquire(&dir, RuntimeRoleV2::RustOwner, 7).unwrap();
@@ -1840,6 +1848,7 @@ fn role_lease_is_released_when_the_holder_process_dies() {
     use std::process::{Command, Stdio};
 
     let dir = tmp_dir("lease-child");
+    let spawning = SPAWN_WINDOW.write().unwrap_or_else(|e| e.into_inner());
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -1853,6 +1862,8 @@ fn role_lease_is_released_when_the_holder_process_dies() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    // spawn returns after the exec: the child holds no copy any more.
+    drop(spawning);
     let mut reader = BufReader::new(child.stdout.take().unwrap());
     let mut locked = false;
     let mut line = String::new();
