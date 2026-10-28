@@ -1857,6 +1857,21 @@ impl<E: End> Executor<E> {
         self.evidence
     }
 
+    /// Plan 28.10.: a real position the chain confirmed, `tokens` received
+    /// for `input_wei`: its exit sells at most these tokens, and a C3
+    /// position (or one from before a restart) becomes exitable the same
+    /// way as a Strategy C one.
+    pub fn adopt(&mut self, token: [u8; 20], tokens: U256, input_wei: U256) {
+        match self.strategy_bought.iter_mut().find(|h| h.token == token) {
+            Some(h) => h.min_tokens = tokens,
+            None => self.strategy_bought.push(Held {
+                token,
+                min_tokens: tokens,
+                input_wei,
+            }),
+        }
+    }
+
     /// Strategy C's PAPER counters (Phase I): intents asked for, handed
     /// off, refused by stage.
     pub fn strategy_counters(&self) -> &ExecCounters {

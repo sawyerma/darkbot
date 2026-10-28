@@ -71,9 +71,40 @@ fn word(w: &[u8; 32]) -> U256 {
     U256::from_be_bytes(*w)
 }
 
+/// Plan 28.10.: a real LIVE position held by the strategy, a `Runtime`
+/// record: `h | token [20] | tokens [32] | spent wei [32] | filled ms u64`.
+pub fn hold_payload(token: [u8; 20], tokens: U256, spent_wei: U256, filled_ms: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(HOLD_LEN);
+    out.push(b'h');
+    out.extend_from_slice(&token);
+    out.extend_from_slice(&tokens.to_be_bytes::<32>());
+    out.extend_from_slice(&spent_wei.to_be_bytes::<32>());
+    out.extend_from_slice(&filled_ms.to_le_bytes());
+    out
+}
+
+const HOLD_LEN: usize = 1 + 20 + 32 + 32 + 8;
+
+/// The real LIVE position's end: `u | token [20]`.
+pub fn unhold_payload(token: [u8; 20]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(21);
+    out.push(b'u');
+    out.extend_from_slice(&token);
+    out
+}
+
 /// The strategy input of one journaled canonical record, if it is one.
 pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
     match (kind, p.first()?) {
+        (RecordKind::Runtime, b'h') if p.len() == HOLD_LEN => Some(Input::Hold {
+            token: p.get(1..21)?.try_into().ok()?,
+            tokens: U256::from_be_slice(p.get(21..53)?),
+            spent_wei: U256::from_be_slice(p.get(53..85)?),
+            filled_ms: u64_at(p, 85)?,
+        }),
+        (RecordKind::Runtime, b'u') if p.len() == 21 => Some(Input::Unhold {
+            token: p.get(1..21)?.try_into().ok()?,
+        }),
         (RecordKind::Canonical, b'B') if p.len() == BLOCK_LEN => Some(Input::Block {
             number: u64_at(p, 1)?,
             time_ms: u64_at(p, 41)?,
@@ -569,6 +600,35 @@ impl StrategyRuntime {
         self.engine.followed()
     }
 
+    /// Plan 28.10.: the strategy holds a real LIVE position (its exit rules
+    /// apply on the real curve). The input is journaled first, so a replay
+    /// steps the same engine.
+    pub fn hold(
+        &mut self,
+        token: [u8; 20],
+        tokens: U256,
+        spent_wei: U256,
+        filled_ms: u64,
+        at: u64,
+        journal: &mut RuntimeJournal,
+    ) {
+        let p = hold_payload(token, tokens, spent_wei, filled_ms);
+        journal.record(RecordKind::Runtime, at, p.clone());
+        self.record(RecordKind::Runtime, &p, at, Some(journal));
+    }
+
+    /// The real position ended (its SELL included).
+    pub fn unhold(&mut self, token: [u8; 20], at: u64, journal: &mut RuntimeJournal) {
+        let p = unhold_payload(token);
+        journal.record(RecordKind::Runtime, at, p.clone());
+        self.record(RecordKind::Runtime, &p, at, Some(journal));
+    }
+
+    /// Real LIVE positions the strategy holds.
+    pub fn held(&self) -> usize {
+        self.engine.held_positions()
+    }
+
     /// Decisions wait for their block's completion.
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
@@ -593,7 +653,7 @@ impl StrategyRuntime {
             Input::Term { .. } => c.terms += 1,
             Input::Migrated { .. } => c.migrations += 1,
             Input::Incomplete => c.incomplete += 1,
-            Input::Block { .. } => {}
+            Input::Block { .. } | Input::Hold { .. } | Input::Unhold { .. } => {}
         }
         let typed = self.engine.step(input);
         let outputs: Vec<Vec<u8>> = typed

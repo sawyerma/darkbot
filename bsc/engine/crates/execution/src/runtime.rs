@@ -746,6 +746,25 @@ fn apply_canonical(
             }
         }
     }
+    // Plan 28.10.: the buyer's receipts and reorgs become ledger facts;
+    // a position opened or ended is held or released by Strategy C (a
+    // journaled input, so a replay steps the same engine).
+    if let Some(l) = live.as_mut() {
+        for change in l.on_canonical(&event) {
+            let Some(s) = c.strategy.as_mut() else {
+                continue;
+            };
+            match change {
+                live::PositionChange::Opened {
+                    token,
+                    tokens,
+                    spent_wei,
+                    filled_ms,
+                } => s.hold(token, tokens, spent_wei, filled_ms, at, journal),
+                live::PositionChange::Ended { token } => s.unhold(token, at, journal),
+            }
+        }
+    }
     c.event(at, event, journal);
     if let Some(block) = complete {
         strategy_to_paper(c, exec, live, owner, clock, journal, block);

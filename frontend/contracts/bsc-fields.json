@@ -4403,6 +4403,18 @@
     },
     {
       "schemas": [
+        "darkbot.bsc.live-ledger.v1"
+      ],
+      "match": "*",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "plan 28.10. package 6: one fact of the LIVE ledger (released, included, reverted, replaced, orphaned); its fold is projected as positions and PnL in the LIVE tab"
+    },
+    {
+      "schemas": [
         "darkbot.bsc.runtime-status.v1"
       ],
       "match": "prefix:live[].",

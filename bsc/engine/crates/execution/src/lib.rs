@@ -67,6 +67,10 @@ pub mod live_key;
 /// transports (plan 28.10.).
 #[cfg(feature = "runtime")]
 pub mod live_end;
+/// The LIVE ledger: released transactions, their inclusions, positions and
+/// net result (plan 28.10.).
+#[cfg(feature = "runtime")]
+pub mod live_ledger;
 /// The native WSS pending-transaction source adapter (verified full txs).
 #[cfg(feature = "runtime")]
 pub mod wss;

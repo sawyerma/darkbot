@@ -318,6 +318,38 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("written={} sha256={}", out.display(), hex(&darkbot_bsc_record::sha256(&bytes)));
             Ok(true)
         }
+        // Plan 28.10.: the LIVE ledger's positions and net result.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "positions" => {
+            use darkbot_bsc_execution::live_ledger::{Ledger, fold};
+            let dir = std::path::Path::new(flag(rest, "--state")?);
+            let book = fold(&Ledger::open(dir).facts()?);
+            for p in &book.positions {
+                println!(
+                    "token=0x{} component={} state={} tokens={} input_wei={} proceeds_wei={} gas_wei={} pnl_wei={}",
+                    hex(&p.token),
+                    p.component.name(),
+                    p.state.name(),
+                    p.tokens,
+                    p.input_wei,
+                    p.proceeds_wei,
+                    p.gas_wei,
+                    p.pnl_wei.map_or("-".into(), |v| v.to_string()),
+                );
+            }
+            for t in book.unresolved() {
+                println!(
+                    "unresolved tx=0x{} intent={} state={}",
+                    hex(&t.released.tx_hash),
+                    t.released.intent.name(),
+                    t.state.name()
+                );
+            }
+            println!(
+                "realized_pnl_wei={} gas_wei={}",
+                book.realized_pnl_wei, book.gas_wei
+            );
+            Ok(true)
+        }
         // The LIVE gate as it holds now: every missing condition, then
         // what each LIVE request is now.
         [area, cmd, rest @ ..] if area == "live" && cmd == "status" => {
@@ -687,7 +719,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

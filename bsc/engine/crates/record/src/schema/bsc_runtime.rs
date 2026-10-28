@@ -478,6 +478,72 @@ pub mod live_spend {
     };
 }
 
+/// One fact of the LIVE ledger (plan 28.10.): a LIVE transaction whose
+/// bytes may have left, and what the canonical chain made of it. Written
+/// create-new in order, never changed: the positions, their costs and the
+/// net result are the fold of these facts, after a crash as before.
+pub mod live_ledger {
+    use super::*;
+
+    /// `RELEASED`, `UNKNOWN` (its handoff did not complete), `INCLUDED`,
+    /// `REVERTED`, `REPLACED` (another transaction took its nonce) or
+    /// `ORPHANED` (its block left the canonical chain).
+    pub const KIND: u16 = 1;
+    pub const TX_HASH: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// `BUY`, `APPROVE` or `SELL`.
+    pub const INTENT: u16 = 5;
+    /// `BSC_EXEC` or `BSC_STRATEGY_C`.
+    pub const COMPONENT: u16 = 6;
+    pub const TOKEN: u16 = 7;
+    pub const NONCE: u16 = 8;
+    pub const GRANT_GENERATION: u16 = 9;
+    /// The signed native value (a BUY's input).
+    pub const INPUT_WEI: u16 = 10;
+    /// The signed input and gas limit at the signed price: the most the
+    /// transaction can cost.
+    pub const MAX_WEI: u16 = 11;
+    pub const BLOCK_NUMBER: u16 = 12;
+    pub const BLOCK_HASH: u16 = 13;
+    pub const BLOCK_MS: u16 = 14;
+    /// Gas used times the effective price, from the receipt.
+    pub const GAS_WEI: u16 = 15;
+    /// A BUY's tokens received, a SELL's tokens sold (the Portal's trade).
+    pub const TOKENS: u16 = 16;
+    /// A BUY's native amount spent, a SELL's received (the Portal's trade).
+    pub const ETH_WEI: u16 = 17;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 1,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+        ],
+    };
+}
+
 /// The LIVE qualification of a scope (plan 28.10., `0a647175`): what this
 /// product qualified about venues, sources and inclusion adapters, its
 /// acquisition and its operator's risk decision, each bound by path and
@@ -1253,11 +1319,22 @@ pub mod runtime_status {
         /// Refusals by stage, `NAME=n`.
         pub const REFUSALS: u16 = 16;
         pub const PROBES: u16 = 17;
+        /// The LIVE ledger's positions (its fold).
+        pub const POSITIONS_OPEN: u16 = 18;
+        pub const POSITIONS_CLOSED: u16 = 19;
+        pub const POSITIONS_FAILED: u16 = 20;
+        /// Closed positions' proceeds minus input minus all gas, and the
+        /// gas of failed BUYs, signed decimal wei.
+        pub const REALIZED_PNL_WEI: u16 = 21;
+        /// All gas the ledger's included or reverted transactions paid.
+        pub const GAS_WEI: u16 = 22;
+        /// Why the ledger could not be read (then nothing above counts).
+        pub const LEDGER_ERROR: u16 = 23;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1276,6 +1353,12 @@ pub mod runtime_status {
                 Field::opt(LAST_REFUSAL, "last_refusal", Text),
                 Field::rep(REFUSALS, "refusals", Text),
                 Field::req(PROBES, "probes", U64),
+                Field::req(POSITIONS_OPEN, "positions_open", U64),
+                Field::req(POSITIONS_CLOSED, "positions_closed", U64),
+                Field::req(POSITIONS_FAILED, "positions_failed", U64),
+                Field::req(REALIZED_PNL_WEI, "realized_pnl_wei", Text),
+                Field::req(GAS_WEI, "gas_wei", U256),
+                Field::opt(LEDGER_ERROR, "ledger_error", Text),
             ],
         };
     }
@@ -1624,6 +1707,7 @@ pub const ALL: &[&Schema] = &[
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,
+    &live_ledger::SCHEMA,
     &live_qualification::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,

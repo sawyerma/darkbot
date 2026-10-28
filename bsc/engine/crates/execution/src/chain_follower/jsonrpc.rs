@@ -71,6 +71,8 @@ pub(super) struct Receipt {
     pub(super) block_number: u64,
     /// `status` is `0x1`.
     pub(super) succeeded: bool,
+    /// `gasUsed` and `effectiveGasPrice`, when the node states both.
+    pub(super) cost: Option<super::TxCost>,
     pub(super) logs: Vec<Log>,
 }
 
@@ -210,6 +212,14 @@ fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {
         1 => true,
         _ => return Err(RequestError::Shape(Field::Status)),
     };
+    // Optional on the wire; present, it must be a quantity.
+    let cost = match (r.get("gasUsed"), r.get("effectiveGasPrice")) {
+        (Some(_), Some(_)) => Some(super::TxCost {
+            gas_used: quantity(r, "gasUsed", Field::GasCost)?,
+            effective_gas_price: quantity(r, "effectiveGasPrice", Field::GasCost)?,
+        }),
+        _ => None,
+    };
     let Some(Value::Array(entries)) = r.get("logs") else {
         return Err(RequestError::Shape(Field::Logs));
     };
@@ -254,6 +264,7 @@ fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {
         block_hash,
         block_number,
         succeeded,
+        cost,
         logs,
     })
 }

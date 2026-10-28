@@ -215,6 +215,23 @@ pub struct CanonicalTx {
     pub sender: [u8; 20],
     pub nonce: u64,
     pub succeeded: bool,
+    /// What the transaction paid for gas, when its receipt states it
+    /// (plan 28.10.: the LIVE ledger's costs).
+    pub cost: Option<TxCost>,
+}
+
+/// A receipt's gas: used, and the effective price per unit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxCost {
+    pub gas_used: u64,
+    pub effective_gas_price: u64,
+}
+
+impl TxCost {
+    /// Gas used times the effective price, in wei.
+    pub fn wei(self) -> u128 {
+        u128::from(self.gas_used) * u128::from(self.effective_gas_price)
+    }
 }
 
 /// What the follower reports, in chain order.
@@ -504,6 +521,8 @@ pub enum Field {
     BlockHash,
     BlockNumber,
     Status,
+    /// A receipt's `gasUsed` or `effectiveGasPrice` is not a quantity.
+    GasCost,
     Logs,
     LogAddress,
     LogTopics,

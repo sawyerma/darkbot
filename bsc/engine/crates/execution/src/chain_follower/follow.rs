@@ -443,6 +443,7 @@ impl Follower {
                 sender: tx.from,
                 nonce: tx.nonce,
                 succeeded: receipt.succeeded,
+                cost: receipt.cost,
             })
             .collect();
         sink(CanonicalEvent::Block {

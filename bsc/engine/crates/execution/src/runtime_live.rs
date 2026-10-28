@@ -18,14 +18,21 @@
 //!    a switch off or a restart disarms, visibly), keeps the connections
 //!    and probes the deployment again every `BSC_EXEC_REPROBE_MS`.
 //!
+//! Every transaction whose bytes may have left is a fact of the LIVE
+//! ledger at once; the canonical chain's receipts (status, gas, the
+//! Portal's trade) and reorgs follow as facts, block by block; the
+//! positions they make are adopted by the executor (its exits sell the
+//! real tokens) and held by Strategy C (its exit rules on the real curve).
+//!
 //! Launches reach it only as verified full pending transactions (the
 //! runtime never hands it a hash-only sighting). Nothing is re-armed
 //! automatically after a refusal: switching the scope off and on again
 //! starts over, with a new fence.
 
-use crate::chain_follower::FollowerLimits;
+use crate::chain_follower::{CanonicalEvent, FollowerLimits};
 use crate::live_end::{LiveEnd, LiveHandoff, LiveRoute};
 use crate::live_key::LiveKey;
+use crate::live_ledger::{Book, Fact, FactKind, Ledger, PositionState, fold};
 use crate::live_qualification;
 use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Refusal};
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
@@ -145,6 +152,32 @@ impl Phase {
     }
 }
 
+/// What the ledger's new facts did to a position, for Strategy C.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PositionChange {
+    /// The BUY was included: `tokens` for `spent_wei`, its block at
+    /// `filled_ms`.
+    Opened {
+        token: [u8; 20],
+        tokens: U256,
+        spent_wei: U256,
+        filled_ms: u64,
+    },
+    /// Its SELL was included, or its BUY reverted or left the chain.
+    Ended { token: [u8; 20] },
+}
+
+/// What one block showed of a buyer transaction, until the block is
+/// complete.
+#[derive(Clone, Debug)]
+struct Seen {
+    tx_hash: [u8; 32],
+    succeeded: bool,
+    gas_wei: Option<U256>,
+    tokens: Option<U256>,
+    eth_wei: Option<U256>,
+}
+
 /// The components a grant of `strategies` arms.
 fn components(strategies: LiveStrategies) -> Vec<ComponentId> {
     let mut out = Vec::with_capacity(2);
@@ -200,6 +233,17 @@ pub struct LiveRuntime {
     /// The owner's boot session (tests: a fixed one) and wall clock.
     boot: Option<String>,
     wall: fn() -> u64,
+    ledger: Ledger,
+    /// The armed end's released transactions already in the ledger.
+    recorded: usize,
+    /// The block being applied: number, hash, time; its buyer transactions.
+    block: Option<(u64, [u8; 32], u64)>,
+    seen: Vec<Seen>,
+    /// The ledger's fold, and why it could not be read.
+    book: Book,
+    ledger_error: Option<String>,
+    /// Positions reported opened (to the executor and Strategy C).
+    opened: Vec<[u8; 20]>,
 }
 
 impl LiveRuntime {
@@ -232,6 +276,7 @@ impl LiveRuntime {
         paper_sender: Option<[u8; 20]>,
         prober: Prober,
     ) -> Self {
+        let ledger = Ledger::open(&state_dir);
         LiveRuntime {
             setup,
             exec,
@@ -255,7 +300,199 @@ impl LiveRuntime {
             prober,
             boot: None,
             wall: wall_ms,
+            ledger,
+            recorded: 0,
+            block: None,
+            seen: Vec::new(),
+            book: Book::default(),
+            ledger_error: None,
+            opened: Vec::new(),
         }
+        .folded()
+    }
+
+    fn folded(mut self) -> Self {
+        self.refold();
+        self
+    }
+
+    /// The ledger's fold now; an unreadable ledger is visible and counts
+    /// nothing.
+    fn refold(&mut self) {
+        match self.ledger.facts() {
+            Ok(facts) => {
+                self.book = fold(&facts);
+                self.ledger_error = None;
+            }
+            Err(e) => {
+                self.book = Book::default();
+                self.ledger_error = Some(e);
+            }
+        }
+    }
+
+    fn append(&mut self, fact: &Fact) {
+        if let Err(e) = self.ledger.append(fact, (self.wall)()) {
+            self.ledger_error = Some(e);
+        }
+    }
+
+    /// Every transaction the armed end released since the last call, as a
+    /// ledger fact (handed off or UNKNOWN).
+    fn sync_released(&mut self) {
+        let Some(x) = self.executor.as_ref() else {
+            return;
+        };
+        let generation = x.end().armed().grant_generation();
+        let new: Vec<Fact> = x.end().released()[self.recorded..]
+            .iter()
+            .map(|r| Fact {
+                kind: if r.handed_off {
+                    FactKind::Released
+                } else {
+                    FactKind::Unknown
+                },
+                tx_hash: r.tx_hash,
+                intent: r.kind,
+                component: r.component,
+                token: r.token,
+                nonce: r.nonce,
+                grant_generation: generation,
+                input_wei: Some(r.input_wei),
+                max_wei: Some(r.max_wei),
+                block: None,
+                gas_wei: None,
+                tokens: None,
+                eth_wei: None,
+            })
+            .collect();
+        self.recorded += new.len();
+        for f in &new {
+            self.append(f);
+        }
+        if !new.is_empty() {
+            self.refold();
+        }
+    }
+
+    /// One canonical event: the buyer's transactions of a block become
+    /// ledger facts once the block is complete (status, gas, the Portal's
+    /// trade); a reorg's orphaned blocks take their inclusions back. What
+    /// that did to the positions, for Strategy C.
+    pub fn on_canonical(&mut self, event: &CanonicalEvent) -> Vec<PositionChange> {
+        let buyer = self.setup.buyer;
+        match event {
+            CanonicalEvent::Block {
+                number,
+                hash,
+                timestamp_ms,
+                txs,
+                ..
+            } => {
+                self.block = Some((*number, *hash, *timestamp_ms));
+                self.seen = txs
+                    .iter()
+                    .filter(|t| t.sender == buyer && self.book.tx(&t.hash).is_some())
+                    .map(|t| Seen {
+                        tx_hash: t.hash,
+                        succeeded: t.succeeded,
+                        gas_wei: t.cost.map(|c| U256::from(c.wei())),
+                        tokens: None,
+                        eth_wei: None,
+                    })
+                    .collect();
+                Vec::new()
+            }
+            CanonicalEvent::FlapTrade(t) if t.origin == buyer => {
+                if let Some(s) = self.seen.iter_mut().find(|s| s.tx_hash == t.tx_hash) {
+                    s.tokens = Some(U256::from_be_bytes(t.amount));
+                    s.eth_wei = Some(U256::from_be_bytes(t.eth));
+                }
+                Vec::new()
+            }
+            CanonicalEvent::BlockComplete { .. } => {
+                let (Some(block), seen) = (self.block.take(), std::mem::take(&mut self.seen))
+                else {
+                    return Vec::new();
+                };
+                let facts: Vec<Fact> = seen
+                    .iter()
+                    .filter_map(|s| {
+                        let tx = self.book.tx(&s.tx_hash)?;
+                        let kind = if s.succeeded {
+                            FactKind::Included
+                        } else {
+                            FactKind::Reverted
+                        };
+                        Some(Fact {
+                            block: Some(block),
+                            gas_wei: s.gas_wei,
+                            tokens: s.tokens,
+                            eth_wei: s.eth_wei,
+                            ..Fact::about(&tx.released, kind)
+                        })
+                    })
+                    .collect();
+                self.record(&facts)
+            }
+            CanonicalEvent::Reorg { orphaned, .. }
+            | CanonicalEvent::ReorgTooDeep { orphaned, .. } => {
+                let facts: Vec<Fact> = self
+                    .book
+                    .txs
+                    .iter()
+                    .filter_map(|t| {
+                        let inclusion = t.inclusion.as_ref()?;
+                        let (n, h, _) = inclusion.block?;
+                        orphaned.contains(&(n, h)).then(|| Fact {
+                            block: inclusion.block,
+                            ..Fact::about(&t.released, FactKind::Orphaned)
+                        })
+                    })
+                    .collect();
+                self.record(&facts)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Appends `facts`, folds the ledger again and reports what changed:
+    /// a position opened is adopted by the executor (its exit sells the
+    /// real tokens).
+    fn record(&mut self, facts: &[Fact]) -> Vec<PositionChange> {
+        if facts.is_empty() {
+            return Vec::new();
+        }
+        for f in facts {
+            self.append(f);
+        }
+        self.refold();
+        let mut changes = Vec::new();
+        for p in &self.book.positions {
+            let open = p.state == PositionState::Open || p.state == PositionState::Exiting;
+            let reported = self.opened.contains(&p.token);
+            if open && !reported {
+                if let Some(x) = self.executor.as_mut() {
+                    x.adopt(p.token, p.tokens, p.input_wei);
+                }
+                self.opened.push(p.token);
+                changes.push(PositionChange::Opened {
+                    token: p.token,
+                    tokens: p.tokens,
+                    spent_wei: p.input_wei + p.gas_wei,
+                    filled_ms: p.opened_ms.unwrap_or_default(),
+                });
+            } else if !open && reported {
+                self.opened.retain(|t| *t != p.token);
+                changes.push(PositionChange::Ended { token: p.token });
+            }
+        }
+        changes
+    }
+
+    /// The ledger's fold now.
+    pub fn book(&self) -> &Book {
+        &self.book
     }
 
     /// The same path in a fixed boot session and wall clock (tests).
@@ -526,7 +763,18 @@ impl LiveRuntime {
         );
         self.arms += 1;
         match armed {
-            Ok(executor) => {
+            Ok(mut executor) => {
+                // Positions open from before (a restart, an earlier grant)
+                // stay exitable with their real tokens.
+                for p in self
+                    .book
+                    .positions
+                    .iter()
+                    .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
+                {
+                    executor.adopt(p.token, p.tokens, p.input_wei);
+                }
+                self.recorded = 0;
                 self.next_nonce = Some(next_nonce);
                 self.executor = Some(executor);
                 self.phase = Phase::Armed;
@@ -586,7 +834,9 @@ impl LiveRuntime {
             self.source_refused += 1;
             return None;
         }
-        launch_to(x, hash, raw, ingress_ns, owner, clock)
+        let buy = launch_to(x, hash, raw, ingress_ns, owner, clock);
+        self.sync_released();
+        buy
     }
 
     /// One Strategy C decision, when armed.
@@ -597,13 +847,9 @@ impl LiveRuntime {
         clock: &dyn Clock,
         now_unix_ms: u64,
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
-        Some(strategy_to(
-            self.executor.as_mut()?,
-            action,
-            owner,
-            clock,
-            now_unix_ms,
-        ))
+        let handed = strategy_to(self.executor.as_mut()?, action, owner, clock, now_unix_ms);
+        self.sync_released();
+        Some(handed)
     }
 
     /// C2's evidence about the buyer's nonces, applied to the armed lanes.
@@ -611,7 +857,7 @@ impl LiveRuntime {
         let Some(x) = self.executor.as_mut() else {
             return Vec::new();
         };
-        evidence
+        let outcomes: Vec<Option<IntentState>> = evidence
             .iter()
             .map(|e| {
                 x.apply_evidence(match e {
@@ -620,7 +866,26 @@ impl LiveRuntime {
                     LaneEvidence::Orphan(p) => NonceEvidence::Orphan(p),
                 })
             })
-            .collect()
+            .collect();
+        // Another transaction took a released one's nonce: it never
+        // happened (UNKNOWN resolved), its position neither.
+        let replaced: Vec<Fact> = evidence
+            .iter()
+            .zip(&outcomes)
+            .filter_map(|(e, o)| match (e, o) {
+                (LaneEvidence::Inclusion(p), Some(IntentState::Replaced)) => Some(p.nonce()),
+                _ => None,
+            })
+            .flat_map(|nonce| {
+                self.book
+                    .unresolved()
+                    .filter(move |t| t.released.nonce == nonce)
+                    .map(|t| Fact::about(&t.released, FactKind::Replaced))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let _ = self.record(&replaced);
+        outcomes
     }
 
     pub fn draft(&self) -> Draft {
@@ -670,6 +935,23 @@ impl LiveRuntime {
             .set(l::REPLACED, ev.replaced)
             .set(l::FINAL, ev.finalized)
             .set(l::ORPHANED, ev.orphaned);
+        d.set(
+            l::POSITIONS_OPEN,
+            self.book.count(PositionState::Open) + self.book.count(PositionState::Exiting),
+        )
+        .set(l::POSITIONS_CLOSED, self.book.count(PositionState::Closed))
+        .set(l::POSITIONS_FAILED, self.book.count(PositionState::Failed))
+        .set(
+            l::REALIZED_PNL_WEI,
+            self.book.realized_pnl_wei.to_string().as_str(),
+        )
+        .set(
+            l::GAS_WEI,
+            darkbot_bsc_record::Value::U256(self.book.gas_wei.to_be_bytes()),
+        );
+        if let Some(e) = &self.ledger_error {
+            d.set(l::LEDGER_ERROR, e.as_str());
+        }
         if self.source_refused > 0 {
             d.push(
                 l::REFUSALS,
@@ -888,6 +1170,7 @@ mod tests {
                 sender: buyer,
                 nonce: 5,
                 succeeded: true,
+                cost: None,
             }],
         });
         let evidence = c2.take_evidence();
@@ -914,6 +1197,294 @@ mod tests {
         );
         assert!(!x.armed());
         drop(store);
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// Plan 28.10. package 6: a Strategy C BUY released over loopback, its
+    /// receipt (gas, the Portal's trade) opens the position in the ledger;
+    /// a reorg takes it back and a new inclusion opens it again; the exit's
+    /// approval and SELL, signed by the buyer key and admitted by the
+    /// owner, close it; PnL = proceeds - input - every gas. A restart reads
+    /// the same book.
+    #[test]
+    fn a_real_position_opens_closes_and_is_accounted() {
+        use crate::chain_follower::{CanonicalTrade, TxCost};
+        use crate::live_ledger::PositionState;
+        use crate::paper_exec::{IntentKind, StrategyCurve};
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+            quote_native_sell,
+        };
+        let (state, _store, _) = live_ready_granting("live-pos", |now| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        });
+        let root = fixture("live-pos", "PASS");
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let spec = Spec {
+            venues: vec![(VenueId::Flap, ev())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: Some("ev/g08.dbrec".into()),
+            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+        };
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(
+            root.join(LIVE_QUALIFICATION_PATH),
+            build(&root, &spec, 1).unwrap(),
+        )
+        .unwrap();
+        let d = std::env::temp_dir().join(format!("bsc-live-pos-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let (key, buyer) = key_file(&d);
+        let (port, requests) = stand_in();
+        let mut x = LiveRuntime::with_prober(
+            LiveSetup {
+                key_path: key,
+                buyer,
+                route: LiveRouteConfig::Loopback { port },
+                connect_timeout: Duration::from_secs(2),
+            },
+            setup(d.join("unused.key"), Duration::from_secs(3_600)),
+            &root,
+            state.clone(),
+            d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", fixed);
+        let mut c2 = owner(&d, buyer);
+        let block = |n: u64, h: u8, parent: u8, txs| CanonicalEvent::Block {
+            number: n,
+            hash: [h; 32],
+            parent_hash: [parent; 32],
+            timestamp_s: 1_793_000_000 + (n - HEAD),
+            timestamp_ms: 1_793_000_000_000 + (n - HEAD) * 1_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs,
+        };
+        c2.canonical(&block(HEAD, 0xb1, 0xb0, Vec::new()));
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: buyer,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", record(&x).opt_text(l::REASON));
+        let reconnect = |x: &mut LiveRuntime| {
+            let failed = x
+                .executor
+                .as_mut()
+                .unwrap()
+                .end_mut()
+                .connect(Duration::from_secs(2));
+            assert!(failed.is_empty());
+        };
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let fresh = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let curve = StrategyCurve {
+            terms,
+            reserve: fresh.reserve_after,
+            circulating: fresh.supply_after,
+        };
+        let buy = StrategyAction::Buy {
+            token,
+            curve,
+            input_wei: input,
+            decided_ns: 0,
+        };
+        let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
+        assert_eq!((intents.len(), refused), (1, None));
+        let buy_tx = intents[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(x.book().unresolved().count(), 1);
+        // Its receipt: included with its gas and the Portal's trade.
+        let bought = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: curve.reserve,
+            circulating_before: curve.circulating,
+            input_amount: input,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let tokens = bought.output_amount;
+        let tx = |hash, nonce, gas: u64| CanonicalTx {
+            hash,
+            index: 0,
+            sender: buyer,
+            nonce,
+            succeeded: true,
+            cost: Some(TxCost {
+                gas_used: gas,
+                effective_gas_price: 50_000_000,
+            }),
+        };
+        let trade = |hash, n: u64, h: u8, sell, amount: U256, eth: U256| {
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: n,
+                block_hash: [h; 32],
+                tx_index: 0,
+                tx_hash: hash,
+                log_index: 0,
+                origin: buyer,
+                sell,
+                token,
+                trader: buyer,
+                amount: amount.to_be_bytes(),
+                eth: eth.to_be_bytes(),
+                fee: [0; 32],
+                post_price: [0; 32],
+            })
+        };
+        let apply = |x: &mut LiveRuntime, events: Vec<CanonicalEvent>| {
+            events
+                .iter()
+                .flat_map(|e| x.on_canonical(e))
+                .collect::<Vec<_>>()
+        };
+        let complete = |n: u64, h: u8| CanonicalEvent::BlockComplete {
+            number: n,
+            hash: [h; 32],
+        };
+        let opened = PositionChange::Opened {
+            token,
+            tokens,
+            spent_wei: input + U256::from(200_000u64 * 50_000_000),
+            filled_ms: 1_793_000_001_000,
+        };
+        let changes = apply(
+            &mut x,
+            vec![
+                block(HEAD + 1, 0xb2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
+                trade(buy_tx, HEAD + 1, 0xb2, false, tokens, input),
+                complete(HEAD + 1, 0xb2),
+            ],
+        );
+        assert_eq!(changes, vec![opened]);
+        // A reorg takes the block: the position is not open; included
+        // again in the new chain's block, it is.
+        let changes = apply(
+            &mut x,
+            vec![CanonicalEvent::Reorg {
+                orphaned: vec![(HEAD + 1, [0xb2; 32])],
+                new_head: (HEAD + 1, [0xc2; 32]),
+            }],
+        );
+        assert_eq!(changes, vec![PositionChange::Ended { token }]);
+        let changes = apply(
+            &mut x,
+            vec![
+                block(HEAD + 1, 0xc2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
+                trade(buy_tx, HEAD + 1, 0xc2, false, tokens, input),
+                complete(HEAD + 1, 0xc2),
+            ],
+        );
+        assert_eq!(changes, vec![opened]);
+        // The exit: approval, then (on a ready connection) the SELL of the
+        // real tokens, both signed by the buyer key.
+        let held = StrategyCurve {
+            reserve: bought.reserve_after,
+            circulating: bought.supply_after,
+            ..curve
+        };
+        let exit = StrategyAction::Exit {
+            token,
+            tokens,
+            curve: held,
+            decided_ns: 0,
+        };
+        reconnect(&mut x);
+        let (out, _) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        let approve_tx = out[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let sell_tx = out[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let positions = &x.book().positions;
+        assert_eq!(positions[0].state, PositionState::Exiting);
+        let proceeds = quote_native_sell(
+            &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
+                token: terms,
+                reserve_before: held.reserve,
+                circulating_before: held.circulating,
+                input_amount: tokens,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+            },
+        )
+        .unwrap()
+        .output_amount;
+        let changes = apply(
+            &mut x,
+            vec![
+                block(
+                    HEAD + 2,
+                    0xc3,
+                    0xc2,
+                    vec![tx(approve_tx, 1, 50_000), {
+                        let mut s = tx(sell_tx, 2, 150_000);
+                        s.index = 1;
+                        s
+                    }],
+                ),
+                trade(sell_tx, HEAD + 2, 0xc3, true, tokens, proceeds),
+                complete(HEAD + 2, 0xc3),
+            ],
+        );
+        assert_eq!(changes, vec![PositionChange::Ended { token }]);
+        let gas = U256::from((200_000u64 + 50_000 + 150_000) * 50_000_000);
+        let p = &x.book().positions[0];
+        assert_eq!(p.state, PositionState::Closed);
+        assert_eq!(p.gas_wei, gas);
+        let pnl = i128::try_from(proceeds).unwrap()
+            - i128::try_from(input).unwrap()
+            - i128::try_from(gas).unwrap();
+        assert_eq!(p.pnl_wei, Some(pnl));
+        let r = record(&x);
+        assert_eq!(r.u64(l::POSITIONS_CLOSED).unwrap(), 1);
+        assert_eq!(r.text(l::REALIZED_PNL_WEI).unwrap(), pnl.to_string());
+        // After a restart the ledger gives the same book.
+        let restarted =
+            crate::live_ledger::fold(&crate::live_ledger::Ledger::open(&state).facts().unwrap());
+        assert_eq!(&restarted, x.book());
+        x.shutdown();
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(state).unwrap();

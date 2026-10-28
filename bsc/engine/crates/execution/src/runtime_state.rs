@@ -515,6 +515,7 @@ mod tests {
                     sender: *sender,
                     nonce: *nonce,
                     succeeded: true,
+                    cost: None,
                 })
                 .collect(),
             observed: Instant::now(),

@@ -962,6 +962,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         sender: SYNTH_SENDER,
         nonce: i,
         succeeded,
+        cost: None,
     };
     assert_eq!(
         a101,
@@ -972,6 +973,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
                 sender: hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"),
                 nonce: 13,
                 succeeded: true,
+                cost: None,
             },
             synthetic(1, true),
             synthetic(2, false),

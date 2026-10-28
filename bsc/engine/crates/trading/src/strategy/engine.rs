@@ -26,6 +26,11 @@
 //! - Fail closed: a token whose curve is no longer tracked (`book`) is not
 //!   entered; an open position on it is `Unresolved`, never valued. A refused
 //!   Flap log, a gap or a reorg ends the tracking of every token.
+//! - Plan 28.10.: a real LIVE position is `Held` (`Input::Hold`, journaled
+//!   like every input): the tokens the receipt names and its whole real
+//!   cost, valued on the real curve (which holds the real BUY) by the same
+//!   exit rules; its exit triggers once. `Input::Unhold` ends it when its
+//!   SELL is included.
 
 use std::collections::BTreeMap;
 
@@ -90,6 +95,18 @@ pub enum Input {
     },
     /// A refused Flap log, a gap or a reorg: no curve stays tracked.
     Incomplete,
+    /// Plan 28.10.: a real LIVE position on `token`, its BUY included at
+    /// `filled_ms`: `tokens` received for `spent_wei` (input and gas).
+    Hold {
+        token: [u8; 20],
+        tokens: U256,
+        spent_wei: U256,
+        filled_ms: u64,
+    },
+    /// The real position's SELL was included: it ends.
+    Unhold {
+        token: [u8; 20],
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +199,13 @@ enum Stage {
         exit_block: u64,
         reason: ExitReason,
     },
+    /// Plan 28.10.: a real LIVE position, valued on the real book;
+    /// `triggered` once its exit was called for.
+    Held {
+        entry: Entry,
+        filled_ms: u64,
+        triggered: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -235,7 +259,7 @@ impl Engine {
         let t = self.tokens.values().find(|t| t.token == *token)?;
         let book = match &t.stage {
             Stage::Open { shadow, .. } | Stage::Exiting { shadow, .. } => shadow.as_ref(),
-            Stage::Observing(_) | Stage::Entering { .. } => &t.book,
+            Stage::Observing(_) | Stage::Entering { .. } | Stage::Held { .. } => &t.book,
         };
         Some((book.priced().ok()?, book.reserve, book.circulating))
     }
@@ -243,9 +267,19 @@ impl Engine {
     /// The tokens an open position holds (what its exit sells).
     pub fn position_tokens(&self, token: &[u8; 20]) -> Option<U256> {
         match &self.tokens.values().find(|t| t.token == *token)?.stage {
-            Stage::Open { entry, .. } | Stage::Exiting { entry, .. } => Some(entry.tokens),
+            Stage::Open { entry, .. }
+            | Stage::Exiting { entry, .. }
+            | Stage::Held { entry, .. } => Some(entry.tokens),
             Stage::Observing(_) | Stage::Entering { .. } => None,
         }
+    }
+
+    /// Real LIVE positions held (plan 28.10.).
+    pub fn held_positions(&self) -> usize {
+        self.tokens
+            .values()
+            .filter(|t| matches!(t.stage, Stage::Held { .. }))
+            .count()
     }
 
     fn token_mut(&mut self, token: &[u8; 20]) -> Option<&mut Token> {
@@ -340,6 +374,28 @@ impl Engine {
                         o.gap = true;
                     }
                 }
+            }
+            Input::Hold {
+                token,
+                tokens,
+                spent_wei,
+                filled_ms,
+            } => {
+                if let Some(t) = self.token_mut(&token) {
+                    t.stage = Stage::Held {
+                        entry: Entry {
+                            tokens,
+                            input_wei: spent_wei,
+                            network_fee_wei: U256::ZERO,
+                            spent_wei,
+                        },
+                        filled_ms,
+                        triggered: false,
+                    };
+                }
+            }
+            Input::Unhold { token } => {
+                self.tokens.retain(|_, t| t.token != token);
             }
         }
         out
@@ -531,6 +587,51 @@ impl Engine {
                         }
                     }
                 }
+                Stage::Held {
+                    entry: e,
+                    filled_ms,
+                    triggered: false,
+                } => {
+                    if let Err(why) = t.book.status {
+                        out.push(Output::Unresolved {
+                            token: t.token,
+                            block: number,
+                            reason: why,
+                        });
+                        self.tokens.remove(&key);
+                        continue;
+                    }
+                    let mut reasons = Vec::new();
+                    if t.creator_sold.is_some() {
+                        reasons.push(ExitReason::CreatorSell);
+                    }
+                    // The real curve holds the real BUY: it is the one the
+                    // position is valued and sold on.
+                    if let Some((target, stop)) = self.valuation(&t.book, &e) {
+                        if target {
+                            reasons.push(ExitReason::Target);
+                        } else if stop {
+                            reasons.push(ExitReason::Stop);
+                        }
+                    }
+                    if time_ms >= filled_ms.saturating_add(self.cfg.hold_ms) {
+                        reasons.push(ExitReason::Timeout);
+                    }
+                    if let Some(reason) = reasons.into_iter().min() {
+                        out.push(Output::ExitTriggered {
+                            token: t.token,
+                            block: number,
+                            reason,
+                        });
+                        if let Some(t) = self.tokens.get_mut(&key) {
+                            t.stage = Stage::Held {
+                                entry: e,
+                                filled_ms,
+                                triggered: true,
+                            };
+                        }
+                    }
+                }
                 Stage::Exiting {
                     entry: e,
                     shadow,
@@ -570,7 +671,10 @@ impl Engine {
                     }
                     self.tokens.remove(&key);
                 }
-                Stage::Exiting { .. } => {}
+                Stage::Exiting { .. }
+                | Stage::Held {
+                    triggered: true, ..
+                } => {}
             }
         }
     }

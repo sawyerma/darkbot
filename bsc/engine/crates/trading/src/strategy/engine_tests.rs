@@ -507,3 +507,42 @@ fn tx_lands_then_exits_on_the_creators_earlier_sale() {
         ]
     );
 }
+
+/// Plan 28.10.: a real LIVE position held on a launch the filter would
+/// reject: never decided away, valued on the real curve (its own BUY in
+/// it) by the same rules; the target triggers its exit once; its tokens
+/// and the real curve are what the exit sells on; `Unhold` ends it.
+#[test]
+fn a_held_real_position_exits_by_the_same_rules_once() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    // The real BUY (ours) is one of the curve's trades.
+    let input = 10_000_000_000_000_000u64;
+    let before = c.book(TOKEN).clone();
+    let q = quote_native_buy(&before.buy_inputs(U256::from(input)).unwrap()).unwrap();
+    c.buy(TOKEN, [0xEE; 20], input);
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: U256::from(input + 30_000_000_000_000),
+        filled_ms: 0,
+    });
+    assert_eq!(c.engine.held_positions(), 1);
+    assert_eq!(c.engine.position_tokens(&TOKEN), Some(q.output_amount));
+    for _ in 0..5 {
+        c.next_block();
+    }
+    // Held: no decision, no trigger on a flat curve.
+    assert!(c.kinds().is_empty(), "{:?}", c.kinds());
+    for i in 10..30u8 {
+        c.buy(TOKEN, [i; 20], 200_000_000_000_000_000);
+    }
+    c.next_block();
+    c.next_block();
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 105 Target"]);
+    let (_, reserve, _) = c.engine.curve_of(&TOKEN).unwrap();
+    assert_eq!(reserve, c.book(TOKEN).reserve, "the real curve");
+    c.feed(Input::Unhold { token: TOKEN });
+    assert_eq!((c.engine.held_positions(), c.engine.followed()), (0, 0));
+}

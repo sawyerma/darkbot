@@ -92,6 +92,12 @@ pub struct Released {
     pub tx_hash: [u8; 32],
     pub kind: LiveIntentKind,
     pub component: ComponentId,
+    pub token: [u8; 20],
+    pub nonce: u64,
+    /// The signed native value, and with the gas limit at the signed price
+    /// the most it can cost.
+    pub input_wei: U256,
+    pub max_wei: U256,
     /// Whether a builder took it whole; otherwise UNKNOWN.
     pub handed_off: bool,
     pub report: Option<FanoutReport>,
@@ -530,6 +536,10 @@ impl End for LiveEnd {
                 tx_hash,
                 kind,
                 component,
+                token: ticket.token().into_array(),
+                nonce: ticket.nonce(),
+                input_wei: budget.max_buy_input_wei,
+                max_wei: budget.max_total_wei,
                 handed_off: result.is_ok(),
                 report: dispatched.as_ref().ok().copied(),
                 frames,

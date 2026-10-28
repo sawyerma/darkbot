@@ -457,6 +457,32 @@ fn receipt_and_log_shapes() {
     );
 }
 
+/// Plan 28.10.: a receipt's gas (used, effective price) is read when the
+/// node states both; a malformed one is refused, never guessed.
+#[test]
+fn a_receipt_states_its_gas_cost() {
+    let none = parse_receipts(receipt_body("").as_bytes(), 1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(none[0].cost, None);
+    let with = receipt_body("").replace(
+        r#""status":"0x1""#,
+        r#""status":"0x1","gasUsed":"0x5208","effectiveGasPrice":"0x2faf080""#,
+    );
+    let r = parse_receipts(with.as_bytes(), 1).unwrap().unwrap();
+    let cost = r[0].cost.unwrap();
+    assert_eq!(
+        (cost.gas_used, cost.effective_gas_price),
+        (21_000, 50_000_000)
+    );
+    assert_eq!(cost.wei(), 1_050_000_000_000);
+    let bad = with.replace("0x5208", "5208");
+    assert_eq!(
+        parse_receipts(bad.as_bytes(), 1),
+        Err(RequestError::Shape(Field::GasCost))
+    );
+}
+
 fn limits() -> FollowerLimits {
     FollowerLimits {
         poll: Duration::from_millis(500),
