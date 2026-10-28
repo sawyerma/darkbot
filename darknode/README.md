@@ -2,6 +2,7 @@
 
 > **Status: GATE 1 – KONZEPT / RECHERCHE / PHASENPLAN (OPEN)** · Stand: 26.10.2026  
 > **Eigenständiges DarkBot-Projekt** neben `bsc/` und `project_0/`. Kein produktiver Connector, keine Handelsfreigabe, kein deployter Bot.  
+> **Code-Übernahme – erstes Entwurfsmuster (V3.1):** [docs/CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md](docs/CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md) – WS_AI/Project_0/BSC-Reuse und konkrete Rust-/Chart-/Backtest-Muster, **nicht implementiert/nicht getestet**.
 > **Zentrales Testprotokoll:** [docs/TESTPROTOKOLL.md](docs/TESTPROTOKOLL.md) – alle Testfälle, PASS/FAIL/OPEN/BLOCKED/NOT_RUN, reale Ergebnisse und Historie.
 > **Verbindliche Planung:** [docs/GATE_1.md](docs/GATE_1.md) · [docs/PHASENPLAN.md](docs/PHASENPLAN.md) · [P1-Phasenplan V1.1](docs/PHASENPLAN_P1_V1.md) · [Endpoint-Registry](docs/ENDPOINT_REGISTRY.md)
 

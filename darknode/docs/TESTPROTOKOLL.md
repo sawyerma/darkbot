@@ -257,6 +257,62 @@ Quelle: [P5_ORDER_STATE_UND_CRASH_MATRIX_V1.md](P5_ORDER_STATE_UND_CRASH_MATRIX_
 
 **Neue Einzeltests in P2–P4/P6–P10:** erste tatsächliche Assertion erhält eine stabile neue `DN-P2-001`-, `DN-P3-001`-, `DN-P4-001`-, `DN-P6-001`-, `DN-P7-001`-, `DN-P8-001`- oder `DN-OPS-001`-Kennung. **Nicht im Voraus hunderte erfundene Cases vergeben** und die vorhandenen P1-/P5-IDs nicht umnummerieren. Jede weitere Prüfanforderung kommt sowohl in den Phasentestplan als auch hierher.
 
+### Ergänzende Code-Übernahme-Solltests (Entwurf V3.1; alle NOT_RUN)
+
+Verbindliche Einzel-IDs aus [CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md), ohne Abnahmebehauptung. Sie sind **zusätzliche Szenarien** zu vorhandenen P1-/P4-/P5-/DN-PROTO-Gates, keine neue parallele Testarchitektur. Teilweise frühere V1/V2-IDs besitzen noch unvollständige Definitionen; diese sind erst nach Präzisierung als individuelle Cases zu registrieren, nicht frei zu erfinden. Das Testprotokoll bleibt das einzige Ergebnisjournal.
+
+| Test-ID | Sollnachweis | Status | Evidence / letztes Ergebnis |
+|---|---|---|---|
+| `DN-P1-WS-001` | Backoff und Obergrenze | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-WS-002` | Flapping setzt Backoff nicht zurück | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-WS-003` | Reconnect dauerhaft, Alarm statt Aufgabe | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-WS-004` | Abonnierte Lane ohne Erstnachricht wird STALE | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-WS-005` | Disconnect erzeugt eindeutiges Coverage-GAP | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-WS-006` | Dekodierfehler ergibt UNAVAILABLE und Datenlücke | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-001` | Out-of-order innerhalb offenen Fensters | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-002` | Late-Trade überschreibt keine finale Kerze | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-003` | Gleiche ms nach belegter source_seq – Open/Close | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-004` | Gap-Qualität und keine künstlichen Nulltrade-Kerzen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-005` | MTF aus 1s identisch zu Rohtrade-Fold | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-006` | Halboffenes Rebuild-Fenster | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-007` | Quellen-Dedupe und Konflikt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-008` | Live/Rebuild-Hash-Gleichheit | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-009` | Read-time-1m aus 1s identisch zu MtfAgg | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-010` | Exklusive History-Seiten ohne Doppel/Loch | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P1-AGG-011` | Offene TF-Kerze wird nie als vollständig geliefert | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-001` | Prepend früherer History-Seiten ohne Scrollsprung | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-002` | Zwei Charts laden getrennt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-003` | Fremde/veraltete request_id verworfen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-004` | Chart-Library-Load-Fehler an alle Aufrufer, kein Hänger | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-005` | Adapter-Fehler werden gemeldet statt geschluckt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-006` | Live-Update derselben offenen Kerze inkrementell | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-007` | Scroll-/Chart-Listener nach destroy abgemeldet | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P7-CH-008` | Backfill-Band ohne frameweises React-Rendering | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-001` | REST Pagination mehrseitig und vollständige Coverage | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-002` | Pagination endet nach belegtem Endpoint-Vertrag | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-003` | Wiederholter Cursor wird abgelehnt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-004` | PageLimit blockiert vollständigen Snapshot | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-016` | FILLED erst nach Filljournal und Positionsabgleich | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-017` | Späte ACKs ohne Zustandsrückschritt und Fill vor ACK | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-018` | Unbewiesene REST-Pagination darf Account nicht ersetzen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-019` | Divergierende IDs dürfen keine falsche Mengenbuchung erzeugen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-020` | Dedupe aller wirtschaftlich relevanten Fillfelder | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-021` | Overfill beweissicher, Zustand UNKNOWN | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-022` | Überlappende REST-Polls, alte Antworten verworfen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-023` | Neuere WS-Position überschreibt REST nicht | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-024` | WS-Snapshot ohne Scope löscht nichts | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-025` | Teilfill-Stopnachlage, Entries gesperrt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-026` | Schutzfrist führt zu kontrollierter Notschließung | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-027` | IO-Queue abgewiesen ⇒ NotSent nur mit Beweis | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-028` | Durabilityfehler blockiert Resend | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-029` | Unbekannter Endpoint ist nicht sendefähig | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-030` | Gemeinsames IP-/UID-Rate-Budget über Endpoints | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P5-UP-031` | HTTP 429 drosselt und Retry-After berücksichtigt | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P4-007` | Rohtrade-Reihenfolge innerhalb derselben ms | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P4-008` | Market-Fill Teilnahmequote und Modellannahmen | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P4-009` | Teilfills und nicht aufgefüllte Restmenge | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+| `DN-P4-010` | Mark-Stop-Trigger: richtige Quelle/Unsicherheit | NOT_RUN | Erster Codeentwurf [V3.1](CODE_UEBERNAHMEPLAN_V3_KONSOLIDIERT.md); kein tatsächlicher Testlauf |
+
 ## 5. Bisherige Research- und Fremdprojekt-Ergebnisse – abgegrenzt von DarkNode-PASS
 
 | Evidence-ID | Beobachtetes Ergebnis | Originalbeleg | DarkNode-Bewertung |
