@@ -28,6 +28,24 @@ struct Pending {
     requested: std::time::Instant,
 }
 
+/// A window's end in progress: its segment's seal, then its check off the owner thread (D-1:
+/// detection never waits for a window's I/O).
+enum Boundary {
+    Sealing(Pending),
+    Checking(std::thread::JoinHandle<Checked>),
+}
+
+/// What a window's check returned: a Shadow-only run's windows (back from the check) and its
+/// verdict, an econ run's segment integrity; `Err` is the code the run fails with.
+struct Checked {
+    windows: Option<RollingWindows>,
+    ended_unix_s: u64,
+    outcome: Result<Option<us::WindowCheck>, (&'static str, String)>,
+}
+
+const ROTATION_STALLED: &str = "UNTIL_STOPPED_OWNER_ROTATION_STALLED";
+const CHECK_PANICKED: &str = "UNTIL_STOPPED_WINDOW_CHECK_PANICKED";
+
 /// DEC-16: the run directory of a Shadow run whose record journal is `record_path`
 /// (`P0_RECORD_PATH`); a continuation names exactly this run.
 pub(crate) fn resume_dir(
@@ -118,7 +136,7 @@ pub(crate) struct OwnerWindows {
     /// The window now open (0 before the first); the MT0 journal follows it.
     open: u64,
     mt0_window: std::sync::Arc<AtomicU64>,
-    pending: Option<Pending>,
+    pending: Option<Boundary>,
     environment: fn(&std::path::Path) -> preflight::Environment,
     /// How long a window's end may wait for its sealed segment (`market_writer_stall_ms`).
     stall: Duration,
@@ -351,17 +369,30 @@ impl OwnerWindows {
         if self.stop.is_some() {
             return Ok(self.stop);
         }
-        if let Some(p) = &self.pending {
-            return match p.rotation.try_recv() {
-                Ok(Ok(sealed)) => {
-                    let p = self.pending.take().expect("pending");
-                    self.close(p, sealed)
-                }
-                Ok(Err(code)) => self.fail(code),
-                Err(TryRecvError::Empty) if p.requested.elapsed() <= self.stall => Ok(None),
-                Err(TryRecvError::Empty) => self.fail("UNTIL_STOPPED_OWNER_ROTATION_STALLED"),
-                Err(TryRecvError::Disconnected) => self.fail("OWNER_EVIDENCE_DISCONNECTED"),
-            };
+        match self.pending.take() {
+            None => {}
+            Some(Boundary::Sealing(p)) => {
+                return match p.rotation.try_recv() {
+                    Ok(Ok(sealed)) => self.spawn_check(p, sealed),
+                    Ok(Err(code)) => self.fail(code),
+                    Err(TryRecvError::Empty) if p.requested.elapsed() <= self.stall => {
+                        self.pending = Some(Boundary::Sealing(p));
+                        Ok(None)
+                    }
+                    Err(TryRecvError::Empty) => self.fail(ROTATION_STALLED),
+                    Err(TryRecvError::Disconnected) => self.fail("OWNER_EVIDENCE_DISCONNECTED"),
+                };
+            }
+            Some(Boundary::Checking(h)) if !h.is_finished() => {
+                self.pending = Some(Boundary::Checking(h));
+                return Ok(None);
+            }
+            Some(Boundary::Checking(h)) => {
+                return match h.join() {
+                    Ok(c) => self.checked(c),
+                    Err(_) => self.fail(CHECK_PANICKED),
+                };
+            }
         }
         if self.due(now_ns, now_s, econ) {
             let record = OwnerWindow {
@@ -383,12 +414,12 @@ impl OwnerWindows {
                 Driver::Own { budget, .. } => Some(budget.roll_window()),
                 Driver::Econ => None,
             };
-            self.pending = Some(Pending {
+            self.pending = Some(Boundary::Sealing(Pending {
                 ended_unix_s: now_s,
                 provider,
                 rotation,
                 requested: std::time::Instant::now(),
-            });
+            }));
             self.open += 1;
             self.mt0_window.store(self.open, Ordering::Release);
             self.started_unix_s = now_s;
@@ -407,73 +438,141 @@ impl OwnerWindows {
         Ok(self.stop)
     }
 
-    /// Checks the window that ended at `p` against its sealed evidence segment: a Shadow-only
-    /// run's gates (`check_window`), an econ run's segment integrity.
-    fn close(
+    /// Starts the check of the window that ended at `p` against its sealed evidence segment off
+    /// the owner thread: a Shadow-only run's gates (`check_window`, which re-reads the segment),
+    /// an econ run's segment integrity.
+    fn spawn_check(
         &mut self,
         p: Pending,
         sealed: RotatedSegment,
     ) -> Result<Option<&'static str>, &'static str> {
-        let Driver::Own {
-            rolling, windows, ..
-        } = &mut self.driver
-        else {
-            return match us::segment_intact(&sealed.sealed, sealed.root_sha256) {
-                Ok(()) => Ok(None),
-                Err(e) => {
-                    crate::console::line(format!("UNTIL_STOPPED_SEGMENT_INTEGRITY {e}"));
-                    self.fail("UNTIL_STOPPED_SEGMENT_INTEGRITY")
-                }
-            };
+        let run_dir = self.run_dir.clone();
+        let environment = self.environment;
+        let job: Box<dyn FnOnce() -> Checked + Send> = match &mut self.driver {
+            Driver::Own {
+                rolling, windows, ..
+            } => {
+                let Some(mut windows) = windows.take() else {
+                    return self.fail("UNTIL_STOPPED_WINDOWS_WRITE_FAILED");
+                };
+                let rolling = (**rolling).clone();
+                Box::new(move || {
+                    let next_end = p
+                        .ended_unix_s
+                        .saturating_add(rolling.binding.checkpoint_seconds);
+                    let outcome = windows
+                        .close(
+                            &rolling.config,
+                            super::super::boot_audit::SHADOW_CAPTURE_SOURCE,
+                            us::Measured {
+                                now: p.ended_unix_s,
+                                bytes: us::run_bytes(&run_dir),
+                                run_volume: &run_dir,
+                                environment: environment(&run_dir),
+                                provider: p.provider.unwrap_or(
+                                    darkbot_solana::provider::WindowUsage {
+                                        requests: 0,
+                                        bytes: 0,
+                                    },
+                                ),
+                                evidence: us::newest_evidence(
+                                    &rolling.project,
+                                    &rolling.config,
+                                    &rolling.binding,
+                                    next_end,
+                                ),
+                                sealed: Some((&sealed.sealed, sealed.root_sha256)),
+                            },
+                        )
+                        .map(Some)
+                        .map_err(|e| ("UNTIL_STOPPED_WINDOWS_WRITE_FAILED", e.to_string()));
+                    Checked {
+                        windows: Some(windows),
+                        ended_unix_s: p.ended_unix_s,
+                        outcome,
+                    }
+                })
+            }
+            Driver::Econ => Box::new(move || Checked {
+                windows: None,
+                ended_unix_s: p.ended_unix_s,
+                outcome: us::segment_intact(&sealed.sealed, sealed.root_sha256)
+                    .map(|()| None)
+                    .map_err(|e| ("UNTIL_STOPPED_SEGMENT_INTEGRITY", e)),
+            }),
         };
-        let next_end = p
-            .ended_unix_s
-            .saturating_add(rolling.binding.checkpoint_seconds);
-        let windows = windows.as_mut().expect("open");
-        let check = windows.close(
-            &rolling.config,
-            super::super::boot_audit::SHADOW_CAPTURE_SOURCE,
-            us::Measured {
-                now: p.ended_unix_s,
-                bytes: us::run_bytes(&self.run_dir),
-                run_volume: &self.run_dir,
-                environment: (self.environment)(&self.run_dir),
-                provider: p.provider.unwrap_or(darkbot_solana::provider::WindowUsage {
-                    requests: 0,
-                    bytes: 0,
-                }),
-                evidence: us::newest_evidence(
-                    &rolling.project,
-                    &rolling.config,
-                    &rolling.binding,
-                    next_end,
-                ),
-                sealed: Some((&sealed.sealed, sealed.root_sha256)),
-            },
-        );
-        let check = match check {
-            Ok(check) => check,
-            Err(e) => {
-                crate::console::line(format!("UNTIL_STOPPED_WINDOWS {e}"));
-                return self.fail("UNTIL_STOPPED_WINDOWS_WRITE_FAILED");
+        match std::thread::Builder::new()
+            .name("p0-owner-window".into())
+            .spawn(job)
+        {
+            Ok(h) => {
+                self.pending = Some(Boundary::Checking(h));
+                Ok(None)
+            }
+            Err(_) => self.fail("UNTIL_STOPPED_WINDOW_CHECK_SPAWN"),
+        }
+    }
+
+    /// Takes a window's check: a Shadow-only run's windows back, its verdict journaled (its
+    /// HALT, or the end of its standing approval, stops the run), an econ run's integrity.
+    fn checked(&mut self, c: Checked) -> Result<Option<&'static str>, &'static str> {
+        if let (Driver::Own { windows, .. }, Some(w)) = (&mut self.driver, c.windows) {
+            *windows = Some(w);
+        }
+        let check = match c.outcome {
+            Ok(None) => return Ok(self.stop),
+            Ok(Some(check)) => check,
+            Err((code, e)) => {
+                crate::console::line(format!("{code} {e}"));
+                return self.fail(code);
             }
         };
         crate::console::line(format!(
             "[UNTIL_STOPPED] window={} verdict={} {}",
             check.window, check.verdict, check.detail
         ));
-        if let Some(reason) = rolling.after_window(&check) {
-            if let Some(code) = check.halt_code() {
-                rolling.suspend_autostart(code, p.ended_unix_s);
+        if let Driver::Own { rolling, .. } = &self.driver {
+            if let Some(reason) = rolling.after_window(&check) {
+                if let Some(code) = check.halt_code() {
+                    rolling.suspend_autostart(code, c.ended_unix_s);
+                }
+                self.stop = Some(reason);
             }
-            self.stop = Some(reason);
         }
         Ok(self.stop)
     }
 
-    /// The run's end: a window's end still waiting for its segment is checked first (within
-    /// the stall budget), then the open window's record carries the run's end — its stop, its
-    /// failure, or `end` (how the owner loop ended otherwise).
+    /// DEC-16 (review M-2): settles a window's end still in progress — its segment's seal
+    /// (within the stall budget), then its check — so the run's result and its ordered-end
+    /// rule include that window (the owner loop has ended).
+    pub(crate) fn settle(&mut self) {
+        if let Some(Boundary::Sealing(p)) =
+            self.pending.take_if(|b| matches!(b, Boundary::Sealing(_)))
+        {
+            let left = self.stall.saturating_sub(p.requested.elapsed());
+            match p.rotation.recv_timeout(left) {
+                Ok(Ok(sealed)) => {
+                    let _ = self.spawn_check(p, sealed);
+                }
+                Ok(Err(code)) => {
+                    let _ = self.fail(code);
+                }
+                Err(_) => {
+                    let _ = self.fail(ROTATION_STALLED);
+                }
+            }
+        }
+        if let Some(Boundary::Checking(h)) = self.pending.take() {
+            let _ = match h.join() {
+                Ok(c) => self.checked(c),
+                Err(_) => self.fail(CHECK_PANICKED),
+            };
+        }
+    }
+
+    /// The run's end: a window's end still in progress is settled first, then the open
+    /// window's record carries the run's end — its stop, its failure, or `end` (how the owner
+    /// loop ended otherwise).
     pub(crate) fn end(
         &mut self,
         end: &'static str,
@@ -481,20 +580,7 @@ impl OwnerWindows {
         evidence: &mut OwnerEvidenceWriter,
         counters: OwnerCounters,
     ) {
-        if let Some(p) = self.pending.take() {
-            let left = self.stall.saturating_sub(p.requested.elapsed());
-            match p.rotation.recv_timeout(left) {
-                Ok(Ok(sealed)) => {
-                    let _ = self.close(p, sealed);
-                }
-                Ok(Err(code)) => {
-                    let _ = self.fail(code);
-                }
-                Err(_) => {
-                    let _ = self.fail("UNTIL_STOPPED_OWNER_ROTATION_STALLED");
-                }
-            }
-        }
+        self.settle();
         if self.open == 0 {
             return;
         }
@@ -518,7 +604,8 @@ impl OwnerWindows {
 
     /// Seals a Shadow-only run's windows journal: complete only for a run that ended in order
     /// and never halted or failed a window (an econ run's is its capture's).
-    pub(crate) fn finish(self, in_order: bool) {
+    pub(crate) fn finish(mut self, in_order: bool) {
+        self.settle();
         if let Driver::Own {
             windows: Some(w), ..
         } = self.driver
@@ -576,6 +663,17 @@ impl ShadowOwner {
         );
         self.windows = Some(w);
         go_on
+    }
+
+    /// DEC-16 (review M-2): after the owner loop, the window's end still in progress is settled
+    /// and a HALT or a failed window is the run's result (before its end is recorded).
+    pub(super) fn settle_windows(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(w) = self.windows.as_mut() else {
+            return Ok(());
+        };
+        w.settle();
+        w.result()
+            .map_err(|code| Box::new(OwnerTerminal(code)) as Box<dyn std::error::Error>)
     }
 
     /// DEC-16 (D-7): the ordered end of an unbounded Shadow run — no new candidate, the session

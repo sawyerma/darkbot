@@ -5681,3 +5681,29 @@ fn dec16_a_crashed_econ4h_run_continues_its_window_numbers() {
     );
     let _ = std::fs::remove_dir_all(&cfg.run_dir);
 }
+
+/// DEC-16 (review M-1): the Shadow owner of a continued econ4h run reads nothing before its
+/// capture held the window the crash interrupted — it waits for the verdict (woken by it), is
+/// refused with the capture's refusal, and gives up at its bound without one.
+#[cfg(any(feature = "historical", feature = "crate_health"))]
+#[test]
+fn dec16_a_continued_econ4h_owner_waits_for_the_capture_resume_verdict() {
+    let (h, _rx) = test_handle(16);
+    assert!(h
+        .await_resume_check(Duration::from_millis(20))
+        .unwrap_err()
+        .starts_with("UNTIL_STOPPED_RESUME_UNCHECKED"));
+    let capture = h.clone();
+    let verdict = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        capture.resume_checked(true);
+    });
+    assert_eq!(h.await_resume_check(Duration::from_secs(10)), Ok(()));
+    verdict.join().unwrap();
+    let (refused, _rx) = test_handle(16);
+    refused.resume_checked(false);
+    assert!(refused
+        .await_resume_check(Duration::from_secs(10))
+        .unwrap_err()
+        .starts_with("UNTIL_STOPPED_RESUME_REFUSED"));
+}

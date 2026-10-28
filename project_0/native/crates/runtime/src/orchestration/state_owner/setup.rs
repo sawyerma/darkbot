@@ -137,19 +137,28 @@ pub(super) fn prepare(
     refuse_unadmitted_unbounded(econ.is_some(), rolling.is_some(), &|k| {
         std::env::var(k).ok()
     })?;
+    // DEC-16 (review M-1): a continued econ4h run's owner reads nothing before its capture held
+    // the window the crash interrupted (bounded by the plan's bootstrap budget).
+    if let Some(h) = econ
+        .as_ref()
+        .filter(|h| h.cfg.rolling.as_ref().is_some_and(|r| r.resume.is_some()))
+    {
+        h.await_resume_check(Duration::from_secs(h.cfg.plan.budgets.bootstrap_seconds))?;
+    }
     // DEC-16: a crashed unbounded Shadow run continues only as itself — the window the crash
     // interrupted re-checked before anything is read (its HALT ends the run here).
+    let resume_ns = clock.now_ns();
+    let resume_s = (clock.unix_ns(resume_ns) / 1_000_000_000) as u64;
     let resumed = match rolling.as_ref().and_then(|r| Some((r, r.resume.as_ref()?))) {
         Some((r, run)) => {
             let record = crate::analytics::journal::binary_path(std::path::Path::new(
                 &config::require("P0_RECORD_PATH")?,
             ));
             let dir = super::windows::resume_dir(&record, run)?;
-            let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
             Some(super::windows::resume_windows(
                 r,
                 &dir,
-                now_s,
+                resume_s,
                 crate::storage::preflight::environment,
                 &darkbot_solana::provider::shared(),
             )?)
@@ -990,13 +999,10 @@ pub(super) fn prepare(
         mt0_journal,
     )?;
     let windows = match (rolling, resumed) {
-        (Some(r), Some((w, _))) => {
-            let now_ns = clock.now_ns();
-            let now_s = (clock.unix_ns(now_ns) / 1_000_000_000) as u64;
-            Some(super::windows::OwnerWindows::resumed(
-                r, run_dir, mt0_window, w, now_ns, now_s,
-            ))
-        }
+        // The next window opens where the resume check closed the interrupted one (review L-5).
+        (Some(r), Some((w, _))) => Some(super::windows::OwnerWindows::resumed(
+            r, run_dir, mt0_window, w, resume_ns, resume_s,
+        )),
         (Some(r), None) => Some(super::windows::OwnerWindows::new(r, run_dir, mt0_window)),
         (None, _) if econ_rolling => Some(super::windows::OwnerWindows::econ(
             run_dir,

@@ -4532,3 +4532,65 @@ fn dec16_the_operator_stop_ends_an_unbounded_shadow_run_in_order() {
     assert_eq!(ends, [Some(us::OPERATOR_STOP.to_string())]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// DEC-16 (review M-2): a window that ends in the very pass the operator stops — its check still
+/// in progress when the owner loop ends — is part of the run's result: its HALT is the run's
+/// terminal result, never an ordered OPERATOR_STOP.
+#[test]
+fn dec16_a_window_ending_with_the_stop_is_part_of_the_run_result() {
+    use crate::orchestration::until_stopped as us;
+    let mut f = fixture("dec16_last_window");
+    let mut b = us::tests::binding(1, 2);
+    b.mode = "shadow".into();
+    let rolling = us::Rolling {
+        project: f.dir.clone(),
+        binding: b,
+        qualification_id: "0123456789abcdef".into(),
+        config: darkbot_solana::runtime_config::RuntimeConfig::default(),
+        max_runtime_seconds: None,
+        resume: None,
+        autostart: None,
+    };
+    let full = |_: &std::path::Path| crate::storage::preflight::Environment {
+        free_disk_bytes: Some(0),
+        ..Default::default()
+    };
+    f.owner.windows = Some(
+        super::windows::OwnerWindows::new(
+            rolling,
+            f.dir.clone(),
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        )
+        .with_environment(full),
+    );
+    mt5_ready(&mut f, &[]);
+    f.owner.threshold_ready = true;
+    assert!(f.owner.lifecycle(), "window 1 opens");
+    std::thread::sleep(Duration::from_millis(1_100));
+    // The same pass ends window 1 (its check pending) and takes the operator's stop.
+    f.owner.stop_poll = || true;
+    assert!(!f.owner.lifecycle());
+    let err = f.owner.settle_windows().unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<OwnerTerminal>().map(|t| t.0),
+        Some(us::HALT_STOP)
+    );
+    assert_eq!(
+        f.owner.windows.as_ref().and_then(|w| w.stop_reason()),
+        Some(us::HALT_STOP),
+        "the HALT wins over the stop"
+    );
+    let dir = f.dir.clone();
+    let _ = f.owner.finish();
+    let mut r =
+        crate::storage::segments::ChainReader::open(&dir.join(us::WINDOWS_JOURNAL)).unwrap();
+    let mut verdicts = Vec::new();
+    while let Some(frame) = r.next_frame().unwrap() {
+        if frame.kind == crate::analytics::journal::kind::UNTIL_STOPPED_WINDOW {
+            verdicts.push(frame.typed::<us::WindowCheck>().unwrap().verdict);
+        }
+    }
+    assert_eq!(verdicts, ["UNTIL_STOPPED_RUNWAY_EXHAUSTED"]);
+    assert!(r.sealed && !r.complete);
+    let _ = std::fs::remove_dir_all(dir);
+}

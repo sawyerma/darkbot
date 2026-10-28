@@ -393,6 +393,8 @@ pub(super) fn run_shadow(
             }
             owner.telemetry();
         }
+        // DEC-16 (review M-2): a window's end still in progress is part of the run's result.
+        owner.settle_windows()?;
         // DEC-16 (D-7): an unbounded Shadow run stopped in order drains its winner watches.
         if owner
             .windows

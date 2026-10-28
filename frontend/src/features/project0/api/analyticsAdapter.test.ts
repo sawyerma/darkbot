@@ -97,12 +97,17 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
   });
 
   it("DEC-16 (stage 3): a running econ4h or Shadow run stops through its boot flow, the raw capture through the desktop control", () => {
-    const flow = (mode: string, state: string) => ({ mode, start: { state } });
-    expect(untilStoppedStopAction(flow("shadow", "RUNNING"))).toBe("project0.boot.cancel");
-    expect(untilStoppedStopAction(flow("econ4h", "RUNNING"))).toBe("project0.boot.cancel");
-    expect(untilStoppedStopAction(flow("market", "RUNNING"))).toBe("project0.capture.stop");
-    expect(untilStoppedStopAction(flow("shadow", "COMPLETED"))).toBe("project0.capture.stop");
-    expect(untilStoppedStopAction(null)).toBe("project0.capture.stop");
+    const flow = (mode: string, state: string, duration = "until-stopped:1h:1d") => ({ mode, duration, start: { state } });
+    const run = { checkpointSeconds: 3600n };
+    expect(untilStoppedStopAction(flow("shadow", "RUNNING"), run)).toBe("project0.boot.cancel");
+    expect(untilStoppedStopAction(flow("econ4h", "RUNNING"), run)).toBe("project0.boot.cancel");
+    expect(untilStoppedStopAction(flow("market", "RUNNING"), run)).toBe("project0.capture.stop");
+    expect(untilStoppedStopAction(flow("shadow", "COMPLETED"), run)).toBe("project0.capture.stop");
+    expect(untilStoppedStopAction(null, run)).toBe("project0.capture.stop");
+    // Review L-2: a running bounded flow is no unbounded run; one with another window is another run.
+    expect(untilStoppedStopAction(flow("shadow", "RUNNING", "1h"), run)).toBe("project0.capture.stop");
+    expect(untilStoppedStopAction(flow("econ4h", "RUNNING", "until-stopped:2h:1d"), run)).toBeNull();
+    expect(untilStoppedStopAction(flow("econ4h", "RUNNING"), null)).toBeNull();
   });
 
   it("rejects malformed wire bytes", () => {

@@ -103,10 +103,11 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   // econ4h or Shadow run through its boot flow's start step, the raw capture through the
   // desktop capture control.
   const run = live ? until?.run ?? null : null;
-  const stopAction = untilStoppedStopAction(flow);
+  const stopAction = untilStoppedStopAction(flow, run);
   const stop = captureButtons(capture.process, capture.busy).stop;
   const stopWhy = !run ? "No unbounded run" : run.sealed ? "The run has ended"
-    : stopAction === "project0.boot.cancel" ? blocked : stop.reason;
+    : stopAction === null ? "The running boot flow is another run than the one shown"
+      : stopAction === "project0.boot.cancel" ? blocked : stop.reason;
   const preview = live ? until?.preview ?? null : null;
   const granted = live ? until?.autostart ?? null : null;
   const previewCmd = autostartPreviewCommand({ qualification: qualificationId, window: windowValue, runway: runwayValue, genesisHash: genesis, maxRuntime, validFor, captureSource: source });

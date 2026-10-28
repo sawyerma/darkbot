@@ -8,22 +8,29 @@
 //! run's duration, an unbounded run's (`until-stopped:W:R`) minimum runway R (its plan is the
 //! window W's).
 //!
+//! `p0-measurement-plan --seconds` (DEC-16): the plan's duration in seconds — the persisted plan
+//! (`P0_MEASUREMENT_PLAN`) of a continued run, an unbounded run's window W.
+//!
 //! `p0-measurement-plan --historical-plan`: the isolated offline path of the pinned historical
 //! readers (JFI-03) for a run without its own plan record: the plan the Rust authority derives
 //! from `P0_MEASUREMENT_DURATION`, printed as `key=value` text; nothing is written and it is
 //! never a runtime input.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut runway = false;
+    let (mut runway, mut seconds) = (false, false);
     let out = match args.as_slice() {
         [flag, path] if flag == "--out" => Some(std::path::PathBuf::from(path)),
         [flag] if flag == "--historical-plan" => None,
+        [flag] if flag == "--seconds" => {
+            seconds = true;
+            None
+        }
         [flag] if flag == "--runway" => {
             runway = true;
             None
         }
         _ => {
-            eprintln!("usage: p0-measurement-plan --out PLAN.p0j | --runway | --historical-plan");
+            eprintln!("usage: p0-measurement-plan --out PLAN.p0j | --runway | --seconds | --historical-plan");
             std::process::exit(2);
         }
     };
@@ -65,6 +72,7 @@ fn main() {
             };
             println!("{seconds}");
         }
+        Ok(plan) if seconds => println!("{}", plan.duration_seconds),
         Ok(plan) => match out {
             Some(out) => {
                 if let Err(e) = darkbot_runner::analytics::journal::write_typed_value(

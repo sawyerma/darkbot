@@ -184,11 +184,17 @@ export function untilStoppedBlock(v: { mode: string; window: string; runway: str
   return "";
 }
 
-/** DEC-16: the command that stops a running unbounded run in order (drain, seal, final
- *  status): an econ4h or Shadow run started by a boot flow ends through that flow's running
- *  start step, the raw capture through the desktop capture control. */
-export function untilStoppedStopAction(flow: { mode: string; start: { state: string } } | null): "project0.boot.cancel" | "project0.capture.stop" {
-  return flow != null && flow.mode !== "market" && flow.start.state === "RUNNING" ? "project0.boot.cancel" : "project0.capture.stop";
+/** DEC-16: the command that stops the unbounded run shown in order (drain, seal, final status):
+ *  an econ4h or Shadow run through its boot flow's running start step — only a flow that runs
+ *  until stopped with the run's window (null: the running flow is another run) — the raw
+ *  capture through the desktop capture control. */
+export function untilStoppedStopAction(flow: { mode: string; duration: string; start: { state: string } } | null,
+  run: { checkpointSeconds: bigint } | null): "project0.boot.cancel" | "project0.capture.stop" | null {
+  if (flow != null && flow.mode !== "market" && flow.start.state === "RUNNING" && flow.duration.startsWith(`${UNTIL_STOPPED}:`)) {
+    const window = durationSeconds(flow.duration.split(":")[1] ?? "");
+    return window !== null && run !== null && window === run.checkpointSeconds ? "project0.boot.cancel" : null;
+  }
+  return "project0.capture.stop";
 }
 
 /** DEC-16: the final status of an unbounded run as its windows journal shows it. */

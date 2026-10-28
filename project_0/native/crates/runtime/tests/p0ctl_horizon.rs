@@ -268,5 +268,40 @@ fn dec16_the_plan_compiler_plans_the_window_and_names_the_runway() {
     let stored: darkbot_runner::analytics::measurement::MeasurementPlan =
         darkbot_runner::analytics::journal::read_typed_value(&file).unwrap();
     assert_eq!(stored.duration_seconds, 3600);
+    // Review H-1: a continued run's launcher takes its persisted plan's duration (the window W,
+    // which the plan's own consistency check demands), never the runway R.
+    let persisted = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_p0-measurement-plan"))
+            .env_clear()
+            .env("P0_MEASUREMENT_DURATION", "until-stopped:1h:24h")
+            .env("P0_MEASUREMENT_PLAN", &path)
+            .args(args)
+            .serialized_output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        )
+    };
+    assert_eq!(persisted(&["--seconds"]), (true, "3600".to_string()));
+    assert_eq!(persisted(&["--runway"]), (true, "86400".to_string()));
+    // What the launcher then exports passes the plan's check; the runway would not.
+    let checked = |secs: &str| {
+        Command::new(env!("CARGO_BIN_EXE_p0-measurement-plan"))
+            .env_clear()
+            .env("P0_MEASUREMENT_DURATION", "until-stopped:1h:24h")
+            .env("P0_MEASUREMENT_PLAN", &path)
+            .env("P0_ECON_DURATION_SECS", secs)
+            .arg("--runway")
+            .serialized_output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(checked("3600"));
+    assert!(
+        !checked("86400"),
+        "the runway as the duration conflicts with the plan"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

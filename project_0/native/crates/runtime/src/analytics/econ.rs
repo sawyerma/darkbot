@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -270,11 +270,20 @@ pub struct ShadowStats {
     pub remote_winner_queue_depth: u64,
     pub remote_projection_queue_depth: u64,
 }
+/// DEC-16: `Shared::resume_checked` — no verdict yet, the interrupted window held, refused.
+pub const RESUME_PENDING: u8 = 0;
+pub const RESUME_HELD: u8 = 1;
+pub const RESUME_REFUSED: u8 = 2;
+
 #[derive(Default)]
 pub struct Shared {
     /// DEC-16: the windows of a continued unbounded run before this process (the window the
     /// crash interrupted included): its grid's windows are numbered on from there.
     pub window_base: AtomicU64,
+    /// DEC-16 (review M-1): a continued run's interrupted window as its capture checked it
+    /// before anything is read (`RESUME_PENDING`, `RESUME_HELD`, `RESUME_REFUSED`); the Shadow
+    /// owner reads nothing before it held.
+    pub resume_checked: AtomicU8,
     pub start_ns: AtomicU64,
     pub cutoff_ns: AtomicU64,
     /// DEC-16: an unbounded run's window (ns); 0 for a fixed run.
@@ -376,11 +385,43 @@ impl Handle {
     /// DEC-16: an unbounded run's measurement starts at `at`: windows of the plan's duration
     /// follow each other without a run cutoff, so the Shadow owner admits until the stop.
     pub fn start_rolling(&self, at: u64) {
+        // The start first: whoever sees the grid (`rolling`) sees its start (review L-1).
+        self.shared.start_ns.store(at, Ordering::Release);
         self.shared.window_ns.store(
             self.cfg.plan.duration_seconds * crate::analytics::measurement::NS,
             Ordering::Release,
         );
-        self.shared.start_ns.store(at, Ordering::Release);
+    }
+    /// DEC-16 (review M-1): the capture's verdict on a continued run's interrupted window.
+    pub fn resume_checked(&self, held: bool) {
+        self.shared.resume_checked.store(
+            if held { RESUME_HELD } else { RESUME_REFUSED },
+            Ordering::Release,
+        );
+        self.shared.owner_wake.notify();
+    }
+    /// DEC-16 (review M-1): waits — at most `within` — until the capture held the interrupted
+    /// window of the continued run; nothing may be read before.
+    pub fn await_resume_check(&self, within: Duration) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + within;
+        loop {
+            let token = self.shared.owner_wake.token();
+            match self.shared.resume_checked.load(Ordering::Acquire) {
+                RESUME_HELD => return Ok(()),
+                RESUME_REFUSED => {
+                    return Err(
+                        "UNTIL_STOPPED_RESUME_REFUSED: the capture refused the continued run"
+                            .into(),
+                    )
+                }
+                _ => {}
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Err("UNTIL_STOPPED_RESUME_UNCHECKED: no verdict on the interrupted window within the bootstrap budget".into());
+            }
+            self.shared.owner_wake.wait(token, left);
+        }
     }
     /// DEC-16: whether this is an unbounded run whose windows started.
     pub fn rolling(&self) -> bool {

@@ -266,7 +266,7 @@ mkdir -p "$CAPTURE_DIR"
 # JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text). A
 # continued run keeps its own plan (the persisted plan is authoritative).
 if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" && -f "$CAPTURE_DIR/measurement_plan.p0j" ]]; then
-  P0_ECON_DURATION_SECS="$(P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j" "$BIN_DIR/p0-measurement-plan" --runway)" || exit 2
+  P0_ECON_DURATION_SECS="$(P0_MEASUREMENT_PLAN="$CAPTURE_DIR/measurement_plan.p0j" "$BIN_DIR/p0-measurement-plan" --seconds)" || exit 2
 else
   P0_ECON_DURATION_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$CAPTURE_DIR/measurement_plan.p0j")" || exit 2
 fi
@@ -428,7 +428,7 @@ BIN_DIR="$(dirname "$BIN")"
 # JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
 # A continued run keeps its own plan (the persisted plan is authoritative).
 if [[ -n "${P0_UNTIL_STOPPED_RESUME:-}" && -f "$RUN_DIR/measurement_plan.p0j" ]]; then
-  SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --runway)" || exit 2
+  SHADOW_SECS="$(P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.p0j" "$BIN_DIR/p0-measurement-plan" --seconds)" || exit 2
 else
   SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$RUN_DIR/measurement_plan.p0j")" || exit 2
 fi

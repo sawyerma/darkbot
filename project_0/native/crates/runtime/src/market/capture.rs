@@ -636,27 +636,34 @@ fn run_embedded_inner(
     {
         None => (JournalSink::create(&cfg.run_dir)?, None),
         Some((r, id)) => {
-            if id != &cfg.run_id {
-                return Err(format!(
-                    "UNTIL_STOPPED_RESUME_DRIFT: the start continues {id}, the capture is {}",
-                    cfg.run_id
-                ));
-            }
-            let (mut sink, how, bytes) = JournalSink::resume(&cfg.run_dir)?;
-            crate::console::line(format!(
-                "[UNTIL_STOPPED] continues run {id}: market journal {how:?}"
-            ));
-            // An econ4h run's runway counts every journal below its run root (as its windows).
-            let bytes = econ.as_ref().map_or(bytes, |h| {
-                crate::orchestration::until_stopped::run_bytes(&h.cfg.run_dir)
-            });
-            match resume_windows(r, &cfg, process_started, bytes) {
-                Ok(w) => (sink, Some(w)),
-                Err(code) => {
-                    let _ = sink.finish(false);
-                    return Err(code);
+            let resumed = (|| {
+                if id != &cfg.run_id {
+                    return Err(format!(
+                        "UNTIL_STOPPED_RESUME_DRIFT: the start continues {id}, the capture is {}",
+                        cfg.run_id
+                    ));
                 }
+                let (mut sink, how, bytes) = JournalSink::resume(&cfg.run_dir)?;
+                crate::console::line(format!(
+                    "[UNTIL_STOPPED] continues run {id}: market journal {how:?}"
+                ));
+                // An econ4h run's runway counts every journal below its run root (as its windows).
+                let bytes = econ.as_ref().map_or(bytes, |h| {
+                    crate::orchestration::until_stopped::run_bytes(&h.cfg.run_dir)
+                });
+                match resume_windows(r, &cfg, process_started, bytes) {
+                    Ok(w) => Ok((sink, Some(w))),
+                    Err(code) => {
+                        let _ = sink.finish(false);
+                        Err(code)
+                    }
+                }
+            })();
+            // DEC-16 (review M-1): the econ run's Shadow owner reads nothing before this verdict.
+            if let Some(h) = &econ {
+                h.resume_checked(resumed.is_ok());
             }
+            resumed?
         }
     };
     if econ.is_none() {
