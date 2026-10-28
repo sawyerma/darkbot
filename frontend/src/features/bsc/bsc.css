@@ -13,3 +13,10 @@
 .bsc-page .g-line > span { min-width: 0; overflow-wrap: anywhere; }
 .bsc-page .g-line > span:first-child { min-width: min(9em, 40%); overflow-wrap: break-word; }
 .bsc-page .bsc-state { display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* Plan 28.10.: the LIVE tab's checklist, scope, positions and transactions; long native IDs and
+   hashes wrap inside the panel (no horizontal page scroll at 390 px). */
+.bsc-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--g-fs-small); margin: var(--g-gap-sm) 0; }
+.bsc-table td { padding: var(--g-gap-xs) var(--g-gap-sm); border-bottom: 1px solid var(--g-line-row); overflow-wrap: anywhere; vertical-align: top; }
+.bsc-table tr[data-met="false"] td:first-child { color: var(--g-status-failed); }
+.bsc-filter label input { flex: none; min-height: 0; padding: 0; margin-right: var(--g-gap-xs); }
+.bsc-page pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--g-font-mono); font-size: var(--g-fs-small); }

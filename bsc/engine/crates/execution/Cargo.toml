@@ -137,3 +137,8 @@ required-features = ["runtime"]
 [[test]]
 name = "bsc_tools"
 required-features = ["g07-mainnet", "runtime"]
+
+# Plan 28.10. package 8: the synthetic, guaranteed non-sending LIVE E2E.
+[[test]]
+name = "live_e2e"
+required-features = ["runtime"]

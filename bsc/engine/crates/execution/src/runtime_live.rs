@@ -266,8 +266,10 @@ impl LiveRuntime {
         )
     }
 
+    /// [`LiveRuntime::new`] with another read-only deployment probe (a
+    /// synthetic deployment in the non-sending E2E).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn with_prober(
+    pub fn with_prober(
         setup: LiveSetup,
         exec: ExecSetup,
         repo_root: &Path,
@@ -639,7 +641,11 @@ impl LiveRuntime {
         };
         if let Some(x) = self.executor.as_mut() {
             // Armed under another grant: this one ends, a new arm follows.
-            if x.end().armed() != &live_now {
+            // (The moment of the proof differs every pass; the grant decides.)
+            let armed = x.end().armed();
+            if armed.grant() != live_now.grant()
+                || armed.grant_generation() != live_now.grant_generation()
+            {
                 return self.close(crate::sources::LIVE_GRANT_CHANGED.into());
             }
             let _ = x.end_mut().maintain(self.setup.connect_timeout);
