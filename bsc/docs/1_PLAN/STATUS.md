@@ -11,6 +11,12 @@
 | BSC3-024 | FIX_VERIFIED (Admission = Write-ahead mit Token/Nonce, Fakt direkt nach Dispatch, Recovery als UNKNOWN; ROT→GRÜN, Review) | `bf871fa9` | dauerhaft unschreibbares Ledger: fail-closed, Inclusion dann erst nach Neustart sichtbar |
 | BSC3-041 | FIX_VERIFIED (kein Arm bei unaufgelöster/unbekannter Tx oder C2≠Ledger, Fence bleibt, `.settled` erst danach) | `bf871fa9` | nie inkludierte Tx bleibt unaufgelöst → Betreiberentscheidung (Nonce-Auflösung) |
 | BSC3-055 | FIX_VERIFIED (LIVE nur an C2-nächster Nonce, SELL nach kanonischem Approve, Exit-Fortsetzung, Token-Dedup beider Pools) | `bf871fa9` | revertierter/ersetzter SELL ohne Re-Exit → BSC3-048 |
+| BSC3-048 | FIX_VERIFIED (Fenster = Bundle-Ende `BSC_EXEC_VALIDITY_BLOCKS` im Admission-Eintrag + Ledger; danach nimmt die nächste Tx dieselbe Nonce, Exits vor BUYs; spät landende Alt-Tx → neue REPLACED mit `by_tx`/Block, Exit geht weiter; eigene orphaned Inclusion/unbekanntes Fenster sperrt; kein Cancel) | `c9cccf25` | byte-identischer verlorener Exit-Schritt wird nicht erneut gesendet (kein Retry) → Betreiberentscheidung; Flap-Kauf ohne Deadline (nur minOutput) |
+| BSC3-071 (neu) | FIX_VERIFIED (erschöpftes BUY-Kontingent schloss den ganzen LIVE-Pfad, offene Positionen ohne Exit → `live_now_exits`, BUYs abgelehnt) | `c9cccf25` | – |
+| BSC3-069 | TEILWEISE (eigene Exit-Slippage `BSC_EXEC_EXIT_SLIPPAGE_BPS`, Default = BUY) | `c9cccf25` | sichtbare LIVE-Risikoparameter/Max-Werte im Grant offen |
+| Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
+
+Belege `c9cccf25`: CI bsc 40779952332 + Project-0-Contract 40779952393 grün; lokal Workspace 1426 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review 1 HIGH + 3 MEDIUM behoben und nachgeprüft (kein offenes HIGH/CRITICAL); Exit-Re-Arm lokal 44–51 ms (Debug, Loopback).
 
 Belege `bf871fa9`: CI bsc 40766234326 + Project-0-Contract 40766234293 grün; lokal Workspace 1418 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2886; unabhängiges Review + Nachprüfung: kein offenes HIGH/CRITICAL.
 
