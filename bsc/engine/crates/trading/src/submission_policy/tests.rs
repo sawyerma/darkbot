@@ -2611,3 +2611,60 @@ fn findings_cannot_qualify_what_a_record_never_offers() {
         .is_err()
     );
 }
+
+/// Plan 28.10.: a builder's single transaction is formed once this product
+/// qualified the mode for that builder, and released under `SingleRawV1`
+/// once its send boundary and the expiry it relies on are qualified;
+/// another builder's qualification forms nothing.
+#[test]
+fn a_qualified_single_transaction_forms_through_its_builder() {
+    use super::qualification::{AdapterQualification, FeatureName, Finding};
+    let single = SubmissionMode::SingleRawBuy;
+    let (ticket, expected) = public_intent();
+    let mut inputs = public_inputs(ticket);
+    inputs.mode = single;
+    inputs.launch = Launch::None;
+    inputs.profile = ReleaseProfile::SingleRawV1;
+    inputs.adapters = set(&[0]);
+    inputs.merge = MergePolicy::ProviderDefault;
+    let q = |id: CapabilityId, findings: &[Finding]| {
+        AdapterQualification::from_findings(id, findings).unwrap()
+    };
+    let mode_only = q(
+        CapabilityId::Club48BuilderV1,
+        &[Finding::Mode(single), Finding::SendTime],
+    );
+    let full = q(
+        CapabilityId::Club48BuilderV1,
+        &[
+            Finding::Mode(single),
+            Finding::SendTime,
+            Finding::Feature(FeatureName::MaxBlockNumber),
+        ],
+    );
+    let other = q(
+        CapabilityId::BlockRazorBuilderV1,
+        &[Finding::Mode(single), Finding::SendTime],
+    );
+    let new = |quals: &[AdapterQualification]| {
+        SubmissionPlan::new_with(&table(), quals, &expected, &budget(), inputs)
+    };
+    assert_eq!(
+        SubmissionPlan::new(&table(), &expected, &budget(), inputs).err(),
+        Some(PlanError::ModeNotEnabled)
+    );
+    assert_eq!(new(&[other]).err(), Some(PlanError::ModeNotEnabled));
+    let plan = new(std::slice::from_ref(&mode_only)).unwrap();
+    assert_eq!(plan.launch(), Launch::None);
+    assert_eq!(
+        plan.qualify_for_release(&table()).err().map(|r| r.blocker),
+        Some(ReleaseBlocker::ModeNotEnabled)
+    );
+    assert_eq!(
+        plan.qualify_for_release_with(&table(), &[mode_only])
+            .err()
+            .map(|r| r.blocker),
+        Some(ReleaseBlocker::ExpiryByBlockNotEstablished)
+    );
+    assert!(plan.qualify_for_release_with(&table(), &[full]).is_ok());
+}

@@ -309,7 +309,7 @@ fn put_u64<O: Out>(out: &mut O, mut value: u64) -> Result<(), FrameError> {
 fn put_bundle_body<O: Out>(
     out: &mut O,
     request_id: &[u8],
-    launch_raw: &[u8],
+    launch_raw: Option<&[u8]>,
     buy_len: usize,
     validity: &ProviderValidity,
     options: EnvelopeOptions,
@@ -318,8 +318,10 @@ fn put_bundle_body<O: Out>(
     out.put(request_id)?;
     out.put(b"\",\"method\":\"eth_sendBundle\",")?;
     out.put(b"\"params\":[{\"txs\":[\"0x")?;
-    put_hex(out, launch_raw)?;
-    out.put(b"\",\"0x")?;
+    if let Some(launch_raw) = launch_raw {
+        put_hex(out, launch_raw)?;
+        out.put(b"\",\"0x")?;
+    }
     let hex_len = buy_len.checked_mul(2).ok_or(FrameError::Oversize)?;
     let slot_start = out.reserve(hex_len, b'0')?;
     out.put(b"\"],\"maxBlockNumber\":")?;
@@ -379,7 +381,9 @@ fn header_safe(text: &str, spaces: bool) -> bool {
             .all(|b| (0x21..=0x7e).contains(&b) || (spaces && b == b' '))
 }
 
-/// Builds the `eth_sendBundle` frame of a builder adapter.
+/// Builds the `eth_sendBundle` frame of a builder adapter: `[launch, BUY]`,
+/// or (plan 28.10.) a single transaction alone as the one transaction of
+/// the bundle, with no launch bytes.
 pub(crate) fn bundle_frame(
     plan: &SubmissionPlan,
     table: &AdapterTable,
@@ -390,18 +394,25 @@ pub(crate) fn bundle_frame(
     capacity: usize,
 ) -> Result<Frame, FrameError> {
     let options = planned(plan, table, adapter, kind)?;
-    match plan.mode() {
-        SubmissionMode::PublicFullLaunchBundle | SubmissionMode::ControlledSelfLaunchBundle => {}
-        SubmissionMode::SingleRawBuy | SubmissionMode::PrivateTarget => {
-            return Err(FrameError::UnsupportedMode);
+    let launch_raw = match plan.mode() {
+        SubmissionMode::PublicFullLaunchBundle | SubmissionMode::ControlledSelfLaunchBundle => {
+            // The launch goes out exactly as it is: the plan refers to
+            // these very bytes, and they are only hex-encoded, never
+            // decoded or re-signed.
+            let launch = plan.launch().tx().ok_or(FrameError::UnsupportedMode)?;
+            if !launch.matches(launch_raw) {
+                return Err(FrameError::LaunchBytesMismatch);
+            }
+            Some(launch_raw)
         }
-    }
-    // The launch goes out exactly as it is: the plan refers to these very
-    // bytes, and they are only hex-encoded, never decoded or re-signed.
-    let launch = plan.launch().tx().ok_or(FrameError::UnsupportedMode)?;
-    if !launch.matches(launch_raw) {
-        return Err(FrameError::LaunchBytesMismatch);
-    }
+        SubmissionMode::SingleRawBuy => {
+            if plan.launch().tx().is_some() || !launch_raw.is_empty() {
+                return Err(FrameError::LaunchBytesMismatch);
+            }
+            None
+        }
+        SubmissionMode::PrivateTarget => return Err(FrameError::UnsupportedMode),
+    };
     let validity = plan
         .provider_validity()
         .ok_or(FrameError::MissingProviderValidity)?;

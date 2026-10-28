@@ -238,6 +238,27 @@ pub const LIVE_SOURCE_UNQUALIFIED: &str = "LIVE_SOURCE_UNQUALIFIED";
 pub const LIVE_ADAPTER_UNQUALIFIED: &str = "LIVE_ADAPTER_UNQUALIFIED";
 pub const LIVE_ACQUISITION_UNPROVEN: &str = "LIVE_ACQUISITION_UNPROVEN";
 pub const LIVE_RISK_DECISION_MISSING: &str = "LIVE_RISK_DECISION_MISSING";
+/// The grant on file is not the one the executor was armed under.
+pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
+/// A BUY's input exceeds the grant's largest input.
+pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
+/// The same signed transaction again: never a second time (no retry).
+pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
+
+/// What an exit of a position the grant opened does not need of the LIVE
+/// gate: BUY attempts (the attempt switch, the daily and campaign limits,
+/// the grant's attempts) and room for another BUY input. Its own gas must
+/// still fit the grant's spend ([`Store::admit_live`]).
+const EXIT_EXEMPT: [&str; 8] = [
+    ECON_ATTEMPT_DISABLED,
+    BUY_LIMIT_UNREADABLE,
+    BUY_LIMIT_EXHAUSTED,
+    ATTEMPT_TOTAL_UNREADABLE,
+    ATTEMPT_TOTAL_EXHAUSTED,
+    LIVE_GRANT_ATTEMPTS_EXHAUSTED,
+    LIVE_GRANT_SPEND_EXHAUSTED,
+    LIVE_SPEND_UNREADABLE,
+];
 
 /// The campaign's total BUY attempt limit (plan 28.10., `0a647175`): every
 /// real economic BUY attempt counts, G0.7 included, UNKNOWN ones too, over
@@ -1095,6 +1116,42 @@ impl Generation {
     /// first reason. Four has no execution path whatever is granted. Every
     /// other request reads as [`Generation::effective_now`].
     pub fn effective_live_now(&self, entity: Entity, ctx: &LiveContext<'_>) -> Effective {
+        self.live_effective(entity, ctx, false)
+    }
+
+    /// [`Generation::live_blockers`] for an exit (approval or SELL) of a
+    /// position the grant opened: without the BUY attempt reasons.
+    pub fn exit_blockers(&self, ctx: &LiveContext<'_>) -> Vec<&'static str> {
+        let mut out = self.live_blockers(ctx);
+        out.retain(|r| !EXIT_EXEMPT.contains(r));
+        out
+    }
+
+    /// [`Generation::effective_live_now`] for an exit: LIVE when
+    /// [`Generation::exit_blockers`] is clear and the scope names it.
+    pub fn effective_exit_now(&self, entity: Entity, ctx: &LiveContext<'_>) -> Effective {
+        self.live_effective(entity, ctx, true)
+    }
+
+    /// Every entity effective LIVE (for an exit: without the BUY attempt
+    /// reasons), or the first entity's reason.
+    fn live_clear(
+        &self,
+        entities: &[Entity],
+        ctx: &LiveContext<'_>,
+        exit: bool,
+    ) -> Result<(), String> {
+        for entity in entities {
+            match self.live_effective(*entity, ctx, exit) {
+                Effective::Live => {}
+                Effective::Blocked(reason) => return Err(reason.into()),
+                other => return Err(format!("{}_{}", entity.name(), other.name())),
+            }
+        }
+        Ok(())
+    }
+
+    fn live_effective(&self, entity: Entity, ctx: &LiveContext<'_>, exit: bool) -> Effective {
         let stored = self.effective_now(entity, ctx.boot);
         if self.requested_of(entity) != Mode::Live {
             return stored;
@@ -1102,7 +1159,12 @@ impl Generation {
         if let Entity::Venue(VenueId::FourClassic | VenueId::OpenFour) = entity {
             return Effective::Blocked(FOUR_EXECUTION_PATH_MISSING);
         }
-        if let Some(first) = self.live_blockers(ctx).first() {
+        let blockers = if exit {
+            self.exit_blockers(ctx)
+        } else {
+            self.live_blockers(ctx)
+        };
+        if let Some(first) = blockers.first() {
             return Effective::Blocked(first);
         }
         match &self.live {
@@ -2173,6 +2235,118 @@ pub fn live_inputs(dir: &Path, now_ms: u64) -> Result<(Generation, BuyUsage, Tot
     ))
 }
 
+fn spend_dir(dir: &Path) -> PathBuf {
+    dir.join("live-spend")
+}
+
+fn wei_u128(word: [u8; 32]) -> Option<u128> {
+    if word[..16].iter().any(|b| *b != 0) {
+        return None;
+    }
+    Some(u128::from_be_bytes(word[16..].try_into().ok()?))
+}
+
+/// What the grant written at `grant_generation` has spent: the sum of the
+/// most each of its admitted intents may lose. An entry that does not
+/// decode makes the spend unreadable (never under-counted).
+pub fn spent_by_grant(dir: &Path, grant_generation: u64) -> Result<u128, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+    let entries = match fs::read_dir(spend_dir(dir)) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: {e}")),
+    };
+    let mut spent = 0u128;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: {e}"))?;
+        if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
+            continue;
+        }
+        let r = fs::read(entry.path())
+            .ok()
+            .and_then(|b| decode(&ls::SCHEMA, &b).ok())
+            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display()))?;
+        let unreadable = |_| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display());
+        if r.u64(ls::GRANT_GENERATION).map_err(unreadable)? != grant_generation {
+            continue;
+        }
+        let most = r
+            .u256(ls::MAX_WEI)
+            .ok()
+            .and_then(wei_u128)
+            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display()))?;
+        spent = spent
+            .checked_add(most)
+            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: the spend overflows"))?;
+    }
+    Ok(spent)
+}
+
+/// What a LIVE intent is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveIntentKind {
+    Buy,
+    Approve,
+    Sell,
+}
+
+impl LiveIntentKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Buy => "BUY",
+            Self::Approve => "APPROVE",
+            Self::Sell => "SELL",
+        }
+    }
+}
+
+/// One LIVE intent the executor asks the owner to admit, immediately
+/// before its dispatch (plan 28.10.).
+#[derive(Clone, Copy, Debug)]
+pub struct LiveIntent<'a> {
+    /// The signed transaction's hash, hex: a BUY's attempt id.
+    pub id: &'a str,
+    pub component: ComponentId,
+    pub kind: LiveIntentKind,
+    pub input_wei: u128,
+    /// Input and gas at the signed gas price and limit.
+    pub max_wei: u128,
+}
+
+/// Proof that the owner's LIVE gate was clear, at one moment, for the
+/// runtime, the grant's venue and the components armed: what arms a LIVE
+/// end and loads its key. Only [`Store::live_now`] makes one; every intent
+/// is admitted again under it ([`Store::admit_live`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveNow {
+    grant: LiveGrant,
+    grant_generation: u64,
+    at_ms: u64,
+}
+
+impl LiveNow {
+    pub fn grant(&self) -> &LiveGrant {
+        &self.grant
+    }
+
+    /// The owner generation that wrote the grant.
+    pub fn grant_generation(&self) -> u64 {
+        self.grant_generation
+    }
+
+    pub fn at_ms(&self) -> u64 {
+        self.at_ms
+    }
+}
+
+/// What the owner admitted: a BUY's daily and campaign slot, and what the
+/// grant has spent with this intent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveAdmission {
+    pub slots: Option<(BuySlot, TotalSlot)>,
+    pub spent_wei: u128,
+}
+
 /// [`Store::consume_buy_attempt`] on the canonical owner state.
 pub fn consume_buy_attempt_here(attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
     let dir = canonical_state_dir().map_err(|e| format!("BUY_ATTEMPT_LIMIT_UNREADABLE: {e}"))?;
@@ -2291,6 +2465,136 @@ impl Store {
         let day = self.consume_daily(attempt_id, now_ms)?;
         let total = self.consume_total(attempt_id, grant_generation, now_ms)?;
         Ok((day, total))
+    }
+
+    /// Admits one LIVE intent as the owner's state holds now, immediately
+    /// before its dispatch (plan 28.10.): the grant is still the one the
+    /// executor was armed under; the runtime, the intent's component and
+    /// the grant's venue are effective LIVE (an exit: without the BUY
+    /// attempt reasons); a BUY's input is within the grant; the intent's
+    /// most fits the grant's spend. Then a BUY takes its daily and campaign
+    /// slot, and every intent writes its spend entry, create-new: both are
+    /// durable before any byte can leave. Each refusal names its reason.
+    /// The same transaction is never admitted twice (no retry).
+    pub fn admit_live(
+        &self,
+        armed: &LiveNow,
+        intent: &LiveIntent<'_>,
+        qualification: &LiveQualification,
+        now_ms: u64,
+    ) -> Result<LiveAdmission, String> {
+        use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+        let g = self.current()?;
+        let spent = spent_by_grant(&self.dir, armed.grant_generation).ok();
+        let (daily, total) = (
+            buy_usage(&self.dir, now_ms).ok(),
+            total_usage(&self.dir).ok(),
+        );
+        let ctx = LiveContext {
+            boot: self.boot().ok(),
+            now_unix_ms: now_ms,
+            daily: daily.as_ref(),
+            total: total.as_ref(),
+            spent_wei: spent,
+            qualification,
+        };
+        let grant = match (&g.live, &g.live_set_by) {
+            (Some(grant), Some(by))
+                if by.generation == armed.grant_generation && *grant == armed.grant =>
+            {
+                grant
+            }
+            _ => return Err(LIVE_GRANT_CHANGED.into()),
+        };
+        let exit = intent.kind != LiveIntentKind::Buy;
+        let entities = [
+            Entity::Runtime,
+            Entity::Component(intent.component),
+            Entity::Venue(grant.venue),
+        ];
+        g.live_clear(&entities, &ctx, exit)?;
+        if !exit && intent.input_wei > grant.max_input_wei {
+            return Err(LIVE_INPUT_ABOVE_GRANT.into());
+        }
+        let spent = spent.ok_or(LIVE_SPEND_UNREADABLE)?;
+        let after = spent
+            .checked_add(intent.max_wei)
+            .filter(|after| *after <= grant.max_spend_wei)
+            .ok_or(LIVE_GRANT_SPEND_EXHAUSTED)?;
+        let entry = spend_dir(&self.dir).join(format!("{}.dbrec", intent.id));
+        if parse_hex32(intent.id).is_none() {
+            return Err("a LIVE intent is named by its transaction hash".into());
+        }
+        if entry.exists() {
+            return Err(LIVE_INTENT_SEEN.into());
+        }
+        let slots = match exit {
+            false => Some(self.consume_attempt(intent.id, armed.grant_generation, now_ms)?),
+            true => None,
+        };
+        let mut d = Draft::new(&ls::SCHEMA);
+        d.set(ls::INTENT_ID, intent.id)
+            .set(ls::KIND, intent.kind.name())
+            .set(ls::COMPONENT, intent.component.name())
+            .set(ls::PROVENANCE_TOOL, "bsc_runtime")
+            .set(ls::PROVENANCE_OBSERVED_UNIX_MS, now_ms)
+            .set(ls::GRANT_GENERATION, armed.grant_generation)
+            .set(
+                ls::INPUT_WEI,
+                darkbot_bsc_record::Value::u128(intent.input_wei),
+            )
+            .set(ls::MAX_WEI, darkbot_bsc_record::Value::u128(intent.max_wei));
+        let bytes = d.encode().map_err(|e| e.to_string())?;
+        create_durable_dir(&spend_dir(&self.dir))?;
+        match write_new(&entry, &bytes) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                return Err(LIVE_INTENT_SEEN.into());
+            }
+            Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: entry not written: {e}")),
+        }
+        Ok(LiveAdmission {
+            slots,
+            spent_wei: after,
+        })
+    }
+
+    /// The owner's LIVE gate as it holds now for the runtime, the grant's
+    /// venue and `components` (plan 28.10.): the proof a LIVE end is armed
+    /// with, or the first reason it is not.
+    pub fn live_now(
+        &self,
+        components: &[ComponentId],
+        qualification: &LiveQualification,
+        now_ms: u64,
+    ) -> Result<LiveNow, String> {
+        let g = self.current()?;
+        let (grant, by) = match (&g.live, &g.live_set_by) {
+            (Some(grant), Some(by)) => (grant, by),
+            _ => return Err(LIVE_GRANT_MISSING.into()),
+        };
+        let (daily, total) = (
+            buy_usage(&self.dir, now_ms).ok(),
+            total_usage(&self.dir).ok(),
+        );
+        let ctx = LiveContext {
+            boot: self.boot().ok(),
+            now_unix_ms: now_ms,
+            daily: daily.as_ref(),
+            total: total.as_ref(),
+            spent_wei: spent_by_grant(&self.dir, by.generation).ok(),
+            qualification,
+        };
+        let entities: Vec<Entity> = [Entity::Runtime, Entity::Venue(grant.venue)]
+            .into_iter()
+            .chain(components.iter().map(|c| Entity::Component(*c)))
+            .collect();
+        g.live_clear(&entities, &ctx, false)?;
+        Ok(LiveNow {
+            grant: grant.clone(),
+            grant_generation: by.generation,
+            at_ms: now_ms,
+        })
     }
 
     fn consume_total(
@@ -2622,7 +2926,7 @@ pub fn current_record_and_generation(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn store(tag: &str) -> (PathBuf, Store) {
@@ -2956,7 +3260,7 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
-    fn session(tag: &str, boot: &str) -> (PathBuf, Store) {
+    pub(crate) fn session(tag: &str, boot: &str) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("bsc-switch-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let s = Store::open_in_session(&dir, 8, Ok(boot.into())).unwrap();
@@ -3492,10 +3796,14 @@ mod tests {
     }
 
     /// A LIVE grant of Flap / C3 from PublicNode through 48Club.
-    fn grant(expires: u64) -> LiveGrant {
+    pub(crate) fn grant(expires: u64) -> LiveGrant {
+        grant_of(expires, LiveStrategies::C3)
+    }
+
+    pub(crate) fn grant_of(expires: u64, strategies: LiveStrategies) -> LiveGrant {
         LiveGrant {
             venue: VenueId::Flap,
-            strategies: LiveStrategies::C3,
+            strategies,
             sources: vec![SourceId::PublicNode],
             adapters: vec![LiveAdapter::Club48BuilderV1],
             max_input_wei: 1_000_000_000_000,
@@ -3506,7 +3814,7 @@ mod tests {
     }
 
     /// Evidence for exactly that scope.
-    fn qualified() -> LiveQualification {
+    pub(crate) fn qualified() -> LiveQualification {
         LiveQualification {
             venues: vec![VenueId::Flap],
             sources: vec![SourceId::PublicNode],
@@ -3518,9 +3826,24 @@ mod tests {
 
     /// A store of boot session `boot-1` with the whole scope requested
     /// LIVE, every switch ENABLED, both limits set and the grant written.
-    fn live_ready(tag: &str) -> (PathBuf, Store, u64) {
+    pub(crate) fn live_ready(tag: &str) -> (PathBuf, Store, u64) {
+        live_ready_with(tag, LiveStrategies::C3)
+    }
+
+    /// [`live_ready`] with a grant of `strategies`.
+    pub(crate) fn live_ready_with(tag: &str, strategies: LiveStrategies) -> (PathBuf, Store, u64) {
+        live_ready_granting(tag, |now| grant_of(now + 3_600_000, strategies))
+    }
+
+    /// [`live_ready`] with the grant `grant(now)`, its scope requested.
+    pub(crate) fn live_ready_granting(
+        tag: &str,
+        grant: impl FnOnce(u64) -> LiveGrant,
+    ) -> (PathBuf, Store, u64) {
         let (dir, s) = session(tag, "boot-1");
         let now = 1_793_059_200_000;
+        let grant = grant(now);
+        let strategies = grant.strategies;
         let mut g = 0;
         let mut req = |entity: Entity, mode: Mode| {
             let r = s.request(&format!("r-{g}"), entity, mode, g, now).unwrap();
@@ -3531,13 +3854,17 @@ mod tests {
             req(Entity::Switch(id), Mode::Enabled);
         }
         req(Entity::Runtime, Mode::Live);
-        req(ComponentId::ExecC3.into(), Mode::Live);
+        if strategies.c3() {
+            req(ComponentId::ExecC3.into(), Mode::Live);
+        }
+        if strategies.strategy_c() {
+            req(ComponentId::StrategyC.into(), Mode::Live);
+        }
         req(ComponentId::StateC2.into(), Mode::Live);
         req(VenueId::Flap.into(), Mode::Live);
         req(SourceId::PublicNode.into(), Mode::Live);
         req(Entity::BuyLimit, Mode::PerDay(2));
         req(Entity::BuyTotal, Mode::PerDay(3));
-        let grant = grant(now + 3_600_000);
         let r = s
             .grant_live("grant-1", grant.clone(), grant.scope_sha256(), g, now)
             .unwrap();
@@ -4113,6 +4440,117 @@ mod tests {
         }
         fs::write(&path, d.encode().unwrap()).unwrap();
         assert!(s.current().unwrap_err().contains("not the owner's"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Plan 28.10.: the owner admits each LIVE intent as its state holds
+    /// at that moment: a BUY takes its daily and campaign slot and its spend
+    /// entry before any byte can leave; an exit needs no BUY attempt; the
+    /// same transaction never twice; another grant, a restart or a scope
+    /// that does not name the component admits nothing.
+    #[test]
+    fn each_live_intent_is_admitted_by_the_owner_as_it_holds_now() {
+        let (dir, s, now) = live_ready("live-admit");
+        let q = qualified();
+        assert_eq!(
+            s.live_now(&[ComponentId::StrategyC], &q, now).unwrap_err(),
+            "BSC_STRATEGY_C_OFF"
+        );
+        assert_eq!(
+            s.live_now(&[ComponentId::ExecC3], &LiveQualification::default(), now)
+                .unwrap_err(),
+            LIVE_VENUE_UNQUALIFIED
+        );
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let grant = armed.grant().clone();
+        let generation = armed.grant_generation();
+        let id = |n: u8| hex32(&[n; 32]);
+        let ids: Vec<String> = (0..8).map(id).collect();
+        let intent = |n: usize, kind: LiveIntentKind, input: u128, most: u128| LiveIntent {
+            id: &ids[n],
+            component: ComponentId::ExecC3,
+            kind,
+            input_wei: input,
+            max_wei: most,
+        };
+        let buy = |n| intent(n, LiveIntentKind::Buy, 1_000, 2_000);
+        let first = s.admit_live(&armed, &buy(0), &q, now).unwrap();
+        assert_eq!(first.spent_wei, 2_000);
+        let (day, total) = first.slots.unwrap();
+        assert_eq!((day.slot, total.slot), (0, 0));
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 2_000);
+        assert_eq!(
+            s.admit_live(&armed, &buy(0), &q, now).unwrap_err(),
+            LIVE_INTENT_SEEN
+        );
+        assert_eq!(
+            s.admit_live(
+                &armed,
+                &intent(1, LiveIntentKind::Buy, grant.max_input_wei + 1, 1),
+                &q,
+                now
+            )
+            .unwrap_err(),
+            LIVE_INPUT_ABOVE_GRANT
+        );
+        assert_eq!(
+            s.admit_live(
+                &armed,
+                &intent(1, LiveIntentKind::Buy, 1, grant.max_spend_wei),
+                &q,
+                now
+            )
+            .unwrap_err(),
+            LIVE_GRANT_SPEND_EXHAUSTED
+        );
+        assert!(s.admit_live(&armed, &buy(1), &q, now).is_ok());
+        // The day's two BUYs are taken: no third BUY, the exit still.
+        assert_eq!(
+            s.admit_live(&armed, &buy(2), &q, now).unwrap_err(),
+            BUY_LIMIT_EXHAUSTED
+        );
+        let sell = s
+            .admit_live(&armed, &intent(3, LiveIntentKind::Sell, 0, 500), &q, now)
+            .unwrap();
+        assert_eq!((sell.slots, sell.spent_wei), (None, 4_500));
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 2);
+        // Not the grant armed under; not in the scope; evidence missing.
+        let other = LiveNow {
+            grant_generation: generation + 1,
+            ..armed.clone()
+        };
+        let exit = intent(4, LiveIntentKind::Sell, 0, 1);
+        assert_eq!(
+            s.admit_live(&other, &exit, &q, now).unwrap_err(),
+            LIVE_GRANT_CHANGED
+        );
+        let strategy = LiveIntent {
+            component: ComponentId::StrategyC,
+            ..exit
+        };
+        assert!(
+            s.admit_live(&armed, &strategy, &q, now)
+                .unwrap_err()
+                .starts_with("BSC_STRATEGY_C_")
+        );
+        let none = LiveQualification::default();
+        assert_eq!(
+            s.admit_live(&armed, &exit, &none, now).unwrap_err(),
+            LIVE_VENUE_UNQUALIFIED
+        );
+        // After a restart nothing is LIVE, an exit neither.
+        let restarted = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        assert_eq!(
+            restarted.admit_live(&armed, &exit, &q, now).unwrap_err(),
+            ECONOMIC_LIVE_DISABLED
+        );
+        assert_eq!(
+            restarted
+                .live_now(&[ComponentId::ExecC3], &q, now)
+                .unwrap_err(),
+            ECONOMIC_LIVE_DISABLED
+        );
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 4_500);
         fs::remove_dir_all(dir).unwrap();
     }
 }

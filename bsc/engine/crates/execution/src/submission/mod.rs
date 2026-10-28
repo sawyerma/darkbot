@@ -11,6 +11,8 @@
 //! - [`tls`]: the production transport of the two builders, a warm
 //!   HTTP/1.1-over-TLS connection per builder and the owner that builds and
 //!   keeps it outside any dispatch.
+//! - [`loopback`]: the LIVE release path's builder stand-in on 127.0.0.1
+//!   (plan 28.10.), qualified under its own implementation, never sending.
 //!
 //! A diagnostic dispatch runs over any [`Transport`], the TLS transport
 //! included. After the accepted Q5A run, the TLS module can bind a concrete
@@ -29,6 +31,7 @@ pub mod club48;
 pub mod egress;
 pub mod frame;
 pub mod local_geth;
+pub mod loopback;
 pub mod response;
 pub mod send;
 pub mod tls;

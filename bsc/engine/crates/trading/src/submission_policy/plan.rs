@@ -619,6 +619,21 @@ impl SubmissionPlan {
         budget: &BudgetEnvelope,
         inputs: PlanInputs,
     ) -> Result<Self, PlanError> {
+        Self::new_with(table, &[], expected, budget, inputs)
+    }
+
+    /// [`SubmissionPlan::new`] where a mode the frozen record leaves
+    /// unqualified counts as enabled once this product qualified it for
+    /// the adapter (plan 28.10.: a builder's single transaction). Nothing
+    /// else changes: an `Unsupported` mode never qualifies, and the release
+    /// still needs [`SubmissionPlan::qualify_for_release_with`].
+    pub fn new_with<'e>(
+        table: &AdapterTable,
+        qualifications: &[AdapterQualification],
+        expected: impl Into<ExpectedTx<'e>>,
+        budget: &BudgetEnvelope,
+        inputs: PlanInputs,
+    ) -> Result<Self, PlanError> {
         let expected: ExpectedTx<'e> = expected.into();
         let ticket = inputs.ticket;
         if table.chain_id() != ticket.chain_id() {
@@ -708,7 +723,10 @@ impl SubmissionPlan {
                 continue;
             };
             let record = table.record(adapter).ok_or(PlanError::UnboundAdapter)?;
-            if record.mode(inputs.mode) != Support::Enabled {
+            let qualified = qualifications
+                .iter()
+                .any(|q| q.id() == record.id() && q.mode_established(inputs.mode));
+            if record.mode(inputs.mode) != Support::Enabled && !qualified {
                 return Err(PlanError::ModeNotEnabled);
             }
             if tx_count > record.max_txs() {

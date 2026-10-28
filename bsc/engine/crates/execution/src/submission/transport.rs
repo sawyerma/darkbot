@@ -353,6 +353,35 @@ pub(super) fn bind_accepted_tls<'a>(
     (qualified, qualification)
 }
 
+/// Sealed production promotion of the loopback adapter (plan 28.10.):
+/// reachable only through [`crate::submission::loopback::qualify_loopback`]
+/// once it checked that the peer is this host. Its qualification names the
+/// loopback implementation, never the builders' TLS.
+pub(super) fn bind_loopback<'a>(
+    transport: &'a mut crate::submission::loopback::LoopbackTransport,
+    adapter: AdapterId,
+    kind: AdapterKind,
+    capability_generation: u64,
+    boundary: HandoffBoundary,
+    _peer: crate::submission::loopback::LoopbackPeer,
+) -> (QualifiedTransport<'a>, TransportQualification) {
+    let qualification = TransportQualification {
+        implementation: crate::submission::loopback::LOOPBACK_TRANSPORT_IMPLEMENTATION,
+        generation: crate::submission::loopback::LOOPBACK_QUALIFICATION_GENERATION,
+    };
+    let qualified = QualifiedTransport {
+        transport,
+        binding: TransportBinding {
+            adapter,
+            kind,
+            capability_generation,
+            boundary,
+            qualification,
+        },
+    };
+    (qualified, qualification)
+}
+
 /// A monotonic clock with an identity. Times of different clocks are never
 /// compared.
 pub trait Clock {

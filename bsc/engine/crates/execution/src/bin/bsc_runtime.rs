@@ -321,18 +321,23 @@ fn run(args: &[String]) -> Result<bool, String> {
         // The LIVE gate as it holds now: every missing condition, then
         // what each LIVE request is now.
         [area, cmd, rest @ ..] if area == "live" && cmd == "status" => {
-            use darkbot_bsc_execution::sources::{LiveContext, live_inputs};
+            use darkbot_bsc_execution::sources::{LiveContext, live_inputs, spent_by_grant};
             let dir = std::path::Path::new(flag(rest, "--state")?);
             let now = darkbot_bsc_record::observed_now()?;
             let (g, daily, total) = live_inputs(dir, now)?;
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
             let qualification = print_qualification(rest);
+            // What the grant on file has spent (its admitted intents).
+            let spent = match &g.live_set_by {
+                Some(by) => spent_by_grant(dir, by.generation).ok(),
+                None => Some(0),
+            };
             let ctx = LiveContext {
                 boot: boot.as_deref(),
                 now_unix_ms: now,
                 daily: Some(&daily),
                 total: Some(&total),
-                spent_wei: Some(0),
+                spent_wei: spent,
                 qualification: &qualification,
             };
             println!("generation={}", g.generation);
@@ -353,6 +358,10 @@ fn run(args: &[String]) -> Result<bool, String> {
                 "buy_attempts day_utc={} used={} limit={} total_used={} total_limit={}",
                 daily.day.utc, daily.used, daily.limit, total.used, total.limit
             );
+            match spent {
+                Some(wei) => println!("spent_wei={wei}"),
+                None => println!("spent_wei=UNREADABLE"),
+            }
             Ok(blockers.is_empty())
         }
         [cmd, rest @ ..] if cmd == "run" => {

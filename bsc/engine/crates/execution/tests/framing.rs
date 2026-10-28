@@ -299,3 +299,58 @@ fn plan_for(
     }
     plan(world, table, inputs)
 }
+
+/// Plan 28.10.: a builder's single transaction (an approval, a SELL, a
+/// Strategy C BUY) is the one transaction of its bundle, with the plan's
+/// expiry; no launch bytes are taken, and none can be slipped in.
+#[test]
+fn a_qualified_single_transaction_is_a_one_transaction_bundle() {
+    use darkbot_bsc_trading::submission_policy::capability::{CapabilityId, SubmissionMode};
+    use darkbot_bsc_trading::submission_policy::plan::PlanInputs;
+    use darkbot_bsc_trading::submission_policy::qualification::{AdapterQualification, Finding};
+    use darkbot_bsc_trading::submission_policy::release::ReleaseProfile;
+    let world = World::prepared();
+    let table = frozen_table();
+    let mode = AdapterQualification::from_findings(
+        CapabilityId::Club48BuilderV1,
+        &[Finding::Mode(SubmissionMode::SingleRawBuy)],
+    )
+    .unwrap();
+    let inputs = PlanInputs {
+        adapters: set(&[CLUB48]),
+        provider_validity: bundle_inputs(&world, &[CLUB48], MergePolicy::ProviderDefault)
+            .provider_validity,
+        profile: ReleaseProfile::SingleRawV1,
+        ..single_inputs(&world)
+    };
+    let plan =
+        SubmissionPlan::new_with(&table, &[mode], &world.expected, &budget(), inputs).unwrap();
+    let frame = club48::frame(
+        &plan,
+        &table,
+        adapter(CLUB48),
+        &CLUB48_ENDPOINT,
+        &[],
+        FRAME_CAPACITY,
+    )
+    .unwrap();
+    let body = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":\"{}\",\"method\":\"eth_sendBundle\",\
+         \"params\":[{{\"txs\":[\"0x{}\"],\"maxBlockNumber\":{MAX_BLOCK}}}]}}",
+        request_id(&world),
+        "0".repeat(world.raw_buy.len() * 2),
+    );
+    assert!(shown(&frame).ends_with(&format!("\r\n\r\n{body}")));
+    assert_eq!(
+        club48::frame(
+            &plan,
+            &table,
+            adapter(CLUB48),
+            &CLUB48_ENDPOINT,
+            &world.launch_raw,
+            FRAME_CAPACITY,
+        )
+        .err(),
+        Some(FrameError::LaunchBytesMismatch)
+    );
+}

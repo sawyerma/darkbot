@@ -287,6 +287,10 @@ pub enum Refusal {
     /// Phase I gate M2: the path does not take the sender in this arm
     /// (`BSC_EXEC_SENDER_PATHS`).
     PathOff,
+    /// Plan 28.10.: the plan or a transport is not qualified for a release.
+    Unqualified,
+    /// Plan 28.10.: the native owner did not admit the LIVE intent now.
+    Owner,
 }
 
 impl Refusal {
@@ -310,6 +314,8 @@ impl Refusal {
             Self::StaleHead => "STALE_HEAD",
             Self::NonceTaken => "NONCE_TAKEN",
             Self::PathOff => "PATH_OFF",
+            Self::Unqualified => "UNQUALIFIED",
+            Self::Owner => "OWNER",
         }
     }
 }
@@ -1783,6 +1789,11 @@ impl<E: End> Executor<E> {
         &self.end
     }
 
+    /// The end, for its maintenance outside any hand-over.
+    pub fn end_mut(&mut self) -> &mut E {
+        &mut self.end
+    }
+
     pub fn counters(&self) -> &ExecCounters {
         &self.counters
     }
@@ -1814,7 +1825,7 @@ impl<E: End> Executor<E> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use alloy_primitives::{hex, keccak256};
     use darkbot_bsc_trading::economics::flap::native_curve20::WITNESSED_MAINNET_TERMS;
@@ -1830,14 +1841,14 @@ mod tests {
     const CODEHASH_GENERATION: u64 = 5;
     const CLOCK_ID: u32 = 1;
 
-    fn dir(name: &str) -> PathBuf {
+    pub(crate) fn dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("bsc-paper-exec-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         d
     }
 
     /// The current deployment (economics reconfirmed on it).
-    fn validated() -> ValidatedDeployment {
+    pub(crate) fn validated() -> ValidatedDeployment {
         let d = bsc_mainnet_v5_27_0();
         d.validate(
             &ObservedDeployment {
@@ -1853,7 +1864,7 @@ mod tests {
         .unwrap()
     }
 
-    fn config(lanes: usize, buys: u128) -> ExecConfig {
+    pub(crate) fn config(lanes: usize, buys: u128) -> ExecConfig {
         let gas_price_wei = 1_000_000_000;
         let gas_limit = 300_000;
         let one = 1_000_000_000_000_000 + u128::from(gas_price_wei) * u128::from(gas_limit);
@@ -1923,7 +1934,7 @@ mod tests {
     }
 
     /// A launch really signed by a third party: (hash, signed bytes, input).
-    fn launch(salt: u8, nonce: u64) -> ([u8; 32], Vec<u8>, Vec<u8>) {
+    pub(crate) fn launch(salt: u8, nonce: u64) -> ([u8; 32], Vec<u8>, Vec<u8>) {
         let launcher = Signer::from_secret_bytes(&[0x5a; 32]).unwrap();
         let input = calldata(salt);
         let (mut scratch, mut raw) = (Vec::new(), Vec::new());
@@ -1955,14 +1966,14 @@ mod tests {
         })
     }
 
-    fn c2(head: Option<ChainHead>) -> LaunchContext<'static> {
+    pub(crate) fn c2(head: Option<ChainHead>) -> LaunchContext<'static> {
         LaunchContext {
             snapshot: &snapshot,
             head,
         }
     }
 
-    const HEAD: ChainHead = ChainHead {
+    pub(crate) const HEAD: ChainHead = ChainHead {
         number: 129_900_000,
         timestamp: 1_793_000_000,
     };
@@ -1988,7 +1999,7 @@ mod tests {
         (exec, d)
     }
 
-    fn clock(start: u64, step: u64) -> FnClock<impl Fn() -> u64> {
+    pub(crate) fn clock(start: u64, step: u64) -> FnClock<impl Fn() -> u64> {
         let now = Cell::new(start);
         FnClock {
             id: CLOCK_ID,
@@ -2365,7 +2376,7 @@ mod tests {
     /// Now: one second after the test head.
     const NOW_MS: u64 = 1_793_000_001_000;
 
-    fn strategy_c2(head: Option<ChainHead>) -> CanonicalContext<'static> {
+    pub(crate) fn strategy_c2(head: Option<ChainHead>) -> CanonicalContext<'static> {
         CanonicalContext {
             snapshot: &canonical,
             head,
@@ -2375,7 +2386,7 @@ mod tests {
 
     /// A curve after real BUYs of `wei` from the fresh curve, and the
     /// quote of a BUY of `input` on it.
-    fn curve_after(wei: u128) -> StrategyCurve {
+    pub(crate) fn curve_after(wei: u128) -> StrategyCurve {
         use darkbot_bsc_trading::economics::flap::native_curve20::{
             HoldingCap, NativeBuyInputs, profile_terms, quote_native_buy,
         };

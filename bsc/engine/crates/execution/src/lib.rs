@@ -60,6 +60,13 @@ pub mod sources;
 /// The LIVE qualification record, verified against its evidence (plan 28.10.).
 #[cfg(any(feature = "runtime", feature = "g07-mainnet"))]
 pub mod live_qualification;
+/// The LIVE key: the buyer's private key file, loaded under an effective LIVE.
+#[cfg(feature = "runtime")]
+pub mod live_key;
+/// The LIVE end of the executor: owner-admitted release over qualified
+/// transports (plan 28.10.).
+#[cfg(feature = "runtime")]
+pub mod live_end;
 /// The native WSS pending-transaction source adapter (verified full txs).
 #[cfg(feature = "runtime")]
 pub mod wss;

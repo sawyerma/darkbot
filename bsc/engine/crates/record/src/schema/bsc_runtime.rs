@@ -435,6 +435,49 @@ pub mod buy_attempt_total_slot {
     };
 }
 
+/// One LIVE intent the native owner admitted (plan 28.10.): written
+/// create-new before any byte of it can leave, its most the grant may
+/// lose by it (a BUY's input and gas, an approval's or SELL's gas). The
+/// grant's spend is the sum of its entries; an entry is never removed, so a
+/// possibly sent intent always counts.
+pub mod live_spend {
+    use super::*;
+
+    /// The signed transaction's hash, hex: one entry per transaction.
+    pub const INTENT_ID: u16 = 1;
+    /// `BUY`, `APPROVE` or `SELL`.
+    pub const KIND: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// The component it acts for (`BSC_EXEC`, `BSC_STRATEGY_C`).
+    pub const COMPONENT: u16 = 5;
+    /// The owner generation of the grant it was admitted under.
+    pub const GRANT_GENERATION: u16 = 6;
+    pub const INPUT_WEI: u16 = 7;
+    /// Input and gas at the signed gas price and limit.
+    pub const MAX_WEI: u16 = 8;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-spend.v1",
+        record_type: 67,
+        schema_version: 1,
+        fields: &[
+            Field::req(INTENT_ID, "intent_id", Text),
+            Field::req(KIND, "kind", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::req(INPUT_WEI, "input_wei", U256),
+            Field::req(MAX_WEI, "max_wei", U256),
+        ],
+    };
+}
+
 /// The LIVE qualification of a scope (plan 28.10., `0a647175`): what this
 /// product qualified about venues, sources and inclusion adapters, its
 /// acquisition and its operator's risk decision, each bound by path and
@@ -1520,6 +1563,7 @@ pub const ALL: &[&Schema] = &[
     &source_mode_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
+    &live_spend::SCHEMA,
     &live_qualification::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,

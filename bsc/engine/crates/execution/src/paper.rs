@@ -130,6 +130,43 @@ fn private(meta: &fs::Metadata) -> bool {
     meta.permissions().mode() & 0o077 == 0
 }
 
+/// The signer of the key file at `path`: absolute and outside `repo_root`,
+/// an owner-only regular file in an owner-only directory, exactly 32 bytes
+/// of a valid secp256k1 key. The bytes read are zeroized at once; the
+/// signer's key is zeroized when it is dropped. The file is only read.
+pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, IdentityError> {
+    check_location(path, repo_root)?;
+    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
+    let meta = fs::symlink_metadata(path).map_err(io)?;
+    if !meta.is_file() || !private(&meta) {
+        return Err(IdentityError::Permissions(format!(
+            "{} is not a private regular file",
+            path.display()
+        )));
+    }
+    if let Some(dir) = path.parent()
+        && !private(&fs::metadata(dir).map_err(io)?)
+    {
+        return Err(IdentityError::Permissions(format!(
+            "{} is accessible to others",
+            dir.display()
+        )));
+    }
+    let mut bytes = fs::read(path).map_err(io)?;
+    let mut secret = [0u8; 32];
+    let len = bytes.len();
+    if len == 32 {
+        secret.copy_from_slice(&bytes);
+    }
+    bytes.zeroize();
+    if len != 32 {
+        return Err(IdentityError::Malformed(format!("{len} bytes, not 32")));
+    }
+    let signer = Signer::from_secret_bytes(&secret);
+    secret.zeroize();
+    signer.map_err(|_| IdentityError::Malformed("not a secp256k1 key".into()))
+}
+
 impl PaperIdentity {
     /// Creates a new identity at `path` from the operating system's
     /// randomness and returns its address. Refuses an existing file; the
@@ -186,36 +223,7 @@ impl PaperIdentity {
         repo_root: &Path,
         production: &[[u8; 20]],
     ) -> Result<Self, IdentityError> {
-        check_location(path, repo_root)?;
-        let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
-        let meta = fs::symlink_metadata(path).map_err(io)?;
-        if !meta.is_file() || !private(&meta) {
-            return Err(IdentityError::Permissions(format!(
-                "{} is not a private regular file",
-                path.display()
-            )));
-        }
-        if let Some(dir) = path.parent()
-            && !private(&fs::metadata(dir).map_err(io)?)
-        {
-            return Err(IdentityError::Permissions(format!(
-                "{} is accessible to others",
-                dir.display()
-            )));
-        }
-        let mut bytes = fs::read(path).map_err(io)?;
-        let mut secret = [0u8; 32];
-        let len = bytes.len();
-        if len == 32 {
-            secret.copy_from_slice(&bytes);
-        }
-        bytes.zeroize();
-        if len != 32 {
-            return Err(IdentityError::Malformed(format!("{len} bytes, not 32")));
-        }
-        let signer = Signer::from_secret_bytes(&secret);
-        secret.zeroize();
-        let signer = signer.map_err(|_| IdentityError::Malformed("not a secp256k1 key".into()))?;
+        let signer = load_private_key(path, repo_root)?;
         let address = signer.address().into_array();
         if production.contains(&address) {
             return Err(IdentityError::ProductionAccount(format!(
