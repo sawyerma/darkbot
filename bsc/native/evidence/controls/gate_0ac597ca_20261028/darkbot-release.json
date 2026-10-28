@@ -1,0 +1,32 @@
+{
+  "schema_id": "5e1a11c27e28e2fae5494c9efe1dc36d03c5463b0f3bf0f878761eb820eafb2b",
+  "files": {
+    "gateway/target/release/darkbot-gateway": "ed9454c103bb8f7405580a5230b8f4c46184ed35b3ee09ea31129c1c91dcbe39",
+    "project_0/native/target/release/p0-market-capture-reported": "40dc5f987e27399e785d7c4f0512d86069d1c56501358149ece1da15f17c2ba6",
+    "project_0/native/target/release/p0ctl": "07a15d1bdac77b6aae74a1053c3dd68909b56772a3a80ca5abbb075e9ab120c7",
+    "project_0/native/target/release/p0-analytics-reporter": "92292be599bd82acffb88d50936b59454fba76acf02dc95791c29d70a8036b97",
+    "bsc/engine/target/release/bsc-status-reporter": "64013eeae926bd0093dd4485f048c5da003bedfe6150ab83e7358915c79a239a",
+    "bsc/engine/target/release/g07_pre_live_readiness": "c1ba04129d37b0a706298d7e773707c7cc8f9dc6b739c6d5f19b11edf2a84a7f",
+    "bsc/engine/target/release/g07_candidate": "2c1ca5af85a5b67a2c641ec1aeb9f092e057ae5b6a0f7d8bf2312288898d5d97",
+    "bsc/engine/target/release/bsc_runtime": "b3660e8b6a7feeed063c39206024370de2165a62328a3c3218aced586a618c91",
+    "ops/darkbotctl": "f4983c794436f426587480cd0696324b878dba5e9339e8a20d0685cfc8075002",
+    "ops/bsc-control.sh": "4ba6826b2ab2b9919546fd63563acae7c965c0f635d5c20cb21378f45b775c33",
+    "bsc/tools/readiness_job.py": "0b9436113831829694e922a4b20f5b98a360788237e6a7ab9eb0ef86c8018e2b",
+    "frontend/dist/assets/BscPage--sZ2N9OT.js": "744fe41a463bab55e50b385f9fed0bd7fc4e1ff391da1936da658c4b14bd765a",
+    "frontend/dist/assets/BscPage-CvX2x_U7.css": "9d5a74346be4c36e1542b3c8c74ae612bca11b202a3f1ccdf930982b9fad9829",
+    "frontend/dist/assets/OverviewPage-BwcWXa0B.js": "c3ac5b1f089ae35cab9907aa03d6dabd947210a4e79a46a791add760f01900c6",
+    "frontend/dist/assets/OverviewPage-D5q5oF56.css": "8319179b167ef69efcc814be7aac8830b79c02645d616bdc0f973f98f91fcdc0",
+    "frontend/dist/assets/Project0Page-DkapP9FW.css": "f42c0e78148198dfab6caca75fae2da8dfa051232e3357007a71087601821f45",
+    "frontend/dist/assets/Project0Page-b3lc2fE6.js": "f880b40e378678fc94db756b998e5bd17c8a06faaa43c0c75dca498287d24921",
+    "frontend/dist/assets/SolanaPage-E6zlmogB.js": "4e0870ae27fcd3b1bc8d98492917e2dad00cbafcf61030b799077e90d0e74ff3",
+    "frontend/dist/assets/commands_pb-B47jQ6QV.js": "cfd37675d2b9fe117adc87c04306759fe3c82b074869dc9c2aedd5637554c610",
+    "frontend/dist/assets/index-D4-IA_eV.css": "a87346b71f2b34e274d5a4fbf299816391406d58afb327cb322b15fb7d638318",
+    "frontend/dist/assets/index-NjWDbpmj.js": "e0202be6660bfa64c591fc3c3a2251d8e38079a0c9cef636f963ac38b8f54526",
+    "frontend/dist/assets/index-h5XhuoX5.js": "3030bf4c077f98d60145cfd4894b6379bb025245013763dd8a055b1b4d2ed318",
+    "frontend/dist/assets/index-tOy-C_N7.css": "e9d7e5cb9b7ddc231ef2b8878ffe306884b33c4da3b981cfa2cea337f88b7fc0",
+    "frontend/dist/assets/numeric_pb-_dF7LSxJ.js": "5710864f0afcc4b0c27ce0ec24a2038208481465428bdc2ee226d6eb855bcfb7",
+    "frontend/dist/index.html": "56587f075178479eb97600b9bda3e05330636104056e89e34eb596134d382e7c",
+    "frontend/dist/placeholder.svg": "64badf7aabda0b9630b87020ffb6095cb858ccbcf66b355c2aa08b1063954d3b",
+    "frontend/dist/robots.txt": "a3d27b3ca5ce32341fa9f96f01169b521b1657c05d1860c45d1e53a6258e9e8b"
+  }
+}

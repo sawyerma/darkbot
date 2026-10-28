@@ -1,0 +1,29 @@
+✖ E: main() simulates only through simulatePrepared, which never signs, sends, switches or writes; evidence comes last (1.2295ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.130125
+
+✖ failing tests:
+
+test at bsc/tools/test_g06a_state_pin.cjs:243:1
+✖ E: main() simulates only through simulatePrepared, which never signs, sends, switches or writes; evidence comes last (1.2295ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/test_g06a_state_pin.cjs:259:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.start (node:internal/test_runner/test:959:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:332:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual'
+  }

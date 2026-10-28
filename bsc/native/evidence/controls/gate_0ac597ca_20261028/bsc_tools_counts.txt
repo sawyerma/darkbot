@@ -1,0 +1,31 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running tests/bsc_tools.rs (target/debug/deps/bsc_tools-0b0bb66d428b154f)
+
+running 6 tests
+test the_runner_sees_every_failure_error_skip_and_missing_summary ... ok
+bsc_tools test_g06a_shell_scope.py: exit Some(0), tests 7, pass 7, fail 0, error 0, skip 0
+test test_g06a_shell_scope_py ... ok
+bsc_tools test_g06a_private_mode.cjs: exit Some(0), tests 4, pass 4, fail 0, error 0, skip 0
+test test_g06a_private_mode_cjs ... ok
+bsc_tools test_g06a_key_hygiene.cjs: exit Some(0), tests 3, pass 3, fail 0, error 0, skip 0
+test test_g06a_key_hygiene_cjs ... ok
+bsc_tools test_g06a_state_pin.cjs: exit Some(0), tests 9, pass 9, fail 0, error 0, skip 0
+test test_g06a_state_pin_cjs ... ok
+bsc_tools test_g06a_dry_modes.py: exit Some(0), tests 18, pass 18, fail 0, error 0, skip 0
+test test_g06a_dry_modes_py ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 42.33s
+
+execution bsc_tools exit=0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/bsc_tools.rs (target/debug/deps/bsc_tools-c26c0f8f72dd6055)
+
+running 2 tests
+bsc_tools test_status_sync.py: exit Some(0), tests 4, pass 4, fail 0, error 0, skip 0
+test test_status_sync_py ... ok
+bsc_tools test_readiness_job.py: exit Some(0), tests 5, pass 5, fail 0, error 0, skip 0
+test test_readiness_job_py ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+
+qualification bsc_tools exit=0

@@ -1,0 +1,32 @@
+✖ A: another block is refused with STATE_BLOCK_MISMATCH only, before any state read and without evidence (104.04825ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147.037542
+
+✖ failing tests:
+
+test at bsc/tools/test_g06a_state_pin.cjs:129:1
+✖ A: another block is refused with STATE_BLOCK_MISMATCH only, before any state read and without evidence (104.04825ms)
+  AssertionError [ERR_ASSERTION]: Error: newTokenV6 returned 0x, not the predicted CREATE2 token 0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a
+      at simulatePrepared (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/g06a_local_simulate.cjs:241:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async atAnotherBlock (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/test_g06a_state_pin.cjs:85:11)
+      at async TestContext.<anonymous> (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/test_g06a_state_pin.cjs:131:13)
+      at async Test.run (node:internal/test_runner/test:1069:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3)
+  ["eth_chainId","eth_getBlockByNumber","eth_getBalance","eth_getTransactionCount","eth_getCode","eth_getCode"]
+      at TestContext.<anonymous> (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/test_g06a_state_pin.cjs:132:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1069:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }

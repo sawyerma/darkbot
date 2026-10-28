@@ -1,0 +1,30 @@
+regression (macos-latest) success 2026-10-28T00:15:38Z 2026-10-28T00:20:41Z job 122550885392
+    Set up job success
+    Run actions/checkout@v4 success
+    Run dtolnay/rust-toolchain@master success
+    Run actions/setup-node@v4 success
+    Run actions/setup-python@v5 success
+    Run Swatinem/rust-cache@v2 success
+    npm dependencies of the DRY tools (package-lock) success
+    cargo regression, all features (bsc_tools runs the seven tool tests) success
+    the seven tool tests ran, each with its fixed count success
+    Post Run Swatinem/rust-cache@v2 success
+    Post Run actions/setup-python@v5 success
+    Post Run actions/setup-node@v4 success
+    Post Run actions/checkout@v4 success
+    Complete job success
+regression (ubuntu-latest) success 2026-10-28T00:15:37Z 2026-10-28T00:19:05Z job 122550885567
+    Set up job success
+    Run actions/checkout@v4 success
+    Run dtolnay/rust-toolchain@master success
+    Run actions/setup-node@v4 success
+    Run actions/setup-python@v5 success
+    Run Swatinem/rust-cache@v2 success
+    npm dependencies of the DRY tools (package-lock) success
+    cargo regression, all features (bsc_tools runs the seven tool tests) success
+    the seven tool tests ran, each with its fixed count success
+    Post Run Swatinem/rust-cache@v2 success
+    Post Run actions/setup-python@v5 success
+    Post Run actions/setup-node@v4 success
+    Post Run actions/checkout@v4 success
+    Complete job success

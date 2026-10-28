@@ -1,0 +1,18 @@
+== original test (c2267886) against the simulator before 86de25c9:
+✔ local simulation refuses another block than the preflight before any state read (162.469542ms)
+✔ the cross-check reads every state word pinned to the preflight block hash (167.503417ms)
+✔ the state pin and the canonical re-check refuse another block (0.433083ms)
+✔ every local EVM tool re-checks its block right before writing evidence (0.313375ms)
+ℹ pass 4
+ℹ fail 0
+== the same test against the simulator at 86de25c9:
+✖ local simulation refuses another block than the preflight before any state read (111.523792ms)
+✔ the cross-check reads every state word pinned to the preflight block hash (167.527416ms)
+✔ the state pin and the canonical re-check refuse another block (0.376667ms)
+✔ every local EVM tool re-checks its block right before writing evidence (0.319208ms)
+ℹ pass 3
+ℹ fail 1
+✖ failing tests:
+✖ local simulation refuses another block than the preflight before any state read (111.523792ms)
+  'Error: native switches refuse the signature: STOP: CONTROL_DISABLED at generation 0: BSC_WALLET_LAUNCHER DISABLED, BSC_WALLET_BUYER DISABLED, BSC_ECON_SIGN DISABLED\n' +
+    actual: 'Error: native switches refuse the signature: STOP: CONTROL_DISABLED at generation 0: BSC_WALLET_LAUNCHER DISABLED, BSC_WALLET_BUYER DISABLED, BSC_ECON_SIGN DISABLED\n    at requireSigningSwitches (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/statepin_86de25c9/bsc/tools/g06a_local_simulate.cjs:73:11)\n    at main (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/statepin_86de25c9/bsc/tools/g06a_local_simulate.cjs:192:3)\n    at Object.<anonymous> (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/statepin_86de25c9/bsc/tools/g06a_local_simulate.cjs:412:3)\n    at Module._compile (node:internal/modules/cjs/loader:1734:14)\n    at Object..js (node:internal/modules/cjs/loader:1899:10)\n    at Module.load (node:internal/modules/cjs/loader:1469:32)\n    at Module._load (node:internal/modules/cjs/loader:1286:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:152:5)\n',

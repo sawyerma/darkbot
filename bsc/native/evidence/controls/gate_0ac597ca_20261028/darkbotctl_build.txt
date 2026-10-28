@@ -1,0 +1,71 @@
+
+> trading-dashboard@0.0.0 lint
+> eslint .
+
+
+> trading-dashboard@0.0.0 lint:boundaries
+> node scripts/check-boundaries.mjs
+
+Frontend import boundaries: PASS
+
+> trading-dashboard@0.0.0 lint:css
+> node scripts/check-graphite-css.mjs
+
+Graphite CSS token boundaries: PASS
+
+> trading-dashboard@0.0.0 check:freeze
+> node scripts/check-design-freeze.mjs
+
+freeze OK: src/features/project0/styles/graphite.css
+freeze OK: src/features/project0/pages/WalletsPanel.tsx
+freeze OK: design/reference/project0_graphite_v7_fleet.html
+
+> trading-dashboard@0.0.0 build
+> npm run check:bsc-fields && npm run type-check && vite build
+
+
+> trading-dashboard@0.0.0 check:bsc-fields
+> node scripts/check-bsc-fields.mjs
+
+BSC F0-VAR: PASS 2765 native fields placed (IST_CONNECTED 2133, IST_BUG 0, SOLL_MISSING 0, FUTURE_PHASE_BLOCKED 36, EXCLUDED 596), 116 proto fields placed
+
+> trading-dashboard@0.0.0 type-check
+> tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit
+
+vite v5.4.21 building for production...
+transforming...
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✓ 321 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.80 kB │ gzip:   0.45 kB
+dist/assets/BscPage-CvX2x_U7.css         1.19 kB │ gzip:   0.48 kB
+dist/assets/OverviewPage-D5q5oF56.css    3.81 kB │ gzip:   1.29 kB
+dist/assets/Project0Page-DkapP9FW.css    5.01 kB │ gzip:   1.61 kB
+dist/assets/index-tOy-C_N7.css           7.11 kB │ gzip:   2.08 kB
+dist/assets/index-D4-IA_eV.css          11.74 kB │ gzip:   3.29 kB
+dist/assets/SolanaPage-E6zlmogB.js       0.29 kB │ gzip:   0.22 kB
+dist/assets/commands_pb-B47jQ6QV.js      3.35 kB │ gzip:   1.79 kB
+dist/assets/numeric_pb-_dF7LSxJ.js       3.73 kB │ gzip:   1.74 kB
+dist/assets/OverviewPage-BwcWXa0B.js    21.40 kB │ gzip:   7.96 kB
+dist/assets/index-h5XhuoX5.js           40.85 kB │ gzip:  14.08 kB
+dist/assets/BscPage--sZ2N9OT.js         99.47 kB │ gzip:  28.77 kB
+dist/assets/Project0Page-b3lc2fE6.js   143.58 kB │ gzip:  46.17 kB
+dist/assets/index-NjWDbpmj.js          347.74 kB │ gzip: 108.45 kB
+✓ built in 1.20s
+    Finished `release` profile [optimized] target(s) in 0.08s
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/runtime)
+   Compiling darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/reporter)
+    Finished `release` profile [optimized] target(s) in 20.05s
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/project_0/native/crates/runtime)
+    Finished `release` profile [optimized] target(s) in 18.11s
+   Compiling darkbot-bsc-qualification v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/qualification)
+   Compiling darkbot-bsc-execution v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution)
+    Finished `release` profile [optimized] target(s) in 5.62s
+   Compiling darkbot-bsc-execution v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution)
+    Finished `release` profile [optimized] target(s) in 2.32s
+    Finished `release` profile [optimized] target(s) in 0.07s
+Coordinated release manifest: PASS
+build ok – weiter mit: darkbotctl deploy
