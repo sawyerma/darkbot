@@ -156,6 +156,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         integration_probe_terminal: HashSet::new(),
         threshold_fallback: HashSet::new(),
         threshold_bootstrap: VecDeque::new(),
+        threshold_bootstrap_queued: HashSet::new(),
         threshold_bootstrap_batch: 64,
         threshold: dec06_control(Default::default(), None),
         sweep_batch_max_events: 64,
@@ -5128,8 +5129,7 @@ fn dec06_active_crosscheck_ignores_healthy_stale_and_covered_samples() {
     let (account, asset_bank, liab_bank, _, jobs, results) = dec06_active(&mut f, 95.0);
     let none = HashSet::new();
     let answer = |f: &mut Fixture, change: &dyn Fn(&mut Fixture)| {
-        f.owner
-            .threshold_crosscheck_sample(&[asset_bank], &none, &none);
+        f.owner.threshold_crosscheck_sample(&[asset_bank], &none);
         let result = crosscheck_evaluate(jobs.try_pop().unwrap());
         change(f);
         assert!(results.try_push(result).is_ok());
@@ -5178,7 +5178,7 @@ fn dec06_active_crosscheck_ignores_healthy_stale_and_covered_samples() {
     let mut h = fixture("dec06_crosscheck_healthy");
     let (_, asset_bank, _, _, jobs, results) = dec06_active(&mut h, 85.0);
     h.owner
-        .threshold_crosscheck_sample(&[asset_bank], &HashSet::new(), &HashSet::new());
+        .threshold_crosscheck_sample(&[asset_bank], &HashSet::new());
     let result = crosscheck_evaluate(jobs.try_pop().unwrap());
     assert_eq!(result.liquidatable, Ok(false));
     assert!(results.try_push(result).is_ok());
@@ -5189,7 +5189,7 @@ fn dec06_active_crosscheck_ignores_healthy_stale_and_covered_samples() {
     h.owner.threshold.crosscheck_accounts = 1;
     for _ in 0..17 {
         h.owner
-            .threshold_crosscheck_sample(&[asset_bank], &HashSet::new(), &HashSet::new());
+            .threshold_crosscheck_sample(&[asset_bank], &HashSet::new());
     }
     assert_eq!(
         (
@@ -5306,5 +5306,336 @@ fn dec06_the_controller_switches_the_threshold_mode_hot() {
         "no index without a mode"
     );
     assert_eq!(f.owner.sources.capabilities.config_version, Some(5));
+    cleanup(f);
+}
+
+/// DEC-06 OBSERVE: a liquidatable account whose time wake-up is due is no miss — both paths
+/// consume the same wake-ups (V2-03), so the comparison leaves it out; the tick still counts.
+#[test]
+fn dec06_observe_leaves_due_time_wakeups_out_of_the_comparison() {
+    use darkbot_project0::index::Side;
+    use darkbot_project0::schedule::Trigger;
+    let mut f = fixture("dec06_observe_due");
+    let (account, asset_bank, liab_bank) = dec06_observe(&mut f, 95.0);
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    f.owner
+        .time_schedule
+        .upsert(account, Trigger::PremiumBoundary, Some(1_700_000_000));
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let s = &f.owner.threshold.stats;
+    assert_eq!((s.hits, s.misses, s.ticks, s.streak), (0, 0, 1, 1));
+    cleanup(f);
+}
+
+/// DEC-06 ACTIVE: an account the tick woke is never sampled — the cross-check spends its
+/// samples on what the threshold trigger did not wake.
+#[test]
+fn dec06_active_crosscheck_samples_only_what_the_tick_did_not_wake() {
+    let mut f = fixture("dec06_crosscheck_woken");
+    let (account, asset_bank, _, _, jobs, _) = dec06_active(&mut f, 95.0);
+    f.owner
+        .threshold_crosscheck_sample(&[asset_bank], &HashSet::from([account]));
+    assert!(jobs.try_pop().is_none());
+    assert_eq!(f.owner.threshold.stats.crosscheck_samples, 0);
+    cleanup(f);
+}
+
+/// DEC-06: a price projection the threshold trigger asked for in ACTIVE that returns after ACTIVE
+/// was left admits nothing (counted stale): the full sweep at that change covers its bank.
+#[test]
+fn dec06_a_projection_after_active_was_left_admits_nothing() {
+    use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
+    let mut f = fixture_with("dec06_projection_left", None);
+    let (_, asset_bank, _) = dec06_observe(&mut f, 95.0);
+    let stale = f.owner.metrics.oracle_bank_projection_stale;
+    assert!(f
+        .results
+        .as_ref()
+        .unwrap()
+        .oracle
+        .try_push(OraclePriceProjectionResultMessage {
+            bank: asset_bank,
+            base_slot: 100,
+            base_bank_hash: solana_sdk::hash::Hash::default(),
+            result: Err("RPC_TRANSPORT".into()),
+        })
+        .is_ok());
+    f.owner.remote_apply().unwrap();
+    assert!(f.owner.oracle_lanes.is_empty(), "OBSERVE: nothing admitted");
+    assert_eq!(f.owner.metrics.oracle_bank_projection_stale, stale + 1);
+    cleanup(f);
+}
+
+/// DEC-06: an ACTIVE request whose decision cannot be recorded does not stand (durable receipts):
+/// the requested mode falls back to OBSERVE.
+#[test]
+fn dec06_an_unrecorded_active_request_does_not_stand() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::threshold_mode::{self as tm, Requested};
+    let mut f = fixture_with("dec06_unrecorded", None);
+    dec06_ready(&mut f, 95.0);
+    // The decisions' directory is a file: no receipt can be written.
+    let blocked = f.dir.join("capability-control");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    f.owner.sources.capabilities.dir = Some(blocked);
+    f.owner.sources.capabilities.config_version = Some(0);
+    let request = |seq, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: tm::THRESHOLD_TRIGGER.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+        })
+    };
+    f.owner.apply_capability_control(1, request(1, "OBSERVE"));
+    assert_eq!(f.owner.threshold.requested, Requested::Observe);
+    f.owner.apply_capability_control(2, request(2, "ACTIVE"));
+    assert_eq!(
+        f.owner.threshold.requested,
+        Requested::Observe,
+        "unrecorded ACTIVE"
+    );
+    cleanup(f);
+}
+
+/// DEC-06: a reconnect through the real recovery path (`events()`: Reconnected, snapshot, Ready)
+/// rebuilds the threshold index — the requested ACTIVE kept apart, SWEEP with INDEX_BOOTSTRAP —
+/// and the effective mode follows the index back to ACTIVE behind the startup sweep's batch.
+#[test]
+fn dec06_a_reconnect_rebuilds_the_index_and_active_follows_it() {
+    use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
+    let mut f = fixture("dec06_reconnect");
+    let (state, account, _, _) = p2_accounts(&f, 95.0, 1_700_000_000, false);
+    let mut accounts = vec![f.program_data_account.clone()];
+    accounts.extend(state);
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: 100,
+            accounts: accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.owner.threshold_test_active();
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert!(f.owner.st.run_state().is_tradable());
+    assert_eq!(f.owner.threshold.requested, Requested::Active);
+    assert_eq!(
+        (f.owner.threshold.effective, f.owner.threshold.block),
+        (Effective::Sweep, tm::INDEX_BOOTSTRAP)
+    );
+    assert_eq!(
+        Vec::from(f.owner.threshold_bootstrap.clone()),
+        vec![account]
+    );
+    assert!(
+        f.owner.sweep_batch_pending(),
+        "the startup sweep of the Ready"
+    );
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.threshold.block, tm::BARRIER);
+    f.owner.sweep();
+    assert_eq!(
+        f.owner.threshold.effective,
+        Effective::Active,
+        "follows the index"
+    );
+    cleanup(f);
+}
+
+/// DEC-06 (review H1): a threshold mode beside the authoritative sweep never delays readiness —
+/// an unbounded run's first window opens at the sweep's READY while the OBSERVE index still waits
+/// for budget to bootstrap.
+#[test]
+fn dec06_a_threshold_mode_beside_the_sweep_never_delays_readiness() {
+    use crate::orchestration::threshold_mode::{Effective, Requested};
+    use crate::orchestration::until_stopped as us;
+    let mut f = fixture("dec06_ready");
+    let mut b = us::tests::binding(60, 120);
+    b.mode = "shadow".into();
+    let rolling = us::Rolling {
+        project: f.dir.clone(),
+        binding: b,
+        qualification_id: "0123456789abcdef".into(),
+        config: darkbot_solana::runtime_config::RuntimeConfig::default(),
+        max_runtime_seconds: None,
+        resume: None,
+        autostart: None,
+    };
+    f.owner.windows = Some(super::windows::OwnerWindows::new(
+        rolling,
+        f.dir.clone(),
+        Arc::new(std::sync::atomic::AtomicU64::new(0)),
+    ));
+    dec06_ready(&mut f, 95.0);
+    f.owner.threshold = dec06_control(Requested::Observe, None);
+    f.owner.threshold_index_reset();
+    f.owner.threshold.budget.charge(u64::MAX / 2);
+    assert!(f.owner.lifecycle());
+    assert!(!f.owner.threshold_ready, "the bootstrap waits for budget");
+    assert_eq!(f.owner.threshold.effective, Effective::Sweep);
+    assert!(
+        f.dir.join(us::WINDOWS_JOURNAL).exists(),
+        "window 1 opens at the sweep's READY"
+    );
+    assert_eq!(
+        f.owner.threshold.stats.sampled_out, 0,
+        "a waiting bootstrap is no sampled unit (L4)"
+    );
+    cleanup(f);
+}
+
+/// DEC-06 (review H2/M1): an invalidated account (a bank write, a deferred upkeep) is queued once
+/// however often it is invalidated, and leaves the index incomplete; ticks then test nothing —
+/// not comparable, never toward N — until the bootstrap evaluated it again.
+#[test]
+fn dec06_ticks_on_an_incomplete_index_never_count_toward_n() {
+    let mut f = fixture("dec06_incomplete");
+    let (account, asset_bank, liab_bank) = dec06_observe(&mut f, 95.0);
+    for _ in 0..3 {
+        f.owner.threshold_defer(account);
+    }
+    assert_eq!(
+        Vec::from(f.owner.threshold_bootstrap.clone()),
+        vec![account],
+        "queued once"
+    );
+    assert!(!f.owner.threshold_ready);
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (s.ticks, s.uncomparable_ticks, s.hits, s.streak),
+        (0, 1, 0, 0)
+    );
+    // The bootstrap evaluates it again (once), the next tick is comparable.
+    assert!(f.owner.lifecycle());
+    assert!(f.owner.threshold_ready && f.owner.threshold_bootstrap_queued.is_empty());
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    assert_eq!(
+        (f.owner.threshold.stats.ticks, f.owner.threshold.stats.hits),
+        (1, 1)
+    );
+    cleanup(f);
+}
+
+/// DEC-06 (review M3): a miss on banks that were looked up counts — the streak back to 0 — also
+/// in a batch another tick of which could not be looked up (its ticks not comparable).
+#[test]
+fn dec06_a_miss_counts_in_a_batch_that_is_not_comparable() {
+    use darkbot_project0::index::Side;
+    let mut f = fixture("dec06_miss_uncomparable");
+    let (account, asset_bank, _) = dec06_observe(&mut f, 95.0);
+    f.owner.threshold.stats.streak = 9;
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    let clock = chain_clock(&f.owner.st);
+    let now = f.owner.clock.now_ns();
+    f.owner.threshold_observe_tick(&[asset_bank], now, clock);
+    // A bank without state: its price cannot be looked up (ACTIVE would project it).
+    f.owner
+        .threshold_observe_tick(&[Pubkey::new_unique()], now, clock);
+    f.owner.mark_all_banks_dirty();
+    f.owner.sweep();
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (s.misses, s.streak, s.ticks, s.uncomparable_ticks),
+        (1, 0, 0, 2)
+    );
+    cleanup(f);
+}
+
+/// DEC-06 (review M2): an unrecorded ACTIVE demotion is journaled as a change of its own, so a
+/// resume restores OBSERVE, never the unrecorded ACTIVE.
+#[test]
+fn dec06_an_unrecorded_active_is_never_restored() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::threshold_mode::{self as tm, Requested};
+    let mut f = fixture_with("dec06_unrecorded_restore", None);
+    // Not bootstrapped yet: the effective mode stays SWEEP through both requests.
+    p2_state(&mut f, 95.0, 1_700_000_000);
+    let blocked = f.dir.join("capability-control");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    f.owner.sources.capabilities.dir = Some(blocked);
+    f.owner.sources.capabilities.config_version = Some(0);
+    let request = |seq, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: tm::THRESHOLD_TRIGGER.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+        })
+    };
+    f.owner.apply_capability_control(1, request(1, "OBSERVE"));
+    f.owner.apply_capability_control(2, request(2, "ACTIVE"));
+    assert_eq!(f.owner.threshold.requested, Requested::Observe);
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    assert_eq!(
+        super::threshold::restore(&dir.join("opportunities.p0j")).map(|r| r.requested),
+        Some(Requested::Observe)
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-06 (review L5): a liquidatable sample the owner wakes without the sweep — it waits in a
+/// lane, or its time wake-up is due — is covered, no alarm.
+#[test]
+fn dec06_active_crosscheck_counts_pending_and_due_accounts_as_covered() {
+    use crate::orchestration::remote_workers::crosscheck_evaluate;
+    use darkbot_project0::index::Side;
+    use darkbot_project0::schedule::Trigger;
+    let mut f = fixture("dec06_crosscheck_covered");
+    let (account, asset_bank, _, _, jobs, results) = dec06_active(&mut f, 95.0);
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    let answer = |f: &mut Fixture| {
+        f.owner
+            .threshold_crosscheck_sample(&[asset_bank], &HashSet::new());
+        let result = crosscheck_evaluate(jobs.try_pop().unwrap());
+        assert_eq!(result.liquidatable, Ok(true));
+        assert!(results.try_push(result).is_ok());
+        f.owner.remote_apply().unwrap();
+    };
+    f.owner
+        .time_schedule
+        .upsert(account, Trigger::PremiumBoundary, Some(1_700_000_000));
+    answer(&mut f);
+    f.owner.time_schedule.remove_account(&account);
+    f.owner
+        .admit_oracle_accounts(HashSet::from([account]), HashSet::new(), (0, 100), 1);
+    answer(&mut f);
+    assert_eq!(f.owner.threshold.stats.crosscheck_misses, 0);
+    assert!(f.owner.threshold_authority() && !f.owner.threshold.latched);
+    cleanup(f);
+}
+
+/// DEC-06 (review M4): the cross-check's sampling is work beside ACTIVE's authoritative path —
+/// within its budget and measured; without budget the sample is skipped (counted), nothing queued.
+#[test]
+fn dec06_active_crosscheck_without_budget_is_skipped() {
+    let mut f = fixture("dec06_crosscheck_budget");
+    let (_, asset_bank, _, _, jobs, _) = dec06_active(&mut f, 95.0);
+    f.owner
+        .threshold_crosscheck_sample(&[asset_bank], &HashSet::new());
+    assert!(jobs.try_pop().is_some());
+    assert!(
+        f.owner.threshold.stats.observe_owner_ns.count() >= 1,
+        "measured"
+    );
+    f.owner.threshold.budget.charge(u64::MAX / 2);
+    f.owner
+        .threshold_crosscheck_sample(&[asset_bank], &HashSet::new());
+    assert!(jobs.try_pop().is_none());
+    assert_eq!(
+        (
+            f.owner.threshold.stats.crosscheck_samples,
+            f.owner.threshold.stats.crosscheck_skipped
+        ),
+        (1, 1)
+    );
     cleanup(f);
 }

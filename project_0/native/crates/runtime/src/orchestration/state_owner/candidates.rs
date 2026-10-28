@@ -747,6 +747,10 @@ impl CandidateLanes {
     pub(crate) fn lane_len(&self, lane: Lane) -> usize {
         self.order[lane.idx()].len()
     }
+    /// DEC-06: an entry of `account` waits in a lane.
+    pub(crate) fn contains(&self, account: &Pubkey) -> bool {
+        self.pending.contains_key(account)
+    }
     #[cfg(test)]
     pub(crate) fn get(&self, account: &Pubkey) -> Option<&PendingCandidate> {
         self.pending.get(account)

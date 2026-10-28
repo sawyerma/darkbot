@@ -116,6 +116,14 @@ impl TimeScheduler {
     pub fn earliest(&self) -> Option<u64> {
         self.heap.peek().map(|Reverse((at, _))| *at)
     }
+    /// DEC-06: the earliest wake-up scheduled for `account` (either trigger).
+    pub fn wake_at(&self, account: &Pubkey) -> Option<u64> {
+        [Trigger::PremiumBoundary, Trigger::TagProfitable]
+            .iter()
+            .filter_map(|t| self.current.get(&(*account, *t)))
+            .filter_map(|seq| self.by_seq.get(seq).map(|d| d.at_unix_s))
+            .min()
+    }
     pub fn len(&self) -> usize {
         self.by_seq.len()
     }

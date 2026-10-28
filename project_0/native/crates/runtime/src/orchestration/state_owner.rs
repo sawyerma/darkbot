@@ -237,6 +237,8 @@ pub(super) struct ShadowOwner {
     integration_probe_terminal: HashSet<Pubkey>,
     threshold_fallback: HashSet<Pubkey>,
     threshold_bootstrap: VecDeque<Pubkey>,
+    /// DEC-06 (review M1): the accounts in `threshold_bootstrap`, each queued once.
+    threshold_bootstrap_queued: HashSet<Pubkey>,
     threshold_bootstrap_batch: usize,
     /// DEC-06: the threshold mode (requested/effective, generation, OBSERVE evidence).
     threshold: threshold::ThresholdControl,

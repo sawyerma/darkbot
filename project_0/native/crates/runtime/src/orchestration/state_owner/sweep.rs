@@ -229,8 +229,8 @@ impl ShadowOwner {
                         work
                     })
                     .collect();
-                // DEC-06 OBSERVE: this batch against the threshold trigger's wake-ups.
-                self.threshold_compare(&evaluated, evaluated_ns, &due_accounts);
+                // DEC-06 OBSERVE: the batch's evaluations, compared once it is forwarded (review L2).
+                let observed = (self.threshold.batch.ticks > 0).then(|| evaluated.clone());
                 if census_batch {
                     let rows = census_rows.into_iter().flatten().collect();
                     self.submit_c0_census(clock, rows, batch_started.elapsed());
@@ -625,6 +625,11 @@ impl ShadowOwner {
                 if blocked_ns > self.metrics.sweep_batch_ns_max {
                     self.metrics.sweep_batch_ns_max = blocked_ns;
                     self.metrics.sweep_batch_ns_max_accounts = unique;
+                }
+                // DEC-06 OBSERVE: the batch against the threshold trigger's wake-ups, after its
+                // forwarding and outside the sweep's measured owner time.
+                if let Some(observed) = observed {
+                    self.threshold_compare(&observed, evaluated_ns, &due_accounts);
                 }
                 // DEC-06: the batch is evaluated — ACTIVE's barrier is open now (under steady
                 // oracle traffic a batch is always open at the loop's start).

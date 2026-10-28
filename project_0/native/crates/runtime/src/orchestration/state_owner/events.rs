@@ -664,7 +664,7 @@ impl ShadowOwner {
                     for account in affected_accounts.iter().copied() {
                         self.threshold_index.remove_account(&account);
                         self.threshold_fallback.insert(account);
-                        self.threshold_bootstrap.push_back(account);
+                        self.threshold_enqueue(account);
                     }
                     self.threshold_ready = self.threshold_bootstrap.is_empty();
                 }
@@ -1090,8 +1090,12 @@ impl ShadowOwner {
                             }
                         }
 
-                        // DEC-06: the sweep cross-check samples what this tick did not wake.
-                        self.threshold_crosscheck_sample(&looked_up, &candidates, &fallback);
+                        // DEC-06: what this tick woke, for the cross-check after the admission.
+                        let woken: HashSet<Pubkey> = if looked_up.is_empty() {
+                            HashSet::new()
+                        } else {
+                            candidates.union(&fallback).copied().collect()
+                        };
                         // This tick's input revision (FIX-134): a new cause for every hit.
                         self.admit_oracle_accounts(
                             candidates,
@@ -1099,6 +1103,9 @@ impl ShadowOwner {
                             (t_rx_ns, event_slot),
                             self.candidate_input_epoch,
                         );
+                        // DEC-06 (review M4): the sweep cross-check samples what this tick did not
+                        // wake, behind the admission and within the budget beside it.
+                        self.threshold_crosscheck_sample(&looked_up, &woken);
                     }
                 }
             }

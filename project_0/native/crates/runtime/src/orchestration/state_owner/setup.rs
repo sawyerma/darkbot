@@ -1207,6 +1207,7 @@ pub(super) fn prepare(
         integration_probe_terminal,
         threshold_fallback,
         threshold_bootstrap,
+        threshold_bootstrap_queued: HashSet::new(),
         threshold_bootstrap_batch,
         threshold,
         sweep_batch_max_events,

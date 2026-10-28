@@ -39,7 +39,11 @@ pub(super) struct ObserveBatch {
     /// The banks of the batch's oracle ticks.
     pub(super) oracle_banks: HashSet<Pubkey>,
     pub(super) ticks: u64,
-    /// A tick was sampled out or could not be looked up (a price ACTIVE projects first).
+    /// Banks of the batch's ticks the threshold trigger did not look up — a sampled tick, a
+    /// price ACTIVE projects first, an incomplete index (review H2/M3): their accounts are left
+    /// out of the comparison and the batch's ticks are not comparable.
+    pub(super) unlooked: HashSet<Pubkey>,
+    /// The batch's ticks span a generation change.
     pub(super) uncomparable: bool,
     /// The generation of the batch's first tick.
     pub(super) generation: Option<u64>,
@@ -51,9 +55,16 @@ impl ThresholdControl {
     pub(super) fn continue_from(&mut self, r: Restored) {
         self.requested = r.requested;
         self.requested_source = "resume".into();
-        self.stats.ticks = r.ticks;
-        self.stats.streak = r.streak;
+        // The continued run's generations follow its own (review L3): START is a new one.
+        self.generation = r.generation.saturating_add(1);
         self.latched = r.latched;
+        let (s, c) = (&mut self.stats, &r.counters);
+        (s.ticks, s.streak, s.uncomparable_ticks) = (c.ticks, c.streak, c.uncomparable_ticks);
+        (s.hits, s.misses, s.extra) = (c.hits, c.misses, c.extra);
+        (s.sampled_out, s.fallbacks, s.index_evaluations) =
+            (c.sampled_out, c.fallbacks, c.index_evaluations);
+        (s.crosscheck_samples, s.crosscheck_skipped) = (c.crosscheck_samples, c.crosscheck_skipped);
+        (s.crosscheck_stale, s.crosscheck_misses) = (c.crosscheck_stale, c.crosscheck_misses);
     }
 
     pub(super) fn new(
@@ -89,19 +100,38 @@ impl ThresholdControl {
     }
 }
 
-/// DEC-06: the threshold mode a resumed run continues with, from its owner journal.
+/// DEC-06: the threshold mode a resumed run continues with, from its owner journal: the requested
+/// mode, the generation reached, the latch and the counters (latencies are the new process's).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Restored {
     pub(super) requested: Requested,
+    pub(super) generation: u64,
+    pub(super) latched: bool,
+    pub(super) counters: Counters,
+}
+
+/// The cumulative counters a resumed run continues.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Counters {
     pub(super) ticks: u64,
     pub(super) streak: u64,
-    pub(super) latched: bool,
+    pub(super) uncomparable_ticks: u64,
+    pub(super) hits: u64,
+    pub(super) misses: u64,
+    pub(super) extra: u64,
+    pub(super) sampled_out: u64,
+    pub(super) fallbacks: u64,
+    pub(super) index_evaluations: u64,
+    pub(super) crosscheck_samples: u64,
+    pub(super) crosscheck_skipped: u64,
+    pub(super) crosscheck_stale: u64,
+    pub(super) crosscheck_misses: u64,
 }
 
 /// DEC-06: the threshold mode of the run whose owner journal (chain) is `journal`, read in order:
-/// a transition or stats record sets the requested mode and the evidence, a later miss resets the
-/// streak (an alarm latches). Growth after the last record is not restored (conservative); a torn
-/// tail ends the read; `None` without a record.
+/// a transition sets the requested mode, generation, latch and evidence; a stats record every
+/// counter; a later miss counts and resets the streak (an alarm latches). Growth after the last
+/// record is not restored (conservative); a torn tail ends the read; `None` without a record.
 pub(super) fn restore(journal: &std::path::Path) -> Option<Restored> {
     use crate::analytics::evidence::{ThresholdMiss, ThresholdStatsRecord, ThresholdTransition};
     use crate::analytics::payload::Payload;
@@ -111,22 +141,47 @@ pub(super) fn restore(journal: &std::path::Path) -> Option<Restored> {
         if frame.kind == ThresholdTransition::KIND {
             if let Ok(t) = frame.typed::<ThresholdTransition>() {
                 if let Some(requested) = Requested::parse(&t.requested) {
+                    let counters = out.map(|o| o.counters).unwrap_or_default();
                     out = Some(Restored {
                         requested,
-                        ticks: t.ticks,
-                        streak: t.streak,
+                        generation: t.generation,
                         latched: t.latched,
+                        counters: Counters {
+                            ticks: t.ticks,
+                            streak: t.streak,
+                            ..counters
+                        },
                     });
                 }
             }
         } else if frame.kind == ThresholdStatsRecord::KIND {
             if let (Ok(s), Some(o)) = (frame.typed::<ThresholdStatsRecord>(), out.as_mut()) {
-                (o.ticks, o.streak) = (s.ticks, s.streak);
+                o.generation = o.generation.max(s.generation);
+                o.counters = Counters {
+                    ticks: s.ticks,
+                    streak: s.streak,
+                    uncomparable_ticks: s.uncomparable_ticks,
+                    hits: s.hits,
+                    misses: s.misses,
+                    extra: s.extra,
+                    sampled_out: s.sampled_out,
+                    fallbacks: s.fallbacks,
+                    index_evaluations: s.index_evaluations,
+                    crosscheck_samples: s.crosscheck_samples,
+                    crosscheck_skipped: s.crosscheck_skipped,
+                    crosscheck_stale: s.crosscheck_stale,
+                    crosscheck_misses: s.crosscheck_misses,
+                };
             }
         } else if frame.kind == ThresholdMiss::KIND {
             if let (Ok(m), Some(o)) = (frame.typed::<ThresholdMiss>(), out.as_mut()) {
-                o.streak = 0;
-                o.latched |= m.alarm;
+                let c = &mut o.counters;
+                c.streak = 0;
+                c.misses = c.misses.saturating_add(1);
+                if m.alarm {
+                    c.crosscheck_misses = c.crosscheck_misses.saturating_add(1);
+                    o.latched = true;
+                }
             }
         }
     }
@@ -250,11 +305,16 @@ impl ShadowOwner {
         self.threshold_index = ThresholdIndex::new();
         self.threshold_fallback.clear();
         self.threshold_bootstrap.clear();
+        self.threshold_bootstrap_queued.clear();
         if self.threshold_indexing() {
-            for (pk, record) in self.st.iter_owned_by(&self.program) {
-                if liability_account_in_group(&record.data, &self.group) {
-                    self.threshold_bootstrap.push_back(*pk);
-                }
+            let debtors: Vec<Pubkey> = self
+                .st
+                .iter_owned_by(&self.program)
+                .filter(|(_, record)| liability_account_in_group(&record.data, &self.group))
+                .map(|(pk, _)| *pk)
+                .collect();
+            for pk in debtors {
+                self.threshold_enqueue(pk);
             }
         }
         self.threshold_ready = self.threshold_bootstrap.is_empty();
@@ -335,13 +395,38 @@ impl ShadowOwner {
     }
 
     /// Threshold work may run now: ACTIVE's always (it is the authoritative path), the work
-    /// beside the sweep only within its budget — a refusal is counted sampled.
+    /// beside the sweep only within its budget.
+    pub(super) fn threshold_budget_allows(&mut self) -> bool {
+        self.threshold_authority() || self.threshold.budget.allows(self.clock.now_ns())
+    }
+
+    /// [`Self::threshold_budget_allows`] for one unit of work — a refusal is counted sampled.
     pub(super) fn threshold_work_allowed(&mut self) -> bool {
-        if self.threshold_authority() || self.threshold.budget.allows(self.clock.now_ns()) {
+        if self.threshold_budget_allows() {
             return true;
         }
         self.threshold.stats.sampled_out = self.threshold.stats.sampled_out.saturating_add(1);
         false
+    }
+
+    /// Queues `account` for its exact thresholds once (review M1: bank writes and deferrals
+    /// never queue it twice).
+    pub(super) fn threshold_enqueue(&mut self, account: Pubkey) {
+        if self.threshold_bootstrap_queued.insert(account) {
+            self.threshold_bootstrap.push_back(account);
+        }
+    }
+
+    /// DEC-06: an ACTIVE request whose decision could not be recorded does not stand — back to
+    /// OBSERVE, journaled as a change of its own (review M2: a resume never restores it).
+    pub(super) fn threshold_demote_unrecorded(&mut self) {
+        let generation = self.threshold.generation;
+        self.threshold.requested = Requested::Observe;
+        self.threshold_refresh("UNRECORDED");
+        if self.threshold.generation == generation {
+            self.threshold.generation = generation.saturating_add(1);
+            self.threshold_record("UNRECORDED");
+        }
     }
 
     /// An account's thresholds could not be kept up to date for want of budget: it is
@@ -349,7 +434,7 @@ impl ShadowOwner {
     pub(super) fn threshold_defer(&mut self, account: Pubkey) {
         self.threshold_index.remove_account(&account);
         self.threshold_fallback.insert(account);
-        self.threshold_bootstrap.push_back(account);
+        self.threshold_enqueue(account);
         self.threshold_ready = false;
     }
 
@@ -369,16 +454,16 @@ impl ShadowOwner {
             b.uncomparable = true;
         }
         if !self.threshold_work_allowed() {
-            self.threshold.batch.uncomparable = true;
+            self.threshold.batch.unlooked.extend(banks.iter().copied());
             return;
         }
         let started = std::time::Instant::now();
         let mut woken: Vec<Pubkey> = Vec::new();
-        let mut uncomparable = false;
+        let mut unlooked: Vec<Pubkey> = Vec::new();
         for bank in banks {
             if !self.threshold_ready {
-                // As ACTIVE: an index still bootstrapping re-checks the whole bank.
-                woken.extend(self.reverse_index.accounts_for_bank(bank).copied());
+                // An incomplete index (ACTIVE re-checks the whole bank) tests nothing (H2).
+                unlooked.push(*bank);
                 continue;
             }
             match self.threshold_hits(bank, clock) {
@@ -386,13 +471,13 @@ impl ShadowOwner {
                     woken.extend(hits);
                     woken.extend(rechecks);
                 }
-                // ACTIVE would project the bank's price first (R126): not comparable.
-                Err(_) => uncomparable = true,
+                // ACTIVE would project the bank's price first (R126): not looked up.
+                Err(_) => unlooked.push(*bank),
             }
         }
         let woke_ns = self.clock.now_ns();
         let b = &mut self.threshold.batch;
-        b.uncomparable |= uncomparable;
+        b.unlooked.extend(unlooked);
         for account in woken {
             b.woken.entry(account).or_insert((t_rx_ns, woke_ns));
         }
@@ -400,10 +485,10 @@ impl ShadowOwner {
     }
 
     /// OBSERVE: the flushed sweep batch against the threshold trigger's wake-ups of the same
-    /// ticks. Of the accounts on the ticks' banks (time wake-ups excluded: both paths consume
-    /// them), a liquidatable one is a hit when woken, a miss (recorded) when not; a woken
-    /// healthy one is extra. Only a comparable batch counts: every tick looked up, one
-    /// generation.
+    /// ticks. Of the accounts whose ticked banks were all looked up (time wake-ups excluded: both
+    /// paths consume them), a liquidatable one is a hit when woken, a miss (recorded, the streak
+    /// back to 0) when not; a woken healthy one is extra. The batch's ticks count toward N only
+    /// when every tick was looked up in one generation; a miss counts in any batch (review M3).
     pub(super) fn threshold_compare(
         &mut self,
         evaluated: &[(Pubkey, u64, u64, u64, CandidateHealthState)],
@@ -414,19 +499,31 @@ impl ShadowOwner {
         if batch.ticks == 0 {
             return;
         }
-        let comparable = !batch.uncomparable && batch.generation == Some(self.threshold.generation);
-        if !comparable || !self.threshold_work_allowed() {
+        // Nothing looked up (every tick sampled or unlooked): nothing to compare, no unit spent.
+        let nothing = batch
+            .oracle_banks
+            .iter()
+            .all(|b| batch.unlooked.contains(b));
+        if batch.uncomparable
+            || batch.generation != Some(self.threshold.generation)
+            || nothing
+            || !self.threshold_work_allowed()
+        {
             self.threshold.stats.batch(batch.ticks, false, 0);
             return;
         }
+        let comparable = batch.unlooked.is_empty();
         let started = std::time::Instant::now();
         let (mut hits, mut extra, mut misses) = (0u64, 0u64, Vec::new());
         for (account, t_rx_ns, slot, revision, status) in evaluated {
+            let mut ticked = self
+                .reverse_index
+                .banks_for_account(account)
+                .filter(|b| batch.oracle_banks.contains(b))
+                .peekable();
             if due.contains(account)
-                || !self
-                    .reverse_index
-                    .banks_for_account(account)
-                    .any(|b| batch.oracle_banks.contains(b))
+                || ticked.peek().is_none()
+                || ticked.any(|b| batch.unlooked.contains(b))
             {
                 continue;
             }
@@ -434,15 +531,20 @@ impl ShadowOwner {
             match status {
                 CandidateHealthState::Liquidatable => {
                     let s = &mut self.threshold.stats;
-                    s.sweep_detect_ns
-                        .record(evaluated_ns.saturating_sub(*t_rx_ns));
                     match woken {
+                        // Both detection times from the same waking tick (review L1).
                         Some((woke_t_rx, woke_ns)) => {
                             hits += 1;
+                            s.sweep_detect_ns
+                                .record(evaluated_ns.saturating_sub(*woke_t_rx));
                             s.threshold_detect_ns
                                 .record(woke_ns.saturating_sub(*woke_t_rx));
                         }
-                        None => misses.push((*account, *slot, *revision)),
+                        None => {
+                            s.sweep_detect_ns
+                                .record(evaluated_ns.saturating_sub(*t_rx_ns));
+                            misses.push((*account, *slot, *revision));
+                        }
                     }
                 }
                 CandidateHealthState::Healthy if woken.is_some() => extra += 1,
@@ -453,7 +555,7 @@ impl ShadowOwner {
         s.hits = s.hits.saturating_add(hits);
         s.extra = s.extra.saturating_add(extra);
         s.misses = s.misses.saturating_add(misses.len() as u64);
-        s.batch(batch.ticks, true, misses.len() as u64);
+        s.batch(batch.ticks, comparable, misses.len() as u64);
         for (account, slot, input_revision) in misses {
             self.threshold_miss(account, slot, input_revision, false);
         }
@@ -491,19 +593,26 @@ impl ShadowOwner {
     /// ACTIVE: samples up to `crosscheck_accounts` accounts of the tick's looked-up banks that the
     /// threshold trigger did not wake (a rotating start covers each bank's accounts in turn),
     /// copies what their exact health reads and hands them to the cross-check worker off the
-    /// owner; a full queue skips the sample (counted).
+    /// owner. It runs behind the tick's admission, within the budget of the work beside the
+    /// authoritative path and measured like it (review M4); without budget or with a full queue
+    /// the sample is skipped (counted).
     pub(super) fn threshold_crosscheck_sample(
         &mut self,
         banks: &[Pubkey],
-        candidates: &HashSet<Pubkey>,
-        fallback: &HashSet<Pubkey>,
+        woken: &HashSet<Pubkey>,
     ) {
         let Ok(clock) = chain_clock(&self.st) else {
             return;
         };
-        if self.remote.crosscheck.is_none() {
+        if self.remote.crosscheck.is_none() || banks.is_empty() {
             return;
         }
+        if !self.threshold.budget.allows(self.clock.now_ns()) {
+            let s = &mut self.threshold.stats;
+            s.crosscheck_skipped = s.crosscheck_skipped.saturating_add(1);
+            return;
+        }
+        let started = std::time::Instant::now();
         let k = self.threshold.crosscheck_accounts;
         let mut picked: Vec<Pubkey> = Vec::with_capacity(k);
         for bank in banks {
@@ -518,7 +627,7 @@ impl ShadowOwner {
                 if picked.len() >= k {
                     break;
                 }
-                if !candidates.contains(a) && !fallback.contains(a) && !picked.contains(a) {
+                if !woken.contains(a) && !picked.contains(a) {
                     picked.push(*a);
                 }
             }
@@ -559,27 +668,33 @@ impl ShadowOwner {
                 accounts,
             });
         }
-        let Some(queues) = self.remote.crosscheck.as_ref() else {
-            return;
-        };
-        let s = &mut self.threshold.stats;
-        for work in works {
-            if queues.jobs.try_push(work).is_ok() {
-                s.crosscheck_samples = s.crosscheck_samples.saturating_add(1);
-            } else {
-                s.crosscheck_skipped = s.crosscheck_skipped.saturating_add(1);
+        if let Some(queues) = self.remote.crosscheck.as_ref() {
+            let s = &mut self.threshold.stats;
+            for work in works {
+                if queues.jobs.try_push(work).is_ok() {
+                    s.crosscheck_samples = s.crosscheck_samples.saturating_add(1);
+                } else {
+                    s.crosscheck_skipped = s.crosscheck_skipped.saturating_add(1);
+                }
             }
         }
+        self.threshold_charge(started);
     }
 
-    /// ACTIVE: whether the threshold trigger wakes `account` at the current state on any of its
-    /// banks — an index hit, an unknown threshold, or a bank it cannot look up (which ACTIVE
-    /// projects or re-checks bank-wide).
+    /// ACTIVE: whether the owner wakes `account` at the current state without the sweep — it
+    /// waits in a lane, its time wake-up is due (both paths consume those, review L5), or the
+    /// threshold trigger wakes it on one of its banks (an index hit, an unknown threshold, or a
+    /// bank it cannot look up, which ACTIVE projects or re-checks bank-wide).
     pub(super) fn threshold_wakes(&self, account: &Pubkey) -> bool {
-        if !self.threshold_ready {
+        let clock = chain_clock(&self.st);
+        let due = clock.is_ok_and(|c| {
+            self.time_schedule
+                .wake_at(account)
+                .is_some_and(|at| at <= c.unix_s())
+        });
+        if !self.threshold_ready || due || self.oracle_lanes.contains(account) {
             return true;
         }
-        let clock = chain_clock(&self.st);
         self.reverse_index.banks_for_account(account).any(|bank| {
             match self.threshold_hits(bank, clock) {
                 Ok((hits, rechecks)) => hits.contains(account) || rechecks.contains(account),
@@ -782,6 +897,47 @@ mod restore_tests {
         path
     }
 
+    /// DEC-06 (review L3): a resumed run continues every counter and its generations (START is a
+    /// new one); the latencies are the new process's.
+    #[test]
+    fn a_resumed_control_continues_the_counters_and_the_generation() {
+        let mut t = ThresholdControl::new(Requested::Off, Some(5), 20_000, 4, 0);
+        t.continue_from(Restored {
+            requested: Requested::Active,
+            generation: 7,
+            latched: true,
+            counters: Counters {
+                ticks: 50,
+                streak: 3,
+                hits: 9,
+                misses: 2,
+                extra: 4,
+                fallbacks: 1,
+                crosscheck_misses: 1,
+                ..Default::default()
+            },
+        });
+        assert_eq!(
+            (t.requested, t.requested_source.as_str()),
+            (Requested::Active, "resume")
+        );
+        assert_eq!((t.generation, t.latched), (8, true));
+        let s = &t.stats;
+        assert_eq!(
+            (
+                s.ticks,
+                s.streak,
+                s.hits,
+                s.misses,
+                s.extra,
+                s.fallbacks,
+                s.crosscheck_misses
+            ),
+            (50, 3, 9, 2, 4, 1, 1)
+        );
+        assert_eq!(s.sweep_detect_ns.count(), 0);
+    }
+
     /// DEC-06: a resumed run's threshold mode, read in journal order — the last transition, newer
     /// stats, a later miss resetting the streak (an alarm latching); nothing without a record.
     #[test]
@@ -797,14 +953,15 @@ mod restore_tests {
                 stats(95, 5),
             ],
         );
+        let r = restore(&p).unwrap();
         assert_eq!(
-            restore(&p),
-            Some(Restored {
-                requested: Requested::Active,
-                ticks: 95,
-                streak: 5,
-                latched: false
-            })
+            (r.requested, r.generation, r.latched),
+            (Requested::Active, 1, false)
+        );
+        assert_eq!(
+            (r.counters.ticks, r.counters.streak, r.counters.misses),
+            (95, 5, 0),
+            "the stats after the miss carry its count"
         );
         let p = chain(
             "alarm",
@@ -814,14 +971,17 @@ mod restore_tests {
                 miss(true),
             ],
         );
+        let r = restore(&p).unwrap();
+        assert_eq!((r.requested, r.latched), (Requested::Active, true));
         assert_eq!(
-            restore(&p),
-            Some(Restored {
-                requested: Requested::Active,
-                ticks: 12,
-                streak: 0,
-                latched: true
-            })
+            (
+                r.counters.ticks,
+                r.counters.streak,
+                r.counters.misses,
+                r.counters.crosscheck_misses
+            ),
+            (12, 0, 1, 1),
+            "a miss after the last stats counts and resets"
         );
         assert_eq!(restore(&chain("none", vec![stats(5, 5), miss(true)])), None);
         // A torn tail (a crash inside a frame) ends the read; the prefix stands.
@@ -835,7 +995,7 @@ mod restore_tests {
             .and_then(|mut f| std::io::Write::write_all(&mut f, &[0x50, 0x30, 0x4a, 0x31, 9, 9]))
             .unwrap();
         assert_eq!(
-            restore(&p).map(|r| (r.requested, r.ticks, r.streak)),
+            restore(&p).map(|r| (r.requested, r.counters.ticks, r.counters.streak)),
             Some((Requested::Observe, 7, 7))
         );
         assert_eq!(restore(&p.with_file_name("missing.p0j")), None);

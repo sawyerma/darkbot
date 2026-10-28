@@ -59,8 +59,10 @@ impl ShadowOwner {
         }
         if let Some(h) = &self.econ {
             let ready = self.st.run_state().is_tradable() && !self.program_upgrade_latched;
+            // DEC-06 (review H1): only an admitting threshold trigger waits for its index; beside
+            // the authoritative sweep (OBSERVE, SWEEP) readiness is the sweep's.
             #[cfg(feature = "crate_health")]
-            let ready = ready && self.threshold_ready;
+            let ready = ready && (!self.threshold_authority() || self.threshold_ready);
             h.shared
                 .shadow_ready
                 .store(ready, std::sync::atomic::Ordering::Release);
@@ -83,8 +85,10 @@ impl ShadowOwner {
         // DEC-16: an unbounded Shadow run's windows (the first opens at the first tradable READY).
         if self.windows.is_some() {
             let ready = self.st.run_state().is_tradable() && !self.program_upgrade_latched;
+            // DEC-06 (review H1): only an admitting threshold trigger waits for its index; beside
+            // the authoritative sweep (OBSERVE, SWEEP) readiness is the sweep's.
             #[cfg(feature = "crate_health")]
-            let ready = ready && self.threshold_ready;
+            let ready = ready && (!self.threshold_authority() || self.threshold_ready);
             if !self.until_stopped_tick(ready) {
                 return false;
             }
@@ -92,8 +96,13 @@ impl ShadowOwner {
         let rolling = self.windows.is_some();
         if let Some(window) = &mut self.operational_window {
             let ready = self.st.run_state().is_tradable() && !self.program_upgrade_latched;
+            // DEC-06 (review H1): only an admitting threshold trigger waits for its index; beside
+            // the authoritative sweep (OBSERVE, SWEEP) readiness is the sweep's.
             #[cfg(feature = "crate_health")]
-            let ready = ready && self.threshold_ready;
+            let ready = ready
+                && (self.threshold.effective
+                    != crate::orchestration::threshold_mode::Effective::Active
+                    || self.threshold_ready);
             match window.poll(
                 self.clock.now_ns().saturating_sub(self.operational_start),
                 ready,
@@ -125,8 +134,9 @@ impl ShadowOwner {
             && self.st.run_state().is_tradable()
             && !self.threshold_ready
             && !self.threshold_bootstrap.is_empty()
-            // DEC-06: beside the sweep the bootstrap is OBSERVE work within its budget (B-9).
-            && self.threshold_work_allowed()
+            // DEC-06: beside the sweep the bootstrap is OBSERVE work within its budget (B-9);
+            // waiting for it is no sampled unit (review L4).
+            && self.threshold_budget_allows()
         {
             let bootstrap_started = std::time::Instant::now();
             // [C0-FIX-03] canonical chain clock, never local or zero time
@@ -140,6 +150,7 @@ impl ShadowOwner {
                 let Some(account) = self.threshold_bootstrap.pop_front() else {
                     break;
                 };
+                self.threshold_bootstrap_queued.remove(&account);
                 match clock
                     .map_err(|e| darkbot_project0::health::HealthError::Stale(e.to_string()))
                     .and_then(|c| engine.thresholds(&account, c.unix_timestamp, c.slot))

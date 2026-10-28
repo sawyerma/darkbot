@@ -506,8 +506,7 @@ impl ShadowOwner {
                 && self.threshold.requested
                     == crate::orchestration::threshold_mode::Requested::Active
             {
-                self.threshold.requested = crate::orchestration::threshold_mode::Requested::Observe;
-                self.threshold_refresh("UNRECORDED");
+                self.threshold_demote_unrecorded();
             }
             // DEC-04: an ACTIVE decision stands only recorded.
             if hold_b && self.hold_gate.mode == crate::execution::hold_b::HoldMode::Active {
