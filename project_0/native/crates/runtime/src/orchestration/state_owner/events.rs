@@ -600,8 +600,13 @@ impl ShadowOwner {
                     Some(banks) => {
                         self.reverse_index.set_account_banks(account_pk, &banks);
                         // DEC-06: the threshold index is kept while a threshold mode is
-                        // requested; without one the R127 sweep alone admits.
-                        if self.threshold_indexing() {
+                        // requested; without one the R127 sweep alone admits. Beside the
+                        // sweep the upkeep is OBSERVE work within its budget (B-9): without
+                        // budget the account is re-checked bank-wide until re-evaluated.
+                        if self.threshold_indexing() && !self.threshold_work_allowed() {
+                            self.threshold_defer(account_pk);
+                        } else if self.threshold_indexing() {
+                            let upkeep_started = std::time::Instant::now();
                             // [C0-FIX-03] canonical chain clock, never local or zero time
                             let clock = chain_clock(&self.st);
                             let view = StateView(&self.st);
@@ -632,6 +637,9 @@ impl ShadowOwner {
                                         e
                                     );
                                 }
+                            }
+                            if !self.threshold_authority() {
+                                self.threshold_charge(upkeep_started);
                             }
                         }
                     }
@@ -826,10 +834,6 @@ impl ShadowOwner {
                     // [C0-FIX-03] canonical chain clock, never local or zero time
                     let clock = chain_clock(&self.st);
                     let view = StateView(&self.st);
-                    let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                        state: &view,
-                        group: self.group,
-                    };
                     let banks: Vec<Pubkey> = self
                         .reverse_index
                         .banks_for_oracle(&dependency)
@@ -848,6 +852,13 @@ impl ShadowOwner {
                     }
 
                     if !self.threshold_authority() {
+                        // DEC-06 OBSERVE: the threshold trigger's lookup of this tick on the
+                        // same state and input revision, beside the sweep; it admits nothing.
+                        if self.threshold.effective
+                            == crate::orchestration::threshold_mode::Effective::Observe
+                        {
+                            self.threshold_observe_tick(&banks, t_rx_ns, clock);
+                        }
                         if self.sweep_batch_started_ns.is_none() {
                             self.sweep_batch_started_ns = Some(self.clock.now_ns());
                         }
@@ -875,31 +886,10 @@ impl ShadowOwner {
                         let mut fallback: HashSet<Pubkey> = HashSet::new();
                         for bank in banks {
                             if self.threshold_ready {
-                                match clock
-                                    .map_err(|e| {
-                                        darkbot_project0::health::HealthError::Stale(e.to_string())
-                                    })
-                                    .and_then(|c| {
-                                        engine.maintenance_risk_price_bits(
-                                            &bank,
-                                            c.unix_timestamp,
-                                            c.slot,
-                                        )
-                                    }) {
-                                    Ok((asset_price, liability_price)) => {
-                                        candidates.extend(self.threshold_index.candidates(
-                                            &bank,
-                                            asset_price,
-                                            liability_price,
-                                            0,
-                                        ));
-                                        // V2-13: the bank's unknown-threshold accounts, from the
-                                        // fallback set — the bank's list is never materialized.
-                                        fallback.extend(
-                                            self.threshold_fallback.iter().copied().filter(|a| {
-                                                self.reverse_index.bank_has_account(&bank, a)
-                                            }),
-                                        );
+                                match self.threshold_hits(&bank, clock) {
+                                    Ok((hits, rechecks)) => {
+                                        candidates.extend(hits);
+                                        fallback.extend(rechecks);
                                     }
                                     Err(e) => {
                                         // [R126] Integration pricing may be stale in canonical state even

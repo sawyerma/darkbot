@@ -51,6 +51,11 @@ impl ShadowOwner {
             .projection_stats
             .line(self.projection_pending.len(), self.projection_cache.len());
         owner_log!(self, "{projection}");
+        // DEC-06: the threshold mode's counters once at shutdown, when one was requested.
+        #[cfg(feature = "crate_health")]
+        if self.threshold_indexing() || self.threshold.generation > 0 {
+            self.threshold_stats_record();
+        }
         // DEC-01: the blockhash parking once at shutdown (parked entries end like lane entries).
         let parking = self.blockhash_park_line();
         owner_log!(self, "{parking}");

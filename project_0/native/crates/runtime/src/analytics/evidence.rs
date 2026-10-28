@@ -247,6 +247,10 @@ pub enum OwnerEvidence {
     Window(OwnerWindow),
     /// DEC-06: one change of the threshold mode.
     ThresholdTransition(ThresholdTransition),
+    /// DEC-06: a liquidatable account the threshold trigger did not wake.
+    ThresholdMiss(ThresholdMiss),
+    /// DEC-06: the threshold mode's cumulative counters.
+    ThresholdStats(Box<ThresholdStatsRecord>),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -310,6 +314,78 @@ pub struct ThresholdTransition {
 impl Payload for ThresholdTransition {
     const KIND: u16 = journal::kind::THRESHOLD_TRANSITION;
 }
+
+/// DEC-06 (kind `THRESHOLD_MISS`): a liquidatable account the threshold trigger did not wake —
+/// found by OBSERVE's comparison with the sweep, or by ACTIVE's sweep cross-check (`alarm`: it took
+/// ACTIVE back to the sweep).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThresholdMiss {
+    pub generation: u64,
+    /// OBSERVE | ACTIVE.
+    pub phase: String,
+    pub account: Pubkey,
+    pub slot: u64,
+    pub input_revision: u64,
+    pub alarm: bool,
+    pub at_unix_ms: Option<u64>,
+}
+impl Payload for ThresholdMiss {
+    const KIND: u16 = journal::kind::THRESHOLD_MISS;
+}
+
+/// DEC-06: a latency distribution in ns (`None`: no sample yet, never 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatencyNs {
+    pub count: u64,
+    pub p50: Option<u64>,
+    pub p95: Option<u64>,
+    pub p99: Option<u64>,
+    pub max: Option<u64>,
+}
+impl LatencyNs {
+    pub fn of(h: &darkbot_common::histogram::Histogram) -> Self {
+        let s = h.summary();
+        Self {
+            count: s.count,
+            p50: s.p50,
+            p95: s.p95,
+            p99: s.p99,
+            max: s.max,
+        }
+    }
+}
+
+/// DEC-06 (kind `THRESHOLD_STATS`): the threshold mode's cumulative comparison and cost counters
+/// of the owner's run (OBSERVE's ticks, hits, misses and extra wake-ups, the detection times of
+/// both paths on the same ticks, OBSERVE's owner time and budget, ACTIVE's cross-check).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThresholdStatsRecord {
+    pub generation: u64,
+    pub requested: String,
+    pub effective: String,
+    pub block_reason: String,
+    pub ticks: u64,
+    pub streak: u64,
+    pub uncomparable_ticks: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub extra: u64,
+    pub sampled_out: u64,
+    pub fallbacks: u64,
+    pub index_evaluations: u64,
+    pub crosscheck_samples: u64,
+    pub crosscheck_skipped: u64,
+    pub crosscheck_stale: u64,
+    pub crosscheck_misses: u64,
+    pub budget_ppm: u64,
+    pub sweep_detect_ns: LatencyNs,
+    pub threshold_detect_ns: LatencyNs,
+    pub observe_owner_ns: LatencyNs,
+    pub observe_owner_ns_total: u64,
+}
+impl Payload for ThresholdStatsRecord {
+    const KIND: u16 = journal::kind::THRESHOLD_STATS;
+}
 /// One encoded owner event: kind, payload version, bytes and frame provenance.
 struct Encoded {
     kind: u16,
@@ -346,6 +422,8 @@ impl OwnerEvidence {
             Self::SimulationFailure(v) => Encoded::of(v.as_ref(), v.rx_slot, None),
             Self::Window(v) => Encoded::of(v, None, None),
             Self::ThresholdTransition(v) => Encoded::of(v, None, None),
+            Self::ThresholdMiss(v) => Encoded::of(v, Some(v.slot), None),
+            Self::ThresholdStats(v) => Encoded::of(v.as_ref(), None, None),
         }
     }
 }

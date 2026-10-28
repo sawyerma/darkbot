@@ -125,7 +125,10 @@ impl ShadowOwner {
             && self.st.run_state().is_tradable()
             && !self.threshold_ready
             && !self.threshold_bootstrap.is_empty()
+            // DEC-06: beside the sweep the bootstrap is OBSERVE work within its budget (B-9).
+            && self.threshold_work_allowed()
         {
+            let bootstrap_started = std::time::Instant::now();
             // [C0-FIX-03] canonical chain clock, never local or zero time
             let clock = chain_clock(&self.st);
             let view = StateView(&self.st);
@@ -156,6 +159,9 @@ impl ShadowOwner {
                         );
                     }
                 }
+            }
+            if !self.threshold_authority() {
+                self.threshold_charge(bootstrap_started);
             }
             if self.threshold_bootstrap.is_empty() {
                 self.threshold_ready = true;

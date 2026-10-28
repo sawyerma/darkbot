@@ -225,8 +225,9 @@ pub struct ThresholdStats {
     pub sweep_detect_ns: darkbot_common::histogram::Histogram,
     /// t_rx → threshold wake-up of a liquidatable account.
     pub threshold_detect_ns: darkbot_common::histogram::Histogram,
-    /// Owner time of one unit of OBSERVE work (lookups, comparison, index upkeep).
+    /// Owner time of one unit of OBSERVE work (lookups, comparison, index upkeep), and in all.
     pub observe_owner_ns: darkbot_common::histogram::Histogram,
+    pub observe_owner_ns_total: u64,
 }
 
 impl ThresholdStats {

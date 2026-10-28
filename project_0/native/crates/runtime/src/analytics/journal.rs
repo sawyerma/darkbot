@@ -40,6 +40,10 @@ pub mod kind {
     pub const OWNER_WINDOW: u16 = 106;
     /// DEC-06: one change of the owner's threshold mode (`ThresholdTransition`).
     pub const THRESHOLD_TRANSITION: u16 = 107;
+    /// DEC-06: a liquidatable account the threshold trigger did not wake (`ThresholdMiss`).
+    pub const THRESHOLD_MISS: u16 = 108;
+    /// DEC-06: the threshold mode's cumulative counters (`ThresholdStatsRecord`).
+    pub const THRESHOLD_STATS: u16 = 109;
     /// FE-04 single-flight automaton: one full state version per durable transition.
     pub const FE04_TRANSITION: u16 = 200;
     /// FE-04 import of a pre-binary JSON wallet journal; the JSON file itself stays unchanged.
@@ -189,6 +193,8 @@ pub mod kind {
         OWNER_SIMULATION_FAILURE,
         OWNER_WINDOW,
         THRESHOLD_TRANSITION,
+        THRESHOLD_MISS,
+        THRESHOLD_STATS,
         FE04_TRANSITION,
         FE04_LEGACY_IMPORT,
         MARKET_TRANSACTION,

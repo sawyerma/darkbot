@@ -157,7 +157,12 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_fallback: HashSet::new(),
         threshold_bootstrap: VecDeque::new(),
         threshold_bootstrap_batch: 64,
-        threshold: super::threshold::ThresholdControl::new(Default::default(), None),
+        threshold: super::threshold::ThresholdControl::new(
+            Default::default(),
+            None,
+            OPERATIONAL.threshold_observe_budget_ppm,
+            0,
+        ),
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -3286,6 +3291,22 @@ fn p2_clock(slot: u64, unix: u64) -> AccountUpdate {
 /// holding 100 USD collateral (maintenance weight 0.9) and `liab` USD debt on a premium-active
 /// bank (≈ 10 %/year since `t0`); fixed 1-USD oracles. Returns the account.
 fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
+    let (state, account, _, _) = p2_accounts(f, liab, t0, true);
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    f.owner.st.confirm_ready();
+    assert!(f.owner.st.run_state().is_tradable());
+    account
+}
+
+/// The accounts of `p2_state` (DEC-06: `premium` off gives exact thresholds): the state, the
+/// account, its collateral bank and its liability bank.
+fn p2_accounts(
+    f: &Fixture,
+    liab: f64,
+    t0: u64,
+    premium: bool,
+) -> (Vec<AccountUpdate>, Pubkey, Pubkey, Pubkey) {
     use bytemuck::Zeroable;
     use marginfi_type_crate::constants::PREMIUM_ACTIVE;
     use marginfi_type_crate::types::{
@@ -3350,7 +3371,10 @@ fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
             .concat(),
         ),
         update(asset_bank, bank(0.9, 0)),
-        update(liab_bank, bank(1.0, PREMIUM_ACTIVE)),
+        update(
+            liab_bank,
+            bank(1.0, if premium { PREMIUM_ACTIVE } else { 0 }),
+        ),
         update(
             account,
             [
@@ -3360,11 +3384,7 @@ fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
             .concat(),
         ),
     ];
-    f.owner.st.install_snapshot(100, state.clone());
-    f.owner.st.reconcile(100, &state);
-    f.owner.st.confirm_ready();
-    assert!(f.owner.st.run_state().is_tradable());
-    account
+    (state, account, asset_bank, liab_bank)
 }
 
 /// V2-13 (P4-03/P5b-02): a bank-wide re-check without a new cause is not admitted again — a
@@ -4597,6 +4617,19 @@ fn dec16_a_window_ending_with_the_stop_is_part_of_the_run_result() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// DEC-06: a threshold mode as the setup builds it (the e2e limits' OBSERVE budget).
+fn dec06_control(
+    requested: crate::orchestration::threshold_mode::Requested,
+    min_ticks: Option<u64>,
+) -> super::threshold::ThresholdControl {
+    super::threshold::ThresholdControl::new(
+        requested,
+        min_ticks,
+        OPERATIONAL.threshold_observe_budget_ppm,
+        0,
+    )
+}
+
 /// DEC-06: `p2_state` as the Ready leaves it — the reverse index rebuilt from the state.
 fn dec06_ready(f: &mut Fixture, liab: f64) -> Pubkey {
     let account = p2_state(f, liab, 1_700_000_000);
@@ -4630,7 +4663,7 @@ fn dec06_transitions(dir: &std::path::Path) -> Vec<(u64, String, String, String)
 fn dec06_a_requested_active_follows_the_index_and_stays_observe_without_n() {
     use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
     let mut f = fixture("dec06_follow");
-    f.owner.threshold = super::threshold::ThresholdControl::new(Requested::Active, None);
+    f.owner.threshold = dec06_control(Requested::Active, None);
     let account = dec06_ready(&mut f, 95.0);
     f.owner.threshold_index_reset();
     f.owner.threshold_refresh("INDEX");
@@ -4688,7 +4721,7 @@ fn dec06_a_requested_active_follows_the_index_and_stays_observe_without_n() {
 fn dec06_active_waits_for_the_batch_and_its_fallback_resweeps_every_bank() {
     use crate::orchestration::threshold_mode::{self as tm, Effective, Requested};
     let mut f = fixture("dec06_barrier");
-    f.owner.threshold = super::threshold::ThresholdControl::new(Requested::Active, Some(3));
+    f.owner.threshold = dec06_control(Requested::Active, Some(3));
     let account = dec06_ready(&mut f, 95.0);
     f.owner.threshold_index_reset();
     assert!(f.owner.lifecycle());
@@ -4787,5 +4820,194 @@ fn dec06_a_gap_falls_back_to_the_sweep_and_the_ready_follows_the_index() {
         Effective::Active,
         "follows the index"
     );
+    cleanup(f);
+}
+
+/// DEC-06 OBSERVE fixture: a tradable state with exact thresholds (no premium), the reverse index
+/// rebuilt, OBSERVE requested and its index bootstrapped. Returns the account and its banks.
+fn dec06_observe(f: &mut Fixture, liab: f64) -> (Pubkey, Pubkey, Pubkey) {
+    use crate::orchestration::threshold_mode::{Effective, Requested};
+    let (state, account, asset_bank, liab_bank) = p2_accounts(f, liab, 1_700_000_000, false);
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    assert!(f.owner.st.confirm_ready().is_tradable());
+    f.owner.reverse_index =
+        rebuild_reverse_index(&f.owner.st, &f.owner.program, &f.owner.group, None).0;
+    f.owner.threshold = dec06_control(Requested::Observe, None);
+    f.owner.threshold_index_reset();
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.threshold.effective, Effective::Observe);
+    (account, asset_bank, liab_bank)
+}
+
+/// DEC-06: one oracle tick of `banks` as `events.rs` takes it in OBSERVE — the threshold
+/// trigger's lookup beside the sweep, and the banks dirty for the sweep — then the batch's flush.
+fn dec06_tick_and_flush(f: &mut Fixture, banks: &[Pubkey]) {
+    let clock = chain_clock(&f.owner.st);
+    let t_rx = f.owner.clock.now_ns();
+    f.owner.threshold_observe_tick(banks, t_rx, clock);
+    f.owner.mark_all_banks_dirty();
+    f.owner.sweep();
+}
+
+/// DEC-06 OBSERVE: the sweep stays authoritative and admits once; the threshold trigger's lookup
+/// of the same tick admits nothing and is compared on the same state — a woken liquidatable
+/// account is a hit with both detection times, the tick counts, the streak grows, and the owner
+/// time of the threshold work is measured.
+#[test]
+fn dec06_observe_compares_the_tick_with_the_sweep_and_admits_nothing() {
+    let mut f = fixture("dec06_observe_hit");
+    let (account, asset_bank, liab_bank) = dec06_observe(&mut f, 95.0);
+    assert_eq!(
+        f.owner.threshold_index.tracked_accounts(),
+        1,
+        "exact thresholds"
+    );
+    let clock = chain_clock(&f.owner.st);
+    let t_rx = f.owner.clock.now_ns();
+    f.owner
+        .threshold_observe_tick(&[asset_bank, liab_bank], t_rx, clock);
+    assert!(f.owner.threshold.batch.woken.contains_key(&account));
+    assert!(f.owner.oracle_lanes.is_empty(), "OBSERVE admits nothing");
+    f.owner.mark_all_banks_dirty();
+    f.owner.sweep();
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (s.hits, s.misses, s.extra, s.ticks, s.streak),
+        (1, 0, 0, 1, 1)
+    );
+    assert_eq!(
+        (s.sweep_detect_ns.count(), s.threshold_detect_ns.count()),
+        (1, 1)
+    );
+    assert!(s.observe_owner_ns.count() >= 2 && s.observe_owner_ns_total > 0);
+    assert_eq!(f.owner.oracle_lanes.len(), 1, "the sweep admitted once");
+    assert_eq!(f.owner.threshold.batch.ticks, 0, "the batch was consumed");
+    cleanup(f);
+}
+
+/// DEC-06 OBSERVE: a liquidatable account the threshold trigger does not wake (a stale index) is
+/// a miss — journaled, the streak back to 0 — while the sweep admits it as before.
+#[test]
+fn dec06_observe_records_a_miss_and_resets_the_streak() {
+    use crate::analytics::evidence::ThresholdMiss;
+    use crate::analytics::payload::{decode, Payload};
+    use darkbot_project0::index::Side;
+    let mut f = fixture("dec06_observe_miss");
+    let (account, asset_bank, liab_bank) = dec06_observe(&mut f, 95.0);
+    f.owner.threshold.stats.streak = 7;
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, 0)]);
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let s = &f.owner.threshold.stats;
+    assert_eq!((s.hits, s.misses, s.ticks, s.streak), (0, 1, 1, 0));
+    assert_eq!(f.owner.oracle_lanes.len(), 1, "the sweep admits it");
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut misses = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == ThresholdMiss::KIND {
+            let m: ThresholdMiss = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            misses.push((m.account, m.phase, m.alarm));
+        }
+    }
+    assert_eq!(misses, [(account, "OBSERVE".to_string(), false)]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-06 OBSERVE: a woken healthy account is an extra wake-up; without budget (B-9) a tick is
+/// sampled — not looked up, its batch not comparable — and the sweep evaluates exactly as before;
+/// a generation change inside a batch makes it not comparable too.
+#[test]
+fn dec06_observe_counts_extra_wakeups_and_samples_without_budget() {
+    use darkbot_project0::index::Side;
+    let mut f = fixture("dec06_observe_budget");
+    let (account, asset_bank, liab_bank) = dec06_observe(&mut f, 85.0);
+    f.owner
+        .threshold_index
+        .set_account(account, &[(asset_bank, Side::Asset, u128::MAX)]);
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let s = &f.owner.threshold.stats;
+    assert_eq!((s.hits, s.misses, s.extra, s.ticks), (0, 0, 1, 1));
+    f.owner.threshold.budget.charge(u64::MAX / 2);
+    let checks = f.owner.metrics.health_sweep_checks;
+    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let s = &f.owner.threshold.stats;
+    assert_eq!(
+        (s.ticks, s.uncomparable_ticks, s.extra, s.sampled_out),
+        (1, 1, 1, 1)
+    );
+    assert_eq!(
+        f.owner.metrics.health_sweep_checks,
+        checks + 1,
+        "the sweep is not slowed"
+    );
+    f.owner.threshold.budget = crate::orchestration::threshold_mode::ObserveBudget::new(
+        OPERATIONAL.threshold_observe_budget_ppm,
+        f.owner.clock.now_ns(),
+    );
+    let clock = chain_clock(&f.owner.st);
+    f.owner
+        .threshold_observe_tick(&[asset_bank], f.owner.clock.now_ns(), clock);
+    f.owner.threshold.generation += 1;
+    f.owner.mark_all_banks_dirty();
+    f.owner.sweep();
+    assert_eq!(
+        (
+            f.owner.threshold.stats.ticks,
+            f.owner.threshold.stats.uncomparable_ticks
+        ),
+        (1, 2),
+        "a generation change"
+    );
+    cleanup(f);
+}
+
+/// DEC-06 OBSERVE: an account update without budget (B-9) leaves the index conservative — the
+/// account is re-checked bank-wide (fallback) and queued for its thresholds — and the bootstrap
+/// evaluates it once the budget allows (the real ingress path, `events()`).
+#[test]
+fn dec06_observe_defers_the_index_upkeep_without_budget() {
+    let mut f = fixture("dec06_upkeep");
+    let (account, _, _) = dec06_observe(&mut f, 95.0);
+    let data = f.owner.st.get(&account).unwrap().data.clone();
+    f.owner.threshold.budget.charge(u64::MAX / 2);
+    f.producer
+        .try_push(IngressEvent::Account(AccountUpdate {
+            pubkey: account,
+            owner: f.owner.program,
+            lamports: 1,
+            data,
+            slot: 101,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }))
+        .unwrap();
+    let mut fetch = || Err("no recovery".to_string());
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert_eq!(f.owner.threshold_index.tracked_accounts(), 0);
+    assert!(f.owner.threshold_fallback.contains(&account));
+    assert_eq!(
+        Vec::from(f.owner.threshold_bootstrap.clone()),
+        vec![account]
+    );
+    assert!(!f.owner.threshold_ready);
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.threshold_bootstrap.len(), 1, "still no budget");
+    f.owner.threshold.budget = crate::orchestration::threshold_mode::ObserveBudget::new(
+        OPERATIONAL.threshold_observe_budget_ppm,
+        f.owner.clock.now_ns(),
+    );
+    assert!(f.owner.lifecycle());
+    assert_eq!(
+        f.owner.threshold_index.tracked_accounts(),
+        1,
+        "re-evaluated"
+    );
+    assert!(f.owner.threshold_ready && !f.owner.threshold_fallback.contains(&account));
     cleanup(f);
 }

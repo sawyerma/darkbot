@@ -47,6 +47,10 @@ impl ShadowOwner {
             if let Some(line) = self.bootstrap_probe_line() {
                 owner_log!(self, "{line}");
             }
+            // DEC-06: the threshold mode's counters (also once at shutdown).
+            if self.threshold_indexing() {
+                self.threshold_stats_record();
+            }
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,

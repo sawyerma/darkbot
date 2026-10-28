@@ -82,10 +82,12 @@ impl ShadowOwner {
                 // P2-04/P2-05 (0.1.12): an account whose wake-up passed is re-evaluated exactly
                 // even without any bank or account event (time alone moved its health or its tag
                 // premium); a tagged candidate is forwarded again, not held by its repeat interval.
+                let mut due_accounts: HashSet<Pubkey> = HashSet::new();
                 if let Ok(c) = chain_clock(&self.st) {
                     let (t_rx_ns, slot) = (self.clock.now_ns(), self.slot_watch.get());
                     let now = c.unix_s();
                     for due in self.time_schedule.pop_due(now) {
+                        due_accounts.insert(due.account);
                         if due.trigger == darkbot_project0::schedule::Trigger::TagProfitable {
                             self.candidate_force_rearm.insert(due.account);
                         }
@@ -214,6 +216,7 @@ impl ShadowOwner {
                             )
                         })
                         .unzip();
+                let evaluated_ns = self.clock.now_ns();
                 // P2-04: every evaluation renews or removes the account's premium wake-up.
                 let mut evaluated: Vec<_> = evaluated
                     .into_iter()
@@ -226,6 +229,8 @@ impl ShadowOwner {
                         work
                     })
                     .collect();
+                // DEC-06 OBSERVE: this batch against the threshold trigger's wake-ups.
+                self.threshold_compare(&evaluated, evaluated_ns, &due_accounts);
                 if census_batch {
                     let rows = census_rows.into_iter().flatten().collect();
                     self.submit_c0_census(clock, rows, batch_started.elapsed());

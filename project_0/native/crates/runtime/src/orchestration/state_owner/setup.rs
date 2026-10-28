@@ -837,6 +837,8 @@ pub(super) fn prepare(
             darkbot_solana::runtime_config::active().threshold_trigger,
         ),
         darkbot_solana::runtime_config::active().threshold_min_ticks,
+        operational.threshold_observe_budget_ppm,
+        clock.now_ns(),
     );
     let threshold_requested =
         threshold.requested != crate::orchestration::threshold_mode::Requested::Off;

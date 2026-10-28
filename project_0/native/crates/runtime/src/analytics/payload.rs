@@ -861,6 +861,10 @@ macro_rules! typed_kinds {
             k::THRESHOLD_TRANSITION => {
                 $f::<super::evidence::ThresholdTransition>($kind, $schema, $bytes)
             }
+            k::THRESHOLD_MISS => $f::<super::evidence::ThresholdMiss>($kind, $schema, $bytes),
+            k::THRESHOLD_STATS => {
+                $f::<super::evidence::ThresholdStatsRecord>($kind, $schema, $bytes)
+            }
             k::ECON_SHADOW_EVALUATION => {
                 $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
             }
