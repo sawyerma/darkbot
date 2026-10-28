@@ -425,6 +425,30 @@ fn dec08_index_incomplete_histories_fail_closed_with_their_reason() {
     assert_eq!(r.status, "HISTORICAL_INCOMPLETE");
     std::fs::remove_dir_all(&j.output).unwrap();
 
+    // The transaction's status or time is not its index row's: the history is inconsistent.
+    for (answer, reason) in [
+        (
+            variant(&h.f, SLOT, BT, History::failed()),
+            "INDEX_TX_STATUS_MISMATCH",
+        ),
+        (
+            variant(&h.f, SLOT, BT + 1, Value::Null),
+            "INDEX_TX_TIME_MISMATCH",
+        ),
+    ] {
+        let server = h.clone();
+        let (url, _) = loopback(move |m, p| match m {
+            "getTransaction" if p[0].as_str() == Some(server.f.as_str()) => {
+                Reply::Result(answer.clone())
+            }
+            _ => server.answer(m, p),
+        });
+        let j = job(reason);
+        let r = run(&j, 10, Some(url), &bot).unwrap();
+        assert_eq!(r.reason.as_deref(), Some(reason));
+        std::fs::remove_dir_all(&j.output).unwrap();
+    }
+
     // An invalid job is refused before any read.
     let mut bad = job("config");
     bad.end_ns = bad.start_ns;
@@ -1351,20 +1375,26 @@ fn dec08_crosscheck_names_every_disagreement() {
     let h = Arc::new(History::new());
     let one = h.clone();
     let (url_a, _) = loopback(move |m, p| one.answer(m, p));
-    // The second source: B missing from its index, F failed.
+    // The second source: B missing from its index, F failed, Y only in its index.
     let two = h.clone();
+    let y = Signature::new_unique().to_string();
+    let only = y.clone();
     let (url_b, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
         ("getSignaturesForAddress", None) => Reply::Result(json!([
             row(&two.a, SLOT + 300, BT + 300, Value::Null),
             row(&two.e, SLOT + 100, BT + 100, Value::Null),
             row(&two.f, SLOT, BT, History::failed()),
+            row(&only, SLOT - 3, BT - 3, History::failed()),
         ])),
-        ("getSignaturesForAddress", Some(b)) if b == two.f => Reply::Result(json!([
+        ("getSignaturesForAddress", Some(b)) if b == only => Reply::Result(json!([
             row(&two.c, SLOT - 200, BT - 200, Value::Null),
             row(&two.d, SLOT - 201, BT - 201, Value::Null),
         ])),
         ("getTransaction", _) if p[0].as_str() == Some(two.f.as_str()) => {
             Reply::Result(variant(&two.f, SLOT, BT, History::failed()))
+        }
+        ("getTransaction", _) if p[0].as_str() == Some(only.as_str()) => {
+            Reply::Result(variant(&only, SLOT - 3, BT - 3, History::failed()))
         }
         _ => two.answer(m, p),
     });
@@ -1394,6 +1424,7 @@ fn dec08_crosscheck_names_every_disagreement() {
             .collect()
     };
     assert_eq!(fields(&h.b), ["INDEXED_BY_PRIMARY_ONLY"]);
+    assert_eq!(fields(&y), ["INDEXED_BY_SECONDARY_ONLY"]);
     assert_eq!(fields(&h.f), ["CLASSIFICATION", "PROGRAM_EVENTS", "EVENTS"]);
     assert!(fields(&h.e).is_empty(), "the boundary row agrees");
     std::fs::remove_dir_all(a.output.parent().unwrap().parent().unwrap()).unwrap();

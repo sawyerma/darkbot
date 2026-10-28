@@ -974,6 +974,49 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// DEC-08: each verification method has its own typed requests/bytes/RPS budget; time, disk,
+    /// RAM and free space are shared.
+    #[test]
+    fn dec08_each_method_has_its_own_typed_budget() {
+        let mut l = darkbot_solana::runtime_config::Limits::default();
+        (l.verify_rps, l.verify_calls, l.verify_mib) = (1, 10, 100);
+        (l.index_rps, l.index_calls, l.index_mib) = (2, 20, 200);
+        (l.crosscheck_rps, l.crosscheck_calls, l.crosscheck_mib) = (3, 30, 300);
+        (
+            l.verify_seconds,
+            l.verify_disk_mib,
+            l.verify_ram_mib,
+            l.verify_free_mib,
+        ) = (7, 8, 9, 6);
+        let mib = 1024 * 1024;
+        let of = |mode| {
+            let b = StrictBudget::of_mode(mode, &l);
+            (b.rps, b.max_calls, b.max_bytes / mib)
+        };
+        assert_eq!(of(VerifyMode::Strict), (1, 10, 100));
+        assert_eq!(of(VerifyMode::Off), (1, 10, 100));
+        assert_eq!(of(VerifyMode::Index { max_pages: 1 }), (2, 20, 200));
+        assert_eq!(of(VerifyMode::Crosscheck { max_pages: 1 }), (3, 30, 300));
+        let b = StrictBudget::of_mode(VerifyMode::Crosscheck { max_pages: 1 }, &l);
+        assert_eq!(
+            (
+                b.max_seconds,
+                b.max_disk_bytes,
+                b.max_ram_bytes,
+                b.min_free_bytes
+            ),
+            (7, 8 * mib, 9 * mib, 6 * mib)
+        );
+        use crate::storage::preflight::{VerifyBudget, VerifyMode as P};
+        let pre = |m| {
+            let v = VerifyBudget::for_mode(m, &l);
+            (v.rps, v.calls, v.bytes / mib, v.max_pages)
+        };
+        assert_eq!(pre(P::Strict), (1, 10, 100, l.verify_pages));
+        assert_eq!(pre(P::Index), (2, 20, 200, l.verify_pages));
+        assert_eq!(pre(P::Crosscheck), (3, 30, 300, l.verify_pages));
+    }
+
     /// DEC-08 (C-02): the second source of a CROSSCHECK is the second configured endpoint on
     /// another host with its own measured FREE_ONLY archive proof; missing, the primary itself
     /// or on the primary's host it is NOT_RUN; present without its proof it is refused.

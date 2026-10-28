@@ -1296,7 +1296,12 @@ mod supervise_tests {
                         online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"),
                         "{mode}"
                     );
-                    let cached = post_capture(&run, mode, &["--offline".into()]).unwrap();
+                    let cached = post_capture(
+                        &run,
+                        mode,
+                        &["--offline".into(), "--verify-max-pages".into(), "3".into()],
+                    )
+                    .unwrap();
                     assert!(!cached.verification_ok, "{mode}");
                     assert!(
                         cached.text.contains("status=HISTORICAL_INCOMPLETE"),
