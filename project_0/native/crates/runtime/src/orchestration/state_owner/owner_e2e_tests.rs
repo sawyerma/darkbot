@@ -4931,7 +4931,16 @@ fn dec06_observe_counts_extra_wakeups_and_samples_without_budget() {
     assert_eq!((s.hits, s.misses, s.extra, s.ticks), (0, 0, 1, 1));
     f.owner.threshold.budget.charge(u64::MAX / 2);
     let checks = f.owner.metrics.health_sweep_checks;
-    dec06_tick_and_flush(&mut f, &[asset_bank, liab_bank]);
+    let clock = chain_clock(&f.owner.st);
+    f.owner
+        .threshold_observe_tick(&[asset_bank, liab_bank], f.owner.clock.now_ns(), clock);
+    assert!(
+        f.owner.threshold.batch.woken.is_empty(),
+        "a sampled tick looks nothing up"
+    );
+    assert!(f.owner.threshold.batch.unlooked.contains(&asset_bank));
+    f.owner.mark_all_banks_dirty();
+    f.owner.sweep();
     let s = &f.owner.threshold.stats;
     assert_eq!(
         (s.ticks, s.uncomparable_ticks, s.extra, s.sampled_out),
