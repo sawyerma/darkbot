@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`2210fe21`** (2026-10-29) | DEC-13b Owner→FE-04-Admission aus detect, In-Run-Settlement (Kapital+Inventar einmal), Exit-Admission, Liquidator-Status; DEC-02 Liquidator-Status | OFFLINE_VERIFIED (Gate 1200/1046/446/446, Mutationen 31/31, CI 40847373951); LIVE bis FE-06 gesperrt |
 | **`94a15749`** (2026-10-29) | DEC-08 INDEX/CROSSCHECK/STRICT nativ (Driver, Jobs, Reports, CLI, Controller, Protobuf, Gateway, Frontend, A4-Parität) | OFFLINE_VERIFIED (Gate 1189/1035/445/445, Mutationen 65/65, CI 40813170184); real NOT_RUN (C-02) |
 | **`bd9a1ebf`** (2026-10-28) | DEC-06 Threshold-Modus OFF/OBSERVE/ACTIVE: Controller mit CAS/Receipt, OBSERVE-Vergleich unter Owner-Budget, ACTIVE-Gegenprobe mit Fallback, Fortsetzung, Liquidator-Reiter (mit `64e280ca`, `6d0507d3`, `af2f6bed`, `d42bacd9`, `e9b1d6ad`, `1e3f2b00`, `bd9a1ebf`) | OFFLINE_VERIFIED · CI 40646377964 + Gateway 40646429284 (workflow_dispatch) grün · ACTIVE bis B-8 gesperrt · reale Qualifikation NOT_RUN |
 | **`310ca31a`** (2026-10-28) | DEC-16 Stufe 3: Shadow-Owner bis Stop (Fenster, Drains, SK-07-Owner-Journale), econ4h-Owner auf dem Econ-Raster, Fortsetzung nach Absturz (Shadow, econ4h), Zulassung aller drei Modi, GUI je Modus (mit `f7185d42`, `f83dd1dd`, `bbc84c23`, `1f2ac957`, `d8474d41`, `aaf750bb`, `f8bbfee3`, `75755392`, `310ca31a`) | OFFLINE_VERIFIED · CI 40620266158 grün · reale Qualifikation NOT_RUN |

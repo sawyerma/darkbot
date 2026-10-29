@@ -5573,7 +5573,7 @@ Ein stale/missing CachedBlockhash wird **vor** `plans_with_health` erkannt: kein
 
 ### DEC-02 — P7-03/V2-15 Simulation: **A, gebundene Wiederverwendung**
 
-> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** TEILWEISE laut BUGS.md: aktuelle echte Simulation-/State-Kontextbindung bis zum Handoff.
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: OFFLINE_VERIFIED (Code) `ac3fec1f` + DEC-13b `bbfd6d2a`; offen nur Nutzerentscheidung Kontext-Slot (Handoff fail-closed).
 
 Nur der **identische Wire-Digest der exakt signierten `SignedPayload`-Bytes einschließlich sämtlicher Signaturen, deren Reihenfolge und Submission-Pfad** legitimiert die Wiederverwendung; ein **Message-Hash allein reicht ausdrücklich nicht**. **Bundle nur mit tatsächlicher Bundle-Simulation** derselben gebundenen Payload. Nur das typisierte `SimResult::Ok` aus einem echten `SimulatedPayload`-Token ist verwendbar, nie Failed/Unavailable/Deadline; `exact_signed_payload_simulated` **aus dem Token ableiten, nie als Literal**. Kontext-Slot ≥ Intent-State-Slot, gleiche State-/Program-/Lookup-Generation, kein Gap/Recovery/ProgramData-Drift seit Simulation, gültiger Blockhash und **Alter ≤ `max_state_age_ms` der Approval** beim Handoff. Bei Verletzung Neusimulation nur mit Budget/Deadline oder fail-closed ohne neu entstehenden Hold. Ein bestehender Pipeline-/FE-04-Admission-Owner, keine zweite Simulation ohne Grund; pro Bindungsbedingung Negative-/Mutationstests und genau eine Simulation im positiven Wiederverwendungsfall.
 
@@ -5631,7 +5631,7 @@ Typisierte Rejection-/Loss- und native `message_hash`-Identität, harte **konfig
 
 ### DEC-13 — FS-F-09/FE-04/FE-06: **JA, Admission voll erreichbar und LIVE weiter gesperrt**
 
-> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** TEILWEISE laut BUGS.md: DEC-13b echte Owner→FE-04-Admission/Settlement/Exit/Wallets bis zum LIVE-gateten Pfad.
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: OFFLINE_VERIFIED `2210fe21` (BUGS §22.5); LIVE gesperrt bis FE-06 (Nutzerentscheidung Format/Quelle).
 
 Vorhandenen echten one-shot `reserve→validate→submit→settle/recover`-Pfad als einen nativen Controller-Consumer und kompletten Liquidator-/Wallets-Protobuf-Rundweg verdrahten, nicht nur als aufrufbare Tests. **Gilt für Versuch und Exit. Die In-Run-Admission gibt die eigene `check()`-Reservierung ausschließlich über das durable Journal-Settlement frei (BUGS C3-Rest), ohne eine zweite RAM-Freigabe oder doppelte Kapitalbuchung.** Persistente atomare Single-Flight-Holds, maximal zulässige Gebühren, Idempotenz, Replay, Crash, UNKNOWN, finalisierte Token-/Lamport-Deltas und harte Stop-/HALT-Gates nachweisen. **Ohne separate FE-06-Freigabe keine werttragende Signierung/Submission**; durch negativen Loopback-/Gateway-Test belegen. Keine neue eigenständige Admission-Engine.
 
