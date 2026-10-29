@@ -1,15 +1,16 @@
 //! The LIVE ledger (plan 28.10., package 6): every LIVE transaction whose
 //! bytes may have left, and what the canonical chain made of it, as facts
-//! written create-new in order under the owner state (`live-ledger/`) and
-//! never changed. The positions, their costs and the net result are the
-//! fold of these facts ([`fold`]): after a crash or restart exactly as
-//! before it.
+//! written in order under the owner state (`live-ledger/`) and never
+//! changed. An entry is published whole or not at all (BSC3-045). The
+//! positions, their costs and the net result are the fold of these facts
+//! ([`fold`]): after a crash or restart exactly as before it.
 //!
-//! - A BUY included opens its token's position with the tokens the Portal
-//!   traded to it; reverted, it failed and its gas is lost; replaced, it
-//!   never happened.
-//! - An approval's and a SELL's gas count against the position; a SELL
-//!   included closes it with the native amount the Portal paid.
+//! - A BUY is a lot of its own, named by its hash (BSC3-047): included, it
+//!   opens with the tokens the Portal traded to it; reverted, it failed and
+//!   its gas is lost; replaced, it never happened (no lot). A token bought
+//!   again after its exit is a new lot.
+//! - An approval's and a SELL's gas count against their token's latest
+//!   lot; a SELL included closes it with the native amount the Portal paid.
 //! - A block that left the canonical chain takes its inclusions back: the
 //!   transaction is unresolved again until it is included anew.
 //! - An UNKNOWN transaction (its handoff did not complete) is unresolved,
@@ -34,6 +35,7 @@ use std::fs;
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// What a fact says about its transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +171,10 @@ pub struct Recovered {
 #[derive(Clone, Debug)]
 pub struct Ledger {
     dir: PathBuf,
+    /// Tests: an entry's write ends after this many bytes, as a crash
+    /// would end it.
+    #[cfg(test)]
+    cut: Option<usize>,
 }
 
 fn word(v: U256) -> Value {
@@ -179,10 +185,27 @@ impl Ledger {
     pub fn open(state_dir: &Path) -> Self {
         Ledger {
             dir: state_dir.join("live-ledger"),
+            #[cfg(test)]
+            cut: None,
         }
     }
 
-    /// Appends `fact` as the next entry, create-new and synced.
+    /// `bytes` into `file`, synced (tests: cut off as a crash would).
+    fn write_entry(&self, mut file: fs::File, bytes: &[u8]) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(n) = self.cut {
+            file.write_all(&bytes[..n.min(bytes.len())])?;
+            return Err(std::io::Error::other("cut off"));
+        }
+        file.write_all(bytes)?;
+        file.sync_all()
+    }
+
+    /// Appends `fact` as the next entry. It is written whole and synced
+    /// under a temporary name no reader takes, then published by a link
+    /// that never replaces an entry (BSC3-045): a process that ends in the
+    /// middle leaves at most an unpublished temporary file, never a torn
+    /// entry. Nothing here removes or skips an entry.
     pub fn append(&self, fact: &Fact, now_ms: u64) -> Result<u64, String> {
         let mut d = Draft::new(&k::SCHEMA);
         d.set(k::KIND, fact.kind.name())
@@ -211,25 +234,48 @@ impl Ledger {
             .recursive(true)
             .create(&self.dir)
             .map_err(e)?;
-        let mut seq = self.count()?;
-        loop {
-            let path = self.dir.join(format!("{seq:020}.dbrec"));
-            let written = fs::OpenOptions::new()
+        let (file, tmp) = loop {
+            static TEMPORARY: AtomicU64 = AtomicU64::new(0);
+            let n = TEMPORARY.fetch_add(1, Ordering::Relaxed);
+            let path = self
+                .dir
+                .join(format!("pending-{}-{n}.tmp", std::process::id()));
+            match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
                 .open(&path)
-                .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()));
-            match written {
-                Ok(()) => break,
-                Err(err) if err.kind() == ErrorKind::AlreadyExists => seq += 1,
+            {
+                Ok(f) => break (f, path),
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
                 Err(err) => return Err(e(err)),
             }
+        };
+        if let Err(err) = self.write_entry(file, &bytes) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e(err));
         }
+        let published = self.publish(&tmp);
+        // The published entry is a link of its own.
+        let _ = fs::remove_file(&tmp);
+        let seq = published.map_err(e)?;
         fs::File::open(&self.dir)
             .and_then(|d| d.sync_all())
             .map_err(e)?;
         Ok(seq)
+    }
+
+    /// Links the written entry `tmp` as the next free sequence number.
+    fn publish(&self, tmp: &Path) -> std::io::Result<u64> {
+        let mut seq = self.count().map_err(std::io::Error::other)?;
+        loop {
+            let path = self.dir.join(format!("{seq:020}.dbrec"));
+            match fs::hard_link(tmp, &path) {
+                Ok(()) => return Ok(seq),
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => seq += 1,
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     /// Every admitted transaction the ledger has no fact of becomes one, as
@@ -257,6 +303,8 @@ impl Ledger {
         Ok(out)
     }
 
+    /// The published entries in order (an unpublished temporary file is
+    /// none).
     fn names(&self) -> Result<Vec<(u64, PathBuf)>, String> {
         let entries = match fs::read_dir(&self.dir) {
             Ok(e) => e,
@@ -340,6 +388,8 @@ pub struct Tx {
     /// its bytes were public in a block and may be included at any height;
     /// its window bounds nothing any more (BSC3-048).
     pub orphaned: bool,
+    /// The lot it counts in (none: withdrawn or replaced, BSC3-047).
+    pub lot: Option<[u8; 32]>,
 }
 
 impl Tx {
@@ -386,9 +436,11 @@ impl PositionState {
     }
 }
 
-/// One token's LIVE position.
+/// One lot of a token's LIVE position: what one BUY opened (BSC3-047).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Position {
+    /// The BUY's hash (an exit step without a lot before it: its own).
+    pub lot: [u8; 32],
     pub token: [u8; 20],
     pub component: ComponentId,
     pub state: PositionState,
@@ -401,6 +453,8 @@ pub struct Position {
     pub gas_wei: U256,
     /// When the BUY's block was produced (unix ms).
     pub opened_ms: Option<u64>,
+    /// An approval of this lot is included: its SELL needs no other.
+    pub approved: bool,
     /// Proceeds − input − gas, once closed (failed: − gas).
     pub pnl_wei: Option<i128>,
 }
@@ -429,6 +483,19 @@ impl Book {
     pub fn tx(&self, tx_hash: &[u8; 32]) -> Option<&Tx> {
         self.txs.iter().find(|t| t.released.tx_hash == *tx_hash)
     }
+
+    /// The lot `tx_hash` counts in.
+    pub fn lot_of(&self, tx_hash: &[u8; 32]) -> Option<&Position> {
+        let lot = self.tx(tx_hash)?.lot?;
+        self.positions.iter().find(|p| p.lot == lot)
+    }
+
+    /// `token`'s open lot: its latest one open or exiting.
+    pub fn open_lot(&self, token: &[u8; 20]) -> Option<&Position> {
+        self.positions.iter().rev().find(|p| {
+            p.token == *token && matches!(p.state, PositionState::Open | PositionState::Exiting)
+        })
+    }
 }
 
 fn signed(v: U256) -> i128 {
@@ -447,6 +514,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                         state: f.kind,
                         inclusion: None,
                         orphaned: false,
+                        lot: None,
                     });
                 }
             }
@@ -474,16 +542,25 @@ pub fn fold(facts: &[Fact]) -> Book {
         }
     }
     let mut book = Book::default();
-    // A withdrawn transaction never left: no position, no cost.
-    for t in txs.iter().filter(|t| t.state != FactKind::Withdrawn) {
-        if matches!(t.state, FactKind::Included | FactKind::Reverted) {
+    for t in &mut txs {
+        // A withdrawn transaction never left, a replaced one never
+        // happened: no lot, no cost.
+        if matches!(t.state, FactKind::Withdrawn | FactKind::Replaced) {
+            continue;
+        }
+        let spent = matches!(t.state, FactKind::Included | FactKind::Reverted);
+        if spent {
             book.gas_wei += t.gas();
         }
         let token = t.released.token;
-        let at = match book.positions.iter().position(|p| p.token == token) {
-            Some(i) => i,
-            None => {
+        // A BUY opens a lot of its own; an exit step counts in its token's
+        // latest lot (BSC3-047).
+        let latest = book.positions.iter().rposition(|p| p.token == token);
+        let at = match latest {
+            Some(i) if t.released.intent != LiveIntentKind::Buy => i,
+            _ => {
                 book.positions.push(Position {
+                    lot: t.released.tx_hash,
                     token,
                     component: t.released.component,
                     state: PositionState::Pending,
@@ -492,13 +569,15 @@ pub fn fold(facts: &[Fact]) -> Book {
                     proceeds_wei: U256::ZERO,
                     gas_wei: U256::ZERO,
                     opened_ms: None,
+                    approved: false,
                     pnl_wei: None,
                 });
                 book.positions.len() - 1
             }
         };
         let p = &mut book.positions[at];
-        if matches!(t.state, FactKind::Included | FactKind::Reverted) {
+        t.lot = Some(p.lot);
+        if spent {
             p.gas_wei += t.gas();
         }
         let inclusion = t.inclusion.as_ref();
@@ -509,9 +588,8 @@ pub fn fold(facts: &[Fact]) -> Book {
                 p.input_wei = t.released.input_wei.unwrap_or_default();
                 p.opened_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
             }
-            (LiveIntentKind::Buy, FactKind::Reverted) if p.state == PositionState::Pending => {
-                p.state = PositionState::Failed;
-            }
+            (LiveIntentKind::Buy, FactKind::Reverted) => p.state = PositionState::Failed,
+            (LiveIntentKind::Approve, FactKind::Included) => p.approved = true,
             (LiveIntentKind::Sell, FactKind::Included) => {
                 p.state = PositionState::Closed;
                 p.proceeds_wei = inclusion.and_then(|f| f.eth_wei).unwrap_or_default();
@@ -659,6 +737,111 @@ mod tests {
         // An entry that does not decode refuses the ledger.
         fs::write(dir.join("live-ledger/00000000000000000099.dbrec"), b"x").unwrap();
         assert!(Ledger::open(&dir).facts().is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-045: an entry's write ends in the middle (an I/O error, or the
+    /// process ends and leaves its temporary file). It is no entry: the
+    /// ledger reads as before, the next fact takes the next entry.
+    #[test]
+    fn an_entry_cut_off_in_its_write_is_no_entry() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-cut-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let buy = released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300);
+        let lost = released(2, LiveIntentKind::Buy, 0xB, 1_000, 1_300);
+        let next = released(3, LiveIntentKind::Buy, 0xC, 1_000, 1_300);
+        ledger.append(&buy, 1).unwrap();
+        let crashed = Ledger {
+            cut: Some(9),
+            ..Ledger::open(&dir)
+        };
+        assert!(crashed.append(&lost, 1).is_err());
+        // What a process that ended there leaves.
+        fs::write(dir.join("live-ledger/pending-1-0.tmp"), b"torn").unwrap();
+        let files = || fs::read_dir(dir.join("live-ledger")).unwrap().count();
+        let left = files();
+        assert_eq!(ledger.facts().unwrap(), vec![buy.clone()]);
+        assert_eq!(ledger.append(&next, 1).unwrap(), 1);
+        assert_eq!(ledger.facts().unwrap(), vec![buy, next]);
+        assert_eq!(files(), left + 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-047: a token bought again after its exit is a lot of its own
+    /// (the BUY's hash): each lot keeps its tokens, input, gas and result;
+    /// the exit steps count in their lot; the net result is the closed
+    /// lots'. A BUY another transaction replaced never happened: no lot.
+    /// A reorg and a restart fold the same.
+    #[test]
+    fn a_token_bought_again_is_a_lot_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-lots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let buy1 = released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300);
+        let approve1 = released(2, LiveIntentKind::Approve, 0xA, 0, 100);
+        let sell1 = released(3, LiveIntentKind::Sell, 0xA, 0, 150);
+        // A BUY of token B is lost; BUY 2 of A takes its nonce.
+        let lost = released(4, LiveIntentKind::Buy, 0xB, 3_000, 3_300);
+        let buy2 = released(5, LiveIntentKind::Buy, 0xA, 2_000, 2_300);
+        let approve2 = released(6, LiveIntentKind::Approve, 0xA, 0, 100);
+        let facts = [
+            buy1.clone(),
+            included(&buy1, 10, 250, 5_000, 1_000),
+            approve1.clone(),
+            included(&approve1, 11, 40, 0, 0),
+            sell1.clone(),
+            included(&sell1, 12, 90, 5_000, 1_500),
+            lost.clone(),
+            buy2.clone(),
+            Fact {
+                block: Some((13, [13; 32], 13_000)),
+                by_tx: Some(buy2.tx_hash),
+                ..Fact::about(&lost, FactKind::Replaced)
+            },
+            included(&buy2, 13, 260, 7_000, 2_000),
+            // A reorg takes BUY 2's block; it is included anew.
+            Fact {
+                block: Some((13, [13; 32], 13_000)),
+                ..Fact::about(&buy2, FactKind::Orphaned)
+            },
+            included(&buy2, 14, 270, 7_000, 2_000),
+            approve2.clone(),
+            included(&approve2, 15, 45, 0, 0),
+        ];
+        for f in &facts {
+            ledger.append(f, 1).unwrap();
+        }
+        let book = fold(&Ledger::open(&dir).facts().unwrap());
+        assert_eq!(book.positions.len(), 2, "{:?}", book.positions);
+        let (first, second) = (&book.positions[0], &book.positions[1]);
+        assert_eq!((first.lot, second.lot), (buy1.tx_hash, buy2.tx_hash));
+        assert_eq!(first.state, PositionState::Closed);
+        assert_eq!(
+            (first.tokens, first.input_wei, first.gas_wei),
+            (
+                U256::from(5_000),
+                U256::from(1_000),
+                U256::from(250 + 40 + 90)
+            )
+        );
+        assert_eq!(first.pnl_wei, Some(1_500 - 1_000 - 380));
+        assert_eq!(second.state, PositionState::Open);
+        assert_eq!(
+            (second.tokens, second.input_wei, second.gas_wei),
+            (U256::from(7_000), U256::from(2_000), U256::from(270 + 45))
+        );
+        assert_eq!((second.opened_ms, second.pnl_wei), (Some(14_000), None));
+        // Each lot knows its own approval.
+        assert!(first.approved && second.approved);
+        let without = fold(&Ledger::open(&dir).facts().unwrap()[..12]);
+        assert!(!without.positions[1].approved);
+        assert_eq!(book.lot_of(&approve2.tx_hash).unwrap().lot, buy2.tx_hash);
+        assert_eq!(book.lot_of(&approve1.tx_hash).unwrap().lot, buy1.tx_hash);
+        assert!(book.lot_of(&lost.tx_hash).is_none());
+        assert_eq!(book.realized_pnl_wei, 1_500 - 1_000 - 380);
+        assert_eq!(book.gas_wei, U256::from(250 + 40 + 90 + 270 + 45));
+        assert_eq!(book.count(PositionState::Pending), 0);
         fs::remove_dir_all(dir).unwrap();
     }
 

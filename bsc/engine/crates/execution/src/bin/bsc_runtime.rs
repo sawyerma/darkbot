@@ -325,7 +325,8 @@ fn run(args: &[String]) -> Result<bool, String> {
             let book = fold(&Ledger::open(dir).facts()?);
             for p in &book.positions {
                 println!(
-                    "token=0x{} component={} state={} tokens={} input_wei={} proceeds_wei={} gas_wei={} pnl_wei={}",
+                    "lot=0x{} token=0x{} component={} state={} tokens={} input_wei={} proceeds_wei={} gas_wei={} pnl_wei={}",
+                    hex(&p.lot),
                     hex(&p.token),
                     p.component.name(),
                     p.state.name(),

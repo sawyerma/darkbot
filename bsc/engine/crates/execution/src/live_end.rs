@@ -358,6 +358,13 @@ impl End for LiveEnd {
             submission,
             config,
         } = h;
+        // BSC3-045: a fact the ledger did not take may be missing from the
+        // book: nothing more is handed over (before the owner's admission:
+        // no attempt, no spend).
+        if let Some(e) = &self.ledger_failure {
+            let why = format!("{}: {e}", crate::sources::LIVE_LEDGER_UNREADABLE);
+            return self.refuse(Refusal::Owner, why);
+        }
         let kind = match expected {
             ExpectedTx::Buy(_) => LiveIntentKind::Buy,
             ExpectedTx::Approve(_) => LiveIntentKind::Approve,
@@ -1213,6 +1220,55 @@ pub(crate) mod tests {
         assert_eq!(again.err(), Some(Refusal::DuplicateToken));
         assert!(requests.recv_timeout(silent).is_err());
         exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-045: the ledger did not take a released transaction's fact.
+    /// The end hands nothing over after it: the next intent is refused
+    /// before the owner admits it (no attempt, no spend), nothing leaves.
+    #[test]
+    fn an_end_whose_fact_was_not_written_hands_nothing_more_over() {
+        use std::os::unix::fs::PermissionsExt;
+        let (state, d, mut exec, requests) = armed_both("live-unwritten");
+        let wait = std::time::Duration::from_secs(2);
+        let silent = std::time::Duration::from_millis(300);
+        let ledger = state.join("live-ledger");
+        fs::create_dir_all(&ledger).unwrap();
+        fs::set_permissions(&ledger, fs::Permissions::from_mode(0o500)).unwrap();
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        exec.on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
+            .unwrap();
+        requests.recv_timeout(wait).unwrap();
+        assert!(exec.end().ledger_failure().is_some());
+        reconnect(&mut exec);
+        let next = exec.on_strategy_buy(
+            [0x5A; 20],
+            curve_after(1_000_000_000_000_000_000),
+            U256::from(10_000_000_000_000_000u64),
+            &strategy_c2_next(Some(HEAD), 1),
+            &clock(500, 3),
+            500,
+        );
+        assert_eq!(next.err(), Some(Refusal::Owner));
+        assert!(
+            exec.end()
+                .last_refusal()
+                .unwrap()
+                .starts_with(crate::sources::LIVE_LEDGER_UNREADABLE)
+        );
+        assert!(requests.recv_timeout(silent).is_err());
+        assert_eq!(crate::sources::admitted_intents(&state).unwrap().len(), 1);
+        fs::set_permissions(&ledger, fs::Permissions::from_mode(0o700)).unwrap();
+        drop(exec);
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(state).unwrap();
     }

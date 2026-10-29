@@ -272,8 +272,9 @@ pub struct LiveRuntime {
     /// arm follows and no fence settles until a restart recovers what the
     /// admission entries hold (BSC3-024/041).
     ledger_write_failed: Option<String>,
-    /// Positions reported opened (to the executor and Strategy C).
-    opened: Vec<[u8; 20]>,
+    /// The lot of each token reported open (to the executor and Strategy
+    /// C), by its BUY's hash (BSC3-047): one per token at a time.
+    opened: Vec<([u8; 20], [u8; 32])>,
     /// Open positions whose exit the strategy decided and whose SELL has
     /// not gone: the exit continues once the sender's nonce order allows
     /// (BSC3-055), across arms of this process.
@@ -680,43 +681,44 @@ impl LiveRuntime {
             self.append(f);
         }
         self.refold();
+        // A token's reported lot ends when it is no longer the token's open
+        // lot; then the open lot is reported (a reorg may reopen an earlier
+        // lot of a token bought again, BSC3-047).
         let mut changes = Vec::new();
+        let book = &self.book;
+        self.opened.retain(|(token, lot)| {
+            let still = book.open_lot(token).is_some_and(|p| p.lot == *lot);
+            if !still {
+                changes.push(PositionChange::Ended { token: *token });
+            }
+            still
+        });
         for p in &self.book.positions {
-            let open = p.state == PositionState::Open || p.state == PositionState::Exiting;
-            let reported = self.opened.contains(&p.token);
-            if open && !reported {
-                if let Some(x) = self.executor.as_mut() {
-                    x.adopt(p.token, p.tokens, p.input_wei);
-                }
-                self.opened.push(p.token);
-                changes.push(PositionChange::Opened {
-                    token: p.token,
-                    tokens: p.tokens,
-                    spent_wei: p.input_wei + p.gas_wei,
-                    filled_ms: p.opened_ms.unwrap_or_default(),
-                });
-            } else if !open && reported {
-                self.opened.retain(|t| *t != p.token);
-                changes.push(PositionChange::Ended { token: p.token });
+            let reported = self.opened.iter().any(|(token, _)| *token == p.token);
+            if reported || self.book.open_lot(&p.token).is_none_or(|o| o.lot != p.lot) {
+                continue;
             }
-        }
-        for c in &changes {
-            if let PositionChange::Ended { token } = c {
-                self.exits_wanted.retain(|t| t != token);
+            if let Some(x) = self.executor.as_mut() {
+                x.adopt(p.token, p.tokens, p.input_wei);
             }
+            self.opened.push((p.token, p.lot));
+            changes.push(PositionChange::Opened {
+                token: p.token,
+                tokens: p.tokens,
+                spent_wei: p.input_wei + p.gas_wei,
+                filled_ms: p.opened_ms.unwrap_or_default(),
+            });
         }
-        // An approval the chain included: the armed exit sells without
-        // approving again (also one that landed after its window).
+        // An exit is wanted of an open position only.
+        let book = &self.book;
+        self.exits_wanted.retain(|t| book.open_lot(t).is_some());
+        // An approval the chain included: the armed exit sells its lot
+        // without approving again (also one that landed after its window).
         for f in facts
             .iter()
             .filter(|f| f.kind == FactKind::Included && f.intent == LiveIntentKind::Approve)
         {
-            let tokens = self
-                .book
-                .positions
-                .iter()
-                .find(|p| p.token == f.token)
-                .map(|p| p.tokens);
+            let tokens = self.book.lot_of(&f.tx_hash).map(|p| p.tokens);
             if let (Some(x), Some(tokens)) = (self.executor.as_mut(), tokens) {
                 x.adopt_approval(f.token, tokens);
             }
@@ -1135,13 +1137,9 @@ impl LiveRuntime {
                     .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
                 {
                     executor.adopt(p.token, p.tokens, p.input_wei);
-                    // Its approval the chain included: no second one.
-                    let approved = self.book.txs.iter().any(|t| {
-                        t.released.token == p.token
-                            && t.released.intent == LiveIntentKind::Approve
-                            && t.state == FactKind::Included
-                    });
-                    if approved {
+                    // Its lot's approval the chain included: no second one
+                    // (an earlier lot's went with its SELL, BSC3-047).
+                    if p.approved {
                         executor.adopt_approval(p.token, p.tokens);
                     }
                 }
@@ -3356,6 +3354,200 @@ mod tests {
             "{why:?}"
         );
         assert!(r.fences(".fence").is_empty());
+        r.clean();
+    }
+
+    /// BSC3-047: a token bought, exited and bought again in a later arm is
+    /// a second lot, with its own tokens. A reorg that takes the first
+    /// lot's SELL and the second lot's BUY reopens the first lot: the
+    /// second ends before the first is reported open, and back. After a
+    /// restart with the second lot open, its exit approves again (the
+    /// first lot's approval went with its SELL), its own tokens; the book
+    /// holds both lots, the first closed with its result.
+    #[test]
+    fn a_token_bought_again_approves_its_exit_again() {
+        use crate::chain_follower::CanonicalTrade;
+        use crate::live_ledger::PositionState;
+        use crate::paper_exec::IntentKind;
+        use darkbot_bsc_trading::transactions::legacy::decode_signed;
+        use darkbot_bsc_trading::venues::flap::abi::decode_approve;
+        use darkbot_bsc_trading::venues::flap::recognize::decode_swap_exact_input;
+        let r = Rig::new("live-rebuy", LiveStrategies::StrategyC);
+        let sc = Sc::new(r.buyer);
+        let a = [0xA1; 20];
+        let tokens2 = sc.tokens * U256::from(2u64);
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let wait = Duration::from_secs(2);
+        let trade = |hash, n, h, sell, amount: U256| {
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: n,
+                block_hash: [h; 32],
+                tx_index: 0,
+                tx_hash: hash,
+                log_index: 0,
+                origin: r.buyer,
+                sell,
+                token: a,
+                trader: r.buyer,
+                amount: amount.to_be_bytes(),
+                eth: sc.input.to_be_bytes(),
+                fee: [0; 32],
+                post_price: [0; 32],
+            })
+        };
+        let sold = |hash, n, h| trade(hash, n, h, true, sc.tokens);
+        // Lot 1: bought at nonce 0, approved at 1, sold at 2.
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, _) = x.on_strategy(&sc.buy(a), &c2, &clock, now_ms).unwrap();
+        let buy1 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![sc.receipt(buy1, 0)]),
+                sc.trade(buy1, HEAD + 1, 0xb2, a),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        reconnect(&mut x);
+        let (out, _) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        let approve1 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 2, 0xb3, 0xb2, vec![sc.receipt(approve1, 1)]),
+                complete_of(HEAD + 2, 0xb3),
+            ],
+        );
+        reconnect(&mut x);
+        let (out, _) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let sell1 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        let changes = feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 3, 0xb4, 0xb3, vec![sc.receipt(sell1, 2)]),
+                sold(sell1, HEAD + 3, 0xb4),
+                complete_of(HEAD + 3, 0xb4),
+            ],
+        );
+        assert_eq!(changes, vec![PositionChange::Ended { token: a }]);
+        x.shutdown();
+        // Lot 2: the next process buys the token again, at nonce 3.
+        r.authorize("boot-2", "rebuy");
+        let mut x = r.runtime("boot-2");
+        let mut c2 = c2_at(&r.d.join("c2-2"), r.buyer, 3);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, refused) = x.on_strategy(&sc.buy(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        let buy2 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        let changes = feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xd2, 0xb1, vec![sc.receipt(buy2, 3)]),
+                trade(buy2, HEAD + 1, 0xd2, false, tokens2),
+                complete_of(HEAD + 1, 0xd2),
+            ],
+        );
+        let opened = |c: &PositionChange| match c {
+            PositionChange::Opened { token, tokens, .. } if *token == a => Some(*tokens),
+            _ => None,
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(opened(&changes[0]), Some(tokens2));
+        // A reorg takes SELL 1's and BUY 2's blocks: lot 2 ends, lot 1 is
+        // open again (its SELL unresolved); included again, back.
+        let changes = x.on_canonical(&CanonicalEvent::Reorg {
+            orphaned: vec![(HEAD + 3, [0xb4; 32]), (HEAD + 1, [0xd2; 32])],
+            new_head: (HEAD + 1, [0xe2; 32]),
+        });
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert_eq!(changes[0], PositionChange::Ended { token: a });
+        assert_eq!(opened(&changes[1]), Some(sc.tokens));
+        assert_eq!(x.book().positions[0].state, PositionState::Exiting);
+        assert_eq!(x.book().positions[1].state, PositionState::Pending);
+        let mut changes = Vec::new();
+        for e in [
+            block_of(
+                HEAD + 1,
+                0xe2,
+                0xb1,
+                vec![sc.receipt(sell1, 2), sc.receipt(buy2, 3)],
+            ),
+            sold(sell1, HEAD + 1, 0xe2),
+            trade(buy2, HEAD + 1, 0xe2, false, tokens2),
+            complete_of(HEAD + 1, 0xe2),
+        ] {
+            changes.extend(x.on_canonical(&e));
+        }
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert_eq!(changes[0], PositionChange::Ended { token: a });
+        assert_eq!(opened(&changes[1]), Some(tokens2));
+        x.shutdown();
+        // A restart with lot 2 open: its exit approves first.
+        r.authorize("boot-3", "lot-two");
+        let mut x = r.runtime("boot-3");
+        let mut c2 = c2_at(&r.d.join("c2-3"), r.buyer, 4);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let exit2 = crate::runtime_strategy::StrategyAction::Exit {
+            token: a,
+            tokens: tokens2,
+            curve: sc.held,
+            decided_ns: 0,
+        };
+        let (out, refused) = x.on_strategy(&exit2, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        let input = decode_signed(&out[0].raw).unwrap().tx.input;
+        assert_eq!(decode_approve(input).unwrap().1, tokens2);
+        let approve2 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xf2, 0xb1, vec![sc.receipt(approve2, 4)]),
+                complete_of(HEAD + 1, 0xf2),
+            ],
+        );
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit2, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let input = decode_signed(&out[0].raw).unwrap().tx.input;
+        assert_eq!(
+            decode_swap_exact_input(input).unwrap().input_amount,
+            tokens2
+        );
+        r.requests.recv_timeout(wait).unwrap();
+        let book = x.book();
+        assert_eq!(book.positions.len(), 2, "{:?}", book.positions);
+        assert_eq!(book.positions[0].state, PositionState::Closed);
+        assert_eq!(book.positions[1].state, PositionState::Exiting);
+        assert_eq!(book.positions[1].tokens, tokens2);
+        assert!(book.positions[1].approved && book.positions[0].approved);
+        x.shutdown();
         r.clean();
     }
 }
