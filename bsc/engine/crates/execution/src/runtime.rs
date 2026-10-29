@@ -849,8 +849,16 @@ struct LiveView {
 }
 
 impl LiveView {
-    fn read(g: &Generation, state: &Path, repo_root: &Path, configured: bool, now_ms: u64) -> Self {
-        if !configured {
+    /// The owner state as it holds now; `qualification` is the reconcile's
+    /// one verified LIVE qualification (BSC3-050: verified once per
+    /// reconcile, the same result the LIVE path ticks with).
+    fn read(
+        g: &Generation,
+        state: &Path,
+        qualification: Option<&crate::sources::LiveQualification>,
+        now_ms: u64,
+    ) -> Self {
+        let Some(qualification) = qualification else {
             return LiveView {
                 boot: None,
                 now_ms,
@@ -859,7 +867,7 @@ impl LiveView {
                 spent: None,
                 qualification: Default::default(),
             };
-        }
+        };
         LiveView {
             boot: crate::sources::boot_session().ok(),
             now_ms,
@@ -869,7 +877,7 @@ impl LiveView {
                 Some(by) => crate::sources::spent_by_grant(state, by.generation).ok(),
                 None => Some(0),
             },
-            qualification: crate::live_qualification::view(repo_root).0.view,
+            qualification: qualification.clone(),
         }
     }
 
@@ -1947,8 +1955,17 @@ pub fn run(
                 // Plan 28.10.: what the owner's LIVE gate makes effective
                 // now; a requested LIVE runs only while it is clear.
                 let now_ms = wall_or_expired(observed_now());
-                let live_view =
-                    LiveView::read(&generation, sources_dir, repo_root, live.is_some(), now_ms);
+                // BSC3-050: the LIVE qualification verified once for this
+                // reconcile, for the gate's view and the LIVE path alike.
+                let qualified = live
+                    .is_some()
+                    .then(|| crate::live_qualification::view(repo_root));
+                let live_view = LiveView::read(
+                    &generation,
+                    sources_dir,
+                    qualified.as_ref().map(|(q, _)| &q.view),
+                    now_ms,
+                );
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
                 let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
                 let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
@@ -2027,7 +2044,10 @@ pub fn run(
                         now: || clock.now_ns(),
                     });
                     l.record_responses();
-                    l.tick(owner.as_ref(), follower, started_ms, now_ms);
+                    match &qualified {
+                        Some(q) => l.tick_with(q, owner.as_ref(), follower, started_ms, now_ms),
+                        None => l.tick(owner.as_ref(), follower, started_ms, now_ms),
+                    }
                 }
             }
             for source in SourceId::ALL {
@@ -2824,6 +2844,26 @@ mod tests {
         );
         let _ = journal.finish();
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// BSC3-050: the gate's view of a reconcile carries the one LIVE
+    /// qualification verified for it (the LIVE path ticks with the same);
+    /// without a LIVE path it reads none.
+    #[test]
+    fn the_reconcile_reads_its_one_verified_qualification() {
+        let dir = std::env::temp_dir().join(format!("bsc-runtime-q-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let q = crate::sources::LiveQualification {
+            venues: vec![crate::sources::VenueId::Flap],
+            acquisition: true,
+            ..Default::default()
+        };
+        let g = Generation::initial();
+        assert_eq!(LiveView::read(&g, &dir, Some(&q), 1).qualification, q);
+        assert_eq!(
+            LiveView::read(&g, &dir, None, 1).qualification,
+            crate::sources::LiveQualification::default()
+        );
     }
 
     /// BSC3-014/038/016: a canonical launch of a block that is not the last

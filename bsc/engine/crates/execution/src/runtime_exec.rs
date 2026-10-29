@@ -816,6 +816,11 @@ pub(crate) mod tests {
 
     /// The witnessed self-launch, really signed by a third party.
     pub(crate) fn launch() -> ([u8; 32], Vec<u8>, [u8; 20]) {
+        launch_n(0)
+    }
+
+    /// Launch `n` of the same launcher: its own salt (token) and nonce.
+    pub(crate) fn launch_n(n: u8) -> ([u8; 32], Vec<u8>, [u8; 20]) {
         let mut beneficiary = [0u8; 20];
         beneficiary[18] = 0xa1;
         beneficiary[19] = 0x1c;
@@ -824,9 +829,13 @@ pub(crate) mod tests {
             symbol: b"DBG06E",
             uri: b"ipfs://darkbot-g06a-economics",
             dex_thresh: 1,
-            salt: B256::from(alloy_primitives::hex!(
-                "09c4b20c7956530d4bf91b3569ed173abfce47d16d412d94dde5e6f4034c6eeb"
-            )),
+            salt: {
+                let mut salt = alloy_primitives::hex!(
+                    "09c4b20c7956530d4bf91b3569ed173abfce47d16d412d94dde5e6f4034c6eeb"
+                );
+                salt[31] ^= n;
+                B256::from(salt)
+            },
             migrator_type: 1,
             quote_token: Address::ZERO,
             quote_amt: U256::ZERO,
@@ -857,7 +866,7 @@ pub(crate) mod tests {
             .sign_legacy(
                 &LegacyTx {
                     chain_id: 56,
-                    nonce: 3,
+                    nonce: 3 + u64::from(n),
                     gas_price: 1_000_000_000,
                     gas_limit: 6_000_000,
                     to: bsc_mainnet_v5_27_0().portal,

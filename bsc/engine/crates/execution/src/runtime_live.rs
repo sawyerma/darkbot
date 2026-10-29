@@ -986,9 +986,24 @@ impl LiveRuntime {
     }
 
     /// One reconcile step at `now_ms` (unix): `session` names this
-    /// process's fences.
+    /// process's fences. Verifies the LIVE qualification itself.
     pub fn tick(
         &mut self,
+        owner: Option<&StateOwner>,
+        canonical: Option<(&str, &FollowerLimits)>,
+        session: u64,
+        now_ms: u64,
+    ) {
+        let qualification = live_qualification::view(&self.repo_root);
+        self.tick_with(&qualification, owner, canonical, session, now_ms);
+    }
+
+    /// [`LiveRuntime::tick`] with the reconcile's verified LIVE
+    /// qualification (`live_qualification::view`; BSC3-050: verified once
+    /// per reconcile, never again here).
+    pub fn tick_with(
+        &mut self,
+        qualification: &(live_qualification::Verified, Option<String>),
         owner: Option<&StateOwner>,
         canonical: Option<(&str, &FollowerLimits)>,
         session: u64,
@@ -1005,7 +1020,7 @@ impl LiveRuntime {
             Ok(s) => s,
             Err(e) => return self.close(format!("owner state: {e}")),
         };
-        let (verified, invalid) = live_qualification::view(&self.repo_root);
+        let (verified, invalid) = qualification;
         if let Some(why) = invalid {
             return self.close(format!("LIVE_QUALIFICATION_INVALID: {why}"));
         }
@@ -1208,7 +1223,7 @@ impl LiveRuntime {
             key,
             live_now,
             store,
-            verified,
+            verified.clone(),
             route,
             deployment.deployment().chain_id,
             self.exec.exec.capability_generation,
@@ -1922,6 +1937,22 @@ mod tests {
             vec![Some(IntentState::Included)]
         );
         assert_eq!(record(&x).u64(l::INCLUDED).unwrap(), 1);
+        // BSC3-042: a second qualified launch after the C3 nonce was
+        // included: the arm's C3 lanes all stand on that nonce. Under the
+        // default cap it takes nothing: no owner slot, nothing sent.
+        let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash_b, launcher_b, 4, 0, 20);
+        let used = buy_usage(&state, NOW).unwrap().used;
+        let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+        assert!(second.is_none(), "{:?}", reason(&x));
+        assert_eq!(buy_usage(&state, NOW).unwrap().used, used);
+        assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"SESSION_CAP=1")
+        );
         // Revoked: the path ends at the next pass, the key goes.
         let owner_store = Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap();
         let g = owner_store.current().unwrap().generation;
@@ -1938,6 +1969,146 @@ mod tests {
             ("ENDED", Some(LIVE_GRANT_MISSING))
         );
         assert!(!x.armed());
+        drop(store);
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-042 under a synthetic session cap ten times the default: after
+    /// C3 BUY A's inclusion at the arm's nonce, a second qualified C3
+    /// launch B passes the cap and is refused at the buyer's nonce (the
+    /// arm's C3 lanes all stand on A's): no owner admission (no slot, no
+    /// spend entry), no bytes on the wire.
+    #[test]
+    fn a_second_c3_launch_after_inclusion_takes_nothing_under_a_raised_cap() {
+        let (state, store, now) = live_ready_granting("live-rt-cap", |now| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        assert_eq!(now, NOW);
+        let root = fixture("live-rt-cap", "PASS");
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let spec = Spec {
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: acquisition(),
+            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+        };
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(
+            root.join(LIVE_QUALIFICATION_PATH),
+            build(&root, &spec, 1).unwrap(),
+        )
+        .unwrap();
+        let d = std::env::temp_dir().join(format!("bsc-live-rt-cap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let (key, buyer) = key_file(&d);
+        let (port, requests) = stand_in();
+        let live_setup = LiveSetup {
+            key_path: key,
+            buyer,
+            route: LiveRouteConfig::Loopback { port },
+            connect_timeout: Duration::from_secs(2),
+        };
+        let mut exec = setup(d.join("unused.key"), Duration::from_secs(3_600));
+        exec.exec.session_cap_wei *= 10;
+        let mut x = LiveRuntime::with_prober(
+            live_setup,
+            exec,
+            &root,
+            state.clone(),
+            d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", fixed);
+        let mut c2 = owner(&d, buyer);
+        c2.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: buyer,
+            next_nonce: 5,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .unwrap();
+        assert!(requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        // A is included at the arm's nonce: C2 and the LIVE path see it
+        // (its lanes, its ledger); the buyer's next nonce is C2's n+1, past
+        // the arm's C3 lanes.
+        let included = CanonicalEvent::Block {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+            parent_hash: [0xb1; 32],
+            timestamp_s: 1_793_000_001,
+            timestamp_ms: 1_793_000_001_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: vec![CanonicalTx {
+                hash: buy.handoff.tx_hash,
+                index: 0,
+                sender: buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: None,
+            }],
+        };
+        c2.canonical(&included);
+        let evidence = c2.take_evidence();
+        assert_eq!(
+            x.apply_evidence(&evidence),
+            vec![Some(IntentState::Included)]
+        );
+        let _ = x.on_canonical(&included);
+        let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+        });
+        assert_eq!(x.free_nonce(&c2), Some(6));
+        let (used, spent) = (
+            buy_usage(&state, NOW).unwrap().used,
+            crate::sources::admitted_intents(&state).unwrap(),
+        );
+        assert_eq!((used, spent.len()), (1, 1));
+        let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash_b, launcher_b, 4, 0, 20);
+        let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+        assert!(second.is_none(), "{:?}", reason(&x));
+        assert_eq!(buy_usage(&state, NOW).unwrap().used, used);
+        assert_eq!(crate::sources::admitted_intents(&state).unwrap(), spent);
+        assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
+        let r = record(&x);
+        let refusals = r.texts(l::REFUSALS).unwrap();
+        assert!(refusals.contains(&"SENDER_NONCE=1"), "{refusals:?}");
+        assert!(!refusals.iter().any(|r| r.starts_with("SESSION_CAP")));
+        assert_eq!(record(&x).u64(l::RELEASED).unwrap(), 1);
         drop(store);
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(root).unwrap();
