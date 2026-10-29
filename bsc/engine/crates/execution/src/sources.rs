@@ -2144,6 +2144,29 @@ pub fn boot_session() -> Result<String, String> {
     .clone()
 }
 
+/// The real UID of a `/proc/self/status` text (`Uid:` real, effective,
+/// saved, filesystem).
+fn real_uid_of_status(status: &str) -> Option<&str> {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("Uid:"))
+        .and_then(|l| l.split_whitespace().next())
+}
+
+/// The home of `uid` in a `/etc/passwd` text (seven fields, the shell may
+/// be empty).
+fn home_of_passwd<'a>(passwd: &'a str, uid: &str) -> Option<&'a str> {
+    passwd.lines().find_map(|l| {
+        let f: Vec<&str> = l.split(':').collect();
+        (f.len() >= 7 && f[2] == uid).then_some(f[5])
+    })
+}
+
+/// The home of a `dscacheutil -q user` answer.
+fn home_of_dscache(entry: &str) -> Option<&str> {
+    entry.lines().find_map(|l| l.strip_prefix("dir: "))
+}
+
 /// The account home of this process's real user from the user database
 /// (macOS directory services, Linux `/etc/passwd` only: an account known
 /// only through NSS is refused, fail-closed), read once; never `$HOME`.
@@ -2160,31 +2183,22 @@ pub fn account_home() -> Result<PathBuf, String> {
                 .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
                 .ok_or(format!("account home: {program} refused"))
         };
+        // BSC3-007: the real UID on both systems (`id -ru`; the first of
+        // the four `Uid:` fields), never the effective one.
         let home = if cfg!(target_os = "macos") {
-            let uid = run("/usr/bin/id", &["-u"])?;
+            let uid = run("/usr/bin/id", &["-ru"])?;
             let entry = run(
                 "/usr/bin/dscacheutil",
                 &["-q", "user", "-a", "uid", uid.trim()],
             )?;
-            entry
-                .lines()
-                .find_map(|l| l.strip_prefix("dir: "))
-                .map(str::to_string)
+            home_of_dscache(&entry).map(str::to_string)
         } else {
             let status = fs::read_to_string("/proc/self/status")
                 .map_err(|e| format!("account home: {e}"))?;
-            let uid = status
-                .lines()
-                .find_map(|l| l.strip_prefix("Uid:"))
-                .and_then(|l| l.split_whitespace().next())
-                .ok_or("account home: no real uid")?
-                .to_string();
+            let uid = real_uid_of_status(&status).ok_or("account home: no real uid")?;
             let passwd =
                 fs::read_to_string("/etc/passwd").map_err(|e| format!("account home: {e}"))?;
-            passwd.lines().find_map(|l| {
-                let f: Vec<&str> = l.split(':').collect();
-                (f.len() >= 7 && f[2] == uid).then(|| f[5].to_string())
-            })
+            home_of_passwd(&passwd, uid).map(str::to_string)
         }
         .filter(|h| h.starts_with('/'))
         .ok_or("account home: not in the user database")?;
@@ -3852,6 +3866,29 @@ pub(crate) mod tests {
         let r = s.request("x", SourceId::Geth, Mode::Shadow, 0, 2).unwrap();
         assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-007: the account home is the real user's: the first `Uid:` field
+    /// (not the effective second), the passwd record of exactly that UID
+    /// (none: refused), a record without a shell counts.
+    #[test]
+    fn the_account_home_is_the_real_users() {
+        let status = "Name:\tbsc\nUid:\t1000\t0\t0\t0\nGid:\t1000\t1000\t1000\t1000\n";
+        assert_eq!(real_uid_of_status(status), Some("1000"));
+        assert_eq!(real_uid_of_status("Name:\tbsc\n"), None);
+        let passwd = "root:x:0:0:root:/root:/bin/sh\nbsc:x:1000:1000::/home/bsc:\n";
+        assert_eq!(home_of_passwd(passwd, "1000"), Some("/home/bsc"));
+        assert_eq!(home_of_passwd(passwd, "0"), Some("/root"));
+        assert_eq!(home_of_passwd(passwd, "1001"), None);
+        assert_eq!(home_of_passwd("bsc:x:1000:1000::/home/bsc\n", "1000"), None);
+        assert_eq!(
+            home_of_dscache("name: bsc\npassword: *\nuid: 501\ndir: /Users/bsc\n"),
+            Some("/Users/bsc")
+        );
+        assert_eq!(home_of_dscache(""), None);
+        // This host's account home: an absolute directory of the real user.
+        let home = account_home().unwrap();
+        assert!(home.is_absolute() && home.is_dir(), "{}", home.display());
     }
 
     /// BSC3-003: the owner's state is taken only from owner-only directories

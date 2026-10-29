@@ -36,6 +36,75 @@ fn shown(frame: &Frame) -> String {
     String::from_utf8(frame.redacted_request()).unwrap()
 }
 
+/// The value of `key` in a flat JSON-RPC bundle body as written: a string,
+/// an array or a scalar (the bodies are generated, never parsed in the
+/// product).
+fn value<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let at = body.find(&format!("\"{key}\":"))? + key.len() + 3;
+    let rest = &body[at..];
+    let end = match rest.as_bytes().first()? {
+        b'[' => rest.find(']')? + 1,
+        b'"' => rest[1..].find('"')? + 2,
+        _ => rest.find([',', '}'])?,
+    };
+    Some(&rest[..end])
+}
+
+/// BSC3-066: the G0.7 bundle bodies (`bundle_wire`) and the LIVE frames are
+/// two framers; where their profiles meet (the same launch and BUY, the
+/// same expiry block, both builders) they carry the same bundle: method,
+/// order of the transactions, expiry block and the 48Club flags. The rules
+/// they differ in are deliberate and stay pinned here: G0.7 bounds 48Club
+/// also by `maxTimestamp` (LIVE only when its plan sets timestamps), the
+/// LIVE plan asks BlockRazor for `noMerge` (G0.7 sends it none).
+#[test]
+fn the_g07_bodies_and_the_live_frames_agree_where_their_profiles_meet() {
+    use darkbot_bsc_execution::bundle_wire;
+    let world = World::prepared();
+    let table = frozen_table();
+    let plan = both_builders(&world, &table);
+    let launch = format!("0x{}", hex(&world.launch_raw));
+    let buy = format!("0x{}", "0".repeat(world.raw_buy.len() * 2));
+    let id = request_id(&world);
+    let body = |frame: &Frame| shown(frame).split("\r\n\r\n").nth(1).unwrap().to_string();
+    let live = body(&club48_frame(&world, &plan, &table));
+    let g07 = bundle_wire::club48_body(&id, [&launch, &buy], MAX_BLOCK, 1);
+    for key in [
+        "jsonrpc",
+        "id",
+        "method",
+        "txs",
+        "maxBlockNumber",
+        "noMerge",
+        "positionFirst",
+    ] {
+        assert_eq!(value(&live, key), value(&g07, key), "48Club {key}");
+    }
+    assert_eq!(
+        value(&g07, "txs"),
+        Some(format!("[\"{launch}\",\"{buy}\"]").as_str())
+    );
+    assert_eq!(value(&g07, "maxTimestamp"), Some("1"));
+    assert_eq!(value(&live, "maxTimestamp"), None);
+    let live = body(&blockrazor_frame(&world, &plan, &table));
+    let g07 = bundle_wire::blockrazor_body(&id, [&launch, &buy], MAX_BLOCK);
+    for key in [
+        "jsonrpc",
+        "id",
+        "method",
+        "txs",
+        "maxBlockNumber",
+        "positionFirst",
+    ] {
+        assert_eq!(value(&live, key), value(&g07, key), "BlockRazor {key}");
+    }
+    assert_eq!(value(&live, "noMerge"), Some("true"));
+    assert_eq!(value(&g07, "noMerge"), None);
+    // The G0.7 expiry is the send head + 2; the LIVE plan's comes from its
+    // configured validity: the same block only when both name it.
+    assert_eq!(bundle_wire::MAX_BLOCK_OFFSET, 2);
+}
+
 #[test]
 fn club48_request_carries_exactly_the_birth_entry_envelope() {
     let world = World::prepared();

@@ -80,6 +80,24 @@ pub enum LiveRouteConfig {
     Loopback { port: u16 },
 }
 
+/// BSC3-026: the stand-in route never runs on the account's owner state
+/// (`canonical`, the one the GUI and the signing tools read): its attempts,
+/// spend and ledger stay the test's. Fail-closed when that state cannot be
+/// determined.
+pub fn loopback_refused(state: &Path, canonical: Result<PathBuf, String>) -> Option<String> {
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    match canonical {
+        Err(e) => Some(format!(
+            "LOOPBACK_STATE_UNVERIFIED: the account's owner state is unknown ({e})"
+        )),
+        Ok(c) if real(&c) == real(state) => Some(format!(
+            "LOOPBACK_ON_ACCOUNT_STATE: {} is the account's owner state",
+            state.display()
+        )),
+        Ok(_) => None,
+    }
+}
+
 impl LiveRouteConfig {
     /// `BUILDERS` or `LOOPBACK:<port>`.
     pub fn parse(text: &str, blockrazor_token: Option<PathBuf>) -> Result<Self, String> {
@@ -1166,7 +1184,14 @@ impl LiveRuntime {
             Err(e) => return self.stop(Phase::KeyRefused(e)),
         };
         let route = match &self.setup.route {
-            LiveRouteConfig::Loopback { port } => LiveRoute::Loopback { port: *port },
+            LiveRouteConfig::Loopback { port } => {
+                if let Some(why) =
+                    loopback_refused(store.dir(), crate::sources::canonical_state_dir())
+                {
+                    return self.stop(Phase::ArmFailed(why));
+                }
+                LiveRoute::Loopback { port: *port }
+            }
             LiveRouteConfig::Builders { blockrazor_token } => {
                 let setup = match TlsSetup::web_pki_roots() {
                     Ok(s) => s,
@@ -1600,6 +1625,30 @@ impl LiveRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC3-026: the stand-in route runs only on a state that is not the
+    /// account's owner state (also through another spelling of its path),
+    /// and not when that state is unknown.
+    #[test]
+    fn loopback_never_runs_on_the_accounts_owner_state() {
+        let base = std::env::temp_dir().join(format!("bsc-loopback-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let account = base.join("home/.darkbot/run/bsc-sources");
+        let test = base.join("test/bsc-sources");
+        std::fs::create_dir_all(&account).unwrap();
+        std::fs::create_dir_all(&test).unwrap();
+        assert_eq!(loopback_refused(&test, Ok(account.clone())), None);
+        let same = loopback_refused(&account, Ok(account.clone())).unwrap();
+        assert!(same.starts_with("LOOPBACK_ON_ACCOUNT_STATE"), "{same}");
+        let spelled = base.join("test/../home/.darkbot/run/bsc-sources");
+        assert!(loopback_refused(&spelled, Ok(account.clone())).is_some());
+        let unknown = loopback_refused(&test, Err("HOME differs".into())).unwrap();
+        assert!(
+            unknown.starts_with("LOOPBACK_STATE_UNVERIFIED"),
+            "{unknown}"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
     use crate::chain_follower::{CanonicalEvent, CanonicalTx};
     use crate::live_end::tests::{club48_findings, key_file, stand_in};
     use crate::live_qualification::tests::{acquisition, fixture, venue_evidence};

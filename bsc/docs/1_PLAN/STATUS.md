@@ -30,9 +30,12 @@
 | BSC3-021 | FIX_VERIFIED (mit 002) | `162f5953` | – |
 | BSC3-019 | FIX_VERIFIED | `162f5953` | Flap-Portal nur Paritätstest (flap/deployment.rs ist economics-gebunden) |
 | BSC3-049 | TEILWEISE (VENUE = Freeze des Pins, ACQUISITION = G0.8 PASS des benannten G0.7-Versuchs; Käufer und akzeptierende Builder gebunden, akzeptiert ≠ inkludiert) | `162f5953` | SOURCE-/ADAPTER-Nachweisart und Risiko-Scope-Bindung: Betreiberentscheidung bzw. BSC3-001 |
-| BSC3-003 | FIX_VERIFIED | dieser Commit | – |
-| BSC3-004 | FIX_VERIFIED | dieser Commit | – |
-| BSC3-006 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-003 | FIX_VERIFIED | `8d5167f3` | – |
+| BSC3-004 | FIX_VERIFIED | `8d5167f3` | – |
+| BSC3-006 | FIX_VERIFIED | `8d5167f3` | – |
+| BSC3-007 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-026 | TEILWEISE (LOOPBACK nie auf dem Konto-Owner-State) | dieser Commit | getrennter Test-Key bleibt Betreiberkonfiguration |
+| BSC3-066 | TEILWEISE (Paritätstest G0.7/LIVE-Framing) | dieser Commit | Adapter-Evidence → BSC3-049 |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).
