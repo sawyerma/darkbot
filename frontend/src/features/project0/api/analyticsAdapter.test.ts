@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { countOf, countSum, durationText, jobCommandBlock, jobReadableRuns, methodLine, sideBySide, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
+import { countOf, countSum, durationText, h0Line, jobCommandBlock, jobReadableRuns, methodLine, sideBySide, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -29,7 +29,20 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
       ["opt-1", "OPTIMIZE", "RUNNING"],
       ["bt-1", "BACKTEST", "COMPLETED"],
       ["pc-1", "POST_CAPTURE", "COMPLETED"],
+      ["h0-1", "H0", "COMPLETED"],
     ]);
+    // H0: every saved run (no run), its headline as the job store holds it.
+    expect(view.jobs[3]?.run).toBe("");
+    expect(view.jobs[3]?.result).toEqual({
+      kind: "H0", resultId: "h0-1", windowStartUnixS: 1_757_408_000n, windowEndUnixS: 1_760_000_000n, liquidations: 12n,
+      duplicates: 3n, runsVerified: 2n, runsWithoutResult: 1n, winners: 4n, topWinnerShareBps: 5_000n, bands: 2n,
+      sampleStatus: "MIN_SAMPLE_UNDECIDED", tags: "BLOCKED: H0-04 needs the 0.1.12 deployment",
+    });
+    const r = view.jobs[3]!.result!;
+    if (r.kind !== "H0") throw new Error("H0");
+    expect(h0Line(r)).toBe("2025-09-09 … 2025-10-09 · 12 liquidations (3 seen again) · runs 2 verified / 1 without · 4 winners · top 50.00 %"
+      + " · 2 min-profit bands (upper bounds) · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 needs the 0.1.12 deployment");
+    expect(h0Line({ ...r, topWinnerShareBps: null })).toContain("top —");
     expect(view.jobs[2]?.verification).toEqual({ chainVerify: "strict", offline: true });
     expect(view.jobs[2]?.result).toEqual({ kind: "POST_CAPTURE", verificationOk: false, reportOk: true, verdict: null });
     expect(view.jobs[2]?.params).toBeNull();

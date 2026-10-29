@@ -4,10 +4,10 @@
 use crate::proto::control::{SignedDecimal, UnsignedDecimal};
 use crate::proto::project0::{
     analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, AutostartGrant, BacktestResult,
-    BootFlow, BootStep, CapitalScenario, FundingSet, JobGrid, JobParams, NamedCount,
-    OptimizeResult, OptimizeScore, PostCaptureResult, PostCaptureSpec, RunQualification,
-    ShadowCounterfactual, UntilStopped, UntilStoppedQualification, UntilStoppedRun,
-    VerificationMethod,
+    BootFlow, BootStep, CapitalScenario, FundingSet, H0Result, H0Spec, JobGrid, JobParams,
+    NamedCount, OptimizeResult, OptimizeScore, PostCaptureResult, PostCaptureSpec,
+    RunQualification, ShadowCounterfactual, UntilStopped, UntilStoppedQualification,
+    UntilStoppedRun, VerificationMethod,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
@@ -183,6 +183,33 @@ fn job(s: &JobStatus) -> AnalyticsJob {
                     report_ok: *report_ok,
                     verdict: verdict.clone().unwrap_or_default(),
                 }),
+                JobResult::H0 {
+                    result_id,
+                    window_start_unix_s,
+                    window_end_unix_s,
+                    liquidations,
+                    duplicates,
+                    runs_verified,
+                    runs_without_result,
+                    winners,
+                    top_winner_share_bps,
+                    bands,
+                    sample_status,
+                    tags,
+                } => analytics_job::Result::H0(H0Result {
+                    result_id: result_id.clone(),
+                    window_start_unix_s: *window_start_unix_s,
+                    window_end_unix_s: *window_end_unix_s,
+                    liquidations: *liquidations,
+                    duplicates: *duplicates,
+                    runs_verified: *runs_verified,
+                    runs_without_result: *runs_without_result,
+                    winners: *winners,
+                    top_winner_share_bps: *top_winner_share_bps,
+                    bands: *bands,
+                    sample_status: sample_status.clone(),
+                    tags: tags.clone(),
+                }),
             }),
         ),
         JobState::Running {
@@ -196,7 +223,20 @@ fn job(s: &JobStatus) -> AnalyticsJob {
         ),
         other => (other.name().into(), String::new(), None, None, None),
     };
+    let h0_spec = match &r.spec {
+        JobSpec::H0 {
+            window_days,
+            min_sample,
+            end_unix_s,
+        } => Some(H0Spec {
+            window_days: *window_days,
+            min_sample: *min_sample,
+            end_unix_s: *end_unix_s,
+        }),
+        _ => None,
+    };
     let (job_params, grid, post_capture_spec) = match &r.spec {
+        JobSpec::H0 { .. } => (None, None, None),
         JobSpec::Backtest { params: p } => (Some(params(p)), None, None),
         JobSpec::Optimize {
             baseline,
@@ -253,6 +293,7 @@ fn job(s: &JobStatus) -> AnalyticsJob {
         params: job_params,
         grid,
         post_capture_spec,
+        h0_spec,
         verification_result: r.verification_result.clone().unwrap_or_default(),
         result,
     }

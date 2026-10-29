@@ -561,6 +561,7 @@ mod tests {
     /// only successful candidates fetched, the earliest one the real `end_liquidation` winner.
     #[test]
     fn dec08_the_winner_pages_through_the_shared_reader() {
+        let _budget = crate::market::history::shared_budget_tests();
         let first: Vec<serde_json::Value> = (0..PAGE as u64)
             .map(|i| signature_row(WINNER_SLOT + 400 - i, serde_json::Value::Null))
             .collect();
@@ -628,6 +629,7 @@ mod tests {
     /// a history whose slots rise is refused — both fail closed, never a guessed winner.
     #[test]
     fn dec08_the_winner_history_fails_closed() {
+        let _budget = crate::market::history::shared_budget_tests();
         let (url, _) = loopback(move |method, _| match method {
             "getSignaturesForAddress" => serde_json::Value::Array(
                 (0..PAGE as u64)

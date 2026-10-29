@@ -124,7 +124,16 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
               }
             : j.result.case === "postCapture"
               ? { kind: "POST_CAPTURE", verificationOk: j.result.value.verificationOk, reportOk: j.result.value.reportOk, verdict: j.result.value.verdict || null }
-              : null,
+              : j.result.case === "h0"
+                ? {
+                    kind: "H0", resultId: j.result.value.resultId, windowStartUnixS: j.result.value.windowStartUnixS,
+                    windowEndUnixS: j.result.value.windowEndUnixS, liquidations: j.result.value.liquidations,
+                    duplicates: j.result.value.duplicates, runsVerified: j.result.value.runsVerified,
+                    runsWithoutResult: j.result.value.runsWithoutResult, winners: j.result.value.winners,
+                    topWinnerShareBps: j.result.value.topWinnerShareBps ?? null, bands: j.result.value.bands,
+                    sampleStatus: j.result.value.sampleStatus, tags: j.result.value.tags,
+                  }
+                : null,
     })),
     boot: m.boot ? boot(m.boot) : null,
     bootError: m.bootError,

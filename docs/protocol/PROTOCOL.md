@@ -113,6 +113,9 @@
     - [BootStep](#darkbot-project0-v1-BootStep)
     - [CapitalScenario](#darkbot-project0-v1-CapitalScenario)
     - [FundingSet](#darkbot-project0-v1-FundingSet)
+    - [H0JobCommand](#darkbot-project0-v1-H0JobCommand)
+    - [H0Result](#darkbot-project0-v1-H0Result)
+    - [H0Spec](#darkbot-project0-v1-H0Spec)
     - [JobGrid](#darkbot-project0-v1-JobGrid)
     - [JobParams](#darkbot-project0-v1-JobParams)
     - [NamedCount](#darkbot-project0-v1-NamedCount)
@@ -1790,8 +1793,8 @@ One analytics job of the controller&#39;s store.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | job_id | [string](#string) |  | The job id (the command&#39;s request id when started from the GUI). |
-| kind | [string](#string) |  | BACKTEST or OPTIMIZE. |
-| run | [string](#string) |  | The run as requested (an id under the run roots). |
+| kind | [string](#string) |  | BACKTEST, OPTIMIZE, POST_CAPTURE or H0. |
+| run | [string](#string) |  | The run as requested (an id under the run roots); empty for H0 (every saved run). |
 | state | [string](#string) |  | QUEUED, RUNNING, INTERRUPTED (the worker is gone without an outcome), COMPLETED, FAILED or CANCELLED. |
 | code | [string](#string) |  | The refusal code of a failed or cancelled job; empty otherwise. |
 | requested_unix_ms | [uint64](#uint64) | optional | Wall clock of the request; unset when it was not readable. |
@@ -1805,7 +1808,9 @@ One analytics job of the controller&#39;s store.
 | backtest | [BacktestResult](#darkbot-project0-v1-BacktestResult) |  | A completed backtest. |
 | optimize | [OptimizeResult](#darkbot-project0-v1-OptimizeResult) |  | A completed optimization. |
 | post_capture | [PostCaptureResult](#darkbot-project0-v1-PostCaptureResult) |  | A completed post-capture chain. |
+| h0 | [H0Result](#darkbot-project0-v1-H0Result) |  | A completed H0 report. |
 | post_capture_spec | [PostCaptureSpec](#darkbot-project0-v1-PostCaptureSpec) |  | Post-capture only: the verification request. |
+| h0_spec | [H0Spec](#darkbot-project0-v1-H0Spec) |  | H0 only: the report&#39;s window request. |
 
 
 
@@ -2117,6 +2122,67 @@ Admitted funding classes; empty: every class.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | classes | [string](#string) | repeated | Funding class names. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-H0JobCommand"></a>
+
+### H0JobCommand
+Parameters (CommandRequest.params) of project0.analytics.h0.start: the options of
+`p0ctl job start h0` (every saved run; the operator&#39;s minimum sample is a terminal option).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| window_days | [uint64](#uint64) |  | Days of the window; 0: the registry&#39;s h0_window_days. |
+| max_seconds | [uint64](#uint64) |  | The job&#39;s explicit time budget. |
+| max_ram_bytes | [uint64](#uint64) |  | The job&#39;s explicit memory budget. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-H0Result"></a>
+
+### H0Result
+A completed H0 report&#39;s headline (the full report is the job&#39;s typed H0 journal and render).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| result_id | [string](#string) |  | The result id (the job id; its output is data/h0/&lt;id&gt;/). |
+| window_start_unix_s | [int64](#int64) |  | The window&#39;s start as reported (earlier when the minimum sample extended it). |
+| window_end_unix_s | [int64](#int64) |  | The window&#39;s end (block time, unix s). |
+| liquidations | [uint64](#uint64) |  | Verified liquidations of the window, each once. |
+| duplicates | [uint64](#uint64) |  | The same events seen again in another run. |
+| runs_verified | [uint64](#uint64) |  | Runs with a verified result. |
+| runs_without_result | [uint64](#uint64) |  | Runs without a verified result or unreadable. |
+| winners | [uint64](#uint64) |  | Distinct winners. |
+| top_winner_share_bps | [uint64](#uint64) | optional | The top winner&#39;s share (bps); unset without liquidations. |
+| bands | [uint64](#uint64) |  | Recurring winners with an implied minimum-profit band (an upper bound, never a config). |
+| sample_status | [string](#string) |  | SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED. |
+| tags | [string](#string) |  | The tag timeline&#39;s state (BLOCKED until 0.1.12, H0-04). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-H0Spec"></a>
+
+### H0Spec
+H0 (Track H0): the window of a historical liquidation report over every saved run.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| window_days | [uint64](#uint64) |  | Days before the window&#39;s end (the registry&#39;s h0_window_days unless given). |
+| min_sample | [uint64](#uint64) | optional | The operator&#39;s minimum sample for the longer window; unset: undecided (no extension). |
+| end_unix_s | [int64](#int64) |  | The window&#39;s end (block time, unix s), fixed at the request. |
 
 
 

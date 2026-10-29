@@ -1503,6 +1503,42 @@ mod contract_tests {
                         finished_unix_ms: Some(1_760_000_000_700),
                     })),
                 },
+                // H0: the report over every saved run (no run of its own).
+                JobStatus {
+                    request: darkbot_runner::analytics::jobs::JobRequest {
+                        run: String::new(),
+                        ..request(
+                            "h0-1",
+                            JobSpec::H0 {
+                                window_days: 30,
+                                min_sample: None,
+                                end_unix_s: 1_760_000_000,
+                            },
+                        )
+                    },
+                    state: JobState::Done(Box::new(JobOutcome {
+                        job_id: "h0-1".into(),
+                        state: COMPLETED.into(),
+                        code: String::new(),
+                        result: Some(JobResult::H0 {
+                            result_id: "h0-1".into(),
+                            window_start_unix_s: 1_757_408_000,
+                            window_end_unix_s: 1_760_000_000,
+                            liquidations: 12,
+                            duplicates: 3,
+                            runs_verified: 2,
+                            runs_without_result: 1,
+                            winners: 4,
+                            top_winner_share_bps: Some(5_000),
+                            bands: 2,
+                            sample_status: "MIN_SAMPLE_UNDECIDED".into(),
+                            tags: "BLOCKED: H0-04 needs the 0.1.12 deployment".into(),
+                        }),
+                        worker_pid: 9,
+                        started_unix_ms: Some(1_760_000_000_800),
+                        finished_unix_ms: Some(1_760_000_000_900),
+                    })),
+                },
             ],
             error: None,
             // DEC-07: a flow whose network audit is READY, awaiting the start approval.

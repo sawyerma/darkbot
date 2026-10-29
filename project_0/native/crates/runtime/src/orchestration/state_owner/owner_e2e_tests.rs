@@ -4620,7 +4620,13 @@ fn dec16_a_window_ending_with_the_stop_is_part_of_the_run_result() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// DEC-06: a threshold mode as the setup builds it (the e2e limits' OBSERVE budget).
+/// DEC-06 tests: the OBSERVE budget of the whole owner time, one second banked — the tests are
+/// about the comparison, and a throttled CI runner can measure one unit above the default's
+/// 20 ms bank (1 543 s instead of ~350 s for the suite at `162f5953`); the tests about the budget
+/// exhaust it explicitly (`charge`).
+const DEC06_TEST_BUDGET_PPM: u64 = 1_000_000;
+
+/// DEC-06: a threshold mode as the setup builds it (with the tests' OBSERVE budget).
 fn dec06_control(
     requested: crate::orchestration::threshold_mode::Requested,
     min_ticks: Option<u64>,
@@ -4628,7 +4634,7 @@ fn dec06_control(
     super::threshold::ThresholdControl::new(
         requested,
         min_ticks,
-        OPERATIONAL.threshold_observe_budget_ppm,
+        DEC06_TEST_BUDGET_PPM,
         usize::try_from(OPERATIONAL.threshold_crosscheck_accounts).unwrap(),
         0,
     )
@@ -4959,7 +4965,7 @@ fn dec06_observe_counts_extra_wakeups_and_samples_without_budget() {
         "the sweep is not slowed"
     );
     f.owner.threshold.budget = crate::orchestration::threshold_mode::ObserveBudget::new(
-        OPERATIONAL.threshold_observe_budget_ppm,
+        DEC06_TEST_BUDGET_PPM,
         f.owner.clock.now_ns(),
     );
     let clock = chain_clock(&f.owner.st);
@@ -5012,7 +5018,7 @@ fn dec06_observe_defers_the_index_upkeep_without_budget() {
     assert!(f.owner.lifecycle());
     assert_eq!(f.owner.threshold_bootstrap.len(), 1, "still no budget");
     f.owner.threshold.budget = crate::orchestration::threshold_mode::ObserveBudget::new(
-        OPERATIONAL.threshold_observe_budget_ppm,
+        DEC06_TEST_BUDGET_PPM,
         f.owner.clock.now_ns(),
     );
     assert!(f.owner.lifecycle());

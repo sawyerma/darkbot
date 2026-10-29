@@ -1136,4 +1136,178 @@ mod report_e2e {
             let _ = std::fs::remove_dir_all(d);
         }
     }
+
+    /// H0-01/H0-06 over real saved runs: each run's selected verified result yields its canonical
+    /// liquidation once per window — the same event in a second run is a duplicate, an event
+    /// outside the window is not taken, a run without a verification contributes nothing (named)
+    /// — with its transaction's attributes; the output is the typed journal (every liquidation,
+    /// then the report) and its render, never overwritten.
+    #[test]
+    fn h0_extracts_the_verified_liquidations_of_the_window_across_runs() {
+        use crate::analytics::h0;
+        let a = canonical_run(line!(), true);
+        let b = canonical_run(line!() + 1_000, true);
+        let bare = a.d.join("run_bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        let runs = vec![
+            ("run-a".to_string(), a.run.clone()),
+            ("run-b".to_string(), b.run.clone()),
+            ("run-bare".to_string(), bare),
+        ];
+        let all = h0::Window { start_unix_s: 0, end_unix_s: i64::MAX };
+        let e = h0::extract(&runs, all, &Default::default()).unwrap();
+        assert_eq!(e.liquidations.len(), 1, "{:?}", e.runs);
+        assert_eq!(e.duplicates, 1, "the same event in the second run");
+        let x = &e.liquidations[0];
+        assert_eq!((x.run_id.as_str(), x.event.signature.as_str()), ("run-a", "liq-sig"));
+        assert_eq!(x.event.liquidation_type.as_str(), "RECEIVERSHIP");
+        let tx = x.tx.as_ref().expect("the run kept the decoded transaction");
+        assert_eq!((tx.version.as_deref(), tx.account_count), (Some("v0"), Some(7)), "{tx:?}");
+        // The fixture's signature `liq-sig` is no signature: the wire length is unknown, never
+        // guessed.
+        assert_eq!(tx.serialized_bytes, None);
+        assert_eq!(x.execution_class, "RECEIVERSHIP:NO_SWAP:BUNDLE_UNOBSERVABLE");
+        let status: Vec<(&str, &str, u64)> = e
+            .runs
+            .iter()
+            .map(|c| (c.run_id.as_str(), c.status.as_str(), c.events))
+            .collect();
+        assert_eq!(
+            status,
+            vec![
+                ("run-a", "CANONICAL_VERIFIED", 1),
+                ("run-b", "CANONICAL_VERIFIED", 1),
+                ("run-bare", "UNREADABLE", 0),
+            ]
+        );
+        // A window that ends before the event takes nothing.
+        let t = x.event.block_time.unwrap();
+        let before = h0::Window { start_unix_s: 0, end_unix_s: t };
+        assert!(h0::extract(&runs, before, &Default::default()).unwrap().liquidations.is_empty());
+        // The typed output and its render.
+        let r = h0::report(all, &e, 2, None, None);
+        let out = a.d.join("h0-out");
+        let path = h0::write(&out, &e, &r).unwrap();
+        let mut reader = journal::Reader::open(&path).unwrap();
+        let mut kinds = vec![];
+        let mut back = None;
+        while let Some(f) = reader.next_frame().unwrap() {
+            kinds.push(f.kind);
+            if f.kind == journal::kind::H0_REPORT {
+                back = Some(
+                    crate::analytics::payload::decode::<h0::H0Report>(f.kind, f.schema, &f.payload)
+                        .unwrap(),
+                );
+            }
+        }
+        assert_eq!(
+            kinds,
+            vec![journal::kind::H0_LIQUIDATION, journal::kind::H0_REPORT, journal::MANIFEST],
+            "sealed complete"
+        );
+        assert_eq!(back.as_ref(), Some(&r));
+        assert!(std::fs::read_to_string(out.join(h0::H0_RENDER))
+            .unwrap()
+            .contains("| run-a | CANONICAL_VERIFIED | 1 |"));
+        assert_eq!(h0::write(&out, &e, &r).unwrap_err(), "H0_OUTPUT_EXISTS");
+        std::fs::remove_dir_all(&a.d).unwrap();
+        std::fs::remove_dir_all(&b.d).unwrap();
+    }
+
+    /// H0 through the analytics job controller (the GUI's and `p0ctl job start h0`'s path): the
+    /// job reads every saved run of the project (no run of its own), records the report's
+    /// headline as its outcome and writes the typed output under `data/h0/<job>/`; a cancel ends
+    /// it CANCELLED; a run or a verification result is refused for H0.
+    #[test]
+    fn h0_jobs_read_every_saved_run_and_record_the_headline() {
+        use crate::analytics::{h0, jobs};
+        let a = canonical_run(line!(), true);
+        let b = canonical_run(line!() + 1_000, true);
+        let project = a.d.join("project");
+        let runs = project.join("data/runs");
+        std::fs::create_dir_all(&runs).unwrap();
+        std::fs::rename(&a.run, runs.join("run-a")).unwrap();
+        std::fs::rename(&b.run, runs.join("run-b")).unwrap();
+        let request = |id: &str, run: &str| jobs::JobRequest {
+            job_id: id.into(),
+            run: run.into(),
+            verification_result: None,
+            max_seconds: BACKTEST_BUDGET.max_seconds,
+            max_ram_bytes: BACKTEST_BUDGET.max_ram_bytes,
+            spec: jobs::JobSpec::H0 {
+                window_days: 30,
+                min_sample: None,
+                end_unix_s: (a.w_s + 30 * 86_400) as i64,
+            },
+            requested_unix_ms: Some(1),
+        };
+        assert_eq!(
+            jobs::submit(&project, &request("h0-x", "run-a")).err().as_deref(),
+            Some("H0_READS_ALL_RUNS: no --run or --verification-result")
+        );
+        jobs::submit(&project, &request("h0-1", "")).unwrap();
+        let (outcome, executed) = jobs::run(&project, "h0-1", None).unwrap();
+        assert_eq!((outcome.state.as_str(), outcome.code.as_str()), (jobs::COMPLETED, ""), "{outcome:?}");
+        match &outcome.result {
+            Some(jobs::JobResult::H0 {
+                result_id,
+                liquidations,
+                duplicates,
+                runs_verified,
+                winners,
+                sample_status,
+                ..
+            }) => {
+                assert_eq!(result_id, "h0-1");
+                assert_eq!((*liquidations, *duplicates, *runs_verified, *winners), (1, 1, 2, 1));
+                assert_eq!(sample_status, "MIN_SAMPLE_UNDECIDED");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(executed, Some(jobs::Executed::H0 { .. })));
+        let out = h0::output_dir(&project, "h0-1");
+        assert!(out.join(h0::H0_JOURNAL).is_file() && out.join(h0::H0_RENDER).is_file());
+        assert!(jobs::render(&jobs::status(&project, "h0-1").unwrap())
+            .contains("H0 COMPLETED run= liquidations=1 winners=1 bands=0 sample=MIN_SAMPLE_UNDECIDED"));
+        jobs::submit(&project, &request("h0-2", "")).unwrap();
+        let (cancelled, none) = jobs::run(&project, "h0-2", Some(|| true)).unwrap();
+        assert!(none.is_none());
+        assert_eq!(cancelled.state.as_str(), jobs::CANCELLED);
+        assert!(!h0::output_dir(&project, "h0-2").join(h0::H0_JOURNAL).exists());
+        // A configured minimum sample the 30-day window misses extends it to the registry's longer
+        // window (the event 40 days before the end is then taken).
+        let t = h0::extract(
+            &[("run-a".into(), runs.join("run-a"))],
+            h0::Window { start_unix_s: 0, end_unix_s: i64::MAX },
+            &Default::default(),
+        )
+        .unwrap()
+        .liquidations[0]
+        .event
+        .block_time
+        .unwrap();
+        let mut extended = request("h0-3", "");
+        extended.spec = jobs::JobSpec::H0 {
+            window_days: 30,
+            min_sample: Some(1),
+            end_unix_s: t + 40 * 86_400,
+        };
+        jobs::submit(&project, &extended).unwrap();
+        let (outcome, _) = jobs::run(&project, "h0-3", None).unwrap();
+        match &outcome.result {
+            Some(jobs::JobResult::H0 {
+                liquidations,
+                window_start_unix_s,
+                sample_status,
+                ..
+            }) => {
+                assert_eq!(*liquidations, 1, "{outcome:?}");
+                assert_eq!(*window_start_unix_s, t + 40 * 86_400 - 90 * 86_400);
+                assert_eq!(sample_status, "SUFFICIENT");
+            }
+            other => panic!("{other:?}"),
+        }
+        std::fs::remove_dir_all(&a.d).unwrap();
+        std::fs::remove_dir_all(&b.d).unwrap();
+    }
 }

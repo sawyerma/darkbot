@@ -227,6 +227,7 @@ fn live_capture(h: &History) -> BotEvidence {
 /// the capture's own live transaction the index lacks is BOT_ONLY — and nothing is promoted.
 #[test]
 fn dec08_index_pages_fetches_classifies_and_compares() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let server = h.clone();
     let (url, seen) = loopback(move |m, p| server.answer(m, p));
@@ -301,6 +302,7 @@ fn dec08_index_pages_fetches_classifies_and_compares() {
 /// worked); the next attempt replays the cached page without counting it and verifies.
 #[test]
 fn dec08_index_page_budget_is_resumable() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let server = h.clone();
     let (url, seen) = loopback(move |m, p| server.answer(m, p));
@@ -331,6 +333,7 @@ fn dec08_index_page_budget_is_resumable() {
 /// before any read, its result kept; the next attempt resumes and verifies.
 #[test]
 fn dec08_a_cancelled_index_attempt_is_resumable() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let server = h.clone();
     let (url, seen) = loopback(move |m, p| server.answer(m, p));
@@ -360,6 +363,7 @@ fn dec08_a_cancelled_index_attempt_is_resumable() {
 /// again by the next attempt (unresolved answers are not cached).
 #[test]
 fn dec08_index_pruned_transactions_stay_unresolved_until_resolved() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let pruned = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let (server, gate) = (h.clone(), pruned.clone());
@@ -402,6 +406,7 @@ fn dec08_index_pruned_transactions_stay_unresolved_until_resolved() {
 /// reason — every attempt still writes its typed result.
 #[test]
 fn dec08_index_incomplete_histories_fail_closed_with_their_reason() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let bot = live_capture(&h);
     let server = h.clone();
@@ -559,6 +564,7 @@ fn indexed(events: Vec<TruthEvent>) -> IndexedTx {
 /// exact only with the joined event's identity.
 #[test]
 fn dec08_compare_follows_the_pinned_matching_rules() {
+    let _budget = crate::market::history::shared_budget_tests();
     use LiquidationType::*;
     let tx = indexed(vec![
         truth_event(Classic, 0, "t0", "actor"),
@@ -693,6 +699,7 @@ fn dec08_compare_follows_the_pinned_matching_rules() {
 /// gap edge) or outside the proven live coverage.
 #[test]
 fn dec08_missed_events_are_attributed_by_the_live_coverage() {
+    let _budget = crate::market::history::shared_budget_tests();
     let s = |sec: i64| i128::from(sec) * NS;
     let mut cov = Coverage::default();
     cov.slot_boundary(s(BT - 50), 1);
@@ -793,6 +800,7 @@ fn write_frames<P: Payload>(w: &mut journal::Writer, source: u32, rows: &[P]) {
 /// and the ECON_OPPORTUNITY rows (Shadow without identity, replacing a join of the same key).
 #[test]
 fn dec08_the_capture_side_is_imported_from_the_typed_run() {
+    let _budget = crate::market::history::shared_budget_tests();
     use super::super::rows::{
         MarketCoverage, MarketLiquidation, MarketTransaction, ReceiverRow, TxOrigin, WindowEvent,
     };
@@ -1050,6 +1058,7 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
 /// layout change: bump `SCHEMA` and renew the pin — never silently.
 #[test]
 fn index_result_layout_is_pinned() {
+    let _budget = crate::market::history::shared_budget_tests();
     let mut counts = BTreeMap::new();
     counts.insert("MATCH".to_string(), 2);
     let r = IndexResult {
@@ -1153,6 +1162,7 @@ fn index_result_layout_is_pinned() {
 /// from it and verifies the window; the spec is the `index` mode's, nothing is canonical.
 #[test]
 fn dec08_the_driver_runs_and_resumes_the_index() {
+    let _budget = crate::market::history::shared_budget_tests();
     use super::super::strict_driver::{self, DriverRequest, StrictBudget, VerifyMode};
     let (d, root, f, live, start_s, end_s) = driver_run(line!());
     let budget = StrictBudget {
@@ -1481,6 +1491,7 @@ fn crosscheck_jobs(tag: &str) -> (Job, Job, std::path::PathBuf) {
 /// transaction of the window read identically — and nothing is promoted to canonical.
 #[test]
 fn dec08_crosscheck_verifies_two_agreeing_sources() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let (one, two) = (h.clone(), h.clone());
     let (url_a, seen_a) = loopback(move |m, p| one.answer(m, p));
@@ -1525,6 +1536,7 @@ fn dec08_crosscheck_verifies_two_agreeing_sources() {
 /// with every disagreement named, even when both indexes are complete on their own.
 #[test]
 fn dec08_crosscheck_names_every_disagreement() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let one = h.clone();
     let (url_a, _) = loopback(move |m, p| one.answer(m, p));
@@ -1623,6 +1635,7 @@ fn dec08_crosscheck_names_every_disagreement() {
 /// CROSSCHECK_VERIFIED — never canonical.
 #[test]
 fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
+    let _budget = crate::market::history::shared_budget_tests();
     use super::super::strict_driver;
     let (d, root, f, live, start_s, end_s) = driver_run(line!());
     let args = |resume: bool| -> Vec<String> {
@@ -1721,6 +1734,7 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
 /// empty offline one; the run's view shows that spec verified. Without resume it is refused.
 #[test]
 fn dec08_an_offline_read_continues_the_online_checkpoint() {
+    let _budget = crate::market::history::shared_budget_tests();
     use super::super::strict_driver::{self, DriverRequest, StrictBudget, VerifyMode};
     let (d, root, f, live, start_s, end_s) = driver_run(line!());
     let budget = StrictBudget {
@@ -1828,6 +1842,7 @@ fn dec08_an_offline_read_continues_the_online_checkpoint() {
 /// checkpoint; offline it stays as checkpointed.
 #[test]
 fn dec08_a_head_before_the_end_is_read_again_online() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let caught_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (server, flag) = (h.clone(), caught_up.clone());
@@ -1870,6 +1885,7 @@ fn dec08_a_head_before_the_end_is_read_again_online() {
 /// page mixing rows of the window and before the start is followed by the next page.
 #[test]
 fn dec08_a_page_crosses_the_start_only_with_every_row_before_it() {
+    let _budget = crate::market::history::shared_budget_tests();
     let h = Arc::new(History::new());
     let server = h.clone();
     let (url, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {

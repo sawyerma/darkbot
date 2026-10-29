@@ -297,9 +297,9 @@ message RunQualification {
 message AnalyticsJob {
   // The job id (the command's request id when started from the GUI).
   string job_id = 1;
-  // BACKTEST or OPTIMIZE.
+  // BACKTEST, OPTIMIZE, POST_CAPTURE or H0.
   string kind = 2;
-  // The run as requested (an id under the run roots).
+  // The run as requested (an id under the run roots); empty for H0 (every saved run).
   string run = 3;
   // QUEUED, RUNNING, INTERRUPTED (the worker is gone without an outcome), COMPLETED, FAILED or CANCELLED.
   string state = 4;
@@ -329,9 +329,51 @@ message AnalyticsJob {
     OptimizeResult optimize = 15;
     // A completed post-capture chain.
     PostCaptureResult post_capture = 17;
+    // A completed H0 report.
+    H0Result h0 = 18;
   }
   // Post-capture only: the verification request.
   PostCaptureSpec post_capture_spec = 16;
+  // H0 only: the report's window request.
+  H0Spec h0_spec = 19;
+}
+
+// H0 (Track H0): the window of a historical liquidation report over every saved run.
+message H0Spec {
+  // Days before the window's end (the registry's h0_window_days unless given).
+  uint64 window_days = 1;
+  // The operator's minimum sample for the longer window; unset: undecided (no extension).
+  optional uint64 min_sample = 2;
+  // The window's end (block time, unix s), fixed at the request.
+  int64 end_unix_s = 3;
+}
+
+// A completed H0 report's headline (the full report is the job's typed H0 journal and render).
+message H0Result {
+  // The result id (the job id; its output is data/h0/<id>/).
+  string result_id = 1;
+  // The window's start as reported (earlier when the minimum sample extended it).
+  int64 window_start_unix_s = 2;
+  // The window's end (block time, unix s).
+  int64 window_end_unix_s = 3;
+  // Verified liquidations of the window, each once.
+  uint64 liquidations = 4;
+  // The same events seen again in another run.
+  uint64 duplicates = 5;
+  // Runs with a verified result.
+  uint64 runs_verified = 6;
+  // Runs without a verified result or unreadable.
+  uint64 runs_without_result = 7;
+  // Distinct winners.
+  uint64 winners = 8;
+  // The top winner's share (bps); unset without liquidations.
+  optional uint64 top_winner_share_bps = 9;
+  // Recurring winners with an implied minimum-profit band (an upper bound, never a config).
+  uint64 bands = 10;
+  // SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED.
+  string sample_status = 11;
+  // The tag timeline's state (BLOCKED until 0.1.12, H0-04).
+  string tags = 12;
 }
 
 // The verification request of a post-capture job (A08/F-02).
@@ -496,6 +538,17 @@ message BacktestJobCommand {
   uint64 max_ram_bytes = 6;
   // A verification result id to read instead of the run's canonical one; empty: canonical.
   string verification_result = 7;
+}
+
+// Parameters (CommandRequest.params) of project0.analytics.h0.start: the options of
+// `p0ctl job start h0` (every saved run; the operator's minimum sample is a terminal option).
+message H0JobCommand {
+  // Days of the window; 0: the registry's h0_window_days.
+  uint64 window_days = 1;
+  // The job's explicit time budget.
+  uint64 max_seconds = 2;
+  // The job's explicit memory budget.
+  uint64 max_ram_bytes = 3;
 }
 
 // Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of

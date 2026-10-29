@@ -3,11 +3,11 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
 import {
   AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootStartCommandSchema,
-  OptimizeJobCommandSchema, PostCaptureJobCommandSchema,
+  H0JobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema,
 } from "../generated/darkbot/project0/v1/analytics_pb";
 import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 import {
-  analyticsCommand, autostartGrantCommand, autostartPreviewCommand, backtestCommand, bootNetworkCommand, bootStartCommand, optimizeCommand, recheck,
+  analyticsCommand, autostartGrantCommand, autostartPreviewCommand, backtestCommand, bootNetworkCommand, bootStartCommand, h0Command, optimizeCommand, recheck,
   sourceCommand, untilStoppedDuration, useAnalyticsControl, verifyCommand, type PointInput,
 } from "./analyticsControl";
 
@@ -32,6 +32,16 @@ describe("Analytics job commands", () => {
     const g = fromBinary(OptimizeJobCommandSchema, o.params);
     expect([g.baseline?.runId, g.minProfitUsdGrid, g.fundingSets.map((s) => s.classes), g.holdoutBps, g.maxPoints, g.saveProfile])
       .toEqual(["run-a", ["1.5", "2"], [[], ["NO_SWAP_INVENTORY"]], 3000n, 4n, true]);
+  });
+
+  it("H0: types the registry's window and the operator's budget, never a hidden one", () => {
+    const ok = h0Command({ maxSeconds: "60", maxRamMib: "64" });
+    if (!("params" in ok)) throw new Error(ok.problem);
+    const c = fromBinary(H0JobCommandSchema, ok.params);
+    expect([c.windowDays, c.maxSeconds, c.maxRamBytes]).toEqual([0n, 60n, 64n * 1_048_576n]);
+    for (const bad of [{ maxSeconds: "" }, { maxRamMib: "0" }, { maxSeconds: "x" }]) {
+      expect("problem" in h0Command({ maxSeconds: "60", maxRamMib: "64", ...bad })).toBe(true);
+    }
   });
 
   it("types a verification off or strict from the cache, with an explicit budget", () => {

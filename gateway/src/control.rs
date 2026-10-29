@@ -116,6 +116,8 @@ fn per_day_ok(s: &str) -> bool {
 const BACKTEST_START: &str = "project0.analytics.backtest.start";
 const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
 const JOB_CANCEL: &str = "project0.analytics.job.cancel";
+/// H0 (Track H0): the historical liquidation report over every saved run (`p0ctl job start h0`).
+const H0_START: &str = "project0.analytics.h0.start";
 /// A08/F-02: the post-capture chain (verification, report, qualification) of a recorded run.
 const VERIFY_START: &str = "project0.capture.verify.start";
 /// S1-02: a data source's operating mode (`p0ctl source set`); the running owner decides.
@@ -136,10 +138,11 @@ const AUTOSTART_PREVIEW: &str = "project0.autostart.preview";
 const AUTOSTART_GRANT: &str = "project0.autostart.grant";
 const AUTOSTART_REVOKE: &str = "project0.autostart.revoke";
 const AUTOSTART_ACTIONS: [&str; 3] = [AUTOSTART_PREVIEW, AUTOSTART_GRANT, AUTOSTART_REVOKE];
-const JOB_ACTIONS: [&str; 13] = [
+const JOB_ACTIONS: [&str; 14] = [
     BACKTEST_START,
     OPTIMIZE_START,
     JOB_CANCEL,
+    H0_START,
     VERIFY_START,
     SOURCE_SET,
     CAPABILITY_SET,
@@ -410,8 +413,8 @@ fn capture_source_ok(s: &str) -> bool {
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
         AutostartGrantCommand, AutostartPreviewCommand, BacktestJobCommand, BootNetworkCommand,
-        BootOfflineCommand, BootStartCommand, CapabilityControlCommand, OptimizeJobCommand,
-        PostCaptureJobCommand, SourceControlCommand,
+        BootOfflineCommand, BootStartCommand, CapabilityControlCommand, H0JobCommand,
+        OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
@@ -435,6 +438,23 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             let c = BacktestJobCommand::decode(req.params.as_ref()).ok()?;
             let mut args = start("backtest");
             args.extend(point_args(&c)?);
+            Some(args)
+        }
+        H0_START if req.resource_id.is_empty() => {
+            let c = H0JobCommand::decode(req.params.as_ref()).ok()?;
+            if c.max_seconds == 0 || c.max_ram_bytes == 0 {
+                return None;
+            }
+            let mut args = start("h0");
+            if c.window_days > 0 {
+                args.extend(["--window-days".into(), c.window_days.to_string()]);
+            }
+            args.extend([
+                "--max-seconds".into(),
+                c.max_seconds.to_string(),
+                "--max-ram-bytes".into(),
+                c.max_ram_bytes.to_string(),
+            ]);
             Some(args)
         }
         OPTIMIZE_START if req.resource_id.is_empty() => {
@@ -4013,6 +4033,33 @@ mod tests {
         assert!(argv().ends_with(
             "--min-profit-usd-grid\n1.5,2\n--funding-sets\nall;NO_SWAP_INVENTORY,PREHELD_INVENTORY\n--holdout-bps\n3000\n--max-points\n4\n--save-profile\n"
         ));
+        // H0: every saved run; the window days only when given, the budget always.
+        use crate::proto::project0::v1::H0JobCommand;
+        let h0 = |window_days, max_seconds| H0JobCommand {
+            window_days,
+            max_seconds,
+            max_ram_bytes: 1_048_576,
+        };
+        let h0_request = |id: char, resource: &str, c: H0JobCommand| CommandRequest {
+            request_id: format!("{id}2345678-1234-1234-1234-123456789abc"),
+            ..request(1, H0_START, resource, c.encode_to_vec())
+        };
+        let r = control.execute(&h0_request('c', "", h0(90, 60))).await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert_eq!(
+            argv(),
+            "p0\njob\nstart\nh0\n--id\nc2345678-1234-1234-1234-123456789abc\n--window-days\n90\n--max-seconds\n60\n--max-ram-bytes\n1048576\n"
+        );
+        let r = control.execute(&h0_request('d', "", h0(0, 60))).await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert!(!argv().contains("--window-days"), "the registry's window");
+        for refused in [
+            h0_request('e', "", h0(30, 0)),
+            h0_request('f', "run-a", h0(30, 60)),
+        ] {
+            let r = control.execute(&refused).await;
+            assert_eq!(r.status, CommandStatus::Rejected as i32, "{}", r.detail);
+        }
         let cancel = request(
             3,
             JOB_CANCEL,

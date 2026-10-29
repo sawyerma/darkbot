@@ -1463,8 +1463,9 @@ struct HandoffSubmitter {
     submits: Arc<AtomicU64>,
     sims: Arc<AtomicU64>,
     transport_fails: bool,
-    /// V2-15: how long the simulation takes.
+    /// V2-15: how long the first simulation takes, and every later one.
     simulate_delay: Duration,
+    simulate_delay_again: Duration,
     /// DEC-02: the slot the first simulation reports (`live_evaluate` evaluates at slot 10),
     /// and every later one.
     context_slot: Option<u64>,
@@ -1487,8 +1488,12 @@ impl SubmissionAdapter for HandoffSubmitter {
     }
     fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
         assert!(tx.verify_and_hash_message().is_ok());
-        std::thread::sleep(self.simulate_delay);
         let earlier = self.sims.fetch_add(1, Ordering::Relaxed);
+        std::thread::sleep(if earlier == 0 {
+            self.simulate_delay
+        } else {
+            self.simulate_delay_again
+        });
         SimResult::Ok {
             units_consumed: Some(100),
             context_slot: if earlier == 0 {
@@ -1757,6 +1762,7 @@ fn v2_15_a_state_aged_during_the_simulation_is_never_handed_off() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::from_millis(120),
+        simulate_delay_again: Duration::from_millis(120),
         context_slot: Some(10),
         context_slot_again: Some(10),
     };
@@ -1809,6 +1815,7 @@ fn dec04_live_admission_keeps_the_holds_and_active_reserves_b() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::ZERO,
         context_slot: Some(10),
         context_slot_again: Some(10),
     };
@@ -1916,6 +1923,7 @@ fn b4_admission_binds_a_nonzero_record_rent() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::ZERO,
         context_slot: Some(10),
         context_slot_again: Some(10),
     };
@@ -1994,6 +2002,7 @@ fn v9_safety_denials_are_their_own_cause() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::ZERO,
         context_slot: Some(10),
         context_slot_again: Some(10),
     };
@@ -2076,6 +2085,7 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails,
         simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::ZERO,
         context_slot: Some(10),
         context_slot_again: Some(10),
     };
@@ -4661,11 +4671,14 @@ fn dec12_the_fe04_handoff_is_bounded_by_the_candidate_deadline() {
         submits: Arc::new(AtomicU64::new(0)),
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
-        simulate_delay: Duration::from_millis(100),
+        // The pipeline's simulation at once, the handoff's again past the deadline (a throttled
+        // runner still ends the pipeline before the deadline: CI flake at `162f5953`).
+        simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::from_millis(1_000),
         context_slot: Some(5),
         context_slot_again: Some(10),
     };
-    for (deadline_ns, sent) in [(150_000_000u64, false), (60_000_000_000, true)] {
+    for (deadline_ns, sent) in [(500_000_000u64, false), (60_000_000_000, true)] {
         let dir = std::env::temp_dir().join(format!("p0-dec12-{}", Pubkey::new_unique()));
         std::fs::create_dir_all(&dir).unwrap();
         let before = slow.submits.load(Ordering::Relaxed);
@@ -4809,6 +4822,7 @@ fn dec02_the_handoff_reuses_the_bound_simulation_or_simulates_again_or_refuses()
             sims: Arc::new(AtomicU64::new(0)),
             transport_fails: false,
             simulate_delay: Duration::from_millis(delay_ms),
+            simulate_delay_again: Duration::from_millis(delay_ms),
             context_slot,
             context_slot_again,
         };
@@ -4874,6 +4888,7 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        simulate_delay_again: Duration::ZERO,
         context_slot: Some(10),
         context_slot_again: Some(10),
     };

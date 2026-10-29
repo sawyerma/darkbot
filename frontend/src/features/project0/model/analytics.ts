@@ -127,7 +127,10 @@ export interface CounterfactualView {
 export type JobResultView =
   | { kind: "BACKTEST"; resultId: string; liquidations: bigint; rows: bigint; attempts: bigint; counterfactual: CounterfactualView | null; realized: string }
   | { kind: "OPTIMIZE"; resultId: string; points: bigint; chosen: JobParamsView | null; chosenObjectiveBps: string | null; baselineObjectiveBps: string | null; profile: string }
-  | { kind: "POST_CAPTURE"; verificationOk: boolean; reportOk: boolean; verdict: string | null };
+  | { kind: "POST_CAPTURE"; verificationOk: boolean; reportOk: boolean; verdict: string | null }
+  | { kind: "H0"; resultId: string; windowStartUnixS: bigint; windowEndUnixS: bigint; liquidations: bigint; duplicates: bigint;
+      runsVerified: bigint; runsWithoutResult: bigint; winners: bigint; topWinnerShareBps: bigint | null; bands: bigint;
+      sampleStatus: string; tags: string };
 
 export interface AnalyticsJobView {
   jobId: string;
@@ -343,4 +346,14 @@ export function jobCommandBlock(view: AnalyticsView | null, topicStatus: string,
 /** Runs a backtest or optimization can read: native layout V2 with a recorded capture end. */
 export function jobReadableRuns(view: AnalyticsView | null): readonly AnalyticsRunView[] {
   return (view?.runs ?? []).filter((r) => r.layout === "NATIVE_V2" && r.captureComplete && !r.running);
+}
+
+/** H0: one line of a report's headline — the window, the verified liquidations (each once), the
+ *  runs, the winners and the inferred bands (upper bounds, never a competitor's configuration). */
+export function h0Line(r: Extract<JobResultView, { kind: "H0" }>): string {
+  const day = (s: bigint) => new Date(Number(s) * 1000).toISOString().slice(0, 10);
+  const share = r.topWinnerShareBps == null ? "—" : `${r.topWinnerShareBps / 100n}.${(r.topWinnerShareBps % 100n).toString().padStart(2, "0")} %`;
+  return `${day(r.windowStartUnixS)} … ${day(r.windowEndUnixS)} · ${r.liquidations} liquidations (${r.duplicates} seen again)`
+    + ` · runs ${r.runsVerified} verified / ${r.runsWithoutResult} without · ${r.winners} winners · top ${share}`
+    + ` · ${r.bands} min-profit bands (upper bounds) · ${r.sampleStatus} · tags ${r.tags}`;
 }

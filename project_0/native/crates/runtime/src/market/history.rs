@@ -121,6 +121,15 @@ impl SignaturePager {
     }
 }
 
+/// Tests reading through the process's one provider budget (`provider::shared()`, History at
+/// its default 2 requests/s for the whole test binary) hold this lock, so their reads never queue
+/// behind each other past the read timeout (flake `RPC_ADMISSION_BUDGET` of a crosscheck source).
+#[cfg(test)]
+pub(crate) fn shared_budget_tests() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

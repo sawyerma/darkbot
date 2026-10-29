@@ -2,11 +2,7 @@ import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
-import {
-  AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema,
-  BootStartCommandSchema, OptimizeJobCommandSchema,
-  PostCaptureJobCommandSchema,
-} from "../generated/darkbot/project0/v1/analytics_pb";
+import { AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, H0JobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 
 /**
@@ -15,7 +11,7 @@ import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../g
  * the job and started its worker; the job's progress and end are its state in
  * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
  */
-export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
+export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.h0.start" | "project0.analytics.job.cancel"
   | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set"
   | "project0.boot.offline" | "project0.boot.network" | "project0.boot.start" | "project0.boot.cancel"
   | "project0.autostart.preview" | "project0.autostart.grant" | "project0.autostart.revoke";
@@ -64,6 +60,15 @@ export function backtestCommand(p: PointInput): { params: Uint8Array } | { probl
       maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
     })),
   };
+}
+
+/** H0: the typed request over every saved run — the registry's window and the operator's budget
+ *  (no hidden default); the minimum sample stays a terminal option (the user's decision). */
+export function h0Command(p: Pick<PointInput, "maxSeconds" | "maxRamMib">): { params: Uint8Array } | { problem: string } {
+  const seconds = positive(p.maxSeconds);
+  const mib = positive(p.maxRamMib);
+  if (seconds === null || mib === null) return { problem: "Budget: positive seconds and MiB are required (no hidden default)." };
+  return { params: toBinary(H0JobCommandSchema, message(H0JobCommandSchema, { windowDays: 0n, maxSeconds: seconds, maxRamBytes: mib * 1_048_576n })) };
 }
 
 export function optimizeCommand(p: PointInput, g: GridInput): { params: Uint8Array } | { problem: string } {

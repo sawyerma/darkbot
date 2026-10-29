@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorDraft, Project0Tab } from "../model/contracts";
-import { countOf, countSum, jobCommandBlock, jobReadableRuns, sideBySide, type AnalyticsJobView, type AnalyticsRunView, type AnalyticsView, type JobResultView } from "../model/analytics";
+import { countOf, countSum, h0Line, jobCommandBlock, jobReadableRuns, sideBySide, type AnalyticsJobView, type AnalyticsRunView, type AnalyticsView, type JobResultView } from "../model/analytics";
 import { REPORT_MARKERS } from "../model/contracts";
 import { usdMicroDisplay } from "../model/format";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
-import { analyticsCommand, backtestCommand, optimizeCommand, recheck, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
+import { analyticsCommand, backtestCommand, h0Command, optimizeCommand, recheck, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
 
 type AnalTab = "report" | "backtest" | "optimize";
 const tabs: ReadonlyArray<{ value: AnalTab; label: string }> = [
@@ -19,6 +19,7 @@ function resultLine(r: JobResultView | null, mode?: string): string {
     const nets = c?.scenarios.map(s => `${usdMicroDisplay(s.capitalUsdMicro.toString())} → ${usdMicroDisplay(s.netUsdMicro)}`).join(", ") ?? "—";
     return ` · ${r.liquidations} liquidations · ${c?.matched ?? "—"} matched · ${c?.wins ?? "—"} wins · Shadow net ${nets} · landing ${c?.landing ?? "—"}`;
   }
+  if (r.kind === "H0") return ` · ${h0Line(r)}`;
   // The mode's own verified status (never canonical unless strict); the master verdict is separate.
   if (r.kind === "POST_CAPTURE") return ` · verification ${mode ?? "—"} ${r.verificationOk ? "ok" : "incomplete"} · report ${r.reportOk ? "ok" : "incomplete"} · ${r.verdict ?? "qualification NOT_RUN"}`;
   const chosen = r.chosen ? `min profit ${usdMicroDisplay(r.chosen.minProfitUsdMicro)} · funding ${r.chosen.funding.length ? r.chosen.funding.join(",") : "all"}` : "no point chosen (NO_SAMPLE)";
@@ -82,6 +83,8 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
   const jobs = analytics?.jobs ?? [];
   const latest = jobs.find(j => j.run === run?.runId && j.kind === "BACKTEST" && j.state === "COMPLETED") ?? null;
   const backtest = latest?.result?.kind === "BACKTEST" ? latest.result : null;
+  const h0Job = jobs.find(j => j.kind === "H0" && j.state === "COMPLETED") ?? null;
+  const h0 = h0Job?.result?.kind === "H0" ? h0Job.result : null;
   const live = topicStatus === "LIVE";
   const input: PointInput = { ...point, runId: run?.runId ?? "" };
   const blocked = jobCommandBlock(analytics, topicStatus, busy);
@@ -108,7 +111,19 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
       <DetailRow title="Counterfactual Shadow wins / matched" value={backtest?.counterfactual ? `${backtest.counterfactual.wins} / ${backtest.counterfactual.matched}` : "—"}/>
       {backtest?.counterfactual?.scenarios.map(s => <DetailRow key={s.capitalUsdMicro.toString()} title={`Shadow net · capital ${usdMicroDisplay(s.capitalUsdMicro.toString())}`} value={usdMicroDisplay(s.netUsdMicro)}/>)}
       <DetailRow title="Realized net PnL" value={backtest ? backtest.realized : "—"}/>
-      <p className="p0-note">From the newest completed backtest of the run; counterfactual Shadow results (landing UNPROVEN) are never realized profit.</p></> : null}
+      <p className="p0-note">From the newest completed backtest of the run; counterfactual Shadow results (landing UNPROVEN) are never realized profit.</p>
+      <DetailRow title="H0 · historical liquidations (every saved run)" value={h0 ? h0Line(h0) : "no completed H0 report"}/>
+      <div className="p0-formgrid">
+        <label>H0 budget · seconds<input value={point.maxSeconds} placeholder="required" onChange={e => setPoint({ ...point, maxSeconds: e.target.value })}/></label>
+        <label>H0 budget · RAM MiB<input value={point.maxRamMib} placeholder="required" onChange={e => setPoint({ ...point, maxRamMib: e.target.value })}/></label>
+      </div>
+      <button className="p0-primary" disabled={blocked !== ""} title={blocked || undefined} onClick={() => {
+        const typed = h0Command(point);
+        if ("problem" in typed) { setMsg(typed.problem); return; }
+        setMsg("");
+        void analyticsCommand("project0.analytics.h0.start", { params: typed.params });
+      }}>Run H0 report</button>
+      <p className="p0-note">H0 reads the verified liquidations of every saved run in the registry's window (the same job as p0ctl job start h0); a band is an inferred upper bound, never a competitor's configuration.</p></> : null}
     {tab === "backtest" ? <><p>Replay the run's sealed evidence through the production join (native job, offline; the same action as p0ctl job start backtest).</p>
       <PointFields point={input} set={({ runId: _, ...rest }) => setPoint(rest)}/>
       <button className="p0-primary" disabled={blocked !== "" || !run} title={blocked || undefined} onClick={() => start("backtest")}>Run backtest</button></> : null}

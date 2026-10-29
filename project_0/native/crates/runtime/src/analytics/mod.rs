@@ -4,6 +4,7 @@ pub mod backtest;
 pub mod econ;
 #[cfg(test)]
 pub mod golden;
+pub mod h0;
 pub mod jobs;
 pub mod market_report;
 pub mod measurement;

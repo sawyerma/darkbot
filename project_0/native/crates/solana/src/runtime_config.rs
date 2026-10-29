@@ -232,6 +232,11 @@ parameters! {
     crosscheck_rps = 2, "requests/s", "P0_CROSSCHECK_RPS";
     crosscheck_calls = 2000, "requests", "P0_CROSSCHECK_CALLS";
     crosscheck_mib = 256, "MiB", "P0_CROSSCHECK_MIB";
+    // H0 (Track H0): the historical liquidation window (30 days, 90 for a small sample) and the
+    // wins that make a recurring winner (revision 16).
+    h0_window_days = 30, "days", "P0_H0_WINDOW_DAYS";
+    h0_extended_window_days = 90, "days", "P0_H0_EXTENDED_WINDOW_DAYS";
+    h0_recurring_min_wins = 2, "wins", "P0_H0_RECURRING_MIN_WINS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -248,8 +253,9 @@ parameters! {
 /// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]); 12:
 /// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07); 14:
 /// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06); 15: `index_rps` …
-/// `crosscheck_mib` (DEC-08, the verifiers' budgets per method).
-pub const LIMITS_REVISION: u16 = 15;
+/// `crosscheck_mib` (DEC-08, the verifiers' budgets per method); 16: `h0_window_days`,
+/// `h0_extended_window_days`, `h0_recurring_min_wins` (H0).
+pub const LIMITS_REVISION: u16 = 16;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -270,6 +276,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("h0_window_days") => 16,
         f if position(f) >= position("index_rps") => 15,
         f if position(f) >= position("threshold_observe_budget_ppm") => 14,
         f if position(f) >= position("boot_token_ttl_seconds") => 13,
@@ -2114,9 +2121,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                15,
-                150,
-                "ZYNEy846aL8rFKigE6G1ftg8pX15hqT6JGYkTrMZN72".to_string()
+                16,
+                153,
+                "5qqvfGUQa6BufXLgymdNrud3qDC5gmxg4sUEeKkC2gbD".to_string()
             )
         );
     }

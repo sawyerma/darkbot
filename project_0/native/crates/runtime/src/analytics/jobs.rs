@@ -64,6 +64,15 @@ pub enum JobSpec {
         /// The operator's provider evidence for an online strict verification (terminal only).
         provider_evidence: Option<String>,
     },
+    /// H0 (Track H0): the historical liquidation report over every saved run of the project —
+    /// the window of `window_days` before `end_unix_s` (fixed at the request), extended to the
+    /// registry's longer window when `min_sample` (the operator's, `None`: undecided) is not
+    /// reached. The job's run is empty (it reads the project's runs).
+    H0 {
+        window_days: u64,
+        min_sample: Option<u64>,
+        end_unix_s: i64,
+    },
 }
 
 impl JobSpec {
@@ -72,6 +81,7 @@ impl JobSpec {
             Self::Backtest { .. } => "BACKTEST",
             Self::Optimize { .. } => "OPTIMIZE",
             Self::PostCapture { .. } => "POST_CAPTURE",
+            Self::H0 { .. } => "H0",
         }
     }
 }
@@ -119,6 +129,21 @@ pub enum JobResult {
         report_ok: bool,
         /// The master verdict; `None`: the qualification could not run.
         verdict: Option<String>,
+    },
+    /// The H0 report's headline (the full report is `data/h0/<job>/h0.p0j` and its render).
+    H0 {
+        result_id: String,
+        window_start_unix_s: i64,
+        window_end_unix_s: i64,
+        liquidations: u64,
+        duplicates: u64,
+        runs_verified: u64,
+        runs_without_result: u64,
+        winners: u64,
+        top_winner_share_bps: Option<u64>,
+        bands: u64,
+        sample_status: String,
+        tags: String,
     },
 }
 
@@ -341,11 +366,21 @@ fn validate(project: &Path, r: &JobRequest) -> Result<PathBuf, String> {
     if !valid_id(&r.job_id) {
         return Err("JOB_ID_INVALID".into());
     }
-    let run = find_run(project, &r.run).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
-    native_layout(&run)?;
     if r.max_seconds == 0 || r.max_ram_bytes == 0 {
         return Err("BACKTEST_BUDGET_INVALID".into());
     }
+    // H0 reads every saved run of the project, never one run.
+    if let JobSpec::H0 { window_days, .. } = &r.spec {
+        if !r.run.is_empty() || r.verification_result.is_some() {
+            return Err("H0_READS_ALL_RUNS: no --run or --verification-result".into());
+        }
+        if *window_days == 0 {
+            return Err("H0_WINDOW_INVALID: 0 days".into());
+        }
+        return Ok(project.to_path_buf());
+    }
+    let run = find_run(project, &r.run).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    native_layout(&run)?;
     match &r.spec {
         JobSpec::Backtest { params } => params.validate()?,
         JobSpec::Optimize {
@@ -381,6 +416,7 @@ fn validate(project: &Path, r: &JobRequest) -> Result<PathBuf, String> {
                 return Err("STRICT_PROVIDER_EVIDENCE_REQUIRED: an online chain verification needs the operator's --provider-evidence (else --offline)".into());
             }
         }
+        JobSpec::H0 { .. } => {}
     }
     Ok(run)
 }
@@ -485,6 +521,11 @@ pub enum Executed {
         path: PathBuf,
         profile: Option<PathBuf>,
     },
+    /// The H0 report and its journal.
+    H0 {
+        job_id: String,
+        report: Box<super::h0::H0Report>,
+    },
 }
 
 impl Executed {
@@ -516,6 +557,30 @@ impl Executed {
                 verification_ok: o.verification_ok,
                 report_ok: o.report_ok,
                 verdict: o.verdict.clone(),
+            },
+            Self::H0 { job_id, report: r } => JobResult::H0 {
+                result_id: job_id.clone(),
+                window_start_unix_s: r.window.start_unix_s,
+                window_end_unix_s: r.window.end_unix_s,
+                liquidations: r.liquidations,
+                duplicates: r.duplicates,
+                runs_verified: r
+                    .runs
+                    .iter()
+                    .filter(|c| {
+                        c.status == "CANONICAL_VERIFIED" || c.status == "HISTORICAL_INCOMPLETE"
+                    })
+                    .count() as u64,
+                runs_without_result: r
+                    .runs
+                    .iter()
+                    .filter(|c| c.status == "NO_VERIFIED_RESULT" || c.status == "UNREADABLE")
+                    .count() as u64,
+                winners: r.winners.len() as u64,
+                top_winner_share_bps: r.top_winner_share_bps,
+                bands: r.bands.len() as u64,
+                sample_status: r.sample_status.clone(),
+                tags: r.tags.clone(),
             },
         }
     }
@@ -596,6 +661,31 @@ fn execute(
             }
             super::post_capture::post_capture_with(&run, chain_verify, &args, cancelled)
                 .map(Executed::PostCapture)
+        }
+        JobSpec::H0 {
+            window_days,
+            min_sample,
+            end_unix_s,
+        } => {
+            let deadline = std::time::Instant::now()
+                .checked_add(std::time::Duration::from_secs(r.max_seconds))
+                .ok_or("BACKTEST_BUDGET_INVALID")?;
+            let stop = h0_stop(cancelled, deadline);
+            let limits = &darkbot_solana::runtime_config::active().limits;
+            super::h0::run_job(
+                &run,
+                &r.job_id,
+                *end_unix_s,
+                *window_days,
+                *min_sample,
+                limits,
+                &|k| std::env::var(k).ok(),
+                &stop,
+            )
+            .map(|(report, _)| Executed::H0 {
+                job_id: r.job_id.clone(),
+                report: Box::new(report),
+            })
         }
     }
 }
@@ -685,6 +775,22 @@ pub fn run(
     Ok((outcome, executed))
 }
 
+/// The H0 job's stop between runs: a cancel, then its time budget.
+fn h0_stop(
+    cancelled: Option<fn() -> bool>,
+    deadline: std::time::Instant,
+) -> impl Fn() -> Result<(), String> {
+    move || {
+        if cancelled.is_some_and(|c| c()) {
+            return Err(backtest::CANCELLED.into());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("H0_TIME_BUDGET_EXHAUSTED".into());
+        }
+        Ok(())
+    }
+}
+
 /// A new job id: 32 hex digits.
 pub fn new_id() -> Result<String, String> {
     journal::random16().map(|b| journal::hex(&b)).map_err(io)
@@ -702,10 +808,39 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
             },
         }
     };
+    let budget = backtest::parse_budget(args)?;
+    let number = |name: &str| -> Result<Option<u64>, String> {
+        flag(name)?
+            .map(|v| v.parse::<u64>().map_err(|_| format!("{name}: a number")))
+            .transpose()
+    };
+    // H0 reads every saved run of the project: no run, its window fixed now.
+    if kind == "h0" {
+        if flag("--run")?.is_some() {
+            return Err("H0_READS_ALL_RUNS: no --run".into());
+        }
+        let limits = &darkbot_solana::runtime_config::active().limits;
+        let now = crate::status_tap::unix_ms_now().ok_or("CLOCK_UNAVAILABLE")? / 1_000;
+        return Ok(JobRequest {
+            job_id: match flag("--id")? {
+                Some(id) => id,
+                None => new_id()?,
+            },
+            run: String::new(),
+            verification_result: None,
+            max_seconds: budget.max_seconds,
+            max_ram_bytes: budget.max_ram_bytes,
+            spec: JobSpec::H0 {
+                window_days: number("--window-days")?.unwrap_or(limits.h0_window_days),
+                min_sample: number("--min-sample")?,
+                end_unix_s: i64::try_from(now).map_err(|_| "CLOCK_UNAVAILABLE")?,
+            },
+            requested_unix_ms: crate::status_tap::unix_ms_now(),
+        });
+    }
     let run_arg = flag("--run")?.ok_or("--run ID|PATH required")?;
     let run = find_run(project, &run_arg).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
     native_layout(&run)?;
-    let budget = backtest::parse_budget(args)?;
     let spec = match kind {
         "backtest" => JobSpec::Backtest {
             params: backtest::parse_params(&run, args)?,
@@ -731,7 +866,7 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
         },
         other => {
             return Err(format!(
-                "JOB_KIND_UNKNOWN: {other} (backtest|optimize|post-capture)"
+                "JOB_KIND_UNKNOWN: {other} (backtest|optimize|post-capture|h0)"
             ))
         }
     };
@@ -766,6 +901,15 @@ pub fn render(s: &JobStatus) -> String {
             }) => format!(
                 "verification_ok={verification_ok} report_ok={report_ok} verdict={}",
                 verdict.as_deref().unwrap_or("NOT_RUN")
+            ),
+            Some(JobResult::H0 {
+                liquidations,
+                winners,
+                bands,
+                sample_status,
+                ..
+            }) => format!(
+                "liquidations={liquidations} winners={winners} bands={bands} sample={sample_status}"
             ),
             None => String::new(),
         },
@@ -1140,6 +1284,69 @@ mod tests {
         assert_eq!(cancel(&d, "c"), Ok(child.id()));
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// H0: `job start h0` reads every saved run (a `--run` is refused), takes the registry's
+    /// window unless `--window-days` is given and the operator's `--min-sample`; it stops on a
+    /// cancel and on its time budget.
+    #[test]
+    fn h0_requests_and_stops() {
+        let d = std::env::temp_dir().join(format!("p0-h0-request-{}", std::process::id()));
+        let args = |a: &[&str]| {
+            a.iter()
+                .chain(&["--max-seconds", "5", "--max-ram-bytes", "9"])
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        };
+        let parsed = request_of(&d, "h0", &args(&["--id", "h", "--min-sample", "7"])).unwrap();
+        let limits = &darkbot_solana::runtime_config::active().limits;
+        match parsed.spec {
+            JobSpec::H0 {
+                window_days,
+                min_sample,
+                end_unix_s,
+            } => {
+                assert_eq!((window_days, min_sample), (limits.h0_window_days, Some(7)));
+                assert!(end_unix_s > 0);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!((parsed.job_id.as_str(), parsed.run.as_str()), ("h", ""));
+        let parsed = request_of(&d, "h0", &args(&["--window-days", "90"])).unwrap();
+        assert!(matches!(
+            parsed.spec,
+            JobSpec::H0 {
+                window_days: 90,
+                min_sample: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            request_of(&d, "h0", &args(&["--run", "r"])).unwrap_err(),
+            "H0_READS_ALL_RUNS: no --run"
+        );
+        assert_eq!(
+            request_of(&d, "h0", &args(&["--min-sample", "x"])).unwrap_err(),
+            "--min-sample: a number"
+        );
+        let mut zero = request_of(&d, "h0", &args(&[])).unwrap();
+        zero.spec = JobSpec::H0 {
+            window_days: 0,
+            min_sample: None,
+            end_unix_s: 1,
+        };
+        assert_eq!(submit(&d, &zero).unwrap_err(), "H0_WINDOW_INVALID: 0 days");
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(3_600);
+        assert_eq!(h0_stop(None, later)(), Ok(()));
+        assert_eq!(
+            h0_stop(Some(|| true), later)(),
+            Err(backtest::CANCELLED.into())
+        );
+        assert_eq!(
+            h0_stop(None, std::time::Instant::now())(),
+            Err("H0_TIME_BUDGET_EXHAUSTED".into())
+        );
         let _ = std::fs::remove_dir_all(d);
     }
 

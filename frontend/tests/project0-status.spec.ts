@@ -4,7 +4,7 @@ import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/p
 import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/project0/v1/capture_pb";
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import {
-  AnalyticsJobsSchema, AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema,
+  AnalyticsJobsSchema, AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, H0JobCommandSchema,
   PostCaptureJobCommandSchema, type AnalyticsJobs,
 } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
@@ -387,6 +387,17 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect(thr.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
+  // H0: the newest completed report's headline and a start over every saved run (typed budget).
+  await expect(page.locator(".p0-line", { hasText: "H0 · historical liquidations" }))
+    .toContainText("12 liquidations (3 seen again) · runs 2 verified / 1 without · 4 winners · top 50.00 % · 2 min-profit bands (upper bounds) · MIN_SAMPLE_UNDECIDED");
+  await page.getByLabel("H0 budget · seconds").fill("60");
+  await page.getByLabel("H0 budget · RAM MiB").fill("256");
+  await page.getByRole("button", { name: "Run H0 report" }).click();
+  await expect(page.getByTestId("p0-analytics-command-receipt")).toContainText("COMPLETED");
+  const h0 = sent.at(-1)!;
+  expect([h0.action, h0.resourceId]).toEqual(["project0.analytics.h0.start", ""]);
+  const hc = fromBinary(H0JobCommandSchema, h0.params);
+  expect([hc.windowDays, hc.maxSeconds, hc.maxRamBytes]).toEqual([0n, 60n, 256n * 1_048_576n]);
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();
   await page.getByLabel("Minimum profit · USD").fill("1.5");
   await page.getByLabel("Capital scenarios · USD").fill("100,1000");
@@ -410,7 +421,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.h0.start", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });
 

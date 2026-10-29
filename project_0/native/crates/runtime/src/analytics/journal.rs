@@ -112,6 +112,9 @@ pub mod kind {
     /// sealed single-value journal under `data/analytics-jobs/<id>/`.
     pub const ANALYTICS_JOB_REQUEST: u16 = 356;
     pub const ANALYTICS_JOB_OUTCOME: u16 = 357;
+    /// H0 (Track H0): one historical liquidation of a window and the window's report.
+    pub const H0_LIQUIDATION: u16 = 360;
+    pub const H0_REPORT: u16 = 361;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -235,6 +238,8 @@ pub mod kind {
         BACKTEST_ATTEMPT,
         ANALYTICS_JOB_REQUEST,
         ANALYTICS_JOB_OUTCOME,
+        H0_LIQUIDATION,
+        H0_REPORT,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,

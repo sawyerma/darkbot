@@ -47,15 +47,29 @@ fn the_analytics_publisher_serves_only_the_job_store_and_stops_on_sigterm() {
     .unwrap();
     let socket = format!("/tmp/p0a-{}.sock", std::process::id());
     let _ = std::fs::remove_file(&socket);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_p0-analytics-reporter"))
-        .env_clear()
-        .env("P0_REPORT_SOCKET", &socket)
-        .env("P0_REPORT_GENERATION_FILE", dir.join("generation"))
-        .env("P0_REPORT_ANALYTICS_PROJECT_DIR", &project)
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    /// The publisher is killed whenever the test ends early (a failed assertion never leaves it
+    /// running, holding its socket).
+    struct Publisher(std::process::Child);
+    impl Drop for Publisher {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Publisher(
+        Command::new(env!("CARGO_BIN_EXE_p0-analytics-reporter"))
+            .env_clear()
+            .env("P0_REPORT_SOCKET", &socket)
+            .env("P0_REPORT_GENERATION_FILE", dir.join("generation"))
+            .env("P0_REPORT_ANALYTICS_PROJECT_DIR", &project)
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    // The first start of a freshly linked binary may wait for the host's assessment of it (seen
+    // above 10 s on a loaded macOS host); listening is what is tested, not that latency.
+    const LISTEN_WITHIN: Duration = Duration::from_secs(60);
+    let deadline = Instant::now() + LISTEN_WITHIN;
     let mut stream = loop {
         if let Ok(s) = UnixStream::connect(&socket) {
             break s;
@@ -82,10 +96,10 @@ fn the_analytics_publisher_serves_only_the_job_store_and_stops_on_sigterm() {
     assert_eq!(jobs.jobs[0].job_id, "j-1");
     // SAFETY: SIGTERM to the child spawned above.
     assert_eq!(
-        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) },
+        unsafe { libc::kill(child.0.id() as libc::pid_t, libc::SIGTERM) },
         0
     );
-    let status = child.wait().unwrap();
+    let status = child.0.wait().unwrap();
     assert!(status.success(), "{status:?}");
     assert!(
         !std::path::Path::new(&socket).exists(),
