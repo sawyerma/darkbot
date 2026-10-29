@@ -6009,6 +6009,17 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
     use crate::execution::one_shot::settlement::{SettlementEvidence, SettlementSubject};
     let (mut f, target, calls) = dec13b_fixture("dec13b_live", true);
     assert_eq!(f.owner.approval_status().state, "VALID");
+    // The admission checks its holds against the lamports and every target bank's ATA amount.
+    let balances = f.owner.fe04_wallet_balances(&target);
+    assert_eq!(balances["SOL"], 10_000_000_000);
+    assert_eq!(
+        balances
+            .values()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [0, 2_000_000_000, 10_000_000_000].into(),
+        "{balances:?}"
+    );
     assert_eq!(f.owner.owner_snapshot(1).admission.state, "WAITING");
     f.owner
         .detect(Some((
@@ -6451,10 +6462,19 @@ fn dec13b_exit_fixture(
 #[test]
 fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
     let (mut f, calls, e) = dec13b_exit_fixture("dec13b_exit", true);
-    // Without FE-06 nothing exits.
+    // Without FE-06 nothing exits (the approval read and VALID).
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    assert_eq!(f.owner.approval_status().state, "VALID");
     dec13b_live(&mut f, false);
     f.owner.fe04_exit_admission();
     assert!(calls.lock().unwrap().is_empty());
+    // Not read again yet: while LIVE is effective the FE-04 refresh reads it (no status tap).
+    f.owner.fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
     dec13b_live(&mut f, true);
     f.owner.fe04_refreshed = std::time::Instant::now()
         .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))

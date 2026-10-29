@@ -633,7 +633,10 @@ impl ShadowOwner {
     /// against: the liquidator's lamports (`SOL`) and the validated ATA amount of each mint of the
     /// target's active banks and of the JIT funding bank. A balance not in canonical state is
     /// absent (unknown): a hold of it is refused.
-    fn fe04_wallet_balances(&self, target: &Pubkey) -> std::collections::BTreeMap<String, u64> {
+    pub(super) fn fe04_wallet_balances(
+        &self,
+        target: &Pubkey,
+    ) -> std::collections::BTreeMap<String, u64> {
         let view = StateView(&self.st);
         let mut balances = std::collections::BTreeMap::new();
         if let Some(r) = self.st.get(&self.liquidator) {
