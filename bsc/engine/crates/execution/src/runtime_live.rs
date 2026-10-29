@@ -51,7 +51,8 @@ use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Re
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
 use crate::runtime::state::{LaneEvidence, StateOwner};
 use crate::sources::{
-    ComponentId, KEEP_GENERATIONS, LiveIntentKind, LiveStrategies, SourceId, Store,
+    ComponentId, KEEP_GENERATIONS, LiveIntentKind, LiveStrategies, NonceCosts, NonceKey,
+    NonceOrigin, SourceId, Store,
 };
 use crate::submission::tls::{AuthorizationToken, TlsSetup};
 use crate::submission::transport::Clock;
@@ -315,13 +316,14 @@ pub struct LiveRuntime {
     provider_refused: u64,
 }
 
-/// The buyer's balance at a probe's block: a transaction of the ledger
-/// included or reverted in a later block, or not yet, still comes out of
-/// it at its most.
+/// The buyer's balance at a probe's block (number and hash): a
+/// transaction of the ledger included or reverted in a later block, or not
+/// yet, still comes out of it at its most.
 #[derive(Clone, Copy, Debug)]
 struct Funds {
     balance: U256,
     block: u64,
+    hash: [u8; 32],
 }
 
 impl LiveRuntime {
@@ -891,36 +893,73 @@ impl LiveRuntime {
     }
 
     /// The most the exits of the ledger's lots may still cost
-    /// (BSC3-027/057): per lot pending or open its SELL and, unless an
-    /// approval of it is out or included, its approval. An exiting lot's
-    /// SELL is out (it counts in what was spent).
+    /// (BSC3-027/057): [`Self::exit_reserve_besides`] of no nonce.
     fn exit_reserve(&self) -> U256 {
+        self.exit_reserve_besides(None)
+    }
+
+    /// The most the exits of the ledger's lots may still cost
+    /// (BSC3-027/057): per lot pending or open its SELL and, unless an
+    /// approval of it is out or included, its approval. The pending lots of
+    /// the alternative BUYs of one nonce are one position at most (one of
+    /// them lands): they count once, at the most of them; an open lot, and a
+    /// pending one without its sender and chain, counts alone, in full.
+    /// `besides`: the nonce a new BUY takes, whose own exit (the BUY adds it)
+    /// covers that nonce's pending lots. An exiting lot's SELL is out (it
+    /// counts in what was spent). None counted: the sum overflows.
+    fn exit_reserve_besides(&self, besides: Option<NonceKey>) -> U256 {
         let (approval, sell) = self.exit_gas();
-        self.book
+        let mut reserve = NonceCosts::default();
+        for p in self
+            .book
             .positions
             .iter()
             .filter(|p| matches!(p.state, PositionState::Pending | PositionState::Open))
+        {
             // A lot is a BUY's (an exit step with none before it is not).
-            .filter(|p| {
-                self.book
-                    .tx(&p.lot)
-                    .is_some_and(|t| t.released.intent == LiveIntentKind::Buy)
-            })
-            .map(|p| {
-                let approved = self.book.txs.iter().any(|t| {
-                    t.lot == Some(p.lot)
-                        && t.released.intent == LiveIntentKind::Approve
-                        && matches!(
-                            t.state,
-                            FactKind::Released | FactKind::Unknown | FactKind::Included
-                        )
-                });
-                match approved {
-                    true => sell,
-                    false => approval + sell,
-                }
-            })
-            .fold(U256::ZERO, |sum, wei| sum + wei)
+            let Some(buy) = self
+                .book
+                .tx(&p.lot)
+                .filter(|t| t.released.intent == LiveIntentKind::Buy)
+            else {
+                continue;
+            };
+            let key = match p.state {
+                PositionState::Pending => buy.released.key(),
+                _ => None,
+            };
+            if key.is_some() && key == besides {
+                continue;
+            }
+            let approved = self.book.txs.iter().any(|t| {
+                t.lot == Some(p.lot)
+                    && t.released.intent == LiveIntentKind::Approve
+                    && matches!(
+                        t.state,
+                        FactKind::Released | FactKind::Unknown | FactKind::Included
+                    )
+            });
+            let wei = match approved {
+                true => sell,
+                false => approval + sell,
+            };
+            if reserve.add(key, wei).is_none() {
+                return U256::MAX;
+            }
+        }
+        reserve.total().unwrap_or(U256::MAX)
+    }
+
+    /// The buyer's nonce `nonce` on the probed chain, as the owner's
+    /// admission names it (none: nothing probed).
+    fn buyer_key(&self, nonce: u64) -> Option<NonceKey> {
+        Some(NonceKey {
+            origin: NonceOrigin {
+                chain_id: self.observation.as_ref()?.chain_id,
+                sender: self.setup.buyer,
+            },
+            nonce,
+        })
     }
 
     fn observed(&mut self, result: Result<VenueObservation, String>) {
@@ -933,6 +972,7 @@ impl LiveRuntime {
         let terms = observation.terms;
         let balance = observation.caller_balance_wei;
         let probed_at = observation.block_number;
+        let probed_hash = observation.block_hash;
         let o = &observation.observed;
         let seen = format!(
             "observed {} implementation {}",
@@ -959,6 +999,7 @@ impl LiveRuntime {
                 self.funds = Some(Funds {
                     balance,
                     block: probed_at,
+                    hash: probed_hash,
                 });
                 let exits = open > U256::ZERO || self.positions_open();
                 if balance < need && !(exits && balance >= approval.min(sell)) {
@@ -1349,61 +1390,115 @@ impl LiveRuntime {
             return None;
         }
         self.poll_responses(clock);
-        if self.buy_refused(self.one_buy()).is_some() {
+        let next = self.free_nonce(owner);
+        if self
+            .buy_refused(self.one_buy(), Some(owner), next)
+            .is_some()
+        {
             return None;
         }
-        let next = self.free_nonce(owner);
-        let reserve = Some(self.exit_reserve());
+        let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
         let x = self.executor.as_mut()?;
         let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
         self.record_responses();
         buy
     }
 
-    /// What of the probed balance is left: every transaction of the ledger
-    /// not paid in the probe's block counts at its most.
-    fn available(&self) -> Option<U256> {
+    /// What of the probed balance is left besides the nonce `besides` (a
+    /// new BUY's), and the most that nonce's transactions may still cost:
+    /// every transaction of the ledger not paid in the probe's block counts
+    /// at its most, the alternatives of one (chain, sender, nonce) once, at
+    /// the most of them (one of them lands), and none of them once one of
+    /// them is paid there; a transaction without its sender and chain
+    /// counts alone. Paid in the probe's block: included, reverted or
+    /// replaced at or below it, while that block is the one C2 holds
+    /// canonical at its number; with C2 holding another block there, or
+    /// none (older than its window, not reached yet), nothing is paid. None:
+    /// no balance read, or the sum overflows.
+    fn left_besides(
+        &self,
+        owner: Option<&StateOwner>,
+        besides: Option<NonceKey>,
+    ) -> Option<(U256, U256)> {
         let funds = self.funds?;
-        let to_come = self
+        let consistent = owner.and_then(|o| o.canonical_hash(funds.block)) == Some(funds.hash);
+        let paid = |t: &crate::live_ledger::Tx| {
+            consistent
+                && matches!(
+                    t.state,
+                    FactKind::Included | FactKind::Reverted | FactKind::Replaced
+                )
+                && t.inclusion
+                    .as_ref()
+                    .and_then(|f| f.block)
+                    .is_some_and(|(n, _, _)| n <= funds.block)
+        };
+        let settled: std::collections::HashSet<NonceKey> = self
             .book
             .txs
             .iter()
-            .filter(|t| match t.state {
+            .filter(|t| paid(t))
+            .filter_map(|t| t.released.key())
+            .collect();
+        let mut to_come = NonceCosts::default();
+        for t in &self.book.txs {
+            let counts = match t.state {
                 FactKind::Released | FactKind::Unknown => true,
-                FactKind::Included | FactKind::Reverted => t
-                    .inclusion
-                    .as_ref()
-                    .and_then(|f| f.block)
-                    .is_none_or(|(n, _, _)| n > funds.block),
+                FactKind::Included | FactKind::Reverted => !paid(t),
                 FactKind::Withdrawn
                 | FactKind::Replaced
                 | FactKind::Orphaned
                 | FactKind::Responded => false,
-            })
-            .map(|t| t.released.max_wei.unwrap_or_default())
-            .fold(U256::ZERO, |sum, wei| sum + wei);
-        Some(funds.balance.saturating_sub(to_come))
+            };
+            let key = t.released.key();
+            if !counts || key.is_some_and(|k| settled.contains(&k)) {
+                continue;
+            }
+            to_come.add(key, t.released.max_wei.unwrap_or_default())?;
+        }
+        let group = besides.map_or(U256::ZERO, |k| to_come.of(&k));
+        let others = to_come.total()?.checked_sub(group)?;
+        Some((funds.balance.saturating_sub(others), group))
     }
 
-    /// Why the buyer's balance does not hold a BUY of at most `most`, its
-    /// exit and the exits of what is open (BSC3-027).
-    fn unfunded(&self, most: U256) -> Option<String> {
+    /// What of the probed balance is left ([`Self::left_besides`] of no
+    /// nonce).
+    #[cfg(test)]
+    fn available(&self, owner: Option<&StateOwner>) -> Option<U256> {
+        self.left_besides(owner, None)
+            .map(|(left, group)| left.saturating_sub(group))
+    }
+
+    /// Why the buyer's balance does not hold a BUY of at most `most` at the
+    /// nonce `next`, its exit and the exits of what is open (BSC3-027): the
+    /// BUY and the alternatives of its nonce count once, at the most of
+    /// them, and so do their exits.
+    fn unfunded(
+        &self,
+        most: U256,
+        owner: Option<&StateOwner>,
+        next: Option<u64>,
+    ) -> Option<String> {
         let (approval, sell) = self.exit_gas();
-        let need = most + approval + sell + self.exit_reserve();
-        match self.available() {
-            Some(left) if left >= need => None,
-            Some(left) => Some(format!(
-                "{left} wei left, a BUY with its exit and the open exits need {need}"
-            )),
-            None => Some("no balance read".into()),
-        }
+        let key = next.and_then(|n| self.buyer_key(n));
+        let Some((left, group)) = self.left_besides(owner, key) else {
+            return Some("no balance read".into());
+        };
+        let need = most.max(group) + approval + sell + self.exit_reserve_besides(key);
+        (left < need)
+            .then(|| format!("{left} wei left, a BUY with its exit and the open exits need {need}"))
     }
 
     /// Why no new BUY of at most `most` goes now (counted): an open
     /// position's exit waits for the buyer's nonce first (BSC3-048), the
     /// owner's gate admits only exits (BSC3-071), or the balance does not
     /// hold it with the exits (BSC3-027).
-    fn buy_refused(&mut self, most: U256) -> Option<Refusal> {
+    fn buy_refused(
+        &mut self,
+        most: U256,
+        owner: Option<&StateOwner>,
+        next: Option<u64>,
+    ) -> Option<Refusal> {
         let exit_out = self
             .book
             .unresolved()
@@ -1416,7 +1511,7 @@ impl LiveRuntime {
             self.buys_refused += 1;
             return Some(Refusal::Owner);
         }
-        if self.unfunded(most).is_some() {
+        if self.unfunded(most, owner, next).is_some() {
             self.unfunded_refused += 1;
             return Some(Refusal::Unfunded);
         }
@@ -1471,15 +1566,15 @@ impl LiveRuntime {
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
         self.executor.as_ref()?;
         self.poll_responses(clock);
+        let next = self.free_nonce(owner);
         if let crate::runtime_strategy::StrategyAction::Buy { input_wei, .. } = *action {
             let x = &self.exec.exec;
             let most = input_wei + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
-            if let Some(refusal) = self.buy_refused(most) {
+            if let Some(refusal) = self.buy_refused(most, Some(owner), next) {
                 return Some((Vec::new(), Some(refusal)));
             }
         }
-        let next = self.free_nonce(owner);
-        let reserve = Some(self.exit_reserve());
+        let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
         let handed = strategy_to(
             self.executor.as_mut()?,
             action,
@@ -3740,6 +3835,7 @@ mod tests {
                     max_block: None,
                     by_tx: None,
                     response: None,
+                    origin: None,
                 },
                 1,
             )
@@ -3912,6 +4008,7 @@ mod tests {
             max_block: Some(HEAD + 2),
             by_tx: None,
             response: None,
+            origin: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -4119,6 +4216,7 @@ mod tests {
             max_block: Some(HEAD + 2),
             by_tx: None,
             response: None,
+            origin: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -4230,6 +4328,7 @@ mod tests {
             max_block: Some(HEAD + 2),
             by_tx: None,
             response: None,
+            origin: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -4520,6 +4619,382 @@ mod tests {
         assert_eq!(book.positions[1].state, PositionState::Exiting);
         assert_eq!(book.positions[1].tokens, tokens2);
         assert!(book.positions[1].approved && book.positions[0].approved);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// The buyer's nonce `nonce` on chain 56.
+    fn nonce_of(buyer: [u8; 20], nonce: u64) -> NonceKey {
+        NonceKey {
+            origin: NonceOrigin {
+                chain_id: 56,
+                sender: buyer,
+            },
+            nonce,
+        }
+    }
+
+    /// BUY `n` of `buyer` at `nonce` on chain 56, released, of at most
+    /// `most`.
+    fn alt_buy(n: u8, buyer: [u8; 20], nonce: u64, most: u64) -> Fact {
+        Fact {
+            kind: FactKind::Released,
+            tx_hash: [n; 32],
+            intent: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            token: [n; 20],
+            nonce,
+            grant_generation: 1,
+            input_wei: Some(U256::from(most / 2)),
+            max_wei: Some(U256::from(most)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD + 2),
+            by_tx: None,
+            response: None,
+            origin: Some(NonceOrigin {
+                chain_id: 56,
+                sender: buyer,
+            }),
+        }
+    }
+
+    /// Block `number` (hash `[h; 32]`) as a fact's block.
+    fn at_block(number: u64, h: u8) -> Option<(u64, [u8; 32], u64)> {
+        Some((number, [h; 32], 1_793_000_000_000 + (number - HEAD) * 1_000))
+    }
+
+    /// `of` included in block `number` (hash `[h; 32]`).
+    fn landed(of: &Fact, number: u64, h: u8) -> Fact {
+        Fact {
+            block: at_block(number, h),
+            gas_wei: Some(U256::from(1u8)),
+            tokens: Some(U256::from(1_000u64)),
+            eth_wei: of.input_wei,
+            ..Fact::about(of, FactKind::Included)
+        }
+    }
+
+    /// The LIVE path of `r` after `facts`, the buyer's balance `balance`
+    /// probed at block `block` (hash `[h; 32]`).
+    fn probed_book(r: &Rig, facts: &[Fact], balance: u64, block: u64, h: u8) -> LiveRuntime {
+        let ledger = Ledger::open(&r.state);
+        for f in facts {
+            ledger.append(f, 1).unwrap();
+        }
+        let mut x = r.runtime("boot-1");
+        x.funds = Some(Funds {
+            balance: U256::from(balance),
+            block,
+            hash: [h; 32],
+        });
+        x
+    }
+
+    /// Budget fix (tests A, B, F, K at the balance): the alternatives of one
+    /// (chain, sender, nonce) come out of the balance once, at the most of
+    /// them, an UNKNOWN one included (no relief unproven); another nonce adds
+    /// its own most; a transaction without its sender and chain counts
+    /// alone. A new BUY at the nonce counts with its alternatives.
+    #[test]
+    fn alternatives_of_a_nonce_come_out_of_the_balance_once() {
+        let r = Rig::new("live-alt-balance", LiveStrategies::C3);
+        let b = r.buyer;
+        let facts = [
+            alt_buy(1, b, 7, 10_000),
+            Fact {
+                kind: FactKind::Unknown,
+                ..alt_buy(2, b, 7, 12_000)
+            },
+            alt_buy(3, b, 7, 11_000),
+            alt_buy(4, b, 8, 5_000),
+            Fact {
+                origin: None,
+                ..alt_buy(5, b, 7, 3_000)
+            },
+        ];
+        let x = probed_book(&r, &facts, 1_000_000, HEAD, 0xb1);
+        let c2 = c2_at(&r.d, b, 7);
+        let wei = |n: u64| U256::from(n);
+        assert_eq!(
+            x.available(Some(&c2)),
+            Some(wei(1_000_000 - 12_000 - 5_000 - 3_000))
+        );
+        assert_eq!(
+            x.left_besides(Some(&c2), Some(nonce_of(b, 7))),
+            Some((wei(1_000_000 - 5_000 - 3_000), wei(12_000)))
+        );
+        // Of another sender the same nonce is no alternative.
+        assert_eq!(
+            x.left_besides(Some(&c2), Some(nonce_of([0xee; 20], 7))),
+            Some((wei(1_000_000 - 12_000 - 5_000 - 3_000), U256::ZERO))
+        );
+        r.clean();
+    }
+
+    /// Budget fix (tests C, D): the old alternative lands late and the new
+    /// one is replaced by it: until the balance is probed in its block only
+    /// its most is to come, then nothing; a reorg of that block makes both
+    /// unresolved again and the nonce counts at its most, once; a restart
+    /// folds the same.
+    #[test]
+    fn a_late_alternative_and_a_reorg_keep_the_nonce_reserved() {
+        let r = Rig::new("live-alt-late", LiveStrategies::C3);
+        let b = r.buyer;
+        let (old, new) = (alt_buy(1, b, 7, 10_000), alt_buy(2, b, 7, 12_000));
+        let mut x = probed_book(&r, &[old.clone(), new.clone()], 1_000_000, HEAD, 0xb1);
+        let c2 = c2_at(&r.d, b, 7);
+        let wei = |n: u64| Some(U256::from(n));
+        assert_eq!(x.available(Some(&c2)), wei(1_000_000 - 12_000));
+        let ledger = Ledger::open(&r.state);
+        let replaced = Fact {
+            block: at_block(HEAD + 1, 0xb2),
+            by_tx: Some(old.tx_hash),
+            ..Fact::about(&new, FactKind::Replaced)
+        };
+        ledger.append(&landed(&old, HEAD + 1, 0xb2), 2).unwrap();
+        x.refold();
+        // Probed in the old one's block (C2 holds it): its nonce is paid,
+        // the new one can no longer land, replaced or not yet.
+        let mut c2b = c2_at(&r.d.join("b"), b, 7);
+        c2b.canonical(&block_of(HEAD + 1, 0xb2, 0xb1, Vec::new()));
+        let paid = Funds {
+            balance: U256::from(990_000u64),
+            block: HEAD + 1,
+            hash: [0xb2; 32],
+        };
+        x.funds = Some(paid);
+        assert_eq!(x.available(Some(&c2b)), wei(990_000));
+        ledger.append(&replaced, 2).unwrap();
+        x.refold();
+        assert_eq!(x.available(Some(&c2b)), wei(990_000));
+        // Probed before it: the old one's most is still to come, nothing
+        // of the replaced one.
+        x.funds = Some(Funds {
+            balance: U256::from(1_000_000u64),
+            block: HEAD,
+            hash: [0xb1; 32],
+        });
+        assert_eq!(x.available(Some(&c2)), wei(1_000_000 - 10_000));
+        for f in [&old, &new] {
+            let orphaned = Fact {
+                block: at_block(HEAD + 1, 0xb2),
+                ..Fact::about(f, FactKind::Orphaned)
+            };
+            ledger.append(&orphaned, 3).unwrap();
+        }
+        x.refold();
+        let before = Funds {
+            balance: U256::from(1_000_000u64),
+            block: HEAD,
+            hash: [0xb1; 32],
+        };
+        x.funds = Some(before);
+        assert_eq!(x.available(Some(&c2)), wei(1_000_000 - 12_000));
+        x.shutdown();
+        let mut y = r.runtime("boot-1");
+        y.funds = Some(before);
+        assert_eq!(y.available(Some(&c2)), wei(1_000_000 - 12_000));
+        y.shutdown();
+        r.clean();
+    }
+
+    /// Budget fix (test O): an inclusion at or below the probed block is
+    /// paid in the balance only while C2 holds that very block canonical:
+    /// a balance of another block at that number, of a block C2 does not
+    /// hold, or without C2 pays nothing.
+    #[test]
+    fn a_balance_of_another_block_pays_nothing() {
+        let r = Rig::new("live-alt-snapshot", LiveStrategies::C3);
+        let b = r.buyer;
+        let buy = alt_buy(1, b, 7, 10_000);
+        let mut x = probed_book(
+            &r,
+            &[buy.clone(), landed(&buy, HEAD, 0xb1)],
+            1_000_000,
+            HEAD,
+            0xb1,
+        );
+        let c2 = c2_at(&r.d, b, 8);
+        let (paid, unpaid) = (Some(U256::from(1_000_000u64)), Some(U256::from(990_000u64)));
+        assert_eq!(x.available(Some(&c2)), paid);
+        assert_eq!(x.available(None), unpaid);
+        // Another block at HEAD, a block C2 does not hold; and (not about
+        // C2) a balance from before the inclusion's block.
+        for (block, h) in [(HEAD, 0xee), (HEAD + 3, 0xb4), (HEAD - 1, 0xb0)] {
+            x.funds = Some(Funds {
+                balance: U256::from(1_000_000u64),
+                block,
+                hash: [h; 32],
+            });
+            assert_eq!(x.available(Some(&c2)), unpaid, "{block}");
+        }
+        r.clean();
+    }
+
+    /// Budget fix (tests H, P): the exits of the pending alternative BUYs
+    /// of one nonce are reserved once, an open position (another nonce) in
+    /// full, a pending BUY without its sender and chain alone; a new BUY at
+    /// the alternatives' nonce covers them with its own exit. An included
+    /// BUY paid in the balance and a new nonce count once each.
+    #[test]
+    fn the_exits_of_alternative_buys_are_reserved_once() {
+        let r = Rig::new("live-alt-exits", LiveStrategies::C3);
+        let b = r.buyer;
+        let open = alt_buy(3, b, 6, 9_000);
+        let facts = [
+            open.clone(),
+            landed(&open, HEAD, 0xb1),
+            alt_buy(1, b, 7, 10_000),
+            alt_buy(2, b, 7, 12_000),
+        ];
+        let balance = 1_000_000_000_000_000u64;
+        let mut x = probed_book(&r, &facts, balance, HEAD, 0xb1);
+        x.observation = Some(funded("", &limits(), &bsc_mainnet_v5_27_0(), Address::ZERO).unwrap());
+        let c2 = c2_at(&r.d, b, 7);
+        let (approval, sell) = x.exit_gas();
+        let lot = approval + sell;
+        assert_eq!(x.book.count(PositionState::Open), 1);
+        assert_eq!(x.exit_reserve(), lot * U256::from(2u8));
+        assert_eq!(x.exit_reserve_besides(Some(nonce_of(b, 7))), lot);
+        assert_eq!(
+            x.exit_reserve_besides(Some(nonce_of(b, 6))),
+            lot * U256::from(2u8)
+        );
+        // Paid in the balance: the open position's BUY; to come: nonce 7.
+        let left = U256::from(balance - 12_000);
+        assert_eq!(x.available(Some(&c2)), Some(left));
+        // A BUY at nonce 7: its own most past the alternatives', its exit,
+        // and the open position's.
+        let room = left + U256::from(12_000u64) - lot - lot;
+        assert_eq!(x.unfunded(room, Some(&c2), Some(7)), None);
+        assert!(
+            x.unfunded(room + U256::from(1u8), Some(&c2), Some(7))
+                .is_some()
+        );
+        // A BUY at nonce 8: nonce 7 stays to come, and its exits.
+        let room8 = left - lot - lot - lot;
+        assert_eq!(x.unfunded(room8, Some(&c2), Some(8)), None);
+        assert!(
+            x.unfunded(room8 + U256::from(1u8), Some(&c2), Some(8))
+                .is_some()
+        );
+        // A BUY at nonce 7 of less than the alternatives' most still needs
+        // their most: one of them may land instead.
+        x.funds = Some(Funds {
+            balance: U256::from(12_000u64) + lot + lot,
+            block: HEAD,
+            hash: [0xb1; 32],
+        });
+        assert_eq!(x.unfunded(U256::from(5_000u64), Some(&c2), Some(7)), None);
+        x.funds = Some(Funds {
+            balance: U256::from(12_000u64) + lot + lot - U256::from(1u8),
+            block: HEAD,
+            hash: [0xb1; 32],
+        });
+        assert!(
+            x.unfunded(U256::from(5_000u64), Some(&c2), Some(7))
+                .is_some()
+        );
+        // A pending BUY without its sender and chain: its exit alone.
+        let old = Fact {
+            origin: None,
+            ..alt_buy(4, b, 7, 8_000)
+        };
+        Ledger::open(&r.state).append(&old, 2).unwrap();
+        x.refold();
+        assert_eq!(x.exit_reserve(), lot * U256::from(3u8));
+        r.clean();
+    }
+
+    /// Budget fix (test E): two alternatives of one nonce admitted by the
+    /// owner, the process ending before either outcome was written: the
+    /// restart recovers both as UNKNOWN with their sender and chain; the
+    /// owner's spend and the balance count the nonce once, at its most. One
+    /// lands, the other is replaced: the balance probed in that block pays
+    /// it; the grant's spend stays at the most (nothing is released).
+    #[test]
+    fn alternatives_admitted_before_a_crash_count_once_after_it() {
+        use crate::sources::LiveIntent;
+        let r = Rig::new("live-alt-crash", LiveStrategies::C3);
+        let b = r.buyer;
+        let store = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let q = crate::sources::tests::qualified();
+        let armed = store.live_now(&[ComponentId::ExecC3], &q, NOW).unwrap();
+        let origin = NonceOrigin {
+            chain_id: 56,
+            sender: b,
+        };
+        let ids = [
+            alloy_primitives::hex::encode([1u8; 32]),
+            alloy_primitives::hex::encode([2u8; 32]),
+        ];
+        for (id, most) in [(&ids[0], 10_000u128), (&ids[1], 12_000)] {
+            let intent = LiveIntent {
+                id,
+                component: ComponentId::ExecC3,
+                kind: LiveIntentKind::Buy,
+                input_wei: 1_000,
+                max_wei: most,
+                token: [0x10; 20],
+                nonce: 7,
+                origin,
+                max_block: HEAD + 2,
+                exit_reserve_wei: 0,
+            };
+            store.admit_live(&armed, &intent, &q, NOW).unwrap();
+        }
+        let generation = armed.grant_generation();
+        assert_eq!(
+            crate::sources::spent_by_grant(&r.state, generation).unwrap(),
+            12_000
+        );
+        let mut x = r.runtime("boot-1");
+        assert_eq!(x.book.txs.len(), 2);
+        assert!(
+            x.book
+                .txs
+                .iter()
+                .all(|t| t.state == FactKind::Unknown && t.released.key() == Some(nonce_of(b, 7)))
+        );
+        x.funds = Some(Funds {
+            balance: U256::from(1_000_000u64),
+            block: HEAD,
+            hash: [0xb1; 32],
+        });
+        let c2 = c2_at(&r.d, b, 7);
+        assert_eq!(
+            x.available(Some(&c2)),
+            Some(U256::from(1_000_000u64 - 12_000))
+        );
+        let (first, second) = (
+            x.book.txs[0].released.clone(),
+            x.book.txs[1].released.clone(),
+        );
+        let ledger = Ledger::open(&r.state);
+        ledger.append(&landed(&first, HEAD + 1, 0xb2), 2).unwrap();
+        let replaced = Fact {
+            block: at_block(HEAD + 1, 0xb2),
+            by_tx: Some(first.tx_hash),
+            ..Fact::about(&second, FactKind::Replaced)
+        };
+        ledger.append(&replaced, 2).unwrap();
+        x.refold();
+        let mut c2b = c2_at(&r.d.join("b"), b, 7);
+        c2b.canonical(&block_of(HEAD + 1, 0xb2, 0xb1, Vec::new()));
+        x.funds = Some(Funds {
+            balance: U256::from(995_000u64),
+            block: HEAD + 1,
+            hash: [0xb2; 32],
+        });
+        assert_eq!(x.available(Some(&c2b)), Some(U256::from(995_000u64)));
+        assert_eq!(
+            crate::sources::spent_by_grant(&r.state, generation).unwrap(),
+            12_000
+        );
+        assert_eq!(crate::sources::admitted_intents(&r.state).unwrap().len(), 2);
         x.shutdown();
         r.clean();
     }

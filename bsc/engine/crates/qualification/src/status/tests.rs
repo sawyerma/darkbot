@@ -1702,6 +1702,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         max_block: Some(100),
         by_tx: None,
         response: None,
+        origin: None,
     };
     Ledger::open(&dir).append(&buy, now).unwrap();
     let live = super::live::live_state(&root, &rundir, Some(now));

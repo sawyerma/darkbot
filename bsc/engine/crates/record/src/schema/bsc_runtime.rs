@@ -476,7 +476,39 @@ pub mod live_spend {
     /// written before.
     pub const EXIT_RESERVE_WEI: u16 = 12;
 
+    /// v2: the sender and chain its nonce is of: the alternatives of one
+    /// (chain, sender, nonce) can spend at most once (one of them lands).
+    pub const SENDER: u16 = 13;
+    pub const CHAIN_ID: u16 = 14;
+
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-spend.v1",
+        record_type: 67,
+        schema_version: 2,
+        fields: &[
+            Field::req(INTENT_ID, "intent_id", Text),
+            Field::req(KIND, "kind", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::req(INPUT_WEI, "input_wei", U256),
+            Field::req(MAX_WEI, "max_wei", U256),
+            Field::opt(TOKEN, "token", Address),
+            Field::opt(NONCE, "nonce", U64),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(EXIT_RESERVE_WEI, "exit_reserve_wei", U256),
+            Field::req(SENDER, "sender", Address),
+            Field::req(CHAIN_ID, "chain_id", U64),
+        ],
+    };
+
+    /// v1 (no sender, chain), kept readable: its entries count alone.
+    pub const V1: Schema = Schema {
         name: "darkbot.bsc.live-spend.v1",
         record_type: 67,
         schema_version: 1,
@@ -548,7 +580,47 @@ pub mod live_ledger {
     /// (BSC3-051), apart from what the chain made of it.
     pub const RESPONSE: u16 = 20;
 
+    /// v2: the sender and chain of a transaction's nonce (its first
+    /// fact), for grouping its alternatives.
+    pub const SENDER: u16 = 21;
+    pub const CHAIN_ID: u16 = 22;
+
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 2,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
+            Field::opt(SENDER, "sender", Address),
+            Field::opt(CHAIN_ID, "chain_id", U64),
+        ],
+    };
+
+    /// v1 (no sender, chain), kept readable.
+    pub const V1: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
         record_type: 68,
         schema_version: 1,
@@ -1824,7 +1896,9 @@ pub const ALL: &[&Schema] = &[
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,
+    &live_spend::V1,
     &live_ledger::SCHEMA,
+    &live_ledger::V1,
     &live_qualification::SCHEMA,
     &live_qualification::V1,
     &runtime_status::SCHEMA,

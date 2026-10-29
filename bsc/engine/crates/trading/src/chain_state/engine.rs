@@ -1186,6 +1186,17 @@ impl ChainState {
         self.blocks.iter().map(|b| (b.number, b.hash)).collect()
     }
 
+    /// The hash of the retained canonical block `number` (none: not in the
+    /// retained window).
+    pub fn retained_hash(&self, number: u64) -> Option<B256> {
+        let first = self.blocks.front()?.number;
+        let at = usize::try_from(number.checked_sub(first)?).ok()?;
+        self.blocks
+            .get(at)
+            .filter(|b| b.number == number)
+            .map(|b| b.hash)
+    }
+
     /// Identity of the current coherent snapshot for `pending_candidate`.
     ///
     /// `None` unless [`ChainState::coherent`], or when `pending_candidate`

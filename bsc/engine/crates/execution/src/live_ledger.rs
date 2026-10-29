@@ -27,7 +27,7 @@
 //! transactions; a failed BUY's gas is a loss of its own. A cost the
 //! receipt did not state counts at its most (the signed gas limit).
 
-use crate::sources::{Admitted, ComponentId, LiveIntentKind};
+use crate::sources::{Admitted, ComponentId, LiveIntentKind, NonceKey, NonceOrigin};
 use alloy_primitives::U256;
 use darkbot_bsc_record::schema::bsc_runtime::live_ledger as k;
 use darkbot_bsc_record::{Draft, Value, decode};
@@ -121,9 +121,21 @@ pub struct Fact {
     pub by_tx: Option<[u8; 32]>,
     /// `Responded`: the provider and its answer, `ADAPTER:OUTCOME`.
     pub response: Option<String>,
+    /// The sender and chain of its nonce (absent in a fact written before
+    /// them: its transaction is grouped with no other).
+    pub origin: Option<NonceOrigin>,
 }
 
 impl Fact {
+    /// The nonce its transaction is one of the alternatives of (none: its
+    /// sender and chain are not known).
+    pub fn key(&self) -> Option<NonceKey> {
+        Some(NonceKey {
+            origin: self.origin?,
+            nonce: self.nonce,
+        })
+    }
+
     /// What became of the released `of`: `kind`, with nothing else known.
     pub fn about(of: &Fact, kind: FactKind) -> Fact {
         Fact {
@@ -161,6 +173,7 @@ impl Fact {
             max_block: a.max_block,
             by_tx: None,
             response: None,
+            origin: a.origin,
         })
     }
 }
@@ -235,7 +248,9 @@ impl Ledger {
             .set_opt(k::ETH_WEI, fact.eth_wei.map(word))
             .set_opt(k::MAX_BLOCK, fact.max_block)
             .set_opt(k::BY_TX_HASH, fact.by_tx.map(Value::B256))
-            .set_opt(k::RESPONSE, fact.response.as_deref());
+            .set_opt(k::RESPONSE, fact.response.as_deref())
+            .set_opt(k::CHAIN_ID, fact.origin.map(|o| o.chain_id))
+            .set_opt(k::SENDER, fact.origin.map(|o| Value::Address(o.sender)));
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -347,7 +362,9 @@ impl Ledger {
         for (_, path) in self.names()? {
             let bad = |why: &str| format!("{}: {why}", path.display());
             let bytes = fs::read(&path).map_err(|e| bad(&e.to_string()))?;
-            let r = decode(&k::SCHEMA, &bytes).map_err(|e| bad(&e.0))?;
+            let r = decode(&k::SCHEMA, &bytes)
+                .or_else(|_| decode(&k::V1, &bytes))
+                .map_err(|e| bad(&e.0))?;
             let e = |x: darkbot_bsc_record::RecordError| bad(&x.0);
             let u = |tag| -> Result<Option<U256>, String> {
                 Ok(r.opt_u256(tag).map_err(e)?.map(U256::from_be_bytes))
@@ -360,6 +377,14 @@ impl Ledger {
                 (Some(n), Some(h), Some(ms)) => Some((n, h, ms)),
                 (None, None, None) => None,
                 _ => return Err(bad("a block is named whole or not at all")),
+            };
+            let origin = match (
+                r.opt_u64(k::CHAIN_ID).map_err(e)?,
+                r.opt_address(k::SENDER).map_err(e)?,
+            ) {
+                (Some(chain_id), Some(sender)) => Some(NonceOrigin { chain_id, sender }),
+                (None, None) => None,
+                _ => return Err(bad("a nonce's sender and chain are named together")),
             };
             out.push(Fact {
                 kind: FactKind::parse(r.text(k::KIND).map_err(e)?).ok_or_else(|| bad("kind"))?,
@@ -379,6 +404,7 @@ impl Ledger {
                 max_block: r.opt_u64(k::MAX_BLOCK).map_err(e)?,
                 by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
                 response: r.opt_text(k::RESPONSE).map_err(e)?.map(str::to_string),
+                origin,
             });
         }
         Ok(out)
@@ -655,7 +681,65 @@ mod tests {
             max_block: Some(100),
             by_tx: None,
             response: None,
+            origin: Some(crate::sources::tests::ORIGIN),
         }
+    }
+
+    /// Budget fix: a fact names its nonce's sender and chain and reads them
+    /// back (its alternatives group by them); a fact of an older build
+    /// reads without them (grouped with none); one naming only one of them
+    /// refuses the ledger.
+    #[test]
+    fn a_fact_keeps_the_sender_and_chain_of_its_nonce() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-origin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let buy = released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300);
+        ledger.append(&buy, 1).unwrap();
+        let raw = |schema: &'static darkbot_bsc_record::Schema, seq: u64, chain: Option<u64>| {
+            let mut d = Draft::new(schema);
+            d.set(k::KIND, "RELEASED")
+                .set(k::TX_HASH, Value::B256([seq as u8 + 1; 32]))
+                .set(k::PROVENANCE_TOOL, "test")
+                .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+                .set(k::INTENT, "BUY")
+                .set(k::COMPONENT, "BSC_EXEC")
+                .set(k::TOKEN, Value::Address([0xB; 20]))
+                .set(k::NONCE, 1u64)
+                .set(k::GRANT_GENERATION, 7u64)
+                .set_opt(k::CHAIN_ID, chain);
+            let path = dir.join("live-ledger").join(format!("{seq:020}.dbrec"));
+            fs::write(path, d.encode().unwrap()).unwrap();
+        };
+        raw(&k::V1, 1, None);
+        let facts = ledger.facts().unwrap();
+        assert_eq!(facts[0], buy);
+        assert_eq!(
+            facts[0].key(),
+            Some(NonceKey {
+                origin: crate::sources::tests::ORIGIN,
+                nonce: 1
+            })
+        );
+        assert_eq!((facts[1].origin, facts[1].key()), (None, None));
+        raw(&k::SCHEMA, 2, Some(56));
+        assert!(ledger.facts().unwrap_err().contains("sender and chain"));
+        // A sender without its chain neither.
+        let mut d = Draft::new(&k::SCHEMA);
+        d.set(k::KIND, "RELEASED")
+            .set(k::TX_HASH, Value::B256([9; 32]))
+            .set(k::PROVENANCE_TOOL, "test")
+            .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(k::INTENT, "BUY")
+            .set(k::COMPONENT, "BSC_EXEC")
+            .set(k::TOKEN, Value::Address([0xB; 20]))
+            .set(k::NONCE, 1u64)
+            .set(k::GRANT_GENERATION, 7u64)
+            .set(k::SENDER, Value::Address([0xb0; 20]));
+        let path = dir.join("live-ledger").join(format!("{:020}.dbrec", 2));
+        fs::write(path, d.encode().unwrap()).unwrap();
+        assert!(ledger.facts().unwrap_err().contains("sender and chain"));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     fn included(of: &Fact, block: u8, gas: u64, tokens: u64, eth: u64) -> Fact {
@@ -872,6 +956,7 @@ mod tests {
             token,
             nonce: token.map(|_| u64::from(n)),
             max_block: token.map(|_| 100),
+            origin: token.map(|_| crate::sources::tests::ORIGIN),
         }
     }
 

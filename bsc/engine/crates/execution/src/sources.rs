@@ -29,6 +29,7 @@
 //! between the new generation and its receipt is recovered from the
 //! generation, which names the request it applied.
 
+use alloy_primitives::U256;
 use darkbot_bsc_record::schema::bsc_runtime::{source_mode_receipt as rc, source_modes as sm};
 use darkbot_bsc_record::{Draft, Record, decode};
 use std::fs;
@@ -2492,6 +2493,22 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs between the spend's read and its entry's write (budget test).
+    static AFTER_SPEND_READ: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn after_spend_read() {
+    #[cfg(test)]
+    AFTER_SPEND_READ.with(|h| {
+        if let Some(h) = h.borrow().as_ref() {
+            h();
+        }
+    });
+}
+
 fn before_slot_write() {
     #[cfg(test)]
     BEFORE_SLOT_WRITE.with(|h| {
@@ -2634,40 +2651,93 @@ fn wei_u128(word: [u8; 32]) -> Option<u128> {
     Some(u128::from_be_bytes(word[16..].try_into().ok()?))
 }
 
-/// What the grant written at `grant_generation` has spent: the sum of the
-/// most each of its admitted intents may lose. An entry that does not
-/// decode makes the spend unreadable (never under-counted).
+/// What the grant written at `grant_generation` has spent: per (chain,
+/// sender, nonce) the most of its admitted intents may lose (one of them
+/// lands, whichever), and every intent without its sender and chain (an
+/// entry written before them) in full. Every entry counts, whatever came
+/// of it; none is ever released. An entry that does not decode makes the
+/// spend unreadable (never under-counted).
 pub fn spent_by_grant(dir: &Path, grant_generation: u64) -> Result<u128, String> {
-    use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
-    let entries = match fs::read_dir(spend_dir(dir)) {
-        Ok(e) => e,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(0),
-        Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: {e}")),
-    };
-    let mut spent = 0u128;
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: {e}"))?;
-        if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
-            continue;
-        }
-        let r = fs::read(entry.path())
-            .ok()
-            .and_then(|b| decode(&ls::SCHEMA, &b).ok())
-            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display()))?;
-        let unreadable = |_| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display());
-        if r.u64(ls::GRANT_GENERATION).map_err(unreadable)? != grant_generation {
-            continue;
-        }
-        let most = r
-            .u256(ls::MAX_WEI)
-            .ok()
-            .and_then(wei_u128)
-            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display()))?;
-        spent = spent
-            .checked_add(most)
+    spend_of_grant(&admitted_intents(dir)?, grant_generation)?.wei()
+}
+
+/// [`spent_by_grant`] of the admitted intents `admitted`, by nonce.
+fn spend_of_grant(admitted: &[Admitted], grant_generation: u64) -> Result<NonceCosts, String> {
+    let mut book = NonceCosts::default();
+    for a in admitted
+        .iter()
+        .filter(|a| a.grant_generation == grant_generation)
+    {
+        book.add(a.key(), U256::from(a.max_wei))
             .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: the spend overflows"))?;
     }
-    Ok(spent)
+    Ok(book)
+}
+
+/// The account and chain a LIVE transaction's nonce is of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NonceOrigin {
+    pub chain_id: u64,
+    pub sender: [u8; 20],
+}
+
+/// One (chain, sender, nonce): its transactions are alternatives, at most
+/// one of them lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NonceKey {
+    pub origin: NonceOrigin,
+    pub nonce: u64,
+}
+
+/// What transactions may cost when the alternatives of one nonce count
+/// once, at the most of them; a cost without its nonce's sender and chain
+/// counts alone, in full (never grouped by its nonce alone). Nothing
+/// counted is ever taken back.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NonceCosts {
+    groups: std::collections::BTreeMap<NonceKey, U256>,
+    alone: U256,
+}
+
+impl NonceCosts {
+    /// Counts `wei` under `key` (none: alone). None: the sum overflows.
+    pub fn add(&mut self, key: Option<NonceKey>, wei: U256) -> Option<()> {
+        match key {
+            Some(key) => {
+                let most = self.groups.entry(key).or_default();
+                *most = (*most).max(wei);
+            }
+            None => self.alone = self.alone.checked_add(wei)?,
+        }
+        Some(())
+    }
+
+    /// The most counted under `key` so far.
+    pub fn of(&self, key: &NonceKey) -> U256 {
+        self.groups.get(key).copied().unwrap_or_default()
+    }
+
+    /// What counting `wei` under `key` adds to [`Self::total`]: only what
+    /// it is above the most of its alternatives.
+    pub fn increase(&self, key: Option<NonceKey>, wei: U256) -> U256 {
+        match key {
+            Some(key) => wei.saturating_sub(self.of(&key)),
+            None => wei,
+        }
+    }
+
+    /// Every group's most and every cost alone (none: it overflows).
+    pub fn total(&self) -> Option<U256> {
+        self.groups
+            .values()
+            .try_fold(self.alone, |sum, wei| sum.checked_add(*wei))
+    }
+
+    fn wei(&self) -> Result<u128, String> {
+        self.total()
+            .and_then(|t| u128::try_from(t).ok())
+            .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: the spend overflows"))
+    }
 }
 
 /// What a LIVE intent is.
@@ -2703,6 +2773,9 @@ pub struct LiveIntent<'a> {
     /// the admission durable before any byte can leave (BSC3-024).
     pub token: [u8; 20],
     pub nonce: u64,
+    /// The sender and chain of that nonce (the lane's): the alternatives
+    /// of one nonce spend once.
+    pub origin: NonceOrigin,
     /// The last block its bundle may be included in (BSC3-048).
     pub max_block: u64,
     /// A BUY: the most the exits of the sender's open positions and of its
@@ -2726,6 +2799,19 @@ pub struct Admitted {
     pub nonce: Option<u64>,
     /// Absent in an entry written before BSC3-048: the window is unknown.
     pub max_block: Option<u64>,
+    /// Absent in an entry written before its sender and chain were: it
+    /// counts alone.
+    pub origin: Option<NonceOrigin>,
+}
+
+impl Admitted {
+    /// The nonce it is one of the alternatives of (none: not known whole).
+    pub fn key(&self) -> Option<NonceKey> {
+        Some(NonceKey {
+            origin: self.origin?,
+            nonce: self.nonce?,
+        })
+    }
 }
 
 /// Every LIVE intent the owner ever admitted, in no particular order. An
@@ -2744,10 +2830,11 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
             continue;
         }
         let bad = || format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display());
-        let r = fs::read(entry.path())
-            .ok()
-            .and_then(|b| decode(&ls::SCHEMA, &b).ok())
-            .ok_or_else(bad)?;
+        let bytes = fs::read(entry.path()).map_err(|_| bad())?;
+        let (r, v2) = match decode(&ls::SCHEMA, &bytes) {
+            Ok(r) => (r, true),
+            Err(_) => (decode(&ls::V1, &bytes).map_err(|_| bad())?, false),
+        };
         let kind = match r.text(ls::KIND).map_err(|_| bad())? {
             "BUY" => LiveIntentKind::Buy,
             "APPROVE" => LiveIntentKind::Approve,
@@ -2780,7 +2867,21 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
             token: r.opt_address(ls::TOKEN).map_err(|_| bad())?,
             nonce: r.opt_u64(ls::NONCE).map_err(|_| bad())?,
             max_block: r.opt_u64(ls::MAX_BLOCK).map_err(|_| bad())?,
+            origin: match v2 {
+                true => Some(NonceOrigin {
+                    chain_id: r.u64(ls::CHAIN_ID).map_err(|_| bad())?,
+                    sender: r.address(ls::SENDER).map_err(|_| bad())?,
+                }),
+                false => None,
+            },
         });
+        // An entry that names its sender and chain names its nonce too.
+        if out
+            .last()
+            .is_some_and(|a| a.origin.is_some() && a.nonce.is_none())
+        {
+            return Err(bad());
+        }
     }
     Ok(out)
 }
@@ -2967,6 +3068,33 @@ impl Store {
         Ok((day, total))
     }
 
+    /// The owner's LIVE spend lock, held until dropped: an exclusive lock
+    /// of `live-spend.lock` under the owner state (released by the system
+    /// when the process ends). Never waited for: held by another admission
+    /// (another thread or process), or not to be taken, this one admits
+    /// nothing; the clock it was given stays the admission's.
+    fn spend_lock(&self) -> Result<fs::File, String> {
+        let path = self.dir.join("live-spend.lock");
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: {}: {e}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(fs::TryLockError::WouldBlock) => Err(format!(
+                "{LIVE_SPEND_UNREADABLE}: {}: held by another admission",
+                path.display()
+            )),
+            Err(fs::TryLockError::Error(e)) => {
+                Err(format!("{LIVE_SPEND_UNREADABLE}: {}: {e}", path.display()))
+            }
+        }
+    }
+
     /// Admits one LIVE intent as the owner's state holds now, immediately
     /// before its dispatch (plan 28.10.): the grant is still the one the
     /// executor was armed under; the runtime, the intent's component and
@@ -2984,8 +3112,14 @@ impl Store {
         now_ms: u64,
     ) -> Result<LiveAdmission, String> {
         use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+        // One admission at a time, across threads and processes: what is
+        // read and checked below is what the entry is written against.
+        let _admitting = self.spend_lock()?;
         let g = self.current()?;
-        let spent = spent_by_grant(&self.dir, armed.grant_generation).ok();
+        let book =
+            admitted_intents(&self.dir).and_then(|a| spend_of_grant(&a, armed.grant_generation));
+        let spent = book.as_ref().ok().and_then(|b| b.wei().ok());
+        after_spend_read();
         let (daily, total) = (
             buy_usage(&self.dir, now_ms).ok(),
             total_usage(&self.dir).ok(),
@@ -3016,9 +3150,19 @@ impl Store {
         if !exit && intent.input_wei > grant.max_input_wei {
             return Err(LIVE_INPUT_ABOVE_GRANT.into());
         }
-        let spent = spent.ok_or(LIVE_SPEND_UNREADABLE)?;
+        let (Ok(book), Some(spent)) = (&book, spent) else {
+            return Err(LIVE_SPEND_UNREADABLE.into());
+        };
+        // An alternative of an admitted nonce adds only what it may lose
+        // above the most of the others: one of them lands.
+        let key = NonceKey {
+            origin: intent.origin,
+            nonce: intent.nonce,
+        };
+        let more = u128::try_from(book.increase(Some(key), U256::from(intent.max_wei)))
+            .map_err(|_| LIVE_SPEND_UNREADABLE)?;
         let after = spent
-            .checked_add(intent.max_wei)
+            .checked_add(more)
             .filter(|after| *after <= grant.max_spend_wei)
             .ok_or(LIVE_GRANT_SPEND_EXHAUSTED)?;
         if !exit
@@ -3054,6 +3198,11 @@ impl Store {
             .set(ls::TOKEN, darkbot_bsc_record::Value::Address(intent.token))
             .set(ls::NONCE, intent.nonce)
             .set(ls::MAX_BLOCK, intent.max_block)
+            .set(ls::CHAIN_ID, intent.origin.chain_id)
+            .set(
+                ls::SENDER,
+                darkbot_bsc_record::Value::Address(intent.origin.sender),
+            )
             .set(
                 ls::EXIT_RESERVE_WEI,
                 darkbot_bsc_record::Value::u128(intent.exit_reserve_wei),
@@ -4602,6 +4751,12 @@ pub(crate) mod tests {
         grant_of(expires, LiveStrategies::C3)
     }
 
+    /// The buyer and chain of the LIVE intents of these tests.
+    pub(crate) const ORIGIN: NonceOrigin = NonceOrigin {
+        chain_id: 56,
+        sender: [0xb0; 20],
+    };
+
     pub(crate) fn grant_of(expires: u64, strategies: LiveStrategies) -> LiveGrant {
         LiveGrant {
             venue: VenueId::Flap,
@@ -4644,6 +4799,15 @@ pub(crate) mod tests {
         tag: &str,
         grant: impl FnOnce(u64) -> LiveGrant,
     ) -> (PathBuf, Store, u64) {
+        live_ready_limited(tag, (2, 3), grant)
+    }
+
+    /// [`live_ready_granting`] with the daily and campaign BUY limits.
+    pub(crate) fn live_ready_limited(
+        tag: &str,
+        (per_day, in_total): (u32, u32),
+        grant: impl FnOnce(u64) -> LiveGrant,
+    ) -> (PathBuf, Store, u64) {
         let (dir, s) = session(tag, "boot-1");
         let now = 1_793_059_200_000;
         let grant = grant(now);
@@ -4667,8 +4831,8 @@ pub(crate) mod tests {
         req(ComponentId::StateC2.into(), Mode::Live);
         req(VenueId::Flap.into(), Mode::Live);
         req(SourceId::PublicNode.into(), Mode::Live);
-        req(Entity::BuyLimit, Mode::PerDay(2));
-        req(Entity::BuyTotal, Mode::PerDay(3));
+        req(Entity::BuyLimit, Mode::PerDay(per_day));
+        req(Entity::BuyTotal, Mode::PerDay(in_total));
         let r = s
             .grant_live("grant-1", grant.clone(), grant.scope_sha256(), g, now)
             .unwrap();
@@ -5318,6 +5482,7 @@ pub(crate) mod tests {
             max_wei: 2_000,
             token: [0x10; 20],
             nonce: 40 + n as u64,
+            origin: ORIGIN,
             max_block: 900,
             exit_reserve_wei: 0,
         };
@@ -5383,6 +5548,7 @@ pub(crate) mod tests {
             max_wei: max,
             token: [0x10; 20],
             nonce: 40 + n as u64,
+            origin: ORIGIN,
             max_block: 900,
             exit_reserve_wei: if kind == LiveIntentKind::Buy {
                 approve + sell
@@ -5445,6 +5611,7 @@ pub(crate) mod tests {
             max_wei: most,
             token: [0x10 + n as u8; 20],
             nonce: 40 + n as u64,
+            origin: ORIGIN,
             max_block: 900 + n as u64,
             exit_reserve_wei: 0,
         };
@@ -5468,6 +5635,7 @@ pub(crate) mod tests {
                 token: Some([0x10; 20]),
                 nonce: Some(40),
                 max_block: Some(900),
+                origin: Some(ORIGIN),
             }]
         );
         assert_eq!(
@@ -5542,6 +5710,391 @@ pub(crate) mod tests {
             ECONOMIC_LIVE_DISABLED
         );
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 4_500);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A LIVE BUY of the tests' buyer at `nonce`, named `id`, of at most
+    /// `most`.
+    fn nonce_buy(id: &str, nonce: u64, most: u128) -> LiveIntent<'_> {
+        LiveIntent {
+            id,
+            component: ComponentId::ExecC3,
+            kind: LiveIntentKind::Buy,
+            input_wei: 1_000,
+            max_wei: most,
+            token: [0x10; 20],
+            nonce,
+            origin: ORIGIN,
+            max_block: 900,
+            exit_reserve_wei: 0,
+        }
+    }
+
+    /// An admitted intent `n` of grant `grant` as an entry holds it.
+    fn admitted_of(
+        n: u8,
+        grant: u64,
+        nonce: Option<u64>,
+        origin: Option<NonceOrigin>,
+        most: u128,
+    ) -> Admitted {
+        Admitted {
+            tx_hash: [n; 32],
+            kind: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            grant_generation: grant,
+            input_wei: 1,
+            max_wei: most,
+            token: Some([0x10; 20]),
+            nonce,
+            max_block: Some(900),
+            origin,
+        }
+    }
+
+    /// `a`'s spend entry as the owner writes it, or (no origin) as an older
+    /// build wrote it (v1, no sender and chain).
+    fn spend_entry(dir: &Path, a: &Admitted) {
+        use darkbot_bsc_record::Value;
+        use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+        let mut d = Draft::new(match a.origin {
+            Some(_) => &ls::SCHEMA,
+            None => &ls::V1,
+        });
+        d.set(ls::INTENT_ID, hex32(&a.tx_hash).as_str())
+            .set(ls::KIND, a.kind.name())
+            .set(ls::COMPONENT, a.component.name())
+            .set(ls::PROVENANCE_TOOL, "test")
+            .set(ls::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(ls::GRANT_GENERATION, a.grant_generation)
+            .set(ls::INPUT_WEI, Value::u128(a.input_wei))
+            .set(ls::MAX_WEI, Value::u128(a.max_wei))
+            .set_opt(ls::TOKEN, a.token.map(Value::Address))
+            .set_opt(ls::NONCE, a.nonce)
+            .set_opt(ls::MAX_BLOCK, a.max_block);
+        if let Some(o) = a.origin {
+            d.set(ls::CHAIN_ID, o.chain_id)
+                .set(ls::SENDER, Value::Address(o.sender));
+        }
+        create_durable_dir(&spend_dir(dir)).unwrap();
+        let path = spend_dir(dir).join(format!("{}.dbrec", hex32(&a.tx_hash)));
+        fs::write(path, d.encode().unwrap()).unwrap();
+    }
+
+    /// Budget fix (tests A, M, G): the alternatives of one (chain, sender,
+    /// nonce) spend their most once, whichever lands: a higher one adds only
+    /// its difference, an equal or lower one nothing; another nonce adds its
+    /// own most; the grant is checked against all of it. Every entry stays,
+    /// and every BUY still takes its own daily, campaign and grant slot.
+    #[test]
+    fn alternatives_of_one_nonce_spend_only_their_most() {
+        let (dir, s, now) = live_ready_limited("live-nonce-alt", (6, 6), |now| LiveGrant {
+            max_attempts: 6,
+            max_input_wei: 1_000,
+            max_spend_wei: 21_000,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let generation = armed.grant_generation();
+        let ids: Vec<String> = (0..10u8).map(|n| hex32(&[n; 32])).collect();
+        let admit = |n: usize, nonce: u64, most: u128| {
+            s.admit_live(&armed, &nonce_buy(&ids[n], nonce, most), &q, now)
+                .map(|a| a.spent_wei)
+        };
+        assert_eq!(admit(0, 7, 10_000), Ok(10_000));
+        assert_eq!(admit(1, 7, 12_000), Ok(12_000));
+        assert_eq!(admit(2, 7, 11_000), Ok(12_000));
+        assert_eq!(admit(3, 7, 12_000), Ok(12_000));
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 12_000);
+        // Nonce 8: its own most on top; 12k + 9,001 is past the grant.
+        assert_eq!(admit(4, 8, 9_001), Err(LIVE_GRANT_SPEND_EXHAUSTED.into()));
+        assert_eq!(admit(5, 8, 7_999), Ok(19_999));
+        // Above nonce 7's most only the difference counts: 1,002 more is
+        // past the grant, 1,001 fills it.
+        assert_eq!(admit(6, 7, 13_002), Err(LIVE_GRANT_SPEND_EXHAUSTED.into()));
+        assert_eq!(admit(6, 7, 13_001), Ok(21_000));
+        // An exit alternative of nonce 8 within its most still fits the
+        // full grant.
+        let exit = LiveIntent {
+            kind: LiveIntentKind::Approve,
+            input_wei: 0,
+            ..nonce_buy(&ids[7], 8, 7_999)
+        };
+        assert_eq!(
+            s.admit_live(&armed, &exit, &q, now).unwrap().spent_wei,
+            21_000
+        );
+        // Each BUY took its slots, whatever it added (two added nothing):
+        // the day's six are gone.
+        assert_eq!(admit(8, 7, 1), Err(BUY_LIMIT_EXHAUSTED.into()));
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 6);
+        let total = total_usage(&dir).unwrap();
+        assert_eq!((total.used, total.grants), (6, vec![generation; 6]));
+        // Every admitted entry stays, refused ones were never written.
+        assert_eq!(admitted_intents(&dir).unwrap().len(), 7);
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 21_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Budget fix (tests I, J, K): only one (chain, sender, nonce) groups.
+    /// The same nonce under another grant counts there alone; of another
+    /// sender or chain, in full; an entry without its sender and chain (an
+    /// older build's) in full, and never with another of its nonce.
+    #[test]
+    fn only_one_chain_sender_and_nonce_groups() {
+        let dir = std::env::temp_dir().join(format!("bsc-spend-groups-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let sender = NonceOrigin {
+            sender: [0xb1; 20],
+            ..ORIGIN
+        };
+        let chain = NonceOrigin {
+            chain_id: 97,
+            ..ORIGIN
+        };
+        for a in [
+            admitted_of(1, 5, Some(7), Some(ORIGIN), 10_000),
+            admitted_of(2, 6, Some(7), Some(ORIGIN), 12_000),
+            admitted_of(3, 5, Some(7), Some(sender), 3_000),
+            admitted_of(4, 5, Some(7), Some(chain), 4_000),
+            admitted_of(5, 5, Some(7), None, 5_000),
+            admitted_of(6, 5, Some(7), None, 6_000),
+            admitted_of(7, 5, None, None, 700),
+        ] {
+            spend_entry(&dir, &a);
+        }
+        let old = 5_000 + 6_000 + 700;
+        assert_eq!(
+            spent_by_grant(&dir, 5).unwrap(),
+            10_000 + 3_000 + 4_000 + old
+        );
+        assert_eq!(spent_by_grant(&dir, 6).unwrap(), 12_000);
+        let read = admitted_intents(&dir).unwrap();
+        assert_eq!(read.iter().filter(|a| a.origin.is_none()).count(), 3);
+        assert_eq!(read.iter().filter(|a| a.key().is_some()).count(), 4);
+        // An alternative of grant 5's nonce 7 above its most adds the
+        // difference only.
+        spend_entry(&dir, &admitted_of(8, 5, Some(7), Some(ORIGIN), 11_000));
+        assert_eq!(
+            spent_by_grant(&dir, 5).unwrap(),
+            11_000 + 3_000 + 4_000 + old
+        );
+        assert_eq!(spent_by_grant(&dir, 6).unwrap(), 12_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Budget fix (test N): a damaged entry, one naming its sender and chain
+    /// but not its nonce, and a spend past 128 bits leave the spend
+    /// unreadable; an admission then, or with its lock not to be opened,
+    /// is refused with nothing consumed and nothing written.
+    #[test]
+    fn an_unreadable_spend_refuses_the_admission() {
+        let (dir, s, now) = live_ready_granting("live-spend-bad", |now| {
+            grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let generation = armed.grant_generation();
+        let id = hex32(&[0x99; 32]);
+        let admit = || s.admit_live(&armed, &nonce_buy(&id, 7, 1_000), &q, now);
+        let lock = dir.join("live-spend.lock");
+        fs::create_dir_all(&lock).unwrap();
+        assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
+        fs::remove_dir(&lock).unwrap();
+        create_durable_dir(&spend_dir(&dir)).unwrap();
+        let damaged = spend_dir(&dir).join(format!("{}.dbrec", hex32(&[1; 32])));
+        fs::write(&damaged, b"not a record").unwrap();
+        assert!(
+            spent_by_grant(&dir, generation)
+                .unwrap_err()
+                .starts_with(LIVE_SPEND_UNREADABLE)
+        );
+        assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
+        fs::remove_file(&damaged).unwrap();
+        spend_entry(&dir, &admitted_of(2, generation, None, Some(ORIGIN), 1));
+        assert!(
+            spent_by_grant(&dir, generation)
+                .unwrap_err()
+                .starts_with(LIVE_SPEND_UNREADABLE)
+        );
+        assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
+        fs::remove_file(spend_dir(&dir).join(format!("{}.dbrec", hex32(&[2; 32])))).unwrap();
+        let half = u128::MAX / 2 + 1;
+        spend_entry(
+            &dir,
+            &admitted_of(3, generation, Some(1), Some(ORIGIN), half),
+        );
+        spend_entry(
+            &dir,
+            &admitted_of(4, generation, Some(2), Some(ORIGIN), half),
+        );
+        assert!(
+            spent_by_grant(&dir, generation)
+                .unwrap_err()
+                .contains("overflows")
+        );
+        assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
+        for n in [3u8, 4] {
+            fs::remove_file(spend_dir(&dir).join(format!("{}.dbrec", hex32(&[n; 32])))).unwrap();
+        }
+        // Past 128 bits among entries without sender and chain.
+        spend_entry(&dir, &admitted_of(5, generation, Some(1), None, half));
+        spend_entry(&dir, &admitted_of(6, generation, Some(1), None, half));
+        assert!(
+            spent_by_grant(&dir, generation)
+                .unwrap_err()
+                .contains("overflows")
+        );
+        assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
+        assert_eq!(total_usage(&dir).unwrap().used, 0);
+        assert!(!spend_dir(&dir).join(format!("{id}.dbrec")).exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Budget fix (test L, threads): two admissions, each through its own
+    /// store, with room for one: while the first holds its read the
+    /// second admits nothing (never waits); after the first's write it
+    /// reads its entry and is refused; exactly one is admitted.
+    #[test]
+    fn concurrent_admissions_never_exceed_the_grant() {
+        let (dir, _s, now) = live_ready_granting("live-spend-race", |now| LiveGrant {
+            max_input_wei: 1_000,
+            max_spend_wei: 10_000,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let (read, first_read) = std::sync::mpsc::channel();
+        let (went_on, go_on) = std::sync::mpsc::channel::<()>();
+        let at = dir.clone();
+        let first = std::thread::spawn(move || {
+            let s = Store::open_in_session(&at, 8, Ok("boot-1".into())).unwrap();
+            let q = qualified();
+            let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+            // Holds its read until the second admission has run.
+            AFTER_SPEND_READ.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move || {
+                    let _ = read.send(());
+                    let _ = go_on.recv();
+                }))
+            });
+            let id = hex32(&[1; 32]);
+            s.admit_live(&armed, &nonce_buy(&id, 7, 6_000), &q, now)
+                .map(|a| a.spent_wei)
+        });
+        first_read.recv().unwrap();
+        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let ids = [hex32(&[2; 32]), hex32(&[3; 32])];
+        let during = s.admit_live(&armed, &nonce_buy(&ids[0], 8, 6_000), &q, now);
+        went_on.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Ok(6_000));
+        // While the first held its read, the second admitted nothing.
+        let busy = during.unwrap_err();
+        assert!(
+            busy.starts_with(LIVE_SPEND_UNREADABLE) && busy.ends_with("held by another admission"),
+            "{busy}"
+        );
+        // After it, the second reads the first's entry.
+        let after = s.admit_live(&armed, &nonce_buy(&ids[1], 8, 6_000), &q, now);
+        assert_eq!(after.unwrap_err(), LIVE_GRANT_SPEND_EXHAUSTED);
+        assert_eq!(
+            spent_by_grant(&dir, armed.grant_generation()).unwrap(),
+            6_000
+        );
+        assert_eq!(admitted_intents(&dir).unwrap().len(), 1);
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    const SPEND_CHILD_DIR: &str = "BSC_SPEND_CHILD_DIR";
+
+    /// The other process of
+    /// [`admissions_of_two_processes_never_exceed_the_grant`]: admits one
+    /// BUY, holding its read for a second.
+    #[test]
+    #[ignore = "run by its parent test"]
+    fn spend_admission_child() {
+        let Ok(dir) = std::env::var(SPEND_CHILD_DIR) else {
+            return;
+        };
+        let dir = PathBuf::from(dir);
+        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        let q = qualified();
+        let now = 1_793_059_200_000;
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let (marker, parent) = (dir.join("child-read"), dir.join("parent-done"));
+        // Holds its read until the parent's admission has run.
+        AFTER_SPEND_READ.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || {
+                fs::write(&marker, b"read").unwrap();
+                let started = std::time::Instant::now();
+                while !parent.exists() && started.elapsed() < std::time::Duration::from_secs(60) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }))
+        });
+        let id = hex32(&[1; 32]);
+        let spent = s
+            .admit_live(&armed, &nonce_buy(&id, 7, 6_000), &q, now)
+            .map(|a| a.spent_wei);
+        let tmp = dir.join("child-result.tmp");
+        fs::write(&tmp, format!("{spent:?}")).unwrap();
+        fs::rename(&tmp, dir.join("child-result")).unwrap();
+    }
+
+    /// Budget fix (test L, processes): an admission of another process
+    /// that has read the spend holds the owner's lock: this one admits
+    /// nothing meanwhile; after the other's write it reads its entry and is
+    /// refused; exactly one is admitted.
+    #[test]
+    fn admissions_of_two_processes_never_exceed_the_grant() {
+        let (dir, s, now) = live_ready_granting("live-spend-procs", |now| LiveGrant {
+            max_input_wei: 1_000,
+            max_spend_wei: 10_000,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        assert_eq!(now, 1_793_059_200_000);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "sources::tests::spend_admission_child",
+            ])
+            .env(SPEND_CHILD_DIR, &dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        while !dir.join("child-read").exists() {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(60),
+                "the child never read the spend"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let ids = [hex32(&[2; 32]), hex32(&[3; 32])];
+        let during = s.admit_live(&armed, &nonce_buy(&ids[0], 8, 6_000), &q, now);
+        fs::write(dir.join("parent-done"), b"done").unwrap();
+        assert!(child.wait().unwrap().success());
+        let busy = during.unwrap_err();
+        assert!(busy.ends_with("held by another admission"), "{busy}");
+        let second = s.admit_live(&armed, &nonce_buy(&ids[1], 8, 6_000), &q, now);
+        assert_eq!(
+            fs::read_to_string(dir.join("child-result")).unwrap(),
+            "Ok(6000)"
+        );
+        assert_eq!(second.unwrap_err(), LIVE_GRANT_SPEND_EXHAUSTED);
+        assert_eq!(
+            spent_by_grant(&dir, armed.grant_generation()).unwrap(),
+            6_000
+        );
+        assert_eq!(admitted_intents(&dir).unwrap().len(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 

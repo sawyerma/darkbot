@@ -227,6 +227,12 @@ impl StateOwner {
         })
     }
 
+    /// The hash of the canonical block `number` C2 holds (none: outside
+    /// its retained window).
+    pub fn canonical_hash(&self, number: u64) -> Option<[u8; 32]> {
+        self.state.retained_hash(number).map(|h| h.0)
+    }
+
     /// The next canonical nonce of `sender` when C2 knows it exactly.
     pub fn clean_next_nonce(&self, sender: &[u8; 20]) -> Option<u64> {
         match self.state.sender(Address::from(*sender)) {

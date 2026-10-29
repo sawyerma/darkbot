@@ -22,7 +22,9 @@ use crate::live_key::LiveKey;
 use crate::live_ledger::{Fact, FactKind, Ledger};
 use crate::live_qualification::{Verified, capability};
 use crate::paper_exec::{End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by};
-use crate::sources::{ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, Store};
+use crate::sources::{
+    ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, NonceOrigin, Store,
+};
 use crate::submission::frame::Frame;
 use crate::submission::loopback::{LoopbackTransport, loopback_response, qualify_loopback};
 use crate::submission::response::{ResponseBuffer, ResponseOutcome};
@@ -141,6 +143,8 @@ pub struct Released {
     pub component: ComponentId,
     pub token: [u8; 20],
     pub nonce: u64,
+    /// The sender and chain of that nonce.
+    pub origin: NonceOrigin,
     /// The signed native value, and with the gas limit at the signed price
     /// the most it can cost.
     pub input_wei: U256,
@@ -473,6 +477,7 @@ impl End for LiveEnd {
                 max_block: None,
                 by_tx: None,
                 response: Some(format!("{}:{what}", slot.live.name())),
+                origin: Some(released.origin),
             };
             let (Some(transport), Some(buffer), Some(frame)) =
                 (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
@@ -702,6 +707,15 @@ impl End for LiveEnd {
         // write-ahead record (BSC3-024).
         let token = ticket.token().into_array();
         let nonce = ticket.nonce();
+        // The nonce is the lane's, of its sender and chain: this key's.
+        let origin = NonceOrigin {
+            chain_id: ticket.chain_id(),
+            sender: ticket.sender().into_array(),
+        };
+        if origin.sender != self.key.address() {
+            drop(transports);
+            return self.refuse(Refusal::Plan, "the lane's sender is not the key's".into());
+        }
         let admitted = self.store.admit_live(
             &self.armed,
             &LiveIntent {
@@ -712,6 +726,7 @@ impl End for LiveEnd {
                 max_wei,
                 token,
                 nonce,
+                origin,
                 max_block: last_block,
                 exit_reserve_wei,
             },
@@ -792,6 +807,7 @@ impl End for LiveEnd {
             max_block: Some(last_block),
             by_tx: None,
             response: None,
+            origin: Some(origin),
         };
         match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => self.facts += 1,
@@ -804,6 +820,7 @@ impl End for LiveEnd {
                 component,
                 token,
                 nonce,
+                origin,
                 input_wei: budget.max_buy_input_wei,
                 max_wei: budget.max_total_wei,
                 handed_off: result.is_ok(),
