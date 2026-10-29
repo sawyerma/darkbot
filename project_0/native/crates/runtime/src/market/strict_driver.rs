@@ -1089,6 +1089,7 @@ mod tests {
             provider_binding(a, None),
             provider_binding(b, None),
             provider_binding(b, Some(a)),
+            provider_binding(a, Some("http://c.invalid")),
         ] {
             assert_ne!(both, other);
         }

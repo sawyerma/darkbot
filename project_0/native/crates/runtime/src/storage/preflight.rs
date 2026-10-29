@@ -1292,15 +1292,26 @@ mod tests {
             "{}",
             r.terminal()
         );
-        // DEC-08: a crosscheck reads each source within that source's own budget (the same
-        // budget qualifies it), and keeps a checkpoint per source (twice the verifier's disk).
-        let crosscheck = Request {
+        // DEC-08: a crosscheck reads each source within that source's own budget (exactly the
+        // index sizing, 2,160 signatures + 3 pages, qualifies it; one call less does not), and
+        // keeps a checkpoint per source (twice the verifier's disk).
+        let mut crosscheck = Request {
             verify: VerifyBudget {
                 mode: VerifyMode::Crosscheck,
+                calls: 2_162,
                 ..index.verify.clone()
             },
             ..index.clone()
         };
+        let r = evaluate(
+            crosscheck.clone(),
+            b(),
+            None,
+            probe(200.0 * MIB as f64),
+            env(),
+        );
+        assert_eq!(verdict_of(&r, "verification"), Verdict::Blocked);
+        crosscheck.verify.calls = 2_163;
         let r = evaluate(
             crosscheck.clone(),
             b(),
