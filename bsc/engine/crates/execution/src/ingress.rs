@@ -141,7 +141,7 @@ pub struct IngressCore {
 }
 
 fn index(source: SourceId) -> usize {
-    SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0)
+    source.index()
 }
 
 /// Whether canonical signed bytes are a Flap launch of the C1 scope: the

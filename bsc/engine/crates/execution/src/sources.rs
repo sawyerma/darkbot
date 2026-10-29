@@ -48,6 +48,19 @@ pub enum SourceId {
 }
 
 impl SourceId {
+    /// Its place in [`SourceId::ALL`] (BSC3-002): a fixed index per value,
+    /// the match exhaustive, so a new value needs its own; one left out of
+    /// `ALL` is out of every array's bounds (fail-closed), never index 0.
+    pub const fn index(self) -> usize {
+        match self {
+            SourceId::Geth => 0,
+            SourceId::PublicNode => 1,
+            SourceId::Drpc => 2,
+            SourceId::BlockReq => 3,
+            SourceId::Club48 => 4,
+        }
+    }
+
     pub const ALL: [SourceId; 5] = [
         SourceId::Geth,
         SourceId::PublicNode,
@@ -237,6 +250,9 @@ pub const LIVE_VENUE_UNQUALIFIED: &str = "LIVE_VENUE_UNQUALIFIED";
 pub const LIVE_SOURCE_UNQUALIFIED: &str = "LIVE_SOURCE_UNQUALIFIED";
 pub const LIVE_ADAPTER_UNQUALIFIED: &str = "LIVE_ADAPTER_UNQUALIFIED";
 pub const LIVE_ACQUISITION_UNPROVEN: &str = "LIVE_ACQUISITION_UNPROVEN";
+/// BSC3-049: a granted builder did not accept the proven acquisition's
+/// attempt (exits are exempt: they need no acquisition through it).
+pub const LIVE_ACQUISITION_BUILDER_UNPROVEN: &str = "LIVE_ACQUISITION_BUILDER_UNPROVEN";
 pub const LIVE_RISK_DECISION_MISSING: &str = "LIVE_RISK_DECISION_MISSING";
 /// The grant on file is not the one the executor was armed under.
 pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
@@ -295,7 +311,10 @@ pub const LIVE_CONDITIONS: [(&str, &[&str]); 19] = [
     ("VENUE_QUALIFIED", &[LIVE_VENUE_UNQUALIFIED]),
     ("SOURCES_QUALIFIED", &[LIVE_SOURCE_UNQUALIFIED]),
     ("ADAPTERS_QUALIFIED", &[LIVE_ADAPTER_UNQUALIFIED]),
-    ("ACQUISITION_PROVEN", &[LIVE_ACQUISITION_UNPROVEN]),
+    (
+        "ACQUISITION_PROVEN",
+        &[LIVE_ACQUISITION_UNPROVEN, LIVE_ACQUISITION_BUILDER_UNPROVEN],
+    ),
     ("RISK_DECISION", &[LIVE_RISK_DECISION_MISSING]),
 ];
 
@@ -307,7 +326,8 @@ const SCOPE_CONDITIONS_FROM: usize = 11;
 /// the grant's attempts), room for another BUY input, and a grant that
 /// admits exits only (BSC3-058). Its own gas must still fit the grant's
 /// spend ([`Store::admit_live`]).
-const EXIT_EXEMPT: [&str; 9] = [
+const EXIT_EXEMPT: [&str; 10] = [
+    LIVE_ACQUISITION_BUILDER_UNPROVEN,
     ECON_ATTEMPT_DISABLED,
     BUY_LIMIT_UNREADABLE,
     BUY_LIMIT_EXHAUSTED,
@@ -404,6 +424,17 @@ pub enum ComponentId {
 }
 
 impl ComponentId {
+    /// Its place in [`ComponentId::ALL`] (BSC3-002): a fixed index per value,
+    /// the match exhaustive, so a new value needs its own; one left out of
+    /// `ALL` is out of every array's bounds (fail-closed), never index 0.
+    pub const fn index(self) -> usize {
+        match self {
+            ComponentId::StateC2 => 0,
+            ComponentId::ExecC3 => 1,
+            ComponentId::StrategyC => 2,
+        }
+    }
+
     pub const ALL: [ComponentId; 3] = [
         ComponentId::StateC2,
         ComponentId::ExecC3,
@@ -455,6 +486,17 @@ pub enum VenueId {
 }
 
 impl VenueId {
+    /// Its place in [`VenueId::ALL`] (BSC3-002): a fixed index per value,
+    /// the match exhaustive, so a new value needs its own; one left out of
+    /// `ALL` is out of every array's bounds (fail-closed), never index 0.
+    pub const fn index(self) -> usize {
+        match self {
+            VenueId::Flap => 0,
+            VenueId::FourClassic => 1,
+            VenueId::OpenFour => 2,
+        }
+    }
+
     pub const ALL: [VenueId; 3] = [VenueId::Flap, VenueId::FourClassic, VenueId::OpenFour];
 
     pub fn name(self) -> &'static str {
@@ -510,6 +552,21 @@ pub enum SwitchId {
 }
 
 impl SwitchId {
+    /// Its place in [`SwitchId::ALL`] (BSC3-002): a fixed index per value,
+    /// the match exhaustive, so a new value needs its own; one left out of
+    /// `ALL` is out of every array's bounds (fail-closed), never index 0.
+    pub const fn index(self) -> usize {
+        match self {
+            SwitchId::WalletLauncher => 0,
+            SwitchId::WalletBuyer => 1,
+            SwitchId::Sign => 2,
+            SwitchId::Arm => 3,
+            SwitchId::Send => 4,
+            SwitchId::Attempt => 5,
+            SwitchId::Live => 6,
+        }
+    }
+
     pub const ALL: [SwitchId; 7] = [
         SwitchId::WalletLauncher,
         SwitchId::WalletBuyer,
@@ -855,6 +912,9 @@ pub struct LiveQualification {
     pub adapters: Vec<LiveAdapter>,
     /// A real G0.8 acquisition PASS of the scope.
     pub acquisition: bool,
+    /// BSC3-049: the builders its G0.7 attempt was sent through; the
+    /// grant's adapters must be among them.
+    pub acquisition_adapters: Vec<LiveAdapter>,
     /// The operator's documented J risk decision for the scope.
     pub risk_decision: bool,
 }
@@ -999,19 +1059,19 @@ impl Generation {
     }
 
     pub fn component(&self, id: ComponentId) -> ComponentMode {
-        self.components[ComponentId::ALL.iter().position(|c| *c == id).unwrap_or(0)]
+        self.components[id.index()]
     }
 
     pub fn source(&self, id: SourceId) -> SourceMode {
-        self.sources[SourceId::ALL.iter().position(|s| *s == id).unwrap_or(0)]
+        self.sources[id.index()]
     }
 
     pub fn venue(&self, id: VenueId) -> &VenueMode {
-        &self.venues[VenueId::ALL.iter().position(|v| *v == id).unwrap_or(0)]
+        &self.venues[id.index()]
     }
 
     pub fn switch(&self, id: SwitchId) -> &SwitchMode {
-        &self.switches[SwitchId::ALL.iter().position(|s| *s == id).unwrap_or(0)]
+        &self.switches[id.index()]
     }
 
     /// The effective mode of any entity, as stored.
@@ -1172,6 +1232,12 @@ impl Generation {
             }
             if !q.acquisition {
                 out.push(LIVE_ACQUISITION_UNPROVEN);
+            } else if g
+                .adapters
+                .iter()
+                .any(|a| !q.acquisition_adapters.contains(a))
+            {
+                out.push(LIVE_ACQUISITION_BUILDER_UNPROVEN);
             }
             if !q.risk_decision {
                 out.push(LIVE_RISK_DECISION_MISSING);
@@ -1335,23 +1401,20 @@ impl Generation {
     fn set(&mut self, entity: Entity, requested: Mode, set_by: SetBy) {
         match entity {
             Entity::Source(source) => {
-                let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
+                let at = source.index();
                 self.sources[at].requested = requested;
             }
             Entity::Component(component) => {
-                let at = ComponentId::ALL
-                    .iter()
-                    .position(|c| *c == component)
-                    .unwrap_or(0);
+                let at = component.index();
                 self.components[at].requested = requested;
             }
             Entity::Venue(venue) => {
-                let at = VenueId::ALL.iter().position(|v| *v == venue).unwrap_or(0);
+                let at = venue.index();
                 self.venues[at].requested = requested;
                 self.venues[at].set_by = Some(set_by);
             }
             Entity::Switch(switch) => {
-                let at = SwitchId::ALL.iter().position(|s| *s == switch).unwrap_or(0);
+                let at = switch.index();
                 self.switches[at].requested = requested;
                 self.switches[at].set_by = Some(set_by);
             }
@@ -1556,7 +1619,7 @@ impl Generation {
                         switch.name()
                     ));
                 }
-                let at = SwitchId::ALL.iter().position(|s| *s == switch).unwrap_or(0);
+                let at = switch.index();
                 g.switches[at] = SwitchMode {
                     switch,
                     requested,
@@ -1594,7 +1657,7 @@ impl Generation {
                     source.name()
                 ));
             }
-            let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
+            let at = source.index();
             g.sources[at] = SourceMode {
                 source,
                 requested,
@@ -1628,10 +1691,7 @@ impl Generation {
                     component.name()
                 ));
             }
-            let at = ComponentId::ALL
-                .iter()
-                .position(|c| *c == component)
-                .unwrap_or(0);
+            let at = component.index();
             g.components[at] = ComponentMode {
                 component,
                 requested,
@@ -1665,7 +1725,7 @@ impl Generation {
                     venue.name()
                 ));
             }
-            let at = VenueId::ALL.iter().position(|v| *v == venue).unwrap_or(0);
+            let at = venue.index();
             g.venues[at] = VenueMode {
                 venue,
                 requested,
@@ -3186,6 +3246,24 @@ pub fn current_record_and_generation(
 pub(crate) mod tests {
     use super::*;
 
+    /// BSC3-002/021: each owner enum's ALL lists every value at its own
+    /// fixed index, each index once (no value reads another's, none index
+    /// 0 by default).
+    #[test]
+    fn every_value_has_its_own_index() {
+        fn check<T: Copy>(all: &[T], index: impl Fn(T) -> usize) {
+            let mut seen = vec![false; all.len()];
+            for (i, x) in all.iter().enumerate() {
+                assert_eq!(index(*x), i);
+                assert!(!std::mem::replace(&mut seen[i], true));
+            }
+        }
+        check(&SourceId::ALL, SourceId::index);
+        check(&ComponentId::ALL, ComponentId::index);
+        check(&VenueId::ALL, VenueId::index);
+        check(&SwitchId::ALL, SwitchId::index);
+    }
+
     fn store(tag: &str) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("bsc-sources-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -4078,6 +4156,7 @@ pub(crate) mod tests {
             sources: vec![SourceId::PublicNode],
             adapters: vec![LiveAdapter::Club48BuilderV1],
             acquisition: true,
+            acquisition_adapters: vec![LiveAdapter::Club48BuilderV1],
             risk_decision: true,
         }
     }
@@ -4243,6 +4322,9 @@ pub(crate) mod tests {
         no_adapter.adapters = vec![LiveAdapter::BlockRazorBuilderV1];
         let mut no_acquisition = qualified();
         no_acquisition.acquisition = false;
+        // BSC3-049: an acquisition sent through another builder only.
+        let mut other_builder = qualified();
+        other_builder.acquisition_adapters = vec![LiveAdapter::BlockRazorBuilderV1];
         let mut no_risk = qualified();
         no_risk.risk_decision = false;
         let cases: Vec<(LiveContext<'_>, &str)> = vec![
@@ -4313,6 +4395,13 @@ pub(crate) mod tests {
             ),
             (
                 LiveContext {
+                    qualification: &other_builder,
+                    ..ctx
+                },
+                LIVE_ACQUISITION_BUILDER_UNPROVEN,
+            ),
+            (
+                LiveContext {
                     qualification: &no_risk,
                     ..ctx
                 },
@@ -4326,6 +4415,15 @@ pub(crate) mod tests {
                 Effective::Blocked(reason)
             );
         }
+        // BSC3-049 review: a builder without the acquisition still takes the
+        // exits of what the grant holds.
+        assert!(
+            g.exit_blockers(&LiveContext {
+                qualification: &other_builder,
+                ..ctx
+            })
+            .is_empty()
+        );
         // Another boot session: the switches and the grant are reset.
         let reboot = LiveContext {
             boot: Some("boot-2"),

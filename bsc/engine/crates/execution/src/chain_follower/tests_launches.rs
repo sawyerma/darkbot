@@ -221,12 +221,18 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
         hex!("7dae4dcd1b20eb0445e7cc1d02b3e2e7f32fa63081a0e764732c269f2b8f228f")
     );
     assert!(openfour.buy.is_none());
-    // The table's Four.meme contracts are the decoder's frozen deployment.
+    // The table's Four.meme contracts are the decoder's frozen deployment,
+    // its chain the follower's; the Flap Portal is the pinned LIVE
+    // deployment's (BSC3-019).
     let d = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711();
     assert_eq!(
         (four.contract, openfour.contract),
         (d.token_manager2.into_array(), d.openfour_core.into_array())
     );
+    assert_eq!(d.chain_id, crate::wss::BSC_MAINNET_CHAIN_ID);
+    let flap_pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+    assert_eq!(flap.contract, flap_pin.portal.into_array());
+    assert_eq!(flap_pin.chain_id, crate::wss::BSC_MAINNET_CHAIN_ID);
 }
 
 #[test]

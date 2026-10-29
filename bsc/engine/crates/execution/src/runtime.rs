@@ -1839,7 +1839,7 @@ pub fn run(
     let reconcile_every = Duration::from_millis(config.reconcile_ms);
     let canonical_slice = Duration::from_millis(config.canonical_slice_ms);
     let status_every = Duration::from_millis(config.status_ms);
-    let index = |s: SourceId| SourceId::ALL.iter().position(|x| *x == s).unwrap_or(0);
+    let index = |s: SourceId| s.index();
     let mut stop_journaled = false;
     // Which sources run this pass (the reconcile sets it; LIVE included).
     let mut source_on = SourceId::ALL.map(|s| generation.source(s).effective == Effective::Shadow);

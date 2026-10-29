@@ -681,8 +681,42 @@ pub mod live_qualification {
     /// The G0.8 result whose verdict PASS is the scope's acquisition.
     pub const ACQUISITION: u16 = 5;
     pub const RISK: u16 = 6;
+    /// BSC3-049: the G0.7 attempt that G0.8 result rates (its buyer,
+    /// deployment and the builders it was sent through).
+    pub const ACQUISITION_ATTEMPT: u16 = 7;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-qualification.v1",
+        record_type: 66,
+        schema_version: 2,
+        fields: &[
+            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
+            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::nested(
+                ACQUISITION,
+                "acquisition",
+                Presence::Optional,
+                &evidence::SCHEMA,
+            ),
+            Field::nested(RISK, "risk", Presence::Optional, &risk::SCHEMA),
+            Field::nested(
+                ACQUISITION_ATTEMPT,
+                "acquisition_attempt",
+                Presence::Optional,
+                &evidence::SCHEMA,
+            ),
+        ],
+    };
+
+    /// v1 (an acquisition without its attempt), kept readable; it verifies
+    /// no acquisition.
+    pub const V1: Schema = Schema {
         name: "darkbot.bsc.live-qualification.v1",
         record_type: 66,
         schema_version: 1,
@@ -1749,6 +1783,7 @@ pub const ALL: &[&Schema] = &[
     &live_spend::SCHEMA,
     &live_ledger::SCHEMA,
     &live_qualification::SCHEMA,
+    &live_qualification::V1,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,

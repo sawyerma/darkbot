@@ -15,7 +15,9 @@ def job(exit_code,config=CONFIG,runner_bin=None,seen=None):
   base=pathlib.Path(folder);root=base/'root';run=base/'run';tools=base/'bin';root.mkdir();tools.mkdir()
   (root/'SNAPSHOT_SHA256').write_text('a'*64);(root/'COMMIT').write_text('fixture');(root/'CHECKOUT').write_text('/fixture/checkout\n')
   if config is not None:(root/'bsc/config').mkdir(parents=True);(root/'bsc/config/readiness.public.env').write_text(config)
-  shutil.copy2(REPORTER,tools/'bsc-status-reporter')
+  # A link, not a copy: a freshly copied binary's first start can take longer than the
+  # wrapper's validator timeout on a scanning host (10-22 s measured on macOS).
+  (tools/'bsc-status-reporter').symlink_to(REPORTER)
   runner=tools/'g07_pre_live_readiness'
   if runner_bin: shutil.copy2(runner_bin,runner)
   else: runner.write_text(f"#!/bin/sh\nenv > '{base}/runner.env'\ncat '{GOLDEN}'\nexit {exit_code}\n");runner.chmod(0o755)

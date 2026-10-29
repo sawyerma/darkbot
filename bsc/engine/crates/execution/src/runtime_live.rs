@@ -1602,7 +1602,7 @@ mod tests {
     use super::*;
     use crate::chain_follower::{CanonicalEvent, CanonicalTx};
     use crate::live_end::tests::{club48_findings, key_file, stand_in};
-    use crate::live_qualification::tests::fixture;
+    use crate::live_qualification::tests::{acquisition, fixture, venue_evidence};
     use crate::live_qualification::{LIVE_QUALIFICATION_PATH, Spec, build};
     use crate::paper_exec::FnClock;
     use crate::runtime::exec::tests::{HEAD, launch, limits, observation, owner, setup};
@@ -1725,10 +1725,10 @@ mod tests {
         let root = fixture("live-rt", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
-            venues: vec![(VenueId::Flap, ev())],
+            venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: Some("ev/g08.dbrec".into()),
+            acquisition: acquisition(),
             risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
         };
         fs::create_dir_all(root.join("bsc/config")).unwrap();
@@ -1904,10 +1904,10 @@ mod tests {
         let root = fixture("live-pos", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
-            venues: vec![(VenueId::Flap, ev())],
+            venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: Some("ev/g08.dbrec".into()),
+            acquisition: acquisition(),
             risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
         };
         fs::create_dir_all(root.join("bsc/config")).unwrap();
@@ -2210,10 +2210,10 @@ mod tests {
             let root = fixture(tag, "PASS");
             let ev = || vec!["ev/measure.dbrec".to_string()];
             let spec = Spec {
-                venues: vec![(VenueId::Flap, ev())],
+                venues: vec![(VenueId::Flap, venue_evidence())],
                 sources: vec![(SourceId::PublicNode, ev())],
                 adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-                acquisition: Some("ev/g08.dbrec".into()),
+                acquisition: acquisition(),
                 risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
             };
             fs::create_dir_all(root.join("bsc/config")).unwrap();

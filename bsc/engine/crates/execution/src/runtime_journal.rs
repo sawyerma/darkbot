@@ -95,7 +95,7 @@ pub enum SourceEvent {
 }
 
 pub(crate) fn source_byte(source: SourceId) -> u8 {
-    SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0) as u8
+    source.index() as u8
 }
 
 pub fn first_sighting_payload(source: SourceId, hash: &[u8; 32], raw: &[u8]) -> Vec<u8> {

@@ -26,6 +26,10 @@
 | BSC3-064 | FIX_VERIFIED | `546cc38f` | Kriterien nicht an observable_ms gebunden (erst nach versionierter Kriterienfreigabe) |
 | BSC3-033 | FIX_VERIFIED | `1c0b56a3` | Echtheit der Entscheider-Identität und der Records → BSC3-001; laufende Kampagne 27.10. ohne Vorab-Precommit nicht bindend bewertbar |
 | BSC3-067 | FIX_VERIFIED | `1c0b56a3` | – |
+| BSC3-002 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-021 | FIX_VERIFIED (mit 002) | dieser Commit | – |
+| BSC3-019 | FIX_VERIFIED | dieser Commit | Flap-Portal nur Paritätstest (flap/deployment.rs ist economics-gebunden) |
+| BSC3-049 | TEILWEISE (VENUE = Freeze des Pins, ACQUISITION = G0.8 PASS des benannten G0.7-Versuchs; Käufer und akzeptierende Builder gebunden, akzeptiert ≠ inkludiert) | dieser Commit | SOURCE-/ADAPTER-Nachweisart und Risiko-Scope-Bindung: Betreiberentscheidung bzw. BSC3-001 |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

@@ -8,15 +8,22 @@
 //! undecodable evidence file, an acquisition that is not a G0.8 PASS or a
 //! risk decision without evidence counts as not qualified.
 //!
+//! BSC3-049: each role takes only its own record schemas, bound to what it
+//! qualifies: a venue the G0.1 freeze of the pinned deployment, the
+//! acquisition the G0.8 PASS of the G0.7 attempt it names, of the pinned
+//! deployment, with its buyer and the builders it was sent through.
+//!
 //! No record: nothing is qualified, so nothing is live and no plan is
 //! released. A record that does not verify is refused as a whole.
 
 use crate::sources::{LiveAdapter, LiveQualification, SourceId, VenueId};
+use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
 use darkbot_bsc_record::schema::bsc_runtime::live_qualification as lq;
-use darkbot_bsc_record::schema::g08;
-use darkbot_bsc_record::{Draft, Record, decode};
+use darkbot_bsc_record::schema::{g06a, g07, g08};
+use darkbot_bsc_record::{Draft, Record, Schema, decode};
 use darkbot_bsc_trading::submission_policy::capability::CapabilityId;
 use darkbot_bsc_trading::submission_policy::qualification::{AdapterQualification, Finding};
+use darkbot_bsc_trading::venues::flap::deployment::{FlapDeployment, bsc_mainnet_v5_27_0};
 use std::fs;
 use std::path::{Component, Path};
 
@@ -40,11 +47,25 @@ pub struct Verified {
     pub adapters: Vec<AdapterQualification>,
     /// SHA-256 of the qualification record itself.
     pub sha256: [u8; 32],
+    /// The buyer of the proven acquisition: the LIVE key must be it.
+    pub acquisition_buyer: Option<[u8; 20]>,
 }
 
+/// The schemas of a venue's evidence: the G0.1 freeze (v2, with its
+/// upgrade check).
+const VENUE_EVIDENCE: &[&Schema] = &[&ff::V2];
+/// The acquisition: the G0.8 result, and the G0.7 attempt it rates.
+const ACQUISITION_EVIDENCE: &[&Schema] = &[&g08::result::SCHEMA];
+const ATTEMPT_EVIDENCE: &[&Schema] = &[&g07::evidence::SCHEMA];
+
 /// One evidence reference, verified: the file at `path` (relative, inside
-/// `root`) has this SHA-256 and decodes as the named schema.
-fn verified_evidence(root: &Path, r: &Record) -> Result<Record, String> {
+/// `root`) has this SHA-256 and decodes as the named schema, one of
+/// `allowed` (none: any known record).
+fn verified_evidence(
+    root: &Path,
+    r: &Record,
+    allowed: Option<&[&'static Schema]>,
+) -> Result<Record, String> {
     use lq::evidence as k;
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let path = r.text(k::PATH).map_err(e)?;
@@ -63,7 +84,18 @@ fn verified_evidence(root: &Path, r: &Record) -> Result<Record, String> {
         return Err(format!("evidence {path} changed since it was qualified"));
     }
     let name = r.text(k::SCHEMA_NAME).map_err(e)?;
-    let decoded = darkbot_bsc_record::schema::all()
+    let schemas = allowed.map_or_else(darkbot_bsc_record::schema::all, <[_]>::to_vec);
+    if !schemas.iter().any(|s| s.name == name) {
+        return Err(format!(
+            "evidence {path} is a {name} record, not {}",
+            schemas
+                .iter()
+                .map(|s| s.name)
+                .collect::<Vec<_>>()
+                .join(" or ")
+        ));
+    }
+    let decoded = schemas
         .into_iter()
         .filter(|s| s.name == name)
         .find_map(|s| decode(s, &bytes).ok())
@@ -71,24 +103,140 @@ fn verified_evidence(root: &Path, r: &Record) -> Result<Record, String> {
     Ok(decoded)
 }
 
-/// Every evidence reference of `row` under `tag`, verified; at least one.
-fn verified_all(root: &Path, row: &Record, tag: u16) -> Result<Vec<Record>, String> {
+/// Every evidence reference of `row` under `tag`, verified against
+/// `allowed`; at least one.
+fn verified_all(
+    root: &Path,
+    row: &Record,
+    tag: u16,
+    allowed: Option<&[&'static Schema]>,
+) -> Result<Vec<Record>, String> {
     let refs = row.nested_all(tag).map_err(|x| x.0)?;
     if refs.is_empty() {
         return Err("a qualification without evidence".into());
     }
-    refs.iter().map(|r| verified_evidence(root, r)).collect()
+    refs.iter()
+        .map(|r| verified_evidence(root, r, allowed))
+        .collect()
+}
+
+fn re(x: darkbot_bsc_record::RecordError) -> String {
+    x.0
+}
+
+/// A G0.1 freeze of `pin`: its chain, Portal and version, the pin read
+/// again, one implementation over the scanned window, the pinned one.
+fn freeze_binds(f: &Record, pin: &FlapDeployment) -> Result<(), String> {
+    let check = f.nested_all(ff::UPGRADE_CHECK).map_err(re)?;
+    let upgrade = check.first().ok_or("a freeze without its upgrade check")?;
+    let bound = f.u64(ff::CHAIN_ID).map_err(re)? == pin.chain_id
+        && f.address(ff::PORTAL).map_err(re)? == pin.portal.into_array()
+        && f.opt_text(ff::PORTAL_VERSION).map_err(re)? == Some(pin.portal_version)
+        && f.bool(ff::PIN_RECHECKED).map_err(re)?
+        && upgrade.text(ff::upgrade_check::STATUS).map_err(re)? == "ONE_IMPLEMENTATION"
+        && upgrade
+            .opt_address(ff::upgrade_check::LAST_IMPLEMENTATION)
+            .map_err(re)?
+            == Some(pin.portal_implementation.into_array());
+    if !bound {
+        return Err(format!(
+            "the freeze is not of the pinned deployment (Portal {} at {})",
+            pin.portal_version, pin.portal
+        ));
+    }
+    Ok(())
+}
+
+/// The acquisition: a G0.8 PASS of the G0.7 attempt `attempt` (its file's
+/// SHA-256 `attempt_sha256`), the same attempt, buy, token and buyer, of
+/// the pinned deployment. Returns the attempt's buyer and the builders that
+/// accepted it (bytes may have left, a 2xx answer with a result hash, no
+/// error, error code or message and nothing undecodable). Accepted is not
+/// included: which builder delivered is not on chain.
+fn acquisition_binds(
+    result: &Record,
+    attempt: &Record,
+    attempt_sha256: [u8; 32],
+    pin: &FlapDeployment,
+) -> Result<([u8; 20], Vec<LiveAdapter>), String> {
+    use g07::evidence as a;
+    use g08::result as r;
+    if result.text(r::GATE).map_err(re)? != "G0.8" {
+        return Err("the acquisition is not a G0.8 result".into());
+    }
+    if result.text(r::VERDICT).map_err(re)? != "PASS" {
+        return Err("the G0.8 result is not an acquisition PASS".into());
+    }
+    if result.b256(r::G07_EVIDENCE_SHA256).map_err(re)? != attempt_sha256
+        || attempt.text(a::GATE).map_err(re)? != "G0.7"
+        || result.text(r::ATTEMPT_ID).map_err(re)? != attempt.text(a::ATTEMPT_ID).map_err(re)?
+        || result.b256(r::BUY_TX).map_err(re)? != attempt.b256(a::BUY_TX_HASH).map_err(re)?
+        || result.address(r::TOKEN).map_err(re)? != attempt.address(a::TOKEN).map_err(re)?
+        || result.address(r::BUYER).map_err(re)? != attempt.address(a::BUYER).map_err(re)?
+    {
+        return Err("the G0.8 result does not rate this G0.7 attempt".into());
+    }
+    let preflight = attempt
+        .opt_nested(a::PREFLIGHT)
+        .map_err(re)?
+        .ok_or("a G0.7 attempt without its preflight")?;
+    use g06a::preflight as pf;
+    if attempt.u64(a::CHAIN_ID).map_err(re)? != pin.chain_id
+        || attempt.address(a::PORTAL).map_err(re)? != pin.portal.into_array()
+        || preflight.u64(pf::CHAIN_ID).map_err(re)? != pin.chain_id
+        || preflight.address(pf::PORTAL).map_err(re)? != pin.portal.into_array()
+        || preflight.text(pf::PORTAL_VERSION).map_err(re)? != pin.portal_version
+        || preflight.address(pf::PORTAL_IMPLEMENTATION).map_err(re)?
+            != pin.portal_implementation.into_array()
+        || preflight
+            .b256(pf::PORTAL_IMPLEMENTATION_CODE_SHA256)
+            .map_err(re)?
+            != pin.portal_implementation_runtime_sha256
+    {
+        return Err(format!(
+            "the G0.7 attempt is not of the pinned deployment (Portal {} at {})",
+            pin.portal_version, pin.portal
+        ));
+    }
+    let mut sent = Vec::new();
+    if let Some(send) = attempt.opt_nested(a::SEND).map_err(re)? {
+        use g07::provider_result as pr;
+        for (tag, adapter) in [
+            (a::send::FORTYEIGHTCLUB, LiveAdapter::Club48BuilderV1),
+            (a::send::BLOCKRAZOR, LiveAdapter::BlockRazorBuilderV1),
+        ] {
+            if let Some(p) = send.opt_nested(tag).map_err(re)?
+                && p.bool(pr::BYTES_MAY_HAVE_LEFT).map_err(re)?
+                && p.opt_u64(pr::HTTP_STATUS_CODE)
+                    .map_err(re)?
+                    .is_some_and(|c| (200..300).contains(&c))
+                && p.opt_b256(pr::RPC_RESULT_HASH).map_err(re)?.is_some()
+                && p.opt_text(pr::ERROR).map_err(re)?.is_none()
+                && p.opt_i64(pr::RPC_ERROR_CODE).map_err(re)?.is_none()
+                && p.opt_text(pr::RPC_ERROR_MESSAGE).map_err(re)?.is_none()
+                && p.opt_text(pr::RESPONSE_UNDECODABLE).map_err(re)?.is_none()
+            {
+                sent.push(adapter);
+            }
+        }
+    }
+    Ok((attempt.address(a::BUYER).map_err(re)?, sent))
 }
 
 /// Verifies the qualification record `bytes` against the evidence in `root`.
 pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
-    let r = decode(&lq::SCHEMA, bytes).map_err(|e| e.to_string())?;
+    // A v1 record names no G0.7 attempt: its acquisition verifies nothing.
+    let (r, v1) = match decode(&lq::SCHEMA, bytes) {
+        Ok(r) => (r, false),
+        Err(e2) => (decode(&lq::V1, bytes).map_err(|_| e2.to_string())?, true),
+    };
     let e = |x: darkbot_bsc_record::RecordError| x.0;
+    let pin = bsc_mainnet_v5_27_0();
     let mut view = LiveQualification::default();
+    let mut acquisition_buyer = None;
     for row in r.nested_all(lq::ITEMS).map_err(e)? {
         use lq::item as k;
         let id = row.text(k::ID).map_err(e)?;
-        verified_all(root, &row, k::EVIDENCE)?;
         match row.text(k::KIND).map_err(e)? {
             "VENUE" => {
                 let venue = VenueId::parse(id).ok_or(format!("unknown venue {id}"))?;
@@ -98,9 +246,13 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                 if view.venues.contains(&venue) {
                     return Err(format!("{id} is qualified twice"));
                 }
+                for f in verified_all(root, &row, k::EVIDENCE, Some(VENUE_EVIDENCE))? {
+                    freeze_binds(&f, &pin).map_err(|why| format!("{id}: {why}"))?;
+                }
                 view.venues.push(venue);
             }
             "SOURCE" => {
+                verified_all(root, &row, k::EVIDENCE, None)?;
                 let source = SourceId::parse(id).ok_or(format!("unknown source {id}"))?;
                 if view.sources.contains(&source) {
                     return Err(format!("{id} is qualified twice"));
@@ -118,7 +270,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         if view.adapters.contains(&adapter) {
             return Err(format!("{name} is qualified twice"));
         }
-        verified_all(root, &row, k::EVIDENCE)?;
+        verified_all(root, &row, k::EVIDENCE, None)?;
         let findings = row
             .texts(k::FINDINGS)
             .map_err(e)?
@@ -135,14 +287,18 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         view.adapters.push(adapter);
     }
     if let Some(row) = r.opt_nested(lq::ACQUISITION).map_err(e)? {
-        let result = verified_evidence(root, &row)?;
-        if result.schema().name != g08::result::SCHEMA.name {
-            return Err("the acquisition is not a G0.8 result".into());
+        let result = verified_evidence(root, &row, Some(ACQUISITION_EVIDENCE))?;
+        let attempt_ref = match v1 {
+            true => None,
+            false => r.opt_nested(lq::ACQUISITION_ATTEMPT).map_err(e)?,
         }
-        if result.text(g08::result::VERDICT).map_err(e)? != "PASS" {
-            return Err("the G0.8 result is not an acquisition PASS".into());
-        }
+        .ok_or("the acquisition names no G0.7 attempt: qualify again")?;
+        let attempt = verified_evidence(root, &attempt_ref, Some(ATTEMPT_EVIDENCE))?;
+        let attempt_sha256 = attempt_ref.b256(lq::evidence::SHA256).map_err(e)?;
+        let (buyer, sent) = acquisition_binds(&result, &attempt, attempt_sha256, &pin)?;
         view.acquisition = true;
+        view.acquisition_adapters = sent;
+        acquisition_buyer = Some(buyer);
     }
     if let Some(row) = r.opt_nested(lq::RISK).map_err(e)? {
         use lq::risk as k;
@@ -152,13 +308,14 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         {
             return Err("a risk decision names who decided what, and when".into());
         }
-        verified_all(root, &row, k::EVIDENCE)?;
+        verified_all(root, &row, k::EVIDENCE, None)?;
         view.risk_decision = true;
     }
     Ok(Verified {
         view,
         adapters,
         sha256: darkbot_bsc_record::sha256(bytes),
+        acquisition_buyer,
     })
 }
 
@@ -178,6 +335,7 @@ pub fn view(root: &Path) -> (Verified, Option<String>) {
         view: LiveQualification::default(),
         adapters: Vec::new(),
         sha256: [0; 32],
+        acquisition_buyer: None,
     };
     match load(root) {
         Ok(Some(v)) => (v, None),
@@ -192,8 +350,8 @@ pub struct Spec {
     pub venues: Vec<(VenueId, Vec<String>)>,
     pub sources: Vec<(SourceId, Vec<String>)>,
     pub adapters: Vec<(LiveAdapter, Vec<Finding>, Vec<String>)>,
-    /// The G0.8 result record.
-    pub acquisition: Option<String>,
+    /// The G0.8 result record and the G0.7 attempt record it rates.
+    pub acquisition: Option<(String, String)>,
     /// Who decided, when, what, and the evidence it rests on.
     pub risk: Option<(String, u64, String, Vec<String>)>,
 }
@@ -201,12 +359,15 @@ pub struct Spec {
 /// The qualification record of `spec`: each evidence path is read in
 /// `root`, its SHA-256 and schema bound; the result verifies as it is.
 pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
-    let evidence = |path: &str| -> Result<darkbot_bsc_record::Value, String> {
+    let evidence = |path: &str,
+                    allowed: Option<&[&'static Schema]>|
+     -> Result<darkbot_bsc_record::Value, String> {
         let bytes = fs::read(root.join(path)).map_err(|e| format!("evidence {path}: {e}"))?;
-        let schema = darkbot_bsc_record::schema::all()
+        let schema = allowed
+            .map_or_else(darkbot_bsc_record::schema::all, <[_]>::to_vec)
             .into_iter()
             .find(|s| decode(s, &bytes).is_ok())
-            .ok_or_else(|| format!("evidence {path} is no known record"))?;
+            .ok_or_else(|| format!("evidence {path} is no record this role takes"))?;
         let mut d = Draft::new(&lq::evidence::SCHEMA);
         d.set(lq::evidence::PATH, path)
             .set(
@@ -222,13 +383,17 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
     let items = spec
         .venues
         .iter()
-        .map(|(v, p)| ("VENUE", v.name(), p))
-        .chain(spec.sources.iter().map(|(s, p)| ("SOURCE", s.name(), p)));
-    for (kind, id, paths) in items {
+        .map(|(v, p)| ("VENUE", v.name(), p, Some(VENUE_EVIDENCE)))
+        .chain(
+            spec.sources
+                .iter()
+                .map(|(s, p)| ("SOURCE", s.name(), p, None)),
+        );
+    for (kind, id, paths, allowed) in items {
         let mut row = Draft::new(&lq::item::SCHEMA);
         row.set(lq::item::KIND, kind).set(lq::item::ID, id);
         for path in paths {
-            row.push(lq::item::EVIDENCE, evidence(path)?);
+            row.push(lq::item::EVIDENCE, evidence(path, allowed)?);
         }
         d.push(lq::ITEMS, row.into_nested());
     }
@@ -239,12 +404,19 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
             row.push(lq::adapter::FINDINGS, f.name());
         }
         for path in paths {
-            row.push(lq::adapter::EVIDENCE, evidence(path)?);
+            row.push(lq::adapter::EVIDENCE, evidence(path, None)?);
         }
         d.push(lq::ADAPTERS, row.into_nested());
     }
-    if let Some(path) = &spec.acquisition {
-        d.set(lq::ACQUISITION, evidence(path)?);
+    if let Some((result, attempt)) = &spec.acquisition {
+        d.set(
+            lq::ACQUISITION,
+            evidence(result, Some(ACQUISITION_EVIDENCE))?,
+        )
+        .set(
+            lq::ACQUISITION_ATTEMPT,
+            evidence(attempt, Some(ATTEMPT_EVIDENCE))?,
+        );
     }
     if let Some((by, at, statement, paths)) = &spec.risk {
         let mut row = Draft::new(&lq::risk::SCHEMA);
@@ -252,7 +424,7 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
             .set(lq::risk::DECIDED_UNIX_MS, *at)
             .set(lq::risk::STATEMENT, statement.as_str());
         for path in paths {
-            row.push(lq::risk::EVIDENCE, evidence(path)?);
+            row.push(lq::risk::EVIDENCE, evidence(path, None)?);
         }
         d.set(lq::RISK, row.into_nested());
     }
@@ -292,17 +464,126 @@ pub(crate) mod tests {
         d
     }
 
-    /// A root with a G0.8 result of `verdict` and one other evidence record.
+    /// The secret of the tests' synthetic buyer key (`live_end` key_file).
+    pub(crate) const BUYER_SECRET: [u8; 32] = [0x33; 32];
+
+    pub(crate) fn buyer() -> [u8; 20] {
+        darkbot_bsc_trading::signer::Signer::from_secret_bytes(&BUYER_SECRET)
+            .unwrap()
+            .address()
+            .into_array()
+    }
+
+    /// The G0.1 freeze of the pinned deployment.
+    pub(crate) fn freeze() -> Draft {
+        let pin = bsc_mainnet_v5_27_0();
+        let mut upgrade = filled(&ff::upgrade_check::SCHEMA);
+        upgrade
+            .set(ff::upgrade_check::STATUS, "ONE_IMPLEMENTATION")
+            .set(
+                ff::upgrade_check::LAST_IMPLEMENTATION,
+                Value::Address(pin.portal_implementation.into_array()),
+            );
+        let mut f = filled(&ff::V2);
+        f.set(ff::CHAIN_ID, pin.chain_id)
+            .set(ff::PORTAL, Value::Address(pin.portal.into_array()))
+            .set(ff::PORTAL_VERSION, pin.portal_version)
+            .set(ff::PIN_RECHECKED, true)
+            .set(ff::UPGRADE_CHECK, upgrade.into_nested());
+        f
+    }
+
+    /// A G0.7 attempt of the pinned deployment by `buyer`, sent through
+    /// `sent`.
+    pub(crate) fn attempt(buyer: [u8; 20], sent: &[LiveAdapter]) -> Draft {
+        use g06a::preflight as pf;
+        use g07::evidence as a;
+        let pin = bsc_mainnet_v5_27_0();
+        let mut preflight = filled(&pf::SCHEMA);
+        preflight
+            .set(pf::CHAIN_ID, pin.chain_id)
+            .set(pf::PORTAL, Value::Address(pin.portal.into_array()))
+            .set(pf::PORTAL_VERSION, pin.portal_version)
+            .set(
+                pf::PORTAL_IMPLEMENTATION,
+                Value::Address(pin.portal_implementation.into_array()),
+            )
+            .set(
+                pf::PORTAL_IMPLEMENTATION_CODE_SHA256,
+                Value::B256(pin.portal_implementation_runtime_sha256),
+            );
+        let mut send = filled(&a::send::SCHEMA);
+        for adapter in sent {
+            let mut r = filled(&g07::provider_result::SCHEMA);
+            r.set(g07::provider_result::BYTES_MAY_HAVE_LEFT, true)
+                .set(g07::provider_result::HTTP_STATUS_CODE, 200u64)
+                .set(g07::provider_result::RPC_RESULT_HASH, Value::B256([7; 32]));
+            let tag = match adapter {
+                LiveAdapter::Club48BuilderV1 => a::send::FORTYEIGHTCLUB,
+                LiveAdapter::BlockRazorBuilderV1 => a::send::BLOCKRAZOR,
+            };
+            send.set(tag, r.into_nested());
+        }
+        let mut g = filled(&a::SCHEMA);
+        g.set(a::GATE, "G0.7")
+            .set(a::ATTEMPT_ID, "attempt-1")
+            .set(a::CHAIN_ID, pin.chain_id)
+            .set(a::PORTAL, Value::Address(pin.portal.into_array()))
+            .set(a::BUYER, Value::Address(buyer))
+            .set(a::BUY_TX_HASH, Value::B256([5; 32]))
+            .set(a::TOKEN, Value::Address([6; 20]))
+            .set(a::PREFLIGHT, preflight.into_nested())
+            .set(a::SEND, send.into_nested());
+        g
+    }
+
+    /// The G0.8 result of `verdict` rating `attempt` (its bytes).
+    pub(crate) fn result(attempt: &[u8], verdict: &str) -> Draft {
+        use g08::result as r;
+        let a = decode(&g07::evidence::SCHEMA, attempt).unwrap();
+        let mut g = filled(&r::SCHEMA);
+        g.set(r::GATE, "G0.8")
+            .set(r::VERDICT, verdict)
+            .set(
+                r::G07_EVIDENCE_SHA256,
+                Value::B256(darkbot_bsc_record::sha256(attempt)),
+            )
+            .set(r::ATTEMPT_ID, "attempt-1")
+            .set(r::BUY_TX, Value::B256([5; 32]))
+            .set(r::TOKEN, Value::Address([6; 20]))
+            .set(
+                r::BUYER,
+                Value::Address(a.address(g07::evidence::BUYER).unwrap()),
+            );
+        g
+    }
+
+    /// A root with typed evidence: the freeze of the pinned deployment, a
+    /// G0.7 attempt of the tests' buyer sent through Club48 and its G0.8
+    /// result of `verdict`, and one record of no role (`measure`).
     pub(crate) fn fixture(tag: &str, verdict: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("bsc-live-q-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ev")).unwrap();
-        let mut g08 = filled(&g08::result::SCHEMA);
-        g08.set(g08::result::VERDICT, verdict);
-        fs::write(root.join("ev/g08.dbrec"), g08.encode().unwrap()).unwrap();
+        fs::write(root.join("ev/freeze.dbrec"), freeze().encode().unwrap()).unwrap();
+        let g07 = attempt(buyer(), &[LiveAdapter::Club48BuilderV1])
+            .encode()
+            .unwrap();
+        fs::write(root.join("ev/g07.dbrec"), &g07).unwrap();
+        let g08 = result(&g07, verdict).encode().unwrap();
+        fs::write(root.join("ev/g08.dbrec"), g08).unwrap();
         let other = filled(&darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot::SCHEMA);
         fs::write(root.join("ev/measure.dbrec"), other.encode().unwrap()).unwrap();
         root
+    }
+
+    /// The qualification spec of the fixture's evidence.
+    pub(crate) fn acquisition() -> Option<(String, String)> {
+        Some(("ev/g08.dbrec".into(), "ev/g07.dbrec".into()))
+    }
+
+    pub(crate) fn venue_evidence() -> Vec<String> {
+        vec!["ev/freeze.dbrec".into()]
     }
 
     fn findings() -> Vec<Finding> {
@@ -330,10 +611,10 @@ pub(crate) mod tests {
     fn spec() -> Spec {
         let ev = || vec!["ev/measure.dbrec".to_string()];
         Spec {
-            venues: vec![(VenueId::Flap, ev())],
+            venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, findings(), ev())],
-            acquisition: Some("ev/g08.dbrec".into()),
+            acquisition: acquisition(),
             risk: Some((
                 "operator".into(),
                 1,
@@ -359,9 +640,11 @@ pub(crate) mod tests {
                 sources: vec![SourceId::PublicNode],
                 adapters: vec![LiveAdapter::Club48BuilderV1],
                 acquisition: true,
+                acquisition_adapters: vec![LiveAdapter::Club48BuilderV1],
                 risk_decision: true,
             }
         );
+        assert_eq!(v.acquisition_buyer, Some(buyer()));
         assert_eq!(v.adapters.len(), 1);
         assert_eq!(v.adapters[0].id(), CapabilityId::Club48BuilderV1);
         assert!(v.adapters[0].send_time_established());
@@ -403,7 +686,7 @@ pub(crate) mod tests {
         // Four has no execution path; a path leaving the root; no author.
         let root2 = fixture("scope", "PASS");
         let mut four = spec();
-        four.venues = vec![(VenueId::FourClassic, vec!["ev/measure.dbrec".into()])];
+        four.venues = vec![(VenueId::FourClassic, venue_evidence())];
         assert!(
             build(&root2, &four, 1)
                 .unwrap_err()
@@ -427,13 +710,199 @@ pub(crate) mod tests {
                 .contains("without evidence")
         );
         let mut acquisition = spec();
-        acquisition.acquisition = Some("ev/measure.dbrec".into());
+        acquisition.acquisition = Some(("ev/measure.dbrec".into(), "ev/g07.dbrec".into()));
         assert!(
             build(&root2, &acquisition, 1)
                 .unwrap_err()
-                .contains("not a G0.8 result")
+                .contains("no record this role takes")
         );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(root2).unwrap();
+    }
+
+    /// A qualification naming `path` as the Flap venue's evidence, with the
+    /// schema name `declared`, hand-encoded (not through `build`).
+    fn hand_venue(root: &Path, path: &str, declared: &str) -> Vec<u8> {
+        let bytes = fs::read(root.join(path)).unwrap();
+        let mut ev = Draft::new(&lq::evidence::SCHEMA);
+        ev.set(lq::evidence::PATH, path)
+            .set(
+                lq::evidence::SHA256,
+                Value::B256(darkbot_bsc_record::sha256(&bytes)),
+            )
+            .set(lq::evidence::SCHEMA_NAME, declared);
+        let mut item = Draft::new(&lq::item::SCHEMA);
+        item.set(lq::item::KIND, "VENUE")
+            .set(lq::item::ID, VenueId::Flap.name())
+            .push(lq::item::EVIDENCE, ev.into_nested());
+        let mut d = Draft::new(&lq::SCHEMA);
+        d.set(lq::PROVENANCE_TOOL, "test")
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .push(lq::ITEMS, item.into_nested());
+        d.encode().unwrap()
+    }
+
+    /// BSC3-049: each role takes only its own records, bound to what it
+    /// qualifies: a venue the freeze of the pinned deployment, the
+    /// acquisition the G0.8 PASS of the G0.7 attempt it names, of that
+    /// deployment, its buyer and builders carried to the gate.
+    #[test]
+    fn each_role_takes_only_its_own_bound_records() {
+        let root = fixture("roles", "PASS");
+        // A correctly hashed record of no role as the venue's freeze, built
+        // or hand-encoded under its own or a borrowed schema name.
+        let mut venue = spec();
+        venue.venues = vec![(VenueId::Flap, vec!["ev/measure.dbrec".into()])];
+        assert!(
+            build(&root, &venue, 1)
+                .unwrap_err()
+                .contains("no record this role takes")
+        );
+        let slot = darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot::SCHEMA.name;
+        for (declared, why) in [
+            (slot, "not darkbot.g01.flap-freeze.v2"),
+            (ff::V2.name, "is not a"),
+        ] {
+            let e = verify(&root, &hand_venue(&root, "ev/measure.dbrec", declared)).unwrap_err();
+            assert!(e.contains(why), "{e}");
+        }
+        assert!(verify(&root, &hand_venue(&root, "ev/freeze.dbrec", ff::V2.name)).is_ok());
+        // A freeze of another version, a Portal that was upgraded, a pin
+        // not read again.
+        let freeze = || freeze();
+        let mut upgraded = filled(&ff::upgrade_check::SCHEMA);
+        upgraded.set(ff::upgrade_check::STATUS, "UPGRADED");
+        for f in [
+            {
+                let mut f = freeze();
+                f.set(ff::PORTAL_VERSION, "5.27.2");
+                f
+            },
+            {
+                let mut f = freeze();
+                f.set(ff::UPGRADE_CHECK, upgraded.into_nested());
+                f
+            },
+            {
+                let mut f = freeze();
+                f.set(ff::PIN_RECHECKED, false);
+                f
+            },
+        ] {
+            fs::write(root.join("ev/freeze.dbrec"), f.encode().unwrap()).unwrap();
+            let e = build(&root, &spec(), 1).unwrap_err();
+            assert!(e.contains("not of the pinned deployment"), "{e}");
+        }
+        fs::write(root.join("ev/freeze.dbrec"), freeze().encode().unwrap()).unwrap();
+        // A G0.8 PASS of another attempt (its bytes changed), of an attempt
+        // of another Portal version, or of a v1 record without the attempt.
+        let g07 = attempt(buyer(), &[LiveAdapter::Club48BuilderV1]);
+        let mut other = attempt([9; 20], &[LiveAdapter::Club48BuilderV1]);
+        other.set(g07::evidence::ATTEMPT_ID, "attempt-2");
+        fs::write(root.join("ev/g07.dbrec"), other.encode().unwrap()).unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains("does not rate this G0.7 attempt"), "{e}");
+        // The same attempt, buy, token and buyer, but other bytes (another
+        // builder claimed): only the G0.8 result's G0.7 hash tells.
+        let swapped = attempt(buyer(), &[LiveAdapter::BlockRazorBuilderV1]);
+        fs::write(root.join("ev/g07.dbrec"), swapped.encode().unwrap()).unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains("does not rate this G0.7 attempt"), "{e}");
+        let mut old = filled(&g06a::preflight::SCHEMA);
+        old.set(g06a::preflight::PORTAL_VERSION, "5.24.0");
+        let mut drifted = g07.clone();
+        drifted.set(g07::evidence::PREFLIGHT, old.into_nested());
+        let bytes = drifted.encode().unwrap();
+        fs::write(root.join("ev/g07.dbrec"), &bytes).unwrap();
+        fs::write(
+            root.join("ev/g08.dbrec"),
+            result(&bytes, "PASS").encode().unwrap(),
+        )
+        .unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains("not of the pinned deployment"), "{e}");
+        // Another buyer, sent through BlockRazor only: verified, carried to
+        // the LIVE end (buyer) and the gate (builders).
+        let theirs = attempt([9; 20], &[LiveAdapter::BlockRazorBuilderV1])
+            .encode()
+            .unwrap();
+        fs::write(root.join("ev/g07.dbrec"), &theirs).unwrap();
+        fs::write(
+            root.join("ev/g08.dbrec"),
+            result(&theirs, "PASS").encode().unwrap(),
+        )
+        .unwrap();
+        let v = verify(&root, &build(&root, &spec(), 1).unwrap()).unwrap();
+        assert_eq!(v.acquisition_buyer, Some([9; 20]));
+        assert_eq!(
+            v.view.acquisition_adapters,
+            [LiveAdapter::BlockRazorBuilderV1]
+        );
+        // Review M: a builder that refused, answered nothing a client can
+        // read or no result hash did not accept the attempt.
+        use g07::provider_result as pr;
+        for refused in [
+            (pr::HTTP_STATUS_CODE, Value::U64(401)),
+            (
+                pr::RESPONSE_UNDECODABLE,
+                Value::Text("401 Unauthorized".into()),
+            ),
+            (pr::RPC_ERROR_MESSAGE, Value::Text("bundle refused".into())),
+            (pr::ERROR, Value::Text("connection reset".into())),
+        ] {
+            let mut g = attempt([9; 20], &[LiveAdapter::BlockRazorBuilderV1]);
+            let mut r = filled(&pr::SCHEMA);
+            r.set(pr::BYTES_MAY_HAVE_LEFT, true)
+                .set(pr::HTTP_STATUS_CODE, 200u64)
+                .set(pr::RPC_RESULT_HASH, Value::B256([7; 32]))
+                .set(refused.0, refused.1);
+            let mut send = filled(&g07::evidence::send::SCHEMA);
+            send.set(g07::evidence::send::BLOCKRAZOR, r.into_nested());
+            g.set(g07::evidence::SEND, send.into_nested());
+            let bytes = g.encode().unwrap();
+            fs::write(root.join("ev/g07.dbrec"), &bytes).unwrap();
+            fs::write(
+                root.join("ev/g08.dbrec"),
+                result(&bytes, "PASS").encode().unwrap(),
+            )
+            .unwrap();
+            let v = verify(&root, &build(&root, &spec(), 1).unwrap()).unwrap();
+            assert!(v.view.acquisition_adapters.is_empty());
+        }
+        // Review L: the right G0.7 hash, but the G0.8 result names another
+        // buyer (or attempt, buy, token): no rating of this attempt.
+        let mine = attempt(buyer(), &[LiveAdapter::Club48BuilderV1])
+            .encode()
+            .unwrap();
+        fs::write(root.join("ev/g07.dbrec"), &mine).unwrap();
+        for (tag, value) in [
+            (g08::result::BUYER, Value::Address([9; 20])),
+            (g08::result::ATTEMPT_ID, Value::Text("attempt-2".into())),
+            (g08::result::BUY_TX, Value::B256([8; 32])),
+            (g08::result::TOKEN, Value::Address([8; 20])),
+        ] {
+            let mut g = result(&mine, "PASS");
+            g.set(tag, value);
+            fs::write(root.join("ev/g08.dbrec"), g.encode().unwrap()).unwrap();
+            let e = build(&root, &spec(), 1).unwrap_err();
+            assert!(e.contains("does not rate this G0.7 attempt"), "{e}");
+        }
+        let mut g08_ref = Draft::new(&lq::evidence::SCHEMA);
+        g08_ref
+            .set(lq::evidence::PATH, "ev/g08.dbrec")
+            .set(
+                lq::evidence::SHA256,
+                Value::B256(darkbot_bsc_record::sha256(
+                    &fs::read(root.join("ev/g08.dbrec")).unwrap(),
+                )),
+            )
+            .set(lq::evidence::SCHEMA_NAME, g08::result::SCHEMA.name);
+        let mut d = Draft::new(&lq::V1);
+        d.set(lq::PROVENANCE_TOOL, "test")
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(lq::ACQUISITION, g08_ref.into_nested());
+        let e = verify(&root, &d.encode().unwrap()).unwrap_err();
+        assert!(e.contains("names no G0.7 attempt"), "{e}");
+        fs::remove_dir_all(root).unwrap();
     }
 }

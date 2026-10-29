@@ -121,7 +121,7 @@ const MAINNET_PRESETS: &[OpenFourPreset] = &[
 
 /// BSC mainnet (chain 56) as frozen at block 129842711, its presets from
 /// the v3 freeze at block 129907738.
-pub fn bsc_mainnet_g01_129842711() -> FourDeployment {
+pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
     FourDeployment {
         chain_id: 56,
         token_manager2: address!("5c952063c7fc8610ffdb798152d69f0b9550762b"),

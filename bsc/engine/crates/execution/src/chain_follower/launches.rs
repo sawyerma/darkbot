@@ -97,10 +97,11 @@ pub struct BuyEvent {
 
 /// The Flap Portal (BSC).
 pub const FLAP_PORTAL: [u8; 20] = hex!("e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0");
-/// The Four.meme Classic TokenManager2 (BSC).
-pub const FOUR_TOKEN_MANAGER2: [u8; 20] = hex!("5c952063c7fc8610ffdb798152d69f0b9550762b");
-/// The Four.meme OpenFour Core (BSC).
-pub const OPENFOUR_CORE: [u8; 20] = hex!("ebe7b6c1089d9f72ad07f34e36d898e44e5e27f3");
+/// The Four.meme Classic TokenManager2 (BSC): the decoder's frozen
+/// deployment's, not a second definition (BSC3-019).
+pub const FOUR_TOKEN_MANAGER2: [u8; 20] = bsc_mainnet_g01_129842711().token_manager2.0.0;
+/// The Four.meme OpenFour Core (BSC), likewise.
+pub const OPENFOUR_CORE: [u8; 20] = bsc_mainnet_g01_129842711().openfour_core.0.0;
 
 /// The venues, in no particular order; a log matches at most one.
 pub const LAUNCH_EVENTS: [LaunchEvent; 3] = [

@@ -219,6 +219,13 @@ impl LiveEnd {
         wall_ms: Box<dyn Fn() -> u64 + Send>,
     ) -> Result<Self, String> {
         let grant = armed.grant().clone();
+        // BSC3-049: the acquisition proven is this key's.
+        if qualification.acquisition_buyer != Some(key.address()) {
+            return Err(format!(
+                "{}: the proven acquisition's buyer is not this key",
+                crate::sources::LIVE_ACQUISITION_UNPROVEN
+            ));
+        }
         let mut bindings = Vec::with_capacity(grant.adapters.len());
         let mut slots = Vec::with_capacity(grant.adapters.len());
         for (index, live) in grant.adapters.iter().enumerate() {
@@ -1000,6 +1007,7 @@ pub(crate) mod tests {
                     .unwrap(),
             ],
             sha256: [0; 32],
+            acquisition_buyer: Some(crate::live_qualification::tests::buyer()),
         }
     }
 
@@ -1012,7 +1020,7 @@ pub(crate) mod tests {
             .create(&keys)
             .unwrap();
         let path = keys.join("buyer.key");
-        let secret = [0x33u8; 32];
+        let secret = crate::live_qualification::tests::BUYER_SECRET;
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -1060,6 +1068,35 @@ pub(crate) mod tests {
         let mut cfg = config(2, 2);
         // The BUY, its approval and SELL, and one more BUY.
         cfg.strategy_lanes = 5;
+        // BSC3-049: an acquisition proven for another buyer arms nothing.
+        let foreign = Verified {
+            acquisition_buyer: Some([9; 20]),
+            ..q.clone()
+        };
+        let other = LiveKey::load(
+            &key_path,
+            Path::new("/nonexistent-repo"),
+            buyer,
+            &[],
+            &armed,
+        )
+        .unwrap();
+        let refused = LiveEnd::new(
+            other,
+            armed.clone(),
+            Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap(),
+            foreign,
+            LiveRoute::Loopback { port },
+            56,
+            cfg.capability_generation,
+            Box::new(move || now),
+        );
+        assert!(
+            refused
+                .err()
+                .unwrap()
+                .contains(crate::sources::LIVE_ACQUISITION_UNPROVEN)
+        );
         let end = LiveEnd::new(
             key,
             armed,

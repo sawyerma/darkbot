@@ -98,14 +98,80 @@ fn filled(s: &'static Schema) -> Draft {
     d
 }
 
-/// Synthetic evidence under `root`/`ev`: a G0.8 result of `verdict`, one
-/// measurement.
+/// The synthetic buyer key's secret ([`buyer_key`]).
+const BUYER_SECRET: [u8; 32] = [0x44; 32];
+
+/// Synthetic typed evidence under `root`/`ev` (BSC3-049): the G0.1 freeze
+/// of the pinned deployment, a G0.7 attempt of the synthetic buyer of that
+/// deployment sent through Club48, its G0.8 result of `verdict`, and one
+/// measurement of no particular role.
 fn write_evidence(root: &Path, ev: &str, verdict: &str) {
-    use darkbot_bsc_record::schema::{bsc_runtime, g08};
+    use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
+    use darkbot_bsc_record::schema::{bsc_runtime, g06a, g07, g08};
     fs::create_dir_all(root.join(ev)).unwrap();
     fs::create_dir_all(root.join("bsc/config")).unwrap();
+    let pin = bsc_mainnet_v5_27_0();
+    let portal = Value::Address(pin.portal.into_array());
+    let implementation = Value::Address(pin.portal_implementation.into_array());
+    let mut upgrade = filled(&ff::upgrade_check::SCHEMA);
+    upgrade
+        .set(ff::upgrade_check::STATUS, "ONE_IMPLEMENTATION")
+        .set(
+            ff::upgrade_check::LAST_IMPLEMENTATION,
+            implementation.clone(),
+        );
+    let mut f = filled(&ff::V2);
+    f.set(ff::CHAIN_ID, pin.chain_id)
+        .set(ff::PORTAL, portal.clone())
+        .set(ff::PORTAL_VERSION, pin.portal_version)
+        .set(ff::PIN_RECHECKED, true)
+        .set(ff::UPGRADE_CHECK, upgrade.into_nested());
+    fs::write(root.join(ev).join("freeze.dbrec"), f.encode().unwrap()).unwrap();
+    let buyer = Signer::from_secret_bytes(&BUYER_SECRET)
+        .unwrap()
+        .address()
+        .into_array();
+    let mut preflight = filled(&g06a::preflight::SCHEMA);
+    preflight
+        .set(g06a::preflight::CHAIN_ID, pin.chain_id)
+        .set(g06a::preflight::PORTAL, portal.clone())
+        .set(g06a::preflight::PORTAL_VERSION, pin.portal_version)
+        .set(g06a::preflight::PORTAL_IMPLEMENTATION, implementation)
+        .set(
+            g06a::preflight::PORTAL_IMPLEMENTATION_CODE_SHA256,
+            Value::B256(pin.portal_implementation_runtime_sha256),
+        );
+    let mut club48 = filled(&g07::provider_result::SCHEMA);
+    club48
+        .set(g07::provider_result::BYTES_MAY_HAVE_LEFT, true)
+        .set(g07::provider_result::HTTP_STATUS_CODE, 200u64)
+        .set(g07::provider_result::RPC_RESULT_HASH, Value::B256([7; 32]));
+    let mut send = filled(&g07::evidence::send::SCHEMA);
+    send.set(g07::evidence::send::FORTYEIGHTCLUB, club48.into_nested());
+    let mut attempt = filled(&g07::evidence::SCHEMA);
+    attempt
+        .set(g07::evidence::GATE, "G0.7")
+        .set(g07::evidence::ATTEMPT_ID, "synthetic-attempt")
+        .set(g07::evidence::CHAIN_ID, pin.chain_id)
+        .set(g07::evidence::PORTAL, portal)
+        .set(g07::evidence::BUYER, Value::Address(buyer))
+        .set(g07::evidence::BUY_TX_HASH, Value::B256([5; 32]))
+        .set(g07::evidence::TOKEN, Value::Address([6; 20]))
+        .set(g07::evidence::PREFLIGHT, preflight.into_nested())
+        .set(g07::evidence::SEND, send.into_nested());
+    let attempt = attempt.encode().unwrap();
+    fs::write(root.join(ev).join("g07.dbrec"), &attempt).unwrap();
     let mut g = filled(&g08::result::SCHEMA);
-    g.set(g08::result::VERDICT, verdict);
+    g.set(g08::result::GATE, "G0.8")
+        .set(g08::result::VERDICT, verdict)
+        .set(
+            g08::result::G07_EVIDENCE_SHA256,
+            Value::B256(darkbot_bsc_record::sha256(&attempt)),
+        )
+        .set(g08::result::ATTEMPT_ID, "synthetic-attempt")
+        .set(g08::result::BUY_TX, Value::B256([5; 32]))
+        .set(g08::result::TOKEN, Value::Address([6; 20]))
+        .set(g08::result::BUYER, Value::Address(buyer));
     fs::write(root.join(ev).join("g08.dbrec"), g.encode().unwrap()).unwrap();
     let m = filled(&bsc_runtime::buy_attempt_slot::SCHEMA);
     fs::write(root.join(ev).join("measure.dbrec"), m.encode().unwrap()).unwrap();
@@ -127,7 +193,7 @@ fn buyer_key(home: &Path) -> (PathBuf, [u8; 20]) {
         .create(&keys)
         .unwrap();
     let path = keys.join("buyer.key");
-    let secret = [0x44u8; 32];
+    let secret = BUYER_SECRET;
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -209,9 +275,9 @@ fn qualify(root: &Path) {
 fn qualify_in(root: &Path, ev: &str) {
     let measure = format!("{ev}/measure.dbrec");
     let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{measure}");
-    let venue = format!("BSC_VENUE_FLAP@{measure}");
+    let venue = format!("BSC_VENUE_FLAP@{ev}/freeze.dbrec");
     let source = format!("BSC_INGRESS_PUBLICNODE@{measure}");
-    let g08 = format!("{ev}/g08.dbrec");
+    let g08 = format!("{ev}/g08.dbrec@{ev}/g07.dbrec");
     let root_s = root.to_str().unwrap();
     let (code, out) = cli(&[
         "live",
@@ -998,7 +1064,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         "--adapter",
         &adapter,
         "--acquisition",
-        "ev/g08.dbrec",
+        "ev/g08.dbrec@ev/g07.dbrec",
     ]);
     assert!(
         code != 0 && out.contains("not an acquisition PASS"),
