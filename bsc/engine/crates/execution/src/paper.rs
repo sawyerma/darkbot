@@ -130,36 +130,13 @@ fn private(meta: &fs::Metadata) -> bool {
     meta.permissions().mode() & 0o077 == 0
 }
 
-/// The key's directory `dir`: owner-only, and no directory on its way
-/// (as written and as resolved) can be changed by another user: each
-/// belongs to the key directory's owner or root and is not writable by
-/// group or others unless sticky. Returns that owner: a process that opens
-/// a file inside an owner-only directory is its owner (or root).
+/// The key's directory `dir`: owner-only, no directory on its way
+/// changeable by another user ([`crate::sources::private_directory`]).
 fn key_directory(dir: &Path) -> Result<u32, IdentityError> {
-    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", dir.display()));
-    let real = fs::canonicalize(dir).map_err(io)?;
-    let meta = fs::metadata(&real).map_err(io)?;
-    if !meta.is_dir() || !private(&meta) {
-        return Err(IdentityError::Permissions(format!(
-            "{} is accessible to others",
-            dir.display()
-        )));
-    }
-    let owner = meta.uid();
-    for a in dir.ancestors().chain(real.ancestors()) {
-        // A link on the written path is the owner's or root's (its target
-        // is on the resolved path); a directory is checked itself.
-        let m = fs::symlink_metadata(a).map_err(io)?;
-        let others_write =
-            !m.file_type().is_symlink() && m.mode() & 0o022 != 0 && m.mode() & 0o1000 == 0;
-        if (m.uid() != owner && m.uid() != 0) || others_write {
-            return Err(IdentityError::Permissions(format!(
-                "{} can be changed by another user",
-                a.display()
-            )));
-        }
-    }
-    Ok(owner)
+    crate::sources::private_directory(dir).map_err(|r| match r {
+        crate::sources::DirRefusal::Io(e) => IdentityError::Io(e),
+        crate::sources::DirRefusal::Exposed(e) => IdentityError::Permissions(e),
+    })
 }
 
 /// The signer of the key file at `path`: absolute and outside `repo_root`,

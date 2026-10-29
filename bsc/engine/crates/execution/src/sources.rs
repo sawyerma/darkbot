@@ -33,7 +33,7 @@ use darkbot_bsc_record::schema::bsc_runtime::{source_mode_receipt as rc, source_
 use darkbot_bsc_record::{Draft, Record, decode};
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -674,6 +674,9 @@ impl Entity {
         match self {
             Entity::Switch(_) => matches!(mode, Mode::Disabled | Mode::Enabled),
             Entity::Runtime => matches!(mode, Mode::Off | Mode::Shadow | Mode::Paper | Mode::Live),
+            // A stored limit of any size still decodes (BSC3-004 review M1);
+            // a request above the campaign's is refused in `apply`, the
+            // limit in force is capped.
             Entity::BuyLimit => matches!(mode, Mode::PerDay(_)),
             Entity::BuyTotal => matches!(mode, Mode::PerDay(n) if n <= MAX_BUY_ATTEMPTS_TOTAL),
             Entity::LiveGrant => matches!(mode, Mode::Granted(_) | Mode::Disabled),
@@ -686,7 +689,7 @@ impl Entity {
         match self {
             Entity::Switch(_) => "DISABLED or ENABLED",
             Entity::Runtime => "OFF, SHADOW, PAPER or LIVE",
-            Entity::BuyLimit => "a whole number of BUY attempts per UTC day (0 = none)",
+            Entity::BuyLimit => "a whole number of BUY attempts per UTC day, at most 10 (0 = none)",
             Entity::BuyTotal => {
                 "a whole number of BUY attempts for the whole campaign, at most 10 (0 = none)"
             }
@@ -1139,7 +1142,8 @@ impl Generation {
     /// The daily BUY attempt limit in force.
     pub fn buy_attempts_per_day(&self) -> u32 {
         match self.buy_limit.effective {
-            Effective::PerDay(n) => n,
+            // BSC3-004: never more a day than the whole campaign may take.
+            Effective::PerDay(n) => n.min(MAX_BUY_ATTEMPTS_TOTAL),
             _ => 0,
         }
     }
@@ -1896,7 +1900,8 @@ pub struct Receipt {
     pub entity: Entity,
     pub requested: Mode,
     pub expected_generation: u64,
-    /// `APPLIED` or `REJECTED_STALE`.
+    /// `APPLIED`, `REJECTED_STALE`, or `UNRESOLVED` (its receipt lost and
+    /// the generation it would have written no longer kept).
     pub outcome: &'static str,
     pub generation: u64,
     pub effective: Effective,
@@ -1950,6 +1955,7 @@ impl Receipt {
         let outcome = match r.text(rc::OUTCOME).map_err(e)? {
             "APPLIED" => "APPLIED",
             "REJECTED_STALE" => "REJECTED_STALE",
+            "UNRESOLVED" => "UNRESOLVED",
             _ => return Err("unknown receipt outcome".into()),
         };
         // The effective mode as recorded then (its LIVE reason depended on
@@ -1974,6 +1980,8 @@ impl Receipt {
 /// The owner's state directory (`generations/`, `receipts/`).
 pub struct Store {
     dir: PathBuf,
+    /// The owner of its directories (BSC3-003): every file read is theirs.
+    owner: u32,
     /// Generations kept besides the current one (older ones are pruned).
     keep: u64,
     /// The host boot session every write is stamped with.
@@ -2012,6 +2020,83 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let _ = fs::remove_file(&tmp);
     written?;
     fs::File::open(dir)?.sync_all()
+}
+
+/// Why a directory or file of a private store is refused.
+#[derive(Debug)]
+pub(crate) enum DirRefusal {
+    Io(String),
+    /// Another user can read or change it.
+    Exposed(String),
+}
+
+impl std::fmt::Display for DirRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DirRefusal::Io(e) | DirRefusal::Exposed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// `dir` is owner-only and no directory on its way (as written and as
+/// resolved) can be changed by another user: each belongs to `dir`'s owner
+/// or root and is not writable by group or others unless sticky; a link on
+/// the written path is the owner's or root's (its target is on the
+/// resolved path). Returns that owner: a process that opens a file inside
+/// an owner-only directory is its owner (or root). BSC3-003/067.
+pub(crate) fn private_directory(dir: &Path) -> Result<u32, DirRefusal> {
+    let io = |e: std::io::Error| DirRefusal::Io(format!("{}: {e}", dir.display()));
+    let real = fs::canonicalize(dir).map_err(io)?;
+    let meta = fs::metadata(&real).map_err(io)?;
+    if !meta.is_dir() || meta.mode() & 0o077 != 0 {
+        return Err(DirRefusal::Exposed(format!(
+            "{} is accessible to others",
+            dir.display()
+        )));
+    }
+    let owner = meta.uid();
+    for a in dir
+        .ancestors()
+        .chain(real.ancestors())
+        .filter(|a| !a.as_os_str().is_empty())
+    {
+        let m = fs::symlink_metadata(a).map_err(io)?;
+        let others_write =
+            !m.file_type().is_symlink() && m.mode() & 0o022 != 0 && m.mode() & 0o1000 == 0;
+        if (m.uid() != owner && m.uid() != 0) || others_write {
+            return Err(DirRefusal::Exposed(format!(
+                "{} can be changed by another user",
+                a.display()
+            )));
+        }
+    }
+    Ok(owner)
+}
+
+/// The bytes of the store file `path` whose directory belongs to `owner`:
+/// the name checked (a regular file, no link), the file opened once and
+/// checked on its descriptor (the same inode, `owner`'s, writable by no
+/// one else). Its link count is not: [`write_new`] publishes by a second
+/// name for a moment, and no other user can link into an owner-only
+/// directory. BSC3-003.
+pub(crate) fn read_private(path: &Path, owner: u32) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let named = fs::symlink_metadata(path)?;
+    let mut file = fs::File::open(path)?;
+    let opened = file.metadata()?;
+    if !named.is_file()
+        || (opened.dev(), opened.ino()) != (named.dev(), named.ino())
+        || opened.uid() != owner
+        || opened.mode() & 0o022 != 0
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::PermissionDenied,
+            "not a private file of the store's owner",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Creates `d` (0700) unless it exists; a new directory is made durable in
@@ -2128,18 +2213,32 @@ pub fn canonical_state_dir() -> Result<PathBuf, String> {
 
 /// The generation on file in `dir` without creating anything: the initial
 /// one (everything DISABLED) when there is none.
+/// The owner of `dir`'s `generations`: a real, owner-only directory
+/// (BSC3-003; the way to it is checked when a store opens and before a
+/// switch is required).
+fn generations_owner(dir: &Path) -> Result<u32, String> {
+    let m = fs::symlink_metadata(dir.join("generations")).map_err(|e| e.to_string())?;
+    if !m.is_dir() || m.mode() & 0o077 != 0 {
+        return Err("generations is not a private real directory".into());
+    }
+    Ok(m.uid())
+}
+
 pub fn current_generation(dir: &Path) -> Result<Generation, String> {
     match fs::symlink_metadata(dir.join("generations")) {
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Generation::initial()),
         Err(e) => return Err(e.to_string()),
-        Ok(m) if !m.is_dir() => return Err("generations is not a real directory".into()),
         Ok(_) => {}
     }
+    let owner = generations_owner(dir)?;
     match highest_generation(dir)? {
         None => Ok(Generation::initial()),
         Some(n) => {
-            let bytes = fs::read(dir.join("generations").join(format!("{n:020}.dbrec")))
-                .map_err(|e| e.to_string())?;
+            let bytes = read_private(
+                &dir.join("generations").join(format!("{n:020}.dbrec")),
+                owner,
+            )
+            .map_err(|e| e.to_string())?;
             let g = Generation::decode(&bytes)?;
             if g.generation != n {
                 return Err(format!(
@@ -2157,6 +2256,12 @@ pub fn current_generation(dir: &Path) -> Result<Generation, String> {
 /// generation checked. A missing, unreadable or foreign state refuses: every
 /// switch is DISABLED then.
 pub fn require_enabled(dir: &Path, boot: &str, needed: &[SwitchId]) -> Result<u64, String> {
+    // BSC3-003: the state of a store another user can change counts nothing
+    // (a missing one is everything DISABLED below).
+    if dir.join("generations").exists() {
+        private_directory(&dir.join("generations"))
+            .map_err(|e| format!("CONTROL_STATE_UNREADABLE: {e}; every switch DISABLED"))?;
+    }
     let g = current_generation(dir)
         .map_err(|e| format!("CONTROL_STATE_UNREADABLE: {e}; every switch DISABLED"))?;
     let off: Vec<String> = needed
@@ -2364,6 +2469,84 @@ fn total_slots(dir: &Path) -> Result<Vec<(u64, Option<String>, u64)>, String> {
         out.push((slot, attempt, grant));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Runs between a slot's limit read and its write (BSC3-004 test).
+    static BEFORE_SLOT_WRITE: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn before_slot_write() {
+    #[cfg(test)]
+    BEFORE_SLOT_WRITE.with(|h| {
+        if let Some(h) = h.borrow().as_ref() {
+            h();
+        }
+    });
+}
+
+/// The daily slot `attempt_id` holds on any UTC day (BSC3-004: an attempt
+/// tried again after midnight is the same attempt, never a second daily
+/// slot).
+fn daily_slot_of(dir: &Path, attempt_id: &str) -> Result<Option<(BuyDay, u64)>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
+    let days = match fs::read_dir(dir.join("buy-attempts")) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("buy attempts unreadable: {e}")),
+    };
+    for day in days {
+        let day = day.map_err(|e| e.to_string())?.path();
+        // Review L4: a stray file (e.g. `.DS_Store`) is no day.
+        if !day.is_dir() {
+            continue;
+        }
+        for (slot, attempt) in buy_slots(&day)? {
+            if attempt.as_deref() != Some(attempt_id) {
+                continue;
+            }
+            let r = fs::read(day.join(format!("{slot:010}.dbrec")))
+                .map_err(|e| e.to_string())
+                .and_then(|b| decode(&bs::SCHEMA, &b).map_err(|e| e.to_string()))?;
+            let e = |x: darkbot_bsc_record::RecordError| x.0;
+            return Ok(Some((
+                BuyDay {
+                    index: r.u64(bs::DAY_INDEX).map_err(e)?,
+                    utc: r.text(bs::DAY_UTC).map_err(e)?.to_string(),
+                },
+                slot,
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// The latest time a campaign slot was taken at (BSC3-004: slots are taken
+/// on a forward clock only).
+fn latest_slot_ms(dir: &Path) -> Result<Option<u64>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_total_slot as ts;
+    let entries = match fs::read_dir(total_dir(dir)) {
+        Ok(e) => e,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("total BUY attempts unreadable: {e}")),
+    };
+    let mut latest = None;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
+            continue;
+        }
+        if let Some(t) = fs::read(entry.path())
+            .ok()
+            .and_then(|b| decode(&ts::SCHEMA, &b).ok())
+            .and_then(|r| r.u64(ts::PROVENANCE_OBSERVED_UNIX_MS).ok())
+        {
+            latest = latest.max(Some(t));
+        }
+    }
+    Ok(latest)
 }
 
 /// The campaign's BUY attempts against the total limit in force, read-only.
@@ -2644,13 +2827,27 @@ impl Store {
         boot: Result<String, String>,
     ) -> Result<Self, String> {
         let dir = dir.into();
+        let mut owner = None;
         for d in [dir.clone(), dir.join("generations"), dir.join("receipts")] {
             create_durable_dir(&d)?;
             if !fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir()) {
                 return Err(format!("{} is not a real directory", d.display()));
             }
+            // BSC3-003: an existing directory is taken only owner-only, of
+            // one owner, on a way no other user can change.
+            let o = private_directory(&d).map_err(|r| r.to_string())?;
+            if owner.is_some_and(|x| x != o) {
+                return Err(format!("{} has another owner", d.display()));
+            }
+            owner = Some(o);
         }
-        Ok(Store { dir, keep, boot })
+        let owner = owner.ok_or("no store directory")?;
+        Ok(Store {
+            dir,
+            owner,
+            keep,
+            boot,
+        })
     }
 
     fn generation_path(&self, n: u64) -> PathBuf {
@@ -2742,6 +2939,15 @@ impl Store {
         grant_generation: u64,
         now_ms: u64,
     ) -> Result<(BuySlot, TotalSlot), String> {
+        // BSC3-004: a clock set back takes no slot (its day would be one
+        // already counted, or a day before the campaign's last attempt).
+        if let Some(latest) = latest_slot_ms(&self.dir)?
+            && now_ms < latest
+        {
+            return Err(format!(
+                "BUY_ATTEMPT_CLOCK_BEHIND: now {now_ms} ms is before the last BUY attempt at {latest} ms"
+            ));
+        }
         let day = self.consume_daily(attempt_id, now_ms)?;
         let total = self.consume_total(attempt_id, grant_generation, now_ms)?;
         Ok((day, total))
@@ -2929,6 +3135,11 @@ impl Store {
             .iter()
             .find(|(_, a, _)| a.as_deref() == Some(attempt_id))
         {
+            if *slot >= u64::from(limit) {
+                return Err(format!(
+                    "BUY_ATTEMPT_TOTAL_REACHED: slot {slot} is beyond the limit {limit}"
+                ));
+            }
             return Ok(TotalSlot { slot: *slot, limit });
         }
         for slot in 0..u64::from(limit) {
@@ -2945,7 +3156,15 @@ impl Store {
                 &total_dir(&self.dir).join(format!("{slot:010}.dbrec")),
                 &bytes,
             ) {
-                Ok(()) => return Ok(TotalSlot { slot, limit }),
+                Ok(()) => {
+                    let now = self.current()?.buy_attempts_total();
+                    if slot >= u64::from(now) {
+                        return Err(format!(
+                            "BUY_ATTEMPT_TOTAL_REACHED: slot {slot} taken while the limit fell to {now}"
+                        ));
+                    }
+                    return Ok(TotalSlot { slot, limit });
+                }
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(format!("total buy attempt slot not written: {e}")),
             }
@@ -2976,14 +3195,17 @@ impl Store {
         for d in [self.dir.join("buy-attempts"), day_dir.clone()] {
             create_durable_dir(&d)?;
         }
-        let taken = buy_slots(&day_dir)?;
-        if let Some((slot, _)) = taken.iter().find(|(_, a)| a.as_deref() == Some(attempt_id)) {
-            return Ok(BuySlot {
-                day,
-                slot: *slot,
-                limit,
-            });
+        if let Some((day, slot)) = daily_slot_of(&self.dir, attempt_id)? {
+            // Review M2: a retry finds its slot, within the limit in force.
+            if slot >= u64::from(limit) {
+                return Err(format!(
+                    "BUY_ATTEMPT_LIMIT_REACHED: slot {slot} of {} is beyond the limit {limit}",
+                    day.utc
+                ));
+            }
+            return Ok(BuySlot { day, slot, limit });
         }
+        let taken = buy_slots(&day_dir)?;
         for slot in 0..u64::from(limit) {
             let mut d = Draft::new(&bs::SCHEMA);
             d.set(bs::ATTEMPT_ID, attempt_id)
@@ -2995,8 +3217,19 @@ impl Store {
                 .set(bs::PROVENANCE_TOOL, "bsc_runtime")
                 .set(bs::PROVENANCE_OBSERVED_UNIX_MS, now_ms);
             let bytes = d.encode().map_err(|e| e.to_string())?;
+            before_slot_write();
             match write_new(&day_dir.join(format!("{slot:010}.dbrec")), &bytes) {
-                Ok(()) => return Ok(BuySlot { day, slot, limit }),
+                Ok(()) => {
+                    // BSC3-004: a limit lowered meanwhile holds; the slot
+                    // stays taken (counted, never given back).
+                    let now = self.current()?.buy_attempts_per_day();
+                    if slot >= u64::from(now) {
+                        return Err(format!(
+                            "BUY_ATTEMPT_LIMIT_REACHED: slot {slot} taken while the limit fell to {now}"
+                        ));
+                    }
+                    return Ok(BuySlot { day, slot, limit });
+                }
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(format!("buy attempt slot not written: {e}")),
             }
@@ -3076,7 +3309,10 @@ impl Store {
         if !safe_id(request_id) {
             return Err("the request ID is not a safe identifier".into());
         }
-        if !entity.accepts(requested) {
+        if !entity.accepts(requested)
+            || (entity == Entity::BuyLimit
+                && matches!(requested, Mode::PerDay(n) if n > MAX_BUY_ATTEMPTS_TOTAL))
+        {
             return Err(format!("{} takes {}", entity.name(), entity.modes()));
         }
         let receipt_path = self
@@ -3088,7 +3324,7 @@ impl Store {
                 && r.requested == requested
                 && r.expected_generation == expected_generation
         };
-        match fs::read(&receipt_path) {
+        match read_private(&receipt_path, self.owner) {
             Ok(bytes) => {
                 let r = Receipt::decode(&bytes)?;
                 return if same(&r) {
@@ -3117,6 +3353,27 @@ impl Store {
                 return Err("the request ID already belongs to another request".into());
             }
             receipt.outcome = "APPLIED";
+        } else if expected_generation < current.generation {
+            // BSC3-006: later requests moved the generation on since; the
+            // generation this request would have written tells whether it
+            // did (its receipt lost), else another request took it. One no
+            // longer kept tells nothing: UNRESOLVED, never a guess.
+            let path = self.generation_path(expected_generation.saturating_add(1));
+            match read_private(&path, self.owner) {
+                Ok(bytes) => {
+                    let then = Generation::decode(&bytes)?;
+                    if then.request_id.as_deref() == Some(request_id) {
+                        if !then.applied(request_id, entity, requested) {
+                            return Err("the request ID already belongs to another request".into());
+                        }
+                        receipt.outcome = "APPLIED";
+                        receipt.generation = then.generation;
+                        receipt.effective = then.effective_of(entity);
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::NotFound => receipt.outcome = "UNRESOLVED",
+                Err(e) => return Err(format!("{}: {e}", path.display())),
+            }
         } else if current.generation == expected_generation {
             let boot = self.boot()?.to_string();
             let mut next = current.clone();
@@ -3166,7 +3423,9 @@ impl Store {
             Ok(()) => {}
             // A concurrent identical request wrote it first: its receipt counts.
             Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                let r = Receipt::decode(&fs::read(&receipt_path).map_err(|e| e.to_string())?)?;
+                let r = Receipt::decode(
+                    &read_private(&receipt_path, self.owner).map_err(|e| e.to_string())?,
+                )?;
                 return if same(&r) {
                     Ok(r)
                 } else {
@@ -3233,7 +3492,7 @@ pub fn current_record_and_generation(
         return Ok(None);
     };
     let path = dir.join("generations").join(format!("{n:020}.dbrec"));
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let bytes = read_private(&path, generations_owner(dir)?).map_err(|e| e.to_string())?;
     let g = Generation::decode(&bytes)?;
     if g.generation != n {
         return Err(format!("generation file {n} holds another generation"));
@@ -3592,6 +3851,114 @@ pub(crate) mod tests {
         fs::remove_file(dir.join("receipts/x.dbrec")).unwrap();
         let r = s.request("x", SourceId::Geth, Mode::Shadow, 0, 2).unwrap();
         assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-003: the owner's state is taken only from owner-only directories
+    /// on a way no other user can change, and its files only as private
+    /// files of that owner read through their own name.
+    #[test]
+    fn an_exposed_or_linked_store_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("bsc-store-exposed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&base)
+            .unwrap();
+        let dir = base.join("bsc-sources");
+        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        s.request("a", SwitchId::Sign, Mode::Enabled, 0, 1).unwrap();
+        assert_eq!(require_enabled(&dir, "boot-1", &[SwitchId::Sign]), Ok(1));
+        let mode =
+            |p: &Path, m: u32| fs::set_permissions(p, fs::Permissions::from_mode(m)).unwrap();
+        // An existing directory others may read, or a way others may change:
+        // no store opens on it; a switch is required only from state no
+        // other user can change.
+        for (p, m, required) in [
+            (dir.clone(), 0o755, true),
+            (dir.join("generations"), 0o750, false),
+            (base.clone(), 0o777, false),
+        ] {
+            mode(&p, m);
+            let e = Store::open_in_session(&dir, 8, Ok("boot-1".into()))
+                .err()
+                .unwrap();
+            assert!(
+                e.contains("accessible to others") || e.contains("changed by another user"),
+                "{e}"
+            );
+            let r = require_enabled(&dir, "boot-1", &[SwitchId::Sign]);
+            match required {
+                true => assert_eq!(r, Ok(1)),
+                false => assert!(r.unwrap_err().contains("CONTROL_STATE_UNREADABLE")),
+            }
+            mode(&p, 0o700);
+        }
+        mode(&base, 0o1777);
+        assert!(Store::open_in_session(&dir, 8, Ok("boot-1".into())).is_ok());
+        mode(&base, 0o700);
+        // The current generation writable by others, or a link to another file.
+        let current = s.generation_path(1);
+        mode(&current, 0o666);
+        assert!(s.current().unwrap_err().contains("not a private file"));
+        mode(&current, 0o600);
+        let elsewhere = base.join("elsewhere.dbrec");
+        fs::copy(&current, &elsewhere).unwrap();
+        fs::remove_file(&current).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &current).unwrap();
+        assert!(s.current().unwrap_err().contains("not a private file"));
+        assert!(current_record_and_generation(&dir).is_err());
+        fs::remove_file(&current).unwrap();
+        fs::rename(&elsewhere, &current).unwrap();
+        assert_eq!(s.current().unwrap().generation, 1);
+        // A receipt that is a link: no answer from it.
+        let receipt = dir.join("receipts/a.dbrec");
+        let copy = base.join("receipt.dbrec");
+        fs::copy(&receipt, &copy).unwrap();
+        fs::remove_file(&receipt).unwrap();
+        std::os::unix::fs::symlink(&copy, &receipt).unwrap();
+        assert!(s.request("a", SwitchId::Sign, Mode::Enabled, 0, 2).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    /// BSC3-006: a lost receipt is recovered from the generation its request
+    /// wrote, also after later requests moved the generation on; another
+    /// payload under its ID is refused; a request that met a generation no
+    /// longer kept is UNRESOLVED, a stale one REJECTED_STALE.
+    #[test]
+    fn a_lost_receipt_is_recovered_after_later_generations() {
+        let (dir, s) = store("crash-later");
+        s.request("a", SourceId::Geth, Mode::Shadow, 0, 1).unwrap();
+        fs::remove_file(dir.join("receipts/a.dbrec")).unwrap();
+        s.request("b", SourceId::Drpc, Mode::Shadow, 1, 2).unwrap();
+        let r = s.request("a", SourceId::Geth, Mode::Shadow, 0, 3).unwrap();
+        assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
+        assert_eq!(r.effective, Effective::Shadow);
+        // The same again: its receipt now.
+        assert_eq!(
+            s.request("a", SourceId::Geth, Mode::Shadow, 0, 4).unwrap(),
+            r
+        );
+        // Another payload under a lost receipt's ID is no recovery.
+        s.request("c", SourceId::Geth, Mode::Off, 2, 5).unwrap();
+        fs::remove_file(dir.join("receipts/c.dbrec")).unwrap();
+        s.request("d", SourceId::Drpc, Mode::Off, 3, 6).unwrap();
+        assert!(
+            s.request("c", SourceId::Geth, Mode::Shadow, 2, 7)
+                .unwrap_err()
+                .contains("another request")
+        );
+        // A request that met generation 1 but never wrote: stale.
+        let stale = s.request("e", SourceId::Geth, Mode::Off, 1, 8).unwrap();
+        assert_eq!(stale.outcome, "REJECTED_STALE");
+        // The generation it would have written no longer kept: unresolved.
+        fs::remove_file(s.generation_path(1)).unwrap();
+        fs::remove_file(dir.join("receipts/a.dbrec")).unwrap();
+        let unknown = s.request("a", SourceId::Geth, Mode::Shadow, 0, 9).unwrap();
+        assert_eq!(unknown.outcome, "UNRESOLVED");
+        assert!(!unknown.applied());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -4102,6 +4469,69 @@ pub(crate) mod tests {
         assert_eq!((usage.used, usage.limit, usage.remaining()), (2, 1, 0));
         assert!(again.consume_buy_attempt("a4", now + 10).is_err());
         assert!(s.consume_buy_attempt("../x", now).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-004: a day never allows more than the campaign; a clock set back
+    /// takes no slot; an attempt tried again after midnight UTC is the same
+    /// attempt (no second daily slot); a limit lowered between its read and
+    /// the slot's write holds.
+    #[test]
+    fn the_daily_limit_holds_across_days_clocks_and_changes() {
+        const DAY: u64 = 86_400_000;
+        let (dir, s) = session("buy-days", "boot-1");
+        assert!(
+            s.request("bl-11", Entity::BuyLimit, Mode::PerDay(11), 0, 1)
+                .is_err()
+        );
+        s.request("bt", Entity::BuyTotal, Mode::PerDay(10), 0, 1)
+            .unwrap();
+        s.request("bl", Entity::BuyLimit, Mode::PerDay(10), 1, 1)
+            .unwrap();
+        let (day1, _) = s.consume_attempt("a", 0, DAY + 5).unwrap();
+        // The same attempt after midnight: its slot of the first day.
+        let (again, total) = s.consume_attempt("a", 0, 2 * DAY + 5).unwrap();
+        assert_eq!((again.day, again.slot), (day1.day.clone(), day1.slot));
+        assert_eq!(total.slot, 0);
+        assert_eq!(buy_usage(&dir, 2 * DAY + 5).unwrap().used, 0);
+        // A clock set back before the last attempt: refused, nothing taken.
+        let e = s.consume_attempt("b", 0, DAY + 4).unwrap_err();
+        assert!(e.contains("BUY_ATTEMPT_CLOCK_BEHIND"), "{e}");
+        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        // The daily limit lowered to 1 after it was read for "c": c's slot
+        // 1 is taken (counted) but refused.
+        let g = s.current().unwrap().generation;
+        let at = dir.clone();
+        let lower = move || {
+            let owner = Store::open_in_session(&at, 8, Ok("boot-1".into())).unwrap();
+            owner
+                .request("bl-1", Entity::BuyLimit, Mode::PerDay(1), g, DAY + 6)
+                .unwrap();
+        };
+        BEFORE_SLOT_WRITE.with(|h| *h.borrow_mut() = Some(Box::new(lower)));
+        let e = s.consume_attempt("c", 0, DAY + 7).unwrap_err();
+        BEFORE_SLOT_WRITE.with(|h| *h.borrow_mut() = None);
+        assert!(e.contains("limit fell to 1"), "{e}");
+        assert_eq!(buy_usage(&dir, DAY + 7).unwrap().used, 2);
+        // Review M2: tried again, its slot is still beyond the limit.
+        let e = s.consume_attempt("c", 0, DAY + 8).unwrap_err();
+        assert!(e.contains("beyond the limit"), "{e}");
+        // Review M1: a daily limit stored above the campaign's (an older
+        // build took any) still decodes; the limit in force is capped.
+        let mut stored = s.current().unwrap();
+        stored.set(
+            Entity::BuyLimit,
+            Mode::PerDay(20),
+            SetBy {
+                request_id: "old".into(),
+                generation: stored.generation,
+            },
+        );
+        let back = Generation::decode(&stored.encode(1).unwrap()).unwrap();
+        assert_eq!(back.buy_attempts_per_day(), MAX_BUY_ATTEMPTS_TOTAL);
+        // Review L4: a stray file among the days blocks nothing.
+        fs::write(dir.join("buy-attempts/.DS_Store"), b"x").unwrap();
+        assert!(s.consume_attempt("a", 0, DAY + 9).is_ok());
         fs::remove_dir_all(dir).unwrap();
     }
 
