@@ -47,6 +47,16 @@ jobs:
           npm ci --prefix evm-audit-tools
       - name: cargo regression, all features (bsc_tools runs the seven tool tests)
         run: cargo test --locked --no-fail-fast --workspace --all-features
+      # BSC3-054: the canonical -> Strategy C -> executor -> sink -> journal
+      # test holds its 1 ms transport start limit in an optimized build only
+      # (ignored in the debug run above): it runs here, exactly it, and must pass.
+      - name: the release-only journal end-to-end test ran and passed
+        run: |
+          cargo test --locked --release --all-features -p darkbot-bsc-execution --lib \
+            runtime::exec::tests::a_runtime_pass_reaches_the_sink_and_the_journal \
+            -- --include-ignored --exact 2>&1 | tee ../release_e2e.txt
+          grep -F "test result: ok. 1 passed; 0 failed" ../release_e2e.txt \
+            || { echo "::error::the release journal end-to-end test did not run and pass"; exit 1; }
       - name: the seven tool tests ran, each with its fixed count
         run: |
           cargo test --locked --all-features -p darkbot-bsc-execution --test bsc_tools -- --nocapture 2>&1 | tee ../tools.txt
