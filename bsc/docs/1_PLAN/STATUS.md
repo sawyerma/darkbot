@@ -39,9 +39,17 @@
 | BSC3-022 | FIX_VERIFIED | `f9c0154d` | – |
 | BSC3-052 | FIX_VERIFIED | `f9c0154d` | – |
 | BSC3-070 | FIX_VERIFIED | `f9c0154d` | – |
-| BSC3-014 | FIX_VERIFIED | dieser Commit | – |
-| BSC3-038 | FIX_VERIFIED | dieser Commit | – |
-| BSC3-043 | FIX_VERIFIED (eigene LIVE-Latenz ingress→handoff, nur C3) | dieser Commit | reales T_send/Inklusion erst mit G0.7 |
+| BSC3-014 | FIX_VERIFIED | `e010e625` | – |
+| BSC3-038 | FIX_VERIFIED | `e010e625` | – |
+| BSC3-043 | FIX_VERIFIED (eigene LIVE-Latenz ingress→handoff, nur C3) | `e010e625` | reales T_send/Inklusion erst mit G0.7 |
+| BSC3-016 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-010 | WIDERLEGT (Widerruf vor Dispatch: live_end-Test) | – | – |
+| BSC3-017 | KEIN FIX (Wartungsumfang; zertifizierte Stacks bleiben) | – | – |
+| BSC3-028 | WIDERLEGT (Pin fail-closed) | – | Refreeze → BSC3-065 |
+| BSC3-034 | WIDERLEGT | – | – |
+| BSC3-044 | WIDERLEGT (nur Benennung) | – | – |
+| BSC3-059 | WIDERLEGT (kein Planverstoß) | – | Grant-Höchstdauer: Betreiberentscheidung |
+| BSC3-060 | KEIN FEHLER | – | – |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

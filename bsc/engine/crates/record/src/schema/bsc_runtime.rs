@@ -1501,11 +1501,15 @@ pub mod runtime_status {
     pub const STRATEGY: u16 = 16;
     /// Present while a LIVE path is configured (plan 28.10.).
     pub const LIVE: u16 = 17;
+    /// v22 (BSC3-016): the last G0.4 census refresh (`OK` or why it
+    /// failed) and when the last one was written.
+    pub const CENSUS_STATE: u16 = 18;
+    pub const CENSUS_WRITTEN_UNIX_MS: u16 = 19;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 21,
+        schema_version: 22,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -1533,6 +1537,8 @@ pub mod runtime_status {
             Field::nested(CAPTURE, "capture", Presence::Optional, &capture::SCHEMA),
             Field::nested(STRATEGY, "strategy", Presence::Optional, &strategy::SCHEMA),
             Field::nested(LIVE, "live", Presence::Optional, &live::SCHEMA),
+            Field::opt(CENSUS_STATE, "census_state", Text),
+            Field::opt(CENSUS_WRITTEN_UNIX_MS, "census_written_unix_ms", U64),
         ],
     };
 }

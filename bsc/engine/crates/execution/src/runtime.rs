@@ -1597,6 +1597,28 @@ pub fn write_census(
     Ok(census)
 }
 
+/// The last G0.4 census refresh of this run (BSC3-016): `OK` or why it
+/// failed, and when the last one was written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CensusRefresh {
+    state: Option<String>,
+    written_unix_ms: Option<u64>,
+}
+
+impl CensusRefresh {
+    /// The census thread's end: its result, or that it panicked.
+    fn ended(&mut self, joined: std::thread::Result<Result<u64, String>>) {
+        match joined {
+            Ok(Ok(ms)) => {
+                self.state = Some("OK".into());
+                self.written_unix_ms = Some(ms);
+            }
+            Ok(Err(e)) => self.state = Some(format!("FAILED: {e}")),
+            Err(_) => self.state = Some("FAILED: the census thread panicked".into()),
+        }
+    }
+}
+
 /// The status record of this moment.
 #[allow(clippy::too_many_arguments)]
 fn status_bytes(
@@ -1615,6 +1637,7 @@ fn status_bytes(
     exec: Option<&ExecRuntime>,
     live: Option<&LiveRuntime>,
     status_interval_ms: u64,
+    census: &CensusRefresh,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
     let mut d = Draft::new(&rs::SCHEMA);
@@ -1636,6 +1659,12 @@ fn status_bytes(
             },
         )
         .set(rs::STATUS_INTERVAL_MS, status_interval_ms);
+    if let Some(state) = &census.state {
+        d.set(rs::CENSUS_STATE, state.as_str());
+    }
+    if let Some(ms) = census.written_unix_ms {
+        d.set(rs::CENSUS_WRITTEN_UNIX_MS, ms);
+    }
     if let Some(c) = capture {
         use rs::capture as k;
         let w = &c.writer;
@@ -1776,7 +1805,8 @@ pub fn run(
     // The dropped-event totals last journaled, per source (`D` records).
     let mut journaled_drops = [0u64; 5];
     // The periodic census in flight, if any.
-    let mut census_job: Option<std::thread::JoinHandle<()>> = None;
+    let mut census_job: Option<std::thread::JoinHandle<Result<u64, String>>> = None;
+    let mut census_refresh = CensusRefresh::default();
     // Phase E review L3: the Four.meme drift guard in flight, and its next
     // run (at start, then every BSC_CANONICAL_FOUR_PROBE_MS).
     type FourProbe = Result<crate::venue_probe::FourObservation, crate::venue_probe::ProbeError>;
@@ -2295,6 +2325,7 @@ pub fn run(
                 exec.as_ref(),
                 live.as_ref(),
                 config.status_ms,
+                &census_refresh,
             )?;
             replace(&status_path, &bytes)?;
         }
@@ -2309,6 +2340,10 @@ pub fn run(
                         .map_or(0, |c| c.state.checkpoint_ms),
                 );
             o.checkpoint(replace);
+        }
+        // BSC3-016 review L5: a finished census reaches the status at once.
+        if let Some(done) = census_job.take_if(|j| j.is_finished()) {
+            census_refresh.ended(done.join());
         }
         if Instant::now() >= next_census && !stopping {
             next_census = Instant::now() + Duration::from_millis(config.census_ms);
@@ -2329,7 +2364,7 @@ pub fn run(
             // failure is visible in the log; observation goes on.
             if census_job.as_ref().is_none_or(|j| j.is_finished()) {
                 if let Some(done) = census_job.take() {
-                    let _ = done.join();
+                    census_refresh.ended(done.join());
                 }
                 let (config, rundir, active) = (
                     config.clone(),
@@ -2339,11 +2374,17 @@ pub fn run(
                 census_job = std::thread::Builder::new()
                     .name("bsc-census".into())
                     .spawn(move || {
-                        if let Err(e) = write_census(&config, &rundir, Some(&active)) {
+                        let written = write_census(&config, &rundir, Some(&active))
+                            .and_then(|_| observed_now());
+                        if let Err(e) = &written {
                             eprintln!("g04 census: {e}");
                         }
+                        written
                     })
-                    .map_err(|e| eprintln!("g04 census thread: {e}"))
+                    .map_err(|e| {
+                        eprintln!("g04 census thread: {e}");
+                        census_refresh.state = Some(format!("FAILED: no census thread: {e}"));
+                    })
                     .ok();
             }
         }
@@ -2391,7 +2432,11 @@ pub fn run(
                             &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711(),
                         )
                     })
-                    .map_err(|e| eprintln!("four probe thread: {e}"))
+                    .map_err(|e| {
+                        eprintln!("four probe thread: {e}");
+                        // BSC3-016: shown, not only logged.
+                        c.four_deployment = format!("PROBE_FAILED: no probe thread: {e}");
+                    })
                     .ok();
                 next_four = Instant::now() + Duration::from_millis(cc.four_probe_ms);
             }
@@ -2757,10 +2802,10 @@ mod tests {
     /// The follower's events, joined with the sightings, reach the status
     /// counters, the journal and the census alike; a reorg takes its
     /// launches out of all three.
-    /// BSC3-014/038: a canonical launch of a block that is not the last
+    /// BSC3-014/038/016: a canonical launch of a block that is not the last
     /// one reported is counted and journaled as received (the census shows
     /// it unjoined), never joined; Four.meme launches are counted by
-    /// visibility class.
+    /// visibility class; the status names the last census refresh.
     #[test]
     fn a_launch_without_its_head_and_four_classes_are_counted() {
         use crate::chain_follower::{CanonicalLaunch, Venue};
@@ -2832,6 +2877,13 @@ mod tests {
             ),
             (1, 1, 0, 0)
         );
+        let refresh = {
+            let mut r = CensusRefresh::default();
+            r.ended(Ok(Err("disk full".into())));
+            assert_eq!(r.state.as_deref(), Some("FAILED: disk full"));
+            r.ended(Ok(Ok(42)));
+            r
+        };
         let status = status_bytes(
             &Generation::initial(),
             &[],
@@ -2848,9 +2900,12 @@ mod tests {
             None,
             None,
             config.status_ms,
+            &refresh,
         )
         .unwrap();
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        assert_eq!(r.text(rs::CENSUS_STATE).unwrap(), "OK");
+        assert_eq!(r.u64(rs::CENSUS_WRITTEN_UNIX_MS).unwrap(), 42);
         let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
         assert_eq!(k.u64(rs::canonical::LAUNCH_HEAD_MISSING).unwrap(), 1);
         assert_eq!(k.u64(rs::canonical::FOUR_MISSED).unwrap(), 1);
@@ -3057,6 +3112,7 @@ mod tests {
             None,
             None,
             config.status_ms,
+            &CensusRefresh::default(),
         )
         .unwrap();
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
