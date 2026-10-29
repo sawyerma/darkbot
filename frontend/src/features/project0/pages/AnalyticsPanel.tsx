@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorDraft, Project0Tab } from "../model/contracts";
-import { comparisonSum, countOf, jobCommandBlock, jobReadableRuns, sideBySide, type AnalyticsJobView, type AnalyticsRunView, type AnalyticsView, type JobResultView } from "../model/analytics";
+import { countOf, countSum, jobCommandBlock, jobReadableRuns, sideBySide, type AnalyticsJobView, type AnalyticsRunView, type AnalyticsView, type JobResultView } from "../model/analytics";
 import { REPORT_MARKERS } from "../model/contracts";
 import { usdMicroDisplay } from "../model/format";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
@@ -12,21 +12,22 @@ const tabs: ReadonlyArray<{ value: AnalTab; label: string }> = [
   { value: "report", label: "Report" }, { value: "backtest", label: "Backtest" }, { value: "optimize", label: "Optimize" }];
 
 /** One line of a job's result headline; counterfactual values are never realized profit. */
-function resultLine(r: JobResultView | null): string {
+function resultLine(r: JobResultView | null, mode?: string): string {
   if (!r) return "";
   if (r.kind === "BACKTEST") {
     const c = r.counterfactual;
     const nets = c?.scenarios.map(s => `${usdMicroDisplay(s.capitalUsdMicro.toString())} → ${usdMicroDisplay(s.netUsdMicro)}`).join(", ") ?? "—";
     return ` · ${r.liquidations} liquidations · ${c?.matched ?? "—"} matched · ${c?.wins ?? "—"} wins · Shadow net ${nets} · landing ${c?.landing ?? "—"}`;
   }
-  if (r.kind === "POST_CAPTURE") return ` · verification ${r.verificationOk ? "ok" : "incomplete"} · report ${r.reportOk ? "ok" : "incomplete"} · ${r.verdict ?? "qualification NOT_RUN"}`;
+  // The mode's own verified status (never canonical unless strict); the master verdict is separate.
+  if (r.kind === "POST_CAPTURE") return ` · verification ${mode ?? "—"} ${r.verificationOk ? "ok" : "incomplete"} · report ${r.reportOk ? "ok" : "incomplete"} · ${r.verdict ?? "qualification NOT_RUN"}`;
   const chosen = r.chosen ? `min profit ${usdMicroDisplay(r.chosen.minProfitUsdMicro)} · funding ${r.chosen.funding.length ? r.chosen.funding.join(",") : "all"}` : "no point chosen (NO_SAMPLE)";
   return ` · ${r.points} points · ${chosen} · holdout ${r.chosenObjectiveBps ?? "—"} bps vs baseline ${r.baselineObjectiveBps ?? "—"} bps${r.profile ? ` · Shadow candidate ${r.profile}` : ""}`;
 }
 
 function JobRow({ job, cancelBlock }: { job: AnalyticsJobView; cancelBlock: string }) {
   return <><DetailRow title={`${job.kind} · ${job.run} · ${job.jobId.slice(0, 8)}`}
-    value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result)}`}/>
+    value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result, job.verification?.chainVerify)}`}/>
     {job.state === "RUNNING" ? <div className="p0-actions"><button className="p0-secondary" disabled={cancelBlock !== ""} title={cancelBlock || undefined}
       onClick={() => void analyticsCommand("project0.analytics.job.cancel", { resourceId: job.jobId })}>Cancel job</button></div> : null}</>;
 }
@@ -43,11 +44,13 @@ function MethodsCompared({ run }: { run: AnalyticsRunView | null }) {
     <DetailRow title="Verification · status" value={sideBySide(m, x => `${x.status}${x.reason ? ` (${x.reason})` : ""}`)}/>
     {KINDS.map(k => <DetailRow key={k} title={`Verification · ${k}`} value={sideBySide(m, x => countOf(x.qualified, k))}/>)}
     {REPORT_MARKERS.map(k => <DetailRow key={k.id} title={`Verification · marker ${k.label}`} value={sideBySide(m, x => countOf(x.markers, k.id))}/>)}
-    <DetailRow title="Verification · found (MATCH)" value={sideBySide(m, x => countOf(x.comparison, "MATCH"))}/>
-    <DetailRow title="Verification · missing" value={sideBySide(m, x => comparisonSum(x, ["MISSING_", "BOT_ONLY_"]))}/>
-    <DetailRow title="Verification · deviations" value={sideBySide(m, x => `${comparisonSum(x, ["TYPE_MISMATCH", "TARGET_OR_ACTOR_MISMATCH", "AMOUNT_MISMATCH", "SLOT_MISMATCH"])}${x.disagreements != null ? ` · ${x.disagreements} disagreements` : ""}`)}/>
+    <DetailRow title="Verification · found events (MATCH)" value={sideBySide(m, x => countOf(x.comparison, "MATCH"))}/>
+    <DetailRow title="Verification · missing events" value={sideBySide(m, x => countSum(x.comparison, ["MISSING_"]))}/>
+    <DetailRow title="Verification · deviations" value={sideBySide(m, x => `${countSum(x.comparison, ["TYPE_MISMATCH", "TARGET_OR_ACTOR_MISMATCH", "AMOUNT_MISMATCH"])}${x.disagreements != null ? ` · ${x.disagreements} disagreements` : ""}`)}/>
+    <DetailRow title="Verification · transactions live / slot mismatch / missing live / capture only" value={sideBySide(m, x => x.transactions.length === 0 ? "—"
+      : `${countOf(x.transactions, "MATCH")} / ${countOf(x.transactions, "SLOT_MISMATCH")} / ${countOf(x.transactions, "MISSING_LIVE")} / ${countOf(x.transactions, "BOT_ONLY_INDEX_MISSING")}`)}/>
     <DetailRow title="Verification · unresolved / unknown" value={sideBySide(m, x => `${x.unresolved ?? "—"} / ${x.unknown ?? "—"}`)}/>
-    <DetailRow title="Verification · costs" value={sideBySide(m, x => `${x.calls ?? "—"} requests · ${x.bytes ?? "—"} bytes`)}/>
+    <DetailRow title="Verification · costs" value={sideBySide(m, x => `${x.calls ?? "—"} requests · ${x.bytes ?? "—"} bytes · all attempts ${x.callsTotal ?? "—"} / ${x.bytesTotal ?? "—"}`)}/>
     <p className="p0-note">Nothing is promoted: INDEX_VERIFIED &lt; CROSSCHECK_VERIFIED &lt; CANONICAL_VERIFIED; only strict's canonical result can count toward the C0-E1 master, with every other gate.</p>
   </>;
 }

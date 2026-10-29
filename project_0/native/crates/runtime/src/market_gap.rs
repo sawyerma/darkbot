@@ -306,6 +306,12 @@ impl RpcFetcher {
                 Some(-32007) => "SKIPPED_OR_LEDGER_MISSING",
                 Some(-32009 | -32001) => "RPC_PRUNED_OR_UNAVAILABLE",
                 Some(-32015) => "RPC_UNSUPPORTED_VERSION",
+                // A rate limit answered in the JSON-RPC body (as the pinned verifier reads it).
+                Some(429 | -32005) => {
+                    darkbot_solana::provider::shared()
+                        .rate_limited_header(darkbot_solana::provider::RetryAfterHeader::Absent);
+                    "RPC_RATE_LIMIT"
+                }
                 _ => "RPC_ERROR",
             });
         }

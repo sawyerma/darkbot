@@ -437,7 +437,7 @@ test("DEC-08: the chain verification methods reach the Capture and Analytics tab
   // Capture: each method with status, progress, provider, requests, bytes, checkpoint, block reason.
   await tab(page, "Capture");
   await expect(page.locator(".p0-line", { hasText: "run-a · verification index" }))
-    .toContainText(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 · bytes 65248 · checkpoint 7 reads · 2 attempts`);
+    .toContainText(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 (9 all attempts) · bytes 65248 · checkpoint 7 reads · 2 attempts`);
   await expect(page.locator(".p0-line", { hasText: "run-a · verification crosscheck" }))
     .toContainText("NOT_RUN (CROSSCHECK_SECOND_PROVIDER_MISSING) · progress 0 pages");
   // The run start preview names the operator's provider evidence for a history read.
@@ -460,8 +460,11 @@ test("DEC-08: the chain verification methods reach the Capture and Analytics tab
     .toContainText("index INDEX_VERIFIED · crosscheck NOT_RUN (CROSSCHECK_SECOND_PROVIDER_MISSING) · strict —");
   await expect(page.locator(".p0-line", { hasText: "Verification · RECEIVERSHIP" })).toContainText("index 1 · crosscheck — · strict —");
   await expect(page.locator(".p0-line", { hasText: "Verification · marker Receivership · end" })).toContainText("index 2 · crosscheck —");
-  await expect(page.locator(".p0-line", { hasText: "Verification · missing" })).toContainText("index 3 · crosscheck —");
-  await expect(page.locator(".p0-line", { hasText: "Verification · costs" })).toContainText("index 5 requests · 65248 bytes");
+  await expect(page.locator(".p0-line", { hasText: "Verification · found events (MATCH)" })).toContainText("index 1 · crosscheck —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · missing events" })).toContainText("index 1 · crosscheck —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · transactions live" })).toContainText("index 1 / 0 / 2 / 1 · crosscheck —");
+  await expect(page.locator(".p0-line", { hasText: "Verification · costs" })).toContainText("index 5 requests · 65248 bytes · all attempts 9 / 98000");
+  await expect(page.locator(".p0-line", { hasText: "POST_CAPTURE · run-a" })).toContainText("RUNNING");
   // The running verification job is cancelled through the job controller.
   await page.locator(".p0-line", { hasText: "POST_CAPTURE · run-a" }).locator("xpath=following-sibling::div[1]")
     .getByRole("button", { name: "Cancel job" }).click();

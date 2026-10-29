@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { comparisonSum, countOf, durationText, jobCommandBlock, jobReadableRuns, methodLine, sideBySide, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
+import { countOf, countSum, durationText, jobCommandBlock, jobReadableRuns, methodLine, sideBySide, untilStoppedBlock, untilStoppedRunStatus, untilStoppedStopAction } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -43,8 +43,12 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
       .toEqual(["index", "INDEX_VERIFIED", 5n, 65_248n, null, 7n]);
     expect(countOf(index!.qualified, "RECEIVERSHIP")).toBe("1");
     expect(countOf(index!.markers, "end_liquidation")).toBe("2");
-    expect(comparisonSum(index!, ["MISSING_"])).toBe("3");
-    expect(methodLine(index!)).toBe(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 · bytes 65248 · checkpoint 7 reads · 2 attempts`);
+    expect(countSum(index!.comparison, ["MISSING_"])).toBe("1");
+    expect(countOf(index!.comparison, "MATCH")).toBe("1");
+    expect(countOf(index!.transactions, "MISSING_LIVE")).toBe("2");
+    expect(countOf(index!.transactions, "BOT_ONLY_INDEX_MISSING")).toBe("1");
+    expect([index?.callsTotal, index?.bytesTotal]).toEqual([9n, 98_000n]);
+    expect(methodLine(index!)).toBe(`INDEX_VERIFIED · progress 2 pages · provider ${"c".repeat(12)} · requests 5 (9 all attempts) · bytes 65248 · checkpoint 7 reads · 2 attempts`);
     expect([crosscheck?.status, crosscheck?.reason, crosscheck?.calls, crosscheck?.disagreements]).toEqual(["NOT_RUN", "CROSSCHECK_SECOND_PROVIDER_MISSING", null, null]);
     expect(countOf(crosscheck!.qualified, "RECEIVERSHIP")).toBe("—");
     expect(sideBySide(view.runs[0]!.verification, (m) => m.status)).toBe("index INDEX_VERIFIED · crosscheck NOT_RUN · strict —");

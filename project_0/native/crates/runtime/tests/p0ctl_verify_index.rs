@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use solana_sdk::signature::Signature;
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 const FIXTURE: &str = include_str!(
@@ -50,8 +50,15 @@ fn row(signature: &str, slot: u64, bt: i64) -> Value {
 }
 
 /// The provider: the head page (after the end, the liquidation), the page before the start and
-/// the liquidation; the first request is answered `429 Too Many Requests` while `limited` holds.
-fn endpoint(start_s: i64, end_s: i64, f: String, limited: Arc<AtomicBool>) -> String {
+/// the liquidation; the next `limited` requests are answered `429 Too Many Requests`, the next
+/// `limited_body` ones with a JSON-RPC error 429 in the body.
+fn endpoint(
+    start_s: i64,
+    end_s: i64,
+    f: String,
+    limited: Arc<AtomicU64>,
+    limited_body: Arc<AtomicU64>,
+) -> String {
     use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -75,7 +82,10 @@ fn endpoint(start_s: i64, end_s: i64, f: String, limited: Arc<AtomicBool>) -> St
             }
             let mut body = vec![0u8; length];
             let _ = reader.read_exact(&mut body);
-            if limited.swap(false, Ordering::SeqCst) {
+            if limited
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
                 let _ = write!(
                     stream,
                     "HTTP/1.1 429 Too Many Requests\r\nretry-after: 0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
@@ -83,6 +93,21 @@ fn endpoint(start_s: i64, end_s: i64, f: String, limited: Arc<AtomicBool>) -> St
                 continue;
             }
             let q: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            if limited_body
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                let answer = json!({"jsonrpc": "2.0", "id": q["id"],
+                    "error": {"code": 429, "message": "Too many requests"}})
+                .to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    answer.len(),
+                    answer
+                );
+                continue;
+            }
             let result = match q["method"].as_str() {
                 Some("getSignaturesForAddress") => match q["params"][1]["before"].as_str() {
                     None => json!([row(&after, 2_000, end_s + 50), row(&f, 1_000, start_s + 10)]),
@@ -203,34 +228,67 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
     assert!(err.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"), "{err}");
 
     // The measured FREE_ONLY archive evidence of the loopback endpoint.
-    let limited = Arc::new(AtomicBool::new(true));
-    let url = endpoint(start_s, end_s, f.clone(), limited.clone());
+    // As many 429s as the configured attempts (`rpc_attempts`) allow for one read.
+    let attempts = darkbot_solana::runtime_config::Limits::default().rpc_attempts;
+    let limited = Arc::new(AtomicU64::new(attempts));
+    let limited_body = Arc::new(AtomicU64::new(0));
+    let url = endpoint(
+        start_s,
+        end_s,
+        f.clone(),
+        limited.clone(),
+        limited_body.clone(),
+    );
     let sha = |b: &[u8]| journal::hex(&solana_sdk::hash::hash(b).to_bytes());
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs_f64();
-    let evidence = d.join("provider.p0j");
-    journal::write_typed_value(
-        &evidence,
-        source::FE01,
-        &ProviderEvidence {
-            providers: vec![ProviderProof {
-                policy: "FREE_ONLY".into(),
-                passed: true,
-                provider_binding: sha(url.as_bytes()),
-                measured_at_unix_s: now - 1.0,
-                evidence_sha256: Some(sha(b"loopback")),
-                allowed_rps: 1_000.0,
-                available_calls: 1_000_000,
-            }],
-            wss_provider_binding: None,
-            wss_free_only: false,
-            archive_qualified: true,
-            source_sha256: sha(b"measured"),
-        },
-    )
-    .unwrap();
+    let proof = |name: &str, available_calls: u64| {
+        let path = d.join(name);
+        journal::write_typed_value(
+            &path,
+            source::FE01,
+            &ProviderEvidence {
+                providers: vec![ProviderProof {
+                    policy: "FREE_ONLY".into(),
+                    passed: true,
+                    provider_binding: sha(url.as_bytes()),
+                    measured_at_unix_s: now - 1.0,
+                    evidence_sha256: Some(sha(b"loopback")),
+                    allowed_rps: 1_000.0,
+                    available_calls,
+                }],
+                wss_provider_binding: None,
+                wss_free_only: false,
+                archive_qualified: true,
+                source_sha256: sha(b"measured"),
+            },
+        )
+        .unwrap();
+        path
+    };
+    let evidence = proof("provider.p0j", 1_000_000);
+    // A provider that proved fewer requests than the method's budget is refused before any RPC.
+    let small = proof("small.p0j", 10);
+    let (code, _, err) = p0ctl(
+        &d,
+        &[("P0_RPC_URL", url.as_str())],
+        &[
+            "verify",
+            "--run",
+            run,
+            "--mode",
+            "index",
+            "--provider-evidence",
+            small.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("PROVIDER_CAPACITY_BELOW_METHOD_BUDGET"),
+        "{err}"
+    );
     let env = [("P0_RPC_URL", url.as_str())];
     let online = |resume: bool| {
         let mut a = vec![
@@ -249,23 +307,24 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
         }
         p0ctl(&d, &env, &a)
     };
-    // 429 on the first page: incomplete with its reason, resumable.
+    // 429 on every attempt of the first page: incomplete with its reason, resumable.
     let (code, out, err) = online(false);
     assert_eq!(code, 2, "{out}{err}");
     assert!(
         out.contains("status=HISTORICAL_INCOMPLETE reason=RPC_RATE_LIMIT"),
         "{out}{err}"
     );
-    assert!(
-        !limited.load(Ordering::SeqCst),
-        "the provider was asked once"
-    );
+    assert_eq!(limited.load(Ordering::SeqCst), 0, "every attempt was made");
+    // One 429 on the resume — a JSON-RPC rate limit in the body — is retried within the attempt
+    // (after the provider's cooldown).
+    limited_body.store(1, Ordering::SeqCst);
     // Resumed: the window verifies; never canonical.
     let (code, out, err) = online(true);
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("status=INDEX_VERIFIED reason=none"), "{out}");
     assert!(out.contains("CANONICAL_VERIFIED=false"), "{out}");
     assert!(out.contains("comparison MATCH=2"), "{out}");
+    assert_eq!(limited_body.load(Ordering::SeqCst), 0, "the retried 429");
     // Crosscheck online with one configured source: NOT_RUN (C-02), no chain read.
     let (code, out, err) = p0ctl(
         &d,

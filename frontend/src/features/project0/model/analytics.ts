@@ -48,13 +48,19 @@ export interface VerificationMethodView {
   checkpointReads: bigint;
   calls: bigint | null;
   bytes: bigint | null;
+  /** Requests and response bytes of every attempt of the spec. */
+  callsTotal: bigint | null;
+  bytesTotal: bigint | null;
   progressUnit: string;
   progressDone: bigint;
   progressTotal: bigint | null;
   qualified: readonly NamedCountView[];
   observed: readonly NamedCountView[];
   markers: readonly NamedCountView[];
+  /** Detection statuses of the window's liquidation events (found, missing, deviations). */
   comparison: readonly NamedCountView[];
+  /** Transaction statuses of the window and the capture's live transactions the index lacks. */
+  transactions: readonly NamedCountView[];
   disagreements: bigint | null;
   unresolved: bigint | null;
   unknown: bigint | null;
@@ -65,7 +71,8 @@ export interface VerificationMethodView {
 export function methodLine(m: VerificationMethodView): string {
   const progress = `${m.progressDone}${m.progressTotal != null ? ` / ${m.progressTotal}` : ""} ${m.progressUnit}`;
   const provider = m.offline ? "checkpoint only" : m.providerBinding ? `provider ${m.providerBinding.slice(0, 12)}` : "no provider";
-  return `${m.status}${m.reason ? ` (${m.reason})` : ""} · progress ${progress} · ${provider} · requests ${m.calls ?? "—"} · bytes ${m.bytes ?? "—"} · checkpoint ${m.checkpointReads} reads · ${m.attempts} attempt${m.attempts === 1n ? "" : "s"}`;
+  const total = m.callsTotal != null && m.callsTotal !== m.calls ? ` (${m.callsTotal} all attempts)` : "";
+  return `${m.status}${m.reason ? ` (${m.reason})` : ""} · progress ${progress} · ${provider} · requests ${m.calls ?? "—"}${total} · bytes ${m.bytes ?? "—"} · checkpoint ${m.checkpointReads} reads · ${m.attempts} attempt${m.attempts === 1n ? "" : "s"}`;
 }
 
 /** DEC-08: the methods the Analytics tab shows side by side, in their rank order. */
@@ -85,10 +92,10 @@ export function countOf(list: readonly NamedCountView[], name: string): string {
   return (list.find((c) => c.name === name)?.count ?? 0n).toString();
 }
 
-/** The sum of the comparison counts whose name starts with one of `prefixes`; `—` when unknown. */
-export function comparisonSum(m: VerificationMethodView, prefixes: readonly string[]): string {
-  if (m.comparison.length === 0) return "—";
-  return m.comparison.filter((c) => prefixes.some((p) => c.name.startsWith(p))).reduce((n, c) => n + c.count, 0n).toString();
+/** The sum of the counts whose name starts with one of `prefixes`; `—` when the list is unknown. */
+export function countSum(list: readonly NamedCountView[], prefixes: readonly string[]): string {
+  if (list.length === 0) return "—";
+  return list.filter((c) => prefixes.some((p) => c.name.startsWith(p))).reduce((n, c) => n + c.count, 0n).toString();
 }
 
 export interface JobParamsView {

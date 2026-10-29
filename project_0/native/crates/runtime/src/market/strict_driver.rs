@@ -496,15 +496,19 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             .ok_or("RPC_URL_MISSING")?;
         let now = now_unix_ns()? as f64 / 1e9;
         strict_provider_gate(config, &url, evidence, now)?;
-        let mut binding = url.clone();
+        if let VerifyMode::Index { .. } | VerifyMode::Crosscheck { .. } = req.mode {
+            method_capacity(evidence, &url, &req.budget)?;
+        }
         if let VerifyMode::Crosscheck { .. } = req.mode {
             second = crosscheck_source(config, &url, evidence, now)?.map(Some);
             if let Ok(Some(s)) = &second {
-                binding.push('\n');
-                binding.push_str(s);
+                method_capacity(evidence, s, &req.budget)?;
             }
         }
-        Some(solana_sdk::hash::hash(binding.as_bytes()).to_bytes())
+        Some(provider_binding(
+            &url,
+            second.as_ref().ok().and_then(|s| s.as_deref()),
+        ))
     };
     let spec = VerificationSpec {
         schema: SPEC_SCHEMA.into(),
@@ -520,6 +524,15 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         provider_policy: "FREE_ONLY".into(),
         provider_binding_sha256: provider,
         budget: req.budget.clone(),
+    };
+    // An offline history read continues the operator's online checkpoint: the newest spec of
+    // this definition that bound a provider (an offline spec of its own would hold an empty
+    // checkpoint; the offline attempt reads the cache only, its time/RAM bounds its own).
+    let spec = match (req.offline, req.mode) {
+        (true, VerifyMode::Index { .. } | VerifyMode::Crosscheck { .. } | VerifyMode::Strict) => {
+            online_spec(&run, &spec).unwrap_or(spec)
+        }
+        _ => spec,
     };
     let spec_id = spec.id()?;
     let out = run
@@ -683,6 +696,82 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         reason: record.reason,
         terminal: read_report(&out.join("strict")).terminal(),
     })
+}
+
+/// The spec's provider binding: SHA-256 of the endpoint, and of both a CROSSCHECK reads (never
+/// the endpoint itself).
+fn provider_binding(primary: &str, second: Option<&str>) -> [u8; 32] {
+    let mut bound = primary.to_string();
+    if let Some(second) = second {
+        bound.push('\n');
+        bound.push_str(second);
+    }
+    solana_sdk::hash::hash(bound.as_bytes()).to_bytes()
+}
+
+/// DEC-08: the newest spec of `run` that equals `offline` but for its provider binding and
+/// budget and bound a provider (the operator's online verification of the same capture,
+/// window, mode, program, decoder binary and pin); `None` when there is none.
+fn online_spec(run: &Path, offline: &VerificationSpec) -> Option<VerificationSpec> {
+    let same = |s: &VerificationSpec| {
+        s.provider_binding_sha256.is_some()
+            && s.schema == offline.schema
+            && s.capture_run_id == offline.capture_run_id
+            && s.manifest_sha256 == offline.manifest_sha256
+            && s.window_start_unix_ns == offline.window_start_unix_ns
+            && s.window_end_unix_ns == offline.window_end_unix_ns
+            && s.mode == offline.mode
+            && s.program == offline.program
+            && s.decoder_binary_sha256 == offline.decoder_binary_sha256
+            && s.protocol_pin == offline.protocol_pin
+            && s.journal_version == offline.journal_version
+            && s.provider_policy == offline.provider_policy
+    };
+    let newest_attempt = |dir: &Path| {
+        std::fs::read_dir(dir.join("attempts"))
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|a| {
+                        journal::read_typed_value::<AttemptRecord>(&a.path().join("start.p0j")).ok()
+                    })
+                    .map(|a| a.at_unix_ns)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    };
+    std::fs::read_dir(run.join("verification"))
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let id = name.strip_prefix(NATIVE_PREFIX)?.to_string();
+            let spec: VerificationSpec =
+                journal::read_typed_value(&e.path().join("spec.p0j")).ok()?;
+            (same(&spec) && spec.id().ok()? == id).then(|| (newest_attempt(&e.path()), spec))
+        })
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, spec)| spec)
+}
+
+/// DEC-08: a history read plans no more than its provider proved — the endpoint's measured
+/// FREE_ONLY proof covers the method's typed RPS and requests.
+fn method_capacity(evidence: &Path, url: &str, budget: &StrictBudget) -> Result<(), String> {
+    let proof: crate::orchestration::provider_evidence::ProviderEvidence =
+        journal::read_typed_value(evidence).map_err(|_| "STRICT_PROVIDER_EVIDENCE_INVALID")?;
+    let binding = hex(&solana_sdk::hash::hash(url.as_bytes()).to_bytes());
+    let p = proof
+        .providers
+        .iter()
+        .find(|p| p.provider_binding == binding)
+        .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
+    if p.allowed_rps < budget.rps as f64 || p.available_calls < budget.max_calls {
+        return Err(format!(
+            "PROVIDER_CAPACITY_BELOW_METHOD_BUDGET: proved {} rps / {} requests, the method's budget {} rps / {} requests",
+            p.allowed_rps, p.available_calls, budget.rps, budget.max_calls
+        ));
+    }
+    Ok(())
 }
 
 /// DEC-08: the second source of an online CROSSCHECK — the second configured RPC endpoint, on
@@ -983,6 +1072,77 @@ mod tests {
         assert_eq!(
             strict_provider_gate(&config, url, &dir.join("missing.p0j"), 1001.0),
             Err("STRICT_PROVIDER_EVIDENCE_INVALID".into())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// DEC-08: a crosscheck's spec binds both endpoints (never one alone, never the endpoints).
+    #[test]
+    fn dec08_the_provider_binding_holds_both_crosscheck_endpoints() {
+        let (a, b) = ("http://a.invalid", "http://b.invalid");
+        assert_eq!(
+            provider_binding(a, None),
+            solana_sdk::hash::hash(a.as_bytes()).to_bytes()
+        );
+        let both = provider_binding(a, Some(b));
+        for other in [
+            provider_binding(a, None),
+            provider_binding(b, None),
+            provider_binding(b, Some(a)),
+        ] {
+            assert_ne!(both, other);
+        }
+    }
+
+    /// DEC-08 (review): a history read plans no more than its provider proved — the measured
+    /// proof of the endpoint covers the method's RPS and requests.
+    #[test]
+    fn dec08_a_history_read_plans_within_its_providers_proof() {
+        use crate::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
+        let dir = std::env::temp_dir().join(format!("p0_cap_{}_{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let url = "http://archive.invalid";
+        let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
+        let path = dir.join("evidence.p0j");
+        journal::write_typed_value(
+            &path,
+            source::FE01,
+            &ProviderEvidence {
+                providers: vec![ProviderProof {
+                    policy: "FREE_ONLY".into(),
+                    passed: true,
+                    provider_binding: sha(url.as_bytes()),
+                    measured_at_unix_s: 1000.0,
+                    evidence_sha256: Some(sha(b"fixture")),
+                    allowed_rps: 5.0,
+                    available_calls: 300,
+                }],
+                wss_provider_binding: None,
+                wss_free_only: false,
+                archive_qualified: true,
+                source_sha256: sha(b"measured"),
+            },
+        )
+        .unwrap();
+        let budget = |rps, max_calls| StrictBudget {
+            rps,
+            max_calls,
+            max_seconds: 1,
+            max_bytes: 1,
+            max_disk_bytes: 1,
+            max_ram_bytes: 1,
+            min_free_bytes: 1,
+        };
+        assert_eq!(method_capacity(&path, url, &budget(5, 300)), Ok(()));
+        for over in [budget(6, 300), budget(5, 301)] {
+            assert!(method_capacity(&path, url, &over)
+                .unwrap_err()
+                .starts_with("PROVIDER_CAPACITY_BELOW_METHOD_BUDGET"));
+        }
+        assert_eq!(
+            method_capacity(&path, "http://other.invalid", &budget(1, 1)).unwrap_err(),
+            "FE_PROVIDER_EVIDENCE_MISSING"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -252,8 +252,8 @@ message VerificationMethod {
   repeated NamedCount observed = 17;
   // The six markers (empty: unknown).
   repeated NamedCount markers = 18;
-  // Found and missing events and deviations against the capture (detection and transaction
-  // statuses of the INDEX comparison).
+  // Detection statuses of the window's liquidation events against the capture (MATCH,
+  // MISSING_*, *_MISMATCH, …): found and missing events and deviations (empty: unknown).
   repeated NamedCount comparison = 19;
   // CROSSCHECK: transactions the two sources read differently.
   optional uint64 disagreements = 20;
@@ -261,6 +261,14 @@ message VerificationMethod {
   optional uint64 unresolved = 21;
   // Transactions of the window that stayed unqualified.
   optional uint64 unknown = 22;
+  // Transaction statuses of the window against the capture (MATCH, SLOT_MISMATCH,
+  // MISSING_LIVE) and the capture's live transactions the index lacks (BOT_ONLY_INDEX_MISSING);
+  // empty: unknown.
+  repeated NamedCount transactions = 23;
+  // Requests of every attempt of the spec.
+  optional uint64 calls_total = 24;
+  // Response bytes of every attempt of the spec.
+  optional uint64 bytes_total = 25;
 }
 
 // A count under a bounded name.

@@ -780,13 +780,14 @@ fn verification_check(
             };
             let signatures = (rate * duration * safety).ceil() as u64;
             let pages = signatures / SIGNATURES_PER_PAGE + 1;
-            let calls = sources * (signatures + pages);
+            // DEC-08: each CROSSCHECK source reads within its own budget and deadline.
+            let calls = signatures + pages;
             let (short, seconds) = fits(calls, None, Some(pages));
             if short.is_empty() {
                 (
                     Qualified,
                     format!(
-                        "{}: ~{signatures} signatures ({rate:.3}/s × {}s × {safety:.2}), {calls} calls, {seconds}s at {} rps; provider quota checked by the verification preflight",
+                        "{}: ~{signatures} signatures ({rate:.3}/s × {}s × {safety:.2}), {calls} calls, {seconds}s at {} rps per source × {sources}; provider quota checked by the verification preflight",
                         v.mode.as_str(), req.duration_s, v.rps
                     ),
                 )
@@ -849,10 +850,11 @@ fn verification_check(
 /// an unbounded run, re-checked every window).
 pub fn disk_need_bytes(req: &Request, avg_bytes_per_s: f64) -> u64 {
     let safety = 1.0 + req.safety_percent as f64 / 100.0;
-    let verify_disk = if req.verify.mode == VerifyMode::Off {
-        0
-    } else {
-        req.verify.disk_bytes
+    // DEC-08: a CROSSCHECK keeps one checkpoint per source.
+    let verify_disk = match req.verify.mode {
+        VerifyMode::Off => 0,
+        VerifyMode::Crosscheck => req.verify.disk_bytes.saturating_mul(2),
+        _ => req.verify.disk_bytes,
     };
     (avg_bytes_per_s * req.duration_s as f64 * safety) as u64 + req.disk_reserve_bytes + verify_disk
 }
@@ -1283,12 +1285,38 @@ mod tests {
         assert_eq!(verdict_of(&r, "verification"), Verdict::Blocked);
         let mut index = req(14_400, VerifyMode::Index);
         (index.verify.calls, index.verify.seconds) = (5_000, 3_000);
-        let r = evaluate(index, b(), None, probe(200.0 * MIB as f64), env());
+        let r = evaluate(index.clone(), b(), None, probe(200.0 * MIB as f64), env());
         assert_eq!(
             verdict_of(&r, "verification"),
             Verdict::Qualified,
             "{}",
             r.terminal()
+        );
+        // DEC-08: a crosscheck reads each source within that source's own budget (the same
+        // budget qualifies it), and keeps a checkpoint per source (twice the verifier's disk).
+        let crosscheck = Request {
+            verify: VerifyBudget {
+                mode: VerifyMode::Crosscheck,
+                ..index.verify.clone()
+            },
+            ..index.clone()
+        };
+        let r = evaluate(
+            crosscheck.clone(),
+            b(),
+            None,
+            probe(200.0 * MIB as f64),
+            env(),
+        );
+        assert_eq!(
+            verdict_of(&r, "verification"),
+            Verdict::Qualified,
+            "{}",
+            r.terminal()
+        );
+        assert_eq!(
+            disk_need_bytes(&crosscheck, 1.0) - disk_need_bytes(&index, 1.0),
+            index.verify.disk_bytes
         );
         // Strict with measured per-slot cost and a large budget: qualified sizing.
         let mut strict = req(14_400, VerifyMode::Strict);

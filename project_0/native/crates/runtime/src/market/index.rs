@@ -13,7 +13,7 @@
 //! `INDEX_VERIFIED` is conditional index-scope evidence: never `CANONICAL_VERIFIED`, never the
 //! C0-E1 master.
 use super::reconcile::{ChainAnswer, ChainRead};
-use super::truth::{self, LiquidationType, NativeEvidence, TruthEvent};
+use super::truth::{self, LiquidationType, TruthEvent};
 use super::verification::{Client, Job};
 use super::{decode_receiver_events, LogEventRef};
 use crate::analytics::journal::{self, kind, source};
@@ -80,7 +80,6 @@ pub struct BotEvent {
     pub seized: Option<f64>,
     pub repaid: Option<f64>,
     pub protocol_fee: Option<u64>,
-    pub native: Option<NativeEvidence>,
 }
 
 /// The capture's live slot-boundary coverage and its proven outages (the Python verifier's rule:
@@ -242,7 +241,6 @@ impl BotEvidence {
                                 seized: Some(r.event.seized_equity_usd),
                                 repaid: Some(r.event.repaid_equity_usd),
                                 protocol_fee: Some(u64::from(r.event.protocol_flat_fee_lamports)),
-                                native: None,
                             },
                         );
                     }
@@ -302,7 +300,6 @@ impl BotEvidence {
                                 seized: e.seized_value_usd,
                                 repaid: e.repaid_value_usd,
                                 protocol_fee: e.protocol_fee_lamports,
-                                native: e.native_evidence.clone(),
                             },
                         );
                         if row.our.is_some() {
@@ -382,7 +379,6 @@ pub fn live_payload(logs: &[String], program: &Pubkey) -> Option<Vec<BotEvent>> 
                         seized: Some(ev.seized_equity_usd),
                         repaid: Some(ev.repaid_equity_usd),
                         protocol_fee: Some(u64::from(ev.protocol_flat_fee_lamports)),
-                        native: None,
                     }
                 }
                 LogEventRef::Additional(i) => {
@@ -396,7 +392,6 @@ pub fn live_payload(logs: &[String], program: &Pubkey) -> Option<Vec<BotEvent>> 
                         seized: None,
                         repaid: None,
                         protocol_fee: None,
-                        native: None,
                     }
                 }
             })
@@ -508,16 +503,11 @@ pub fn compare(tx: &IndexedTx, bot: &BotEvidence) -> TxComparison {
                 (Some(_), Some(_)) => {}
                 _ => unknown.push("protocol_fee_lamports".into()),
             }
+            // Native amounts are compared nowhere natively: the capture's rows carry none
+            // comparable (rule D3 of the parity evidence; the pinned verifier compares its own
+            // decoded live payload).
             if ev.native_evidence.is_some() {
-                match &b.native {
-                    // The live payload decoder carries native amounts of receiverships only.
-                    Some(native) if b.source == BotSource::LivePayload => {
-                        if Some(native) != ev.native_evidence.as_ref() {
-                            mismatch.push("native_evidence".into());
-                        }
-                    }
-                    _ => unknown.push("native_amount_semantics".into()),
-                }
+                unknown.push("native_amount_semantics".into());
             }
             let status = if b.kind != ev.liquidation_type {
                 "TYPE_MISMATCH"
@@ -725,7 +715,8 @@ fn paginate(
             address: *program,
             before,
         };
-        if !c.is_cached(&read) {
+        let cached = c.is_cached(&read);
+        if !cached {
             if fetched >= max_pages {
                 return Err("INDEX_PAGE_BUDGET");
             }
@@ -738,11 +729,31 @@ fn paginate(
             ChainAnswer::Signatures(Ok(page)) => page,
             _ => return Err("INDEX_PAGE_LAYOUT"),
         };
-        if before.is_none() {
-            r.head_after_end = page.iter().any(|row| {
+        let after_end = |page: &[SignatureEntry]| {
+            page.iter().any(|row| {
                 row.block_time
                     .is_some_and(|bt| i128::from(bt) * NS >= i128::from(job.end_ns))
-            });
+            })
+        };
+        // The newest page is a history's one mutable read: a checkpoint whose head does not reach
+        // past the window end (the finalized index lagged) is read again online.
+        let page = if before.is_none() && cached && !after_end(&page) && c.online() {
+            if fetched >= max_pages {
+                return Err("INDEX_PAGE_BUDGET");
+            }
+            fetched += 1;
+            let calls = c.calls;
+            let fresh = c.refresh(&read);
+            r.signature_calls += c.calls - calls;
+            match fresh? {
+                ChainAnswer::Signatures(Ok(page)) => page,
+                _ => return Err("INDEX_PAGE_LAYOUT"),
+            }
+        } else {
+            page
+        };
+        if before.is_none() {
+            r.head_after_end = after_end(&page);
         }
         let start = job.start_ns;
         match r.pager.accept(page, |p| crosses(p, start))? {
@@ -1178,12 +1189,24 @@ pub fn crosscheck(
     store(&jobs[0].output.join("results"), &primary)?;
     store(&jobs[1].output.join("results"), &secondary)?;
     let disagreements = disagreements(jobs[0], &a.reading, &b.reading);
+    // An incomplete source names its own cause (cancelled, rate-limited, unresolved, …).
+    let incomplete_source = |code: &str, r: &IndexResult| match r
+        .reason
+        .clone()
+        .or_else(|| r.incomplete_reasons.first().cloned())
+    {
+        Some(cause) => format!("{code}({cause})"),
+        None => code.to_string(),
+    };
     let mut incomplete = Vec::new();
     if primary.status != "INDEX_VERIFIED" {
-        incomplete.push("CROSSCHECK_PRIMARY_INCOMPLETE".to_string());
+        incomplete.push(incomplete_source("CROSSCHECK_PRIMARY_INCOMPLETE", &primary));
     }
     if secondary.status != "INDEX_VERIFIED" {
-        incomplete.push("CROSSCHECK_SECONDARY_INCOMPLETE".to_string());
+        incomplete.push(incomplete_source(
+            "CROSSCHECK_SECONDARY_INCOMPLETE",
+            &secondary,
+        ));
     }
     if !disagreements.is_empty() {
         incomplete.push("CROSSCHECK_DISAGREEMENT".to_string());

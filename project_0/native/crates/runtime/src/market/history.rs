@@ -57,7 +57,8 @@ impl SignaturePager {
         self.end
     }
     /// Accepts the page fetched at `before()`. Its rows must not rise in slot (also across pages);
-    /// a signature seen before must repeat identically (`INDEX_DUPLICATE_CONFLICT`); the page must
+    /// a signature seen before (on this or an earlier page) must repeat identically
+    /// (`INDEX_DUPLICATE_CONFLICT`); the page must
     /// move the cursor (`INDEX_CURSOR_STALLED`) and hold at most `PAGE_LIMIT` rows
     /// (`INDEX_PAGE_LAYOUT`). `stop(page)` ends the history after the whole page is kept.
     pub fn accept(
@@ -79,7 +80,14 @@ impl SignaturePager {
             return Err("INDEX_CURSOR_STALLED");
         }
         let mut previous = self.last_slot;
+        let mut seen: HashMap<&str, &SignatureEntry> = HashMap::new();
         for row in &page {
+            if seen
+                .insert(row.signature.as_str(), row)
+                .is_some_and(|first| first != row)
+            {
+                return Err("INDEX_DUPLICATE_CONFLICT");
+            }
             if previous.is_some_and(|p| row.slot > p) {
                 return Err("INDEX_SLOT_ORDER");
             }
@@ -179,6 +187,19 @@ mod tests {
             p.accept(vec![row("a", 9, Some(90))], never),
             Err("INDEX_CURSOR_STALLED")
         );
+        // A repeat inside one page must be identical too (an identical one is kept once).
+        let mut q = SignaturePager::new();
+        let mut failed_a = row("a", 9, Some(90));
+        failed_a.status = TxStatus::Unknown("X");
+        assert_eq!(
+            q.accept(vec![row("a", 9, Some(90)), failed_a], never),
+            Err("INDEX_DUPLICATE_CONFLICT")
+        );
+        assert_eq!(
+            q.accept(vec![row("a", 9, Some(90)), row("a", 9, Some(90))], never),
+            Ok(PageEnd::More)
+        );
+        assert_eq!(q.rows().len(), 1);
         let big: Vec<SignatureEntry> = (0..=PAGE_LIMIT as u64)
             .map(|i| row(&format!("s{i}"), 8, None))
             .collect();

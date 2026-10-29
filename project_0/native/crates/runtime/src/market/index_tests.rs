@@ -1,3 +1,4 @@
+use super::super::truth::NativeEvidence;
 use super::*;
 use crate::analytics::journal::Provenance;
 use serde_json::{json, Value};
@@ -211,7 +212,6 @@ fn live_capture(h: &History) -> BotEvidence {
                 seized: e.seized_value_usd,
                 repaid: e.repaid_value_usd,
                 protocol_fee: e.protocol_fee_lamports,
-                native: None,
             },
         );
     }
@@ -535,7 +535,6 @@ fn bot_event(source: BotSource, index: u32, kind: LiquidationType, target: &str)
         seized: Some(105.),
         repaid: Some(100.),
         protocol_fee: Some(5000),
-        native: None,
     }
 }
 fn indexed(events: Vec<TruthEvent>) -> IndexedTx {
@@ -588,6 +587,9 @@ fn dec08_compare_follows_the_pinned_matching_rules() {
     bot.event("sig", 9, bot_event(BotSource::Canonical, 0, Classic, "t0"));
     bot.shadow
         .insert(("sig".into(), 9, "t1".into()), Some((1, Receivership)));
+    // The classic's target joined to another kind at its index: no exact identity.
+    bot.shadow
+        .insert(("sig".into(), 9, "t0".into()), Some((0, Receivership)));
     bot.shadow.insert(("sig".into(), 9, "t2".into()), None);
     let c = compare(&tx, &bot);
     assert_eq!(c.transaction_status, "MATCH");
@@ -613,7 +615,7 @@ fn dec08_compare_follows_the_pinned_matching_rules() {
         classic.detection, "DETECTION_UNPROVEN",
         "a live classic without a payload"
     );
-    assert_eq!(classic.shadow_status, "SHADOW_NO_EVIDENCE");
+    assert_eq!(classic.shadow_status, "SHADOW_IDENTITY_UNKNOWN");
     assert_eq!(
         status(receivership, BotSource::Live).as_deref(),
         Some("MATCH")
@@ -707,6 +709,11 @@ fn dec08_missed_events_are_attributed_by_the_live_coverage() {
         (Some(s(BT - 50)), Some(s(BT + 50)), Some(5))
     );
     assert_eq!(cov.gap_open, None);
+    assert_eq!(
+        cov.gaps,
+        vec![(s(BT + 10), s(BT + 30))],
+        "the later gap voided the first reconnect: one outage until the second"
+    );
     assert_eq!(cov.at(Some(BT), false), "WITHIN_OBSERVED_SLOT_INTERVAL");
     assert_eq!(
         cov.at(Some(BT + 20), false),
@@ -845,6 +852,24 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
                     tx: tx.clone(),
                 },
             },
+            MarketTransaction {
+                signature: "truncated-live".into(),
+                slot: 5,
+                origin: TxOrigin::LogsSubscribe {
+                    observed_unix_s: BT as u64,
+                    t_rx_ns: 3,
+                    logs: darkbot_solana::chain::ChainLogs {
+                        slot: 5,
+                        signature: "truncated-live".into(),
+                        status: TxStatus::Success,
+                        logs: Some({
+                            let mut cut = logs.clone();
+                            cut.push("Log truncated".into());
+                            cut
+                        }),
+                    },
+                },
+            },
         ],
     );
     let liquidation = |t_rx_ns| {
@@ -964,6 +989,10 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
         &[
             opportunity("winner-only", false),
             opportunity(&events[0].target, true),
+            crate::analytics::econ::OpportunityRow {
+                winner: None,
+                ..opportunity("weak-join", true)
+            },
         ],
     );
     reports.seal(true).unwrap();
@@ -997,6 +1026,16 @@ fn dec08_the_capture_side_is_imported_from_the_typed_run() {
     assert!(!bot
         .shadow
         .contains_key(&(f.clone(), SLOT, "winner-only".to_string())));
+    assert!(
+        !bot.shadow
+            .contains_key(&(f.clone(), SLOT, "weak-join".to_string())),
+        "a market event without a strong join (no unique winner) is no key"
+    );
+    assert!(bot.live.contains(&("truncated-live".to_string(), 5)));
+    assert!(
+        !bot.events.contains_key(&("truncated-live".to_string(), 5)),
+        "a truncated live payload carries no events"
+    );
     let s = |sec: i64| i128::from(sec) * NS;
     assert_eq!(bot.coverage.gaps, vec![(s(BT - 30), s(BT - 20))]);
     assert_eq!(
@@ -1238,14 +1277,23 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
         ("RECEIVERSHIP".to_string(), verified.qualified[1])
     );
     assert_eq!(m.markers.len(), 6);
+    // Event detections and transaction statuses apart (the result counts both under MATCH).
     assert_eq!(
         m.comparison,
-        verified
-            .comparison_counts
-            .iter()
-            .map(|(k, v)| (k.clone(), *v))
-            .collect::<Vec<_>>()
+        vec![("MATCH".to_string(), 1)],
+        "the liquidation event"
     );
+    assert_eq!(
+        m.transactions,
+        vec![("MATCH".to_string(), 1)],
+        "its live transaction"
+    );
+    assert_eq!(
+        verified.comparison_counts.get("MATCH").copied(),
+        Some(2),
+        "the result's own count is both"
+    );
+    assert_eq!((m.calls_total, m.bytes_total), (Some(0), Some(0)));
     // A started attempt that has not ended is RUNNING (its counts stay the newest result's).
     let running = out.join("attempts").join("z-running");
     std::fs::create_dir_all(&running).unwrap();
@@ -1268,9 +1316,28 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
             methods[0].running,
             methods[0].attempts
         ),
-        ("RUNNING", true, 3)
+        ("INTERRUPTED", false, 3),
+        "no attempt holds the spec's lock: it ended without its record"
+    );
+    // While the driver holds the spec's writer lock the attempt is RUNNING.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(out.join("writer.lock"))
+        .unwrap();
+    use std::os::fd::AsRawFd;
+    // SAFETY: flock on the owned descriptor of the test's lock file.
+    assert_eq!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0
+    );
+    let methods = super::super::verification_view::methods(&root);
+    assert_eq!(
+        (methods[0].status.as_str(), methods[0].running),
+        ("RUNNING", true)
     );
     assert_eq!(methods[0].qualified, m.qualified);
+    drop(lock);
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -1534,7 +1601,10 @@ fn dec08_crosscheck_names_every_disagreement() {
     .unwrap();
     assert_eq!(
         r.incomplete_reasons,
-        ["CROSSCHECK_SECONDARY_INCOMPLETE", "CROSSCHECK_DISAGREEMENT"],
+        [
+            "CROSSCHECK_SECONDARY_INCOMPLETE(HISTORICAL_PAYLOAD_UNKNOWN)",
+            "CROSSCHECK_DISAGREEMENT"
+        ],
         "agreement on F is unprovable: {r:?}"
     );
     assert_eq!(r.secondary.unresolved_transactions, 1);
@@ -1586,7 +1656,9 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
     let (text, verified) = strict_driver::cli(&args(false)).unwrap();
     assert!(!verified);
     assert!(
-        text.contains("status=HISTORICAL_INCOMPLETE reason=CROSSCHECK_PRIMARY_INCOMPLETE"),
+        text.contains(
+            "status=HISTORICAL_INCOMPLETE reason=CROSSCHECK_PRIMARY_INCOMPLETE(OFFLINE_CACHE_MISS)"
+        ),
         "{text}"
     );
     let spec_id = text
@@ -1642,4 +1714,178 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
     );
     assert_eq!(m.progress_done, 4, "two pages from each source");
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// DEC-08 (review H1): an offline history read (the GUI's "from the checkpoint", `--offline`)
+/// continues the operator's online spec of the same definition — its checkpoint, never an
+/// empty offline one; the run's view shows that spec verified. Without resume it is refused.
+#[test]
+fn dec08_an_offline_read_continues_the_online_checkpoint() {
+    use super::super::strict_driver::{self, DriverRequest, StrictBudget, VerifyMode};
+    let (d, root, f, live, start_s, end_s) = driver_run(line!());
+    let budget = StrictBudget {
+        rps: 100,
+        max_calls: 10,
+        max_seconds: 30,
+        max_bytes: 1 << 26,
+        max_disk_bytes: 1 << 26,
+        max_ram_bytes: 1 << 36,
+        min_free_bytes: 1,
+    };
+    let req = |resume| DriverRequest {
+        run: root.clone(),
+        budget: budget.clone(),
+        offline: true,
+        resume,
+        mode: VerifyMode::Index { max_pages: 5 },
+        provider_evidence: None,
+        cancelled: None,
+    };
+    // No online spec yet: the offline read is its own (an empty checkpoint, incomplete).
+    let first = strict_driver::drive(&req(false)).unwrap();
+    assert_eq!(first.reason.as_deref(), Some("OFFLINE_CACHE_MISS"));
+    // Review M2: an incomplete reading's counts are no facts — unknown, never 0.
+    let view = super::super::verification_view::methods(&root);
+    assert_eq!(view[0].status, "HISTORICAL_INCOMPLETE");
+    assert!(view[0].qualified.is_empty() && view[0].markers.is_empty());
+    assert!(view[0].comparison.is_empty() && view[0].transactions.is_empty());
+    assert_eq!((view[0].unresolved, view[0].calls), (None, Some(0)));
+    let verification = root.canonicalize().unwrap().join("verification");
+    let offline: strict_driver::VerificationSpec = journal::read_typed_value(
+        &verification
+            .join(format!(
+                "{}{}",
+                strict_driver::NATIVE_PREFIX,
+                first.verification_spec_id
+            ))
+            .join("spec.p0j"),
+    )
+    .unwrap();
+    // The operator's online spec of the same definition (its own budget, a bound provider)
+    // with its attempt and checkpoint.
+    let online = strict_driver::VerificationSpec {
+        provider_binding_sha256: Some([7; 32]),
+        budget: StrictBudget {
+            rps: 2,
+            max_calls: 2000,
+            ..budget.clone()
+        },
+        ..offline.clone()
+    };
+    let dir = verification.join(format!(
+        "{}{}",
+        strict_driver::NATIVE_PREFIX,
+        online.id().unwrap()
+    ));
+    std::fs::create_dir_all(dir.join("attempts/online")).unwrap();
+    journal::write_typed_value(&dir.join("spec.p0j"), source::STRICT, &online).unwrap();
+    let attempt = strict_driver::AttemptRecord {
+        verification_spec_id: online.id().unwrap(),
+        verification_attempt_id: "online".into(),
+        at_unix_ns: 1,
+        offline: false,
+        resume: false,
+        verification_result_id: None,
+        status: Some("HISTORICAL_INCOMPLETE".into()),
+        reason: Some("RPC_RATE_LIMIT".into()),
+        capture_evidence_digest: String::new(),
+    };
+    for name in ["start.p0j", "end.p0j"] {
+        journal::write_typed_value(
+            &dir.join("attempts/online").join(name),
+            source::STRICT,
+            &attempt,
+        )
+        .unwrap();
+    }
+    checkpoint(&dir.join("index"), &f, &live, start_s, end_s);
+    assert_eq!(
+        strict_driver::drive(&req(false)).unwrap_err(),
+        "SPEC_EXISTS_USE_RESUME_VERIFICATION"
+    );
+    let resumed = strict_driver::drive(&req(true)).unwrap();
+    assert_eq!(resumed.verification_spec_id, online.id().unwrap());
+    assert_eq!(resumed.status, "INDEX_VERIFIED", "{}", resumed.terminal);
+    let methods = super::super::verification_view::methods(&root);
+    let [m] = &methods[..] else {
+        panic!("{methods:?}")
+    };
+    assert_eq!(
+        (
+            m.spec_id.as_str(),
+            m.status.as_str(),
+            m.offline,
+            m.provider_binding.is_some()
+        ),
+        (online.id().unwrap().as_str(), "INDEX_VERIFIED", true, true)
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// DEC-08 (review M3, M2): a checkpoint whose newest page does not reach past the window end is
+/// incomplete (INDEX_HEAD_BEFORE_END, its counts no facts) and the next online attempt reads that
+/// page again — the finalized index caught up, the window verifies from the rest of the
+/// checkpoint; offline it stays as checkpointed.
+#[test]
+fn dec08_a_head_before_the_end_is_read_again_online() {
+    let h = Arc::new(History::new());
+    let caught_up = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (server, flag) = (h.clone(), caught_up.clone());
+    let (url, seen) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
+        ("getSignaturesForAddress", None) if !flag.load(std::sync::atomic::Ordering::SeqCst) => {
+            Reply::Result(json!([
+                row(&server.f, SLOT, BT, Value::Null),
+                row(&server.b, SLOT - 5, BT - 5, History::failed()),
+            ]))
+        }
+        _ => server.answer(m, p),
+    });
+    let j = job("head-lag");
+    let bot = live_capture(&h);
+    let first = run(&j, 10, Some(url.clone()), &bot).unwrap();
+    assert_eq!(
+        (first.status.as_str(), first.incomplete_reasons.clone()),
+        (
+            "HISTORICAL_INCOMPLETE",
+            vec!["INDEX_HEAD_BEFORE_END".to_string()]
+        )
+    );
+    assert!(first.crossed_start && !first.head_after_end);
+    let offline = run(&j, 10, None, &bot).unwrap();
+    assert_eq!(offline.incomplete_reasons, ["INDEX_HEAD_BEFORE_END"]);
+    caught_up.store(true, std::sync::atomic::Ordering::SeqCst);
+    let calls = methods(&seen).len();
+    let second = run(&j, 10, Some(url), &bot).unwrap();
+    assert_eq!(second.status, "INDEX_VERIFIED", "{second:?}");
+    assert_eq!(
+        (second.signature_calls, second.transaction_calls),
+        (1, 1),
+        "the head again, the end second's transaction; the rest from the checkpoint"
+    );
+    assert_eq!(methods(&seen).len(), calls + 2);
+    std::fs::remove_dir_all(&j.output).unwrap();
+}
+
+/// DEC-08 (pinned `paginate`): a page crosses the start only when every row lies before it — a
+/// page mixing rows of the window and before the start is followed by the next page.
+#[test]
+fn dec08_a_page_crosses_the_start_only_with_every_row_before_it() {
+    let h = Arc::new(History::new());
+    let server = h.clone();
+    let (url, _) = loopback(move |m, p| match (m, p[1]["before"].as_str()) {
+        ("getSignaturesForAddress", None) => Reply::Result(json!([
+            row(&server.a, SLOT + 300, BT + 300, Value::Null),
+            row(&server.f, SLOT, BT, Value::Null),
+            row(&server.c, SLOT - 200, BT - 200, Value::Null),
+        ])),
+        ("getSignaturesForAddress", Some(b)) if b == server.c => {
+            Reply::Result(json!([row(&server.d, SLOT - 201, BT - 201, Value::Null)]))
+        }
+        _ => server.answer(m, p),
+    });
+    let j = job("mixed");
+    let r = run(&j, 10, Some(url), &live_capture(&h)).unwrap();
+    assert_eq!(r.status, "INDEX_VERIFIED", "{r:?}");
+    assert_eq!((r.pages, r.signature_calls), (2, 2));
+    std::fs::remove_dir_all(&j.output).unwrap();
 }

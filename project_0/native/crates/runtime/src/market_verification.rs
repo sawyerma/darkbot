@@ -279,6 +279,32 @@ impl<'a> Client<'a> {
     pub(super) fn is_cached(&self, read: &ChainRead) -> bool {
         cache_path(&self.job.output, read).exists()
     }
+    /// The client reads the network (`false`: the cache only).
+    pub(super) fn online(&self) -> bool {
+        self.rpc.is_some()
+    }
+    /// DEC-08: re-reads `read` from the network and replaces its cache entry — the one mutable
+    /// read of an INDEX checkpoint (an address's newest page); a failed re-read keeps the old one.
+    pub(super) fn refresh(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
+        self.guard()?;
+        let path = cache_path(&self.job.output, read);
+        let kept = path.with_extension("p0j.replaced");
+        if path.exists() {
+            fs::rename(&path, &kept).map_err(io_code)?;
+        }
+        match self.network(read) {
+            Ok(answer) => {
+                let _ = fs::remove_file(&kept);
+                Ok(answer)
+            }
+            Err(e) => {
+                if kept.exists() && !path.exists() {
+                    fs::rename(&kept, &path).map_err(io_code)?;
+                }
+                Err(e)
+            }
+        }
+    }
     /// Time, disk, RAM and free-space budgets (no subprocess; disk usage tracked incrementally).
     pub(super) fn guard(&self) -> Result<(), &'static str> {
         if self.job.cancelled.is_some_and(|c| c()) {
@@ -331,17 +357,32 @@ impl<'a> Client<'a> {
         Ok(entry.answer)
     }
     fn network(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
-        if self.calls >= self.job.max_calls {
-            return Err("VERIFICATION_CALL_BUDGET");
-        }
         let remaining_bytes = self.job.max_bytes.saturating_sub(self.bytes);
         if remaining_bytes == 0 {
             return Err("VERIFICATION_NETWORK_BUDGET");
         }
         let rpc = self.rpc.as_ref().ok_or("OFFLINE_CACHE_MISS")?;
-        self.pacer.wait(self.deadline)?;
-        self.calls += 1;
-        let (answer, bytes) = fetch(rpc, read, self.deadline, remaining_bytes)?;
+        // A transient refusal (429, timeout, transport) is retried within the attempt up to the
+        // configured attempts; the shared provider waits out its cooldown before each one.
+        let attempts = darkbot_solana::runtime_config::active()
+            .limits
+            .rpc_attempts
+            .max(1);
+        let mut tried = 0;
+        let (answer, bytes) = loop {
+            if self.calls >= self.job.max_calls {
+                return Err("VERIFICATION_CALL_BUDGET");
+            }
+            self.pacer.wait(self.deadline)?;
+            self.calls += 1;
+            tried += 1;
+            match fetch(rpc, read, self.deadline, remaining_bytes) {
+                Err("RPC_RATE_LIMIT" | "RPC_TIMEOUT" | "RPC_TRANSPORT") if tried < attempts => {
+                    self.guard()?;
+                }
+                other => break other?,
+            }
+        };
         self.bytes += bytes;
         let answer = self.store(read, answer)?;
         self.guard()?;

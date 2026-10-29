@@ -29,5 +29,6 @@ The pinned `Audit.execute()` (import, paging, fetch, `compare`, `report`; `opera
 |---|---|
 | D1 | a pruned answer (-32009) ends the pinned attempt (`RPC_PROVIDER_ERROR`, rest unread); native keeps the transaction unresolved and works the window — both HISTORICAL_INCOMPLETE, both resume to identical verified lines |
 | D2 | the pinned import reads live logs at `raw.value(.meta)`; a rendered `transactionSubscribe` row nests them under `raw.transaction`: only native matches the live transaction's own payload events (`LIVE_PAYLOAD=MATCH` entries; detection statuses unaffected) |
+| D3 | native amounts (`native_evidence`) are compared nowhere natively — the capture's rows carry no comparable form; the pinned verifier compares its own decoded live payload. Such a field is `native_amount_semantics` unknown, never a MATCH or a mismatch (statuses unaffected) |
 
 Found by the gate and fixed: an opportunity row keyed by its winner alone (the pinned rows nest the winner's signature in its identity) — native now keys Shadow opportunities by their strongly joined market event only, as the pinned import.

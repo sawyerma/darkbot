@@ -2427,10 +2427,13 @@ CROSSCHECK_VERIFIED &lt; CANONICAL_VERIFIED, only STRICT is canonical; an absent
 | qualified | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Qualified events per liquidation kind (empty: unknown). |
 | observed | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Program events per kind including unqualified transactions (empty: unknown). |
 | markers | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | The six markers (empty: unknown). |
-| comparison | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Found and missing events and deviations against the capture (detection and transaction statuses of the INDEX comparison). |
+| comparison | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Detection statuses of the window&#39;s liquidation events against the capture (MATCH, MISSING_*, *_MISMATCH, …): found and missing events and deviations (empty: unknown). |
 | disagreements | [uint64](#uint64) | optional | CROSSCHECK: transactions the two sources read differently. |
 | unresolved | [uint64](#uint64) | optional | Transactions of the window the provider left unresolved (null or pruned). |
 | unknown | [uint64](#uint64) | optional | Transactions of the window that stayed unqualified. |
+| transactions | [NamedCount](#darkbot-project0-v1-NamedCount) | repeated | Transaction statuses of the window against the capture (MATCH, SLOT_MISMATCH, MISSING_LIVE) and the capture&#39;s live transactions the index lacks (BOT_ONLY_INDEX_MISSING); empty: unknown. |
+| calls_total | [uint64](#uint64) | optional | Requests of every attempt of the spec. |
+| bytes_total | [uint64](#uint64) | optional | Response bytes of every attempt of the spec. |
 
 
 

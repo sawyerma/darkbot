@@ -1357,6 +1357,8 @@ mod contract_tests {
                 checkpoint_reads: 7,
                 calls: Some(5),
                 bytes: Some(65_248),
+                calls_total: Some(9),
+                bytes_total: Some(98_000),
                 progress_unit: "pages",
                 progress_done: 2,
                 progress_total: None,
@@ -1371,8 +1373,12 @@ mod contract_tests {
                     ("lending_pool_handle_bankruptcy", 0),
                 ]),
                 comparison: named(&[
-                    ("MATCH", 2),
+                    ("MATCH", 1),
                     ("MISSING_LIQUIDATION_WITHIN_OBSERVED_INTERVAL", 1),
+                ]),
+                transactions: named(&[
+                    ("BOT_ONLY_INDEX_MISSING", 1),
+                    ("MATCH", 1),
                     ("MISSING_LIVE", 2),
                 ]),
                 disagreements: None,
@@ -2106,6 +2112,8 @@ mod contract_tests {
         );
         assert!(crosscheck.qualified.is_empty() && crosscheck.calls.is_none());
         assert!(crosscheck.unresolved.is_none() && crosscheck.disagreements.is_none());
+        assert_eq!((index.calls_total, index.transactions.len()), (Some(9), 3));
+        assert!(crosscheck.transactions.is_empty() && crosscheck.calls_total.is_none());
         assert!(a.runs[1].verification.is_empty());
         let unreadable = a.runs[1].qualification.as_ref().unwrap();
         assert_eq!(

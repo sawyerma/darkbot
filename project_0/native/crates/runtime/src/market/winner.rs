@@ -21,9 +21,8 @@
 use crate::analytics::record::LossReason;
 use darkbot_project0::protocol::ix::END_LIQUIDATION;
 use serde::Serialize;
-use solana_client::rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient};
+use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_request::RpcRequest;
-use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::str::FromStr;
@@ -396,16 +395,22 @@ pub fn find_winner(
             .before()
             .map(|b| Signature::from_str(b).map_err(|e| format!("winner cursor {b}: {e:?}")))
             .transpose()?;
-        let cfg = GetConfirmedSignaturesForAddress2Config {
-            before,
-            until: None,
-            limit: Some(PAGE),
-            commitment: Some(CommitmentConfig::confirmed()),
-        };
+        // DEC-08: the page in the one wire decoder (`chain::decode_signature_page`), through the
+        // client's provider budget; no second parser.
+        let mut options = serde_json::json!({"limit": PAGE, "commitment": "confirmed"});
+        if let Some(b) = before {
+            options["before"] = b.to_string().into();
+        }
         let mt0_start = std::time::Instant::now(); // [MT0]
         let sigs = rpc
-            .get_signatures_for_address_with_config(account, cfg)
-            .map_err(|e| e.to_string());
+            .send::<serde_json::Value>(
+                RpcRequest::GetSignaturesForAddress,
+                serde_json::json!([account.to_string(), options]),
+            )
+            .map_err(|e| e.to_string())
+            .and_then(|page| {
+                darkbot_solana::chain::decode_signature_page(&page).map_err(|e| e.0.to_string())
+            });
         let mt0_outcome = match &sigs {
             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
             Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
@@ -415,18 +420,7 @@ pub fn find_winner(
             mt0_start.elapsed(),
             mt0_outcome,
         );
-        let page = sigs?
-            .into_iter()
-            .map(|s| darkbot_solana::chain::SignatureEntry {
-                signature: s.signature,
-                slot: s.slot,
-                block_time: s.block_time,
-                status: match s.err {
-                    None => darkbot_solana::chain::TxStatus::Success,
-                    Some(e) => darkbot_solana::chain::TxStatus::Failed(e.into()),
-                },
-            })
-            .collect();
+        let page = sigs?;
         pager
             .accept(page, reaches_since)
             .map_err(|e| format!("winner signatures: {e}"))?;
@@ -646,6 +640,31 @@ mod tests {
         let account = Pubkey::from_str(TARGET).unwrap();
         let err = find_winner(&RpcClient::new(url), &program, &account, WINNER_SLOT).unwrap_err();
         assert!(err.contains("INDEX_SLOT_ORDER"), "{err}");
+        // A full page that reaches below `since_slot` ends the history: no further page.
+        let read = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let reads = read.clone();
+        let (url, _) = loopback(move |method, _| match method {
+            "getSignaturesForAddress" => {
+                reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                serde_json::Value::Array(
+                    (0..PAGE as u64)
+                        .map(|i| {
+                            signature_row(
+                                WINNER_SLOT + 50 - i,
+                                serde_json::json!({"InstructionError": [0, {"Custom": 1}]}),
+                            )
+                        })
+                        .collect(),
+                )
+            }
+            _ => serde_json::Value::Null,
+        });
+        assert_eq!(
+            find_winner(&RpcClient::new(url), &program, &account, WINNER_SLOT).unwrap(),
+            None,
+            "only failed candidates"
+        );
+        assert_eq!(read.load(std::sync::atomic::Ordering::SeqCst), 1);
         let pages = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let count = pages.clone();
         let (url, _) = loopback(move |method, _| match method {

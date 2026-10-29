@@ -229,8 +229,6 @@ def explain_index(diff, r, p):
             and pr == ['TRANSACTION_LAYOUT_OR_PAYLOAD_UNKNOWN'] and p.get('program_events') == '0,0,0,0'):
         return ('I6_PYTHON_STOPS_BEFORE_THE_LOGS (successful transaction without its loaded addresses: the pinned '
                 'verifier stops at key resolution; the native INDEX reads the program-attributed log events as observed only, never qualified)')
-    if (d == {'events'} and r.get('class') == p.get('class') == 'UNKNOWN' and not r.get('events')):
-        return 'I5_UNQUALIFIED_EVENTS_ARE_OBSERVED_ONLY (both UNKNOWN, counts agree; the native INDEX never compares unqualified events)'
     return None
 
 
