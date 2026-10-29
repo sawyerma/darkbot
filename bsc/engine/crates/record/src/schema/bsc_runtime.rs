@@ -749,7 +749,8 @@ pub mod source_mode_receipt {
     pub const SOURCE_ID: u16 = 2;
     pub const REQUESTED: u16 = 3;
     pub const EXPECTED_GENERATION: u16 = 4;
-    /// `APPLIED` or `REJECTED_STALE`.
+    /// `APPLIED`, `REJECTED_STALE` or `UNRESOLVED` (BSC3-006: its receipt
+    /// lost, the generation it would have written no longer kept).
     pub const OUTCOME: u16 = 5;
     /// The generation now current (the new one when applied).
     pub const GENERATION: u16 = 6;
@@ -911,11 +912,22 @@ pub mod runtime_status {
         /// v10 (Paket 8 review M1): Four Classic launches whose token is
         /// one of the frozen pairs' candidates (not derivable).
         pub const FOUR_PENDING_CANDIDATE: u16 = 34;
+        /// v11 (BSC3-038): the Four.meme launches by visibility class, as
+        /// the Flap ones above.
+        pub const FOUR_SEEN_FULL_BEFORE: u16 = 35;
+        pub const FOUR_SEEN_HASH_ONLY_BEFORE: u16 = 36;
+        pub const FOUR_SEEN_AFTER: u16 = 37;
+        pub const FOUR_MISSED: u16 = 38;
+        pub const FOUR_CLOCK_UNKNOWN: u16 = 39;
+        /// v11 (BSC3-014): canonical launches whose block was not the last
+        /// one reported (no head to join them): journaled as received and
+        /// never joined, counted here.
+        pub const LAUNCH_HEAD_MISSING: u16 = 40;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 10,
+            schema_version: 11,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -951,6 +963,16 @@ pub mod runtime_status {
                 Field::req(REVERTED_LAUNCHES, "reverted_launches", U64),
                 Field::opt(FOUR_DEPLOYMENT, "four_deployment", Text),
                 Field::req(FOUR_PENDING_CANDIDATE, "four_pending_candidate", U64),
+                Field::req(FOUR_SEEN_FULL_BEFORE, "four_seen_full_before", U64),
+                Field::req(
+                    FOUR_SEEN_HASH_ONLY_BEFORE,
+                    "four_seen_hash_only_before",
+                    U64,
+                ),
+                Field::req(FOUR_SEEN_AFTER, "four_seen_after", U64),
+                Field::req(FOUR_MISSED, "four_missed", U64),
+                Field::req(FOUR_CLOCK_UNKNOWN, "four_clock_unknown", U64),
+                Field::req(LAUNCH_HEAD_MISSING, "launch_head_missing", U64),
             ],
         };
     }
@@ -1403,11 +1425,18 @@ pub mod runtime_status {
         pub const LEDGER_ERROR: u16 = 23;
         /// The providers' answers to the releases, `OUTCOME=n` (BSC3-051).
         pub const RESPONSES: u16 = 24;
+        /// v3 (BSC3-043): `T_ingress` → `T_handoff` of the LIVE path's
+        /// releases (owner admitted, request written; no builder answer,
+        /// no inclusion), the kept samples (ns).
+        pub const LATENCY_SAMPLES: u16 = 25;
+        pub const LATENCY_P50_NS: u16 = 26;
+        pub const LATENCY_P99_NS: u16 = 27;
+        pub const LATENCY_MAX_NS: u16 = 28;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
             record_type: 0,
-            schema_version: 2,
+            schema_version: 3,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1433,6 +1462,10 @@ pub mod runtime_status {
                 Field::req(GAS_WEI, "gas_wei", U256),
                 Field::opt(LEDGER_ERROR, "ledger_error", Text),
                 Field::rep(RESPONSES, "responses", Text),
+                Field::req(LATENCY_SAMPLES, "latency_samples", U64),
+                Field::opt(LATENCY_P50_NS, "latency_p50_ns", U64),
+                Field::opt(LATENCY_P99_NS, "latency_p99_ns", U64),
+                Field::opt(LATENCY_MAX_NS, "latency_max_ns", U64),
             ],
         };
     }
@@ -1472,7 +1505,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 20,
+        schema_version: 21,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

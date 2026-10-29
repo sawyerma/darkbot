@@ -1618,6 +1618,14 @@ impl LiveRuntime {
                 d.push(l::RESPONSES, format!("{name}={n}").as_str());
             }
         }
+        // BSC3-043: the LIVE path's own release latencies, never PAPER's.
+        let latencies = x.map(|x| x.latencies());
+        d.set(l::LATENCY_SAMPLES, latencies.map_or(0, |l| l.len() as u64));
+        if let Some((p50, p99, max)) = latencies.and_then(|l| l.quantiles()) {
+            d.set(l::LATENCY_P50_NS, p50)
+                .set(l::LATENCY_P99_NS, p99)
+                .set(l::LATENCY_MAX_NS, max);
+        }
         d
     }
 }
@@ -1881,6 +1889,14 @@ mod tests {
                 .unwrap()
                 .contains(&"SOURCE_NOT_GRANTED=1")
         );
+        // BSC3-043: the released C3 BUY is the LIVE path's own latency
+        // sample (ingress to handoff), apart from PAPER's.
+        assert_eq!(r.u64(l::LATENCY_SAMPLES).unwrap(), 1);
+        assert_eq!(
+            r.opt_u64(l::LATENCY_P50_NS).unwrap(),
+            r.opt_u64(l::LATENCY_MAX_NS).unwrap()
+        );
+        assert!(r.opt_u64(l::LATENCY_P50_NS).unwrap().is_some());
         // C2 includes the BUY at the buyer's nonce: the lane resolves it.
         c2.canonical(&CanonicalEvent::Block {
             number: HEAD + 1,

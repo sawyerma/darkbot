@@ -300,12 +300,24 @@ pub fn four_token_of_byte(byte: u8) -> Option<FourToken> {
 }
 
 pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
+    received_launch_payload(l.venue, l.block_number, &l.block_hash, &l.tx_hash)
+}
+
+/// A canonical launch received (`P`) by its identity alone: also one the
+/// runtime cannot join (BSC3-014: no head of its block), which then stays
+/// unjoined in the census.
+pub fn received_launch_payload(
+    venue: Venue,
+    block_number: u64,
+    block_hash: &[u8; 32],
+    tx_hash: &[u8; 32],
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(74);
     out.push(b'P');
-    out.push(venue_byte(l.venue));
-    out.extend_from_slice(&l.block_number.to_le_bytes());
-    out.extend_from_slice(&l.block_hash);
-    out.extend_from_slice(&l.tx_hash);
+    out.push(venue_byte(venue));
+    out.extend_from_slice(&block_number.to_le_bytes());
+    out.extend_from_slice(block_hash);
+    out.extend_from_slice(tx_hash);
     out
 }
 

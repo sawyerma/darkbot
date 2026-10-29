@@ -1011,6 +1011,9 @@ struct Canonical {
     window_first_block: u64,
     backfill_blocks: u64,
     backfill_launches: u64,
+    /// BSC3-014: canonical launches whose block was not the last reported
+    /// (no head to join them).
+    launch_head_missing: u64,
     /// Launch calls included and reverted, and the recent ones (a reorg
     /// within the follower's window takes them out again).
     reverted_launches: u64,
@@ -1051,6 +1054,7 @@ impl Canonical {
             window_first_block: 0,
             backfill_blocks: 0,
             backfill_launches: 0,
+            launch_head_missing: 0,
             reverted_launches: 0,
             flap_trades: 0,
             flap_trades_undecodable: 0,
@@ -1213,6 +1217,22 @@ impl Canonical {
             CanonicalEvent::Launch(l) => {
                 // Its block is the last one reported (launches follow it).
                 let same = self.head.is_some_and(|(_, h)| h == l.block_hash);
+                // BSC3-014: without that head nothing joins it: counted and
+                // journaled as received, so the census shows it unjoined.
+                let Some(block_ms) = self.head_block_ms.filter(|_| same) else {
+                    self.launch_head_missing += 1;
+                    journal.record(
+                        RecordKind::Canonical,
+                        at,
+                        crate::runtime_journal::received_launch_payload(
+                            l.venue,
+                            l.block_number,
+                            &l.block_hash,
+                            &l.tx_hash,
+                        ),
+                    );
+                    return;
+                };
                 let launch = LaunchRef {
                     venue: l.venue,
                     block_number: l.block_number,
@@ -1239,11 +1259,7 @@ impl Canonical {
                         Some(r) if is_unrebuildable(r) => LaunchTx::Unrebuildable,
                         Some(_) => LaunchTx::AnswerRefused,
                     },
-                    block_ms: match self.head_block_ms {
-                        Some(ms) if same => ms,
-                        // Never reached: the follower reports a block before its launches.
-                        _ => return,
-                    },
+                    block_ms,
                     block_seen_ns: self.head_seen_ns.filter(|_| same).unwrap_or(at),
                     block_seen_unix_ms: self.head_seen_unix_ms.filter(|_| same),
                 };
@@ -1360,6 +1376,12 @@ impl Canonical {
             .set(e::FOUR_PENDING_UNKNOWN, c.four_pending_unknown)
             .set(e::FOUR_PENDING_MISMATCH, c.four_pending_mismatch)
             .set(e::FOUR_PENDING_CANDIDATE, c.four_pending_candidate)
+            .set(e::FOUR_SEEN_FULL_BEFORE, c.four_seen_full_before)
+            .set(e::FOUR_SEEN_HASH_ONLY_BEFORE, c.four_seen_hash_only_before)
+            .set(e::FOUR_SEEN_AFTER, c.four_seen_after)
+            .set(e::FOUR_MISSED, c.four_missed)
+            .set(e::FOUR_CLOCK_UNKNOWN, c.four_clock_unknown)
+            .set(e::LAUNCH_HEAD_MISSING, self.launch_head_missing)
             .set(e::FOUR_ACTIONABLE, c.four_actionable)
             .set(e::REVERTED_LAUNCHES, self.reverted_launches)
             .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)
@@ -2735,6 +2757,109 @@ mod tests {
     /// The follower's events, joined with the sightings, reach the status
     /// counters, the journal and the census alike; a reorg takes its
     /// launches out of all three.
+    /// BSC3-014/038: a canonical launch of a block that is not the last
+    /// one reported is counted and journaled as received (the census shows
+    /// it unjoined), never joined; Four.meme launches are counted by
+    /// visibility class.
+    #[test]
+    fn a_launch_without_its_head_and_four_classes_are_counted() {
+        use crate::chain_follower::{CanonicalLaunch, Venue};
+        const BLOCK_MS: u64 = 1_792_000_000_000;
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-headless-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let cc = config.canonical.clone().unwrap();
+        let block_ms = |n: u8| BLOCK_MS + u64::from(n) * 450;
+        let mut c = Canonical::new(&cc, block_ms(10));
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let core = IngressCore::new(64, config.max_launch_calldata);
+        let clock = Clock(Instant::now());
+        let block = |n: u8| CanonicalEvent::Block {
+            number: u64::from(n),
+            hash: [n; 32],
+            parent_hash: [n - 1; 32],
+            timestamp_s: block_ms(n) / 1_000,
+            timestamp_ms: block_ms(n),
+            txs: Vec::new(),
+            observed: clock.0,
+            observed_unix_ms: Some(block_ms(n) + 300),
+        };
+        let launch = |n: u8, tx: u8, venue| {
+            CanonicalEvent::Launch(CanonicalLaunch {
+                venue,
+                block_number: u64::from(n),
+                block_hash: [n; 32],
+                tx_index: 0,
+                tx_hash: [tx; 32],
+                token: Some([tx; 20]),
+                creator: None,
+                external_buys_after: Some(0),
+                first_external_buy_index: None,
+                sender: Some([tx; 20]),
+                nonce: Some(u64::from(tx)),
+                c1_scope: false,
+                venue_target: false,
+                four_token: crate::chain_follower::FourToken::NotApplicable,
+                unverifiable: None,
+            })
+        };
+        c.event(10, block(10), &mut journal);
+        c.event(11, block(11), &mut journal);
+        // Block 10's launch after block 11 was reported: no head to join it.
+        c.event(11, launch(10, 7, Venue::Flap), &mut journal);
+        assert_eq!((c.launch_head_missing, c.ledger.waiting()), (1, 0));
+        // A Four launch never seen: missed, as a Four class.
+        let CanonicalEvent::Launch(mut four) = launch(11, 8, Venue::Four) else {
+            unreachable!()
+        };
+        four.four_token = crate::chain_follower::FourToken::NotRecognized;
+        c.event(11, CanonicalEvent::Launch(four), &mut journal);
+        c.join(u64::MAX, &core, &mut journal);
+        let k = c.ledger.counters();
+        assert_eq!(
+            (
+                k.four_launches,
+                k.four_missed,
+                k.four_seen_full_before,
+                k.missed
+            ),
+            (1, 1, 0, 0)
+        );
+        let status = status_bytes(
+            &Generation::initial(),
+            &[],
+            clock,
+            1,
+            1,
+            0,
+            "j",
+            0,
+            0,
+            None,
+            Some(&c),
+            None,
+            None,
+            None,
+            config.status_ms,
+        )
+        .unwrap();
+        let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
+        assert_eq!(k.u64(rs::canonical::LAUNCH_HEAD_MISSING).unwrap(), 1);
+        assert_eq!(k.u64(rs::canonical::FOUR_MISSED).unwrap(), 1);
+        journal.finish().unwrap();
+        let census = census(&base, journal_max_payload(&config), None).unwrap();
+        assert_eq!(census.unjoined, 1);
+        fs::remove_dir_all(base).unwrap();
+    }
+
     #[test]
     fn canonical_events_join_into_status_journal_and_census() {
         use crate::chain_follower::{CanonicalLaunch, Venue};

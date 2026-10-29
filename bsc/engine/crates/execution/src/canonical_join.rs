@@ -197,6 +197,12 @@ pub struct JoinCounters {
     /// Flap launches of the C1 scope, and those seen full before the block.
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
+    /// BSC3-038: the Four.meme launches by visibility class.
+    pub four_seen_full_before: u64,
+    pub four_seen_hash_only_before: u64,
+    pub four_seen_after: u64,
+    pub four_missed: u64,
+    pub four_clock_unknown: u64,
     /// Sum over the Flap launches whose buys are known.
     pub external_buys: u64,
     /// Flap launches whose external buys are unknown (never counted as 0).
@@ -230,6 +236,13 @@ impl JoinCounters {
                 && matches!(j.visibility, Visibility::FullBefore { .. })
             {
                 step(&mut self.four_actionable);
+            }
+            match j.visibility {
+                Visibility::FullBefore { .. } => step(&mut self.four_seen_full_before),
+                Visibility::HashOnlyBefore { .. } => step(&mut self.four_seen_hash_only_before),
+                Visibility::After { .. } => step(&mut self.four_seen_after),
+                Visibility::Missed => step(&mut self.four_missed),
+                Visibility::ClockUnknown { .. } => step(&mut self.four_clock_unknown),
             }
             return;
         }
