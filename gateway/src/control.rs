@@ -2034,15 +2034,30 @@ mod tests {
 
     /// CI-N1: a hermetic launchd stand-in that knows no job — what launchd answers for an absent
     /// label — so the tests never read the host's launchd and also run where none exists (Linux).
-    fn absent_launchctl(dir: &Path) -> PathBuf {
+    /// Writes the executable script `script` at `path`. Its bytes reach the
+    /// file through a short-lived `cp`: this process never holds a write
+    /// descriptor of a file it executes, so a child another test forks
+    /// meanwhile (it holds this process's descriptors until its exec) cannot
+    /// make that exec fail ETXTBSY.
+    fn executable(path: &Path, script: &str) {
         use std::os::unix::fs::PermissionsExt;
+        let source = path.with_extension("source");
+        fs::write(&source, script).unwrap();
+        let copied = std::process::Command::new("/bin/cp")
+            .arg(&source)
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(copied.success());
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn absent_launchctl(dir: &Path) -> PathBuf {
         let path = dir.join("launchctl");
-        fs::write(
+        executable(
             &path,
             "#!/bin/sh\necho \"Could not find service \\\"$2\\\" in domain for port\" >&2\nexit 113\n",
-        )
-        .unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         path
     }
     /// Ledger bounds come from `Limits` exactly as in production; only the capacity is small so
@@ -2180,7 +2195,6 @@ mod tests {
             Self::with(name, limits())
         }
         fn with(name: &str, limits: Limits) -> Self {
-            use std::os::unix::fs::PermissionsExt;
             // Distinct from ledger()'s directories: tests run in parallel.
             let dir = std::env::temp_dir().join(format!("gw-env-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
@@ -2189,12 +2203,10 @@ mod tests {
             fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
             fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
             let runs = dir.join("runs");
-            fs::write(
-                dir.join("darkbotctl"),
-                format!("#!/bin/sh\nprintf '%s\\n' \"$6\" >> '{}'\n", runs.display()),
-            )
-            .unwrap();
-            fs::set_permissions(dir.join("darkbotctl"), fs::Permissions::from_mode(0o755)).unwrap();
+            executable(
+                &dir.join("darkbotctl"),
+                &format!("#!/bin/sh\nprintf '%s\\n' \"$6\" >> '{}'\n", runs.display()),
+            );
             Env { dir, runs, limits }
         }
         fn restart(&self) -> Control {
@@ -2790,7 +2802,6 @@ mod tests {
     async fn the_live_grant_revoke_and_total_limit_reach_the_native_owner() {
         use crate::proto::bsc::v1::BscLiveGrantCommand;
         use crate::proto::expected_version::Version::{ConfigVersion, WalletPolicyVersion};
-        use std::os::unix::fs::PermissionsExt;
         let request =
             |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
                 project: ProjectId::Bsc as i32,
@@ -2922,15 +2933,13 @@ mod tests {
         fs::create_dir_all(dir.join("run")).unwrap();
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
-        fs::write(
+        executable(
             &ctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho \"outcome=APPLIED source=BSC_LIVE_GRANT requested=GRANTED generation=10\"\n",
                 log.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let control = Control::new(
             Some(Paths {
                 ctl,
@@ -2983,7 +2992,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_wallet_venue_and_economic_switches_reach_the_one_native_owner() {
-        use std::os::unix::fs::PermissionsExt;
         let request =
             |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
                 project: ProjectId::Bsc as i32,
@@ -3145,15 +3153,13 @@ mod tests {
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
         // A fake owner: applies an ENABLED request at generation 3, refuses anything else stale.
-        fs::write(
+        executable(
             &ctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nif [ \"$6\" = 3 ]; then echo \"outcome=APPLIED source=$4 requested=$5 effective=$5 generation=4 request_id=$7\"; else echo \"outcome=REJECTED_STALE source=$4 requested=$5 effective=DISABLED generation=4 request_id=$7\"; exit 2; fi\n",
                 log.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let control = Control::new(
             Some(Paths {
                 ctl,
@@ -3703,7 +3709,6 @@ mod tests {
     }
     #[tokio::test]
     async fn a_candidate_request_dispatches_one_fixed_native_command() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("gw-candidate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("bsc-root")).unwrap();
@@ -3711,15 +3716,13 @@ mod tests {
         fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
-        fs::write(
+        executable(
             &ctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$4\" = SELF_B ]\n",
                 log.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let control = Control::new(
             Some(Paths {
                 ctl,
@@ -3789,7 +3792,6 @@ mod tests {
     /// receipt is the detail (APPLIED completes, REJECTED_STALE fails); nothing else passes.
     #[tokio::test]
     async fn a_source_request_reaches_the_native_owner_and_returns_its_receipt() {
-        use std::os::unix::fs::PermissionsExt;
         let request = |id: &str, resource: &str, expected: Option<expected_version::Version>| {
             CommandRequest {
                 project: ProjectId::Bsc as i32,
@@ -3845,15 +3847,13 @@ mod tests {
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
         // The controller prints the owner's receipt line; generation 4 is current.
-        fs::write(
+        executable(
             &ctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$6\" = 4 ] && {{ echo \"outcome=APPLIED source=$4 requested=$5 effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED generation=5 request_id=$7\"; exit 0; }}\necho \"outcome=REJECTED_STALE source=$4 requested=$5 effective=OFF generation=5 request_id=$7\"; exit 2\n",
                 log.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let control = Control::new(
             Some(Paths {
                 ctl,
@@ -3937,21 +3937,18 @@ mod tests {
     #[tokio::test]
     async fn analytics_job_commands_dispatch_the_p0ctl_job_options() {
         use crate::proto::project0::v1::{BacktestJobCommand, FundingSet, OptimizeJobCommand};
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("gw-jobs-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("run")).unwrap();
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
-        fs::write(
+        executable(
             &ctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$3\" != cancel ] || {{ echo 'p0ctl: JOB_NOT_RUNNING: COMPLETED' >&2; exit 2; }}\n",
                 log.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let control = Control::new(
             Some(Paths {
                 ctl,
