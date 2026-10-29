@@ -5657,32 +5657,36 @@ fn dec06_active_crosscheck_without_budget_is_skipped() {
 }
 
 /// DEC-13b: the owner's production RPC submitter against a loopback node that quotes, simulates
-/// and records every send (`sendTransaction` answers the sent signature) under a budget that
-/// admits the test's calls at once; the node's methods in call order.
-fn dec13b_live_node(f: &mut Fixture) -> Arc<Mutex<Vec<String>>> {
+/// and records every send (`sendTransaction` answers the sent signature; with `send_ok` false a
+/// server error, the send's fate unknown; a simulation answered after `sim_delay_ms`) under a
+/// budget that admits the test's calls at once; the node's methods in call order.
+fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mutex<Vec<String>>> {
     use crate::execution::one_shot::non_landing::loopback::{endpoint, Reply};
     use base64::Engine;
-    let (url, calls) = endpoint(Arc::new(
-        |method: &str, params: &serde_json::Value| match method {
-            "getFeeForMessage" => {
-                Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": 5000}))
-            }
-            "simulateTransaction" => {
-                Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": {
+    let (url, calls) =
+        endpoint(Arc::new(
+            move |method: &str, params: &serde_json::Value| match method {
+                "getFeeForMessage" => {
+                    Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": 5000}))
+                }
+                "simulateTransaction" => {
+                    std::thread::sleep(Duration::from_millis(sim_delay_ms));
+                    Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": {
                 "err": null, "logs": [], "accounts": null, "unitsConsumed": 100,
                 "returnData": null, "innerInstructions": null, "replacementBlockhash": null}}))
-            }
-            "sendTransaction" => {
-                let wire = base64::engine::general_purpose::STANDARD
-                    .decode(params[0].as_str().unwrap())
-                    .unwrap();
-                let tx: solana_sdk::transaction::VersionedTransaction =
-                    bincode::deserialize(&wire).unwrap();
-                Reply::Result(serde_json::json!(tx.signatures[0].to_string()))
-            }
-            _ => Reply::Status(500),
-        },
-    ));
+                }
+                "sendTransaction" if !send_ok => Reply::Status(500),
+                "sendTransaction" => {
+                    let wire = base64::engine::general_purpose::STANDARD
+                        .decode(params[0].as_str().unwrap())
+                        .unwrap();
+                    let tx: solana_sdk::transaction::VersionedTransaction =
+                        bincode::deserialize(&wire).unwrap();
+                    Reply::Result(serde_json::json!(tx.signatures[0].to_string()))
+                }
+                _ => Reply::Status(500),
+            },
+        ));
     // The owner's candidate transport (fee quote, simulation, send) under a budget that admits
     // the test's calls at once.
     let mut c = darkbot_solana::runtime_config::RuntimeConfig::default();
@@ -5720,6 +5724,17 @@ fn dec13b_live(f: &mut Fixture, fe06: bool) {
 /// authorization (the offline tests' stand-in) opens LIVE and the submitter; without it nothing
 /// opens. Returns the fixture, the target and the node's methods in call order.
 fn dec13b_fixture(tag: &str, fe06: bool) -> (Fixture, Pubkey, Arc<Mutex<Vec<String>>>) {
+    dec13b_fixture_with(tag, fe06, true, 0)
+}
+
+/// `dec13b_fixture` whose node answers every send with a server error unless `send_ok` and every
+/// simulation after `sim_delay_ms`.
+fn dec13b_fixture_with(
+    tag: &str,
+    fe06: bool,
+    send_ok: bool,
+    sim_delay_ms: u64,
+) -> (Fixture, Pubkey, Arc<Mutex<Vec<String>>>) {
     use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, ATTEMPT_SCHEMA};
     use bytemuck::Zeroable;
     use marginfi_type_crate::types::{
@@ -5733,7 +5748,7 @@ fn dec13b_fixture(tag: &str, fe06: bool) -> (Fixture, Pubkey, Arc<Mutex<Vec<Stri
     (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
     f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
     f.owner.zero_prefund_enabled = true;
-    let calls = dec13b_live_node(&mut f);
+    let calls = dec13b_live_node(&mut f, send_ok, sim_delay_ms);
     let num = |v: f64| WrappedI80F48 {
         value: ((v * (1u64 << 48) as f64) as i128).to_le_bytes(),
     };
@@ -6089,6 +6104,11 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
         "released once by the booking"
     );
     assert_eq!(f.owner.safety.day().failed_attempts, 1);
+    assert_eq!(
+        f.owner.safety.halted(),
+        Some(darkbot_common::error::HaltReason::LimitBreached),
+        "a consumed one-shot halts as its restart replay does"
+    );
     assert!(f.owner.reservations.is_empty());
     assert_eq!(methods().len(), 4, "nothing sent again");
     cleanup(f);
@@ -6202,6 +6222,22 @@ fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
         crate::execution::one_shot::Journal::open(&dir, &f.owner.liquidator.to_string()).unwrap(),
     );
     assert!(reason(&f.owner).unwrap().starts_with("FE04_ATTEMPT_HELD"));
+    // A halted Safety is shown as the block of every admission.
+    f.owner.fe04_held = None;
+    f.owner
+        .safety
+        .halt(darkbot_common::error::HaltReason::LimitBreached);
+    let s = f.owner.owner_snapshot(2).admission;
+    assert_eq!(
+        (s.state, s.block_reason),
+        (
+            "BLOCKED",
+            format!(
+                "SAFETY_HALTED:{}",
+                darkbot_common::error::HaltReason::LimitBreached.as_str()
+            )
+        )
+    );
     cleanup(f);
 }
 
@@ -6289,11 +6325,20 @@ fn dec13b_exit_jupiter(taker: Pubkey, mint: Pubkey) -> String {
 /// DEC-13b: with LIVE effective the held attempt's open position exits with its exit approval —
 /// the route quoted now, one durable exit admission and exactly one send; the settlement then
 /// reads that exit. An open exit admits no second one; without FE-06 nothing exits.
-#[test]
-fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
+/// DEC-13b: a held, settled attempt with 1 000 units of a mint open, the exit approval of that
+/// position (written, not read yet), its ATA, an empty WSOL ATA, lamports, a fresh blockhash, a
+/// loopback Jupiter selling the position and the loopback node (`send_ok`); LIVE not requested.
+fn dec13b_exit_fixture(
+    tag: &str,
+    send_ok: bool,
+) -> (
+    Fixture,
+    Arc<Mutex<Vec<String>>>,
+    crate::execution::one_shot::exit::ExitApproval,
+) {
     use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, EXIT_SCHEMA};
     use solana_sdk::signer::Signer;
-    let mut f = fixture_with("dec13b_exit", None);
+    let mut f = fixture_with(tag, None);
     let payer = solana_sdk::signature::Keypair::new();
     let liquidator = payer.pubkey();
     (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
@@ -6399,7 +6444,13 @@ fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
     f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
         .unwrap()
         .with_base_url(dec13b_exit_jupiter(liquidator, mint));
-    let calls = dec13b_live_node(&mut f);
+    let calls = dec13b_live_node(&mut f, send_ok, 0);
+    (f, calls, e)
+}
+
+#[test]
+fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
+    let (mut f, calls, e) = dec13b_exit_fixture("dec13b_exit", true);
     // Without FE-06 nothing exits.
     dec13b_live(&mut f, false);
     f.owner.fe04_exit_admission();
@@ -6426,5 +6477,308 @@ fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
     run_until(&mut f, |o| o.fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the exit read is due at once");
     assert_eq!(job.exit, Some(e.approval_id.clone()));
+    cleanup(f);
+}
+
+/// DEC-13b (review M5, H1, M1, M2): a candidate refused after `check()` (here the approval's SOL
+/// debit bound) releases its reservation at once — nothing durable, nothing sent, nothing to
+/// book — and its admission stays open; the FE-04 refresh keeps the book readable while the
+/// admission holds the journal. After a restart the unused admission's journal blocks nothing:
+/// the next candidate is admitted on it. LIVE ending closes the admission and frees the wallet.
+#[test]
+fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_nothing() {
+    let (mut f, target, calls) = dec13b_fixture("dec13b_refused_check", true);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let file = f.dir.join("approval.conf");
+    let approval = std::fs::read_to_string(&file).unwrap();
+    let set_approval = |f: &mut Fixture, text: &str| {
+        std::fs::write(&file, text).unwrap();
+        f.owner
+            .fe04_approval
+            .as_mut()
+            .unwrap()
+            .refresh(Some(&dir), &wallet);
+    };
+    set_approval(
+        &mut f,
+        &approval.replace(
+            "max_total_sol_debit_lamports = 50000000",
+            "max_total_sol_debit_lamports = 1",
+        ),
+    );
+    let detect = |f: &mut Fixture, slot| {
+        f.owner
+            .detect(Some((
+                target,
+                f.owner.clock.now_ns(),
+                slot,
+                "account_update",
+            )))
+            .unwrap()
+    };
+    detect(&mut f, 100);
+    let a = &f.owner.fe04_admissions;
+    assert_eq!((a.submitted, a.refused, a.unknown), (0, 1, 0));
+    assert_eq!(a.last_refusal, "APPROVAL_BUDGET_EXCEEDED:SOL_DEBIT");
+    assert_eq!(
+        (
+            f.owner.safety.capital_in_use(),
+            f.owner.safety.inventory_reserved()
+        ),
+        (0, 0),
+        "released at once, before anything durable"
+    );
+    assert!(f.owner.fe04_unbooked.is_none() && f.owner.fe04_held.is_none());
+    assert!(f.owner.fe04_admission.is_some(), "the admission stays open");
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .contains(&"sendTransaction".to_string()));
+    // The FE-04 refresh while the admission holds the journal (and its lock).
+    f.owner.fe04_refreshed = std::time::Instant::now()
+        .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+        .unwrap();
+    f.owner.lifecycle();
+    assert!(
+        !f.owner.reservations.is_unreadable(),
+        "the book follows the open journal"
+    );
+    // Restart: the unused journal is the held one and blocks nothing.
+    f.owner.fe04_admission = None;
+    let dir_s = dir.display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .unwrap();
+    assert!(start
+        .held
+        .as_ref()
+        .is_some_and(|j| j.step_state().is_none()));
+    f.owner.fe04_held = start.held;
+    set_approval(&mut f, &approval);
+    assert_eq!(f.owner.fe04_admission_facts(&target).err(), None);
+    detect(&mut f, 101);
+    assert_eq!(
+        f.owner.fe04_admissions.submitted, 1,
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    assert!(f.owner.fe04_held.as_ref().unwrap().step_state().is_some());
+    cleanup(f);
+}
+
+/// DEC-13b (review M2, M3): an admission is closed once LIVE is no longer effective (its wallet
+/// lock released), and a journal holding an attempt another owner left is never admitted over:
+/// it is closed again with the reason, nothing is reserved or sent.
+#[test]
+fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitted_over() {
+    let (mut f, target, calls) = dec13b_fixture("dec13b_foreign", true);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let file = f.dir.join("approval.conf");
+    let approval = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(
+        &file,
+        approval.replace(
+            "max_total_sol_debit_lamports = 50000000",
+            "max_total_sol_debit_lamports = 1",
+        ),
+    )
+    .unwrap();
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(f.owner.fe04_admission.is_some());
+    f.owner.sources.capabilities.live_requested =
+        crate::orchestration::capability_control::LIVE_OFF;
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_none(), "closed with LIVE");
+    // An attempt another owner left (UNKNOWN) in the wallet journal.
+    crate::execution::one_shot::test_unknown_attempt(&dir, &wallet);
+    f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            101,
+            "account_update",
+        )))
+        .unwrap();
+    assert_eq!(
+        f.owner.fe04_admissions.block_reason,
+        "FE04_JOURNAL_HAS_ATTEMPT:UNKNOWN"
+    );
+    assert!(f.owner.fe04_admission.is_none() && f.owner.fe04_held.is_none());
+    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .contains(&"sendTransaction".to_string()));
+    // The journal is free again for its owner.
+    crate::execution::one_shot::Journal::open(&dir, &wallet).unwrap();
+    cleanup(f);
+}
+
+/// DEC-13b (review M4, M5): a send whose fate is unknown (the node answers an error after the
+/// durable handoff) halts Safety and keeps every hold — capital and inventory reserved, the
+/// attempt UNKNOWN in the journal read back from the disk — until the settlement's proven
+/// non-landing books it, releasing everything exactly once; a repeated answer releases nothing.
+#[test]
+fn dec13b_an_unknown_send_keeps_every_hold_until_the_settlement_books_it_once() {
+    use crate::execution::one_shot::settlement::{SettlementEvidence, SettlementSubject};
+    let (mut f, target, calls) = dec13b_fixture_with("dec13b_unknown", true, false, 0);
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(calls
+        .lock()
+        .unwrap()
+        .contains(&"sendTransaction".to_string()));
+    let a = &f.owner.fe04_admissions;
+    assert_eq!((a.submitted, a.unknown), (0, 1));
+    assert_eq!(
+        f.owner.safety.halted(),
+        Some(darkbot_common::error::HaltReason::UnknownEconomics)
+    );
+    let held = f.owner.fe04_held.as_ref().unwrap();
+    assert_eq!(
+        held.step_state(),
+        Some(crate::execution::accounting::StepState::Unknown)
+    );
+    let unbooked = f.owner.fe04_unbooked.unwrap();
+    assert!(unbooked.reserved_inventory > 0);
+    assert_eq!(
+        f.owner.safety.inventory_reserved(),
+        unbooked.reserved_inventory
+    );
+    let (intent, _) = held.settlement_job().unwrap();
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert_eq!(fe04_job(&f).unwrap().subject.signatures, intent.signatures);
+    let evidence = SettlementEvidence {
+        observations: vec![],
+        non_landing: Some(Ok(
+            crate::execution::one_shot::non_landing::loopback::proving(
+                &SettlementSubject::from(&intent).non_landing().unwrap(),
+                true,
+            ),
+        )),
+    };
+    fe04_answer(&f, evidence.clone());
+    run_until(&mut f, fe04_settled);
+    assert_eq!(
+        (
+            f.owner.safety.capital_in_use(),
+            f.owner.safety.inventory_reserved()
+        ),
+        (0, 0)
+    );
+    let day = f.owner.safety.day();
+    fe04_answer(&f, evidence);
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    assert_eq!(f.owner.safety.day(), day, "booked once");
+    assert_eq!(
+        f.owner.safety.halted(),
+        Some(darkbot_common::error::HaltReason::UnknownEconomics),
+        "no ledger violation"
+    );
+    cleanup(f);
+}
+
+/// DEC-13b (review M5, L4): an exit whose send fate is unknown halts Safety, stays open UNKNOWN
+/// in the journal for the settlement and ends the exits of the run (no second route or send).
+#[test]
+fn dec13b_an_unknown_exit_halts_and_ends_the_exits_of_the_run() {
+    let (mut f, calls, e) = dec13b_exit_fixture("dec13b_exit_unknown", false);
+    dec13b_live(&mut f, true);
+    f.owner.fe04_refreshed = std::time::Instant::now()
+        .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+        .unwrap();
+    f.owner.lifecycle();
+    assert_eq!(
+        f.owner.fe04_admissions.exits_unknown, 1,
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    // Halted (the replayed one-shot already was; the first reason stays).
+    assert!(f.owner.safety.halted().is_some());
+    assert_eq!(
+        f.owner.fe04_held.as_ref().unwrap().open_exit_id(),
+        Some(e.approval_id.clone())
+    );
+    let sends = calls.lock().unwrap().len();
+    f.owner.fe04_exit_admission();
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        sends,
+        "no second exit in this run"
+    );
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert_eq!(fe04_job(&f).unwrap().exit, Some(e.approval_id.clone()));
+    cleanup(f);
+}
+
+/// DEC-13b (review M4): a reservation the handoff refused after it was made durable (the state
+/// aged past the approval's `max_state_age_ms` during a slow simulation; nothing sent) is read
+/// back from the disk the way a restart reads it — UNKNOWN, every hold kept — so the running
+/// owner's settlement proves its non-landing instead of the attempt staying RESERVED all run.
+#[test]
+fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlement() {
+    let (mut f, target, calls) = dec13b_fixture_with("dec13b_aged", true, true, 1_200);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let file = f.dir.join("approval.conf");
+    let approval = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(
+        &file,
+        approval.replace("max_state_age_ms = 60000", "max_state_age_ms = 1000"),
+    )
+    .unwrap();
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .contains(&"sendTransaction".to_string()));
+    assert_eq!(
+        f.owner.fe04_admissions.unknown, 1,
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    let held = f.owner.fe04_held.as_ref().unwrap();
+    assert_eq!(
+        held.step_state(),
+        Some(crate::execution::accounting::StepState::Unknown),
+        "never RESERVED for the rest of the run"
+    );
+    assert!(f.owner.fe04_unbooked.is_some());
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some(), "the settlement reads it");
     cleanup(f);
 }

@@ -556,7 +556,12 @@ impl ShadowOwner {
         let mut admission = match mode {
             crate::execution::pipeline::Mode::Live => {
                 let facts = self.fe04_admission_facts(&acct);
-                fe04::admission_for(&mut self.fe04_admission, &mut self.fe04_admissions, facts)
+                fe04::admission_for(
+                    &mut self.fe04_admission,
+                    &mut self.fe04_held,
+                    &mut self.fe04_admissions,
+                    facts,
+                )
             }
             crate::execution::pipeline::Mode::Shadow => None,
         };

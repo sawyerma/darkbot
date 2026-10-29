@@ -69,6 +69,22 @@ pub struct OwnerLock {
     pub path: PathBuf,
 }
 
+/// The flock belongs to the open file description, which a child spawned concurrently by this
+/// process shares until its exec: closing alone may leave the lock held, so it is released
+/// explicitly (as the FE-04 wallet lock is).
+fn unlock(file: &File) {
+    // SAFETY: flock on an owned, open file descriptor.
+    unsafe {
+        libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+    }
+}
+
+impl Drop for OwnerLock {
+    fn drop(&mut self) {
+        unlock(&self._file);
+    }
+}
+
 fn try_lock(file: &File) -> std::io::Result<bool> {
     // SAFETY: flock on an owned, open file descriptor.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
@@ -186,10 +202,13 @@ pub fn owner_state(path: &Path) -> Result<OwnerState, String> {
         .map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))?;
     let held = held.trim().to_string();
     match try_lock(&file).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))? {
-        // Taken just to probe; released when `file` drops at the end of this function.
-        true => Ok(OwnerState::NotRunning {
-            last: (!held.is_empty()).then_some(held),
-        }),
+        // Taken just to probe; released at once (explicitly, never by the drop alone).
+        true => {
+            unlock(&file);
+            Ok(OwnerState::NotRunning {
+                last: (!held.is_empty()).then_some(held),
+            })
+        }
         false => Ok(OwnerState::Running {
             pid: field(&held, "pid")
                 .and_then(|v| v.parse().ok())
@@ -302,9 +321,14 @@ mod tests {
             }
             probes
         });
+        // A child another thread spawned shares the previous owner's open file description
+        // until its exec (a clone held across the next start stands in for it): the release
+        // must not depend on the close.
+        let mut spawned = None;
         for i in 0..1000 {
             let owner = acquire_owner(&path, &format!("run{i}"), "shadow")
                 .unwrap_or_else(|e| panic!("start {i} refused by a probe: {e}"));
+            spawned = Some(owner._file.try_clone().unwrap());
             assert!(acquire_owner(&path, "second", "shadow")
                 .unwrap_err()
                 .starts_with("RUNTIME_OWNER_LOCKED"));
@@ -314,6 +338,7 @@ mod tests {
             ));
             drop(owner);
         }
+        drop(spawned);
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         assert!(prober.join().unwrap() > 0);
         std::fs::remove_dir_all(d).unwrap();

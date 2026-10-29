@@ -454,9 +454,9 @@ impl ShadowOwner {
 
     /// DEC-10: the configured approval at this instant (expiry moves with the clock); without an
     /// FE-04 journal its single use is unchecked: never VALID then.
-    /// DEC-13b/DEC-02: the admission state — OFF without an effective LIVE (its block reason),
-    /// READY with an open admission, WAITING before the first LIVE candidate, else BLOCKED with
-    /// the reason — and this run's counters.
+    /// DEC-13b/DEC-02: the admission state — OFF without an effective LIVE (its block reason);
+    /// BLOCKED by a held attempt, a Safety halt or the last LIVE candidate's refusal; READY with
+    /// an open admission; WAITING before the first LIVE candidate — and this run's counters.
     fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
         let a = &self.fe04_admissions;
         let (state, block_reason) = if !self.live_effective() {
@@ -465,21 +465,18 @@ impl ShadowOwner {
                 self.sources.capabilities.fe06.as_ref(),
             );
             ("OFF", reason.to_string())
+        } else if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
+            // Single flight: the held attempt blocks every admission.
+            ("BLOCKED", format!("FE04_ATTEMPT_HELD:{}", state.name()))
+        } else if let Some(halt) = self.safety.halted() {
+            ("BLOCKED", format!("SAFETY_HALTED:{}", halt.as_str()))
+        } else if !a.block_reason.is_empty() {
+            // The last LIVE candidate's refusal.
+            ("BLOCKED", a.block_reason.clone())
         } else if self.fe04_admission.is_some() {
             ("READY", String::new())
-        } else if let Some(held) = &self.fe04_held {
-            // Single flight: the held attempt blocks every admission.
-            (
-                "BLOCKED",
-                format!(
-                    "FE04_ATTEMPT_HELD:{}",
-                    held.step_state().map_or("UNKNOWN", |s| s.name())
-                ),
-            )
-        } else if a.block_reason.is_empty() {
-            ("WAITING", String::new())
         } else {
-            ("BLOCKED", a.block_reason.clone())
+            ("WAITING", String::new())
         };
         crate::status_tap::OwnerAdmission {
             state,

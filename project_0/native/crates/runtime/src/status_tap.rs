@@ -350,8 +350,8 @@ pub struct OwnerAdmission {
     pub refused: u64,
     pub unknown: u64,
     pub last_refusal: String,
-    /// DEC-02: pipeline simulations reused at the handoff, simulated again, refused without time,
-    /// and why the last reuse was refused.
+    /// DEC-02: pipeline simulations reused at the handoff, simulated again, refused (no time for a
+    /// new one, or the new one's node behind the state slot), and why the last reuse was refused.
     pub simulation_reused: u64,
     pub simulation_resimulated: u64,
     pub simulation_refused: u64,

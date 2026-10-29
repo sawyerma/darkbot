@@ -139,8 +139,6 @@ mod tests {
         assert!(c.fresh(300, 100).is_none());
     }
 
-    /// DEC-01: every stored blockhash is a new generation; refresh requests coalesce until the
-    /// worker takes them, and a request unparks the registered worker.
     /// DEC-13: a refresh keeps the slot the node answered at; the blockhash stays valid for
     /// `MAX_PROCESSING_AGE` slots after it (unknown without that slot).
     #[test]
@@ -187,6 +185,8 @@ mod tests {
             None
         );
     }
+    /// DEC-01: every stored blockhash is a new generation; refresh requests coalesce until the
+    /// worker takes them, and a request unparks the registered worker.
     #[test]
     fn generation_and_coalesced_refresh_requests() {
         let c = BlockhashCache::new();

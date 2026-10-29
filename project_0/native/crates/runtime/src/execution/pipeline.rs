@@ -1348,6 +1348,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         } else {
             (self.submitter.path(), vec![built.tx.clone()])
         };
+        // DEC-13b (review L1): the attempt is valid no longer than the blockhash it is signed with.
+        if let Some(valid) = bh.valid_until_slot() {
+            fe04.valid_until_slot = fe04.valid_until_slot.min(valid);
+        }
         let t_handoff_ns = self.clock.now_ns();
         let admission = fe04.admit(
             crate::execution::one_shot::admission::Candidate {

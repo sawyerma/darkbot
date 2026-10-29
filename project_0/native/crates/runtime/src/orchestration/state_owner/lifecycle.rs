@@ -6,12 +6,23 @@ impl ShadowOwner {
         // P8-RES-02: the book follows the durable FE-04 journal (a finalized reconciliation
         // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
         // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
+        // DEC-13b (review M2): an admission (and its wallet lock) is open only while LIVE is.
+        #[cfg(feature = "crate_health")]
+        if self.fe04_admission.is_some() && !self.live_effective() {
+            self.fe04_admission = None;
+        }
         if let Some(dir) = &self.fe04_journal {
             if self.fe04_refreshed.elapsed() >= self.fe04_refresh {
                 let wallet = self.liquidator.to_string();
                 if self.fe04_held.is_none() {
-                    self.reservations =
-                        crate::execution::reservation::WalletReservations::refreshed(dir, &wallet);
+                    use crate::execution::reservation::WalletReservations;
+                    // Review M1: an open admission holds the journal and its lock; the book
+                    // follows that journal.
+                    self.reservations = match &self.fe04_admission {
+                        Some(a) => WalletReservations::rebuild(a.journal.active_hold())
+                            .unwrap_or_else(|_| WalletReservations::unreadable()),
+                        None => WalletReservations::refreshed(dir, &wallet),
+                    };
                 }
                 // DEC-04: the B evidence of the journals (unreadable: none, ACTIVE impossible).
                 self.hold_gate.evidence = crate::execution::accounting::Ledger::load(dir, &wallet)

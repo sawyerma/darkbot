@@ -51,14 +51,19 @@ pub(super) fn book_settlement(
     settled: SettledAttempt,
 ) -> Result<(), LedgerViolation> {
     match unbooked.reserved_capital {
-        Some(capital) => safety.record_outcome(
-            settled.unix_s,
-            s.landed_success,
-            Some(s.realized_net_usd_micro),
-            capital,
-            s.unrealized_inventory_usd_micro,
-            unbooked.reserved_inventory,
-        ),
+        Some(capital) => {
+            safety.record_outcome(
+                settled.unix_s,
+                s.landed_success,
+                Some(s.realized_net_usd_micro),
+                capital,
+                s.unrealized_inventory_usd_micro,
+                unbooked.reserved_inventory,
+            )?;
+            // A consumed one-shot halts as its restart replay does (review L3).
+            safety.halt(darkbot_common::error::HaltReason::LimitBreached);
+            Ok(())
+        }
         None => safety.restore_attempt(settled.unix_s, None, Some(settled)),
     }
 }
@@ -472,10 +477,13 @@ pub(super) struct Fe04AdmissionFacts {
 
 /// DEC-13b: the admission a LIVE candidate is handed to — the open one of the same approval
 /// refreshed with `facts`, else a new one on the wallet's journal (a replaced approval's journal
-/// is closed first) — or `None` with its reason; the pipeline then stops at its send boundary
-/// (`LIVE_SEND_REQUIRES_FE04`). It comes back through `fe04_admission_back`.
+/// is closed first; a held journal without an attempt is that journal) — or `None` with its
+/// reason; the pipeline then stops at its send boundary (`LIVE_SEND_REQUIRES_FE04`). A journal
+/// holding an attempt is never admitted over: it is closed again (review M3). The admission
+/// comes back through `fe04_admission_back`.
 pub(super) fn admission_for(
     open: &mut Option<crate::execution::one_shot::admission::Fe04Admission>,
+    held: &mut Option<crate::execution::one_shot::Journal>,
     stats: &mut Fe04AdmissionStats,
     facts: Result<Fe04AdmissionFacts, (String, bool)>,
 ) -> Option<crate::execution::one_shot::admission::Fe04Admission> {
@@ -493,13 +501,21 @@ pub(super) fn admission_for(
         Some(a) if a.approval == f.approval => a,
         other => {
             drop(other);
-            let journal = match crate::execution::one_shot::Journal::open(&f.dir, &f.wallet) {
+            let journal = match held.take_if(|j| j.step_state().is_none()) {
+                Some(j) => Ok(j),
+                None => crate::execution::one_shot::Journal::open(&f.dir, &f.wallet),
+            };
+            let journal = match journal {
                 Ok(j) => j,
                 Err(e) => {
                     stats.block_reason = e;
                     return None;
                 }
             };
+            if let Some(state) = journal.step_state() {
+                stats.block_reason = format!("FE04_JOURNAL_HAS_ATTEMPT:{}", state.name());
+                return None;
+            }
             crate::execution::one_shot::admission::Fe04Admission {
                 journal,
                 approval: f.approval,
@@ -542,14 +558,10 @@ impl ShadowOwner {
         target: &Pubkey,
     ) -> Result<Fe04AdmissionFacts, (String, bool)> {
         use crate::execution::one_shot::approval_file::ApprovalFile;
-        if let Some(held) = &self.fe04_held {
-            return Err((
-                format!(
-                    "FE04_ATTEMPT_HELD:{}",
-                    held.step_state().map_or("UNKNOWN", |s| s.name())
-                ),
-                true,
-            ));
+        // Single flight: an attempt in the held journal blocks every admission; a journal without
+        // one (an unused admission of an earlier run, an archived attempt) does not (review H1).
+        if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
+            return Err((format!("FE04_ATTEMPT_HELD:{}", state.name()), true));
         }
         let Some(dir) = self.fe04_journal.clone() else {
             return Err(("FE04_JOURNAL_NOT_CONFIGURED".into(), true));
@@ -576,7 +588,7 @@ impl ShadowOwner {
             return Err(("FE04_TARGET_NOT_APPROVED".into(), false));
         }
         if self.program_upgrade_latched {
-            return Err(("FE04_PROGRAM_UPGRADED".into(), false));
+            return Err(("FE04_PROGRAM_UPGRADED".into(), true));
         }
         // The blockhash the pipeline signs with is this one or a newer one: its validity bounds
         // the attempt conservatively.
@@ -594,6 +606,27 @@ impl ShadowOwner {
             valid_until_slot,
             approval: approval.clone(),
         })
+    }
+
+    /// DEC-13b (review M4/L5): an UNKNOWN handoff is read back from the disk the way a restart
+    /// reads it — a reservation never handed off becomes UNKNOWN (the non-landing proof settles
+    /// it), a failed write shows what reached the disk. A journal that cannot be read again leaves
+    /// the book unreadable (every hold kept, no offer).
+    pub(super) fn fe04_reopen_held(&mut self) {
+        let (Some(journal), Some(dir)) = (self.fe04_held.take(), self.fe04_journal.clone()) else {
+            return;
+        };
+        drop(journal);
+        match crate::execution::one_shot::Journal::open(&dir, &self.liquidator.to_string()) {
+            Ok(j) => self.fe04_held = Some(j),
+            Err(e) => {
+                self.reservations = crate::execution::reservation::WalletReservations::unreadable();
+                owner_log!(
+                    self,
+                    "fe04_admission: journal not read again {e}; holds retained"
+                );
+            }
+        }
     }
 
     /// DEC-13b: the reconciled wallet balances an admission for `target` checks its holds
@@ -654,12 +687,16 @@ impl ShadowOwner {
             self.fe04_admission = Some(admission);
             return;
         };
-        if matches!(rec.decision, Decision::Submitted) {
+        let submitted = matches!(rec.decision, Decision::Submitted);
+        if submitted {
             self.fe04_admissions.submitted = self.fe04_admissions.submitted.saturating_add(1);
         } else {
             self.fe04_admissions.unknown = self.fe04_admissions.unknown.saturating_add(1);
         }
         self.fe04_held = Some(admission.journal);
+        if !submitted {
+            self.fe04_reopen_held();
+        }
         self.fe04_unbooked = Some(Fe04Unbooked {
             reserved_capital: Some(reserved.capital),
             reserved_inventory: reserved.inventory,
@@ -688,7 +725,8 @@ impl ShadowOwner {
         use crate::execution::one_shot::admission::Admission;
         use crate::execution::one_shot::approval_file::ApprovalFile;
         use crate::execution::one_shot::exit_admission::{admit_exit, ExitCandidate};
-        if !self.live_effective() {
+        // An UNKNOWN exit ends the exits of this run (review L4): its holds stay, it is settled.
+        if !self.live_effective() || self.fe04_admissions.exits_unknown > 0 {
             return;
         }
         let Some(held) = self.fe04_held.as_ref() else {
@@ -793,6 +831,7 @@ impl ShadowOwner {
                 s.last_exit_refusal = reason;
                 self.safety
                     .halt(darkbot_common::error::HaltReason::UnknownEconomics);
+                self.fe04_reopen_held();
             }
         }
         self.fe04_settle_due = Some(std::time::Instant::now());

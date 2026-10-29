@@ -170,7 +170,9 @@ pub fn latest_outcome(dir: &Path) -> Result<Option<CapabilityControlOutcome>, St
 /// DEC-13: the separate FE-06 authorization that opens LIVE — the pipeline mode, Safety LIVE, the
 /// asset allowlist and the submitter together. No request, FE-04 approval or configuration grants
 /// it; its format and source are the user's decision (BUGS DEC-13), so this build reads none and
-/// no production path constructs one: LIVE stays BLOCKED (only the offline tests hold one).
+/// no production path constructs one: LIVE stays BLOCKED (only the offline tests hold one). The
+/// decided source must open all of them at once — `OwnerCapabilities::fe06`, `ObserveOnly::open`
+/// and Safety LIVE — never the mode alone (review L7).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fe06Authorization {
     _sealed: (),
