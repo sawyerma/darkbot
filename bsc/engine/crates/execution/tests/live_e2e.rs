@@ -457,6 +457,7 @@ fn exec_setup() -> ExecSetup {
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
+            live_max_head_age_ms: 86_400_000,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),

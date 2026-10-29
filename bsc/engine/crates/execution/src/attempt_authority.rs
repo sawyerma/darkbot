@@ -922,8 +922,11 @@ mod tests {
             .unwrap();
             std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
                 .unwrap();
+            // A script written just now: macOS checks it on its first run
+            // (tens of seconds under load), which is not git's time.
             Git {
                 program: path,
+                timeout: Duration::from_secs(300),
                 ..Git::new(git[0].repo.clone(), "origin")
             }
         };
@@ -1002,7 +1005,7 @@ mod tests {
         let started = Instant::now();
         while !reported.exists() {
             assert!(
-                started.elapsed() < Duration::from_secs(30),
+                started.elapsed() < Duration::from_secs(120),
                 "child never consumed"
             );
             std::thread::sleep(Duration::from_millis(20));

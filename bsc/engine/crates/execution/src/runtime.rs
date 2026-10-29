@@ -413,6 +413,11 @@ impl RuntimeConfig {
                             1_000,
                             600_000,
                         )?,
+                        live_max_head_age_ms: take(
+                            "BSC_EXEC_LIVE_MAX_HEAD_AGE_MS",
+                            1_000,
+                            600_000,
+                        )?,
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -3317,8 +3322,9 @@ mod tests {
             thread::spawn(move || run(&config, &sources, &rundir, Path::new("/nonexistent-repo")));
         let status = base.join("bsc-runtime/status.dbrec");
         let started = Instant::now();
+        // A liveness bound, not a timing claim: a loaded host starts slowly.
         while !status.exists() {
-            assert!(started.elapsed() < Duration::from_secs(10), "no status");
+            assert!(started.elapsed() < Duration::from_secs(120), "no status");
             thread::sleep(Duration::from_millis(20));
         }
         fs::write(base.join("bsc.runtime.stop"), b"stop\n").unwrap();

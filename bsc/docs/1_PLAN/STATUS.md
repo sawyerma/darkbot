@@ -55,7 +55,11 @@
 | BSC3-031 | FIX_VERIFIED (lokale Einzeloperation 1,1 µs → 40 ns, keine E2E-Latenz) | `cec77423` | – |
 | BSC3-050 | FIX_VERIFIED | `f2a4a87f` | – |
 | BSC3-042 | TEILWEISE (zweiter C3-Launch nach Inklusion: Default-Cap SESSION_CAP, erhöhte Cap SENDER_NONCE; kein Owner-Slot, kein Send) | `f2a4a87f` | neuer Arm je Versuch: Planentscheidung |
-| BSC3-073 (neu: Budget-Doppelzählung bei Nonce-Wiederverwendung, Auftrag 29.10.) | FIX_VERIFIED (je (Chain, Absender, Nonce) nur das größte MAX_WEI in Spend, Zulassung, Balance und Exit-Reserve; Zulassung per flock serialisiert; v1-Einträge einzeln) | dieser Commit | – |
+| BSC3-073 (neu: Budget-Doppelzählung bei Nonce-Wiederverwendung, Auftrag 29.10.) | FIX_VERIFIED (je (Chain, Absender, Nonce) nur das größte MAX_WEI in Spend, Zulassung, Balance und Exit-Reserve; Zulassung per flock serialisiert; v1-Einträge einzeln) | `85897e79` | – |
+| BSC3-036 | TEILWEISE (LIVE-Release nur auf kanonischem Head ≤ `BSC_EXEC_LIVE_MAX_HEAD_AGE_MS`; gestallte Quelle → STALE_HEAD vor dem Owner) | dieser Commit | Provider-Qualifikation/Failover: Betreiberentscheidung |
+| BSC3-035 | TEILWEISE (Parität der drei manuellen Flap-Leser: Signatur-, Layout- und Negativtests) | dieser Commit | Promotion in den zentralen Decoder erst mit v5.27.2-ABI-Evidence |
+| BSC3-030 | TEILWEISE (verlorener Exit: nach dem Fenster neue Exit-Entscheidung an derselben Nonce mit eigener Owner-Admission, kein Retry derselben Bytes; Test `a_lost_exit_step_goes_again_at_its_nonce_before_any_buy`) | `c9cccf25` | öffentliche Mempool-Fallback-Route: Betreiberentscheidung |
+| BSC3-029 | KEIN FIX (keine direkte Provider-Zahlung im Plan) | – | Bid-Änderung nur mit Fee-/Bundle-/Provider-Qualifikation: Betreiberentscheidung |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

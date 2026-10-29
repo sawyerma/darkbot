@@ -635,6 +635,67 @@ fn a_reverted_launch_call_is_reported_and_no_other_failed_transaction() {
     );
 }
 
+/// BSC3-035: the Portal's LaunchedToDEX (declared in the verified ABI, not
+/// witnessed, so not decoded by the Phase D decoder) is read by its declared
+/// layout only: the topic is its signature's, the first of four data words
+/// the token (no indexed parameter); another layout is refused, never a
+/// migration and never skipped.
+#[test]
+fn launched_to_dex_logs_are_migrations_or_refused() {
+    use super::launches::flap_events;
+    use darkbot_bsc_trading::venues::flap::events::PortalEventKind;
+    let kind = PortalEventKind::LaunchedToDex;
+    assert_eq!(
+        kind.signature(),
+        "LaunchedToDEX(address,address,uint256,uint256)"
+    );
+    assert_eq!(keccak256(kind.signature()).0, kind.topic0());
+    assert!(!kind.witnessed());
+    let (block, receipts) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129774331);
+    let token = [0xAB; 20];
+    let word = |a: [u8; 20]| {
+        let mut w = [0u8; 32];
+        w[12..].copy_from_slice(&a);
+        w
+    };
+    let data = |first: [u8; 32], words: usize| {
+        let mut d = first.to_vec();
+        d.resize(words * 32, 7);
+        d
+    };
+    let log = |topics: Vec<[u8; 32]>, data: Vec<u8>| super::jsonrpc::Log {
+        address: FLAP_PORTAL,
+        topics,
+        data,
+        log_index: 900,
+    };
+    let mut receipt = receipts.iter().find(|r| r.succeeded).unwrap().clone();
+    let mut wide = word(token);
+    wide[0] = 1;
+    receipt.logs = vec![
+        log(vec![kind.topic0()], data(word(token), 4)),
+        // An indexed parameter, three words, five words, a non-address word.
+        log(vec![kind.topic0(), word(token)], data(word(token), 4)),
+        log(vec![kind.topic0()], data(word(token), 3)),
+        log(vec![kind.topic0()], data(word(token), 5)),
+        log(vec![kind.topic0()], data(wide, 4)),
+    ];
+    let got: Vec<String> = flap_events(&block, &[receipt])
+        .iter()
+        .map(|e| match e {
+            super::CanonicalEvent::FlapMigrated { token: t, .. } if *t == token => {
+                "migrated".into()
+            }
+            super::CanonicalEvent::FlapTradeUndecodable { .. } => "refused".into(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        got,
+        ["migrated", "refused", "refused", "refused", "refused"]
+    );
+}
+
 /// Phase H: the live Portal's NFT gate and per-origin holding cap (outside
 /// the verified ABI) are token terms; their topics are the declared
 /// signatures; another layout is refused, never skipped.

@@ -552,6 +552,14 @@ impl End for LiveEnd {
             ExpectedTx::Approve(_) => LiveIntentKind::Approve,
             ExpectedTx::Sell(_) => LiveIntentKind::Sell,
         };
+        // BSC3-036: a canonical head older than the bound: the canonical
+        // source is stalled or cut off; nothing is planned on it (before
+        // the owner's admission: no attempt, no spend).
+        let age_ms = (self.wall_ms)().saturating_sub(head.timestamp.saturating_mul(1_000));
+        if age_ms > config.live_max_head_age_ms {
+            let why = format!("the canonical head {} is {age_ms} ms old", head.number);
+            return self.refuse(Refusal::StaleHead, why);
+        }
         // BSC3-051: a provider refused one of this end's BUYs: no further
         // BUY through it (before the owner's admission; exits go on).
         if let Some(why) = self

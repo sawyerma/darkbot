@@ -165,6 +165,10 @@ pub struct ExecConfig {
     /// now) a strategy intent is formed on; a follower catching up does
     /// not act on old blocks as if they were fresh.
     pub strategy_max_head_age_ms: u64,
+    /// BSC3-036: the oldest canonical head (its timestamp against the wall
+    /// clock) a LIVE release plans on, BUY or exit: older, the canonical
+    /// source is stalled (or cut off) and nothing leaves.
+    pub live_max_head_age_ms: u64,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -219,6 +223,9 @@ impl ExecConfig {
         }
         if self.strategy_max_head_age_ms == 0 {
             return Err("BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS must be positive".into());
+        }
+        if self.live_max_head_age_ms == 0 {
+            return Err("BSC_EXEC_LIVE_MAX_HEAD_AGE_MS must be positive".into());
         }
         Ok(())
     }
@@ -2192,6 +2199,7 @@ pub(crate) mod tests {
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
+            live_max_head_age_ms: 86_400_000,
             sender_paths: SenderPaths::Both,
         }
     }

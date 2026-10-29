@@ -4998,4 +4998,97 @@ mod tests {
         x.shutdown();
         r.clean();
     }
+
+    /// The wall clock of [`a_stalled_canonical_source_releases_nothing`].
+    static STALL_WALL_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(NOW);
+
+    fn stall_wall() -> u64 {
+        STALL_WALL_MS.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// BSC3-036: the canonical source stalls after the arm (no block
+    /// arrives, as when it is rate limited or cut off) while the clean
+    /// nonce stands: once its head is older than
+    /// BSC_EXEC_LIVE_MAX_HEAD_AGE_MS by the wall clock, a further launch is
+    /// refused STALE_HEAD before the owner (no slot, no spend entry,
+    /// nothing sent); a fresh head lets the next one go.
+    #[test]
+    fn a_stalled_canonical_source_releases_nothing() {
+        let r = Rig::new("live-stall", LiveStrategies::C3);
+        let mut exec = r.exec.clone();
+        exec.exec.live_max_head_age_ms = 3_000;
+        STALL_WALL_MS.store(NOW, std::sync::atomic::Ordering::SeqCst);
+        let head = |number: u64, h: u8, parent: u8, at_ms: u64| CanonicalEvent::Block {
+            number,
+            hash: [h; 32],
+            parent_hash: [parent; 32],
+            timestamp_s: at_ms / 1_000,
+            timestamp_ms: at_ms,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        };
+        let mut c2 = owner(&r.d, r.buyer);
+        c2.canonical(&head(HEAD, 0xb1, 0xb0, NOW - 1_000));
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: r.buyer,
+            next_nonce: 5,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        let mut x = LiveRuntime::with_prober(
+            r.live.clone(),
+            exec,
+            &r.root,
+            r.state.clone(),
+            r.d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", stall_wall);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        // The source stalls: 4 s pass and no block comes.
+        STALL_WALL_MS.store(NOW + 4_000, std::sync::atomic::Ordering::SeqCst);
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let stalled = x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock);
+        assert!(stalled.is_none());
+        let refusals = record(&x);
+        assert!(
+            refusals
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"STALE_HEAD=1"),
+            "{:?}",
+            refusals.texts(l::REFUSALS)
+        );
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 0);
+        assert!(
+            crate::sources::admitted_intents(&r.state)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        // A fresh block: the next launch goes.
+        c2.canonical(&head(HEAD + 1, 0xb2, 0xb1, NOW + 3_500));
+        let _ = c2.take_evidence();
+        let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash_b, launcher_b, 4, 0, 20);
+        let fresh = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+        assert!(fresh.is_some(), "{:?}", reason(&x));
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        x.shutdown();
+        r.clean();
+    }
 }
