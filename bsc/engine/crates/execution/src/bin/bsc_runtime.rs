@@ -9,6 +9,7 @@
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime g04-precommit --rundir <dir> --criteria <g04_criteria.env> --decided-by <who>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! bsc_runtime capture-preflight --rundir <dir> --config <ingress.public.env>
@@ -41,9 +42,14 @@
 //! G0.4 census record (`bsc-runtime/g04-census.dbrec`) and prints its text
 //! view; the running runtime refreshes the same record itself.
 //!
+//! `g04-precommit` commits the confirmed criteria file's hash for the
+//! campaign in the run directory (`bsc-runtime/g04-precommit.dbrec`, written
+//! once, before the campaign's first journal starts; BSC3-033).
+//!
 //! `g04-verdict` replays the census and rates it against the G0.4 criteria
 //! file (order V2 §8) into `bsc-runtime/g04-verdict.dbrec` and prints it;
-//! unconfirmed criteria rate nothing. Exit 0 only for a verdict
+//! unconfirmed criteria, or criteria without a pre-commitment of their hash
+//! older than the campaign, rate nothing. Exit 0 only for a verdict
 //! (CONTINUE, ADAPT or STOP).
 //!
 //! `request` applies one user request with its generation as the CAS and
@@ -430,6 +436,25 @@ fn run(args: &[String]) -> Result<bool, String> {
             print!("{}", census.summary());
             Ok(true)
         }
+        [cmd, rest @ ..] if cmd == "g04-precommit" => {
+            let criteria_path = flag(rest, "--criteria")?;
+            let criteria = g04_criteria::Criteria::parse(
+                &std::fs::read(criteria_path).map_err(|e| format!("{criteria_path}: {e}"))?,
+            )?;
+            let p = g04_criteria::Precommit::write(
+                std::path::Path::new(flag(rest, "--rundir")?),
+                &criteria,
+                flag(rest, "--decided-by")?,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!(
+                "G0.4 criteria sha256 {} committed by {} at {} ms",
+                darkbot_bsc_record::hex(&p.criteria_sha256),
+                p.decided_by,
+                p.committed_unix_ms
+            );
+            Ok(true)
+        }
         [cmd, rest @ ..] if cmd == "g04-verdict" => {
             let config_path = flag(rest, "--config")?;
             let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
@@ -439,13 +464,15 @@ fn run(args: &[String]) -> Result<bool, String> {
                 &std::fs::read(criteria_path).map_err(|e| format!("{criteria_path}: {e}"))?,
             )?;
             let rundir = std::path::Path::new(flag(rest, "--rundir")?);
+            let verdict_path = rundir.join("bsc-runtime/g04-verdict.dbrec");
+            // An unreadable pre-commitment leaves no older verdict standing.
+            let precommit = g04_criteria::Precommit::read(rundir).inspect_err(|_| {
+                let _ = std::fs::remove_file(&verdict_path);
+            })?;
             let census = write_census(&config, rundir, None)?;
             let now = darkbot_bsc_record::observed_now()?;
-            let verdict = g04_criteria::evaluate(&criteria, &census, now);
-            replay_proof::write(
-                &rundir.join("bsc-runtime/g04-verdict.dbrec"),
-                &verdict.encode(now)?,
-            )?;
+            let verdict = g04_criteria::evaluate(&criteria, precommit.as_ref(), &census, now);
+            replay_proof::write(&verdict_path, &verdict.encode(now)?)?;
             print!("{}", verdict.summary());
             Ok(verdict.verdict != g04_criteria::NOT_EVALUABLE
                 && verdict.verdict != darkbot_bsc_execution::g04_census::CRITERIA_UNCONFIRMED)
@@ -737,7 +764,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

@@ -89,6 +89,11 @@ pub struct Window {
     pub flap_trades: u64,
     pub trade_gaps: u64,
     pub state: &'static str,
+    /// BSC3-033: the G0.4 pre-commitment its run was started under (its
+    /// journal's `g` record: the record hash); none for a run without one,
+    /// an older journal or two different ones. Not part of the census
+    /// record: the verdict compares it.
+    pub g04_precommit_sha256: Option<[u8; 32]>,
 }
 
 /// The census of all journals.
@@ -490,17 +495,29 @@ fn replay(
     max_payload: usize,
     active: bool,
 ) -> Result<Replay, String> {
+    let manifest = path
+        .is_dir()
+        .then(|| fs::read(path.join(RUN_MANIFEST)).ok())
+        .flatten()
+        .and_then(|b| cr::decode_run(&b).ok());
     let mut reader = if path.is_dir() {
         // A sealed run is read with at least the bound it was written with
         // (the configuration may have lowered it since).
-        let max_payload = fs::read(path.join(RUN_MANIFEST))
-            .ok()
-            .and_then(|b| cr::decode_run(&b).ok())
+        let max_payload = manifest
+            .as_ref()
             .and_then(|m| m.opt_u64(cr::MAX_PAYLOAD).ok().flatten())
             .and_then(|v| usize::try_from(v).ok())
             .map_or(max_payload, |written| written.max(max_payload));
-        // A missing or reordered segment is a corrupt run: nothing counts.
+        // A missing or reordered segment is a corrupt run, and so is a
+        // manifest of another start than its name (BSC3-033 review L1: the
+        // name dates the window): nothing counts.
         match RunReader::open(path, max_payload) {
+            _ if manifest
+                .as_ref()
+                .is_some_and(|m| m.u64(cr::STARTED_UNIX_MS).ok() != Some(started)) =>
+            {
+                None
+            }
             Ok(r) => Some(Reader::Run(Box::new(r))),
             Err(JournalError::FileMismatch) => None,
             Err(e) => return Err(format!("{}: {e}", path.display())),
@@ -517,6 +534,9 @@ fn replay(
         started_unix_ms: started,
         ..Window::default()
     };
+    // The `g` records read: the first, and whether another differed.
+    let mut precommit: Option<[u8; 32]> = None;
+    let mut precommit_conflict = false;
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
     let mut later_lags_ns: Vec<u64> = Vec::new();
@@ -565,6 +585,12 @@ fn replay(
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            (RecordKind::Runtime, Some(b'g')) if p.len() == 33 => {
+                let mut h = [0u8; 32];
+                h.copy_from_slice(&p[1..]);
+                precommit_conflict |= precommit.is_some_and(|x| x != h);
+                precommit = precommit.or(Some(h));
+            }
             (RecordKind::Runtime, Some(b'v'))
                 if p.len() == crate::runtime_journal::FOUR_PROBE_LEN =>
             {
@@ -699,13 +725,14 @@ fn replay(
                 }
             }
             // A known runtime tag of another length: damaged, counted (L6).
-            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X' | b'Q' | b'v')) => {
+            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X' | b'Q' | b'v' | b'g')) => {
                 window.unparsed_records += 1
             }
             (RecordKind::Canonical | RecordKind::Reorg, _) => window.unparsed_records += 1,
             _ => {}
         }
     };
+    window.g04_precommit_sha256 = precommit.filter(|_| !precommit_conflict);
     if let Some(Reader::Run(run)) = &reader
         && !active
     {
@@ -1365,6 +1392,70 @@ mod tests {
         let path = j.path().to_path_buf();
         j.finish().unwrap();
         path
+    }
+
+    /// BSC3-033: a run names the G0.4 pre-commitment on file at its start
+    /// (its journal's first record, also after a crash); a manifest of
+    /// another start than the run's name (review L1: the name dates the
+    /// window) makes nothing of it count.
+    #[test]
+    fn a_run_names_the_precommitment_it_started_under() {
+        let dir =
+            std::env::temp_dir().join(format!("bsc-g04-precommit-run-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let run = |g: &[[u8; 32]]| {
+            let mut r: Vec<(RecordKind, u64, Vec<u8>)> = g
+                .iter()
+                .map(|h| {
+                    (
+                        RecordKind::Runtime,
+                        1,
+                        crate::runtime_journal::g04_precommit_payload(h),
+                    )
+                })
+                .collect();
+            r.extend([
+                (
+                    RecordKind::Canonical,
+                    2,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                (
+                    RecordKind::Canonical,
+                    3,
+                    window_payload(b'E', 11, &[11; 32]),
+                ),
+                (RecordKind::Runtime, 4, EXIT_PAYLOAD.to_vec()),
+            ]);
+            r
+        };
+        write_run(&dir, 1_000, &run(&[[7; 32]]), 1 << 20);
+        let unbound = write_run(&dir, 2_000, &run(&[]), 1 << 20);
+        write_run(&dir, 4_000, &run(&[[7; 32], [8; 32]]), 1 << 20);
+        // A crashed run (no manifest) keeps it.
+        let crashed = write_run(&dir, 5_000, &run(&[[7; 32]])[..2], 1 << 20);
+        fs::remove_file(crashed.join(RUN_MANIFEST)).unwrap();
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(
+            c.windows
+                .iter()
+                .map(|w| (w.state, w.g04_precommit_sha256))
+                .collect::<Vec<_>>(),
+            [
+                ("COMPLETE", Some([7; 32])),
+                ("COMPLETE", None),
+                // Two different ones bind neither.
+                ("COMPLETE", None),
+                ("UNTERMINATED", Some([7; 32])),
+            ]
+        );
+        // A manifest moved under another start: nothing of it counts.
+        fs::rename(&unbound, dir.join("3000")).unwrap();
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.windows[1].journal, "3000");
+        assert_eq!(c.windows[1].state, "INVALID");
+        assert_eq!(c.windows[1].first_block, None);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Phase E review L1: a short `C` record and launch records of an

@@ -12034,7 +12034,7 @@
     "schema_version": 11,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].journal",
     "type": "Text",
     "unit": "text"
@@ -12048,7 +12048,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -12062,7 +12062,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].duration_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -12076,7 +12076,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].first_block",
     "type": "U64",
     "unit": "block_number"
@@ -12090,7 +12090,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].last_block",
     "type": "U64",
     "unit": "block_number"
@@ -12104,7 +12104,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -12118,7 +12118,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].resyncs",
     "type": "U64",
     "unit": "integer"
@@ -12132,7 +12132,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -12146,7 +12146,7 @@
     "schema_version": 11,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].state",
     "type": "Text",
     "unit": "text"
@@ -12160,7 +12160,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -12174,7 +12174,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unjoined",
     "type": "U64",
     "unit": "integer"
@@ -12188,7 +12188,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].pending_join",
     "type": "U64",
     "unit": "integer"
@@ -12202,7 +12202,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -12216,7 +12216,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -12230,7 +12230,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].observable_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -12244,7 +12244,7 @@
     "schema_version": 11,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -12258,7 +12258,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -12272,7 +12272,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -12286,7 +12286,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "flap_launches",
     "type": "U64",
     "unit": "integer"
@@ -12300,7 +12300,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_launches",
     "type": "U64",
     "unit": "integer"
@@ -12314,7 +12314,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "orphaned_launches",
     "type": "U64",
     "unit": "integer"
@@ -12328,7 +12328,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -12342,7 +12342,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "full_before",
     "type": "U64",
     "unit": "integer"
@@ -12356,7 +12356,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -12370,7 +12370,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "after",
     "type": "U64",
     "unit": "integer"
@@ -12384,7 +12384,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "missed",
     "type": "U64",
     "unit": "integer"
@@ -12398,7 +12398,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -12412,7 +12412,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -12426,7 +12426,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p99_us",
     "type": "U64",
     "unit": "integer"
@@ -12440,7 +12440,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -12454,7 +12454,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "contested_launches",
     "type": "U64",
     "unit": "integer"
@@ -12468,7 +12468,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "external_buys",
     "type": "U64",
     "unit": "integer"
@@ -12482,7 +12482,7 @@
     "schema_version": 11,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -12496,7 +12496,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].first_full_before",
     "type": "U64",
     "unit": "integer"
@@ -12510,7 +12510,7 @@
     "schema_version": 11,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria",
     "type": "Text",
     "unit": "text"
@@ -12524,7 +12524,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "buys_unknown",
     "type": "U64",
     "unit": "integer"
@@ -12538,7 +12538,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -12552,7 +12552,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_launches",
     "type": "U64",
     "unit": "integer"
@@ -12566,7 +12566,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_full_before",
     "type": "U64",
     "unit": "integer"
@@ -12580,7 +12580,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unjoined",
     "type": "U64",
     "unit": "integer"
@@ -12594,7 +12594,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -12608,7 +12608,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_min",
     "type": "I64",
     "unit": "signed_integer"
@@ -12622,7 +12622,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_p50",
     "type": "I64",
     "unit": "signed_integer"
@@ -12636,7 +12636,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_max",
     "type": "I64",
     "unit": "signed_integer"
@@ -12650,7 +12650,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_suspect",
     "type": "Bool",
     "unit": "boolean"
@@ -12664,7 +12664,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_unverifiable",
     "type": "U64",
     "unit": "integer"
@@ -12678,7 +12678,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_between_windows",
     "type": "U64",
     "unit": "integer"
@@ -12692,7 +12692,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -12706,7 +12706,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_answer_refused",
     "type": "U64",
     "unit": "integer"
@@ -12720,7 +12720,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_derived",
     "type": "U64",
     "unit": "integer"
@@ -12734,7 +12734,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_no_derivation",
     "type": "U64",
     "unit": "integer"
@@ -12748,7 +12748,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_mismatch",
     "type": "U64",
     "unit": "integer"
@@ -12762,7 +12762,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_not_recognized",
     "type": "U64",
     "unit": "integer"
@@ -12776,7 +12776,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_verdict_unrecorded",
     "type": "U64",
     "unit": "integer"
@@ -12790,7 +12790,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_full_before",
     "type": "U64",
     "unit": "integer"
@@ -12804,7 +12804,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -12818,7 +12818,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_after",
     "type": "U64",
     "unit": "integer"
@@ -12832,7 +12832,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_missed",
     "type": "U64",
     "unit": "integer"
@@ -12846,7 +12846,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -12860,7 +12860,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_sightings",
     "type": "U64",
     "unit": "integer"
@@ -12874,7 +12874,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -12888,7 +12888,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -12902,7 +12902,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_max_us",
     "type": "U64",
     "unit": "integer"
@@ -12916,7 +12916,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -12930,7 +12930,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_launches",
     "type": "U64",
     "unit": "integer"
@@ -12944,7 +12944,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_launches",
     "type": "U64",
     "unit": "integer"
@@ -12958,7 +12958,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_actionable",
     "type": "U64",
     "unit": "integer"
@@ -12972,7 +12972,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_actionable",
     "type": "U64",
     "unit": "integer"
@@ -12986,7 +12986,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_actionable",
     "type": "U64",
     "unit": "integer"
@@ -13000,7 +13000,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -13014,7 +13014,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -13028,7 +13028,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -13042,7 +13042,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_flap",
     "type": "U64",
     "unit": "integer"
@@ -13056,7 +13056,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_classic",
     "type": "U64",
     "unit": "integer"
@@ -13070,7 +13070,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_openfour",
     "type": "U64",
     "unit": "integer"
@@ -13084,7 +13084,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "launches_not_included",
     "type": "U64",
     "unit": "integer"
@@ -13098,7 +13098,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_candidate",
     "type": "U64",
     "unit": "integer"
@@ -13112,7 +13112,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "adjacent_buy_launches",
     "type": "U64",
     "unit": "integer"
@@ -13126,7 +13126,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_buy_launches",
     "type": "U64",
     "unit": "integer"
@@ -13140,7 +13140,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "adjacent_buy_full_before",
     "type": "U64",
     "unit": "integer"
@@ -13154,7 +13154,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "placement_unknown",
     "type": "U64",
     "unit": "integer"
@@ -13168,7 +13168,7 @@
     "schema_version": 11,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "observable_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -13182,7 +13182,7 @@
     "schema_version": 10,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].journal",
     "type": "Text",
     "unit": "text"
@@ -13196,7 +13196,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -13210,7 +13210,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].duration_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -13224,7 +13224,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].first_block",
     "type": "U64",
     "unit": "block_number"
@@ -13238,7 +13238,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].last_block",
     "type": "U64",
     "unit": "block_number"
@@ -13252,7 +13252,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -13266,7 +13266,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].resyncs",
     "type": "U64",
     "unit": "integer"
@@ -13280,7 +13280,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -13294,7 +13294,7 @@
     "schema_version": 10,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].state",
     "type": "Text",
     "unit": "text"
@@ -13308,7 +13308,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -13322,7 +13322,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unjoined",
     "type": "U64",
     "unit": "integer"
@@ -13336,7 +13336,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].pending_join",
     "type": "U64",
     "unit": "integer"
@@ -13350,7 +13350,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -13364,7 +13364,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -13378,7 +13378,7 @@
     "schema_version": 10,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -13392,7 +13392,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -13406,7 +13406,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -13420,7 +13420,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "flap_launches",
     "type": "U64",
     "unit": "integer"
@@ -13434,7 +13434,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_launches",
     "type": "U64",
     "unit": "integer"
@@ -13448,7 +13448,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "orphaned_launches",
     "type": "U64",
     "unit": "integer"
@@ -13462,7 +13462,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -13476,7 +13476,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "full_before",
     "type": "U64",
     "unit": "integer"
@@ -13490,7 +13490,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -13504,7 +13504,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "after",
     "type": "U64",
     "unit": "integer"
@@ -13518,7 +13518,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "missed",
     "type": "U64",
     "unit": "integer"
@@ -13532,7 +13532,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -13546,7 +13546,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -13560,7 +13560,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p99_us",
     "type": "U64",
     "unit": "integer"
@@ -13574,7 +13574,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -13588,7 +13588,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "contested_launches",
     "type": "U64",
     "unit": "integer"
@@ -13602,7 +13602,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "external_buys",
     "type": "U64",
     "unit": "integer"
@@ -13616,7 +13616,7 @@
     "schema_version": 10,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -13630,7 +13630,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].first_full_before",
     "type": "U64",
     "unit": "integer"
@@ -13644,7 +13644,7 @@
     "schema_version": 10,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria",
     "type": "Text",
     "unit": "text"
@@ -13658,7 +13658,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "buys_unknown",
     "type": "U64",
     "unit": "integer"
@@ -13672,7 +13672,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -13686,7 +13686,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_launches",
     "type": "U64",
     "unit": "integer"
@@ -13700,7 +13700,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_full_before",
     "type": "U64",
     "unit": "integer"
@@ -13714,7 +13714,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unjoined",
     "type": "U64",
     "unit": "integer"
@@ -13728,7 +13728,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -13742,7 +13742,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_min",
     "type": "I64",
     "unit": "signed_integer"
@@ -13756,7 +13756,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_p50",
     "type": "I64",
     "unit": "signed_integer"
@@ -13770,7 +13770,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_max",
     "type": "I64",
     "unit": "signed_integer"
@@ -13784,7 +13784,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_suspect",
     "type": "Bool",
     "unit": "boolean"
@@ -13798,7 +13798,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_unverifiable",
     "type": "U64",
     "unit": "integer"
@@ -13812,7 +13812,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_between_windows",
     "type": "U64",
     "unit": "integer"
@@ -13826,7 +13826,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -13840,7 +13840,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_answer_refused",
     "type": "U64",
     "unit": "integer"
@@ -13854,7 +13854,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_derived",
     "type": "U64",
     "unit": "integer"
@@ -13868,7 +13868,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_no_derivation",
     "type": "U64",
     "unit": "integer"
@@ -13882,7 +13882,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_mismatch",
     "type": "U64",
     "unit": "integer"
@@ -13896,7 +13896,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_not_recognized",
     "type": "U64",
     "unit": "integer"
@@ -13910,7 +13910,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_verdict_unrecorded",
     "type": "U64",
     "unit": "integer"
@@ -13924,7 +13924,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_full_before",
     "type": "U64",
     "unit": "integer"
@@ -13938,7 +13938,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -13952,7 +13952,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_after",
     "type": "U64",
     "unit": "integer"
@@ -13966,7 +13966,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_missed",
     "type": "U64",
     "unit": "integer"
@@ -13980,7 +13980,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -13994,7 +13994,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_sightings",
     "type": "U64",
     "unit": "integer"
@@ -14008,7 +14008,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -14022,7 +14022,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -14036,7 +14036,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_max_us",
     "type": "U64",
     "unit": "integer"
@@ -14050,7 +14050,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -14064,7 +14064,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_launches",
     "type": "U64",
     "unit": "integer"
@@ -14078,7 +14078,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_launches",
     "type": "U64",
     "unit": "integer"
@@ -14092,7 +14092,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_actionable",
     "type": "U64",
     "unit": "integer"
@@ -14106,7 +14106,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_actionable",
     "type": "U64",
     "unit": "integer"
@@ -14120,7 +14120,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_actionable",
     "type": "U64",
     "unit": "integer"
@@ -14134,7 +14134,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -14148,7 +14148,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -14162,7 +14162,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -14176,7 +14176,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_flap",
     "type": "U64",
     "unit": "integer"
@@ -14190,7 +14190,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_classic",
     "type": "U64",
     "unit": "integer"
@@ -14204,7 +14204,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_openfour",
     "type": "U64",
     "unit": "integer"
@@ -14218,7 +14218,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "launches_not_included",
     "type": "U64",
     "unit": "integer"
@@ -14232,7 +14232,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_candidate",
     "type": "U64",
     "unit": "integer"
@@ -14246,7 +14246,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "adjacent_buy_launches",
     "type": "U64",
     "unit": "integer"
@@ -14260,7 +14260,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_buy_launches",
     "type": "U64",
     "unit": "integer"
@@ -14274,7 +14274,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "adjacent_buy_full_before",
     "type": "U64",
     "unit": "integer"
@@ -14288,7 +14288,7 @@
     "schema_version": 10,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "placement_unknown",
     "type": "U64",
     "unit": "integer"
@@ -14302,7 +14302,7 @@
     "schema_version": 9,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].journal",
     "type": "Text",
     "unit": "text"
@@ -14316,7 +14316,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -14330,7 +14330,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].duration_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -14344,7 +14344,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].first_block",
     "type": "U64",
     "unit": "block_number"
@@ -14358,7 +14358,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].last_block",
     "type": "U64",
     "unit": "block_number"
@@ -14372,7 +14372,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -14386,7 +14386,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].resyncs",
     "type": "U64",
     "unit": "integer"
@@ -14400,7 +14400,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -14414,7 +14414,7 @@
     "schema_version": 9,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].state",
     "type": "Text",
     "unit": "text"
@@ -14428,7 +14428,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -14442,7 +14442,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unjoined",
     "type": "U64",
     "unit": "integer"
@@ -14456,7 +14456,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].pending_join",
     "type": "U64",
     "unit": "integer"
@@ -14470,7 +14470,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -14484,7 +14484,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -14498,7 +14498,7 @@
     "schema_version": 9,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -14512,7 +14512,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -14526,7 +14526,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -14540,7 +14540,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "flap_launches",
     "type": "U64",
     "unit": "integer"
@@ -14554,7 +14554,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_launches",
     "type": "U64",
     "unit": "integer"
@@ -14568,7 +14568,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "orphaned_launches",
     "type": "U64",
     "unit": "integer"
@@ -14582,7 +14582,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -14596,7 +14596,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "full_before",
     "type": "U64",
     "unit": "integer"
@@ -14610,7 +14610,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -14624,7 +14624,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "after",
     "type": "U64",
     "unit": "integer"
@@ -14638,7 +14638,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "missed",
     "type": "U64",
     "unit": "integer"
@@ -14652,7 +14652,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -14666,7 +14666,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -14680,7 +14680,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p99_us",
     "type": "U64",
     "unit": "integer"
@@ -14694,7 +14694,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -14708,7 +14708,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "contested_launches",
     "type": "U64",
     "unit": "integer"
@@ -14722,7 +14722,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "external_buys",
     "type": "U64",
     "unit": "integer"
@@ -14736,7 +14736,7 @@
     "schema_version": 9,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -14750,7 +14750,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].first_full_before",
     "type": "U64",
     "unit": "integer"
@@ -14764,7 +14764,7 @@
     "schema_version": 9,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria",
     "type": "Text",
     "unit": "text"
@@ -14778,7 +14778,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "buys_unknown",
     "type": "U64",
     "unit": "integer"
@@ -14792,7 +14792,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -14806,7 +14806,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_launches",
     "type": "U64",
     "unit": "integer"
@@ -14820,7 +14820,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_full_before",
     "type": "U64",
     "unit": "integer"
@@ -14834,7 +14834,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unjoined",
     "type": "U64",
     "unit": "integer"
@@ -14848,7 +14848,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -14862,7 +14862,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_min",
     "type": "I64",
     "unit": "signed_integer"
@@ -14876,7 +14876,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_p50",
     "type": "I64",
     "unit": "signed_integer"
@@ -14890,7 +14890,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_max",
     "type": "I64",
     "unit": "signed_integer"
@@ -14904,7 +14904,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_suspect",
     "type": "Bool",
     "unit": "boolean"
@@ -14918,7 +14918,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_unverifiable",
     "type": "U64",
     "unit": "integer"
@@ -14932,7 +14932,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_between_windows",
     "type": "U64",
     "unit": "integer"
@@ -14946,7 +14946,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -14960,7 +14960,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_answer_refused",
     "type": "U64",
     "unit": "integer"
@@ -14974,7 +14974,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_derived",
     "type": "U64",
     "unit": "integer"
@@ -14988,7 +14988,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_no_derivation",
     "type": "U64",
     "unit": "integer"
@@ -15002,7 +15002,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_mismatch",
     "type": "U64",
     "unit": "integer"
@@ -15016,7 +15016,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_not_recognized",
     "type": "U64",
     "unit": "integer"
@@ -15030,7 +15030,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_verdict_unrecorded",
     "type": "U64",
     "unit": "integer"
@@ -15044,7 +15044,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_full_before",
     "type": "U64",
     "unit": "integer"
@@ -15058,7 +15058,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -15072,7 +15072,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_after",
     "type": "U64",
     "unit": "integer"
@@ -15086,7 +15086,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_missed",
     "type": "U64",
     "unit": "integer"
@@ -15100,7 +15100,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -15114,7 +15114,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_sightings",
     "type": "U64",
     "unit": "integer"
@@ -15128,7 +15128,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -15142,7 +15142,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -15156,7 +15156,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_max_us",
     "type": "U64",
     "unit": "integer"
@@ -15170,7 +15170,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -15184,7 +15184,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_launches",
     "type": "U64",
     "unit": "integer"
@@ -15198,7 +15198,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_launches",
     "type": "U64",
     "unit": "integer"
@@ -15212,7 +15212,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_actionable",
     "type": "U64",
     "unit": "integer"
@@ -15226,7 +15226,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_actionable",
     "type": "U64",
     "unit": "integer"
@@ -15240,7 +15240,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_actionable",
     "type": "U64",
     "unit": "integer"
@@ -15254,7 +15254,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -15268,7 +15268,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -15282,7 +15282,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -15296,7 +15296,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_flap",
     "type": "U64",
     "unit": "integer"
@@ -15310,7 +15310,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_classic",
     "type": "U64",
     "unit": "integer"
@@ -15324,7 +15324,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_openfour",
     "type": "U64",
     "unit": "integer"
@@ -15338,7 +15338,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "launches_not_included",
     "type": "U64",
     "unit": "integer"
@@ -15352,7 +15352,7 @@
     "schema_version": 9,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_candidate",
     "type": "U64",
     "unit": "integer"
@@ -15366,7 +15366,7 @@
     "schema_version": 8,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].journal",
     "type": "Text",
     "unit": "text"
@@ -15380,7 +15380,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -15394,7 +15394,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].duration_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -15408,7 +15408,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].first_block",
     "type": "U64",
     "unit": "block_number"
@@ -15422,7 +15422,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].last_block",
     "type": "U64",
     "unit": "block_number"
@@ -15436,7 +15436,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].reorgs",
     "type": "U64",
     "unit": "integer"
@@ -15450,7 +15450,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].resyncs",
     "type": "U64",
     "unit": "integer"
@@ -15464,7 +15464,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -15478,7 +15478,7 @@
     "schema_version": 8,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].state",
     "type": "Text",
     "unit": "text"
@@ -15492,7 +15492,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -15506,7 +15506,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unjoined",
     "type": "U64",
     "unit": "integer"
@@ -15520,7 +15520,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].pending_join",
     "type": "U64",
     "unit": "integer"
@@ -15534,7 +15534,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -15548,7 +15548,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "windows[].ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -15562,7 +15562,7 @@
     "schema_version": 8,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -15576,7 +15576,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -15590,7 +15590,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -15604,7 +15604,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "flap_launches",
     "type": "U64",
     "unit": "integer"
@@ -15618,7 +15618,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_launches",
     "type": "U64",
     "unit": "integer"
@@ -15632,7 +15632,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "orphaned_launches",
     "type": "U64",
     "unit": "integer"
@@ -15646,7 +15646,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -15660,7 +15660,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "full_before",
     "type": "U64",
     "unit": "integer"
@@ -15674,7 +15674,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -15688,7 +15688,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "after",
     "type": "U64",
     "unit": "integer"
@@ -15702,7 +15702,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "missed",
     "type": "U64",
     "unit": "integer"
@@ -15716,7 +15716,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -15730,7 +15730,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -15744,7 +15744,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_p99_us",
     "type": "U64",
     "unit": "integer"
@@ -15758,7 +15758,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -15772,7 +15772,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "contested_launches",
     "type": "U64",
     "unit": "integer"
@@ -15786,7 +15786,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "external_buys",
     "type": "U64",
     "unit": "integer"
@@ -15800,7 +15800,7 @@
     "schema_version": 8,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].source_id",
     "type": "Text",
     "unit": "text"
@@ -15814,7 +15814,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "sources[].first_full_before",
     "type": "U64",
     "unit": "integer"
@@ -15828,7 +15828,7 @@
     "schema_version": 8,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria",
     "type": "Text",
     "unit": "text"
@@ -15842,7 +15842,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "buys_unknown",
     "type": "U64",
     "unit": "integer"
@@ -15856,7 +15856,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -15870,7 +15870,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_launches",
     "type": "U64",
     "unit": "integer"
@@ -15884,7 +15884,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "c1_scope_full_before",
     "type": "U64",
     "unit": "integer"
@@ -15898,7 +15898,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unjoined",
     "type": "U64",
     "unit": "integer"
@@ -15912,7 +15912,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_skipped",
     "type": "U64",
     "unit": "integer"
@@ -15926,7 +15926,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_min",
     "type": "I64",
     "unit": "signed_integer"
@@ -15940,7 +15940,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_p50",
     "type": "I64",
     "unit": "signed_integer"
@@ -15954,7 +15954,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "fetch_lag_ms_max",
     "type": "I64",
     "unit": "signed_integer"
@@ -15968,7 +15968,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "clock_suspect",
     "type": "Bool",
     "unit": "boolean"
@@ -15982,7 +15982,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_unverifiable",
     "type": "U64",
     "unit": "integer"
@@ -15996,7 +15996,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "blocks_between_windows",
     "type": "U64",
     "unit": "integer"
@@ -16010,7 +16010,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "unparsed_records",
     "type": "U64",
     "unit": "integer"
@@ -16024,7 +16024,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "tx_answer_refused",
     "type": "U64",
     "unit": "integer"
@@ -16038,7 +16038,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_derived",
     "type": "U64",
     "unit": "integer"
@@ -16052,7 +16052,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_no_derivation",
     "type": "U64",
     "unit": "integer"
@@ -16066,7 +16066,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_mismatch",
     "type": "U64",
     "unit": "integer"
@@ -16080,7 +16080,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_not_recognized",
     "type": "U64",
     "unit": "integer"
@@ -16094,7 +16094,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_verdict_unrecorded",
     "type": "U64",
     "unit": "integer"
@@ -16108,7 +16108,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_full_before",
     "type": "U64",
     "unit": "integer"
@@ -16122,7 +16122,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_hash_only_before",
     "type": "U64",
     "unit": "integer"
@@ -16136,7 +16136,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_after",
     "type": "U64",
     "unit": "integer"
@@ -16150,7 +16150,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_missed",
     "type": "U64",
     "unit": "integer"
@@ -16164,7 +16164,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_clock_unknown",
     "type": "U64",
     "unit": "integer"
@@ -16178,7 +16178,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_sightings",
     "type": "U64",
     "unit": "integer"
@@ -16192,7 +16192,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -16206,7 +16206,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_p95_us",
     "type": "U64",
     "unit": "integer"
@@ -16220,7 +16220,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "later_lag_max_us",
     "type": "U64",
     "unit": "integer"
@@ -16234,7 +16234,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -16248,7 +16248,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_launches",
     "type": "U64",
     "unit": "integer"
@@ -16262,7 +16262,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_launches",
     "type": "U64",
     "unit": "integer"
@@ -16276,7 +16276,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_actionable",
     "type": "U64",
     "unit": "integer"
@@ -16290,7 +16290,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "classic_actionable",
     "type": "U64",
     "unit": "integer"
@@ -16304,7 +16304,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "openfour_actionable",
     "type": "U64",
     "unit": "integer"
@@ -16318,7 +16318,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_outage_launches",
     "type": "U64",
     "unit": "integer"
@@ -16332,7 +16332,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -16346,7 +16346,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "four_lead_max_us",
     "type": "U64",
     "unit": "integer"
@@ -16360,7 +16360,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_flap",
     "type": "U64",
     "unit": "integer"
@@ -16374,7 +16374,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_classic",
     "type": "U64",
     "unit": "integer"
@@ -16388,7 +16388,7 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reverted_openfour",
     "type": "U64",
     "unit": "integer"
@@ -16402,10 +16402,374 @@
     "schema_version": 8,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "launches_not_included",
     "type": "U64",
     "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 69,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-precommit.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "criteria_sha256",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 69,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-precommit.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "scope",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 69,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-precommit.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "_provenance.tool",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 69,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-precommit.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "_provenance.observed_unix_ms",
+    "type": "U64",
+    "unit": "unix_milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 69,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-precommit.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "decided_by",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "criteria_sha256",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "criteria_state",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "_provenance.tool",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "_provenance.observed_unix_ms",
+    "type": "U64",
+    "unit": "unix_milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "verdict",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "reasons",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "campaign_ms",
+    "type": "U64",
+    "unit": "milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "covered_ms",
+    "type": "U64",
+    "unit": "milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "covered_ppm",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].venue",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].connected",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].scope",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].actionable",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].share_ppm",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].lead_p50_us",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].min_launches",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Required",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].verdict",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated>Repeated",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "venues[].reasons",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "precommit_sha256",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "precommit_decided_by",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 63,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.g04-verdict.v1",
+    "schema_version": 2,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
+    "symbol": "precommit_unix_ms",
+    "type": "U64",
+    "unit": "unix_milliseconds"
   },
   {
     "owner": "BSC",
@@ -16416,7 +16780,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -16430,7 +16794,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "criteria_state",
     "type": "Text",
     "unit": "text"
@@ -16444,7 +16808,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -16458,7 +16822,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -16472,7 +16836,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -16486,7 +16850,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -16500,7 +16864,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "campaign_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -16514,7 +16878,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -16528,7 +16892,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "covered_ppm",
     "type": "U64",
     "unit": "integer"
@@ -16542,7 +16906,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].venue",
     "type": "Text",
     "unit": "text"
@@ -16556,7 +16920,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].connected",
     "type": "U64",
     "unit": "integer"
@@ -16570,7 +16934,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].scope",
     "type": "U64",
     "unit": "integer"
@@ -16584,7 +16948,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].actionable",
     "type": "U64",
     "unit": "integer"
@@ -16598,7 +16962,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].share_ppm",
     "type": "U64",
     "unit": "integer"
@@ -16612,7 +16976,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].lead_p50_us",
     "type": "U64",
     "unit": "integer"
@@ -16626,7 +16990,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].min_launches",
     "type": "U64",
     "unit": "integer"
@@ -16640,7 +17004,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].verdict",
     "type": "Text",
     "unit": "text"
@@ -16654,7 +17018,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_census.rs",
-    "source_sha": "f7ec6ececec7a940fbb22fd0b2446e2063342e56817ae2e93826ec0dd1396538",
+    "source_sha": "0706a8cd21780237eebd2fa00e45e82b669bb7038d6da8adc7f00cb56f285d52",
     "symbol": "venues[].reasons",
     "type": "Text",
     "unit": "text"

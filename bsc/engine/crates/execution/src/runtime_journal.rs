@@ -58,6 +58,9 @@
 //!   source's cumulative count, written when it grows and at the end).
 //! - `Runtime` `b'X'`: the clean end of this process (journal committed
 //!   after it); its absence marks a killed or crashed process.
+//! - `Runtime` `b'g'`: the G0.4 pre-commitment on file when this process
+//!   started (BSC3-033), `b'g' | record sha256 [32]`, written first; absent
+//!   without one.
 //!
 //! With `LAUNCHES` (the default) other pending transactions are only
 //! counted (runtime status), not journaled: the journal stays small over
@@ -308,6 +311,14 @@ pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
 
 /// The clean end of the process (`Runtime` kind).
 pub const EXIT_PAYLOAD: [u8; 1] = [b'X'];
+
+/// The G0.4 pre-commitment a run started under (`b'g'`).
+pub fn g04_precommit_payload(sha256: &[u8; 32]) -> Vec<u8> {
+    let mut p = Vec::with_capacity(33);
+    p.push(b'g');
+    p.extend_from_slice(sha256);
+    p
+}
 
 /// The stop request, before any source is stopped (`Runtime` kind): the
 /// capture window ends here, not at the sources' own stops that follow.

@@ -1326,6 +1326,7 @@ fn the_g04_gate_shows_the_criteria_state_or_the_verdict() {
         .replace("=PROPOSED", "=CONFIRMED");
     let verdict = evaluate(
         &Criteria::parse(text.as_bytes()).unwrap(),
+        None,
         &darkbot_bsc_execution::g04_census::Census::default(),
         1,
     );
@@ -1338,8 +1339,57 @@ fn the_g04_gate_shows_the_criteria_state_or_the_verdict() {
         gate(&projection::project(&root, &run)),
         (
             "NOT_EVALUABLE".into(),
-            vec!["CAMPAIGN_RUNNING".into(), "COVERAGE_BELOW_MINIMUM".into()]
+            vec![
+                "CRITERIA_NOT_PRECOMMITTED".into(),
+                "CAMPAIGN_RUNNING".into(),
+                "COVERAGE_BELOW_MINIMUM".into()
+            ]
         )
+    );
+    // BSC3-033 review M1: a rating that names no pre-commitment (an older
+    // build's v2, or v1) binds nothing; one that names it is shown.
+    use darkbot_bsc_execution::g04_criteria::{CONTINUE, Precommit};
+    let mut rated = verdict.clone();
+    rated.verdict = CONTINUE;
+    rated.reasons.clear();
+    let mut v1 = darkbot_bsc_record::Draft::new(&schema::bsc_census::verdict::V1);
+    {
+        use schema::bsc_census::verdict as gv;
+        v1.set(
+            gv::CRITERIA_SHA256,
+            darkbot_bsc_record::Value::B256([0; 32]),
+        )
+        .set(gv::CRITERIA_STATE, "CONFIRMED")
+        .set(gv::PROVENANCE_TOOL, "bsc_runtime g04-verdict")
+        .set(gv::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+        .set(gv::VERDICT, CONTINUE)
+        .set(gv::CAMPAIGN_MS, 1u64)
+        .set(gv::COVERED_MS, 1u64);
+    }
+    for bytes in [rated.encode(1).unwrap(), v1.encode().unwrap()] {
+        fs::write(run.join("bsc-runtime/g04-verdict.dbrec"), bytes).unwrap();
+        assert_eq!(
+            gate(&projection::project(&root, &run)),
+            (
+                "NOT_EVALUABLE".into(),
+                vec!["CRITERIA_NOT_PRECOMMITTED".into()]
+            )
+        );
+    }
+    rated.precommit = Some(Precommit {
+        criteria_sha256: rated.criteria_sha256,
+        decided_by: "operator".into(),
+        committed_unix_ms: 0,
+        sha256: [1; 32],
+    });
+    fs::write(
+        run.join("bsc-runtime/g04-verdict.dbrec"),
+        rated.encode(1).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        gate(&projection::project(&root, &run)),
+        ("CONTINUE".into(), Vec::<String>::new())
     );
     fs::remove_dir_all(&root).unwrap();
 }

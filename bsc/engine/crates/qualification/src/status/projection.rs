@@ -426,7 +426,24 @@ fn g04_gate(root: &Path, rundir: &Path) -> GateStatus {
     use schema::bsc_census::verdict as gv;
     let path = rundir.join("bsc-runtime/g04-verdict.dbrec");
     if let Some(bytes) = read(&path) {
-        return match record::decode(&gv::SCHEMA, &bytes) {
+        return match gv::decode_verdict(&bytes) {
+            // BSC3-033: a rating that names no pre-commitment (a v1 record,
+            // an older build) binds nothing.
+            Ok(r)
+                if matches!(
+                    r.text(gv::VERDICT),
+                    Ok(darkbot_bsc_execution::g04_criteria::CONTINUE
+                        | darkbot_bsc_execution::g04_criteria::ADAPT
+                        | darkbot_bsc_execution::g04_criteria::STOP)
+                ) && !matches!(r.opt_b256(gv::PRECOMMIT_SHA256), Ok(Some(_))) =>
+            {
+                gate(
+                    "G0.4",
+                    darkbot_bsc_execution::g04_criteria::NOT_EVALUABLE,
+                    Some(evidence(rundir, &path, Some(&r))),
+                    vec!["CRITERIA_NOT_PRECOMMITTED".into()],
+                )
+            }
             Ok(r) => gate(
                 "G0.4",
                 &r.text(gv::VERDICT).map(safe_text).unwrap_or_default(),
@@ -1296,7 +1313,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // Its verdict against the versioned criteria (`bsc_runtime g04-verdict`).
     let verdict = rundir.join("bsc-runtime/g04-verdict.dbrec");
     if let Some(bytes) = read(&verdict) {
-        match record::decode(&schema::bsc_census::verdict::SCHEMA, &bytes) {
+        match schema::bsc_census::verdict::decode_verdict(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &verdict, &r)),
             Err(_) => warnings.push("G04_VERDICT_INVALID".into()),
         }

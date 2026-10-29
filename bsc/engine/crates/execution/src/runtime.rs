@@ -1729,6 +1729,15 @@ pub fn run(
         build_dirty: dirty,
         capture_pending: config.capture_pending.name(),
     });
+    // BSC3-033: the G0.4 pre-commitment on file at this start, first in
+    // the journal (a crashed run keeps it); an unreadable one binds nothing.
+    if let Ok(Some(p)) = crate::g04_criteria::Precommit::read(rundir) {
+        journal.record(
+            RecordKind::Runtime,
+            clock.now_ns(),
+            crate::runtime_journal::g04_precommit_payload(&p.sha256),
+        );
+    }
     let journal_rel: PathBuf = journal
         .path()
         .strip_prefix(rundir)

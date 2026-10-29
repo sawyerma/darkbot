@@ -17,7 +17,7 @@
 use darkbot_bsc_trading::signer::Signer;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
@@ -130,37 +130,87 @@ fn private(meta: &fs::Metadata) -> bool {
     meta.permissions().mode() & 0o077 == 0
 }
 
-/// The signer of the key file at `path`: absolute and outside `repo_root`,
-/// an owner-only regular file in an owner-only directory, exactly 32 bytes
-/// of a valid secp256k1 key. The bytes read are zeroized at once; the
-/// signer's key is zeroized when it is dropped. The file is only read.
-pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, IdentityError> {
-    check_location(path, repo_root)?;
-    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
-    let meta = fs::symlink_metadata(path).map_err(io)?;
-    if !meta.is_file() || !private(&meta) {
-        return Err(IdentityError::Permissions(format!(
-            "{} is not a private regular file",
-            path.display()
-        )));
-    }
-    if let Some(dir) = path.parent()
-        && !private(&fs::metadata(dir).map_err(io)?)
-    {
+/// The key's directory `dir`: owner-only, and no directory on its way
+/// (as written and as resolved) can be changed by another user: each
+/// belongs to the key directory's owner or root and is not writable by
+/// group or others unless sticky. Returns that owner: a process that opens
+/// a file inside an owner-only directory is its owner (or root).
+fn key_directory(dir: &Path) -> Result<u32, IdentityError> {
+    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", dir.display()));
+    let real = fs::canonicalize(dir).map_err(io)?;
+    let meta = fs::metadata(&real).map_err(io)?;
+    if !meta.is_dir() || !private(&meta) {
         return Err(IdentityError::Permissions(format!(
             "{} is accessible to others",
             dir.display()
         )));
     }
-    let mut bytes = fs::read(path).map_err(io)?;
-    let mut secret = [0u8; 32];
-    let len = bytes.len();
-    if len == 32 {
-        secret.copy_from_slice(&bytes);
+    let owner = meta.uid();
+    for a in dir.ancestors().chain(real.ancestors()) {
+        // A link on the written path is the owner's or root's (its target
+        // is on the resolved path); a directory is checked itself.
+        let m = fs::symlink_metadata(a).map_err(io)?;
+        let others_write =
+            !m.file_type().is_symlink() && m.mode() & 0o022 != 0 && m.mode() & 0o1000 == 0;
+        if (m.uid() != owner && m.uid() != 0) || others_write {
+            return Err(IdentityError::Permissions(format!(
+                "{} can be changed by another user",
+                a.display()
+            )));
+        }
     }
-    bytes.zeroize();
-    if len != 32 {
-        return Err(IdentityError::Malformed(format!("{len} bytes, not 32")));
+    Ok(owner)
+}
+
+/// The signer of the key file at `path`: absolute and outside `repo_root`,
+/// in an owner-only directory no other user can change (BSC3-067), an
+/// owner-only regular file of that owner with no other name, exactly 32
+/// bytes of a valid secp256k1 key. The name is checked, then the file opened
+/// once and checked on its descriptor: the same inode as the name, so a link
+/// swapped in between is never read. The bytes read are zeroized at once;
+/// the signer's key is zeroized when it is dropped. The file is only read.
+pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, IdentityError> {
+    check_location(path, repo_root)?;
+    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
+    let refused = || {
+        IdentityError::Permissions(format!(
+            "{} is not a private regular file of the directory's owner",
+            path.display()
+        ))
+    };
+    let owner = key_directory(path.parent().ok_or_else(refused)?)?;
+    let named = fs::symlink_metadata(path).map_err(io)?;
+    if !named.is_file() {
+        return Err(refused());
+    }
+    let mut file = fs::File::open(path).map_err(io)?;
+    let opened = file.metadata().map_err(io)?;
+    if (opened.dev(), opened.ino()) != (named.dev(), named.ino())
+        || !opened.is_file()
+        || !private(&opened)
+        || opened.uid() != owner
+        || opened.nlink() != 1
+    {
+        return Err(refused());
+    }
+    if opened.len() != 32 {
+        return Err(IdentityError::Malformed(format!(
+            "{} bytes, not 32",
+            opened.len()
+        )));
+    }
+    let mut secret = [0u8; 32];
+    let mut more = [0u8; 1];
+    let read = file
+        .read_exact(&mut secret)
+        .and_then(|()| file.read(&mut more));
+    if !matches!(read, Ok(0)) {
+        secret.zeroize();
+        more.zeroize();
+        return Err(match read {
+            Err(e) => io(e),
+            Ok(_) => IdentityError::Malformed("more than 32 bytes".into()),
+        });
     }
     let signer = Signer::from_secret_bytes(&secret);
     secret.zeroize();
@@ -396,6 +446,105 @@ mod tests {
             Err(IdentityError::Location(_))
         ));
         fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    /// BSC3-067: the key is read only through its own name: never through a
+    /// symbolic link, a second name or a directory another user can change,
+    /// and never a file swapped in between the check and the read.
+    #[test]
+    fn a_key_is_read_only_through_its_own_name() {
+        let path = temp("links");
+        let address = PaperIdentity::create(&path, &repo()).unwrap();
+        let dir = path.parent().unwrap();
+        let base = dir.parent().unwrap();
+        // Another identity elsewhere, reached through a link.
+        let other = base.join("other/paper.key");
+        PaperIdentity::create(&other, &repo()).unwrap();
+        let linked = dir.join("linked.key");
+        std::os::unix::fs::symlink(&other, &linked).unwrap();
+        assert!(matches!(
+            PaperIdentity::load(&linked, &repo(), &[]),
+            Err(IdentityError::Permissions(_))
+        ));
+        // A second name of the key.
+        let second = base.join("other/second.key");
+        fs::hard_link(&path, &second).unwrap();
+        assert!(matches!(
+            PaperIdentity::load(&path, &repo(), &[]),
+            Err(IdentityError::Permissions(_))
+        ));
+        fs::remove_file(&second).unwrap();
+        assert_eq!(
+            PaperIdentity::load(&path, &repo(), &[]).unwrap().address(),
+            address
+        );
+        // Through a link of the owner on the written path: its directory.
+        let alias = base.join("alias");
+        std::os::unix::fs::symlink(dir, &alias).unwrap();
+        assert_eq!(
+            PaperIdentity::load(&alias.join("paper.key"), &repo(), &[])
+                .unwrap()
+                .address(),
+            address
+        );
+        // A directory on the way that others may change; sticky is fine.
+        fs::set_permissions(base, fs::Permissions::from_mode(0o777)).unwrap();
+        let e = PaperIdentity::load(&path, &repo(), &[]).unwrap_err();
+        assert!(
+            e.to_string().contains("can be changed by another user"),
+            "{e}"
+        );
+        fs::set_permissions(base, fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(PaperIdentity::load(&path, &repo(), &[]).is_ok());
+        fs::set_permissions(base, fs::Permissions::from_mode(0o700)).unwrap();
+        // More than 32 bytes.
+        let long = dir.join("long.key");
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&long)
+            .and_then(|mut f| f.write_all(&[7u8; 33]))
+            .unwrap();
+        assert!(matches!(
+            PaperIdentity::load(&long, &repo(), &[]),
+            Err(IdentityError::Malformed(_))
+        ));
+        // The name swapped between a regular copy of the key and a link to
+        // the other identity while it is loaded: only the key itself loads.
+        let mine = fs::read(&path).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let swapper = {
+            let (stop, path, other, dir) =
+                (stop.clone(), path.clone(), other.clone(), dir.to_path_buf());
+            std::thread::spawn(move || {
+                let mut n = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let tmp = dir.join(format!("swap-{n}"));
+                    if n % 2 == 0 {
+                        std::os::unix::fs::symlink(&other, &tmp).unwrap();
+                    } else {
+                        fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .mode(0o600)
+                            .open(&tmp)
+                            .and_then(|mut f| f.write_all(&mine))
+                            .unwrap();
+                    }
+                    fs::rename(&tmp, &path).unwrap();
+                    n += 1;
+                }
+            })
+        };
+        for _ in 0..2000 {
+            if let Ok(id) = PaperIdentity::load(&path, &repo(), &[]) {
+                assert_eq!(id.address(), address);
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        swapper.join().unwrap();
+        fs::remove_dir_all(base).unwrap();
     }
 
     /// Gate review L1: a path that leaves the repository and returns to it

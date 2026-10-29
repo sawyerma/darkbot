@@ -11,6 +11,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+const CRITERIA: &str = include_str!("../../../../config/g04_criteria.env");
 
 #[test]
 fn sigterm_is_a_clean_stop_with_a_committed_journal() {
@@ -40,6 +41,23 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
         .output()
         .unwrap();
     assert!(init.status.success(), "{init:?}");
+    // BSC3-033: confirmed criteria committed before the run; the run names
+    // the pre-commitment in its journal (and the CLI never replaces it).
+    let criteria = base.join("g04_criteria.env");
+    fs::write(&criteria, CRITERIA.replace("=PROPOSED", "=CONFIRMED")).unwrap();
+    let precommit = |by: &str| {
+        Command::new(bin)
+            .args(["g04-precommit", "--rundir"])
+            .arg(&base)
+            .arg("--criteria")
+            .arg(&criteria)
+            .args(["--decided-by", by])
+            .output()
+            .unwrap()
+    };
+    let first = precommit("operator");
+    assert!(first.status.success(), "{first:?}");
+    assert!(!precommit("someone else").status.success());
     let mut child = Command::new(bin)
         .arg("run")
         .arg("--sources")
@@ -83,6 +101,25 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     .unwrap();
     assert_eq!(c.windows.len(), 1);
     assert_eq!(c.windows[0].state, "COMPLETE");
+    let committed = darkbot_bsc_execution::g04_criteria::Precommit::read(&base)
+        .unwrap()
+        .unwrap();
+    assert_eq!(committed.decided_by, "operator");
+    assert_eq!(c.windows[0].g04_precommit_sha256, Some(committed.sha256));
+    // The verdict names it (and rates nothing: the campaign is running).
+    let verdict = Command::new(bin)
+        .args(["g04-verdict", "--rundir"])
+        .arg(&base)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--criteria")
+        .arg(&criteria)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&verdict.stdout);
+    assert!(!verdict.status.success(), "{text}");
+    assert!(text.contains("precommitted by operator"), "{text}");
+    assert!(!text.contains("PRECOMMIT_NOT_BOUND_AT_START"), "{text}");
     assert!(base.join("bsc-runtime/g04-census.dbrec").exists());
     // Phase F §9: the run replays to the same counts as the process
     // reported (its last status), sealed by its manifest.

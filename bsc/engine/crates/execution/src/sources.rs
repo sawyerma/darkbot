@@ -1929,7 +1929,7 @@ fn safe_id(id: &str) -> bool {
 /// in a private temporary file first, then hard-linked into place (fails
 /// with `AlreadyExists` if another writer won), so a reader never sees a
 /// partial record.
-fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut nonce = [0u8; 8];
     fs::File::open("/dev/urandom")

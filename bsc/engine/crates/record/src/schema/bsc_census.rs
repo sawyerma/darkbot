@@ -550,10 +550,45 @@ pub mod census {
     }
 }
 
+/// The G0.4 pre-commitment (BSC3-033): the SHA-256 of the confirmed
+/// criteria file, the decision it binds and who decided, written once by
+/// `bsc_runtime g04-precommit` into the campaign's run directory; its
+/// observed time is the commitment time. A verdict rates only criteria
+/// whose hash was committed before the campaign's first journal started.
+/// Who may decide (the identity's authenticity) is BSC3-001.
+pub mod precommit {
+    use super::*;
+
+    pub const CRITERIA_SHA256: u16 = 1;
+    /// The decision bound (`G0.4/V10-8`).
+    pub const SCOPE: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const DECIDED_BY: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-precommit.v1",
+        record_type: 69,
+        schema_version: 1,
+        fields: &[
+            Field::req(CRITERIA_SHA256, "criteria_sha256", B256),
+            Field::req(SCOPE, "scope", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(DECIDED_BY, "decided_by", Text),
+        ],
+    };
+}
+
 /// The G0.4 verdict (order V2 §8): the census replayed by `bsc_runtime
 /// g04-verdict` against the criteria file (`bsc/config/g04_criteria.env`).
 /// Criteria the user has not confirmed give `CRITERIA_UNCONFIRMED` and no
-/// venue rows: no evaluation before the confirmation.
+/// venue rows: no evaluation before the confirmation. Since v2 it names the
+/// pre-commitment it was rated against (record hash, decider, time).
 pub mod verdict {
     use super::*;
 
@@ -600,8 +635,39 @@ pub mod verdict {
     pub const COVERED_MS: u16 = 8;
     pub const COVERED_PPM: u16 = 9;
     pub const VENUES: u16 = 10;
+    /// The pre-commitment read (absent without one): SHA-256 of its record
+    /// bytes, its decider and its commitment time.
+    pub const PRECOMMIT_SHA256: u16 = 11;
+    pub const PRECOMMIT_DECIDED_BY: u16 = 12;
+    pub const PRECOMMIT_UNIX_MS: u16 = 13;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-verdict.v1",
+        record_type: 63,
+        schema_version: 2,
+        fields: &[
+            Field::req(CRITERIA_SHA256, "criteria_sha256", B256),
+            Field::req(CRITERIA_STATE, "criteria_state", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(CAMPAIGN_MS, "campaign_ms", U64),
+            Field::req(COVERED_MS, "covered_ms", U64),
+            Field::opt(COVERED_PPM, "covered_ppm", U64),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::opt(PRECOMMIT_SHA256, "precommit_sha256", B256),
+            Field::opt(PRECOMMIT_DECIDED_BY, "precommit_decided_by", Text),
+            Field::opt(PRECOMMIT_UNIX_MS, "precommit_unix_ms", U64),
+        ],
+    };
+
+    /// v1 (no pre-commitment), kept readable.
+    pub const V1: Schema = Schema {
         name: "darkbot.bsc.g04-verdict.v1",
         record_type: 63,
         schema_version: 1,
@@ -622,6 +688,11 @@ pub mod verdict {
             Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
         ],
     };
+
+    /// A verdict of any kept version (v2, v1).
+    pub fn decode_verdict(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&SCHEMA, bytes).or_else(|_| crate::decode(&V1, bytes))
+    }
 }
 
 pub const ALL: &[&Schema] = &[
@@ -629,5 +700,7 @@ pub const ALL: &[&Schema] = &[
     &census::V10,
     &census::V9,
     &census::V8,
+    &precommit::SCHEMA,
     &verdict::SCHEMA,
+    &verdict::V1,
 ];
