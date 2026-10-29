@@ -77,6 +77,11 @@ pub struct Window {
     pub capture_ms: u64,
     /// The native geth source's connected time inside the capture window.
     pub native_connected_ms: u64,
+    /// BSC3-064: the capture window's time in which any source was
+    /// connected, over an unbroken canonical chain (a complete or running
+    /// window with no skipped blocks, lost, dropped or unparsed records);
+    /// none when its continuity is not shown.
+    pub observable_ms: Option<u64>,
     /// Its disconnects, rate limits and stops inside the capture window.
     pub native_interruptions: u64,
     /// Phase H: the Flap curve trades journaled (`T`) and the Portal trade
@@ -91,6 +96,9 @@ pub struct Window {
 pub struct Census {
     pub windows: Vec<Window>,
     pub covered_ms: u64,
+    /// BSC3-064: the windows' observable time ([`Window::observable_ms`]):
+    /// not the run time `covered_ms` counts.
+    pub observable_ms: u64,
     pub flap_launches: u64,
     pub four_launches: u64,
     pub orphaned_launches: u64,
@@ -369,6 +377,48 @@ impl Connectivity {
             connected = connected.saturating_add(to - s);
         }
         (connected, interruptions)
+    }
+
+    /// After [`Connectivity::sort`]: the time in `[from, to]` in which any
+    /// source was connected.
+    fn any_connected(&self, from: u64, to: u64) -> u64 {
+        let mut up: Vec<bool> = self
+            .events
+            .iter()
+            .map(|events| {
+                let n = events.partition_point(|(t, _)| *t <= from);
+                n > 0 && events[n - 1].1
+            })
+            .collect();
+        let mut changes: Vec<(u64, usize, bool)> = self
+            .events
+            .iter()
+            .enumerate()
+            .flat_map(|(source, events)| {
+                events
+                    .iter()
+                    .filter(|(t, _)| *t > from && *t <= to)
+                    .map(move |&(t, connected)| (t, source, connected))
+            })
+            .collect();
+        changes.sort_by_key(|(t, _, _)| *t);
+        let mut since = up.iter().any(|u| *u).then_some(from);
+        let mut total = 0u64;
+        for (t, source, connected) in changes {
+            up[source] = connected;
+            match (since, up.iter().any(|u| *u)) {
+                (None, true) => since = Some(t),
+                (Some(s), false) => {
+                    total = total.saturating_add(t - s);
+                    since = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = since {
+            total = total.saturating_add(to - s);
+        }
+        total
     }
 
     /// After [`Connectivity::sort`]: was any source connected at `at`?
@@ -700,6 +750,14 @@ fn replay(
         window.capture_ms = (end - first) / 1_000_000;
         window.native_connected_ms = connected / 1_000_000;
         window.native_interruptions = interruptions;
+        let unbroken = matches!(state, "COMPLETE" | "RUNNING")
+            && window.blocks_skipped == 0
+            && window.lost_records == 0
+            && window.ingress_dropped == 0
+            && window.unparsed_records == 0;
+        if unbroken {
+            window.observable_ms = Some(connectivity.any_connected(first, end) / 1_000_000);
+        }
     }
     // A sighting whose transaction no canonical record names by the end of a
     // finished window was never included in it (replaced, dropped, or later).
@@ -807,6 +865,9 @@ fn census_of(
         // are not trusted.
         if r.window.state != "INVALID" {
             out.covered_ms = out.covered_ms.saturating_add(r.window.duration_ms);
+            out.observable_ms = out
+                .observable_ms
+                .saturating_add(r.window.observable_ms.unwrap_or(0));
             out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
             out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
             out.unparsed_records = out
@@ -1008,7 +1069,8 @@ impl Census {
                 .set(e::UNJOINED, w.unjoined)
                 .set(e::PENDING_JOIN, w.pending_join)
                 .set(e::UNPARSED_RECORDS, w.unparsed_records)
-                .set(e::INGRESS_DROPPED, w.ingress_dropped);
+                .set(e::INGRESS_DROPPED, w.ingress_dropped)
+                .set_opt(e::OBSERVABLE_MS, w.observable_ms);
             if let Some(b) = w.first_block {
                 row.set(e::FIRST_BLOCK, b);
             }
@@ -1020,6 +1082,7 @@ impl Census {
         d.set(cs::PROVENANCE_TOOL, "bsc_runtime census")
             .set(cs::PROVENANCE_OBSERVED_UNIX_MS, observed_unix_ms)
             .set(cs::COVERED_MS, self.covered_ms)
+            .set(cs::OBSERVABLE_MS, self.observable_ms)
             .set(cs::FLAP_LAUNCHES, self.flap_launches)
             .set(cs::FOUR_LAUNCHES, self.four_launches)
             .set(cs::FOUR_DERIVED, self.four_derived)
@@ -1895,6 +1958,72 @@ mod tests {
         assert_eq!(c.covered_ms, 2_000);
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::INGRESS_DROPPED).unwrap(), 7);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-064: covered time is the journals' run time; observable time is
+    /// the part of a capture window with a source connected, over an
+    /// unbroken canonical chain. A 10 s window with a source connected for
+    /// 1 s observes 1 s; a window that skipped blocks observes nothing,
+    /// however long a source was connected.
+    #[test]
+    fn observable_time_is_connected_time_over_an_unbroken_chain() {
+        let dir = std::env::temp_dir().join(format!("g04-observable-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write(
+            &dir,
+            1_000,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                (RecordKind::Runtime, 2_000_000_000, vec![b'S', 1, 3]),
+                (RecordKind::Runtime, 3_000_000_000, vec![b'S', 1, 4]),
+                (
+                    RecordKind::Canonical,
+                    10_000_000_001,
+                    window_payload(b'E', 11, &[11; 32]),
+                ),
+                (RecordKind::Runtime, 10_000_000_002, EXIT_PAYLOAD.to_vec()),
+            ],
+        );
+        write(
+            &dir,
+            20_000,
+            &[
+                (RecordKind::Runtime, 1, vec![b'S', 2, 3]),
+                (
+                    RecordKind::Canonical,
+                    2,
+                    window_payload(b'H', 20, &[20; 32]),
+                ),
+                (RecordKind::Reorg, 3, resync_payload(21, 25)),
+                (
+                    RecordKind::Canonical,
+                    5_000_000_002,
+                    window_payload(b'E', 30, &[30; 32]),
+                ),
+                (RecordKind::Runtime, 5_000_000_003, EXIT_PAYLOAD.to_vec()),
+            ],
+        );
+        let c = census(&dir, 4096, None).unwrap();
+        let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
+        assert_eq!(states, ["COMPLETE", "COMPLETE"]);
+        assert_eq!(c.windows[0].observable_ms, Some(1_000));
+        assert_eq!(c.windows[1].blocks_skipped, 5);
+        assert_eq!(c.windows[1].observable_ms, None);
+        assert_eq!(c.observable_ms, 1_000);
+        assert_eq!(c.covered_ms, 10_000 + 5_000);
+        let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
+        assert_eq!(record.u64(cs::OBSERVABLE_MS).unwrap(), 1_000);
+        let windows = record.nested_all(cs::WINDOWS).unwrap();
+        assert_eq!(
+            windows[0].opt_u64(cs::window::OBSERVABLE_MS).unwrap(),
+            Some(1_000)
+        );
+        assert_eq!(windows[1].opt_u64(cs::window::OBSERVABLE_MS).unwrap(), None);
         fs::remove_dir_all(&dir).unwrap();
     }
 
