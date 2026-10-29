@@ -13,7 +13,7 @@ Die 70 IDs sind ein **Auditregister, nicht 70 automatisch bestätigte Bugs**. Fr
 
 ## 0a. Verbindliche Ausführungspräzisierung (28.10.2026)
 
-- **Start:** BSC3-041/055/024 am aktuellen LIVE-Rust-Pfad prüfen und bestätigte Fehler als erstes P0-Paket reproduzieren, korrigieren, testen, reviewen, committen und auf origin/main pushen. Dann die nächsten P0-IDs. Kein weiterer Audit als Ersatz für produktive Fixes.
+- **Start/Fortsetzung:** Bereits auf origin/main als FIX_VERIFIED belegte IDs nicht erneut bearbeiten. Am aktuellen HEAD mit der nächsten bestätigten, offenen P0-ID fortfahren. Kein allgemeiner Audit als Ersatz für produktive Fixes.
 - **CI:** Die vorhandene `.github/workflows/bsc.yml` nutzt bereits macOS/Linux, `cargo test --locked --no-fail-fast --workspace --all-features` und prüft sieben `bsc_tools`-Skripte mit `SKIP 0`. BSC3-005/054 gezielt auf fehlende Release-/Werkzeug-Abdeckung prüfen und ergänzen; CI nicht neu erfinden. Test-PASS immer am finalen Commit nachweisen.
 - **Ignored:** `--include-ignored` niemals pauschal anwenden. Jeder Test wird zuerst auf externe Voraussetzungen und mögliche wirtschaftliche Wirkung geprüft. Nur sichere lokale Tests ausführen; blockierte Tests ehrlich als SKIP/EXTERNAL_BLOCKED ausweisen.
 - **G0.4:** BSC3-032/033/064 vor verbindlicher Kriterienauswertung behandeln. Laufende Kampagne und Rohdaten ohne Betreiberfreigabe nicht verändern, stoppen oder neu starten. Unbelegte Abdeckung bleibt UNKNOWN/NOT_EVALUABLE.
@@ -21,7 +21,17 @@ Die 70 IDs sind ein **Auditregister, nicht 70 automatisch bestätigte Bugs**. Fr
 - **BSC3-058:** Vollständigen Not-Aus erhalten; EXIT-ONLY nur separat autorisiert. Nach Ablauf oder Neustart keine automatische wirtschaftliche Transaktion.
 - **BSC3-059:** Keine erfundene 10-Minuten-Regel für LIVE-Grants; nötige Maximaldauer vom Betreiber entscheiden lassen.
 - **BSC3-068:** Transportfrist vor Owner-Zulassung vorprüfen und unmittelbar vor dem tatsächlichen Write erneut prüfen. Persistente Attempts nur mit crash-/race-sicherem Nicht-Egress-Beweis rückgeben, sonst konservativ zählen.
-- **Abnahme:** Je ID Rot/Grün-Regression am Produktionspfad, Integration/Release soweit nichtsendend, unabhängiges Review, Commit, verifizierter origin/main-HEAD und knapper Bericht. Keine Mocks als Produktionsersatz, kein Fake-PASS, keine Legacy-Umgehungen, kein willkürliches Hardcoding, kein zweiter Bot-Core.
+- **Abnahme:** Je ID Rot/Grün-Regression am Produktionspfad, Integration/Release soweit nichtsendend, unabhängiges Review, Commit und verifizierter origin/main-HEAD; kein Routinebericht. Keine Mocks als Produktionsersatz, kein Fake-PASS, keine Legacy-Umgehungen, kein willkürliches Hardcoding, kein zweiter Bot-Core.
+
+## 0b. Arbeitsmodus ab 29.10.2026: ausschließlich Codefortschritt, kein Berichtstakt
+
+**Diese jüngere ausdrückliche Betreiberanweisung übersteuert die bisherigen Dokumentations-, Einzel-Push- und Berichtsintervalle dieses Auftrags.**
+
+- **Durchgehend arbeiten:** Bestätigte offene BSC-Fehler nacheinander wirklich im bestehenden Produktions-Rust beheben. Nach erfolgreicher Abnahme sofort mit dem nächsten technisch bearbeitbaren Fehler fortfahren. Kein Warten auf Routineantworten, keine Rückfragen nach jedem Paket und keine erneute Gesamtanalyse.
+- **Spätestens alle drei zusätzlich FIX_VERIFIED-IDs pushen:** Echte Fixes mit passenden Tests und unabhängigem Review committen; sobald drei weitere IDs abgeschlossen sind, sicher nach origin/main pushen, CI/Remote-HEAD prüfen und direkt weiterarbeiten. Früher pushen ist zulässig, wenn ein abgeschlossenes, überprüfbares Sicherheits- oder Integrationspaket es erfordert. **Nicht** drei nur behauptete, widerlegte oder extern gesperrte Punkte als Fix zählen. Kein Force-Push und keine parallelen Änderungen überschreiben.
+- **Minimale STATUS-Pflege:** Im vorhandenen `bsc/docs/1_PLAN/STATUS.md` pro ID ausschließlich **ID | Zustand | Commit-SHA | konkreter Blocker (falls vorhanden)** nachziehen. Testbelege in tatsächlich ausgeführten Tests/CI und nötigen Commit-Nachweisen erhalten. Keine separaten Doku-Commits, keine neuen Planungs- oder Auditdokumente und keine fortlaufenden Prosa-Nachträge im Fehlerregister. Bereits vorhandene Registerhistorie erhalten; neue eindeutige Sicherheitsbefunde dürfen mit kurzem Quellbeleg erfasst werden.
+- **Keine Zwischenmeldungen:** Kein Chat-Bericht pro Fix, pro Dreierpaket oder Push. Nur bei einer **wirklich zwingenden Betreiberentscheidung** (Geld, echte Schlüssel, Providerkosten, risikoreicher Sicherheits-Override) oder einem nicht selbst lösbaren Blocker fragen. Bis dahin andere technisch mögliche IDs weiter erledigen.
+- **Qualität unverändert:** Vorher ROT/nachher GRÜN, produktiver Call-Path, Negativ-/Crash-/Race-/Reorg-/UNKNOWN-Test nach Wirkung, Release/CI und Review. Keine Fake-PASS, Produktions-Mocks, willkürliches Hardcoding, Legacy-Umgehungen oder zweite Architektur. Kein Mainnet-SIGN/ARM/Grant/SEND/BUY/SELL und keine sonstigen wirtschaftlichen Aktionen ohne ausdrückliche Nutzerfreigabe.
 
 ## 1. Unverhandelbare Qualitätsregeln
 
@@ -46,8 +56,8 @@ Für **jede** ID verbindlich:
 4. Betroffene Caller, Schalter, Scope-/Nonce-/Budget-/Ledger-/Provider-/Position-/Restart-Semantik und Protobuf/Gateway/UI-Verträge mitprüfen. Tests für Erfolgs-, Ablehnungs-, Crash-, Race-, Reorg- und UNKNOWN-Pfade, soweit kausal betroffen.
 5. Passende Release-Build-, Unit-, Integration-, Doc-Test-, Lint- und Replay-/CI-Prüfungen **wirklich** ausführen; Performance-Behauptungen nur mit tatsächlich gemessenen T_ingress/T_ready/T_queue/T_send, p50/p99/max und Verlust-/Überlastzählern. Nicht gemessene Zahlen nicht schätzen oder als Gewinn melden.
 6. Gezielt unabhängiges Review der geänderten Sicherheitsinvarianten; Regressionen/Findings beheben. Diff eng halten; keine Änderungen an Project_0/DarkNode, Secrets, privaten Walletdateien oder unnötigen Artefakten.
-7. **Ein sauberer Commit pro logisch abgeschlossenem Fix-Paket**, dann sicherer Fast-Forward-Push nach origin/main, tatsächlich remote HEAD prüfen. Keine nur lokale Fertigmeldung, kein Force-Push, kein reset --hard, kein Überschreiben fremder oder unversionierter Arbeit.
-8. Den Fortschritt in [STATUS.md](../1_PLAN/STATUS.md) und im Register mit exaktem Commit, Test-Evidence, Ergebnis und verbleibendem Rest aktualisieren. Unbewiesene/reine externe Punkte als EXTERNAL_BLOCKED dokumentieren. Erst dann nächstes Paket.
+7. **Ein sauberer Commit pro logisch abgeschlossenem Fix-Paket; spätestens nach je drei zusätzlich behobenen und verifizierten IDs pushen** (vgl. §0b). Tatsächlichen Remote-HEAD und CI prüfen. Keine nur lokale Fertigmeldung, kein Force-Push, kein reset --hard, kein Überschreiben fremder oder unversionierter Arbeit.
+8. **Nur [STATUS.md](../1_PLAN/STATUS.md) minimal** mit ID, Zustand, SHA und notwendigem Blocker aktualisieren (§0b). Test-Evidence im Test-/CI-Lauf erhalten; das Prüfregister nicht erneut dokumentarisch ausschreiben. Unbewiesene/externe Punkte korrekt klassifizieren und sofort die nächste technisch bearbeitbare ID bearbeiten.
 
 Zusammenhängende IDs dürfen **in einem atomaren Code-Paket** behoben werden, aber jede ID braucht eine eigene nachprüfbare Abnahmezeile. Ein bloßes Dokumentations-Commit schließt keine Produktions-ID.
 
@@ -78,8 +88,8 @@ Zusammenhängende IDs dürfen **in einem atomaren Code-Paket** behoben werden, a
 
 Ein Paket ist erst **FIX_VERIFIED**, wenn der echte produktive Pfad geändert und der relevante Fehler reproduzierbar ausgeschlossen wurde; zugehörige Unit-/Integration-/Release-/Replay-/CI-Checks erfolgreich ausgeführt sind; Crash/Restart und ökonomische Sicherheit nicht verschlechtert wurden; eine unabhängige Prüfung erfolgt ist; und der **Commit auf origin/main sichtbar** ist.
 
-Berichte nach jedem Paket **kurz und tabellarisch**, mindestens: ID(s), vorherige Ursache (Datei/Zeilen), konkreter Fix, Testname mit PASS/FAIL/SKIP, verbleibende Risiken, Git-Commit und bestätigter Remote-HEAD. Die einzige offene Arbeit nach einem Paket als nächste Code-Aufgabe nennen. Keine unbewiesenen Zusagen, kein bloßes „alles fertig“ und keine neuen Dokumente ohne Codebedarf.
+**Keine Routineberichte.** Nur den bestehenden STATUS pro ID minimal nachziehen (§0b). Tests, Review und Git/CI-Nachweise bleiben verbindlich, müssen aber nicht als Chat-Prosa wiederholt werden. Nur bei zwingender Betreiberentscheidung oder nicht selbst lösbarem Blocker melden; sonst unmittelbar weiterprogrammieren.
 
 Die **abschließende Gesamtsystemabnahme** erfolgt erst nach den produktiven Fixes und gemäß dem Phasenplan vom 28.10.: echte Native-/Gateway-/Frontend-Kette, synthetisch autorisiertes effective=LIVE ohne Egress, kompletter BUY-/Approve-/SELL-Durchlauf, Budget-/Nonce-/Provider-/Deployment-/Crash-/Reorg-/Stop-/Recovery-Matrix, Release-CI und getrennte externe Qualifikation. Ein tatsächlicher Mainnet-Erfolg, LIVE-Wirtschaftsfreigabe, Profitabilität oder der G0.7/G0.8-PASS darf **niemals** aus dieser technischen Testkampagne abgeleitet werden.
 
-**Beginne unmittelbar mit dem obersten bestätigten, bislang nicht reparierten P0-Produktionsfehler. Code und Test zuerst, danach Commit und Push.**
+**Setze unmittelbar beim nächsten bestätigten, noch offenen P0-Produktionsfehler fort. Code und Tests zuerst, STATUS minimal, spätestens nach drei weiteren Fix-IDs pushen; ohne Rückfrage weiterarbeiten.**
