@@ -1060,6 +1060,8 @@ mod tests {
         let (busy, _) = run(&d, "first", None).unwrap();
         assert_eq!(busy.state, FAILED);
         assert!(busy.code.starts_with("JOB_RUNNER_BUSY"));
+        // A child another test spawns now shares the lock until its exec: unlock, then drop.
+        assert!(flock_nb(&runner, libc::LOCK_UN).unwrap());
         drop(runner);
         submit(&d, &request("third")).unwrap();
         let (failed, executed) = run(&d, "third", None).unwrap();

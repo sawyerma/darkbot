@@ -215,6 +215,10 @@ fn dec07_two_workers_never_run_two_steps() {
         (refused.state.as_str(), refused.code.as_str()),
         (FAILED, "BOOT_BUSY: another boot step of this project runs")
     );
+    // A child another thread spawns now shares the lock's open file description until its exec
+    // (a clone stands in for it): only an explicit unlock frees the lock, never the drop alone.
+    let spawned = runner.try_clone().unwrap();
+    assert!(flock_nb(&runner, libc::LOCK_UN).unwrap());
     drop(runner);
     assert_eq!(
         run_step(&p, "a", NETWORK, never, |_, _| Ok(None))
@@ -222,6 +226,7 @@ fn dec07_two_workers_never_run_two_steps() {
             .state,
         COMPLETED
     );
+    drop(spawned);
 }
 
 /// The Capture tab's view of the newest flow: verdicts, the 16-character tokens each approval
