@@ -784,6 +784,11 @@ pub trait End {
     fn address(&self) -> [u8; 20];
     fn signer(&self) -> &Signer;
     fn hand_over(&mut self, h: Handover<'_>) -> Handed<Self::Handoff>;
+
+    /// Reads, without waiting, what arrived of the providers' answers to
+    /// the transactions of `lane` this end released (BSC3-051), and records
+    /// them in the lane. An end without provider answers has none.
+    fn poll_responses(&mut self, _lane: &mut IntentLane, _clock: &dyn Clock) {}
 }
 
 /// The PAPER end: the PAPER identity signs; the 48Club bundle (C3) and the
@@ -2077,6 +2082,14 @@ impl<E: End> Executor<E> {
     /// The end the path hands over to.
     pub fn end(&self) -> &E {
         &self.end
+    }
+
+    /// The providers' answers to what this arm's lanes released, read
+    /// without waiting (BSC3-051): outside any hand-over.
+    pub fn poll_responses(&mut self, clock: &dyn Clock) {
+        for lane in self.lanes.iter_mut().chain(self.strategy_lanes.iter_mut()) {
+            self.end.poll_responses(lane, clock);
+        }
     }
 
     /// The end, for its maintenance outside any hand-over.

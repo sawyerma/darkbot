@@ -1932,6 +1932,13 @@ pub fn run(
                     let follower = canonical_config
                         .as_ref()
                         .map(|c| (c.endpoint.as_str(), &c.limits));
+                    // BSC3-051: the providers' answers first; a connection
+                    // the maintenance would give up may hold one.
+                    l.poll_responses(&FnClock {
+                        id: CLOCK_ID_MONOTONIC,
+                        now: || clock.now_ns(),
+                    });
+                    l.record_responses();
                     l.tick(owner.as_ref(), follower, started_ms, now_ms);
                 }
             }

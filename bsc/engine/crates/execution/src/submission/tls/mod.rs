@@ -70,6 +70,6 @@ pub use owner::{Maintenance, TlsConnectionOwner, TlsProfile};
 pub use qualification::{
     Q5A_TLS_EVIDENCE_PATH, Q5A_TLS_EVIDENCE_SHA256, Q5A_TLS_POLICY,
     Q5A_TLS_QUALIFICATION_GENERATION, QualifiedTlsTransport, TlsQualificationError,
-    qualify_transport,
+    qualify_transport, response_transport,
 };
 pub use transport::TlsTransport;

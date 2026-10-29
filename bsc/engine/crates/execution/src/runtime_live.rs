@@ -293,6 +293,8 @@ pub struct LiveRuntime {
     funds: Option<Funds>,
     /// BUYs the balance does not hold with their exit and the open exits.
     unfunded_refused: u64,
+    /// BUYs refused since a provider refused one of the arm's (BSC3-051).
+    provider_refused: u64,
 }
 
 /// The buyer's balance at a probe's block: a transaction of the ledger
@@ -375,6 +377,7 @@ impl LiveRuntime {
             buys_refused: 0,
             funds: None,
             unfunded_refused: 0,
+            provider_refused: 0,
         }
         .folded()
     }
@@ -809,6 +812,11 @@ impl LiveRuntime {
     /// released is unresolved or not known (BSC3-041): a later arm settles
     /// it only once the chain resolved them.
     fn disarm(&mut self) {
+        // BSC3-051: the answers read since the last reconcile reach the
+        // ledger before the end goes.
+        if let Some(x) = self.executor.as_mut() {
+            x.end_mut().record_responses();
+        }
         let Some(x) = self.executor.take() else {
             return;
         };
@@ -1300,6 +1308,7 @@ impl LiveRuntime {
             self.source_refused += 1;
             return None;
         }
+        self.poll_responses(clock);
         if self.buy_refused(self.one_buy()).is_some() {
             return None;
         }
@@ -1307,7 +1316,7 @@ impl LiveRuntime {
         let reserve = Some(self.exit_reserve());
         let x = self.executor.as_mut()?;
         let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
-        self.handed();
+        self.record_responses();
         buy
     }
 
@@ -1326,7 +1335,10 @@ impl LiveRuntime {
                     .as_ref()
                     .and_then(|f| f.block)
                     .is_none_or(|(n, _, _)| n > funds.block),
-                FactKind::Withdrawn | FactKind::Replaced | FactKind::Orphaned => false,
+                FactKind::Withdrawn
+                | FactKind::Replaced
+                | FactKind::Orphaned
+                | FactKind::Responded => false,
             })
             .map(|t| t.released.max_wei.unwrap_or_default())
             .fold(U256::ZERO, |sum, wei| sum + wei);
@@ -1368,7 +1380,45 @@ impl LiveRuntime {
             self.unfunded_refused += 1;
             return Some(Refusal::Unfunded);
         }
+        // BSC3-051: a provider refused a BUY under this grant (the end's
+        // answer, or the ledger's across arms and restarts): no further BUY
+        // until the operator grants anew (nothing is sent again, no nonce
+        // reused).
+        let book = &self.book;
+        let refused = self.executor.as_ref().is_some_and(|x| {
+            let grant = x.end().armed().grant_generation();
+            x.end().buy_refused().is_some()
+                || book.txs.iter().any(|t| {
+                    t.released.intent == LiveIntentKind::Buy
+                        && t.released.grant_generation == grant
+                        && t.responses
+                            .iter()
+                            .any(|r| r.ends_with(":REJECT") || r.ends_with(":RATE_LIMITED"))
+                })
+        });
+        if refused {
+            self.provider_refused += 1;
+            return Some(Refusal::Dispatch);
+        }
         None
+    }
+
+    /// The providers' answers to what the armed end released, read without
+    /// waiting and kept in memory (BSC3-051): before a decision, nothing
+    /// written. [`Self::record_responses`] writes them.
+    pub fn poll_responses(&mut self, clock: &dyn Clock) {
+        if let Some(x) = self.executor.as_mut() {
+            x.poll_responses(clock);
+        }
+    }
+
+    /// The answers read so far as ledger facts, folded: after a hand-over
+    /// or in the reconcile, never before one.
+    pub fn record_responses(&mut self) {
+        if let Some(x) = self.executor.as_mut() {
+            x.end_mut().record_responses();
+        }
+        self.handed();
     }
 
     /// One Strategy C decision, when armed.
@@ -1380,6 +1430,7 @@ impl LiveRuntime {
         now_unix_ms: u64,
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
         self.executor.as_ref()?;
+        self.poll_responses(clock);
         if let crate::runtime_strategy::StrategyAction::Buy { input_wei, .. } = *action {
             let x = &self.exec.exec;
             let most = input_wei + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
@@ -1401,7 +1452,7 @@ impl LiveRuntime {
         if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action {
             self.want_exit(token);
         }
-        self.handed();
+        self.record_responses();
         Some(handed)
     }
 
@@ -1523,6 +1574,7 @@ impl LiveRuntime {
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
             ("BUYS_UNFUNDED", self.unfunded_refused),
+            ("BUYS_PROVIDER_REFUSED", self.provider_refused),
         ] {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
@@ -1535,6 +1587,11 @@ impl LiveRuntime {
                 .chain(x.strategy_counters().refusals.iter())
         }) {
             d.push(l::REFUSALS, format!("{}={n}", r.name()).as_str());
+        }
+        for (name, n) in x.map(|x| x.end().responses().named()).unwrap_or_default() {
+            if n > 0 {
+                d.push(l::RESPONSES, format!("{name}={n}").as_str());
+            }
         }
         d
     }
@@ -2184,6 +2241,19 @@ mod tests {
                 strategies,
                 requests,
             }
+        }
+
+        /// [`Rig::new`] whose builder stand-in answers with `answers`.
+        fn answering(
+            tag: &str,
+            strategies: LiveStrategies,
+            answers: Vec<crate::live_end::tests::Answer>,
+        ) -> Rig {
+            let mut r = Rig::new(tag, strategies);
+            let (port, requests) = crate::live_end::tests::answering(answers);
+            r.live.route = LiveRouteConfig::Loopback { port };
+            r.requests = requests;
+            r
         }
 
         /// The LIVE path of one process in the boot session `boot`.
@@ -3433,6 +3503,7 @@ mod tests {
                     eth_wei: None,
                     max_block: None,
                     by_tx: None,
+                    response: None,
                 },
                 1,
             )
@@ -3604,6 +3675,7 @@ mod tests {
             eth_wei: None,
             max_block: Some(HEAD + 2),
             by_tx: None,
+            response: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -3674,6 +3746,92 @@ mod tests {
         r.clean();
     }
 
+    /// BSC3-051: a provider refuses a BUY. The answer is read before the
+    /// next decision: the next BUY is refused before anything is signed
+    /// (no attempt, nothing sent again), the status counts the answer and
+    /// the refusal, the refused BUY stays unresolved in the ledger.
+    #[test]
+    fn a_buy_a_provider_refused_closes_the_arms_buys() {
+        use crate::paper_exec::Refusal;
+        let r = Rig::answering(
+            "live-provider-reject",
+            LiveStrategies::StrategyC,
+            vec![crate::live_end::tests::Answer::Reject],
+        );
+        let sc = Sc::new(r.buyer);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let (out, _) = x
+            .on_strategy(&sc.buy([0xA1; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        let first = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while x.executor.as_ref().unwrap().end().buy_refused().is_none()
+            && Instant::now() < deadline
+        {
+            x.poll_responses(&clock);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xB2; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Dispatch)));
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        let status = record(&x);
+        assert!(status.texts(l::RESPONSES).unwrap().contains(&"REJECT=1"));
+        assert!(
+            status
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"BUYS_PROVIDER_REFUSED=1")
+        );
+        x.record_responses();
+        let tx = x.book().tx(&first).unwrap();
+        assert_eq!(tx.state, crate::live_ledger::FactKind::Released);
+        assert_eq!(tx.responses, vec!["CLUB48_BUILDER_V1:REJECT".to_string()]);
+        std::mem::forget(x);
+        // Another process under the same grant, once A's window is over
+        // (it arms at nonce 0 again): the ledger keeps the BUYs closed
+        // until the operator grants anew.
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d.join("c2-again"), r.buyer, 0);
+        let mut parent = 0xb1;
+        for k in 1..=3u8 {
+            let h = 0xd0 + k;
+            feed(
+                &mut x,
+                &mut c2,
+                vec![
+                    block_of(HEAD + u64::from(k), h, parent, Vec::new()),
+                    complete_of(HEAD + u64::from(k), h),
+                ],
+            );
+            parent = h;
+        }
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xC3; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Dispatch)));
+        x.shutdown();
+        r.clean();
+    }
+
     /// BSC3-058: under the operator's separate EXIT-ONLY grant nothing arms
     /// without an open position (the reason names it); with one the path
     /// arms for its exit: a BUY is refused before anything is signed, the
@@ -3724,6 +3882,7 @@ mod tests {
             eth_wei: None,
             max_block: Some(HEAD + 2),
             by_tx: None,
+            response: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -3834,6 +3993,7 @@ mod tests {
             eth_wei: None,
             max_block: Some(HEAD + 2),
             by_tx: None,
+            response: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {

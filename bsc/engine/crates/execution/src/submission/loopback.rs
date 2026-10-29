@@ -112,10 +112,29 @@ pub fn qualify_loopback<'a>(
     table: &AdapterTable,
     adapter: AdapterId,
 ) -> Result<(QualifiedTransport<'a>, TransportQualification), LoopbackQualificationError> {
+    loopback_in(transport, table, adapter, ConnectionState::Ready)
+}
+
+/// The same loopback connection of `adapter`, to read the response to the
+/// request it carries (BSC3-051): only while it awaits that response.
+pub fn loopback_response<'a>(
+    transport: &'a mut LoopbackTransport,
+    table: &AdapterTable,
+    adapter: AdapterId,
+) -> Result<(QualifiedTransport<'a>, TransportQualification), LoopbackQualificationError> {
+    loopback_in(transport, table, adapter, ConnectionState::AwaitingResponse)
+}
+
+fn loopback_in<'a>(
+    transport: &'a mut LoopbackTransport,
+    table: &AdapterTable,
+    adapter: AdapterId,
+    expected: ConnectionState,
+) -> Result<(QualifiedTransport<'a>, TransportQualification), LoopbackQualificationError> {
     let record = table
         .record(adapter)
         .ok_or(LoopbackQualificationError::UnboundAdapter)?;
-    if transport.state != ConnectionState::Ready {
+    if transport.state != expected {
         return Err(LoopbackQualificationError::NotReady(transport.state));
     }
     let here = transport

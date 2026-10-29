@@ -24,18 +24,21 @@ use crate::live_qualification::{Verified, capability};
 use crate::paper_exec::{End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by};
 use crate::sources::{ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, Store};
 use crate::submission::frame::Frame;
-use crate::submission::loopback::{LoopbackTransport, qualify_loopback};
+use crate::submission::loopback::{LoopbackTransport, loopback_response, qualify_loopback};
+use crate::submission::response::{ResponseBuffer, ResponseOutcome};
 use crate::submission::send::{
-    DispatchContext, FanoutReport, ReleaseArmed, SendOutcome, dispatch_release,
+    DispatchContext, FanoutReport, Poll, ReleaseArmed, SendOutcome, dispatch_release,
+    poll_release_response,
 };
 use crate::submission::tls::{
     AuthorizationToken, BLOCKRAZOR_DOCUMENTED_HOST, CLUB48_DOCUMENTED_HOST, HTTPS_PORT,
     ProviderTarget, Q5A_TLS_POLICY, TlsConnectionOwner, TlsEndpoint, TlsSetup, qualify_transport,
+    response_transport,
 };
-use crate::submission::transport::TransportQualifications;
+use crate::submission::transport::{Clock, TransportQualifications};
 use crate::submission::{blockrazor, club48};
 use alloy_primitives::U256;
-use darkbot_bsc_trading::intent::{AdapterId, AdapterSet};
+use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, IntentLane};
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterTable, SubmissionMode,
@@ -71,6 +74,47 @@ struct Slot {
     live: LiveAdapter,
     target: ProviderTarget,
     link: Link,
+    /// The released transaction whose request this connection carries and
+    /// whose answer it awaits (an index of `released`).
+    awaiting: Option<usize>,
+    /// Holds one answer, as large as the largest request frame.
+    buffer: Option<ResponseBuffer>,
+}
+
+/// The providers' answers to this end's releases (BSC3-051), by outcome;
+/// NO_RESPONSE: the connection gave the request up or was replaced first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Responses {
+    pub ack: u64,
+    pub reject: u64,
+    pub rate_limited: u64,
+    pub protocol: u64,
+    pub connection: u64,
+    pub no_response: u64,
+}
+
+impl Responses {
+    /// Each outcome with its count, as the status names them.
+    pub fn named(&self) -> [(&'static str, u64); 6] {
+        [
+            ("ACK", self.ack),
+            ("REJECT", self.reject),
+            ("RATE_LIMITED", self.rate_limited),
+            ("PROTOCOL", self.protocol),
+            ("CONNECTION", self.connection),
+            ("NO_RESPONSE", self.no_response),
+        ]
+    }
+}
+
+fn outcome_name(outcome: ResponseOutcome) -> &'static str {
+    match outcome {
+        ResponseOutcome::Ack => "ACK",
+        ResponseOutcome::Reject { .. } => "REJECT",
+        ResponseOutcome::RateLimited => "RATE_LIMITED",
+        ResponseOutcome::Protocol(_) => "PROTOCOL",
+        ResponseOutcome::Connection => "CONNECTION",
+    }
 }
 
 /// When the release took a transaction: the first qualified handoff
@@ -136,6 +180,13 @@ pub struct LiveEnd {
     ledger: Ledger,
     facts: u64,
     ledger_failure: Option<String>,
+    responses: Responses,
+    /// Why a provider refused one of this end's BUYs (REJECT, 429): no
+    /// further BUY goes through this end (BSC3-051).
+    buy_refused: Option<String>,
+    /// The answers read and not yet written to the ledger: a poll only
+    /// reads, the write waits until no hand-over is near.
+    answered: Vec<Fact>,
 }
 
 impl core::fmt::Debug for LiveEnd {
@@ -226,6 +277,8 @@ impl LiveEnd {
                 live: *live,
                 target,
                 link,
+                awaiting: None,
+                buffer: None,
             });
         }
         if slots.is_empty() {
@@ -247,6 +300,9 @@ impl LiveEnd {
             ledger,
             facts: 0,
             ledger_failure: None,
+            responses: Responses::default(),
+            buy_refused: None,
+            answered: Vec::new(),
         })
     }
 
@@ -324,6 +380,27 @@ impl LiveEnd {
         self.ledger_failure.as_deref()
     }
 
+    /// The providers' answers to this end's releases so far (BSC3-051).
+    pub fn responses(&self) -> Responses {
+        self.responses
+    }
+
+    /// Why a provider refused one of this end's BUYs, if one did.
+    pub fn buy_refused(&self) -> Option<&str> {
+        self.buy_refused.as_deref()
+    }
+
+    /// Writes the answers read since the last call as ledger facts
+    /// (BSC3-051): outside any hand-over (file and directory syncs).
+    pub fn record_responses(&mut self) {
+        for fact in std::mem::take(&mut self.answered) {
+            match self.ledger.append(&fact, (self.wall_ms)()) {
+                Ok(_) => self.facts += 1,
+                Err(e) => self.ledger_failure = Some(e),
+            }
+        }
+    }
+
     fn refuse(&mut self, refusal: Refusal, why: String) -> Handed<LiveHandoff> {
         self.last_refusal = Some(why);
         Handed::refused(refusal)
@@ -341,6 +418,98 @@ impl End for LiveEnd {
 
     fn signer(&self) -> &Signer {
         self.key.signer()
+    }
+
+    /// BSC3-051: each connection awaiting the answer to a request of
+    /// `lane` reads what arrived; a complete answer is recorded in the
+    /// lane and the report, counted, and a ledger fact apart from what the
+    /// chain makes of the transaction. A connection that no longer awaits
+    /// it (given up after the policy's time, replaced) answered nothing. A
+    /// BUY a provider refused closes this end's BUYs; nothing is sent again.
+    fn poll_responses(&mut self, lane: &mut IntentLane, clock: &dyn Clock) {
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            let Some(at) = slot.awaiting else { continue };
+            let Some(released) = self.released.get_mut(at) else {
+                slot.awaiting = None;
+                continue;
+            };
+            let Some(report) = released.report.as_mut() else {
+                slot.awaiting = None;
+                continue;
+            };
+            if report.ticket.is_none_or(|t| lane.state(t).is_err()) {
+                continue;
+            }
+            let bound = match &mut slot.link {
+                Link::Tls(owner) => response_transport(owner, &self.table, slot.adapter)
+                    .ok()
+                    .map(|q| q.into_parts().0),
+                Link::Loopback(t) => loopback_response(t, &self.table, slot.adapter)
+                    .ok()
+                    .map(|(q, _)| q),
+            };
+            let generation = self.armed.grant_generation();
+            let answered = |what: &str| Fact {
+                kind: FactKind::Responded,
+                tx_hash: released.tx_hash,
+                intent: released.kind,
+                component: released.component,
+                token: released.token,
+                nonce: released.nonce,
+                grant_generation: generation,
+                input_wei: None,
+                max_wei: None,
+                block: None,
+                gas_wei: None,
+                tokens: None,
+                eth_wei: None,
+                max_block: None,
+                by_tx: None,
+                response: Some(format!("{}:{what}", slot.live.name())),
+            };
+            let (Some(transport), Some(buffer), Some(frame)) =
+                (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
+            else {
+                let fact = answered("NO_RESPONSE");
+                slot.awaiting = None;
+                // A part of an answer must not meet the next request.
+                if let Some(buffer) = slot.buffer.as_mut() {
+                    buffer.reset();
+                }
+                self.responses.no_response += 1;
+                self.answered.push(fact);
+                continue;
+            };
+            let mut armed = ReleaseArmed { transport, frame };
+            let Poll::Done(outcome) =
+                poll_release_response(lane, &mut armed, buffer, clock, report)
+            else {
+                continue;
+            };
+            slot.awaiting = None;
+            let r = &mut self.responses;
+            match outcome {
+                ResponseOutcome::Ack => r.ack += 1,
+                ResponseOutcome::Reject { .. } => r.reject += 1,
+                ResponseOutcome::RateLimited => r.rate_limited += 1,
+                ResponseOutcome::Protocol(_) => r.protocol += 1,
+                ResponseOutcome::Connection => r.connection += 1,
+            }
+            let refused = matches!(
+                outcome,
+                ResponseOutcome::Reject { .. } | ResponseOutcome::RateLimited
+            );
+            if refused && released.kind == LiveIntentKind::Buy && self.buy_refused.is_none() {
+                self.buy_refused = Some(format!(
+                    "{} {} 0x{}",
+                    slot.live.name(),
+                    outcome_name(outcome),
+                    alloy_primitives::hex::encode(released.tx_hash)
+                ));
+            }
+            let fact = answered(outcome_name(outcome));
+            self.answered.push(fact);
+        }
     }
 
     fn hand_over(&mut self, h: Handover<'_>) -> Handed<LiveHandoff> {
@@ -371,6 +540,16 @@ impl End for LiveEnd {
             ExpectedTx::Approve(_) => LiveIntentKind::Approve,
             ExpectedTx::Sell(_) => LiveIntentKind::Sell,
         };
+        // BSC3-051: a provider refused one of this end's BUYs: no further
+        // BUY through it (before the owner's admission; exits go on).
+        if let Some(why) = self
+            .buy_refused
+            .as_ref()
+            .filter(|_| kind == LiveIntentKind::Buy)
+        {
+            let why = format!("PROVIDER_REFUSED: {why}");
+            return self.refuse(Refusal::Dispatch, why);
+        }
         let (component, profile, mode, launch, launch_raw, merge) = match submission {
             Submission::LaunchBundle(launch_raw) => (
                 ComponentId::ExecC3,
@@ -595,6 +774,7 @@ impl End for LiveEnd {
             eth_wei: None,
             max_block: Some(last_block),
             by_tx: None,
+            response: None,
         };
         match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => self.facts += 1,
@@ -613,6 +793,22 @@ impl End for LiveEnd {
                 report: dispatched.as_ref().ok().copied(),
                 frames,
             });
+            // BSC3-051: each connection that took the request awaits its
+            // answer, read into a buffer as large as the largest frame.
+            let at = self.released.len() - 1;
+            if let Some(report) = &self.released[at].report {
+                for slot in &mut self.slots {
+                    let handed = report
+                        .adapter(slot.adapter)
+                        .is_some_and(|r| r.outcome == SendOutcome::HandedOff);
+                    if handed {
+                        slot.awaiting = Some(at);
+                        slot.buffer
+                            .get_or_insert_with(|| ResponseBuffer::new(config.max_frame))
+                            .reset();
+                    }
+                }
+            }
         }
         let result = result.map_err(|(refusal, why)| {
             self.last_refusal = Some(why);
@@ -657,16 +853,76 @@ pub(crate) mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
 
+    /// How the stand-in answers one request (BSC3-051).
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum Answer {
+        /// HTTP 200, the request's id, a bundle hash.
+        Ack,
+        /// HTTP 200, the request's id, a JSON-RPC error.
+        Reject,
+        /// HTTP 429.
+        RateLimited,
+        /// HTTP 200 answering another request.
+        WrongId,
+        Silent,
+    }
+
+    /// The answer to `request` (its JSON-RPC id echoed), if any.
+    fn reply(answer: Answer, request: &[u8]) -> Option<Vec<u8>> {
+        let text = String::from_utf8_lossy(request);
+        let id = text
+            .split("\"id\":\"")
+            .nth(1)?
+            .split('"')
+            .next()?
+            .to_string();
+        let hash = format!("0x{}", "1f".repeat(32));
+        let json = |body: String| {
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_bytes()
+        };
+        match answer {
+            Answer::Ack => Some(json(format!(
+                r#"{{"jsonrpc":"2.0","id":"{id}","result":"{hash}"}}"#
+            ))),
+            Answer::Reject => Some(json(format!(
+                r#"{{"jsonrpc":"2.0","id":"{id}","error":{{"code":-32000,"message":"bundle refused"}}}}"#
+            ))),
+            Answer::RateLimited => {
+                Some(b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\n\r\n".to_vec())
+            }
+            Answer::WrongId => Some(json(format!(
+                r#"{{"jsonrpc":"2.0","id":"0x{}","result":"{hash}"}}"#,
+                "00".repeat(32)
+            ))),
+            Answer::Silent => None,
+        }
+    }
+
     /// The builder stand-in on 127.0.0.1: every complete HTTP request it
     /// reads, whole. It answers nothing.
     pub(crate) fn stand_in() -> (u16, mpsc::Receiver<Vec<u8>>) {
+        answering(Vec::new())
+    }
+
+    /// [`stand_in`] answering its `n`th request with `answers[n]` (after
+    /// them: nothing).
+    pub(crate) fn answering(answers: Vec<Answer>) -> (u16, mpsc::Receiver<Vec<u8>>) {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = mpsc::channel();
+        let answers = std::sync::Arc::new(answers);
+        let next = std::sync::Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
                 let tx = tx.clone();
+                let (answers, next) = (answers.clone(), next.clone());
                 std::thread::spawn(move || {
                     let (mut buf, mut chunk) = (Vec::new(), [0u8; 4096]);
                     loop {
@@ -679,7 +935,13 @@ pub(crate) mod tests {
                                 .unwrap_or(0);
                             if buf.len() >= end + 4 + len {
                                 let rest = buf.split_off(end + 4 + len);
-                                if tx.send(std::mem::replace(&mut buf, rest)).is_err() {
+                                let request = std::mem::replace(&mut buf, rest);
+                                let n = next.fetch_add(1, Ordering::SeqCst);
+                                let answer = answers.get(n).copied().unwrap_or(Answer::Silent);
+                                if let Some(r) = reply(answer, &request) {
+                                    let _ = stream.write_all(&r);
+                                }
+                                if tx.send(request).is_err() {
                                     return;
                                 }
                                 continue;
@@ -947,6 +1209,14 @@ pub(crate) mod tests {
     /// strategies at nonce 0, on the loopback stand-in: the owner's state,
     /// the run directory, the executor and what the stand-in receives.
     fn armed_both(tag: &str) -> (PathBuf, PathBuf, Executor<LiveEnd>, mpsc::Receiver<Vec<u8>>) {
+        armed_answering(tag, Vec::new())
+    }
+
+    /// [`armed_both`] on a stand-in that answers with `answers`.
+    fn armed_answering(
+        tag: &str,
+        answers: Vec<Answer>,
+    ) -> (PathBuf, PathBuf, Executor<LiveEnd>, mpsc::Receiver<Vec<u8>>) {
         let (state, store, now) = live_ready_granting(tag, |now| LiveGrant {
             max_input_wei: 10_000_000_000_000_000,
             max_spend_wei: 100_000_000_000_000_000,
@@ -966,7 +1236,7 @@ pub(crate) mod tests {
             &armed,
         )
         .unwrap();
-        let (port, requests) = stand_in();
+        let (port, requests) = answering(answers);
         let mut cfg = config(2, 2);
         cfg.strategy_lanes = 4;
         let end = LiveEnd::new(
@@ -1226,6 +1496,101 @@ pub(crate) mod tests {
         exec.disarm().unwrap();
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-051: each provider answer is read without waiting, bound to its
+    /// request and recorded apart from the chain: counted, a RESPONDED
+    /// fact, the transaction still unresolved. After an ACK or a REJECT the
+    /// connection takes the next request (no reconnect); a REJECT or 429
+    /// of a BUY closes the end's BUYs; another request's answer is a
+    /// protocol fault; a connection given up before answering is
+    /// NO_RESPONSE.
+    #[test]
+    fn a_providers_answer_is_read_bound_and_recorded_apart_from_the_chain() {
+        use crate::live_ledger::fold;
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let wait = std::time::Duration::from_secs(2);
+        for (n, answer, outcome) in [
+            (0, Answer::Ack, "ACK"),
+            (1, Answer::Reject, "REJECT"),
+            (2, Answer::RateLimited, "RATE_LIMITED"),
+            (3, Answer::WrongId, "PROTOCOL"),
+            (4, Answer::Silent, "NO_RESPONSE"),
+        ] {
+            let (state, d, mut exec, requests) =
+                armed_answering(&format!("live-answer-{n}"), vec![answer, Answer::Ack]);
+            let (hash, raw, input) = launch(0, 7);
+            let pending = PendingLaunch {
+                hash,
+                raw: &raw,
+                to: Some(portal),
+                input: &input,
+                ingress_ns: 100,
+            };
+            let buy = exec
+                .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
+                .unwrap();
+            requests.recv_timeout(wait).unwrap();
+            let read = |exec: &mut Executor<LiveEnd>| {
+                let deadline = std::time::Instant::now() + wait;
+                while std::time::Instant::now() < deadline {
+                    exec.poll_responses(&clock(200, 1));
+                    if exec.end().responses() != Responses::default() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            };
+            read(&mut exec);
+            if let Answer::Silent = answer {
+                assert_eq!(exec.end().responses(), Responses::default());
+                // The maintenance gives the connection up: nothing answered.
+                assert!(exec.end_mut().maintain(wait).is_empty());
+                exec.poll_responses(&clock(300, 1));
+            }
+            let r = exec.end().responses();
+            let counted = r.named().into_iter().find(|(_, c)| *c > 0);
+            assert_eq!(counted, Some((outcome, 1)), "{answer:?}: {r:?}");
+            // A poll only reads: the fact is written outside any hand-over.
+            let facts = || Ledger::open(&state).facts().unwrap();
+            assert!(facts().iter().all(|f| f.kind != FactKind::Responded));
+            exec.end_mut().record_responses();
+            let book = fold(&facts());
+            let tx = book.tx(&buy.handoff.tx_hash).unwrap();
+            assert_eq!(tx.state, FactKind::Released, "{answer:?}");
+            assert_eq!(tx.responses, vec![format!("CLUB48_BUILDER_V1:{outcome}")]);
+            let refused = matches!(answer, Answer::Reject | Answer::RateLimited);
+            assert_eq!(exec.end().buy_refused().is_some(), refused, "{answer:?}");
+            if matches!(answer, Answer::Ack | Answer::Reject) {
+                // The connection is ready again: the next request goes on it.
+                let next = exec.on_strategy_buy(
+                    [0x5A; 20],
+                    curve_after(1_000_000_000_000_000_000),
+                    U256::from(10_000_000_000_000_000u64),
+                    &strategy_c2_next(Some(HEAD), 1),
+                    &clock(500, 3),
+                    500,
+                );
+                match answer {
+                    Answer::Ack => {
+                        assert!(next.is_ok(), "{next:?}");
+                        requests.recv_timeout(wait).unwrap();
+                    }
+                    _ => {
+                        assert_eq!(next.err(), Some(Refusal::Dispatch));
+                        assert!(
+                            exec.end()
+                                .last_refusal()
+                                .unwrap()
+                                .starts_with("PROVIDER_REFUSED")
+                        );
+                    }
+                }
+            }
+            drop(exec);
+            fs::remove_dir_all(d).unwrap();
+            fs::remove_dir_all(state).unwrap();
+        }
     }
 
     /// BSC3-045: the ledger did not take a released transaction's fact.

@@ -544,6 +544,9 @@ pub mod live_ledger {
     /// `REPLACED`: the transaction that took its nonce (its block is the
     /// fact's block).
     pub const BY_TX_HASH: u16 = 19;
+    /// `RESPONDED`: a provider's answer to the release, `ADAPTER:OUTCOME`
+    /// (BSC3-051), apart from what the chain made of it.
+    pub const RESPONSE: u16 = 20;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
@@ -573,6 +576,7 @@ pub mod live_ledger {
             Field::opt(ETH_WEI, "eth_wei", U256),
             Field::opt(MAX_BLOCK, "max_block", U64),
             Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
         ],
     };
 }
@@ -1363,6 +1367,8 @@ pub mod runtime_status {
         pub const GAS_WEI: u16 = 22;
         /// Why the ledger could not be read (then nothing above counts).
         pub const LEDGER_ERROR: u16 = 23;
+        /// The providers' answers to the releases, `OUTCOME=n` (BSC3-051).
+        pub const RESPONSES: u16 = 24;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
@@ -1392,6 +1398,7 @@ pub mod runtime_status {
                 Field::req(REALIZED_PNL_WEI, "realized_pnl_wei", Text),
                 Field::req(GAS_WEI, "gas_wei", U256),
                 Field::opt(LEDGER_ERROR, "ledger_error", Text),
+                Field::rep(RESPONSES, "responses", Text),
             ],
         };
     }

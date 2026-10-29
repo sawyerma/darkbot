@@ -215,9 +215,28 @@ pub fn qualify_transport<'a>(
     table: &AdapterTable,
     adapter: AdapterId,
 ) -> Result<QualifiedTlsTransport<'a>, TlsQualificationError> {
+    qualify_in(owner, table, adapter, ConnectionState::Ready)
+}
+
+/// The same accepted connection of `adapter`, to read the response to the
+/// request it carries (BSC3-051): only while it awaits that response.
+pub fn response_transport<'a>(
+    owner: &'a mut TlsConnectionOwner,
+    table: &AdapterTable,
+    adapter: AdapterId,
+) -> Result<QualifiedTlsTransport<'a>, TlsQualificationError> {
+    qualify_in(owner, table, adapter, ConnectionState::AwaitingResponse)
+}
+
+fn qualify_in<'a>(
+    owner: &'a mut TlsConnectionOwner,
+    table: &AdapterTable,
+    adapter: AdapterId,
+    expected: ConnectionState,
+) -> Result<QualifiedTlsTransport<'a>, TlsQualificationError> {
     let (kind, boundary) = binding(table, adapter)?;
     let state = owner.state();
-    if state != ConnectionState::Ready {
+    if state != expected {
         return Err(TlsQualificationError::ConnectionNotReady(state));
     }
     let profile = owner.profile().ok_or(TlsQualificationError::NoConnection)?;

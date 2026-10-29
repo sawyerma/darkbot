@@ -47,6 +47,8 @@ pub enum FactKind {
     Reverted,
     Replaced,
     Orphaned,
+    /// A provider answered the release (BSC3-051): no word on the chain.
+    Responded,
 }
 
 impl FactKind {
@@ -59,6 +61,7 @@ impl FactKind {
             Self::Reverted => "REVERTED",
             Self::Replaced => "REPLACED",
             Self::Orphaned => "ORPHANED",
+            Self::Responded => "RESPONDED",
         }
     }
 
@@ -71,6 +74,7 @@ impl FactKind {
             Self::Reverted,
             Self::Replaced,
             Self::Orphaned,
+            Self::Responded,
         ]
         .into_iter()
         .find(|k| k.name() == text)
@@ -115,6 +119,8 @@ pub struct Fact {
     pub max_block: Option<u64>,
     /// `Replaced`: the transaction that took its nonce, in `block`.
     pub by_tx: Option<[u8; 32]>,
+    /// `Responded`: the provider and its answer, `ADAPTER:OUTCOME`.
+    pub response: Option<String>,
 }
 
 impl Fact {
@@ -130,6 +136,7 @@ impl Fact {
             eth_wei: None,
             max_block: None,
             by_tx: None,
+            response: None,
             ..of.clone()
         }
     }
@@ -153,6 +160,7 @@ impl Fact {
             eth_wei: None,
             max_block: a.max_block,
             by_tx: None,
+            response: None,
         })
     }
 }
@@ -226,7 +234,8 @@ impl Ledger {
             .set_opt(k::TOKENS, fact.tokens.map(word))
             .set_opt(k::ETH_WEI, fact.eth_wei.map(word))
             .set_opt(k::MAX_BLOCK, fact.max_block)
-            .set_opt(k::BY_TX_HASH, fact.by_tx.map(Value::B256));
+            .set_opt(k::BY_TX_HASH, fact.by_tx.map(Value::B256))
+            .set_opt(k::RESPONSE, fact.response.as_deref());
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -369,6 +378,7 @@ impl Ledger {
                 eth_wei: u(k::ETH_WEI)?,
                 max_block: r.opt_u64(k::MAX_BLOCK).map_err(e)?,
                 by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
+                response: r.opt_text(k::RESPONSE).map_err(e)?.map(str::to_string),
             });
         }
         Ok(out)
@@ -390,6 +400,9 @@ pub struct Tx {
     pub orphaned: bool,
     /// The lot it counts in (none: withdrawn or replaced, BSC3-047).
     pub lot: Option<[u8; 32]>,
+    /// What the providers answered to its release (BSC3-051): never an
+    /// inclusion.
+    pub responses: Vec<String>,
 }
 
 impl Tx {
@@ -515,6 +528,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                         inclusion: None,
                         orphaned: false,
                         lot: None,
+                        responses: Vec::new(),
                     });
                 }
             }
@@ -523,6 +537,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                     continue;
                 };
                 match kind {
+                    FactKind::Responded => t.responses.extend(f.response.clone()),
                     FactKind::Orphaned => {
                         // Its own inclusion left the chain (not one that
                         // replaced it): its bytes were public.
@@ -639,6 +654,7 @@ mod tests {
             eth_wei: None,
             max_block: Some(100),
             by_tx: None,
+            response: None,
         }
     }
 
