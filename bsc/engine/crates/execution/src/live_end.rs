@@ -679,6 +679,14 @@ impl End for LiveEnd {
             drop(transports);
             return self.refuse(Refusal::Unqualified, why);
         }
+        // BSC3-068: the start deadline again, right before the owner's
+        // admission: a late intent takes no attempt and no spend. The
+        // dispatch checks it once more before its write; a miss in between
+        // counts the attempt (its fact WITHDRAWN: no byte left).
+        if let Err(e) = deadline.check(clock.id(), clock.now_ns()) {
+            drop(transports);
+            return self.refuse(Refusal::Deadline, format!("{e:?}"));
+        }
         // The owner, as it holds now: nothing before this consumed an
         // attempt or a budget, and nothing after it can leave unadmitted.
         // Its entry, with the token and nonce, is the transaction's
@@ -1407,37 +1415,54 @@ pub(crate) mod tests {
         fs::remove_dir_all(state).unwrap();
     }
 
-    /// BSC3-024 (review): an intent the owner admitted whose dispatch then
-    /// found the transport start deadline passed: no byte reaches the
-    /// stand-in, its fact is WITHDRAWN (resolved, never on chain, no
-    /// position, no cost), so neither recovery nor the next arm takes it
-    /// for one that may have left. The owner's slot stays taken (counted
-    /// conservatively, BSC3-068).
+    /// BSC3-068: the transport start deadline is checked again right before
+    /// the owner's admission: an intent already late takes no BUY attempt,
+    /// no spend and leaves no fact. A deadline that passes after its
+    /// admission (before the write) still counts the attempt: no byte left,
+    /// the fact is WITHDRAWN, never on chain, no position, no cost.
     #[test]
-    fn an_admitted_intent_that_never_left_is_withdrawn() {
+    fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         use crate::live_ledger::fold;
-        let (state, d, mut exec, requests) = armed_both("live-withdrawn");
+        use crate::sources::total_usage;
         let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let silent = std::time::Duration::from_millis(300);
         let (hash, raw, input) = launch(0, 7);
+        let pending = || PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        // Late before the admission: nothing taken, nothing written.
+        let (state, d, mut exec, requests) = armed_both("live-late");
         let late = clock(100 + 2_000_000, 1);
-        let refused = exec.on_launch(
-            PendingLaunch {
-                hash,
-                raw: &raw,
-                to: Some(portal),
-                input: &input,
-                ingress_ns: 100,
-            },
-            &c2_next(Some(HEAD), 0),
-            &late,
-        );
+        let refused = exec.on_launch(pending(), &c2_next(Some(HEAD), 0), &late);
         assert_eq!(refused.unwrap_err(), Refusal::Deadline);
-        assert!(
-            requests
-                .recv_timeout(std::time::Duration::from_millis(300))
-                .is_err()
-        );
+        assert!(requests.recv_timeout(silent).is_err());
+        assert_eq!(total_usage(&state).unwrap().used, 0);
+        assert!(crate::sources::admitted_intents(&state).unwrap().is_empty());
+        assert!(Ledger::open(&state).facts().unwrap().is_empty());
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+        // Late only once the owner admitted it (its entry exists).
+        let (state, d, mut exec, requests) = armed_both("live-late-after");
+        let spend = state.join("live-spend");
+        let t = std::cell::Cell::new(100u64);
+        let after = crate::paper_exec::FnClock {
+            id: 1,
+            now: || {
+                let admitted = fs::read_dir(&spend).is_ok_and(|mut e| e.next().is_some());
+                t.set(t.get() + if admitted { 2_000_000 } else { 7 });
+                t.get()
+            },
+        };
+        let refused = exec.on_launch(pending(), &c2_next(Some(HEAD), 0), &after);
+        assert_eq!(refused.unwrap_err(), Refusal::Deadline);
+        assert!(requests.recv_timeout(silent).is_err());
         assert!(exec.end().released().is_empty());
+        assert_eq!(total_usage(&state).unwrap().used, 1);
         let facts = Ledger::open(&state).facts().unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(
@@ -1454,7 +1479,6 @@ pub(crate) mod tests {
                 .unknown,
             0
         );
-        assert_eq!(crate::sources::admitted_intents(&state).unwrap().len(), 1);
         exec.disarm().unwrap();
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(state).unwrap();

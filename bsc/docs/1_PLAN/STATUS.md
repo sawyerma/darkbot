@@ -20,7 +20,8 @@
 | BSC3-057 | FIX_VERIFIED | `f4ecca5d` | – |
 | BSC3-072 (neu: Strategie-Session-Kappe ohne Exit-Reserve, `paper_exec.rs` strategy_buy) | FIX_VERIFIED | `f4ecca5d` | – |
 | BSC3-058 | FIX_VERIFIED | `8f242b7b` | – |
-| BSC3-051 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-051 | FIX_VERIFIED | `3c5cc8d3` | – |
+| BSC3-068 | FIX_VERIFIED | dieser Commit | Rückgabe eines Versuchs nach belegter Nicht-Offenlegung nicht umgesetzt (zählt konservativ) |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).
