@@ -467,6 +467,10 @@ pub mod live_spend {
     /// with no inclusion, the nonce may be taken again (absent in entries
     /// written before: the window is unknown and nothing reuses the nonce).
     pub const MAX_BLOCK: u16 = 11;
+    /// A BUY: the most the exits of the open positions and of its own may
+    /// still cost, the room it left the grant (BSC3-057); absent in entries
+    /// written before.
+    pub const EXIT_RESERVE_WEI: u16 = 12;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-spend.v1",
@@ -488,6 +492,7 @@ pub mod live_spend {
             Field::opt(TOKEN, "token", Address),
             Field::opt(NONCE, "nonce", U64),
             Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(EXIT_RESERVE_WEI, "exit_reserve_wei", U256),
         ],
     };
 }

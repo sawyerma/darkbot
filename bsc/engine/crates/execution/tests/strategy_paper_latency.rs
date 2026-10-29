@@ -240,6 +240,7 @@ fn strategy_paper_path_latency() {
         now_unix_ms: head.map_or(0, |h| h.timestamp * 1_000),
         // PAPER: its transactions never leave.
         next_nonce: None,
+        exit_reserve_wei: None,
     };
 
     let mut journal = RuntimeJournal::open(

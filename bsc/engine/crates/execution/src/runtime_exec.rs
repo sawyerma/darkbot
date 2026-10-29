@@ -408,7 +408,7 @@ impl ExecRuntime {
     ) -> Option<PaperBuy> {
         let x = self.executor.as_mut()?;
         let next_nonce = owner.clean_next_nonce(&x.sender());
-        launch_to(x, hash, raw, ingress_ns, owner, next_nonce, clock)
+        launch_to(x, hash, raw, ingress_ns, owner, next_nonce, None, clock)
     }
 
     /// Phase I: one Strategy C decision on the PAPER path, when armed:
@@ -432,6 +432,7 @@ impl ExecRuntime {
             action,
             owner,
             next_nonce,
+            None,
             clock,
             now_unix_ms,
         ))
@@ -564,7 +565,10 @@ impl ExecRuntime {
 
 /// A verified pending C1-scope launch through `executor`, whichever its
 /// end (PAPER or LIVE, plan 28.10.): the one production path. `next_nonce`:
-/// the nonce a new transaction of the sender may take now (BSC3-048).
+/// the nonce a new transaction of the sender may take now (BSC3-048);
+/// `exit_reserve_wei`: what the exits of the open positions may still cost,
+/// when the end's ledger knows it (BSC3-057).
+#[allow(clippy::too_many_arguments)]
 pub fn launch_to<E: End>(
     executor: &mut Executor<E>,
     hash: [u8; 32],
@@ -572,6 +576,7 @@ pub fn launch_to<E: End>(
     ingress_ns: u64,
     owner: &StateOwner,
     next_nonce: Option<u64>,
+    exit_reserve_wei: Option<U256>,
     clock: &dyn Clock,
 ) -> Option<ExecBuy<E::Handoff>> {
     let Ok(target) = decode_tx_target(raw) else {
@@ -591,6 +596,7 @@ pub fn launch_to<E: End>(
                 snapshot: &|c, p, g| owner.snapshot(c, p, g),
                 head: owner.head(),
                 next_nonce,
+                exit_reserve_wei,
             },
             clock,
         )
@@ -599,12 +605,14 @@ pub fn launch_to<E: End>(
 
 /// One Strategy C decision through `executor`, whichever its end: the
 /// intents that reached it (an exit's approval even when its SELL was
-/// refused) and the refusal. `next_nonce` as in [`launch_to`].
+/// refused) and the refusal. `next_nonce` and `exit_reserve_wei` as in
+/// [`launch_to`].
 pub fn strategy_to<E: End>(
     executor: &mut Executor<E>,
     action: &crate::runtime_strategy::StrategyAction,
     owner: &StateOwner,
     next_nonce: Option<u64>,
+    exit_reserve_wei: Option<U256>,
     clock: &dyn Clock,
     now_unix_ms: u64,
 ) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
@@ -615,6 +623,7 @@ pub fn strategy_to<E: End>(
         head: owner.head(),
         now_unix_ms,
         next_nonce,
+        exit_reserve_wei,
     };
     match *action {
         StrategyAction::Buy {

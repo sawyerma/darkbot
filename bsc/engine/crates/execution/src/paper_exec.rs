@@ -304,6 +304,9 @@ pub enum Refusal {
     /// BSC3-048: an open position's exit waits for the sender's nonce; no
     /// new BUY takes it first.
     ExitFirst,
+    /// BSC3-027: the sender's balance does not hold a BUY with its exit
+    /// and the exits of what is open; the exits go, no BUY.
+    Unfunded,
 }
 
 impl Refusal {
@@ -331,6 +334,7 @@ impl Refusal {
             Self::Owner => "OWNER",
             Self::SenderNonce => "SENDER_NONCE",
             Self::ExitFirst => "EXIT_FIRST",
+            Self::Unfunded => "UNFUNDED",
         }
     }
 }
@@ -388,6 +392,9 @@ pub struct CanonicalContext<'a> {
     /// The sender's canonical next nonce, when C2 knows it exactly (clean):
     /// an end whose transactions reach the chain takes no other.
     pub next_nonce: Option<u64>,
+    /// The most the exits of the sender's open positions may still cost,
+    /// when the end's ledger knows it ([`Executor::exits_after_buy`]).
+    pub exit_reserve_wei: Option<U256>,
 }
 
 impl CanonicalContext<'_> {
@@ -703,6 +710,9 @@ pub struct Handover<'a> {
     pub start_ns: u64,
     pub submission: Submission<'a>,
     pub config: &'a ExecConfig,
+    /// A BUY: the most the exits of the sender's open positions and of its
+    /// own may still cost (BSC3-057); an exit step: zero.
+    pub exit_reserve_wei: U256,
 }
 
 /// What an end made of one hand-over.
@@ -855,6 +865,7 @@ impl End for PaperEnd {
             start_ns,
             submission,
             config,
+            exit_reserve_wei: _,
         } = h;
         let (adapter, mode, launch, merge) = match submission {
             Submission::LaunchBundle(launch_raw) => (
@@ -991,6 +1002,7 @@ fn to_end<E: End>(
     raw: &[u8],
     expected: ExpectedTx<'_>,
     budget: &BudgetEnvelope,
+    exit_reserve_wei: U256,
     snapshot: &SnapshotId,
     head: ChainHead,
     clock: &dyn Clock,
@@ -1021,6 +1033,7 @@ fn to_end<E: End>(
         start_ns,
         submission,
         config,
+        exit_reserve_wei,
     });
     (
         handed.result,
@@ -1089,6 +1102,8 @@ pub struct LaunchContext<'a> {
     /// The sender's canonical next nonce, when C2 knows it exactly (clean):
     /// an end whose transactions reach the chain takes no other.
     pub next_nonce: Option<u64>,
+    /// As [`CanonicalContext::exit_reserve_wei`].
+    pub exit_reserve_wei: Option<U256>,
 }
 
 impl Executor<PaperEnd> {
@@ -1307,6 +1322,16 @@ impl<E: End> Executor<E> {
         if self.spent_wei + exposure > U256::from(self.config.session_cap_wei) {
             return Err(Refusal::SessionCap);
         }
+        // BSC3-072: on a chain ordered end its position is adopted once
+        // included and exits through the strategy: the strategy's cap keeps
+        // room for its exit and for the exits of what is open.
+        let exits = self.exits_after_buy(c2.exit_reserve_wei);
+        if E::CHAIN_ORDERED
+            && self.config.sender_paths.strategy()
+            && self.strategy_spent_wei + exits > U256::from(self.config.strategy_session_cap_wei)
+        {
+            return Err(Refusal::SessionCap);
+        }
         if self.strategy_used > 0 && !self.strategy_skipped_first {
             return Err(Refusal::NonceTaken);
         }
@@ -1348,6 +1373,7 @@ impl<E: End> Executor<E> {
             &self.raw,
             ExpectedTx::Buy(&expected),
             &self.budget,
+            exits,
             &snapshot,
             head,
             clock,
@@ -1448,6 +1474,39 @@ impl<E: End> Executor<E> {
     /// sender buys a token once (BSC3-055, Unit 4 invariant 2).
     fn holds(&self, token: &[u8; 20]) -> bool {
         self.bought.contains(token) || self.strategy_bought.iter().any(|h| h.token == *token)
+    }
+
+    /// One position's exit at the signed gas price: its approval's gas and
+    /// its SELL's.
+    fn exit_gas(&self) -> (U256, U256) {
+        let price = U256::from(self.config.gas_price_wei);
+        (
+            price * U256::from(self.config.approve_gas_limit),
+            price * U256::from(self.config.sell_gas_limit),
+        )
+    }
+
+    /// The most the exits of what this arm holds for the strategy may still
+    /// cost: per position not sold its SELL and, unless approved, its
+    /// approval (a C3 position is the strategy's once adopted).
+    fn held_exit_reserve(&self) -> U256 {
+        let (approval, sell) = self.exit_gas();
+        self.strategy_bought
+            .iter()
+            .filter(|h| !self.exited.contains(&h.token))
+            .map(|h| match self.approved.iter().any(|(a, _)| *a == h.token) {
+                true => sell,
+                false => approval + sell,
+            })
+            .fold(U256::ZERO, |sum, wei| sum + wei)
+    }
+
+    /// What a BUY leaves room for (BSC3-057/072): the exits of the open
+    /// positions (`known`, the end's ledger's; else what this arm holds)
+    /// and its own.
+    fn exits_after_buy(&self, known: Option<U256>) -> U256 {
+        let (approval, sell) = self.exit_gas();
+        known.unwrap_or_else(|| self.held_exit_reserve()) + approval + sell
     }
 
     /// The nonce the next strategy lane is at.
@@ -1598,7 +1657,10 @@ impl<E: End> Executor<E> {
             max_provider_payment_wei: U256::ZERO,
             max_total_wei: input_wei + gas,
         };
-        if self.strategy_spent_wei + budget.max_total_wei
+        // BSC3-072: the cap keeps room for its exit and for the exits of
+        // what is open.
+        let exits = self.exits_after_buy(c2.exit_reserve_wei);
+        if self.strategy_spent_wei + budget.max_total_wei + exits
             > U256::from(self.config.strategy_session_cap_wei)
         {
             return Err(Refusal::SessionCap);
@@ -1651,6 +1713,7 @@ impl<E: End> Executor<E> {
             &self.raw,
             ExpectedTx::Buy(&expected),
             &budget,
+            exits,
             &snapshot,
             head,
             clock,
@@ -1744,13 +1807,12 @@ impl<E: End> Executor<E> {
         let admitted =
             admit_curve_sell(&state, amount, &self.exit_policy).map_err(|_| Refusal::Admission)?;
         let admitted_ns = clock.now_ns();
-        let price = U256::from(self.config.gas_price_wei);
+        let (approval_gas, sell_gas) = self.exit_gas();
         let approve_gas = if approved.is_some() {
             U256::ZERO
         } else {
-            price * U256::from(self.config.approve_gas_limit)
+            approval_gas
         };
-        let sell_gas = price * U256::from(self.config.sell_gas_limit);
         let budget = |gas: U256| BudgetEnvelope {
             max_buy_input_wei: U256::ZERO,
             max_buy_gas_wei: gas,
@@ -1852,6 +1914,7 @@ impl<E: End> Executor<E> {
                 &self.raw,
                 tx,
                 &budget(gas),
+                U256::ZERO,
                 &snapshot,
                 head,
                 clock,
@@ -1972,17 +2035,18 @@ impl<E: End> Executor<E> {
         self.evidence
     }
 
-    /// Plan 28.10.: a real position the chain confirmed, `tokens` received
-    /// for `input_wei`: its exit sells at most these tokens, and a C3
-    /// position (or one from before a restart) becomes exitable the same
-    /// way as a Strategy C one.
-    pub fn adopt(&mut self, token: [u8; 20], tokens: U256, input_wei: U256) {
+    /// Plan 28.10.: a real position the chain confirmed, `tokens` received:
+    /// its exit sells at most these tokens, and a C3 position (or one from
+    /// before a restart) becomes exitable the same way as a Strategy C one.
+    /// Its input is not this arm's strategy exposure (no strategy BUY of
+    /// this arm charged it): its SELL releases none (BSC3-072).
+    pub fn adopt(&mut self, token: [u8; 20], tokens: U256) {
         match self.strategy_bought.iter_mut().find(|h| h.token == token) {
             Some(h) => h.min_tokens = tokens,
             None => self.strategy_bought.push(Held {
                 token,
                 min_tokens: tokens,
-                input_wei,
+                input_wei: U256::ZERO,
             }),
         }
     }
@@ -2198,6 +2262,7 @@ pub(crate) mod tests {
             snapshot: &snapshot,
             head,
             next_nonce: None,
+            exit_reserve_wei: None,
         }
     }
 
@@ -2205,6 +2270,7 @@ pub(crate) mod tests {
     pub(crate) fn c2_next(head: Option<ChainHead>, next: u64) -> LaunchContext<'static> {
         LaunchContext {
             next_nonce: Some(next),
+            exit_reserve_wei: None,
             ..c2(head)
         }
     }
@@ -2391,6 +2457,7 @@ pub(crate) mod tests {
             snapshot: &|_, _, _| None,
             head: Some(HEAD),
             next_nonce: None,
+            exit_reserve_wei: None,
         };
         assert_eq!(
             exec.on_launch(
@@ -2619,6 +2686,7 @@ pub(crate) mod tests {
             head,
             now_unix_ms: NOW_MS,
             next_nonce: None,
+            exit_reserve_wei: None,
         }
     }
 
@@ -2630,6 +2698,7 @@ pub(crate) mod tests {
     ) -> CanonicalContext<'static> {
         CanonicalContext {
             next_nonce: Some(next),
+            exit_reserve_wei: None,
             ..strategy_c2(head)
         }
     }
@@ -2807,6 +2876,7 @@ pub(crate) mod tests {
             head: Some(HEAD),
             now_unix_ms: NOW_MS,
             next_nonce: None,
+            exit_reserve_wei: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &none, &clock(1, 1), 1),
@@ -2823,6 +2893,7 @@ pub(crate) mod tests {
             head: Some(HEAD),
             now_unix_ms: HEAD.timestamp * 1_000 + 30_001,
             next_nonce: None,
+            exit_reserve_wei: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], curve, input, &late, &clock(1, 1), 1),
@@ -2842,6 +2913,68 @@ pub(crate) mod tests {
         );
         assert_eq!(exec.strategy_counters().handoffs, 0);
         assert_eq!(exec.strategy_lanes().1, 2);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// BSC3-072: the strategy's session cap keeps the room the exit of
+    /// what it buys needs (its approval and SELL at the signed gas): a BUY
+    /// whose exit would not fit is refused, before anything is signed
+    /// (before: the BUY went and its exit was refused SESSION_CAP, the
+    /// position stranded).
+    #[test]
+    fn a_buy_leaves_room_in_the_cap_for_its_exit() {
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let token = [0xAB; 20];
+        let at = |cap: U256| {
+            let mut cfg = config(2, 2);
+            cfg.strategy_lanes = 4;
+            cfg.strategy_session_cap_wei = u128::try_from(cap).unwrap();
+            cfg
+        };
+        let cfg = config(2, 2);
+        let price = U256::from(cfg.gas_price_wei);
+        let buy = input + price * U256::from(cfg.gas_limit);
+        let exit = price * U256::from(cfg.approve_gas_limit + cfg.sell_gas_limit);
+        // Room for the BUY, not for its exit.
+        let (mut exec, d) = armed("strategy-exit-room", at(buy + exit - U256::from(1u8)));
+        let bought = exec.on_strategy_buy(
+            token,
+            curve,
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(500, 3),
+            500,
+        );
+        assert_eq!(bought.err(), Some(Refusal::SessionCap));
+        assert_eq!(exec.strategy_counters().handoffs, 0);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+        // Room for both: the BUY and then its exit go.
+        let (mut exec, d) = armed("strategy-exit-room-2", at(buy + exit));
+        let bought = exec
+            .on_strategy_buy(
+                token,
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(500, 3),
+                500,
+            )
+            .unwrap();
+        let tokens = decode_swap_exact_input_native(decode_signed(&bought.raw).unwrap().tx.input)
+            .unwrap()
+            .min_output_amount;
+        let (exits, refused) = exec.on_strategy_exit(
+            token,
+            tokens,
+            curve,
+            &strategy_c2(Some(HEAD)),
+            &clock(900, 3),
+            900,
+        );
+        assert_eq!((exits.len(), refused), (2, None));
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
     }

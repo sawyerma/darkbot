@@ -289,6 +289,19 @@ pub struct LiveRuntime {
     /// admits exits only.
     exit_first: u64,
     buys_refused: u64,
+    /// The buyer's balance as the last probe read it (BSC3-027).
+    funds: Option<Funds>,
+    /// BUYs the balance does not hold with their exit and the open exits.
+    unfunded_refused: u64,
+}
+
+/// The buyer's balance at a probe's block: a transaction of the ledger
+/// included or reverted in a later block, or not yet, still comes out of
+/// it at its most.
+#[derive(Clone, Copy, Debug)]
+struct Funds {
+    balance: U256,
+    block: u64,
 }
 
 impl LiveRuntime {
@@ -360,6 +373,8 @@ impl LiveRuntime {
             buys_closed: None,
             exit_first: 0,
             buys_refused: 0,
+            funds: None,
+            unfunded_refused: 0,
         }
         .folded()
     }
@@ -699,7 +714,7 @@ impl LiveRuntime {
                 continue;
             }
             if let Some(x) = self.executor.as_mut() {
-                x.adopt(p.token, p.tokens, p.input_wei);
+                x.adopt(p.token, p.tokens);
             }
             self.opened.push((p.token, p.lot));
             changes.push(PositionChange::Opened {
@@ -826,6 +841,50 @@ impl LiveRuntime {
         U256::from(x.input_wei) + U256::from(x.gas_price_wei) * U256::from(x.gas_limit)
     }
 
+    /// One position's exit at the signed gas price, as the executor
+    /// charges it: its approval's gas and its SELL's.
+    fn exit_gas(&self) -> (U256, U256) {
+        let x = &self.exec.exec;
+        let price = U256::from(x.gas_price_wei);
+        (
+            price * U256::from(x.approve_gas_limit),
+            price * U256::from(x.sell_gas_limit),
+        )
+    }
+
+    /// The most the exits of the ledger's lots may still cost
+    /// (BSC3-027/057): per lot pending or open its SELL and, unless an
+    /// approval of it is out or included, its approval. An exiting lot's
+    /// SELL is out (it counts in what was spent).
+    fn exit_reserve(&self) -> U256 {
+        let (approval, sell) = self.exit_gas();
+        self.book
+            .positions
+            .iter()
+            .filter(|p| matches!(p.state, PositionState::Pending | PositionState::Open))
+            // A lot is a BUY's (an exit step with none before it is not).
+            .filter(|p| {
+                self.book
+                    .tx(&p.lot)
+                    .is_some_and(|t| t.released.intent == LiveIntentKind::Buy)
+            })
+            .map(|p| {
+                let approved = self.book.txs.iter().any(|t| {
+                    t.lot == Some(p.lot)
+                        && t.released.intent == LiveIntentKind::Approve
+                        && matches!(
+                            t.state,
+                            FactKind::Released | FactKind::Unknown | FactKind::Included
+                        )
+                });
+                match approved {
+                    true => sell,
+                    false => approval + sell,
+                }
+            })
+            .fold(U256::ZERO, |sum, wei| sum + wei)
+    }
+
     fn observed(&mut self, result: Result<VenueObservation, String>) {
         let observation = match result {
             Ok(o) => o,
@@ -835,6 +894,7 @@ impl LiveRuntime {
         let validated = bsc_mainnet_v5_27_0().validate(&observation.deployment(), generation);
         let terms = observation.terms;
         let balance = observation.caller_balance_wei;
+        let probed_at = observation.block_number;
         let o = &observation.observed;
         let seen = format!(
             "observed {} implementation {}",
@@ -849,13 +909,31 @@ impl LiveRuntime {
             Ok(_) if terms != WITNESSED_MAINNET_TERMS => {
                 self.stop(Phase::TermsDrift(format!("{terms:?}")))
             }
-            Ok(_) if balance < self.one_buy() => {
-                self.disarm();
-                self.validated = None;
-                self.phase =
-                    Phase::Unfunded(format!("{balance} wei, one BUY needs {}", self.one_buy()));
-            }
             Ok(v) => {
+                // BSC3-027: the balance holds a BUY, its exit and the exits
+                // of what is open (each BUY is checked again before it goes,
+                // [`Self::unfunded`]). Short of that while a position waits
+                // for its exit, the path arms for the exits as long as one
+                // exit step is paid for.
+                let (approval, sell) = self.exit_gas();
+                let open = self.exit_reserve();
+                let need = self.one_buy() + approval + sell + open;
+                self.funds = Some(Funds {
+                    balance,
+                    block: probed_at,
+                });
+                let exits = open > U256::ZERO || self.positions_open();
+                if balance < need && !(exits && balance >= approval.min(sell)) {
+                    self.disarm();
+                    self.validated = None;
+                    self.phase = Phase::Unfunded(match exits {
+                        true => {
+                            format!("{balance} wei, the exits of the open positions need {open}")
+                        }
+                        false => format!("{balance} wei, a BUY with its exit needs {need}"),
+                    });
+                    return;
+                }
                 if self.executor.is_none() {
                     self.codehash_generation = generation;
                     self.validated = Some((v, terms));
@@ -1136,7 +1214,7 @@ impl LiveRuntime {
                     .iter()
                     .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
                 {
-                    executor.adopt(p.token, p.tokens, p.input_wei);
+                    executor.adopt(p.token, p.tokens);
                     // Its lot's approval the chain included: no second one
                     // (an earlier lot's went with its SELL, BSC3-047).
                     if p.approved {
@@ -1210,20 +1288,58 @@ impl LiveRuntime {
             self.source_refused += 1;
             return None;
         }
-        if self.buy_refused().is_some() {
+        if self.buy_refused(self.one_buy()).is_some() {
             return None;
         }
         let next = self.free_nonce(owner);
+        let reserve = Some(self.exit_reserve());
         let x = self.executor.as_mut()?;
-        let buy = launch_to(x, hash, raw, ingress_ns, owner, next, clock);
+        let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
         self.handed();
         buy
     }
 
-    /// Why no new BUY goes now (counted): an open position's exit waits
-    /// for the buyer's nonce first (BSC3-048), or the owner's gate admits
-    /// only exits (BSC3-071).
-    fn buy_refused(&mut self) -> Option<Refusal> {
+    /// What of the probed balance is left: every transaction of the ledger
+    /// not paid in the probe's block counts at its most.
+    fn available(&self) -> Option<U256> {
+        let funds = self.funds?;
+        let to_come = self
+            .book
+            .txs
+            .iter()
+            .filter(|t| match t.state {
+                FactKind::Released | FactKind::Unknown => true,
+                FactKind::Included | FactKind::Reverted => t
+                    .inclusion
+                    .as_ref()
+                    .and_then(|f| f.block)
+                    .is_none_or(|(n, _, _)| n > funds.block),
+                FactKind::Withdrawn | FactKind::Replaced | FactKind::Orphaned => false,
+            })
+            .map(|t| t.released.max_wei.unwrap_or_default())
+            .fold(U256::ZERO, |sum, wei| sum + wei);
+        Some(funds.balance.saturating_sub(to_come))
+    }
+
+    /// Why the buyer's balance does not hold a BUY of at most `most`, its
+    /// exit and the exits of what is open (BSC3-027).
+    fn unfunded(&self, most: U256) -> Option<String> {
+        let (approval, sell) = self.exit_gas();
+        let need = most + approval + sell + self.exit_reserve();
+        match self.available() {
+            Some(left) if left >= need => None,
+            Some(left) => Some(format!(
+                "{left} wei left, a BUY with its exit and the open exits need {need}"
+            )),
+            None => Some("no balance read".into()),
+        }
+    }
+
+    /// Why no new BUY of at most `most` goes now (counted): an open
+    /// position's exit waits for the buyer's nonce first (BSC3-048), the
+    /// owner's gate admits only exits (BSC3-071), or the balance does not
+    /// hold it with the exits (BSC3-027).
+    fn buy_refused(&mut self, most: U256) -> Option<Refusal> {
         let exit_out = self
             .book
             .unresolved()
@@ -1235,6 +1351,10 @@ impl LiveRuntime {
         if self.buys_closed.is_some() {
             self.buys_refused += 1;
             return Some(Refusal::Owner);
+        }
+        if self.unfunded(most).is_some() {
+            self.unfunded_refused += 1;
+            return Some(Refusal::Unfunded);
         }
         None
     }
@@ -1248,17 +1368,21 @@ impl LiveRuntime {
         now_unix_ms: u64,
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
         self.executor.as_ref()?;
-        if let crate::runtime_strategy::StrategyAction::Buy { .. } = action
-            && let Some(refusal) = self.buy_refused()
-        {
-            return Some((Vec::new(), Some(refusal)));
+        if let crate::runtime_strategy::StrategyAction::Buy { input_wei, .. } = *action {
+            let x = &self.exec.exec;
+            let most = input_wei + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
+            if let Some(refusal) = self.buy_refused(most) {
+                return Some((Vec::new(), Some(refusal)));
+            }
         }
         let next = self.free_nonce(owner);
+        let reserve = Some(self.exit_reserve());
         let handed = strategy_to(
             self.executor.as_mut()?,
             action,
             owner,
             next,
+            reserve,
             clock,
             now_unix_ms,
         );
@@ -1386,6 +1510,7 @@ impl LiveRuntime {
             ("SOURCE_NOT_GRANTED", self.source_refused),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
+            ("BUYS_UNFUNDED", self.unfunded_refused),
         ] {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
@@ -1445,6 +1570,56 @@ mod tests {
         _: Address,
     ) -> Result<VenueObservation, String> {
         Ok(observation(d.portal_version, d.portal_implementation))
+    }
+
+    /// One BUY at the setup's gas (1.15e15 wei) fits, its exit (8e13) not.
+    fn short(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        let mut o = observation(d.portal_version, d.portal_implementation);
+        o.caller_balance_wei = U256::from(1_200_000_000_000_000u128);
+        Ok(o)
+    }
+
+    /// One C3-sized BUY with its exit fits, a Strategy C BUY of 1e16 with
+    /// its exit (1.023e16) not.
+    fn mid(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        let mut o = observation(d.portal_version, d.portal_implementation);
+        o.caller_balance_wei = U256::from(10_200_000_000_000_000u128);
+        Ok(o)
+    }
+
+    /// One Strategy C BUY of 1e16 with its exit fits, a second one after it
+    /// with both exits not.
+    fn two(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        let mut o = observation(d.portal_version, d.portal_implementation);
+        o.caller_balance_wei = U256::from(20_400_000_000_000_000u128);
+        Ok(o)
+    }
+
+    /// The exit of one open position (8e13 wei) fits, a BUY not.
+    fn exits_only(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        let mut o = observation(d.portal_version, d.portal_implementation);
+        o.caller_balance_wei = U256::from(100_000_000_000_000u128);
+        Ok(o)
     }
 
     fn record(x: &LiveRuntime) -> Record {
@@ -2001,6 +2176,11 @@ mod tests {
 
         /// The LIVE path of one process in the boot session `boot`.
         fn runtime(&self, boot: &str) -> LiveRuntime {
+            self.probed(boot, funded)
+        }
+
+        /// [`Rig::runtime`] whose probe sees what `prober` answers.
+        fn probed(&self, boot: &str, prober: Prober) -> LiveRuntime {
             LiveRuntime::with_prober(
                 self.live.clone(),
                 self.exec.clone(),
@@ -2008,7 +2188,7 @@ mod tests {
                 self.state.clone(),
                 self.d.join("fences"),
                 None,
-                funded,
+                prober,
             )
             .in_session(boot, fixed)
         }
@@ -2176,6 +2356,7 @@ mod tests {
         };
         // The BUY leaves; the process is killed before anything else runs.
         let next = x.free_nonce(&c2);
+        let reserve = Some(x.exit_reserve());
         let buy = launch_to(
             x.executor.as_mut().unwrap(),
             hash,
@@ -2183,6 +2364,7 @@ mod tests {
             10,
             &c2,
             next,
+            reserve,
             &clock,
         )
         .unwrap();
@@ -2675,6 +2857,16 @@ mod tests {
         }
     }
 
+    /// The exit reserve the owner's admission entry of `tx` records
+    /// (BSC3-057).
+    fn reserve_of(state: &Path, tx: [u8; 32]) -> U256 {
+        use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+        let name = format!("{}.dbrec", alloy_primitives::hex::encode(tx));
+        let bytes = fs::read(state.join("live-spend").join(name)).unwrap();
+        let entry = darkbot_bsc_record::decode(&ls::SCHEMA, &bytes).unwrap();
+        U256::from_be_bytes(entry.opt_u256(ls::EXIT_RESERVE_WEI).unwrap().unwrap())
+    }
+
     fn reconnect(x: &mut LiveRuntime) {
         let failed = x
             .executor
@@ -2735,6 +2927,12 @@ mod tests {
         assert_eq!(out.len(), 1);
         let b_tx = out[0].handoff.tx_hash;
         r.requests.recv_timeout(wait).unwrap();
+        // BSC3-057: B left the grant room for A's exit and its own.
+        let (approval, sell) = x.exit_gas();
+        assert_eq!(
+            reserve_of(&r.state, b_tx),
+            (approval + sell) * U256::from(2u8)
+        );
         // A's exit: nonce 1 is B's while its window runs.
         reconnect(&mut x);
         let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
@@ -3354,6 +3552,279 @@ mod tests {
             "{why:?}"
         );
         assert!(r.fences(".fence").is_empty());
+        r.clean();
+    }
+
+    /// BSC3-027: the buyer's balance must hold a BUY, its exit and the
+    /// exits of what is open (approval and SELL at the signed gas). Enough
+    /// for a BUY but not for its exit: nothing arms (UNFUNDED, the need
+    /// named). With a position open and enough for its exit only: the path
+    /// arms for the exit, a BUY is refused, the exit goes.
+    #[test]
+    fn a_buyer_short_of_the_exits_buys_nothing() {
+        use crate::paper_exec::{IntentKind, Refusal};
+        let r = Rig::new("live-short", LiveStrategies::StrategyC);
+        let sc = Sc::new(r.buyer);
+        let mut x = r.probed("boot-1", short);
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let (state, why) = reason(&x);
+        assert_eq!(state, "UNFUNDED");
+        assert!(why.as_deref().unwrap().contains("exit"), "{why:?}");
+        x.shutdown();
+        // A position of A is open (bought at nonce 0, included).
+        let a = [0xA1; 20];
+        let ledger = crate::live_ledger::Ledger::open(&r.state);
+        let buy = crate::live_ledger::Fact {
+            kind: crate::live_ledger::FactKind::Released,
+            tx_hash: [0x31; 32],
+            intent: crate::sources::LiveIntentKind::Buy,
+            component: ComponentId::StrategyC,
+            token: a,
+            nonce: 0,
+            grant_generation: 1,
+            input_wei: Some(sc.input),
+            max_wei: Some(sc.input),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD + 2),
+            by_tx: None,
+        };
+        ledger.append(&buy, 1).unwrap();
+        let included = crate::live_ledger::Fact {
+            block: Some((HEAD, [0xb1; 32], 1_793_000_000_000)),
+            gas_wei: Some(U256::from(1u8)),
+            tokens: Some(sc.tokens),
+            eth_wei: Some(sc.input),
+            ..crate::live_ledger::Fact::about(&buy, crate::live_ledger::FactKind::Included)
+        };
+        ledger.append(&included, 1).unwrap();
+        // And one of B (nonce 1): both exits (1.6e14) are more than the
+        // balance (1e14), one exit step is not; the path arms for them.
+        let b = crate::live_ledger::Fact {
+            tx_hash: [0x32; 32],
+            token: [0xB2; 20],
+            nonce: 1,
+            ..buy.clone()
+        };
+        ledger.append(&b, 1).unwrap();
+        let b_included = crate::live_ledger::Fact {
+            tx_hash: b.tx_hash,
+            token: b.token,
+            nonce: 1,
+            ..included.clone()
+        };
+        ledger.append(&b_included, 1).unwrap();
+        let mut x = r.probed("boot-1", exits_only);
+        let c2 = c2_at(&r.d.join("c2-open"), r.buyer, 2);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        // Each open lot's exit: approval 5e12 + SELL 7.5e13 at the setup's
+        // gas.
+        let (approval, sell) = x.exit_gas();
+        assert_eq!(
+            (approval, sell),
+            (
+                U256::from(5_000_000_000_000u64),
+                U256::from(75_000_000_000_000u64)
+            )
+        );
+        assert_eq!(x.exit_reserve(), (approval + sell) * U256::from(2u8));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xC3; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Unfunded)));
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"BUYS_UNFUNDED=1")
+        );
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        // A's approval is out: its SELL and B's exit are left to reserve.
+        assert_eq!(x.exit_reserve(), sell + approval + sell);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-072 (review LOW): a C3 BUY on the LIVE path exits through the
+    /// strategy once its position opens: the strategy's cap must hold its
+    /// exit, or the BUY is refused before anything is signed.
+    #[test]
+    fn a_c3_buy_needs_room_for_its_exit_in_the_strategy_cap() {
+        let mut r = Rig::new("live-c3-exit-room", LiveStrategies::C3);
+        let x = &r.exec.exec;
+        let price = U256::from(x.gas_price_wei);
+        let exit = price * U256::from(x.approve_gas_limit + x.sell_gas_limit);
+        r.exec.exec.strategy_session_cap_wei = u128::try_from(exit).unwrap() - 1;
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"SESSION_CAP=1")
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-027 (review MEDIUM): the probe's balance is of its block. A
+    /// transaction the ledger holds included in a later block is not paid
+    /// in it yet: it counts against what is left.
+    #[test]
+    fn what_a_later_block_included_is_not_paid_in_the_probed_balance() {
+        use crate::paper_exec::Refusal;
+        let r = Rig::new("live-later", LiveStrategies::StrategyC);
+        let sc = Sc::new(r.buyer);
+        let ledger = crate::live_ledger::Ledger::open(&r.state);
+        let x = &r.exec.exec;
+        let most = sc.input + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
+        let buy = crate::live_ledger::Fact {
+            kind: crate::live_ledger::FactKind::Released,
+            tx_hash: [0x41; 32],
+            intent: crate::sources::LiveIntentKind::Buy,
+            component: ComponentId::StrategyC,
+            token: [0xA1; 20],
+            nonce: 0,
+            grant_generation: 1,
+            input_wei: Some(sc.input),
+            max_wei: Some(most),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD + 2),
+            by_tx: None,
+        };
+        ledger.append(&buy, 1).unwrap();
+        let included = crate::live_ledger::Fact {
+            block: Some((HEAD + 1, [0xb2; 32], 1_793_000_001_000)),
+            gas_wei: Some(U256::from(1u8)),
+            tokens: Some(sc.tokens),
+            eth_wei: Some(sc.input),
+            ..crate::live_ledger::Fact::about(&buy, crate::live_ledger::FactKind::Included)
+        };
+        ledger.append(&included, 1).unwrap();
+        // The probe reads the balance at HEAD, before A's block.
+        let mut x = r.probed("boot-1", two);
+        let c2 = c2_at(&r.d, r.buyer, 1);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        // B with its exit and A's needs more than the balance less A.
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xB2; 20]), &c2, &clock, 1_793_000_000_500)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Unfunded)));
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-027 (review MEDIUM): each BUY is checked against the probed
+    /// balance with its own most (a Strategy C BUY is not C3-sized), its
+    /// exit and the open exits, and what left since the probe counts: a
+    /// balance that arms the path but does not hold this BUY refuses it
+    /// (UNFUNDED); after a first BUY lands, a second one is checked
+    /// against what is left.
+    #[test]
+    fn each_buy_needs_its_most_and_the_exits_in_what_is_left() {
+        use crate::paper_exec::Refusal;
+        let r = Rig::new("live-left", LiveStrategies::StrategyC);
+        let sc = Sc::new(r.buyer);
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let mut x = r.probed("boot-1", mid);
+        let mut c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xA1; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Unfunded)));
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        x.shutdown();
+        // Enough for one: it goes and lands; the second is checked against
+        // the balance less the first's most.
+        let mut x = r.probed("boot-1", two);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xA1; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        let first = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (approval, sell) = x.exit_gas();
+        assert_eq!(reserve_of(&r.state, first), approval + sell);
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![sc.receipt(first, 0)]),
+                sc.trade(first, HEAD + 1, 0xb2, [0xA1; 20]),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        reconnect(&mut x);
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xB2; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Unfunded)));
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"BUYS_UNFUNDED=1")
+        );
+        x.shutdown();
         r.clean();
     }
 

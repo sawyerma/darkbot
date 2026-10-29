@@ -462,6 +462,7 @@ fn c3_paper_path_latency() {
                             head,
                             // PAPER: its transactions never leave.
                             next_nonce: None,
+                            exit_reserve_wei: None,
                         },
                         &clock,
                     );

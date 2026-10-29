@@ -244,6 +244,10 @@ pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
 pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 /// The same signed transaction again: never a second time (no retry).
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
+/// A BUY would leave the grant less than the exits of the open positions
+/// and of its own may still cost (BSC3-057): it is refused, the exits are
+/// not.
+pub const LIVE_EXIT_RESERVE_MISSING: &str = "LIVE_EXIT_RESERVE_MISSING";
 /// A LIVE transaction whose bytes may have left is not resolved on chain
 /// (BSC3-041): no new arm may take its nonce.
 pub const LIVE_RELEASE_UNRESOLVED: &str = "LIVE_RELEASE_UNRESOLVED";
@@ -2426,6 +2430,10 @@ pub struct LiveIntent<'a> {
     pub nonce: u64,
     /// The last block its bundle may be included in (BSC3-048).
     pub max_block: u64,
+    /// A BUY: the most the exits of the sender's open positions and of its
+    /// own (approval and SELL at the signed gas) may still cost; the
+    /// grant's spend keeps room for it (BSC3-057). An exit step: zero.
+    pub exit_reserve_wei: u128,
 }
 
 /// One LIVE intent the owner admitted, as its entry holds it: the
@@ -2715,6 +2723,13 @@ impl Store {
             .checked_add(intent.max_wei)
             .filter(|after| *after <= grant.max_spend_wei)
             .ok_or(LIVE_GRANT_SPEND_EXHAUSTED)?;
+        if !exit
+            && after
+                .checked_add(intent.exit_reserve_wei)
+                .is_none_or(|kept| kept > grant.max_spend_wei)
+        {
+            return Err(LIVE_EXIT_RESERVE_MISSING.into());
+        }
         let entry = spend_dir(&self.dir).join(format!("{}.dbrec", intent.id));
         if parse_hex32(intent.id).is_none() {
             return Err("a LIVE intent is named by its transaction hash".into());
@@ -2740,7 +2755,11 @@ impl Store {
             .set(ls::MAX_WEI, darkbot_bsc_record::Value::u128(intent.max_wei))
             .set(ls::TOKEN, darkbot_bsc_record::Value::Address(intent.token))
             .set(ls::NONCE, intent.nonce)
-            .set(ls::MAX_BLOCK, intent.max_block);
+            .set(ls::MAX_BLOCK, intent.max_block)
+            .set(
+                ls::EXIT_RESERVE_WEI,
+                darkbot_bsc_record::Value::u128(intent.exit_reserve_wei),
+            );
         let bytes = d.encode().map_err(|e| e.to_string())?;
         create_durable_dir(&spend_dir(&self.dir))?;
         match write_new(&entry, &bytes) {
@@ -4663,6 +4682,61 @@ pub(crate) mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// BSC3-057: a BUY leaves the grant the room the exits of what is open
+    /// and of its own position need (approval and SELL at the signed gas);
+    /// a BUY that would not is refused before any byte leaves (before: the
+    /// BUY was admitted and its SELL refused LIVE_GRANT_SPEND_EXHAUSTED).
+    #[test]
+    fn a_buy_leaves_the_grant_room_for_its_exit() {
+        let (dir, s, now) = live_ready("live-exit-reserve");
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let most = armed.grant().max_spend_wei;
+        let ids: Vec<String> = (0..4u8).map(|n| hex32(&[n; 32])).collect();
+        let (approve, sell) = (100u128, 500u128);
+        let intent = |n: usize, kind: LiveIntentKind, max: u128| LiveIntent {
+            id: &ids[n],
+            component: ComponentId::ExecC3,
+            kind,
+            input_wei: if kind == LiveIntentKind::Buy {
+                1_000
+            } else {
+                0
+            },
+            max_wei: max,
+            token: [0x10; 20],
+            nonce: 40 + n as u64,
+            max_block: 900,
+            exit_reserve_wei: if kind == LiveIntentKind::Buy {
+                approve + sell
+            } else {
+                0
+            },
+        };
+        // A BUY that leaves less than its exit costs is refused, nothing
+        // consumed.
+        let short = intent(0, LiveIntentKind::Buy, most - approve - sell + 1);
+        assert_eq!(
+            s.admit_live(&armed, &short, &q, now).unwrap_err(),
+            LIVE_EXIT_RESERVE_MISSING
+        );
+        assert_eq!(spent_by_grant(&dir, armed.grant_generation()).unwrap(), 0);
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
+        // One that leaves exactly that: it, its approval and its SELL go.
+        let buy = intent(1, LiveIntentKind::Buy, most - approve - sell);
+        assert!(s.admit_live(&armed, &buy, &q, now).is_ok());
+        let approval = s.admit_live(
+            &armed,
+            &intent(2, LiveIntentKind::Approve, approve),
+            &q,
+            now,
+        );
+        assert!(approval.is_ok(), "{approval:?}");
+        let sold = s.admit_live(&armed, &intent(3, LiveIntentKind::Sell, sell), &q, now);
+        assert_eq!(sold.unwrap().spent_wei, most);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Plan 28.10.: the owner admits each LIVE intent as its state holds
     /// at that moment: a BUY takes its daily and campaign slot and its spend
     /// entry before any byte can leave; an exit needs no BUY attempt; the
@@ -4695,6 +4769,7 @@ pub(crate) mod tests {
             token: [0x10 + n as u8; 20],
             nonce: 40 + n as u64,
             max_block: 900 + n as u64,
+            exit_reserve_wei: 0,
         };
         let buy = |n| intent(n, LiveIntentKind::Buy, 1_000, 2_000);
         let first = s.admit_live(&armed, &buy(0), &q, now).unwrap();

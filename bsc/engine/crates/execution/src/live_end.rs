@@ -357,6 +357,7 @@ impl End for LiveEnd {
             start_ns,
             submission,
             config,
+            exit_reserve_wei,
         } = h;
         // BSC3-045: a fact the ledger did not take may be missing from the
         // book: nothing more is handed over (before the owner's admission:
@@ -464,9 +465,11 @@ impl End for LiveEnd {
             Err(e) => return self.refuse(Refusal::Plan, format!("{e:?}")),
         };
         let planned_ns = clock.now_ns();
-        let (Some(input_wei), Some(max_wei)) =
-            (wei(budget.max_buy_input_wei), wei(budget.max_total_wei))
-        else {
+        let (Some(input_wei), Some(max_wei), Some(exit_reserve_wei)) = (
+            wei(budget.max_buy_input_wei),
+            wei(budget.max_total_wei),
+            wei(exit_reserve_wei),
+        ) else {
             return self.refuse(Refusal::Plan, "the budget exceeds 128 bits".into());
         };
         let id: String = tx_hash.iter().map(|b| format!("{b:02x}")).collect();
@@ -514,6 +517,7 @@ impl End for LiveEnd {
                 token,
                 nonce,
                 max_block: last_block,
+                exit_reserve_wei,
             },
             &self.qualification.view,
             (self.wall_ms)(),
