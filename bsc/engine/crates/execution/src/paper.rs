@@ -521,7 +521,7 @@ mod tests {
                 let mut n = 0u64;
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                     let tmp = dir.join(format!("swap-{n}"));
-                    if n % 2 == 0 {
+                    if n.is_multiple_of(2) {
                         std::os::unix::fs::symlink(&other, &tmp).unwrap();
                     } else {
                         fs::OpenOptions::new()
