@@ -14,7 +14,11 @@
 | BSC3-048 | FIX_VERIFIED (Fenster = Bundle-Ende `BSC_EXEC_VALIDITY_BLOCKS` im Admission-Eintrag + Ledger; danach nimmt die nächste Tx dieselbe Nonce, Exits vor BUYs; spät landende Alt-Tx → neue REPLACED mit `by_tx`/Block, Exit geht weiter; eigene orphaned Inclusion/unbekanntes Fenster sperrt; kein Cancel) | `c9cccf25` | byte-identischer verlorener Exit-Schritt wird nicht erneut gesendet (kein Retry) → Betreiberentscheidung; Flap-Kauf ohne Deadline (nur minOutput) |
 | BSC3-071 (neu) | FIX_VERIFIED (erschöpftes BUY-Kontingent schloss den ganzen LIVE-Pfad, offene Positionen ohne Exit → `live_now_exits`, BUYs abgelehnt) | `c9cccf25` | – |
 | BSC3-069 | TEILWEISE (eigene Exit-Slippage `BSC_EXEC_EXIT_SLIPPAGE_BPS`, Default = BUY) | `c9cccf25` | sichtbare LIVE-Risikoparameter/Max-Werte im Grant offen |
+| BSC3-045 | FIX_VERIFIED (Ledger-Eintrag ganz oder gar nicht: Temp + fsync + Hardlink ohne Ersetzen; nach nicht geschriebenem Fakt keine weitere Übergabe; Arm-/Exit-Sperre bei unlesbarem Ledger aus `bf871fa9`) | `a64d09c0` | vorhandener zerrissener Eintrag (Medienfehler/fremder Schreiber) bleibt fail-closed bis zur autorisierten Rekonstruktion; Temp-Reste nach Absturz werden nicht aufgeräumt (LOW) |
+| BSC3-047 | FIX_VERIFIED (jeder BUY ein eigener Lot; Exit-Schritte im letzten Lot des Tokens; ersetzter BUY kein Lot; Approve nur des offenen Lots übernommen; ein offener Lot je Token gemeldet) | `a64d09c0` | Lot-ID nicht in Status-Projektion/Panel-Key (Protokoll-Schemaänderung, LOW) |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
+
+Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).
 
 Belege `c9cccf25`: CI bsc 40779952332 + Project-0-Contract 40779952393 grün; lokal Workspace 1426 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review 1 HIGH + 3 MEDIUM behoben und nachgeprüft (kein offenes HIGH/CRITICAL); Exit-Re-Arm lokal 44–51 ms (Debug, Loopback).
 
