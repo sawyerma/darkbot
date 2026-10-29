@@ -760,6 +760,7 @@ fn blockhash_freshness_is_one_policy() {
         hash: solana_sdk::hash::Hash::default(),
         last_valid_block_height: 1,
         refreshed_ns: 1_000,
+        context_slot: None,
     });
     // D01: the bound is the typed parameter `blockhash_max_age_ms`, held once by the owner.
     let bound = darkbot_solana::runtime_config::Limits::default().blockhash_max_age_ms * 1_000_000;

@@ -29,6 +29,16 @@ pub struct Fe04Admission {
     pub valid_until_slot: u64,
     /// DEC-02: what became of the pipeline's simulations at the handoff.
     pub simulation: SimulationStats,
+    /// DEC-13b: what the pipeline's `check()` reserved in Safety for the attempt it handed off
+    /// (submitted or UNKNOWN); released only by the journal settlement's booking (C3-Rest).
+    pub reserved: Option<SafetyReserved>,
+}
+
+/// DEC-13b: the Safety reservation of an admitted attempt — its capital and worst-case inventory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SafetyReserved {
+    pub capital: u64,
+    pub inventory: u64,
 }
 
 /// DEC-02: the pipeline simulation reused, a new simulation, or a refusal without one (no

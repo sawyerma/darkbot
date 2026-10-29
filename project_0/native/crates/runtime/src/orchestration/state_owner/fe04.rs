@@ -30,16 +30,19 @@ pub(super) struct Fe04NonLanding {
     pub(super) reads: u64,
 }
 
-/// What Safety has still to book for the held attempt: the capital the startup replay reserved
-/// (`None`: finalized before the restart, none was reserved).
+/// What Safety has still to book for the held attempt: the capital the startup replay or the
+/// in-run admission's `check()` reserved (`None`: finalized before the restart, none was
+/// reserved), and the worst-case inventory that `check()` reserved (DEC-13b; 0 after a restart).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Fe04Unbooked {
     pub(super) reserved_capital: Option<u64>,
+    pub(super) reserved_inventory: u64,
 }
 
 /// FE-04/C3: books a settled attempt into Safety the way a restart replays it — the realized net
 /// and the outcome into the persisted booking day, the open inventory as held inventory — and
-/// releases the capital the startup replay reserved (none reserved: the replay booking itself).
+/// releases the capital (and the in-run admission's inventory hold) reserved for it, exactly once
+/// (none reserved: the replay booking itself).
 /// One checked transaction: a violation halts Safety and applies nothing.
 pub(super) fn book_settlement(
     safety: &mut Safety,
@@ -54,7 +57,7 @@ pub(super) fn book_settlement(
             Some(s.realized_net_usd_micro),
             capital,
             s.unrealized_inventory_usd_micro,
-            0,
+            unbooked.reserved_inventory,
         ),
         None => safety.restore_attempt(settled.unix_s, None, Some(settled)),
     }
@@ -433,5 +436,366 @@ impl ShadowOwner {
             ),
             (Err(e), _) => owner_log!(self, "fe04_exit: refused {e}; holds retained"),
         }
+    }
+}
+
+/// DEC-13b/DEC-02: the owner's FE-04 admissions of this run — attempts and exits handed off,
+/// refused and UNKNOWN with the last refusal, the pipeline simulations at the handoff, and why
+/// no admission is open now (the Liquidator tab).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Fe04AdmissionStats {
+    pub(super) submitted: u64,
+    pub(super) refused: u64,
+    pub(super) unknown: u64,
+    pub(super) last_refusal: String,
+    pub(super) simulation: crate::execution::one_shot::admission::SimulationStats,
+    pub(super) exits_submitted: u64,
+    pub(super) exits_refused: u64,
+    pub(super) exits_unknown: u64,
+    pub(super) last_exit_refusal: String,
+    /// Why no admission is open for LIVE candidates ("" while one is).
+    pub(super) block_reason: String,
+}
+
+/// DEC-13b: the approval, journal and current wallet facts of one admission.
+pub(super) struct Fe04AdmissionFacts {
+    approval: crate::execution::one_shot::Approval,
+    dir: std::path::PathBuf,
+    wallet: String,
+    state_generation: u64,
+    program_data_hash: String,
+    balances: std::collections::BTreeMap<String, u64>,
+    reserved_elsewhere: std::collections::BTreeMap<String, u64>,
+    policy_reserve: std::collections::BTreeMap<String, u64>,
+    valid_until_slot: u64,
+}
+
+/// DEC-13b: the admission a LIVE candidate is handed to — the open one of the same approval
+/// refreshed with `facts`, else a new one on the wallet's journal (a replaced approval's journal
+/// is closed first) — or `None` with its reason; the pipeline then stops at its send boundary
+/// (`LIVE_SEND_REQUIRES_FE04`). It comes back through `fe04_admission_back`.
+pub(super) fn admission_for(
+    open: &mut Option<crate::execution::one_shot::admission::Fe04Admission>,
+    stats: &mut Fe04AdmissionStats,
+    facts: Result<Fe04AdmissionFacts, (String, bool)>,
+) -> Option<crate::execution::one_shot::admission::Fe04Admission> {
+    let f = match facts {
+        Ok(f) => f,
+        Err((reason, close)) => {
+            if close {
+                *open = None;
+            }
+            stats.block_reason = reason;
+            return None;
+        }
+    };
+    let mut admission = match open.take() {
+        Some(a) if a.approval == f.approval => a,
+        other => {
+            drop(other);
+            let journal = match crate::execution::one_shot::Journal::open(&f.dir, &f.wallet) {
+                Ok(j) => j,
+                Err(e) => {
+                    stats.block_reason = e;
+                    return None;
+                }
+            };
+            crate::execution::one_shot::admission::Fe04Admission {
+                journal,
+                approval: f.approval,
+                state_generation: 0,
+                program_data_hash: String::new(),
+                balances: Default::default(),
+                reserved_elsewhere: Default::default(),
+                policy_reserve: Default::default(),
+                valid_until_slot: 0,
+                simulation: Default::default(),
+                reserved: None,
+            }
+        }
+    };
+    admission.state_generation = f.state_generation;
+    admission.program_data_hash = f.program_data_hash;
+    admission.balances = f.balances;
+    admission.reserved_elsewhere = f.reserved_elsewhere;
+    admission.policy_reserve = f.policy_reserve;
+    admission.valid_until_slot = f.valid_until_slot;
+    stats.block_reason.clear();
+    Some(admission)
+}
+
+impl ShadowOwner {
+    /// DEC-13: LIVE is effective (the controller's request with an FE-06 authorization).
+    pub(super) fn live_effective(&self) -> bool {
+        crate::orchestration::capability_control::pipeline_mode(
+            self.sources.capabilities.live_requested,
+            self.sources.capabilities.fe06.as_ref(),
+        ) == crate::execution::pipeline::Mode::Live
+    }
+
+    /// DEC-13b: what the FE-04 admission of a LIVE candidate for `target` is opened or refreshed
+    /// with — the configured attempt approval (VALID: unexpired, bound, unspent) and the current
+    /// wallet facts — or why there is none (`true`: an open admission is closed too, its wallet
+    /// lock released). Single flight: none while an attempt holds the wallet.
+    pub(super) fn fe04_admission_facts(
+        &self,
+        target: &Pubkey,
+    ) -> Result<Fe04AdmissionFacts, (String, bool)> {
+        use crate::execution::one_shot::approval_file::ApprovalFile;
+        if let Some(held) = &self.fe04_held {
+            return Err((
+                format!(
+                    "FE04_ATTEMPT_HELD:{}",
+                    held.step_state().map_or("UNKNOWN", |s| s.name())
+                ),
+                true,
+            ));
+        }
+        let Some(dir) = self.fe04_journal.clone() else {
+            return Err(("FE04_JOURNAL_NOT_CONFIGURED".into(), true));
+        };
+        let status = self.approval_status();
+        if status.state != "VALID" {
+            return Err((
+                if status.reason.is_empty() {
+                    format!("FE04_APPROVAL_{}", status.state)
+                } else {
+                    format!("FE04_APPROVAL_{}:{}", status.state, status.reason)
+                },
+                true,
+            ));
+        }
+        let Some(ApprovalSource {
+            read: Ok(ApprovalFile::Attempt(approval)),
+            ..
+        }) = &self.fe04_approval
+        else {
+            return Err(("FE04_APPROVAL_NOT_AN_ATTEMPT".into(), true));
+        };
+        if !approval.allowed_targets.contains(&target.to_string()) {
+            return Err(("FE04_TARGET_NOT_APPROVED".into(), false));
+        }
+        if self.program_upgrade_latched {
+            return Err(("FE04_PROGRAM_UPGRADED".into(), false));
+        }
+        // The blockhash the pipeline signs with is this one or a newer one: its validity bounds
+        // the attempt conservatively.
+        let Some(valid_until_slot) = self.blockhash.get().and_then(|b| b.valid_until_slot()) else {
+            return Err(("FE04_BLOCKHASH_VALIDITY_UNKNOWN".into(), false));
+        };
+        Ok(Fe04AdmissionFacts {
+            dir,
+            wallet: self.liquidator.to_string(),
+            state_generation: self.st.recovery_generation(),
+            program_data_hash: self.program_data_baseline_hash.to_string(),
+            balances: self.fe04_wallet_balances(target),
+            reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
+            policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
+            valid_until_slot,
+            approval: approval.clone(),
+        })
+    }
+
+    /// DEC-13b: the reconciled wallet balances an admission for `target` checks its holds
+    /// against: the liquidator's lamports (`SOL`) and the validated ATA amount of each mint of the
+    /// target's active banks and of the JIT funding bank. A balance not in canonical state is
+    /// absent (unknown): a hold of it is refused.
+    fn fe04_wallet_balances(&self, target: &Pubkey) -> std::collections::BTreeMap<String, u64> {
+        let view = StateView(&self.st);
+        let mut balances = std::collections::BTreeMap::new();
+        if let Some(r) = self.st.get(&self.liquidator) {
+            balances.insert("SOL".to_string(), r.lamports);
+        }
+        let banks = self
+            .st
+            .get(target)
+            .and_then(|r| accounts::active_banks_in_group_account(&r.data, &self.group))
+            .unwrap_or_default();
+        for bank in banks.iter().chain(self.jit_funding_bank.iter()) {
+            let Some(b) = accounts::bank_from_state(&view, &self.program, bank) else {
+                continue;
+            };
+            if let Some((_, amount)) =
+                accounts::validated_liquidator_ata(&view, &b.mint, &self.atas)
+            {
+                balances.insert(b.mint.to_string(), amount);
+            }
+        }
+        balances
+    }
+
+    /// DEC-13b: the admission after its candidate. A handed-off attempt (submitted, or UNKNOWN
+    /// after its durable reservation) becomes the held attempt: its journal is the owner's, the
+    /// capital and inventory `check()` reserved wait for the journal settlement's booking (never
+    /// a second release), the book and the SUBMITTED ownership follow the journal and the first
+    /// settlement read is due at once. Anything else keeps the admission open for the next
+    /// candidate (nothing durable exists).
+    pub(super) fn fe04_admission_back(
+        &mut self,
+        mut admission: crate::execution::one_shot::admission::Fe04Admission,
+        rec: &crate::analytics::record::OpportunityRecord,
+    ) {
+        let s = &mut self.fe04_admissions.simulation;
+        let a = std::mem::take(&mut admission.simulation);
+        s.reused = s.reused.saturating_add(a.reused);
+        s.resimulated = s.resimulated.saturating_add(a.resimulated);
+        s.refused = s.refused.saturating_add(a.refused);
+        if a.last_reuse_refusal.is_some() {
+            s.last_reuse_refusal = a.last_reuse_refusal;
+        }
+        let Some(reserved) = admission.reserved.take() else {
+            if let Some(crate::analytics::rejection::Rejection::SubmissionRefused {
+                reason, ..
+            }) = &rec.reason
+            {
+                self.fe04_admissions.refused = self.fe04_admissions.refused.saturating_add(1);
+                self.fe04_admissions.last_refusal = reason.clone();
+            }
+            self.fe04_admission = Some(admission);
+            return;
+        };
+        if matches!(rec.decision, Decision::Submitted) {
+            self.fe04_admissions.submitted = self.fe04_admissions.submitted.saturating_add(1);
+        } else {
+            self.fe04_admissions.unknown = self.fe04_admissions.unknown.saturating_add(1);
+        }
+        self.fe04_held = Some(admission.journal);
+        self.fe04_unbooked = Some(Fe04Unbooked {
+            reserved_capital: Some(reserved.capital),
+            reserved_inventory: reserved.inventory,
+        });
+        self.fe04_settle_due = Some(std::time::Instant::now());
+        self.fe04_rebuild_book();
+        owner_log!(
+            self,
+            "fe04_admission: attempt {} handed off decision={:?} capital_usd_micro={} inventory_usd_micro={}",
+            rec.signature.as_deref().unwrap_or("UNKNOWN"),
+            rec.decision,
+            reserved.capital,
+            reserved.inventory
+        );
+    }
+}
+
+impl ShadowOwner {
+    /// DEC-13b: the exit of the held attempt's open inventory while LIVE is effective — with the
+    /// configured exit approval (VALID: unexpired, bound, unspent, an open position of its
+    /// attempt), a fresh blockhash and the route quoted now within the candidate network
+    /// deadline; admitted once (`admit_exit`: reserve, UNKNOWN handoff, one submit) and then
+    /// read and booked by the settlement like every exit. An UNKNOWN exit halts Safety and keeps
+    /// every hold. Called at the FE-04 refresh cadence.
+    pub(super) fn fe04_exit_admission(&mut self) {
+        use crate::execution::one_shot::admission::Admission;
+        use crate::execution::one_shot::approval_file::ApprovalFile;
+        use crate::execution::one_shot::exit_admission::{admit_exit, ExitCandidate};
+        if !self.live_effective() {
+            return;
+        }
+        let Some(held) = self.fe04_held.as_ref() else {
+            return;
+        };
+        if held.open_exit_id().is_some() {
+            return;
+        }
+        let open = held.open_inventory();
+        let Some(ApprovalSource {
+            read: Ok(ApprovalFile::Exit(approval)),
+            ..
+        }) = &self.fe04_approval
+        else {
+            return;
+        };
+        let Some(units) = open
+            .get(&approval.mint)
+            .and_then(|p| u64::try_from(p.units).ok())
+            .filter(|u| *u > 0)
+        else {
+            return;
+        };
+        let approval = approval.clone();
+        let refuse = |o: &mut Self, reason: String| {
+            o.fe04_admissions.last_exit_refusal = reason;
+        };
+        let status = self.approval_status();
+        if status.state != "VALID" {
+            return refuse(
+                self,
+                format!("EXIT_APPROVAL_{}:{}", status.state, status.reason),
+            );
+        }
+        let (Ok(mint), Ok(wsol)) = (
+            approval.mint.parse::<Pubkey>(),
+            crate::execution::route::WSOL_MINT.parse::<Pubkey>(),
+        ) else {
+            return refuse(self, "EXIT_MINT_INVALID".into());
+        };
+        let now_ns = self.clock.now_ns();
+        let Some(bh) = self.blockhash.fresh(now_ns, self.blockhash_max_age_ns) else {
+            return refuse(self, "EXIT_BLOCKHASH_STALE".into());
+        };
+        let Some(deadline) =
+            std::time::Instant::now().checked_add(Duration::from_nanos(self.network.deadline_ns))
+        else {
+            return refuse(self, "EXIT_NETWORK_DEADLINE_UNBOUNDED".into());
+        };
+        let route = match self.routes.exit_to_sol(&mint, units, deadline) {
+            Ok(r) => r,
+            Err(e) => {
+                self.fe04_admissions.exits_refused =
+                    self.fe04_admissions.exits_refused.saturating_add(1);
+                return refuse(self, e);
+            }
+        };
+        let view = StateView(&self.st);
+        let mut balances = std::collections::BTreeMap::new();
+        if let Some(r) = self.st.get(&self.liquidator) {
+            balances.insert("SOL".to_string(), r.lamports);
+        }
+        for m in [mint, wsol] {
+            if let Some((_, amount)) = accounts::validated_liquidator_ata(&view, &m, &self.atas) {
+                balances.insert(m.to_string(), amount);
+            }
+        }
+        let candidate = ExitCandidate {
+            route: &route,
+            payer: &self.payer,
+            blockhash: bh.hash,
+            last_valid_block_height: bh.last_valid_block_height,
+            resources: self.resources,
+            limits: darkbot_solana::tx::TxLimits::default(),
+            slot: self.slot_watch.get(),
+            now_unix_ms: (self.clock.unix_ns(now_ns) / 1_000_000) as u64,
+            state_valid: self.st.run_state().is_tradable() && !self.program_upgrade_latched,
+            balances,
+            reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
+            policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
+            deadline,
+            t_handoff_ns: self.clock.now_ns(),
+        };
+        let Some(mut journal) = self.fe04_held.take() else {
+            return;
+        };
+        let admitted = admit_exit(&mut journal, approval, candidate, &self.submitter);
+        self.fe04_held = Some(journal);
+        let s = &mut self.fe04_admissions;
+        match admitted {
+            Admission::Submitted(ack) => {
+                s.exits_submitted = s.exits_submitted.saturating_add(1);
+                owner_log!(self, "fe04_exit: handed off signature={}", ack.signature);
+            }
+            Admission::Refused(reason) => {
+                s.exits_refused = s.exits_refused.saturating_add(1);
+                s.last_exit_refusal = reason;
+                return;
+            }
+            Admission::Unknown(reason) => {
+                s.exits_unknown = s.exits_unknown.saturating_add(1);
+                s.last_exit_refusal = reason;
+                self.safety
+                    .halt(darkbot_common::error::HaltReason::UnknownEconomics);
+            }
+        }
+        self.fe04_settle_due = Some(std::time::Instant::now());
+        self.fe04_rebuild_book();
     }
 }

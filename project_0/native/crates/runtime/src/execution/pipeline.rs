@@ -1380,6 +1380,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         use crate::execution::one_shot::admission::Admission;
         match admission {
             Admission::Submitted(ack) => {
+                // DEC-13b: the reservation stays until the journal settlement books it.
+                fe04.reserved = Some(crate::execution::one_shot::admission::SafetyReserved {
+                    capital: plan.exposure,
+                    inventory: inventory_hold,
+                });
                 tl.mark(Stage::Handoff, ack.t_handoff_ns);
                 rec.decision = Decision::Submitted;
                 rec.signature = Some(ack.signature.to_string());
@@ -1408,6 +1413,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             Admission::Unknown(reason) => {
                 // A durable reservation/handoff exists: UNKNOWN keeps every hold and halts.
+                fe04.reserved = Some(crate::execution::one_shot::admission::SafetyReserved {
+                    capital: plan.exposure,
+                    inventory: inventory_hold,
+                });
                 self.safety
                     .halt(darkbot_common::error::HaltReason::UnknownEconomics);
                 rec.decision = Decision::AmbiguousSubmission;

@@ -18,12 +18,13 @@ use proto::control::{
 };
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
-    EffectiveRecord, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow, LatencyNs,
-    LiquidatorState, LossCount, MarketAssessment, MarketCounters, NonLanding, NonLandingSource,
-    OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
-    OwnerThreshold, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount,
-    RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision,
-    SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
+    EffectiveRecord, Fe04Admission, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow,
+    LatencyNs, LiquidatorState, LossCount, MarketAssessment, MarketCounters, NonLanding,
+    NonLandingSource, OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline,
+    OwnerRun, OwnerSafety, OwnerThreshold, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget,
+    ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo,
+    SourceDecision, SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState,
+    WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -316,6 +317,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
         }),
         source_config_version: o.source_config_version,
         approval: Some(fe04_approval(&o.approval)),
+        admission: Some(fe04_admission(&o.admission)),
         capability_config_version: o.capability_config_version,
         last_capability_decision: o.last_capability_decision.as_ref().map(|d| SourceDecision {
             seq: d.seq,
@@ -442,6 +444,26 @@ fn fe04_approval(
         min_net_usd_micro: a.min_net_usd_micro,
         max_slippage_bps: a.max_slippage_bps,
         allowed_targets: a.allowed_targets,
+    }
+}
+
+/// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits.
+fn fe04_admission(a: &darkbot_runner::status_tap::OwnerAdmission) -> Fe04Admission {
+    Fe04Admission {
+        state: a.state.into(),
+        block_reason: a.block_reason.clone(),
+        submitted: a.submitted,
+        refused: a.refused,
+        unknown: a.unknown,
+        last_refusal: a.last_refusal.clone(),
+        simulation_reused: a.simulation_reused,
+        simulation_resimulated: a.simulation_resimulated,
+        simulation_refused: a.simulation_refused,
+        last_reuse_refusal: a.last_reuse_refusal.clone(),
+        exits_submitted: a.exits_submitted,
+        exits_refused: a.exits_refused,
+        exits_unknown: a.exits_unknown,
+        last_exit_refusal: a.last_exit_refusal.clone(),
     }
 }
 
@@ -1869,6 +1891,12 @@ mod contract_tests {
                 min_net_usd_micro: 100,
                 max_slippage_bps: 50,
                 allowed_targets: 1,
+            },
+            // DEC-13b: without FE-06 the admission is OFF with LIVE's block reason.
+            admission: darkbot_runner::status_tap::OwnerAdmission {
+                state: "OFF",
+                block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)".into(),
+                ..Default::default()
             },
         }
     }

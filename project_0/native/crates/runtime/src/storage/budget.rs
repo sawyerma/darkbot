@@ -432,14 +432,19 @@ mod tests {
                 }
             })
         };
+        let started = Instant::now();
         assert_eq!(
             budget.acquire(50, Duration::from_millis(50)).err(),
             Some("CAPTURE_MEMORY_BUDGET_EXHAUSTED")
         );
+        // At most once per started interval of the wait as it ran (a loaded host may wake the
+        // waiter after the interval), never once per wake-up (~60 here).
+        let intervals = started.elapsed().as_nanos() / HEADROOM_SAMPLE_INTERVAL.as_nanos();
         churn.join().unwrap();
-        assert_eq!(
-            budget.0.samples.load(std::sync::atomic::Ordering::Relaxed),
-            1
+        let samples = budget.0.samples.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            (1..=1 + intervals as u64).contains(&samples),
+            "{samples} samples in {intervals} full intervals"
         );
         drop(held);
     }

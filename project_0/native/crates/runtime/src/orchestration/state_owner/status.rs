@@ -66,6 +66,7 @@ impl ShadowOwner {
             capabilities: self.capabilities(),
             wallets: self.wallets_status(),
             approval: self.approval_status(),
+            admission: self.admission_status(),
             finance: self.finance_status(),
             rebalance: self.rebalance.projection(self.st.highest_slot()),
             sources: self.sources_status(),
@@ -181,7 +182,10 @@ impl ShadowOwner {
                 // DEC-13: the operator's request and the one effective decision (FE-06).
                 let requested = self.sources.capabilities.live_requested;
                 let (effective, block_reason) =
-                    crate::orchestration::capability_control::live_effective(requested);
+                    crate::orchestration::capability_control::live_effective(
+                        requested,
+                        self.sources.capabilities.fe06.as_ref(),
+                    );
                 cap("LIVE", requested, effective, block_reason)
             },
             // DEC-04: the B hold mode, requested and effective (ACTIVE gated by N and evidence).
@@ -450,7 +454,54 @@ impl ShadowOwner {
 
     /// DEC-10: the configured approval at this instant (expiry moves with the clock); without an
     /// FE-04 journal its single use is unchecked: never VALID then.
-    fn approval_status(&self) -> crate::execution::one_shot::approval_file::ApprovalStatus {
+    /// DEC-13b/DEC-02: the admission state — OFF without an effective LIVE (its block reason),
+    /// READY with an open admission, WAITING before the first LIVE candidate, else BLOCKED with
+    /// the reason — and this run's counters.
+    fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
+        let a = &self.fe04_admissions;
+        let (state, block_reason) = if !self.live_effective() {
+            let (_, reason) = crate::orchestration::capability_control::live_effective(
+                self.sources.capabilities.live_requested,
+                self.sources.capabilities.fe06.as_ref(),
+            );
+            ("OFF", reason.to_string())
+        } else if self.fe04_admission.is_some() {
+            ("READY", String::new())
+        } else if let Some(held) = &self.fe04_held {
+            // Single flight: the held attempt blocks every admission.
+            (
+                "BLOCKED",
+                format!(
+                    "FE04_ATTEMPT_HELD:{}",
+                    held.step_state().map_or("UNKNOWN", |s| s.name())
+                ),
+            )
+        } else if a.block_reason.is_empty() {
+            ("WAITING", String::new())
+        } else {
+            ("BLOCKED", a.block_reason.clone())
+        };
+        crate::status_tap::OwnerAdmission {
+            state,
+            block_reason,
+            submitted: a.submitted,
+            refused: a.refused,
+            unknown: a.unknown,
+            last_refusal: a.last_refusal.clone(),
+            simulation_reused: a.simulation.reused,
+            simulation_resimulated: a.simulation.resimulated,
+            simulation_refused: a.simulation.refused,
+            last_reuse_refusal: a.simulation.last_reuse_refusal.unwrap_or("").to_string(),
+            exits_submitted: a.exits_submitted,
+            exits_refused: a.exits_refused,
+            exits_unknown: a.exits_unknown,
+            last_exit_refusal: a.last_exit_refusal.clone(),
+        }
+    }
+
+    pub(super) fn approval_status(
+        &self,
+    ) -> crate::execution::one_shot::approval_file::ApprovalStatus {
         use crate::execution::one_shot::approval_file::{self, Usage};
         let Some(source) = &self.fe04_approval else {
             return approval_file::status(None, &Default::default(), 0, &Usage::Free);

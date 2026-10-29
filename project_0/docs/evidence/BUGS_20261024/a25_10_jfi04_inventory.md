@@ -26,6 +26,7 @@ W external wire · R offline render/stdout/export · H historical reader or expl
 | runtime/src/market/rows.rs | 34 | H | read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4) |
 | runtime/src/market/summary.rs | 4 | H | read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4) |
 | runtime/src/market/winner.rs | 8 | W | DEC-08: the signature page as raw JSON-RPC into the one wire decoder |
+| solana/src/state/blockhash.rs | 2 | W | DEC-13b: getLatestBlockhash params with its answering slot |
 | runtime/src/market_gap.rs | 3 | W |  |
 | runtime/src/market_reconcile.rs | 9 | W | wire_params/wire_answer: the one JSON-RPC edge of verifier and reconcile (DEC-08: + getSignaturesForAddress/getTransaction); engine and strict cache typed, verifier file JSON-free (F10, 25.10.) |
 | runtime/src/market_truth.rs | 2 | H | read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4) |

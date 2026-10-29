@@ -914,6 +914,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let mut safety = Safety::new(
         Limits {
@@ -1070,6 +1071,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let mut safety = Safety::new(
         Limits {
@@ -1272,6 +1274,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             hash: solana_sdk::hash::Hash::new_unique(),
             last_valid_block_height: 100,
             refreshed_ns: clock.now_ns(),
+            context_slot: None,
         });
         let mut safety = Safety::new(
             Limits {
@@ -1380,6 +1383,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let mut allow_live = Allow::default();
     allow_live.execution_classes.insert("longtail");
@@ -1638,6 +1642,7 @@ fn evaluate_in(
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let allow = Allowlist::default();
     let failed = FailedCostMatrix::default();
@@ -1719,6 +1724,7 @@ fn admission(
         policy_reserve: Default::default(),
         valid_until_slot: 160,
         simulation: Default::default(),
+        reserved: None,
     }
 }
 /// V2-15 (P9-01b): the handoff is validated against the time and slot at the handoff, not at
@@ -2276,6 +2282,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let zero = Limits {
         max_total_capital: 0,
@@ -2400,6 +2407,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             hash: solana_sdk::hash::Hash::new_unique(),
             last_valid_block_height: 100,
             refreshed_ns: clock.now_ns(),
+            context_slot: None,
         });
         let zero = Limits {
             max_total_capital: 0,
@@ -2559,6 +2567,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             hash: solana_sdk::hash::Hash::new_unique(),
             last_valid_block_height: 100,
             refreshed_ns: clock.now_ns(),
+            context_slot: None,
         });
         let zero = Limits {
             max_total_capital: 0,
@@ -3357,6 +3366,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let zero = Limits {
         max_total_capital: 0,
@@ -3618,6 +3628,7 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
             hash: solana_sdk::hash::Hash::new_unique(),
             last_valid_block_height: 100,
             refreshed_ns: clock.now_ns(),
+            context_slot: None,
         });
     }
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
@@ -3859,6 +3870,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for CountedPlans<'_> {
                 hash: solana_sdk::hash::Hash::new_unique(),
                 last_valid_block_height: 100,
                 refreshed_ns: 0,
+                context_slot: None,
             });
         }
         TestBuilder.plans(a, n, s, d)
@@ -3888,6 +3900,7 @@ fn dec01_a_stale_blockhash_is_refused_before_planning_without_budget() {
                 hash: solana_sdk::hash::Hash::new_unique(),
                 last_valid_block_height: 100,
                 refreshed_ns: 0,
+                context_slot: None,
             });
         }
         let generation = bh.generation();
@@ -3980,6 +3993,7 @@ fn dec01_the_late_check_before_the_build_stays() {
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns() + 60_000_000_000,
+        context_slot: None,
     });
     let builder = CountedPlans {
         calls: std::cell::Cell::new(0),
@@ -4866,7 +4880,7 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
     let dir = std::env::temp_dir().join(format!("p0-dec13-{}", Pubkey::new_unique()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
-    let mode = capability_control::pipeline_mode("LIVE");
+    let mode = capability_control::pipeline_mode("LIVE", None);
     let r = evaluate_in(
         mode,
         (&counting, &mut safety, Some(&mut fe04)),
@@ -5037,6 +5051,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         hash: solana_sdk::hash::Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let allow = Allowlist::default();
     let failed = FailedCostMatrix {

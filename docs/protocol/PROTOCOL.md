@@ -149,6 +149,7 @@
     - [Capability](#darkbot-project0-v1-Capability)
     - [CapabilityControlCommand](#darkbot-project0-v1-CapabilityControlCommand)
     - [DataSource](#darkbot-project0-v1-DataSource)
+    - [Fe04Admission](#darkbot-project0-v1-Fe04Admission)
     - [Fe04Approval](#darkbot-project0-v1-Fe04Approval)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
     - [HoldAttempt](#darkbot-project0-v1-HoldAttempt)
@@ -2827,6 +2828,35 @@ One controlled data source (the owner&#39;s arbiter: at most one canonical unit)
 
 
 
+<a name="darkbot-project0-v1-Fe04Admission"></a>
+
+### Fe04Admission
+DEC-13b/DEC-02: the owner&#39;s FE-04 admission of LIVE candidates and exits in this run
+(state_owner/fe04.rs). It never opens LIVE itself: that needs the separate FE-06 authorization.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| state | [string](#string) |  | OFF (LIVE not effective) | WAITING (no LIVE candidate yet) | READY | BLOCKED. |
+| block_reason | [string](#string) |  | Why no admission is open (OFF: the LIVE block reason); empty when READY. |
+| submitted | [uint64](#uint64) |  | Attempts handed off and submitted in this run. |
+| refused | [uint64](#uint64) |  | Attempts refused before anything durable. |
+| unknown | [uint64](#uint64) |  | Attempts whose handoff is UNKNOWN (every hold kept, Safety halted). |
+| last_refusal | [string](#string) |  | The last refusal reason, else empty. |
+| simulation_reused | [uint64](#uint64) |  | DEC-02: pipeline simulations reused at the handoff. |
+| simulation_resimulated | [uint64](#uint64) |  | DEC-02: payloads simulated again at the handoff. |
+| simulation_refused | [uint64](#uint64) |  | DEC-02: handoffs refused without a reusable simulation and without time for a new one. |
+| last_reuse_refusal | [string](#string) |  | DEC-02: why the last reuse was refused, else empty. |
+| exits_submitted | [uint64](#uint64) |  | Exits of the open inventory handed off in this run. |
+| exits_refused | [uint64](#uint64) |  | Exits refused before anything durable. |
+| exits_unknown | [uint64](#uint64) |  | Exits whose handoff is UNKNOWN. |
+| last_exit_refusal | [string](#string) |  | The last exit refusal or UNKNOWN reason, else empty. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-Fe04Approval"></a>
 
 ### Fe04Approval
@@ -2995,6 +3025,7 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | approval | [Fe04Approval](#darkbot-project0-v1-Fe04Approval) |  | DEC-10: the configured FE-04 approval, secret-free; it never authorizes LIVE (FE-06). |
 | capability_config_version | [uint64](#uint64) | optional | DEC-13: the capability configuration version the owner has decided up to — the ExpectedVersion.config_version a capability change states; unset without capability control. |
 | last_capability_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | DEC-13: the owner&#39;s last capability-control decision; unset before the first one. |
+| admission | [Fe04Admission](#darkbot-project0-v1-Fe04Admission) |  | DEC-13b/DEC-02: the owner&#39;s FE-04 admission of LIVE candidates and exits. |
 
 
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LatencyView, LiquidatorView, OwnerThresholdView } from "../model/owner";
 import type { SystemView } from "../model/status";
-import { nsToMs, programPinStatus } from "../model/owner";
+import { admissionLine, nsToMs, programPinStatus } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
 import { orDash, parameterText } from "../model/statusFormat";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
@@ -88,6 +88,7 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
         : `${owner.approval.state}${owner.approval.reason ? ` (${owner.approval.reason})` : ""} · ${owner.approval.kind} ${owner.approval.approvalId}`
           + `${owner.approval.kind === "attempt" ? ` · ${owner.approval.fundingClass} · capital ≤ ${usdMicroDisplay(owner.approval.maxCapitalUsdMicro.toString())} · loss ≤ ${usdMicroDisplay(owner.approval.maxLossUsdMicro.toString())} · ${owner.approval.allowedTargets} targets` : ""}`
           + ` · slippage ≤ ${owner.approval.maxSlippageBps} bps · expires ${new Date(Number(owner.approval.expiresUnixS) * 1000).toISOString()} · LIVE not authorized (FE-06)`}/> : null}
+    {owner.admission ? <DetailRow title="FE-04 admission" value={admissionLine(owner.admission)}/> : null}
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     <LiveRequest owner={owner} live={live}/>

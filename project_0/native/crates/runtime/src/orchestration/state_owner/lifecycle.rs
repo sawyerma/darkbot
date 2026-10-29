@@ -20,15 +20,26 @@ impl ShadowOwner {
                 // P0-PROD-CTRL-04: the accounting the status projection carries, read only when
                 // a status tap is installed (read-only, no wallet lock).
                 #[cfg(feature = "crate_health")]
+                let live = self.live_effective();
+                #[cfg(feature = "crate_health")]
                 if crate::status_tap::installed().is_some() {
                     self.ledger_view = Some(status_view::LedgerView::load(dir, &wallet));
-                    // DEC-10: the approval may be replaced or spent between refreshes; its
-                    // status is published only through the tap.
+                }
+                // DEC-10: the approval may be replaced or spent between refreshes; its status is
+                // published only through the tap. DEC-13b: while LIVE is effective the
+                // admissions use it, so it is re-read then too.
+                #[cfg(feature = "crate_health")]
+                if crate::status_tap::installed().is_some() || live {
                     if let Some(source) = self.fe04_approval.as_mut() {
                         source.refresh(Some(dir), &wallet);
                     }
                 }
                 self.fe04_refreshed = std::time::Instant::now();
+                // DEC-13b: an open position of the held attempt exits with its approval.
+                #[cfg(feature = "crate_health")]
+                if live {
+                    self.fe04_exit_admission();
+                }
             }
         }
         self.refresh_hold_gate(false);

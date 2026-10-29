@@ -36,6 +36,41 @@ message LiquidatorState {
   optional uint64 capability_config_version = 13;
   // DEC-13: the owner's last capability-control decision; unset before the first one.
   SourceDecision last_capability_decision = 14;
+  // DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits.
+  Fe04Admission admission = 15;
+}
+
+// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits in this run
+// (state_owner/fe04.rs). It never opens LIVE itself: that needs the separate FE-06 authorization.
+message Fe04Admission {
+  // OFF (LIVE not effective) | WAITING (no LIVE candidate yet) | READY | BLOCKED.
+  string state = 1;
+  // Why no admission is open (OFF: the LIVE block reason); empty when READY.
+  string block_reason = 2;
+  // Attempts handed off and submitted in this run.
+  uint64 submitted = 3;
+  // Attempts refused before anything durable.
+  uint64 refused = 4;
+  // Attempts whose handoff is UNKNOWN (every hold kept, Safety halted).
+  uint64 unknown = 5;
+  // The last refusal reason, else empty.
+  string last_refusal = 6;
+  // DEC-02: pipeline simulations reused at the handoff.
+  uint64 simulation_reused = 7;
+  // DEC-02: payloads simulated again at the handoff.
+  uint64 simulation_resimulated = 8;
+  // DEC-02: handoffs refused without a reusable simulation and without time for a new one.
+  uint64 simulation_refused = 9;
+  // DEC-02: why the last reuse was refused, else empty.
+  string last_reuse_refusal = 10;
+  // Exits of the open inventory handed off in this run.
+  uint64 exits_submitted = 11;
+  // Exits refused before anything durable.
+  uint64 exits_refused = 12;
+  // Exits whose handoff is UNKNOWN.
+  uint64 exits_unknown = 13;
+  // The last exit refusal or UNKNOWN reason, else empty.
+  string last_exit_refusal = 14;
 }
 
 // One controlled data source (the owner's arbiter: at most one canonical unit).

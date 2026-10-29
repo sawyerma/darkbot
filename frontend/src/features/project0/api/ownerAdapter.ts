@@ -185,6 +185,17 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
     sourceStats: m.sourceStats
       ? { observed: m.sourceStats.observed, rejected: m.sourceStats.rejected, applied: m.sourceStats.applied, refused: m.sourceStats.refused }
       : null,
+    admission: m.admission
+      ? {
+          state: m.admission.state, blockReason: m.admission.blockReason,
+          submitted: m.admission.submitted, refused: m.admission.refused, unknown: m.admission.unknown,
+          lastRefusal: m.admission.lastRefusal, simulationReused: m.admission.simulationReused,
+          simulationResimulated: m.admission.simulationResimulated, simulationRefused: m.admission.simulationRefused,
+          lastReuseRefusal: m.admission.lastReuseRefusal, exitsSubmitted: m.admission.exitsSubmitted,
+          exitsRefused: m.admission.exitsRefused, exitsUnknown: m.admission.exitsUnknown,
+          lastExitRefusal: m.admission.lastExitRefusal,
+        }
+      : null,
   };
 }
 

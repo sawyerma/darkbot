@@ -118,6 +118,8 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_settle_due: None,
         fe04_unbooked: None,
         fe04_non_landing: Default::default(),
+        fe04_admission: None,
+        fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate::OBSERVE,
         inventory_targets: Default::default(),
         jit_funding_bank: None,
@@ -2824,6 +2826,7 @@ fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
     let expected = (
         Some(super::fe04::Fe04Unbooked {
             reserved_capital: Some(intent.capital_usd_micro),
+            reserved_inventory: 0,
         }),
         intent.holds["SOL"],
         day,
@@ -4101,6 +4104,7 @@ fn dec01_blockhash(f: &Fixture, fresh: bool) -> darkbot_solana::state::blockhash
         } else {
             0
         },
+        context_slot: None,
     }
 }
 
@@ -4458,7 +4462,10 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         (1, "LIVE", "BLOCKED", true)
     );
     assert_eq!(
-        capability_control::pipeline_mode(f.owner.sources.capabilities.live_requested),
+        capability_control::pipeline_mode(
+            f.owner.sources.capabilities.live_requested,
+            f.owner.sources.capabilities.fe06.as_ref()
+        ),
         crate::execution::pipeline::Mode::Shadow
     );
     f.owner
@@ -5646,5 +5653,778 @@ fn dec06_active_crosscheck_without_budget_is_skipped() {
         ),
         (1, 1)
     );
+    cleanup(f);
+}
+
+/// DEC-13b: the owner's production RPC submitter against a loopback node that quotes, simulates
+/// and records every send (`sendTransaction` answers the sent signature) under a budget that
+/// admits the test's calls at once; the node's methods in call order.
+fn dec13b_live_node(f: &mut Fixture) -> Arc<Mutex<Vec<String>>> {
+    use crate::execution::one_shot::non_landing::loopback::{endpoint, Reply};
+    use base64::Engine;
+    let (url, calls) = endpoint(Arc::new(
+        |method: &str, params: &serde_json::Value| match method {
+            "getFeeForMessage" => {
+                Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": 5000}))
+            }
+            "simulateTransaction" => {
+                Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": {
+                "err": null, "logs": [], "accounts": null, "unitsConsumed": 100,
+                "returnData": null, "innerInstructions": null, "replacementBlockhash": null}}))
+            }
+            "sendTransaction" => {
+                let wire = base64::engine::general_purpose::STANDARD
+                    .decode(params[0].as_str().unwrap())
+                    .unwrap();
+                let tx: solana_sdk::transaction::VersionedTransaction =
+                    bincode::deserialize(&wire).unwrap();
+                Reply::Result(serde_json::json!(tx.signatures[0].to_string()))
+            }
+            _ => Reply::Status(500),
+        },
+    ));
+    // The owner's candidate transport (fee quote, simulation, send) under a budget that admits
+    // the test's calls at once.
+    let mut c = darkbot_solana::runtime_config::RuntimeConfig::default();
+    (
+        c.limits.rpc_rps,
+        c.limits.rpc_burst,
+        c.limits.rpc_concurrency,
+    ) = (1_000, 100, 4);
+    (c.limits.simulation_rps, c.limits.fee_rps, c.limits.send_rps) = (1_000, 1_000, 1_000);
+    (c.limits.hotpath_rps, c.limits.rpc_backoff_ms) = (1_000, 10);
+    let budget = Arc::new(darkbot_solana::provider::Budget::configured(&c));
+    f.owner.submitter = crate::execution::observe_only::ObserveOnly::new(
+        crate::execution::bundle_path::OwnerSubmitter::new(
+            RpcSubmitter::with_budget(url, true, budget).unwrap(),
+        ),
+    );
+    calls
+}
+
+/// DEC-13b: LIVE requested and, with `fe06`, the FE-06 stand-in opening it and the submitter.
+fn dec13b_live(f: &mut Fixture, fe06: bool) {
+    f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
+    if fe06 {
+        let fe06 = crate::orchestration::capability_control::Fe06Authorization::offline_test();
+        f.owner.submitter.open(&fe06);
+        f.owner.sources.capabilities.fe06 = Some(fe06);
+    }
+}
+
+/// DEC-13b: the LIVE owner of one liquidatable account — the real state (group, a SOL bank and
+/// two 1-USD banks on fixed oracles, FeeState, clock, rent, the liquidator's lamports and ATAs)
+/// through the real detect path, the production RPC submitter against a loopback node that
+/// quotes, simulates and records every send (`sendTransaction` answers the sent signature), the
+/// attempt approval of this owner's wallet and target and an FE-04 journal. `fe06`: the FE-06
+/// authorization (the offline tests' stand-in) opens LIVE and the submitter; without it nothing
+/// opens. Returns the fixture, the target and the node's methods in call order.
+fn dec13b_fixture(tag: &str, fe06: bool) -> (Fixture, Pubkey, Arc<Mutex<Vec<String>>>) {
+    use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, ATTEMPT_SCHEMA};
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, FeeState, MarginfiAccount, MarginfiGroup, OracleSetup,
+        WrappedI80F48,
+    };
+    use solana_sdk::signer::Signer;
+    let mut f = fixture_with(tag, None);
+    let payer = solana_sdk::signature::Keypair::new();
+    let liquidator = payer.pubkey();
+    (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
+    f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
+    f.owner.zero_prefund_enabled = true;
+    let calls = dec13b_live_node(&mut f);
+    let num = |v: f64| WrappedI80F48 {
+        value: ((v * (1u64 << 48) as f64) as i128).to_le_bytes(),
+    };
+    let token_program: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
+    let program = f.owner.program;
+    let update = |pubkey, owner, lamports, data| AccountUpdate {
+        pubkey,
+        owner,
+        lamports,
+        data,
+        slot: 100,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    };
+    let group = f.owner.group;
+    let bank = |mint: Pubkey, decimals: u8, price: f64, asset_weight: f64| {
+        let mut b = Bank::zeroed();
+        b.group = group;
+        b.mint = mint;
+        b.mint_decimals = decimals;
+        b.asset_share_value = num(1.0);
+        b.liability_share_value = num(1.0);
+        b.config.asset_weight_init = num(asset_weight);
+        b.config.asset_weight_maint = num(asset_weight);
+        b.config.liability_weight_init = num(1.0);
+        b.config.liability_weight_maint = num(1.0);
+        b.config.operational_state = BankOperationalState::Operational;
+        b.config.oracle_setup = OracleSetup::Fixed;
+        b.config.fixed_price = num(price);
+        [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&b)].concat()
+    };
+    let sol_mint: Pubkey = protocol::NATIVE_SOL_MINT.parse().unwrap();
+    let (asset_mint, liab_mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+    // A loopback Jupiter `/build`: the collateral sold 1:1 for the liability at 50 bps.
+    f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
+        .unwrap()
+        .with_base_url(dec13b_jupiter(
+            liquidator,
+            token_program,
+            asset_mint,
+            liab_mint,
+        ));
+    let mut keys = [Pubkey::new_unique(), Pubkey::new_unique()];
+    keys.sort_unstable_by(|a, b| b.cmp(a));
+    let (asset_bank, liab_bank, target) = (keys[0], keys[1], Pubkey::new_unique());
+    f.owner.sol_bank = Pubkey::new_unique();
+    let mut a = MarginfiAccount::zeroed();
+    a.group = group;
+    // A linked liquidation record: the plan pays no record rent.
+    a.liquidation_record = protocol::liquidation_record_pda(&program, &target);
+    let bal = &mut a.lending_account.balances;
+    (bal[0].active, bal[0].bank_pk, bal[0].asset_shares) = (1, asset_bank, num(1_000e6));
+    (bal[1].active, bal[1].bank_pk, bal[1].liability_shares) = (1, liab_bank, num(900e6));
+    let mut fee = FeeState::zeroed();
+    fee.global_fee_wallet = Pubkey::new_unique();
+    fee.liquidation_max_fee = num(0.1);
+    let ata = |mint: &Pubkey, amount: u64| {
+        let mut d = vec![0u8; 165];
+        d[0..32].copy_from_slice(mint.as_ref());
+        d[32..64].copy_from_slice(liquidator.as_ref());
+        d[64..72].copy_from_slice(&amount.to_le_bytes());
+        d[108] = 1;
+        update(
+            accounts::associated_token_address(&liquidator, mint, &token_program),
+            token_program,
+            2_039_280,
+            d,
+        )
+    };
+    let now_s = wall_unix_s().unwrap();
+    let state = vec![
+        p2_clock(100, now_s),
+        update(
+            solana_sdk::sysvar::rent::id(),
+            solana_sdk::sysvar::id(),
+            1,
+            bincode::serialize(&solana_sdk::rent::Rent::default()).unwrap(),
+        ),
+        update(
+            group,
+            program,
+            1,
+            [
+                protocol::DISC_MARGINFI_GROUP.as_slice(),
+                bytemuck::bytes_of(&MarginfiGroup::zeroed()),
+            ]
+            .concat(),
+        ),
+        update(
+            protocol::fee_state_pda(&program),
+            program,
+            1,
+            [
+                protocol::DISC_FEE_STATE.as_slice(),
+                bytemuck::bytes_of(&fee),
+            ]
+            .concat(),
+        ),
+        update(f.owner.sol_bank, program, 1, bank(sol_mint, 9, 100.0, 1.0)),
+        update(asset_bank, program, 1, bank(asset_mint, 6, 1.0, 0.8)),
+        update(liab_bank, program, 1, bank(liab_mint, 6, 1.0, 1.0)),
+        update(asset_mint, token_program, 1, vec![0; 82]),
+        update(liab_mint, token_program, 1, vec![0; 82]),
+        update(
+            target,
+            program,
+            1,
+            [
+                protocol::DISC_MARGINFI_ACCOUNT.as_slice(),
+                bytemuck::bytes_of(&a),
+            ]
+            .concat(),
+        ),
+        update(liquidator, Pubkey::default(), 10_000_000_000, vec![]),
+        ata(&liab_mint, 2_000_000_000),
+        ata(&asset_mint, 0),
+    ];
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    f.owner.st.confirm_ready();
+    f.owner.slot_watch.observe(100);
+    f.owner
+        .blockhash
+        .set(darkbot_solana::state::blockhash::CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 1_000,
+            refreshed_ns: f.owner.clock.now_ns(),
+            context_slot: Some(100),
+        });
+    let open = darkbot_project0::safety::Limits {
+        max_total_capital: u64::MAX / 4,
+        max_outstanding_inventory: u64::MAX / 4,
+        max_concurrent_positions: 1,
+        max_exposure_per_attempt: u64::MAX / 4,
+        max_daily_loss: u64::MAX / 4,
+        max_failed_attempts_per_day: 10,
+        max_tip: 0,
+        max_slippage_bps: 50,
+        max_outstanding_attempts: 1,
+    };
+    let mut allow = Allow::default();
+    allow.execution_classes.insert("longtail");
+    allow.assets.extend([asset_mint, liab_mint]);
+    f.owner.safety = Safety::new(open, allow, fe06);
+    // As in the owner's setup: the protocol and the pinned swap program.
+    let jup: Pubkey = protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
+    f.owner.allowlist.swap_programs.insert(jup);
+    f.owner.global_allowed = vec![program, jup];
+    dec13b_live(&mut f, fe06);
+    // The attempt approval of this wallet, program, deployment and target.
+    let journal = f.dir.join("fe04");
+    std::fs::create_dir_all(&journal).unwrap();
+    let file = f.dir.join("approval.conf");
+    std::fs::write(
+        &file,
+        format!(
+            "schema = {ATTEMPT_SCHEMA}\nauthorized = true\napproval_id = dec13b-1\ncode_sha = {}\nbinary_sha256 = {}\nwallet = {liquidator}\nprogram = {program}\nprogram_data_hash = {}\nfunding_class = ZERO_PREFUND_SAME_TX\nallowed_targets = {target}\nexpires_unix_s = {}\nmax_state_age_ms = 60000\nmax_capital_usd_micro = 100000000000\nmax_total_sol_debit_lamports = 50000000\nmax_tip_lamports = 0\nmax_rent_lamports = 50000000\nmax_loss_usd_micro = 100000000000\nmin_net_usd_micro = 1\nmax_slippage_bps = 50\n",
+            "a".repeat(40),
+            "b".repeat(64),
+            f.owner.program_data_baseline_hash,
+            now_s + 3_600
+        ),
+    )
+    .unwrap();
+    let wallet = liquidator.to_string();
+    let mut source = ApprovalSource {
+        path: file,
+        binding: ApprovalBinding {
+            wallet: Bind::Known(wallet.clone()),
+            program: Bind::Known(program.to_string()),
+            program_data_hash: Bind::Known(f.owner.program_data_baseline_hash.to_string()),
+            code_sha: Bind::Known("a".repeat(40)),
+            binary_sha256: Bind::Known("b".repeat(64)),
+            ceilings: None,
+            max_lifetime_seconds: 86_400,
+        },
+        read: Err("APPROVAL_NOT_READ".into()),
+        usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
+    };
+    source.refresh(Some(&journal), &wallet);
+    f.owner.fe04_approval = Some(source);
+    f.owner.fe04_journal = Some(journal);
+    (f, target, calls)
+}
+
+/// DEC-13b: a loopback Jupiter answering every `/build` with the ExactIn route of the requested
+/// amount of `input` into `output` 1:1 (the taker's ATAs, 50 bps); its URL.
+fn dec13b_jupiter(taker: Pubkey, token_program: Pubkey, input: Pubkey, output: Pubkey) -> String {
+    use base64::Engine;
+    use std::io::{BufRead, BufReader, Write};
+    let jup: Pubkey = protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
+    let ata = |m: &Pubkey| accounts::associated_token_address(&taker, m, &token_program);
+    let (source, destination, authority) = (ata(&input), ata(&output), Pubkey::new_unique());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_err() {
+                continue;
+            }
+            loop {
+                let mut header = String::new();
+                if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                    break;
+                }
+            }
+            let amount: u64 = line
+                .split(['?', '&', ' '])
+                .find_map(|kv| kv.strip_prefix("amount="))
+                .and_then(|a| a.parse().ok())
+                .unwrap_or(0);
+            let (out, threshold) = (amount, amount * 995 / 1_000);
+            let mut data = vec![229, 23, 203, 151, 122, 227, 173, 42];
+            data.extend(1u32.to_le_bytes());
+            data.extend([7, 100, 0, 1]);
+            data.extend(amount.to_le_bytes());
+            data.extend(out.to_le_bytes());
+            data.extend(50u16.to_le_bytes());
+            data.push(0);
+            let acct = |k: &Pubkey, signer: bool, writable: bool| serde_json::json!({"pubkey": k.to_string(), "isSigner": signer, "isWritable": writable});
+            let body = serde_json::json!({
+                "inAmount": amount.to_string(), "outAmount": out.to_string(),
+                "otherAmountThreshold": threshold.to_string(), "swapMode": "ExactIn",
+                "setupInstructions": [], "cleanupInstruction": null, "otherInstructions": [],
+                "addressesByLookupTableAddress": null,
+                "swapInstruction": {
+                    "programId": jup.to_string(),
+                    "data": base64::engine::general_purpose::STANDARD.encode(&data),
+                    "accounts": [
+                        acct(&token_program, false, false), acct(&taker, true, false),
+                        acct(&source, false, true), acct(&destination, false, true),
+                        acct(&jup, false, false), acct(&output, false, false),
+                        acct(&jup, false, false), acct(&authority, false, false),
+                        acct(&jup, false, false)]}})
+            .to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    url
+}
+
+/// DEC-13b (FS-F-09, C3-Rest): with LIVE effective (FE-06) the real detect path hands its
+/// actionable candidate to the owner's FE-04 admission: the payload the pipeline simulated is
+/// reused at the handoff (DEC-02), reserved durably and sent exactly once; the attempt becomes
+/// the held one — SUBMITTED ownership, the approval spent, no second admission — and the capital
+/// and inventory `check()` reserved are released only by the journal settlement's booking, once
+/// (before: the booking released no inventory, the reservation stayed for ever).
+#[test]
+fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement() {
+    use crate::execution::one_shot::settlement::{SettlementEvidence, SettlementSubject};
+    let (mut f, target, calls) = dec13b_fixture("dec13b_live", true);
+    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(f.owner.owner_snapshot(1).admission.state, "WAITING");
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let methods = || calls.lock().unwrap().clone();
+    assert_eq!(
+        methods(),
+        [
+            "getFeeForMessage",
+            "getFeeForMessage",
+            "simulateTransaction",
+            "sendTransaction"
+        ],
+        "one simulation, reused at the handoff, and one send"
+    );
+    let a = &f.owner.fe04_admissions;
+    assert_eq!((a.submitted, a.refused, a.unknown), (1, 0, 0));
+    assert_eq!((a.simulation.reused, a.simulation.resimulated), (1, 0));
+    let unbooked = f
+        .owner
+        .fe04_unbooked
+        .expect("the check() reservation waits for the booking");
+    assert_eq!(
+        unbooked.reserved_capital,
+        Some(f.owner.safety.capital_in_use())
+    );
+    assert!(unbooked.reserved_inventory > 0);
+    assert_eq!(
+        f.owner.safety.inventory_reserved(),
+        unbooked.reserved_inventory
+    );
+    let (intent, _) = f
+        .owner
+        .fe04_held
+        .as_ref()
+        .unwrap()
+        .settlement_job()
+        .unwrap();
+    assert_eq!(intent.target, target.to_string());
+    let s = f.owner.owner_snapshot(2).admission;
+    assert_eq!((s.state, s.submitted), ("BLOCKED", 1));
+    assert!(
+        s.block_reason.starts_with("FE04_ATTEMPT_HELD"),
+        "{}",
+        s.block_reason
+    );
+    // Single flight: the target is SUBMITTED, a new detection is deferred and sends nothing.
+    assert!(!f
+        .owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            101,
+            "account_update"
+        )))
+        .unwrap());
+    assert_eq!(methods().len(), 4);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    assert_eq!(f.owner.approval_status().state, "CONSUMED");
+    // The settlement reads the sent signature; its proven non-landing books the attempt once.
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    let job = fe04_job(&f).expect("the first read is due at once");
+    assert_eq!(job.subject.signatures, intent.signatures);
+    let proof = crate::execution::one_shot::non_landing::loopback::proving(
+        &SettlementSubject::from(&intent).non_landing().unwrap(),
+        true,
+    );
+    fe04_answer(
+        &f,
+        SettlementEvidence {
+            observations: vec![],
+            non_landing: Some(Ok(proof)),
+        },
+    );
+    run_until(&mut f, fe04_settled);
+    assert_eq!(f.owner.fe04_unbooked, None);
+    assert_eq!(
+        (
+            f.owner.safety.capital_in_use(),
+            f.owner.safety.inventory_reserved()
+        ),
+        (0, 0),
+        "released once by the booking"
+    );
+    assert_eq!(f.owner.safety.day().failed_attempts, 1);
+    assert!(f.owner.reservations.is_empty());
+    assert_eq!(methods().len(), 4, "nothing sent again");
+    cleanup(f);
+}
+
+/// DEC-13 (negative): a LIVE request without FE-06 stays Shadow on the same candidate — built,
+/// signed and simulated, no FE-04 admission (the wallet journal is not even opened) and not a
+/// single submit call; the admission is OFF with LIVE's block reason.
+#[test]
+fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
+    let (mut f, target, calls) = dec13b_fixture("dec13b_shadow", false);
+    assert_eq!(f.owner.approval_status().state, "VALID");
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let methods = calls.lock().unwrap().clone();
+    assert!(
+        methods.contains(&"simulateTransaction".to_string()),
+        "{methods:?}"
+    );
+    assert!(
+        !methods.contains(&"sendTransaction".to_string()),
+        "{methods:?}"
+    );
+    assert_eq!(
+        f.owner
+            .submitter
+            .attempts
+            .load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+    assert!(f.owner.fe04_held.is_none() && f.owner.fe04_admission.is_none());
+    assert_eq!(f.owner.fe04_admissions, Default::default());
+    let s = f.owner.owner_snapshot(1).admission;
+    assert_eq!(
+        (s.state, s.block_reason.as_str()),
+        (
+            "OFF",
+            crate::orchestration::capability_control::LIVE_BLOCK_REASON
+        )
+    );
+    // The wallet lock is free: no admission holds the journal.
+    crate::execution::one_shot::Journal::open(&f.dir.join("fe04"), &f.owner.liquidator.to_string())
+        .unwrap();
+    cleanup(f);
+}
+
+/// DEC-13b: no admission without its every condition — a held attempt, an FE-04 journal, a VALID
+/// attempt approval naming the target, no ProgramData upgrade and a blockhash of known validity;
+/// each refusal is the projected reason and the candidate stops at the send boundary unsent.
+#[test]
+fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
+    let (mut f, target, calls) = dec13b_fixture("dec13b_refused", true);
+    let reason = |f: &ShadowOwner| f.fe04_admission_facts(&target).err().map(|(r, _)| r);
+    assert_eq!(reason(&f.owner), None);
+    let other = Pubkey::new_unique();
+    assert_eq!(
+        f.owner.fe04_admission_facts(&other).err(),
+        Some(("FE04_TARGET_NOT_APPROVED".into(), false))
+    );
+    f.owner.program_upgrade_latched = true;
+    assert_eq!(reason(&f.owner).as_deref(), Some("FE04_PROGRAM_UPGRADED"));
+    f.owner.program_upgrade_latched = false;
+    let bh = f.owner.blockhash.get().unwrap();
+    f.owner
+        .blockhash
+        .set(darkbot_solana::state::blockhash::CachedBlockhash {
+            context_slot: None,
+            ..bh
+        });
+    assert_eq!(
+        reason(&f.owner).as_deref(),
+        Some("FE04_BLOCKHASH_VALIDITY_UNKNOWN")
+    );
+    f.owner.blockhash.set(bh);
+    let journal = f.owner.fe04_journal.take();
+    assert_eq!(
+        f.owner.fe04_admission_facts(&target).err(),
+        Some(("FE04_JOURNAL_NOT_CONFIGURED".into(), true))
+    );
+    f.owner.fe04_journal = journal;
+    let approval = f.owner.fe04_approval.take();
+    assert_eq!(reason(&f.owner).as_deref(), Some("FE04_APPROVAL_NONE"));
+    // The detection stops at the send boundary with that reason projected; nothing is sent.
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .contains(&"sendTransaction".to_string()));
+    let s = f.owner.owner_snapshot(1).admission;
+    assert_eq!(
+        (s.state, s.block_reason.as_str()),
+        ("BLOCKED", "FE04_APPROVAL_NONE")
+    );
+    f.owner.fe04_approval = approval;
+    let dir = f.dir.join("fe04");
+    crate::execution::one_shot::test_unknown_attempt(&dir, &f.owner.liquidator.to_string());
+    f.owner.fe04_held = Some(
+        crate::execution::one_shot::Journal::open(&dir, &f.owner.liquidator.to_string()).unwrap(),
+    );
+    assert!(reason(&f.owner).unwrap().starts_with("FE04_ATTEMPT_HELD"));
+    cleanup(f);
+}
+
+/// DEC-13b: a loopback Jupiter answering every `/build` with the native-SOL sale of 1 000 units of
+/// `mint` by `taker` (create its WSOL ATA, the route at 50 bps into it, close it to the taker).
+fn dec13b_exit_jupiter(taker: Pubkey, mint: Pubkey) -> String {
+    use base64::Engine;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use std::io::{BufRead, BufReader, Write};
+    let jup: Pubkey = protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
+    let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
+    let wsol: Pubkey = crate::execution::route::WSOL_MINT.parse().unwrap();
+    let ata = |m: &Pubkey| accounts::associated_token_address(&taker, m, &token);
+    let json_ix = |ix: &Instruction| {
+        serde_json::json!({
+            "programId": ix.program_id.to_string(),
+            "data": base64::engine::general_purpose::STANDARD.encode(&ix.data),
+            "accounts": ix.accounts.iter().map(|a| serde_json::json!({
+                "pubkey": a.pubkey.to_string(), "isSigner": a.is_signer,
+                "isWritable": a.is_writable})).collect::<Vec<_>>()})
+    };
+    let mut data = vec![229, 23, 203, 151, 122, 227, 173, 42];
+    data.extend(1u32.to_le_bytes());
+    data.extend([7, 100, 0, 1]);
+    data.extend(1_000u64.to_le_bytes());
+    data.extend(20_000_000u64.to_le_bytes());
+    data.extend(50u16.to_le_bytes());
+    data.push(0);
+    let swap = Instruction {
+        program_id: jup,
+        accounts: vec![
+            AccountMeta::new_readonly(token, false),
+            AccountMeta::new_readonly(taker, true),
+            AccountMeta::new(ata(&mint), false),
+            AccountMeta::new(ata(&wsol), false),
+            AccountMeta::new_readonly(jup, false),
+            AccountMeta::new_readonly(wsol, false),
+            AccountMeta::new_readonly(jup, false),
+            AccountMeta::new_readonly(Pubkey::new_unique(), false),
+            AccountMeta::new_readonly(jup, false),
+        ],
+        data,
+    };
+    let close = Instruction {
+        program_id: token,
+        accounts: vec![
+            AccountMeta::new(ata(&wsol), false),
+            AccountMeta::new(taker, false),
+            AccountMeta::new_readonly(taker, true),
+        ],
+        data: vec![9],
+    };
+    let create =
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            &taker, &taker, &wsol, &token,
+        );
+    let body = serde_json::json!({
+        "inAmount": "1000", "outAmount": "20000000", "otherAmountThreshold": "19900000",
+        "swapMode": "ExactIn", "setupInstructions": [json_ix(&create)],
+        "swapInstruction": json_ix(&swap), "cleanupInstruction": json_ix(&close),
+        "otherInstructions": [], "addressesByLookupTableAddress": null})
+    .to_string();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    url
+}
+
+/// DEC-13b: with LIVE effective the held attempt's open position exits with its exit approval —
+/// the route quoted now, one durable exit admission and exactly one send; the settlement then
+/// reads that exit. An open exit admits no second one; without FE-06 nothing exits.
+#[test]
+fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
+    use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, EXIT_SCHEMA};
+    use solana_sdk::signer::Signer;
+    let mut f = fixture_with("dec13b_exit", None);
+    let payer = solana_sdk::signature::Keypair::new();
+    let liquidator = payer.pubkey();
+    (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
+    f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
+    let (dir, wallet) = (f.dir.join("fe04"), liquidator.to_string());
+    let now_s = wall_unix_s().unwrap();
+    let mint_s =
+        crate::execution::one_shot::exit::tests::settled_with_position(&dir, &wallet, now_s);
+    let mint: Pubkey = mint_s.parse().unwrap();
+    let jup = protocol::JUP_SWAP_PROGRAM_ID;
+    let e = crate::execution::one_shot::exit::tests::exit_approval(&wallet, &mint_s, jup);
+    let file = f.dir.join("exit.conf");
+    std::fs::write(
+        &file,
+        format!(
+            "schema = {EXIT_SCHEMA}\nauthorized = true\napproval_id = {}\nattempt_approval_id = {}\ncode_sha = {}\nbinary_sha256 = {}\nwallet = {wallet}\nmint = {mint_s}\nroute_program = {jup}\nexpires_unix_s = {}\nmax_state_age_ms = {}\nmin_out_lamports = {}\nmax_slippage_bps = {}\nmax_fee_lamports = {}\n",
+            e.approval_id,
+            e.attempt_approval_id,
+            e.code_sha,
+            e.binary_sha256,
+            now_s + 3_600,
+            e.max_state_age_ms.max(60_000),
+            e.min_out_lamports,
+            e.max_slippage_bps,
+            e.max_fee_lamports
+        ),
+    )
+    .unwrap();
+    let dir_s = dir.display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &liquidator,
+    )
+    .unwrap()
+    .start(&mut f.owner.safety, now_s)
+    .unwrap();
+    f.owner.reservations = start.book;
+    f.owner.fe04_journal = start.dir;
+    f.owner.fe04_held = start.held;
+    f.owner.fe04_unbooked = start.unbooked;
+    let source = ApprovalSource {
+        path: file,
+        binding: ApprovalBinding {
+            wallet: Bind::Known(wallet.clone()),
+            code_sha: Bind::Known(e.code_sha.clone()),
+            binary_sha256: Bind::Known(e.binary_sha256.clone()),
+            max_lifetime_seconds: 86_400,
+            ..Default::default()
+        },
+        read: Err("APPROVAL_NOT_READ".into()),
+        usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
+    };
+    // Not read yet: while LIVE is effective the owner's FE-04 refresh reads it (no status tap).
+    f.owner.fe04_approval = Some(source);
+    // The state the exit is checked against: the position's ATA, an empty WSOL ATA, lamports.
+    let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
+    let wsol: Pubkey = crate::execution::route::WSOL_MINT.parse().unwrap();
+    let ata = |m: &Pubkey, amount: u64| {
+        let mut d = vec![0u8; 165];
+        d[0..32].copy_from_slice(m.as_ref());
+        d[32..64].copy_from_slice(liquidator.as_ref());
+        d[64..72].copy_from_slice(&amount.to_le_bytes());
+        d[108] = 1;
+        AccountUpdate {
+            pubkey: accounts::associated_token_address(&liquidator, m, &token),
+            owner: token,
+            lamports: 2_039_280,
+            data: d,
+            slot: 100,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        }
+    };
+    let state = vec![
+        p2_clock(100, now_s),
+        AccountUpdate {
+            pubkey: liquidator,
+            owner: Pubkey::default(),
+            lamports: 10_000_000_000,
+            data: vec![],
+            slot: 100,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        },
+        ata(&mint, 1_000),
+        ata(&wsol, 0),
+    ];
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    f.owner.st.confirm_ready();
+    f.owner.slot_watch.observe(100);
+    f.owner
+        .blockhash
+        .set(darkbot_solana::state::blockhash::CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 1_000,
+            refreshed_ns: f.owner.clock.now_ns(),
+            context_slot: Some(100),
+        });
+    f.owner.network = NetworkBudget::new(4, 5_000_000_000);
+    f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
+        .unwrap()
+        .with_base_url(dec13b_exit_jupiter(liquidator, mint));
+    let calls = dec13b_live_node(&mut f);
+    // Without FE-06 nothing exits.
+    dec13b_live(&mut f, false);
+    f.owner.fe04_exit_admission();
+    assert!(calls.lock().unwrap().is_empty());
+    dec13b_live(&mut f, true);
+    f.owner.fe04_refreshed = std::time::Instant::now()
+        .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+        .unwrap();
+    f.owner.lifecycle();
+    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(
+        calls.lock().unwrap().clone(),
+        ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    assert_eq!(f.owner.fe04_admissions.exits_submitted, 1);
+    let held = f.owner.fe04_held.as_ref().unwrap();
+    assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
+    // An open exit admits no second one.
+    f.owner.fe04_exit_admission();
+    assert_eq!(calls.lock().unwrap().len(), 3);
+    // The settlement reads exactly this exit.
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    let job = fe04_job(&f).expect("the exit read is due at once");
+    assert_eq!(job.exit, Some(e.approval_id.clone()));
     cleanup(f);
 }

@@ -5,7 +5,7 @@
 //! to the state owner by the same control thread (`source_control::spawn`). The operator's value
 //! is the *requested* one; only the owner decides the *effective* one and records it
 //! (`outcome_<seq>.p0j`). LIVE stays BLOCKED until a separate FE-06 authorization exists — this
-//! build holds none (`live_effective`), so no request ever makes a candidate reach a send.
+//! build constructs none (`Fe06Authorization`), so no request ever makes a candidate reach a send.
 use crate::analytics::journal;
 use crate::analytics::payload::{CapabilityControlOutcome, CapabilityControlRequest};
 use std::path::{Path, PathBuf};
@@ -167,12 +167,35 @@ pub fn latest_outcome(dir: &Path) -> Result<Option<CapabilityControlOutcome>, St
     }
 }
 
-/// DEC-13: the one decision of LIVE's effective value — BLOCKED whatever is requested. FE-06 is a
-/// separate authorization that no request, FE-04 approval or configuration grants, and this
-/// build holds none; the owner therefore evaluates every candidate in Shadow and hands no FE-04
-/// admission to the pipeline (no submit call can exist).
-pub fn live_effective(_requested: &str) -> (&'static str, &'static str) {
-    ("BLOCKED", LIVE_BLOCK_REASON)
+/// DEC-13: the separate FE-06 authorization that opens LIVE — the pipeline mode, Safety LIVE, the
+/// asset allowlist and the submitter together. No request, FE-04 approval or configuration grants
+/// it; its format and source are the user's decision (BUGS DEC-13), so this build reads none and
+/// no production path constructs one: LIVE stays BLOCKED (only the offline tests hold one).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Fe06Authorization {
+    _sealed: (),
+}
+
+impl Fe06Authorization {
+    /// The offline tests' stand-in of an FE-06 authorization (never part of a build).
+    #[cfg(test)]
+    pub(crate) fn offline_test() -> Self {
+        Self { _sealed: () }
+    }
+}
+
+/// DEC-13: the one decision of LIVE's effective value — BLOCKED whatever is requested without an
+/// FE-06 authorization (this build holds none, so the owner evaluates every candidate in Shadow
+/// and hands no FE-04 admission to the pipeline); with one, the requested value.
+pub fn live_effective(
+    requested: &str,
+    fe06: Option<&Fe06Authorization>,
+) -> (&'static str, &'static str) {
+    match (fe06, requested) {
+        (Some(_), LIVE) => (LIVE, ""),
+        (Some(_), _) => (LIVE_OFF, ""),
+        (None, _) => ("BLOCKED", LIVE_BLOCK_REASON),
+    }
 }
 
 /// A request's operands as they may be shown (log, GUI): bounded, control characters escaped —
@@ -192,8 +215,11 @@ pub fn shown(capability: &str, requested: &str) -> String {
 
 /// DEC-13: the pipeline mode of a detection — LIVE only while LIVE is effective, so a candidate
 /// reaches no send boundary in this build, whatever was requested.
-pub fn pipeline_mode(requested: &str) -> crate::execution::pipeline::Mode {
-    if live_effective(requested).0 == LIVE {
+pub fn pipeline_mode(
+    requested: &str,
+    fe06: Option<&Fe06Authorization>,
+) -> crate::execution::pipeline::Mode {
+    if live_effective(requested, fe06).0 == LIVE {
         crate::execution::pipeline::Mode::Live
     } else {
         crate::execution::pipeline::Mode::Shadow
@@ -255,12 +281,27 @@ mod tests {
         assert_eq!(shown("LIVE\nX", "OFF"), "LIVE\\nX OFF");
         assert_eq!(shown(&"A".repeat(80), "OFF").chars().count(), 65);
         for requested in LIVE_VALUES {
-            assert_eq!(live_effective(requested), ("BLOCKED", LIVE_BLOCK_REASON));
             assert_eq!(
-                pipeline_mode(requested),
+                live_effective(requested, None),
+                ("BLOCKED", LIVE_BLOCK_REASON)
+            );
+            assert_eq!(
+                pipeline_mode(requested, None),
                 crate::execution::pipeline::Mode::Shadow
             );
         }
+        // DEC-13b: only an FE-06 authorization makes the requested value effective.
+        let fe06 = Fe06Authorization::offline_test();
+        assert_eq!(live_effective(LIVE, Some(&fe06)), (LIVE, ""));
+        assert_eq!(live_effective(LIVE_OFF, Some(&fe06)), (LIVE_OFF, ""));
+        assert_eq!(
+            pipeline_mode(LIVE, Some(&fe06)),
+            crate::execution::pipeline::Mode::Live
+        );
+        assert_eq!(
+            pipeline_mode(LIVE_OFF, Some(&fe06)),
+            crate::execution::pipeline::Mode::Shadow
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

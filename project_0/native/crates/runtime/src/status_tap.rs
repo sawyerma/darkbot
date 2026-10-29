@@ -335,6 +335,31 @@ pub struct OwnerSnapshot {
     pub last_capability_decision: Option<OwnerSourceDecision>,
     /// DEC-10: the configured FE-04 approval, secret-free (never a LIVE authorization).
     pub approval: crate::execution::one_shot::approval_file::ApprovalStatus,
+    /// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits.
+    pub admission: OwnerAdmission,
+}
+
+/// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits in this run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerAdmission {
+    /// OFF (LIVE not effective) | WAITING (no LIVE candidate yet) | READY | BLOCKED.
+    pub state: &'static str,
+    /// Why no admission is open (OFF: the LIVE block reason); empty when READY.
+    pub block_reason: String,
+    pub submitted: u64,
+    pub refused: u64,
+    pub unknown: u64,
+    pub last_refusal: String,
+    /// DEC-02: pipeline simulations reused at the handoff, simulated again, refused without time,
+    /// and why the last reuse was refused.
+    pub simulation_reused: u64,
+    pub simulation_resimulated: u64,
+    pub simulation_refused: u64,
+    pub last_reuse_refusal: String,
+    pub exits_submitted: u64,
+    pub exits_refused: u64,
+    pub exits_unknown: u64,
+    pub last_exit_refusal: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -175,6 +175,12 @@ pub(super) struct ShadowOwner {
     fe04_unbooked: Option<fe04::Fe04Unbooked>,
     /// DEC-03: the latest non-landing read of this run (the Wallets projection).
     fe04_non_landing: fe04::Fe04NonLanding,
+    /// DEC-13b: the open FE-04 admission of LIVE candidates (journal, attempt approval, current
+    /// wallet facts); `None` while LIVE is not effective, no VALID attempt approval exists or an
+    /// attempt holds the wallet. Handed to the pipeline per detection and taken back.
+    fe04_admission: Option<crate::execution::one_shot::admission::Fe04Admission>,
+    /// DEC-13b/DEC-02: this run's admission counters (the Liquidator tab).
+    fe04_admissions: fe04::Fe04AdmissionStats,
     /// DEC-04: the hold mode the pipeline evaluates with (effective mode, the user's N, the
     /// evidence of the FE-04 journals).
     hold_gate: crate::execution::hold_b::HoldGate,

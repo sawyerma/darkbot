@@ -1161,6 +1161,8 @@ pub(super) fn prepare(
         fe04_settle_due,
         fe04_unbooked,
         fe04_non_landing: Default::default(),
+        fe04_admission: None,
+        fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate {
             n: darkbot_solana::runtime_config::active().hold_b_min_attempts,
             ..crate::execution::hold_b::HoldGate::OBSERVE
@@ -1333,6 +1335,8 @@ impl Fe04Start {
             .filter(|r| r.settled.is_none())
             .map(|r| super::fe04::Fe04Unbooked {
                 reserved_capital: r.held_capital_usd_micro,
+                // The replay reserves no inventory hold (`restore_attempt`).
+                reserved_inventory: 0,
             });
         // FE-04 archive: archived attempts are settled — their bookings, never a hold.
         for archived in self.archived {
@@ -1720,17 +1724,22 @@ mod blockhash_tests {
     fn dec01_a_refresh_request_wakes_the_worker_at_once_and_coalesces() {
         let shutdown = Shutdown::new();
         let cache = BlockhashCache::new();
-        let (calls, done) = start_with(&shutdown, None, 0, &cache, &[]);
-        first_refresh(&calls);
-        std::thread::sleep(Duration::from_millis(50));
+        // Requests coalesce until the worker takes one — asserted before it runs (an idle worker
+        // may take the first before a second is made).
         assert!(cache.request_refresh());
         assert!(!cache.request_refresh(), "coalesced");
+        let (calls, done) = start_with(&shutdown, None, 0, &cache, &[]);
+        first_refresh(&calls);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(calls.load(SeqCst), 1, "one refresh per coalesced request");
+        // An idle worker's request starts a refresh at once, not after the 10 s interval.
+        assert!(cache.request_refresh());
         assert!(
             calls_reach(&calls, 2, Duration::from_secs(2)),
             "request not served at once"
         );
         std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(calls.load(SeqCst), 2, "one refresh per coalesced request");
+        assert_eq!(calls.load(SeqCst), 2, "one refresh per request");
         shutdown.request();
         done.recv_timeout(Duration::from_secs(1)).unwrap();
     }

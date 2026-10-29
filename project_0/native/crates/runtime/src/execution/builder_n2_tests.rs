@@ -266,6 +266,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         hash: Hash::new_unique(),
         last_valid_block_height: 100,
         refreshed_ns: clock.now_ns(),
+        context_slot: None,
     });
     let zero = Limits {
         max_total_capital: 0,

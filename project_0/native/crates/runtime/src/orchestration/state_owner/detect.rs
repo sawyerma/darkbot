@@ -547,11 +547,21 @@ impl ShadowOwner {
         }
         // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
         // DEC-13: the mode is the controller gate's — LIVE only while LIVE is effective, which
-        // without an FE-06 authorization it never is (no FE-04 admission is handed over either).
+        // without an FE-06 authorization it never is. DEC-13b: a LIVE candidate is handed the
+        // owner's FE-04 admission (none: the pipeline stops at its send boundary).
+        let mode = crate::orchestration::capability_control::pipeline_mode(
+            self.sources.capabilities.live_requested,
+            self.sources.capabilities.fe06.as_ref(),
+        );
+        let mut admission = match mode {
+            crate::execution::pipeline::Mode::Live => {
+                let facts = self.fe04_admission_facts(&acct);
+                fe04::admission_for(&mut self.fe04_admission, &mut self.fe04_admissions, facts)
+            }
+            crate::execution::pipeline::Mode::Shadow => None,
+        };
         let mut pipe = Pipeline {
-            mode: crate::orchestration::capability_control::pipeline_mode(
-                self.sources.capabilities.live_requested,
-            ),
+            mode,
             clock: &self.clock,
             health: &engine,
             builder: &builder,
@@ -587,7 +597,7 @@ impl ShadowOwner {
             } else {
                 crate::execution::pipeline::BlockhashPark::Off
             },
-            fe04: None,
+            fe04: admission.as_mut(),
             hold: &self.hold_gate,
         };
         #[cfg(feature = "crate_health")]
@@ -637,6 +647,10 @@ impl ShadowOwner {
             identity.read_set = recorder.finish();
             self.note_readset(&identity);
             let _ = self.judge(&identity);
+        }
+        // DEC-13b: the admission comes back before anything can return early.
+        if let Some(admission) = admission {
+            self.fe04_admission_back(admission, &rec);
         }
         // MT4: Jupiter requests of this revision's evaluation (route quotes are made on
         // this thread, so the MT0 delta is this evaluation's); a revision without any is

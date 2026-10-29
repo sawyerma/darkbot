@@ -87,6 +87,9 @@ pub(super) struct OwnerCapabilities {
     /// The effective bundle path and why it is not the requested one.
     pub(super) jito_effective: &'static str,
     pub(super) jito_block: &'static str,
+    /// DEC-13: the FE-06 authorization that opens LIVE; `None` in this build (no production path
+    /// constructs one), so LIVE stays BLOCKED.
+    pub(super) fe06: Option<crate::orchestration::capability_control::Fe06Authorization>,
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
     pub(super) applied: u64,
     pub(super) refused: u64,
@@ -103,6 +106,7 @@ impl Default for OwnerCapabilities {
             jito_requested: "OFF",
             jito_effective: "OFF",
             jito_block: "",
+            fe06: None,
             last_decision: None,
             applied: 0,
             refused: 0,
@@ -461,7 +465,8 @@ impl ShadowOwner {
             (t.requested.code(), t.effective.code(), t.block)
         } else {
             let requested = self.sources.capabilities.live_requested;
-            let (effective, block_reason) = cap::live_effective(requested);
+            let (effective, block_reason) =
+                cap::live_effective(requested, self.sources.capabilities.fe06.as_ref());
             (requested, effective, block_reason)
         };
         let detail = match valid {

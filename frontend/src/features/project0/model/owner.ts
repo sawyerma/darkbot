@@ -179,6 +179,28 @@ export interface LiquidatorView {
   capabilityConfigVersion: bigint | null;
   /** DEC-13: the owner's last capability-control decision. */
   lastCapabilityDecision: { seq: bigint; request: string; applied: boolean; detail: string } | null;
+  /** DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits (never LIVE itself:
+   * that needs FE-06). */
+  admission: AdmissionView | null;
+}
+
+/** DEC-13b/DEC-02: the owner's FE-04 admission state and this run's counters. */
+export interface AdmissionView {
+  /** OFF (LIVE not effective) | WAITING (no LIVE candidate yet) | READY | BLOCKED. */
+  state: string;
+  blockReason: string;
+  submitted: bigint;
+  refused: bigint;
+  unknown: bigint;
+  lastRefusal: string;
+  simulationReused: bigint;
+  simulationResimulated: bigint;
+  simulationRefused: bigint;
+  lastReuseRefusal: string;
+  exitsSubmitted: bigint;
+  exitsRefused: bigint;
+  exitsUnknown: bigint;
+  lastExitRefusal: string;
 }
 
 /** DEC-10: status of the FE-04 approval file the runtime is configured with. */
@@ -317,4 +339,14 @@ export function ownerMonitor(
     programPin: owner?.engine?.programPin ?? null,
     programUpgradeLatched: owner?.engine?.programUpgradeLatched ?? null,
   };
+}
+
+/** DEC-13b/DEC-02: one line of the admission state and this run's attempts, handoff simulations
+ * and exits (the Liquidator tab). */
+export function admissionLine(a: AdmissionView): string {
+  const last = (reason: string) => (reason ? ` (last: ${reason})` : "");
+  return `${a.state}${a.blockReason ? ` · ${a.blockReason}` : ""}`
+    + ` · attempts ${a.submitted} submitted / ${a.refused} refused / ${a.unknown} unknown${last(a.lastRefusal)}`
+    + ` · simulations ${a.simulationReused} reused / ${a.simulationResimulated} again / ${a.simulationRefused} refused${last(a.lastReuseRefusal)}`
+    + ` · exits ${a.exitsSubmitted} submitted / ${a.exitsRefused} refused / ${a.exitsUnknown} unknown${last(a.lastExitRefusal)}`;
 }

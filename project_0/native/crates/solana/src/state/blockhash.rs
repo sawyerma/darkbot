@@ -15,6 +15,20 @@ pub struct CachedBlockhash {
     pub last_valid_block_height: u64,
     /// Monotone Zeit der Aktualisierung (Clock::now_ns) für Staleness-Prüfung.
     pub refreshed_ns: u64,
+    /// DEC-13: the slot the node answered at (`context.slot`, the bank whose blockhash this
+    /// is); `None` unknown.
+    pub context_slot: Option<u64>,
+}
+
+impl CachedBlockhash {
+    /// DEC-13: the last slot at which this blockhash is still valid. Its block is the answering
+    /// slot's, and the block height grows by at most one per slot, so it stays within
+    /// `last_valid_block_height` (its height + `MAX_PROCESSING_AGE`) for that many slots after
+    /// it. `None`: the answering slot is unknown.
+    pub fn valid_until_slot(&self) -> Option<u64> {
+        self.context_slot
+            .map(|s| s.saturating_add(solana_sdk::clock::MAX_PROCESSING_AGE as u64))
+    }
 }
 
 /// DEC-01: the cache with its generation (+1 per stored blockhash) and the owner's coalesced
@@ -70,14 +84,26 @@ impl BlockhashCache {
     }
 
     /// Einmalige Erneuerung per RPC (Poll-Thread ruft das periodisch, z. B. alle 10 s).
+    /// DEC-13: with the answering slot (`context.slot`, external JSON-RPC wire).
     pub fn refresh(&self, rpc: &RpcClient, now_ns: u64) -> Result<CachedBlockhash, String> {
-        let (hash, last_valid_block_height) = rpc
-            .get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())
+        let answer: solana_client::rpc_response::Response<
+            solana_client::rpc_response::RpcBlockhash,
+        > = rpc
+            .send(
+                solana_client::rpc_request::RpcRequest::GetLatestBlockhash,
+                serde_json::json!([CommitmentConfig::confirmed()]),
+            )
             .map_err(|e| e.to_string())?;
+        let hash = answer
+            .value
+            .blockhash
+            .parse()
+            .map_err(|_| "BLOCKHASH_DECODE".to_string())?;
         let v = CachedBlockhash {
             hash,
-            last_valid_block_height,
+            last_valid_block_height: answer.value.last_valid_block_height,
             refreshed_ns: now_ns,
+            context_slot: Some(answer.context.slot),
         };
         self.set(v);
         Ok(v)
@@ -107,6 +133,7 @@ mod tests {
             hash: Hash::default(),
             last_valid_block_height: 5,
             refreshed_ns: 100,
+            context_slot: None,
         });
         assert!(c.fresh(150, 100).is_some());
         assert!(c.fresh(300, 100).is_none());
@@ -114,6 +141,52 @@ mod tests {
 
     /// DEC-01: every stored blockhash is a new generation; refresh requests coalesce until the
     /// worker takes them, and a request unparks the registered worker.
+    /// DEC-13: a refresh keeps the slot the node answered at; the blockhash stays valid for
+    /// `MAX_PROCESSING_AGE` slots after it (unknown without that slot).
+    #[test]
+    fn dec13_a_refresh_keeps_its_answering_slot() {
+        use std::io::{Read, Write};
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let hash = Hash::new_unique();
+        let node = std::thread::spawn(move || {
+            let (mut c, _) = socket.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let n = c.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..n]).contains("getLatestBlockhash"));
+            let body = format!(
+                r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":1000}},"value":{{"blockhash":"{hash}","lastValidBlockHeight":900}}}}}}"#
+            );
+            write!(
+                c,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let cache = BlockhashCache::new();
+        let v = cache.refresh(&RpcClient::new(url), 7).unwrap();
+        node.join().unwrap();
+        assert_eq!(
+            (
+                v.hash,
+                v.last_valid_block_height,
+                v.refreshed_ns,
+                v.context_slot
+            ),
+            (hash, 900, 7, Some(1_000))
+        );
+        assert_eq!(v.valid_until_slot(), Some(1_150));
+        assert_eq!(cache.get(), Some(v));
+        assert_eq!(
+            CachedBlockhash {
+                context_slot: None,
+                ..v
+            }
+            .valid_until_slot(),
+            None
+        );
+    }
     #[test]
     fn generation_and_coalesced_refresh_requests() {
         let c = BlockhashCache::new();
@@ -122,6 +195,7 @@ mod tests {
             hash: Hash::default(),
             last_valid_block_height: 1,
             refreshed_ns: 1,
+            context_slot: None,
         };
         c.set(v);
         c.set(v);

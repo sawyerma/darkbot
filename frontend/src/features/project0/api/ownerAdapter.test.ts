@@ -3,7 +3,7 @@ import liquidatorHex from "../../../../../protocol/golden/project0/liquidator_st
 import walletsHex from "../../../../../protocol/golden/project0/wallets_state.hex?raw";
 import walletsNonLandingHex from "../../../../../protocol/golden/project0/wallets_state_non_landing.hex?raw";
 import financeHex from "../../../../../protocol/golden/project0/finance_summary.hex?raw";
-import { ownerMonitor, programPinStatus, unusableByReason } from "../model/owner";
+import { admissionLine, ownerMonitor, programPinStatus, unusableByReason } from "../model/owner";
 import {
   decodeFinanceSummary,
   decodeLiquidatorState,
@@ -61,6 +61,18 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     // DEC-10: the approval status as the engine projected it (golden: bound to another commit).
     expect(liquidator.approval).toMatchObject({ state: "BINDING_MISMATCH", reason: "code_sha", kind: "attempt",
       approvalId: "pilot-1", maxCapitalUsdMicro: 10_000_000n, allowedTargets: 1n });
+    // DEC-13b: without FE-06 the admission is OFF with LIVE's block reason, nothing admitted.
+    expect(liquidator.admission).toMatchObject({ state: "OFF", blockReason: "FE-06/P8-LT: LIVE is not authorized (B10)",
+      submitted: 0n, refused: 0n, unknown: 0n, exitsSubmitted: 0n });
+    expect(admissionLine(liquidator.admission!)).toBe("OFF · FE-06/P8-LT: LIVE is not authorized (B10)"
+      + " · attempts 0 submitted / 0 refused / 0 unknown · simulations 0 reused / 0 again / 0 refused"
+      + " · exits 0 submitted / 0 refused / 0 unknown");
+    expect(admissionLine({ ...liquidator.admission!, state: "BLOCKED", blockReason: "FE04_ATTEMPT_HELD:SUBMITTED",
+      submitted: 1n, refused: 2n, lastRefusal: "FE04_FEE_UNKNOWN", simulationReused: 1n,
+      lastReuseRefusal: "SIM_REUSE_SLOT", exitsRefused: 1n, lastExitRefusal: "EXIT_BLOCKHASH_STALE" }))
+      .toBe("BLOCKED · FE04_ATTEMPT_HELD:SUBMITTED · attempts 1 submitted / 2 refused / 0 unknown (last: FE04_FEE_UNKNOWN)"
+        + " · simulations 1 reused / 0 again / 0 refused (last: SIM_REUSE_SLOT)"
+        + " · exits 0 submitted / 1 refused / 0 unknown (last: EXIT_BLOCKHASH_STALE)");
   });
 
   it("keeps unknown finance unknown and one snapshot id across the wallet topics", () => {

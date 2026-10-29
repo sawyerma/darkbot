@@ -331,6 +331,9 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.locator(".p0-line", { hasText: "FE-04 approval" }))
     .toContainText("BINDING_MISMATCH (code_sha) · attempt pilot-1 · ZERO_PREFUND_SAME_TX");
   await expect(page.locator(".p0-line", { hasText: "FE-04 approval" })).toContainText("LIVE not authorized (FE-06)");
+  // DEC-13b: the owner's admission is OFF without FE-06 and has admitted nothing.
+  await expect(page.locator(".p0-line", { hasText: "FE-04 admission" }))
+    .toContainText("OFF · FE-06/P8-LT: LIVE is not authorized (B10) · attempts 0 submitted / 0 refused / 0 unknown");
   // DEC-01: the early blockhash refusals (loss Build, cause BLOCKHASH_STALE) and their restarts.
   await expect(page.locator(".p0-line", { hasText: "BLOCKHASH_STALE before planning" })).toContainText("6 · 1 / 4 / 1 · 2");
   // DEC-13: LIVE requested by the operator stays effective BLOCKED (FE-06); the request goes
