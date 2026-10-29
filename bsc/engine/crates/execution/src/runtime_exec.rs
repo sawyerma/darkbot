@@ -59,15 +59,37 @@ pub struct ExecSetup {
 }
 
 impl ExecSetup {
-    /// `~/` at the start of `path` is the home directory.
+    /// `~/` at the start of `path` is the real user's account home
+    /// (`sources::account_home`, BSC3-052), never another directory a
+    /// `$HOME` names: then a `~/` path is refused (an isolated run names an
+    /// absolute path).
     pub fn expand_home(path: &str) -> Result<PathBuf, String> {
-        match path.strip_prefix("~/") {
-            Some(rest) => std::env::var_os("HOME")
-                .map(|home| PathBuf::from(home).join(rest))
-                .ok_or_else(|| "BSC_EXEC_PAPER_IDENTITY: HOME is not set".to_string()),
-            None => Ok(PathBuf::from(path)),
-        }
+        expand_home_in(
+            path,
+            crate::sources::account_home(),
+            std::env::var_os("HOME"),
+        )
     }
+}
+
+fn expand_home_in(
+    path: &str,
+    account: Result<PathBuf, String>,
+    env_home: Option<std::ffi::OsString>,
+) -> Result<PathBuf, String> {
+    let Some(rest) = path.strip_prefix("~/") else {
+        return Ok(PathBuf::from(path));
+    };
+    let home = account.map_err(|e| format!("{path}: {e}"))?;
+    if let Some(h) = env_home.filter(|h| !h.is_empty())
+        && Path::new(&h) != home
+    {
+        return Err(format!(
+            "{path}: HOME is not the account home {}: name an absolute path",
+            home.display()
+        ));
+    }
+    Ok(home.join(rest))
 }
 
 /// One read-only probe of the live deployment, venue terms and caller
@@ -1451,5 +1473,28 @@ pub(crate) mod tests {
         assert_eq!((intents, acted), (1, 1));
         exec.unwrap().shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-052: `~/` is the account home, also with `$HOME` unset; a
+    /// `$HOME` naming another directory refuses it; an absolute path stays.
+    #[test]
+    fn home_is_the_account_home_or_refused() {
+        let account = || Ok(PathBuf::from("/Users/bsc"));
+        let at = |h: &str| Some(std::ffi::OsString::from(h));
+        assert_eq!(
+            expand_home_in("~/k/buyer.key", account(), at("/Users/bsc")),
+            Ok(PathBuf::from("/Users/bsc/k/buyer.key"))
+        );
+        assert_eq!(
+            expand_home_in("~/k/buyer.key", account(), None),
+            Ok(PathBuf::from("/Users/bsc/k/buyer.key"))
+        );
+        let e = expand_home_in("~/k/buyer.key", account(), at("/tmp/other")).unwrap_err();
+        assert!(e.contains("not the account home"), "{e}");
+        assert_eq!(
+            expand_home_in("/tmp/run/buyer.key", account(), at("/tmp/other")),
+            Ok(PathBuf::from("/tmp/run/buyer.key"))
+        );
+        assert!(expand_home_in("~/k", Err("no account".into()), None).is_err());
     }
 }

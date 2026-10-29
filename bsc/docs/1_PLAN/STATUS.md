@@ -33,9 +33,12 @@
 | BSC3-003 | FIX_VERIFIED | `8d5167f3` | – |
 | BSC3-004 | FIX_VERIFIED | `8d5167f3` | – |
 | BSC3-006 | FIX_VERIFIED | `8d5167f3` | – |
-| BSC3-007 | FIX_VERIFIED | dieser Commit | – |
-| BSC3-026 | TEILWEISE (LOOPBACK nie auf dem Konto-Owner-State) | dieser Commit | getrennter Test-Key bleibt Betreiberkonfiguration |
-| BSC3-066 | TEILWEISE (Paritätstest G0.7/LIVE-Framing) | dieser Commit | Adapter-Evidence → BSC3-049 |
+| BSC3-007 | FIX_VERIFIED | `5c09e330` | – |
+| BSC3-026 | TEILWEISE (LOOPBACK nie auf dem Konto-Owner-State) | `5c09e330` | getrennter Test-Key bleibt Betreiberkonfiguration |
+| BSC3-066 | TEILWEISE (Paritätstest G0.7/LIVE-Framing) | `5c09e330` | Adapter-Evidence → BSC3-049 |
+| BSC3-022 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-052 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-070 | FIX_VERIFIED | dieser Commit | – |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

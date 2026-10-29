@@ -81,6 +81,41 @@ impl Binding {
     }
 }
 
+/// The system Git (BSC3-070): root's binary on a way only root can change,
+/// never the first `git` of `PATH` another program of the account may put
+/// there.
+pub const SYSTEM_GIT: &str = "/usr/bin/git";
+
+#[cfg(test)]
+thread_local! {
+    /// Tests of other behaviour run stand-in `git` scripts (failing pushes,
+    /// held output); set only by them, never in a build without tests.
+    static STAND_IN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `program` (as resolved) and every directory on its way belong to root
+/// and nobody else may write them.
+fn trusted_program(program: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    #[cfg(test)]
+    if STAND_IN.with(|s| s.get()) {
+        return Ok(());
+    }
+    let real =
+        std::fs::canonicalize(program).map_err(|e| format!("git {}: {e}", program.display()))?;
+    for a in real.ancestors() {
+        let m = std::fs::metadata(a).map_err(|e| format!("git {}: {e}", a.display()))?;
+        if m.uid() != 0 || m.mode() & 0o022 != 0 {
+            return Err(format!(
+                "git {}: {} is not root's alone",
+                program.display(),
+                a.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// `git -C <repo>` against one remote, as a bounded child process.
 pub struct Git {
     pub program: PathBuf,
@@ -93,7 +128,7 @@ impl Git {
     /// `repo` and its `remote`, 30 s per Git call.
     pub fn new(repo: impl Into<PathBuf>, remote: &str) -> Self {
         Self {
-            program: PathBuf::from("git"),
+            program: PathBuf::from(SYSTEM_GIT),
             repo: repo.into(),
             remote: remote.into(),
             timeout: Duration::from_secs(30),
@@ -107,11 +142,15 @@ impl Git {
 
     fn run(&self, args: &[&str], stdin: &[u8]) -> Result<String, String> {
         use std::os::unix::process::CommandExt;
+        trusted_program(&self.program)?;
         let mut cmd = Command::new(&self.program);
         // Its own process group: a timeout kills git and every helper.
         cmd.process_group(0);
         cmd.env_clear();
-        for name in ["PATH", "HOME", "SSH_AUTH_SOCK"] {
+        // BSC3-070 review: Git's helpers (ssh) from the system's paths
+        // only, never an account directory first in the caller's PATH.
+        cmd.env("PATH", "/usr/bin:/bin");
+        for name in ["HOME", "SSH_AUTH_SOCK"] {
             if let Some(value) = std::env::var_os(name) {
                 cmd.env(name, value);
             }
@@ -212,8 +251,56 @@ impl Git {
         Ok(id.trim().to_string())
     }
 
+    /// The remote is reached exactly as configured (BSC3-070): no
+    /// configuration Git reads (system, global, the checkout's) rewrites its
+    /// URL (`url.*.insteadOf`/`pushInsteadOf`), names an own SSH command or
+    /// a separate push URL. Checked before every remote operation.
+    fn endpoint(&self) -> Result<(), String> {
+        let config = self.run(&["config", "--list"], b"")?;
+        let remote = self.remote.to_ascii_lowercase();
+        let entries: Vec<(String, &str)> = config
+            .lines()
+            .map(|l| match l.split_once('=') {
+                Some((k, v)) => (k.to_ascii_lowercase(), v),
+                None => (l.to_ascii_lowercase(), ""),
+            })
+            .collect();
+        // The remote's URL as configured (a remote given as a URL is one).
+        let url = entries
+            .iter()
+            .find(|(k, _)| *k == format!("remote.{remote}.url"))
+            .map_or(self.remote.as_str(), |(_, v)| *v);
+        for (key, value) in &entries {
+            // A rewrite counts when it applies to this remote's URL.
+            let rewrites = key.starts_with("url.")
+                && (key.ends_with(".insteadof") || key.ends_with(".pushinsteadof"))
+                && !value.is_empty()
+                && url.starts_with(value);
+            let http = key.starts_with("http.") || key.starts_with("https.");
+            let transport = key == "core.sshcommand"
+                || *key == format!("remote.{remote}.pushurl")
+                || (http
+                    && (key.ends_with(".proxy")
+                        || key.ends_with(".sslcainfo")
+                        || key.ends_with(".sslcapath")
+                        || (key.ends_with(".sslverify")
+                            && matches!(
+                                value.to_ascii_lowercase().as_str(),
+                                "false" | "0" | "no" | "off"
+                            ))));
+            if rewrites || transport {
+                return Err(format!(
+                    "the remote {} is redirected by `{key}`: refused",
+                    self.remote
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The remote's commit for `reference`, `None` when it does not exist.
     fn remote_head(&self, reference: &str) -> Result<Option<String>, String> {
+        self.endpoint()?;
         let out = self.run(&["ls-remote", "--refs", &self.remote, reference], b"")?;
         let mut heads = out.lines().filter_map(|l| {
             l.split_once('\t')
@@ -253,6 +340,7 @@ impl Git {
         refspec: &str,
         accepted: &[char],
     ) -> Result<(), String> {
+        self.endpoint()?;
         let lease = format!("--force-with-lease={reference}:{expected}");
         let out = self.run(&["push", "--porcelain", &lease, &self.remote, refspec], b"")?;
         let flag = out.lines().find_map(|l| {
@@ -663,6 +751,61 @@ mod tests {
         base.join("no-attempt-dir").join("RELEASED")
     }
 
+    /// BSC3-070: the authority runs only the system Git, and never against
+    /// a remote a configuration redirects (URL rewriting, an own SSH
+    /// command, a separate push URL): BLOCKED, the remote untouched.
+    #[test]
+    fn a_redirected_remote_or_another_git_is_refused() {
+        let (base, gits) = remote("redirect", 1);
+        let git = &gits[0];
+        let b = binding(1);
+        assert_eq!(state(git, &b).unwrap(), State::Missing);
+        let decoy = base.join("decoy.git");
+        let config = |args: &[&str]| {
+            let mut all = vec!["config"];
+            all.extend_from_slice(args);
+            git.run(&all, b"").unwrap();
+        };
+        for (key, value) in [
+            (
+                format!("url.{}.insteadOf", decoy.display()),
+                base.join("origin.git").display().to_string(),
+            ),
+            (
+                format!("url.{}.pushInsteadOf", decoy.display()),
+                base.join("origin.git").display().to_string(),
+            ),
+            ("core.sshCommand".to_string(), "/bin/false".to_string()),
+            (
+                "remote.origin.pushurl".to_string(),
+                decoy.display().to_string(),
+            ),
+            ("http.proxy".to_string(), "http://127.0.0.1:9".to_string()),
+            ("http.sslVerify".to_string(), "false".to_string()),
+        ] {
+            config(&[&key, &value]);
+            let e = grant(git, &b).unwrap_err();
+            assert!(e.contains("redirected"), "{key}: {e}");
+            config(&["--unset", &key]);
+        }
+        // A `git` that is not root's alone (a copy the account owns).
+        let own = base.join("git");
+        std::fs::copy(SYSTEM_GIT, &own).unwrap();
+        let other = Git {
+            program: own,
+            ..Git::new(base.join("checkout0"), "origin")
+        };
+        assert!(state(&other, &b).unwrap_err().contains("not root's alone"));
+        // A rewrite of other URLs (a common GitHub one) leaves this remote
+        // as configured: granted.
+        config(&[
+            "url.git@example.invalid:.insteadOf",
+            "https://example.invalid/",
+        ]);
+        grant(git, &b).unwrap();
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
     #[test]
     fn only_one_checkout_or_host_ever_consumes_a_granted_authority() {
         let (base, git) = remote("once", 3);
@@ -764,6 +907,7 @@ mod tests {
     /// returned, not landed stays consumed; it is never guessed.
     #[test]
     fn a_failed_return_push_is_settled_by_what_the_remote_holds() {
+        STAND_IN.with(|s| s.set(true));
         let (base, git) = remote("unclear", 1);
         let b = binding(9);
         grant(&git[0], &b).unwrap();
@@ -921,6 +1065,7 @@ mod tests {
     /// ends at the deadline, the whole process group killed.
     #[test]
     fn a_git_child_holding_its_output_open_ends_at_the_deadline() {
+        STAND_IN.with(|s| s.set(true));
         let dir = std::env::temp_dir().join(format!("g07-authority-hang-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
