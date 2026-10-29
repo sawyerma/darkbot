@@ -1505,11 +1505,14 @@ pub mod runtime_status {
     /// failed) and when the last one was written.
     pub const CENSUS_STATE: u16 = 18;
     pub const CENSUS_WRITTEN_UNIX_MS: u16 = 19;
+    /// v23 (BSC3-015): wall-clock reads that failed in this process (each
+    /// counted as expired time).
+    pub const CLOCK_UNREADABLE: u16 = 20;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 22,
+        schema_version: 23,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -1539,6 +1542,7 @@ pub mod runtime_status {
             Field::nested(LIVE, "live", Presence::Optional, &live::SCHEMA),
             Field::opt(CENSUS_STATE, "census_state", Text),
             Field::opt(CENSUS_WRITTEN_UNIX_MS, "census_written_unix_ms", U64),
+            Field::opt(CLOCK_UNREADABLE, "clock_unreadable", U64),
         ],
     };
 }

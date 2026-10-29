@@ -686,11 +686,13 @@ fn strategy_to_paper(
     }
     // Gate L-a: the head's age against the wall clock now; unreadable, every
     // head is too old.
-    let now_unix_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| u64::try_from(d.as_millis()).ok())
-        .unwrap_or(u64::MAX);
+    let now_unix_ms = wall_or_expired(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| u64::try_from(d.as_millis()).ok())
+            .ok_or_else(|| "wall clock before 1970".to_string()),
+    );
     let clk = FnClock {
         id: CLOCK_ID_MONOTONIC,
         now: || clock.now_ns(),
@@ -1597,6 +1599,30 @@ pub fn write_census(
     Ok(census)
 }
 
+/// Wall-clock reads that failed in this process (BSC3-015): each one
+/// counted as expired time (`u64::MAX`: every grant expired, every head too
+/// old), shown in the status, never silent.
+static CLOCK_UNREADABLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The wall clock now (ms), or expired time when it cannot be read
+/// (counted, [`CLOCK_UNREADABLE`]).
+pub(crate) fn wall_or_expired(read: Result<u64, String>) -> u64 {
+    read.unwrap_or_else(|_| {
+        count_unreadable_clock();
+        u64::MAX
+    })
+}
+
+/// Counts one failed wall-clock read ([`CLOCK_UNREADABLE`]).
+pub(crate) fn count_unreadable_clock() {
+    CLOCK_UNREADABLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The failed wall-clock reads of this process so far.
+pub(crate) fn unreadable_clock_reads() -> u64 {
+    CLOCK_UNREADABLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The last G0.4 census refresh of this run (BSC3-016): `OK` or why it
 /// failed, and when the last one was written.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1662,6 +1688,7 @@ fn status_bytes(
     if let Some(state) = &census.state {
         d.set(rs::CENSUS_STATE, state.as_str());
     }
+    d.set(rs::CLOCK_UNREADABLE, unreadable_clock_reads());
     if let Some(ms) = census.written_unix_ms {
         d.set(rs::CENSUS_WRITTEN_UNIX_MS, ms);
     }
@@ -1919,7 +1946,7 @@ pub fn run(
                 generation = store.current()?;
                 // Plan 28.10.: what the owner's LIVE gate makes effective
                 // now; a requested LIVE runs only while it is clear.
-                let now_ms = observed_now().unwrap_or(u64::MAX);
+                let now_ms = wall_or_expired(observed_now());
                 let live_view =
                     LiveView::read(&generation, sources_dir, repo_root, live.is_some(), now_ms);
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
@@ -2799,9 +2826,6 @@ mod tests {
         fs::remove_dir_all(&base).unwrap();
     }
 
-    /// The follower's events, joined with the sightings, reach the status
-    /// counters, the journal and the census alike; a reorg takes its
-    /// launches out of all three.
     /// BSC3-014/038/016: a canonical launch of a block that is not the last
     /// one reported is counted and journaled as received (the census shows
     /// it unjoined), never joined; Four.meme launches are counted by
@@ -2905,6 +2929,11 @@ mod tests {
         .unwrap();
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
         assert_eq!(r.text(rs::CENSUS_STATE).unwrap(), "OK");
+        // BSC3-015: an unreadable clock is expired time, and counted.
+        let before = r.u64(rs::CLOCK_UNREADABLE).unwrap();
+        assert_eq!(wall_or_expired(Err("no clock".into())), u64::MAX);
+        assert_eq!(wall_or_expired(Ok(7)), 7);
+        assert!(CLOCK_UNREADABLE.load(std::sync::atomic::Ordering::Relaxed) > before);
         assert_eq!(r.u64(rs::CENSUS_WRITTEN_UNIX_MS).unwrap(), 42);
         let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
         assert_eq!(k.u64(rs::canonical::LAUNCH_HEAD_MISSING).unwrap(), 1);
@@ -2915,6 +2944,9 @@ mod tests {
         fs::remove_dir_all(base).unwrap();
     }
 
+    /// The follower's events, joined with the sightings, reach the status
+    /// counters, the journal and the census alike; a reorg takes its
+    /// launches out of all three.
     #[test]
     fn canonical_events_join_into_status_journal_and_census() {
         use crate::chain_follower::{CanonicalLaunch, Venue};

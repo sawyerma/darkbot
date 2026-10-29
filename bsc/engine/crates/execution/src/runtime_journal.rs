@@ -750,10 +750,22 @@ pub struct RuntimeJournal {
     ingress_dropped: u64,
 }
 
-fn now_ms() -> u64 {
+#[cfg(test)]
+thread_local! {
+    /// Tests: the wall clock reads as unreadable.
+    static CLOCK_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The wall clock now (unix ms), or why it cannot be read.
+fn now_ms() -> Result<u64, String> {
+    #[cfg(test)]
+    if CLOCK_FAILS.with(std::cell::Cell::get) {
+        return Err("the clock is before the epoch".into());
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .map_err(|e| e.to_string())
 }
 
 impl RuntimeJournal {
@@ -927,14 +939,21 @@ impl RuntimeJournal {
                 self.ingress_dropped
             ));
         }
+        // BSC3-015: an unreadable clock leaves the run's end unknown (0):
+        // counted and named, the run incomplete, never silent.
+        let ended = now_ms().unwrap_or_else(|e| {
+            crate::runtime::count_unreadable_clock();
+            reasons.push(format!("the wall clock was unreadable at the end: {e}"));
+            0
+        });
         let complete = reasons.is_empty();
         let mut d = Draft::new(&cr::V3);
         d.set(cr::RUN_ID, self.started_ms.to_string())
             .set(cr::CHAIN_ID, 56u64)
             .set(cr::PROVENANCE_TOOL, "bsc_runtime")
-            .set(cr::PROVENANCE_OBSERVED_UNIX_MS, now_ms())
+            .set(cr::PROVENANCE_OBSERVED_UNIX_MS, ended)
             .set(cr::STARTED_UNIX_MS, self.started_ms)
-            .set(cr::ENDED_UNIX_MS, now_ms())
+            .set(cr::ENDED_UNIX_MS, ended)
             .set(cr::CLOCK_ID, self.clock_id)
             .set(cr::BUDGET_BYTES, self.setup.budget_bytes as u64)
             .set(cr::QUEUE_RECORDS, self.setup.queue as u64)
@@ -1324,6 +1343,36 @@ mod tests {
         assert_eq!(
             m.texts(cr::REASONS).unwrap(),
             ["3 source events dropped by the ingress queue before the journal"]
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-015: a wall clock unreadable at the run's end makes the run
+    /// INCOMPLETE, named in its manifest and counted (its end unknown: 0).
+    #[test]
+    fn an_unreadable_clock_at_the_end_makes_the_run_incomplete() {
+        let dir =
+            std::env::temp_dir().join(format!("bsc-runtime-journal-c-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let j = RuntimeJournal::open(&dir, 1, 1, JournalSetup::whole(8, 64)).unwrap();
+        let path = j.path().to_path_buf();
+        let before = crate::runtime::unreadable_clock_reads();
+        CLOCK_FAILS.with(|c| c.set(true));
+        let finished = j.finish();
+        CLOCK_FAILS.with(|c| c.set(false));
+        assert!(!finished.unwrap().complete);
+        assert!(crate::runtime::unreadable_clock_reads() > before);
+        let m = cr::decode_run(&fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(
+            (
+                m.text(cr::STATE).unwrap(),
+                m.u64(cr::ENDED_UNIX_MS).unwrap()
+            ),
+            ("INCOMPLETE", 0)
+        );
+        assert_eq!(
+            m.texts(cr::REASONS).unwrap(),
+            ["the wall clock was unreadable at the end: the clock is before the epoch"]
         );
         fs::remove_dir_all(&dir).unwrap();
     }

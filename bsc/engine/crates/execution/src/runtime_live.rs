@@ -234,8 +234,8 @@ fn token_from(path: &Path) -> Result<AuthorizationToken, String> {
 }
 
 fn wall_ms() -> u64 {
-    // Unreadable: every grant counts as expired.
-    darkbot_bsc_record::observed_now().unwrap_or(u64::MAX)
+    // Unreadable: every grant counts as expired (BSC3-015: counted).
+    crate::runtime::wall_or_expired(darkbot_bsc_record::observed_now())
 }
 
 /// Whether an armed path is renewed at the buyer's free nonce `free`

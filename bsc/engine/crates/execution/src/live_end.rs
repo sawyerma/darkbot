@@ -658,7 +658,9 @@ impl End for LiveEnd {
         ) else {
             return self.refuse(Refusal::Plan, "the budget exceeds 128 bits".into());
         };
-        let id: String = tx_hash.iter().map(|b| format!("{b:02x}")).collect();
+        // BSC3-031: one allocation (was one `format!` per byte), the same
+        // lowercase hex.
+        let id = alloy_primitives::hex::encode(tx_hash);
         let mut qualifications = TransportQualifications::default();
         let mut transports = Vec::with_capacity(self.slots.len());
         let mut unqualified = None;
@@ -1034,6 +1036,22 @@ pub(crate) mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// BSC3-031: the request id the release writes is the lowercase hex of
+    /// the transaction hash, byte for byte as before (one allocation now,
+    /// measured: see the commit).
+    #[test]
+    fn the_request_id_is_the_hash_in_lowercase_hex() {
+        for hash in [[0u8; 32], [0xff; 32], {
+            let mut h = [0u8; 32];
+            for (i, b) in h.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_mul(37);
+            }
+            h
+        }] {
+            assert_eq!(alloy_primitives::hex::encode(hash), hex(&hash));
+        }
     }
 
     /// Plan 28.10.: under an effective LIVE the one executor's C3 BUY leaves

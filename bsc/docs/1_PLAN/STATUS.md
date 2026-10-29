@@ -50,6 +50,9 @@
 | BSC3-044 | WIDERLEGT (nur Benennung) | – | – |
 | BSC3-059 | WIDERLEGT (kein Planverstoß) | – | Grant-Höchstdauer: Betreiberentscheidung |
 | BSC3-060 | KEIN FEHLER | – | – |
+| BSC3-037 | TEILWEISE (Creator-Nachkäufe = Teilmenge von external_buys: eigener Absender oder Launch-Absender, je Log, nach Blockhash) | dieser Commit | Qualifikation an realem Tx-/Log-Beispiel fehlt |
+| BSC3-015 | FIX_VERIFIED | dieser Commit | – |
+| BSC3-031 | FIX_VERIFIED (lokale Einzeloperation 1,1 µs → 40 ns, keine E2E-Latenz) | dieser Commit | – |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

@@ -104,6 +104,12 @@ pub struct Census {
     /// BSC3-064: the windows' observable time ([`Window::observable_ms`]):
     /// not the run time `covered_ms` counts.
     pub observable_ms: u64,
+    /// BSC3-037: of `external_buys` (a Flap launch's buys in its block
+    /// after the launch transaction), those its creator's own account sent:
+    /// from the creator word or from the launch transaction's sender (a
+    /// launcher contract's creator word sends none). They stay in
+    /// `external_buys` and the placement (a real competitor at N+1).
+    pub creator_buys_after: u64,
     pub flap_launches: u64,
     pub four_launches: u64,
     pub orphaned_launches: u64,
@@ -437,6 +443,8 @@ impl Connectivity {
 
 /// Flap BUYs by (block hash, token): (tx index, tx hash).
 type BlockBuys = HashMap<([u8; 32], [u8; 20]), Vec<(u64, [u8; 32])>>;
+/// BSC3-037: each Flap BUY's (index, log, sender), by block and token.
+type BlockSenders = HashMap<([u8; 32], [u8; 20]), Vec<(u64, u64, [u8; 20])>>;
 
 /// What one journal contributes.
 struct Replay {
@@ -453,6 +461,8 @@ struct Replay {
     buys: BlockBuys,
     /// Blocks whose trades are incomplete (`W`).
     trade_gap_blocks: HashSet<[u8; 32]>,
+    /// BSC3-037: of the launches' external buys, their creators' own.
+    creator_buys_after: u64,
 }
 
 /// One journal: a single file of an older build or a segmented run.
@@ -542,6 +552,10 @@ fn replay(
     let mut later_lags_ns: Vec<u64> = Vec::new();
     let mut buys: BlockBuys = HashMap::new();
     let mut trade_gap_blocks: HashSet<[u8; 32]> = HashSet::new();
+    // BSC3-037: each Flap launch's creator word (`N`), by token, and every
+    // buy (`T`) by block and token: (index, log, sender).
+    let mut creators: HashMap<[u8; 20], [u8; 20]> = HashMap::new();
+    let mut senders: BlockSenders = HashMap::new();
     // Reverted launch calls (`V`), by block and transaction.
     let mut reverted: HashMap<([u8; 32], [u8; 32]), Venue> = HashMap::new();
     // Every journaled launch sighting (`RawSignedTx`), by transaction hash.
@@ -690,6 +704,11 @@ fn replay(
                     buys.entry((t.block_hash, t.token))
                         .or_default()
                         .push((t.tx_index, t.tx_hash));
+                    senders.entry((t.block_hash, t.token)).or_default().push((
+                        t.tx_index,
+                        t.log_index,
+                        t.origin,
+                    ));
                 }
             }
             (RecordKind::Canonical, Some(b'W')) if p.len() == 57 => {
@@ -705,7 +724,16 @@ fn replay(
             (RecordKind::Canonical, Some(b'B'))
                 if p.len() == crate::runtime_strategy::BLOCK_LEN => {}
             (RecordKind::Canonical, Some(b'N'))
-                if p.len() == crate::runtime_strategy::LAUNCH_LEN => {}
+                if p.len() == crate::runtime_strategy::LAUNCH_LEN =>
+            {
+                let a20 =
+                    |from: usize| -> Option<[u8; 20]> { p.get(from..from + 20)?.try_into().ok() };
+                if let (Some(_), Some(_), Some(token), Some(creator)) =
+                    (u64_at(p, 1), u64_at(p, 9), a20(17), a20(37))
+                {
+                    creators.insert(token, creator);
+                }
+            }
             (RecordKind::Canonical, Some(b'I')) if p.len() == 9 => {}
             (RecordKind::Canonical, Some(tag @ (b'H' | b'E' | b'K'))) if p.len() == 41 => {
                 let number = u64_at(p, 1);
@@ -804,6 +832,29 @@ fn replay(
     } else {
         reverted.into_values().collect()
     };
+    // BSC3-037: per canonical Flap launch with its buys known, its block's
+    // later buys of its token whose sender is the creator word or the launch
+    // transaction's own sender (its creator purchase names it), each log
+    // once. Joined by the block hash: an orphaned launch is out, one
+    // included again counts in its new block.
+    let creator_buys_after = launches
+        .iter()
+        .filter(|l| l.venue == Venue::Flap && l.external_buys.is_some())
+        .filter_map(|l| {
+            let (token, index) = (l.token?, l.tx_index?);
+            let buys = senders.get(&(l.block_hash, token))?;
+            let creator = creators.get(&token);
+            let launcher = buys.iter().find(|b| b.0 == index).map(|b| &b.2);
+            let own: HashSet<(u64, u64)> = buys
+                .iter()
+                .filter(|(at, _, from)| {
+                    *at > index && (Some(from) == creator || Some(from) == launcher)
+                })
+                .map(|(at, log, _)| (*at, *log))
+                .collect();
+            Some(own.len() as u64)
+        })
+        .sum();
     Ok(Replay {
         window,
         launches,
@@ -813,6 +864,7 @@ fn replay(
         later_lags_ns,
         buys,
         trade_gap_blocks,
+        creator_buys_after,
     })
 }
 
@@ -895,6 +947,7 @@ fn census_of(
             out.observable_ms = out
                 .observable_ms
                 .saturating_add(r.window.observable_ms.unwrap_or(0));
+            out.creator_buys_after = out.creator_buys_after.saturating_add(r.creator_buys_after);
             out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
             out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
             out.unparsed_records = out
@@ -1110,6 +1163,7 @@ impl Census {
             .set(cs::PROVENANCE_OBSERVED_UNIX_MS, observed_unix_ms)
             .set(cs::COVERED_MS, self.covered_ms)
             .set(cs::OBSERVABLE_MS, self.observable_ms)
+            .set(cs::CREATOR_BUYS_AFTER, self.creator_buys_after)
             .set(cs::FLAP_LAUNCHES, self.flap_launches)
             .set(cs::FOUR_LAUNCHES, self.four_launches)
             .set(cs::FOUR_DERIVED, self.four_derived)
@@ -1205,7 +1259,7 @@ impl Census {
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
-             contested={} external_buys={} buys_unknown={} criteria={}\n\
+             contested={} external_buys={} (creator later {}) buys_unknown={} criteria={}\n\
              first external BUY in the launch block: at N+1 {} (seen in full before the block {}) later {} unknown {}\n",
             self.covered_ms,
             self.windows.len(),
@@ -1251,6 +1305,7 @@ impl Census {
             self.clock_suspect,
             self.contested_launches,
             self.external_buys,
+            self.creator_buys_after,
             self.buys_unknown,
             CRITERIA_UNCONFIRMED,
             self.adjacent_buy_launches,
@@ -2287,12 +2342,24 @@ mod tests {
             buy(10, 8, 63, [1; 20], false),
             joined(10, 1, 5, Some([1; 20]), true),
             // Block 11: launch at 3, its own creator purchase (same tx), the
-            // first external BUY at 7: later.
+            // first external BUY at 7: later. BSC3-037: the creator buys
+            // again at 9: an external BUY, also counted apart.
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_strategy::flap_launch_payload(11, 3, &[2; 20], &[2; 20]),
+            ),
             buy(11, 3, 2, [2; 20], false),
             buy(11, 4, 64, [2; 20], true),
             buy(11, 7, 65, [2; 20], false),
+            buy(11, 9, 2, [2; 20], false),
             joined(11, 2, 3, Some([2; 20]), false),
             // Block 12: only the creator purchase: none.
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_strategy::flap_launch_payload(12, 0, &[3; 20], &[4; 20]),
+            ),
             buy(12, 0, 4, [3; 20], false),
             joined(12, 4, 0, Some([3; 20]), false),
             // Block 13: trades incomplete; block 14: token unknown.
@@ -2324,10 +2391,141 @@ mod tests {
         );
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::ADJACENT_BUY_LAUNCHES).unwrap(), 1);
+        assert_eq!(c.creator_buys_after, 1);
+        assert_eq!(record.u64(cs::CREATOR_BUYS_AFTER).unwrap(), 1);
+        assert!(c.summary().contains("(creator later 1)"));
         assert!(
             c.summary()
                 .contains("at N+1 1 (seen in full before the block 1) later 1 unknown 2")
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-037: the creator's later buys are those of `external_buys`
+    /// (its launch block, after the launch transaction) its own account
+    /// sent: the creator word as sender, or the launch transaction's sender
+    /// when the creator word is a launcher contract. Not another sender
+    /// routed through that contract, nor a foreign buyer, a later block, a
+    /// launch whose buys are not known or one whose block left the chain;
+    /// a re-included launch counts once, in its new block; each log once.
+    #[test]
+    fn the_creator_buys_after_are_its_own_buys_of_external_buys() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-creator-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (launcher, sender, other, foreign) = ([0xc0; 20], [0xe0; 20], [0xf1; 20], [0xf2; 20]);
+        let joined =
+            |hash: u8, number: u8, tx: u8, index: u64, token: [u8; 20], buys: Option<u32>| {
+                let mut l = launch(Venue::Flap, number, tx, buys, 100);
+                l.block_hash = [hash; 32];
+                l.tx_index = index;
+                l.token = Some(token);
+                (
+                    RecordKind::Canonical,
+                    100,
+                    canonical_launch_payload(&Joined {
+                        launch: l,
+                        visibility: Visibility::Missed,
+                    }),
+                )
+            };
+        let creator = |number: u8, index: u64, token: [u8; 20], word: [u8; 20]| {
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_strategy::flap_launch_payload(
+                    u64::from(number),
+                    index,
+                    &token,
+                    &word,
+                ),
+            )
+        };
+        let buy = |hash: u8,
+                   number: u8,
+                   index: u64,
+                   log: u64,
+                   token: [u8; 20],
+                   origin: [u8; 20],
+                   trader: [u8; 20]| {
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_journal::flap_trade_payload(
+                    &crate::chain_follower::CanonicalTrade {
+                        block_number: u64::from(number),
+                        block_hash: [hash; 32],
+                        tx_index: index,
+                        tx_hash: [index as u8; 32],
+                        log_index: log,
+                        origin,
+                        sell: false,
+                        token,
+                        trader,
+                        amount: [1; 32],
+                        eth: [1; 32],
+                        fee: [0; 32],
+                        post_price: [1; 32],
+                    },
+                ),
+            )
+        };
+        let (a, b, c) = ([0xa1; 20], [0xb1; 20], [0xc1; 20]);
+        let records = vec![
+            (
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 20, &[20; 32]),
+            ),
+            // Block 20: a launcher contract's launch at 2 for the sender
+            // (its creator purchase names the sender); the sender buys
+            // again at 5 (two logs, one journaled twice); another sender
+            // through the launcher at 6; a foreign buyer at 7.
+            creator(20, 2, a, launcher),
+            buy(20, 20, 2, 0, a, sender, launcher),
+            buy(20, 20, 5, 0, a, sender, launcher),
+            buy(20, 20, 5, 1, a, sender, sender),
+            buy(20, 20, 5, 1, a, sender, sender),
+            buy(20, 20, 6, 0, a, other, launcher),
+            buy(20, 20, 7, 0, a, foreign, foreign),
+            joined(20, 20, 1, 2, a, Some(4)),
+            // The creator buys again in block 21: not of `external_buys`.
+            buy(21, 21, 0, 0, a, sender, sender),
+            // Block 30 (hash 30): a direct launch at 1, its creator buys at
+            // 4; the block leaves the chain, its replacement (hash 31)
+            // includes the launch again at 1 and the creator's buy at 3.
+            creator(30, 1, b, sender),
+            buy(30, 30, 4, 0, b, sender, sender),
+            joined(30, 30, 2, 1, b, Some(1)),
+            (
+                RecordKind::Canonical,
+                200,
+                crate::runtime_journal::launch_id_payload(
+                    b'O',
+                    Venue::Flap,
+                    30,
+                    &[30; 32],
+                    &[2; 32],
+                ),
+            ),
+            creator(30, 1, b, sender),
+            buy(31, 30, 3, 0, b, sender, sender),
+            joined(31, 30, 2, 1, b, Some(1)),
+            // Block 40: a malformed buy log voided the count: unknown.
+            creator(40, 0, c, sender),
+            buy(40, 40, 3, 0, c, sender, sender),
+            joined(40, 40, 3, 0, c, None),
+            (
+                RecordKind::Canonical,
+                500,
+                window_payload(b'E', 40, &[40; 32]),
+            ),
+            (RecordKind::Runtime, 501, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        // Block 20: the sender's two logs at 5; block 31: one.
+        assert_eq!(c.creator_buys_after, 3);
+        assert!(c.creator_buys_after <= c.external_buys);
         fs::remove_dir_all(&dir).unwrap();
     }
 
