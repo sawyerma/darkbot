@@ -52,6 +52,8 @@ export async function ownerCommand(origin: string, action: OwnerAction, id: stri
 export interface LiveGrantScope {
   venue: string; strategies: string; sources: string[]; adapters: string[];
   maxInputWei: string; maxSpendWei: string; maxAttempts: number; expiresUnixMs: bigint;
+  /** BSC3-058: the exits of open positions alone, no BUY (a separate authorization). */
+  exitOnly: boolean;
 }
 /** `bsc.live.grant`: the confirmed scope with the SHA-256 of its canonical text the operator was
  *  shown, at the owner generation; the native owner recomputes the digest. */

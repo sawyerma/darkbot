@@ -325,7 +325,7 @@ message BscWalletsState {
 // them; LIVE is effective only while every one holds.
 message LivePrecondition {
   // Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE,
-  // BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, VENUE_QUALIFIED,
+  // BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, VENUE_QUALIFIED,
   // SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION.
   string id = 1;
   // Whether the condition holds now.
@@ -359,6 +359,8 @@ message LiveGrant {
   string request_id = 11;
   // The owner generation that request wrote.
   uint64 set_generation = 12;
+  // The grant admits the exits of open positions only, no BUY (BSC3-058).
+  bool exit_only = 13;
 }
 // One LIVE position of the ledger: its BUY, exit and native result.
 message LivePosition {
@@ -378,6 +380,8 @@ message LivePosition {
   string gas_wei = 7;
   // Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei.
   optional string pnl_wei = 8;
+  // The lot: its BUY's transaction hash, 0x hex (a token bought again is another lot).
+  string lot = 9;
 }
 // One LIVE transaction whose bytes may have left, and what the chain made of it.
 message LiveTransaction {
@@ -476,4 +480,6 @@ message BscLiveGrantCommand {
   uint64 expires_unix_ms = 8;
   // SHA-256 of the canonical scope text the operator was shown, lowercase hex.
   string scope_sha256 = 9;
+  // A separate authorization of the exits of open positions only, no BUY (BSC3-058).
+  bool exit_only = 10;
 }

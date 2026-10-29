@@ -244,6 +244,8 @@ pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
 pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 /// The same signed transaction again: never a second time (no retry).
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
+/// The grant admits the exits of open positions only (BSC3-058): no BUY.
+pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
 /// A BUY would leave the grant less than the exits of the open positions
 /// and of its own may still cost (BSC3-057): it is refused, the exits are
 /// not.
@@ -259,7 +261,7 @@ pub const LIVE_LEDGER_UNREADABLE: &str = "LIVE_LEDGER_UNREADABLE";
 /// with the reasons that say it does not hold (plan 28.10.): the LIVE tab's
 /// checklist. The scope conditions (from GRANT_ATTEMPTS on) are judged only
 /// against a grant.
-pub const LIVE_CONDITIONS: [(&str, &[&str]); 18] = [
+pub const LIVE_CONDITIONS: [(&str, &[&str]); 19] = [
     ("ECONOMIC_LIVE", &[ECONOMIC_LIVE_DISABLED]),
     (
         "LIVE_GRANT",
@@ -289,6 +291,7 @@ pub const LIVE_CONDITIONS: [(&str, &[&str]); 18] = [
         "GRANT_SPEND",
         &[LIVE_SPEND_UNREADABLE, LIVE_GRANT_SPEND_EXHAUSTED],
     ),
+    ("GRANT_BUYS", &[LIVE_GRANT_EXIT_ONLY]),
     ("VENUE_QUALIFIED", &[LIVE_VENUE_UNQUALIFIED]),
     ("SOURCES_QUALIFIED", &[LIVE_SOURCE_UNQUALIFIED]),
     ("ADAPTERS_QUALIFIED", &[LIVE_ADAPTER_UNQUALIFIED]),
@@ -301,9 +304,10 @@ const SCOPE_CONDITIONS_FROM: usize = 11;
 
 /// What an exit of a position the grant opened does not need of the LIVE
 /// gate: BUY attempts (the attempt switch, the daily and campaign limits,
-/// the grant's attempts) and room for another BUY input. Its own gas must
-/// still fit the grant's spend ([`Store::admit_live`]).
-const EXIT_EXEMPT: [&str; 8] = [
+/// the grant's attempts), room for another BUY input, and a grant that
+/// admits exits only (BSC3-058). Its own gas must still fit the grant's
+/// spend ([`Store::admit_live`]).
+const EXIT_EXEMPT: [&str; 9] = [
     ECON_ATTEMPT_DISABLED,
     BUY_LIMIT_UNREADABLE,
     BUY_LIMIT_EXHAUSTED,
@@ -312,6 +316,7 @@ const EXIT_EXEMPT: [&str; 8] = [
     LIVE_GRANT_ATTEMPTS_EXHAUSTED,
     LIVE_GRANT_SPEND_EXHAUSTED,
     LIVE_SPEND_UNREADABLE,
+    LIVE_GRANT_EXIT_ONLY,
 ];
 
 /// The campaign's total BUY attempt limit (plan 28.10., `0a647175`): every
@@ -754,6 +759,10 @@ pub struct LiveGrant {
     /// The most BUY attempts under this grant (within the campaign's total).
     pub max_attempts: u32,
     pub expires_unix_ms: u64,
+    /// The operator's separate authorization of the exits of open
+    /// positions alone (BSC3-058): no BUY under it. A full stop (a switch
+    /// off), its expiry and a restart still end it.
+    pub exit_only: bool,
 }
 
 impl LiveGrant {
@@ -810,7 +819,11 @@ impl LiveGrant {
             self.max_spend_wei,
             self.max_attempts,
             self.expires_unix_ms
-        )
+        ) + if self.exit_only {
+            "exit_only=true\n"
+        } else {
+            ""
+        }
     }
 
     /// SHA-256 of [`LiveGrant::scope_text`].
@@ -1142,6 +1155,9 @@ impl Generation {
                     out.push(LIVE_GRANT_SPEND_EXHAUSTED);
                 }
             }
+        }
+        if grant.is_some_and(|g| g.exit_only) {
+            out.push(LIVE_GRANT_EXIT_ONLY);
         }
         if let Some(g) = grant {
             let q = ctx.qualification;
@@ -1483,7 +1499,8 @@ impl Generation {
                         .set(
                             k::SCOPE_SHA256,
                             darkbot_bsc_record::Value::B256(g.scope_sha256()),
-                        );
+                        )
+                        .set_opt(k::EXIT_ONLY, g.exit_only.then_some(true));
                     for s in &g.sources {
                         e.push(k::SOURCES, s.name());
                     }
@@ -1761,6 +1778,7 @@ impl Generation {
                         max_attempts: u32::try_from(max_attempts)
                             .map_err(|_| "LIVE max_attempts out of range")?,
                         expires_unix_ms: expires,
+                        exit_only: row.opt_bool(k::EXIT_ONLY).map_err(e)?.unwrap_or(false),
                     };
                     grant.validate()?;
                     if grant.scope_sha256() != digest {
@@ -4049,6 +4067,7 @@ pub(crate) mod tests {
             max_spend_wei: 10_000_000_000_000_000,
             max_attempts: 2,
             expires_unix_ms: expires,
+            exit_only: false,
         }
     }
 
@@ -4679,6 +4698,99 @@ pub(crate) mod tests {
         }
         fs::write(&path, d.encode().unwrap()).unwrap();
         assert!(s.current().unwrap_err().contains("not the owner's"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-058: the operator's separate EXIT-ONLY grant. Its scope says
+    /// so (another digest than the same scope with BUYs; a grant with BUYs
+    /// keeps its text) and survives the owner's record; under it no BUY is
+    /// admitted (LIVE_GRANT_EXIT_ONLY, nothing consumed), the gate for BUYs
+    /// is blocked and names it, the exits are admitted. A restart and its
+    /// expiry still end it: nothing economic goes by itself.
+    #[test]
+    fn an_exit_only_grant_admits_exits_and_no_buy() {
+        let (dir, s, now) = live_ready_granting("live-exit-only", |now| LiveGrant {
+            exit_only: true,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let g = s.current().unwrap();
+        let grant = g.live.clone().unwrap();
+        assert!(grant.exit_only);
+        assert!(grant.scope_text().ends_with("exit_only=true\n"));
+        let with_buys = LiveGrant {
+            exit_only: false,
+            ..grant.clone()
+        };
+        assert!(!with_buys.scope_text().contains("exit_only"));
+        assert_ne!(grant.scope_sha256(), with_buys.scope_sha256());
+        assert_eq!(
+            s.live_now(&[ComponentId::ExecC3], &q, now).unwrap_err(),
+            LIVE_GRANT_EXIT_ONLY
+        );
+        let (_, daily, total) = live_inputs(&dir, now).unwrap();
+        let checklist = g.live_checklist(&LiveContext {
+            boot: Some("boot-1"),
+            now_unix_ms: now,
+            daily: Some(&daily),
+            total: Some(&total),
+            spent_wei: Some(0),
+            qualification: &q,
+        });
+        assert!(checklist.contains(&("GRANT_BUYS", Some(LIVE_GRANT_EXIT_ONLY))));
+        assert_eq!(checklist.iter().filter(|(_, r)| r.is_some()).count(), 1);
+        let armed = s.live_now_exits(&[ComponentId::ExecC3], &q, now).unwrap();
+        let ids: Vec<String> = (0..3u8).map(|n| hex32(&[n; 32])).collect();
+        let intent = |n: usize, kind: LiveIntentKind| LiveIntent {
+            id: &ids[n],
+            component: ComponentId::ExecC3,
+            kind,
+            input_wei: if kind == LiveIntentKind::Buy {
+                1_000
+            } else {
+                0
+            },
+            max_wei: 2_000,
+            token: [0x10; 20],
+            nonce: 40 + n as u64,
+            max_block: 900,
+            exit_reserve_wei: 0,
+        };
+        assert_eq!(
+            s.admit_live(&armed, &intent(0, LiveIntentKind::Buy), &q, now)
+                .unwrap_err(),
+            LIVE_GRANT_EXIT_ONLY
+        );
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
+        assert_eq!(spent_by_grant(&dir, armed.grant_generation()).unwrap(), 0);
+        assert!(
+            s.admit_live(&armed, &intent(1, LiveIntentKind::Approve), &q, now)
+                .is_ok()
+        );
+        // Expired: no exit either.
+        let late = grant.expires_unix_ms;
+        assert_eq!(
+            s.live_now_exits(&[ComponentId::ExecC3], &q, late)
+                .unwrap_err(),
+            LIVE_GRANT_EXPIRED
+        );
+        // A restart (another boot session): the switches and the grant are
+        // reset, no exit until the operator authorizes again.
+        let restarted = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        assert!(
+            restarted
+                .live_now_exits(&[ComponentId::ExecC3], &q, now)
+                .is_err()
+        );
+        let after = g.exit_blockers(&LiveContext {
+            boot: Some("boot-2"),
+            now_unix_ms: now,
+            daily: Some(&daily),
+            total: Some(&total),
+            spent_wei: Some(0),
+            qualification: &q,
+        });
+        assert!(after.contains(&LIVE_GRANT_RESET_BY_RESTART), "{after:?}");
         fs::remove_dir_all(dir).unwrap();
     }
 

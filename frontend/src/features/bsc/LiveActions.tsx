@@ -26,7 +26,7 @@ function Confirm({ open, title, children, onConfirm, onClose, testId }: { open: 
 }
 
 const GRANT = "bsc-live-grant";
-const EMPTY: GrantForm = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1" };
+const EMPTY: GrantForm = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false };
 
 /** The grant of one scope: the form, then the exact canonical scope and its SHA-256 to confirm. */
 export function LiveGrantActions({ generation, available }: { generation: bigint; available: boolean }) {
@@ -52,6 +52,7 @@ export function LiveGrantActions({ generation, available }: { generation: bigint
       <input inputMode="numeric" aria-label="Max spend (wei)" placeholder="max spend wei" value={form.maxSpendWei} onChange={e => setForm({ ...form, maxSpendWei: e.target.value.trim() })} data-testid={`${GRANT}-max-spend`} />
       <input inputMode="numeric" aria-label="BUY attempts" placeholder="attempts 1..10" value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />
       <input inputMode="numeric" aria-label="Valid for hours" placeholder="hours" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value.trim() })} data-testid={`${GRANT}-hours`} />
+      <label title="BSC3-058: only the exits of open positions, no BUY"><input type="checkbox" checked={form.exitOnly} onChange={() => setForm({ ...form, exitOnly: !form.exitOnly })} data-testid={`${GRANT}-exit-only`} />EXIT-ONLY</label>
       <button className="g-secondary" disabled={!available || busy || "error" in checked} title={"error" in checked ? checked.error : `Grant at generation ${generation.toString()}`}
         data-testid={`${GRANT}-review`} onClick={() => void review()}>Grant LIVE…</button>
     </div>

@@ -101,6 +101,7 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
                 .positions
                 .iter()
                 .map(|p| LivePosition {
+                    lot: hex0x(&p.lot),
                     token: hex0x(&p.token),
                     component: p.component.name().into(),
                     state: p.state.name().into(),
@@ -238,6 +239,7 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
             scope_text: grant.scope_text(),
             request_id: by.request_id.clone(),
             set_generation: by.generation,
+            exit_only: grant.exit_only,
         });
         let mut scope = vec![Entity::Runtime, ComponentId::StateC2.into()];
         if grant.strategies.c3() {

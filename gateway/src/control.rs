@@ -281,6 +281,8 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             c.max_spend_wei,
             c.max_attempts.to_string(),
             c.expires_unix_ms.to_string(),
+            // BSC3-058: a separate authorization of the exits alone.
+            if c.exit_only { "EXIT_ONLY" } else { "ALL" }.into(),
             c.scope_sha256,
             generation.to_string(),
         ]
@@ -2809,6 +2811,7 @@ mod tests {
             max_attempts: 2,
             expires_unix_ms: 1_793_000_000_000,
             scope_sha256: "ab".repeat(32),
+            exit_only: false,
         };
         let grant = |c: &BscLiveGrantCommand, resource: &str, v| {
             let mut r = request(BSC_LIVE_GRANT, resource, Some(v));
@@ -2829,10 +2832,18 @@ mod tests {
                 "20000000000000000",
                 "2",
                 "1793000000000",
+                "ALL",
                 &"ab".repeat(32),
                 "9",
             ]
         );
+        // BSC3-058: an EXIT-ONLY grant says so to the owner.
+        let exits = BscLiveGrantCommand {
+            exit_only: true,
+            ..scope.clone()
+        };
+        let args = grant_request(&grant(&exits, "BSC_LIVE_GRANT", ConfigVersion(9))).unwrap();
+        assert_eq!(args[11], "EXIT_ONLY");
         for bad in [
             BscLiveGrantCommand {
                 venue: "BSC_VENUE_X".into(),

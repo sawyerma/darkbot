@@ -479,6 +479,18 @@ impl LiveRuntime {
         })
     }
 
+    /// Whether the path holds positions whose exits may still be needed:
+    /// open, exiting or bought and not yet included, or an exit wanted
+    /// (the runtime keeps the strategy, C2 and the sources on for them).
+    pub fn holds_positions(&self) -> bool {
+        self.positions_open()
+            || self
+                .book
+                .positions
+                .iter()
+                .any(|p| p.state == PositionState::Pending)
+    }
+
     /// Positions of the ledger still open (or exiting), or an exit wanted.
     fn positions_open(&self) -> bool {
         !self.exits_wanted.is_empty()
@@ -3658,6 +3670,100 @@ mod tests {
         r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
         // A's approval is out: its SELL and B's exit are left to reserve.
         assert_eq!(x.exit_reserve(), sell + approval + sell);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-058: under the operator's separate EXIT-ONLY grant nothing arms
+    /// without an open position (the reason names it); with one the path
+    /// arms for its exit: a BUY is refused before anything is signed, the
+    /// exit's approval goes.
+    #[test]
+    fn an_exit_only_grant_arms_for_the_exits_of_open_positions_only() {
+        use crate::paper_exec::IntentKind;
+        let r = Rig::new("live-exit-only", LiveStrategies::StrategyC);
+        let sc = Sc::new(r.buyer);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let grant = LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            exit_only: true,
+            ..grant_of(NOW + 3_600_000, LiveStrategies::StrategyC)
+        };
+        let g = s.current().unwrap().generation;
+        let receipt = s
+            .grant_live("exit-only", grant.clone(), grant.scope_sha256(), g, NOW)
+            .unwrap();
+        assert!(receipt.applied(), "{}", receipt.line());
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(
+            reason(&x).1.as_deref(),
+            Some(crate::sources::LIVE_GRANT_EXIT_ONLY)
+        );
+        x.shutdown();
+        // A position of A is open (bought at nonce 0 before, included).
+        let a = [0xA1; 20];
+        let ledger = crate::live_ledger::Ledger::open(&r.state);
+        let buy = crate::live_ledger::Fact {
+            kind: crate::live_ledger::FactKind::Released,
+            tx_hash: [0x51; 32],
+            intent: crate::sources::LiveIntentKind::Buy,
+            component: ComponentId::StrategyC,
+            token: a,
+            nonce: 0,
+            grant_generation: 1,
+            input_wei: Some(sc.input),
+            max_wei: Some(sc.input),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD + 2),
+            by_tx: None,
+        };
+        ledger.append(&buy, 1).unwrap();
+        let included = crate::live_ledger::Fact {
+            block: Some((HEAD, [0xb1; 32], 1_793_000_000_000)),
+            gas_wei: Some(U256::from(1u8)),
+            tokens: Some(sc.tokens),
+            eth_wei: Some(sc.input),
+            ..crate::live_ledger::Fact::about(&buy, crate::live_ledger::FactKind::Included)
+        };
+        ledger.append(&included, 1).unwrap();
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d.join("c2-open"), r.buyer, 1);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let (out, refused) = x
+            .on_strategy(&sc.buy([0xC3; 20]), &c2, &clock, now_ms)
+            .unwrap();
+        assert_eq!(
+            (out.len(), refused),
+            (0, Some(crate::paper_exec::Refusal::Owner))
+        );
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"BUYS_CLOSED=1")
+        );
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
         x.shutdown();
         r.clean();
     }

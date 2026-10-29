@@ -236,6 +236,7 @@ The parameters of `bsc.live.grant`: the scope the operator confirmed and its dig
 | max_attempts | [uint32](#uint32) |  | BUY attempts the grant may take. |
 | expires_unix_ms | [uint64](#uint64) |  | Expiry, unix milliseconds. |
 | scope_sha256 | [string](#string) |  | SHA-256 of the canonical scope text the operator was shown, lowercase hex. |
+| exit_only | [bool](#bool) |  | A separate authorization of the exits of open positions only, no BUY (BSC3-058). |
 
 
 
@@ -545,6 +546,7 @@ The operator&#39;s LIVE grant of one scope as the native owner holds it.
 | scope_text | [string](#string) |  | The canonical scope text itself. |
 | request_id | [string](#string) |  | The request that wrote the grant. |
 | set_generation | [uint64](#uint64) |  | The owner generation that request wrote. |
+| exit_only | [bool](#bool) |  | The grant admits the exits of open positions only, no BUY (BSC3-058). |
 
 
 
@@ -567,6 +569,7 @@ One LIVE position of the ledger: its BUY, exit and native result.
 | proceeds_wei | [string](#string) |  | The SELL&#39;s proceeds, decimal wei. |
 | gas_wei | [string](#string) |  | Gas of all its included or reverted transactions, decimal wei. |
 | pnl_wei | [string](#string) | optional | Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei. |
+| lot | [string](#string) |  | The lot: its BUY&#39;s transaction hash, 0x hex (a token bought again is another lot). |
 
 
 
@@ -582,7 +585,7 @@ them; LIVE is effective only while every one holds.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  | Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE, BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, VENUE_QUALIFIED, SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION. |
+| id | [string](#string) |  | Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE, BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, VENUE_QUALIFIED, SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION. |
 | met | [bool](#bool) |  | Whether the condition holds now. |
 | reason | [string](#string) |  | The owner&#39;s reason when it does not (the gate&#39;s own block reason). |
 

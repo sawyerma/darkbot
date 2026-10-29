@@ -1629,6 +1629,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         max_spend_wei: 10_000_000_000_000_000,
         max_attempts: 2,
         expires_unix_ms: now + 3_600_000,
+        exit_only: false,
     };
     let r = store
         .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
@@ -1659,7 +1660,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         Some("LIVE_VENUE_UNQUALIFIED")
     );
     assert_eq!(live.qualification, "NONE");
-    assert_eq!(live.preconditions.len(), 18);
+    assert_eq!(live.preconditions.len(), 19);
     let met = |id: &str| live.preconditions.iter().find(|p| p.id == id).unwrap().met;
     assert!(met("ECONOMIC_LIVE") && met("LIVE_GRANT") && met("WALLET_BUYER"));
     assert!(!met("VENUE_QUALIFIED") && !met("RISK_DECISION"));

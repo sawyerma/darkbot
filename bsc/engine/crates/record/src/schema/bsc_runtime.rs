@@ -180,6 +180,9 @@ pub mod source_modes {
         pub const SCOPE_SHA256: u16 = 10;
         pub const REQUEST_ID: u16 = 11;
         pub const SET_GENERATION: u16 = 12;
+        /// The grant admits the exits of open positions only, no BUY
+        /// (BSC3-058); absent: BUYs and exits.
+        pub const EXIT_ONLY: u16 = 13;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.source-modes.live",
@@ -198,6 +201,7 @@ pub mod source_modes {
                 Field::opt(SCOPE_SHA256, "scope_sha256", B256),
                 Field::opt(REQUEST_ID, "request_id", Text),
                 Field::opt(SET_GENERATION, "set_generation", U64),
+                Field::opt(EXIT_ONLY, "exit_only", Bool),
             ],
         };
     }

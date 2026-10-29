@@ -871,18 +871,24 @@ impl LiveView {
         }
     }
 
-    fn effective(&self, g: &Generation, e: crate::sources::Entity) -> Effective {
-        g.effective_live_now(
-            e,
-            &crate::sources::LiveContext {
-                boot: self.boot.as_deref(),
-                now_unix_ms: self.now_ms,
-                daily: self.daily.as_ref(),
-                total: self.total.as_ref(),
-                spent_wei: self.spent,
-                qualification: &self.qualification,
-            },
-        )
+    /// What the owner makes effective of `e` now. While the LIVE path holds
+    /// positions (`exits`), judged as for their exits (BSC3-058/071): the
+    /// strategy that decides them, C2 and the sources stay on under a
+    /// grant that admits no BUY (EXIT-ONLY, BUYs used up); the LIVE path
+    /// and the owner still refuse every BUY.
+    fn effective(&self, g: &Generation, e: crate::sources::Entity, exits: bool) -> Effective {
+        let ctx = crate::sources::LiveContext {
+            boot: self.boot.as_deref(),
+            now_unix_ms: self.now_ms,
+            daily: self.daily.as_ref(),
+            total: self.total.as_ref(),
+            spent_wei: self.spent,
+            qualification: &self.qualification,
+        };
+        match exits {
+            true => g.effective_exit_now(e, &ctx),
+            false => g.effective_live_now(e, &ctx),
+        }
     }
 }
 
@@ -1855,7 +1861,8 @@ pub fn run(
                 let now_ms = observed_now().unwrap_or(u64::MAX);
                 let live_view =
                     LiveView::read(&generation, sources_dir, repo_root, live.is_some(), now_ms);
-                let eff = |e: crate::sources::Entity| live_view.effective(&generation, e);
+                let exits = live.as_ref().is_some_and(|l| l.holds_positions());
+                let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
                 let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
                 // Plan v9 §2.3: Flap launches reach the C3 PAPER path and
                 // Strategy C only while the Flap venue is effective SHADOW
@@ -2386,6 +2393,43 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC3-058/071 (review MEDIUM): under a grant that admits no BUY the
+    /// runtime keeps the entities requested LIVE effective for the exits
+    /// of the positions the LIVE path holds (the strategy decides them, C2
+    /// follows them); without positions they stay blocked by that reason.
+    #[test]
+    fn a_grant_without_buys_keeps_the_exit_path_on_while_positions_are_held() {
+        use crate::sources::tests::{grant_of, live_ready_granting, qualified};
+        use crate::sources::{LIVE_GRANT_EXIT_ONLY, LiveGrant, LiveStrategies};
+        let (dir, s, now) = live_ready_granting("runtime-exit-only", |now| LiveGrant {
+            exit_only: true,
+            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        });
+        let g = s.current().unwrap();
+        let view = LiveView {
+            boot: Some("boot-1".into()),
+            now_ms: now,
+            daily: crate::sources::buy_usage(&dir, now).ok(),
+            total: crate::sources::total_usage(&dir).ok(),
+            spent: Some(0),
+            qualification: qualified(),
+        };
+        for e in [
+            crate::sources::Entity::Runtime,
+            ComponentId::StrategyC.into(),
+            ComponentId::StateC2.into(),
+            VenueId::Flap.into(),
+        ] {
+            assert_eq!(
+                view.effective(&g, e, false),
+                Effective::Blocked(LIVE_GRANT_EXIT_ONLY),
+                "{e:?}"
+            );
+            assert_eq!(view.effective(&g, e, true), Effective::Live, "{e:?}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
     /// The shipped refused accounts: the frozen G0.7 launcher and buyer.

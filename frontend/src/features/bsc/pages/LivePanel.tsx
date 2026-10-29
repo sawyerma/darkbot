@@ -37,7 +37,7 @@ export function LivePanel() {
     </PlacedSection>
     <PlacedSection panel="live" section={2} records={records}>
       {l?.grant ? <>
-        <Line label="Grant" value={`${l.grant.strategies} · ${l.grant.venue}`} hint={`request ${l.grant.requestId} @ generation ${l.grant.setGeneration.toString()}`} />
+        <Line label="Grant" value={`${l.grant.strategies} · ${l.grant.venue}${l.grant.exitOnly ? " · EXIT-ONLY" : ""}`} hint={`request ${l.grant.requestId} @ generation ${l.grant.setGeneration.toString()}`} />
         <Line label="Grant expiry" value={new Date(Number(l.grant.expiresUnixMs)).toISOString()} />
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
@@ -75,7 +75,7 @@ export function LivePanel() {
     </PlacedSection>
     <PlacedSection panel="live" section={7} records={records}>
       <table className="bsc-table" data-testid="bsc-live-positions"><tbody>
-        {(l?.positions ?? []).map(p => <tr key={p.token}><td>{p.token}</td><td>{p.component}</td><td>{p.state}</td><td>{p.tokens}</td><td>{wei(p.inputWei)}</td><td>{wei(p.proceedsWei)}</td><td>{p.pnlWei ? signedBnb(p.pnlWei) : "—"}</td></tr>)}
+        {(l?.positions ?? []).map(p => <tr key={p.lot}><td>{p.token}</td><td>{p.component}</td><td>{p.state}</td><td>{p.tokens}</td><td>{wei(p.inputWei)}</td><td>{wei(p.proceedsWei)}</td><td>{p.pnlWei ? signedBnb(p.pnlWei) : "—"}</td></tr>)}
       </tbody></table>
     </PlacedSection>
     <PlacedSection panel="live" section={8} records={records}>

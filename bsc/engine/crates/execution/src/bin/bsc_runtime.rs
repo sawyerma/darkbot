@@ -122,6 +122,7 @@ fn grant_args(rest: &[String]) -> Result<darkbot_bsc_execution::sources::LiveGra
             .map_err(|_| "--max-attempts out of range")?,
         expires_unix_ms: u64::try_from(number("--expires-unix-ms")?)
             .map_err(|_| "--expires-unix-ms out of range")?,
+        exit_only: rest.iter().any(|a| a == "--exit-only"),
     })
 }
 
@@ -736,7 +737,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition EV] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

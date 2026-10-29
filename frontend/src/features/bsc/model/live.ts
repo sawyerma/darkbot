@@ -27,6 +27,7 @@ export const CONDITION_TEXT: Record<string, { label: string; where: string }> = 
   BUY_LIMIT_TOTAL: { label: "Campaign BUY attempts left (at most 10)", where: "Attempts on this tab" },
   GRANT_ATTEMPTS: { label: "The grant's attempts left", where: "A new grant" },
   GRANT_SPEND: { label: "The grant's spend left", where: "A new grant" },
+  GRANT_BUYS: { label: "The grant admits BUYs (not EXIT-ONLY)", where: "A new grant" },
   VENUE_QUALIFIED: { label: "Venue qualified", where: "LIVE qualification record (bsc_runtime live qualify)" },
   SOURCES_QUALIFIED: { label: "Sources qualified", where: "LIVE qualification record" },
   ADAPTERS_QUALIFIED: { label: "Adapters qualified", where: "LIVE qualification record" },
@@ -47,7 +48,8 @@ export function conditionRows(live: BscLiveView | null): ConditionRow[] {
 export function scopeText(s: LiveGrantScope): string {
   return "darkbot.bsc.live-grant.v1\n"
     + `venue=${s.venue}\nstrategies=${s.strategies}\nsources=${s.sources.join(",")}\nadapters=${s.adapters.join(",")}\n`
-    + `max_input_wei=${s.maxInputWei}\nmax_spend_wei=${s.maxSpendWei}\nmax_attempts=${s.maxAttempts}\nexpires_unix_ms=${s.expiresUnixMs.toString()}\n`;
+    + `max_input_wei=${s.maxInputWei}\nmax_spend_wei=${s.maxSpendWei}\nmax_attempts=${s.maxAttempts}\nexpires_unix_ms=${s.expiresUnixMs.toString()}\n`
+    + (s.exitOnly ? "exit_only=true\n" : "");
 }
 
 /** SHA-256 of the scope text, lowercase hex: the digest the operator confirms. */
@@ -66,6 +68,7 @@ export function weiOk(text: string): boolean {
 export interface GrantForm {
   strategies: string; sources: string[]; adapters: string[];
   maxInputWei: string; maxSpendWei: string; maxAttempts: string; hours: string;
+  exitOnly: boolean;
 }
 
 /** The scope of a grant form at `nowMs`, or why it is not one (the owner checks again). */
@@ -82,7 +85,7 @@ export function grantScope(f: GrantForm, nowMs: number): { scope: LiveGrantScope
     scope: {
       venue: LIVE_VENUES[0], strategies: f.strategies, sources: f.sources, adapters: f.adapters,
       maxInputWei: f.maxInputWei, maxSpendWei: f.maxSpendWei, maxAttempts: Number(f.maxAttempts),
-      expiresUnixMs: BigInt(nowMs) + BigInt(f.hours) * 3_600_000n,
+      expiresUnixMs: BigInt(nowMs) + BigInt(f.hours) * 3_600_000n, exitOnly: f.exitOnly,
     },
   };
 }
