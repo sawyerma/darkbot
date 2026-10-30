@@ -188,10 +188,21 @@ pub struct Recovered {
     pub unrecoverable: Vec<[u8; 32]>,
 }
 
+/// The entries a ledger handle has decoded (BSC3-046): their sequence
+/// numbers, ascending, and their facts in the same order.
+#[derive(Debug, Default)]
+struct Read {
+    seqs: Vec<u64>,
+    facts: Vec<Fact>,
+}
+
 /// The ledger under an owner state directory.
 #[derive(Clone, Debug)]
 pub struct Ledger {
     dir: PathBuf,
+    /// What [`Ledger::facts`] decoded so far (shared by its clones):
+    /// published entries never change, so only new ones are read.
+    read: std::sync::Arc<std::sync::Mutex<Read>>,
     /// Tests: an entry's write ends after this many bytes, as a crash
     /// would end it.
     #[cfg(test)]
@@ -206,6 +217,7 @@ impl Ledger {
     pub fn open(state_dir: &Path) -> Self {
         Ledger {
             dir: state_dir.join("live-ledger"),
+            read: Default::default(),
             #[cfg(test)]
             cut: None,
         }
@@ -356,58 +368,82 @@ impl Ledger {
     }
 
     /// Every fact in order. One that does not decode refuses the whole
-    /// ledger: a fold never under-counts.
+    /// ledger: a fold never under-counts. Only entries this handle has not
+    /// decoded yet are read (BSC3-046: published entries never change);
+    /// when the entries on disk are not the ones it read followed by new
+    /// ones (one appeared before them, or went), it reads all of them.
     pub fn facts(&self) -> Result<Vec<Fact>, String> {
-        let mut out = Vec::new();
-        for (_, path) in self.names()? {
-            let bad = |why: &str| format!("{}: {why}", path.display());
-            let bytes = fs::read(&path).map_err(|e| bad(&e.to_string()))?;
-            let r = decode(&k::SCHEMA, &bytes)
-                .or_else(|_| decode(&k::V1, &bytes))
-                .map_err(|e| bad(&e.0))?;
-            let e = |x: darkbot_bsc_record::RecordError| bad(&x.0);
-            let u = |tag| -> Result<Option<U256>, String> {
-                Ok(r.opt_u256(tag).map_err(e)?.map(U256::from_be_bytes))
-            };
-            let block = match (
-                r.opt_u64(k::BLOCK_NUMBER).map_err(e)?,
-                r.opt_b256(k::BLOCK_HASH).map_err(e)?,
-                r.opt_u64(k::BLOCK_MS).map_err(e)?,
-            ) {
-                (Some(n), Some(h), Some(ms)) => Some((n, h, ms)),
-                (None, None, None) => None,
-                _ => return Err(bad("a block is named whole or not at all")),
-            };
-            let origin = match (
-                r.opt_u64(k::CHAIN_ID).map_err(e)?,
-                r.opt_address(k::SENDER).map_err(e)?,
-            ) {
-                (Some(chain_id), Some(sender)) => Some(NonceOrigin { chain_id, sender }),
-                (None, None) => None,
-                _ => return Err(bad("a nonce's sender and chain are named together")),
-            };
-            out.push(Fact {
-                kind: FactKind::parse(r.text(k::KIND).map_err(e)?).ok_or_else(|| bad("kind"))?,
-                tx_hash: r.b256(k::TX_HASH).map_err(e)?,
-                intent: intent_of(r.text(k::INTENT).map_err(e)?).ok_or_else(|| bad("intent"))?,
-                component: ComponentId::parse(r.text(k::COMPONENT).map_err(e)?)
-                    .ok_or_else(|| bad("component"))?,
-                token: r.address(k::TOKEN).map_err(e)?,
-                nonce: r.u64(k::NONCE).map_err(e)?,
-                grant_generation: r.u64(k::GRANT_GENERATION).map_err(e)?,
-                input_wei: u(k::INPUT_WEI)?,
-                max_wei: u(k::MAX_WEI)?,
-                block,
-                gas_wei: u(k::GAS_WEI)?,
-                tokens: u(k::TOKENS)?,
-                eth_wei: u(k::ETH_WEI)?,
-                max_block: r.opt_u64(k::MAX_BLOCK).map_err(e)?,
-                by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
-                response: r.opt_text(k::RESPONSE).map_err(e)?.map(str::to_string),
-                origin,
-            });
+        let names = self.names()?;
+        let mut read = self
+            .read
+            .lock()
+            .map_err(|_| format!("{}: the read entries are poisoned", self.dir.display()))?;
+        let known = read.seqs.len();
+        let prefix = names.len() >= known
+            && names[..known]
+                .iter()
+                .zip(&read.seqs)
+                .all(|((seq, _), known)| seq == known);
+        if !prefix {
+            *read = Read::default();
         }
-        Ok(out)
+        let from = read.seqs.len();
+        for (seq, path) in &names[from..] {
+            let fact = Self::entry(path)?;
+            read.seqs.push(*seq);
+            read.facts.push(fact);
+        }
+        Ok(read.facts.clone())
+    }
+
+    /// One published entry's fact.
+    fn entry(path: &Path) -> Result<Fact, String> {
+        let bad = |why: &str| format!("{}: {why}", path.display());
+        let bytes = fs::read(path).map_err(|e| bad(&e.to_string()))?;
+        let r = decode(&k::SCHEMA, &bytes)
+            .or_else(|_| decode(&k::V1, &bytes))
+            .map_err(|e| bad(&e.0))?;
+        let e = |x: darkbot_bsc_record::RecordError| bad(&x.0);
+        let u = |tag| -> Result<Option<U256>, String> {
+            Ok(r.opt_u256(tag).map_err(e)?.map(U256::from_be_bytes))
+        };
+        let block = match (
+            r.opt_u64(k::BLOCK_NUMBER).map_err(e)?,
+            r.opt_b256(k::BLOCK_HASH).map_err(e)?,
+            r.opt_u64(k::BLOCK_MS).map_err(e)?,
+        ) {
+            (Some(n), Some(h), Some(ms)) => Some((n, h, ms)),
+            (None, None, None) => None,
+            _ => return Err(bad("a block is named whole or not at all")),
+        };
+        let origin = match (
+            r.opt_u64(k::CHAIN_ID).map_err(e)?,
+            r.opt_address(k::SENDER).map_err(e)?,
+        ) {
+            (Some(chain_id), Some(sender)) => Some(NonceOrigin { chain_id, sender }),
+            (None, None) => None,
+            _ => return Err(bad("a nonce's sender and chain are named together")),
+        };
+        Ok(Fact {
+            kind: FactKind::parse(r.text(k::KIND).map_err(e)?).ok_or_else(|| bad("kind"))?,
+            tx_hash: r.b256(k::TX_HASH).map_err(e)?,
+            intent: intent_of(r.text(k::INTENT).map_err(e)?).ok_or_else(|| bad("intent"))?,
+            component: ComponentId::parse(r.text(k::COMPONENT).map_err(e)?)
+                .ok_or_else(|| bad("component"))?,
+            token: r.address(k::TOKEN).map_err(e)?,
+            nonce: r.u64(k::NONCE).map_err(e)?,
+            grant_generation: r.u64(k::GRANT_GENERATION).map_err(e)?,
+            input_wei: u(k::INPUT_WEI)?,
+            max_wei: u(k::MAX_WEI)?,
+            block,
+            gas_wei: u(k::GAS_WEI)?,
+            tokens: u(k::TOKENS)?,
+            eth_wei: u(k::ETH_WEI)?,
+            max_block: r.opt_u64(k::MAX_BLOCK).map_err(e)?,
+            by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
+            response: r.opt_text(k::RESPONSE).map_err(e)?.map(str::to_string),
+            origin,
+        })
     }
 }
 
@@ -739,6 +775,36 @@ mod tests {
         let path = dir.join("live-ledger").join(format!("{:020}.dbrec", 2));
         fs::write(path, d.encode().unwrap()).unwrap();
         assert!(ledger.facts().unwrap_err().contains("sender and chain"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-046: a handle decodes each published entry once; a later read
+    /// decodes only the new ones (published entries never change: one
+    /// rewritten after it was read is not read again). When the entries on
+    /// disk are not the ones it read followed by new ones (one went, or
+    /// appeared before them), it reads all of them again, and an entry
+    /// that does not decode refuses the ledger as before.
+    #[test]
+    fn the_ledger_decodes_only_entries_it_has_not_read() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-incremental-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let facts: Vec<Fact> = (1..=3u8)
+            .map(|n| released(n, LiveIntentKind::Buy, n, 1_000, 1_300))
+            .collect();
+        ledger.append(&facts[0], 1).unwrap();
+        ledger.append(&facts[1], 1).unwrap();
+        assert_eq!(ledger.facts().unwrap(), facts[..2]);
+        let entry = |seq: u64| dir.join("live-ledger").join(format!("{seq:020}.dbrec"));
+        fs::write(entry(0), b"not a record").unwrap();
+        ledger.append(&facts[2], 1).unwrap();
+        assert_eq!(ledger.facts().unwrap(), facts);
+        // A clone shares what was read; a new handle reads it all.
+        assert_eq!(ledger.clone().facts().unwrap(), facts);
+        assert!(Ledger::open(&dir).facts().is_err());
+        // An entry went: all is read again, the damaged one refuses.
+        fs::remove_file(entry(1)).unwrap();
+        assert!(ledger.facts().is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -13,7 +13,7 @@
 | BSC3-055 | FIX_VERIFIED (LIVE nur an C2-nächster Nonce, SELL nach kanonischem Approve, Exit-Fortsetzung, Token-Dedup beider Pools) | `bf871fa9` | revertierter/ersetzter SELL ohne Re-Exit → BSC3-048 |
 | BSC3-048 | FIX_VERIFIED (Fenster = Bundle-Ende `BSC_EXEC_VALIDITY_BLOCKS` im Admission-Eintrag + Ledger; danach nimmt die nächste Tx dieselbe Nonce, Exits vor BUYs; spät landende Alt-Tx → neue REPLACED mit `by_tx`/Block, Exit geht weiter; eigene orphaned Inclusion/unbekanntes Fenster sperrt; kein Cancel) | `c9cccf25` | byte-identischer verlorener Exit-Schritt wird nicht erneut gesendet (kein Retry) → Betreiberentscheidung; Flap-Kauf ohne Deadline (nur minOutput) |
 | BSC3-071 (neu) | FIX_VERIFIED (erschöpftes BUY-Kontingent schloss den ganzen LIVE-Pfad, offene Positionen ohne Exit → `live_now_exits`, BUYs abgelehnt) | `c9cccf25` | – |
-| BSC3-069 | TEILWEISE (Ausführungsrisiko im Grant: BUY-/Exit-Slippage, Gaspreis, Gaslimits bestätigt, sichtbar, beim Scharfschalten erzwungen; eigene Exit-Slippage `c9cccf25`) | dieser Commit | Outlier-Schwellen, Crash-/Fast-Drop-/Sandwich-Simulation offen |
+| BSC3-069 | TEILWEISE (Ausführungsrisiko im Grant: BUY-/Exit-Slippage, Gaspreis, Gaslimits bestätigt, sichtbar, beim Scharfschalten erzwungen; eigene Exit-Slippage `c9cccf25`) | `01bd42da` | Outlier-Schwellen, Crash-/Fast-Drop-/Sandwich-Simulation offen |
 | BSC3-045 | FIX_VERIFIED (Ledger-Eintrag ganz oder gar nicht: Temp + fsync + Hardlink ohne Ersetzen; nach nicht geschriebenem Fakt keine weitere Übergabe; Arm-/Exit-Sperre bei unlesbarem Ledger aus `bf871fa9`) | `a64d09c0` | vorhandener zerrissener Eintrag (Medienfehler/fremder Schreiber) bleibt fail-closed bis zur autorisierten Rekonstruktion; Temp-Reste nach Absturz werden nicht aufgeräumt (LOW) |
 | BSC3-047 | FIX_VERIFIED (jeder BUY ein eigener Lot; Exit-Schritte im letzten Lot des Tokens; ersetzter BUY kein Lot; Approve nur des offenen Lots übernommen; ein offener Lot je Token gemeldet) | `a64d09c0` | Lot-ID nicht in Status-Projektion/Panel-Key (Protokoll-Schemaänderung, LOW) |
 | BSC3-027 | FIX_VERIFIED | `f4ecca5d` | – |
@@ -60,6 +60,21 @@
 | BSC3-035 | TEILWEISE (Parität der drei manuellen Flap-Leser: Signatur-, Layout- und Negativtests) | `1e6e4946` | Promotion in den zentralen Decoder erst mit v5.27.2-ABI-Evidence |
 | BSC3-030 | TEILWEISE (verlorener Exit: nach dem Fenster neue Exit-Entscheidung an derselben Nonce mit eigener Owner-Admission, kein Retry derselben Bytes; Test `a_lost_exit_step_goes_again_at_its_nonce_before_any_buy`) | `c9cccf25` | öffentliche Mempool-Fallback-Route: Betreiberentscheidung |
 | BSC3-029 | KEIN FIX (keine direkte Provider-Zahlung im Plan) | – | Bid-Änderung nur mit Fee-/Bundle-/Provider-Qualifikation: Betreiberentscheidung |
+| BSC3-001 | TEILWEISE (Autorisierungsmatrix eines Prozesses desselben Kontos per Test: Schalter, Limits und Grant ohne Presence-Artefakt; Arm nur mit Key-Datei und verifizierter Qualifikation; SEND aus beendet) | dieser Commit | zweiter Vertrauensanker (Keychain/LocalAuthentication oder Kontogrenze mit Schlüsselverwahrung): Betreiberentscheidung |
+| BSC3-012 | TEILWEISE (ein Arm ruht auf genau dem Qualifikations-Record, mit dem er scharf wurde; ein anderer → LIVE_QUALIFICATION_CHANGED, Arm endet; Produktion liest den synchronisierten Snapshot) | dieser Commit | Binär-Buildidentität in der Qualifikation offen |
+| BSC3-046 | FIX_VERIFIED (ein Ledger-Handle dekodiert nur neue Einträge; Neulesen p50 lokal gemessen: 200 Fakten 3,1 → 0,54 ms, 1000 Fakten 15,5 → 0,61 ms; Fold 0,3 ms) | dieser Commit | – |
+| BSC3-039 | TEILWEISE (Status je Intervall ohne Gerätesync, weiter atomar per Rename: lokal gemessen 4 KiB mit F_FULLFSYNC p50 5,1 ms/p99 9,2 ms je Sekunde weg von der Entscheidungsschleife) | dieser Commit | C2-Checkpoint alle 30 s mit Sync und Gauge-Vollscans: Messung unter Last offen |
+| BSC3-053 | KEIN FIX (gemessen: `decode_tx_target` 32 ns je Aufruf bei 1230 Byte, lokale Einzeloperation) | – | – |
+| BSC3-005 | KEIN FIX (unterstützt ist nur der Harness-Weg: `g06a_final_dry.sh` baut `g06a_dry_handoff` vor jedem Lauf an genau dem Pfad, den der Simulator nimmt; ein Einzelaufruf ist kein Produktionsweg, BSC-002 bleibt `0ac597ca`) | – | – |
+| BSC3-008 | OFFEN | – | Anti-Replay-Vertrag (wie lange eine Request-ID nie wieder läuft) vor jeder Receipt-Begrenzung: Betreiberentscheidung |
+| BSC3-011 | OFFEN | – | qualifizierte LIVE-Signalquelle (geth-IPC/48Club) vor operativem LIVE: externe Qualifikation/Betreiberentscheidung |
+| BSC3-018 | OFFEN (Status bewusst flüchtig, BSC3-039) | – | Verzeichnis-fsync für Checkpoint und Census mit Latenzmessung: Entscheidung |
+| BSC3-020 | OFFEN | – | Höchstalter der eingefrorenen Gas-Evidence: Betreiberentscheidung |
+| BSC3-032 | OFFEN | – | Sendable-before-Quote mit begründeter Schwelle: Kriterienentscheidung |
+| BSC3-040 | OFFEN | – | Politik der globalen coherent()-Sperre (beobachtete Sender): Entscheidung |
+| BSC3-056 | OFFEN | – | unabhängige Zweitquelle/Commitment als LIVE-Gate (Provider, Kosten): Betreiberentscheidung |
+| BSC3-062 | OFFEN | – | Sichtungshorizont/Eviction-Politik: Messung und Entscheidung |
+| BSC3-065 | OFFEN | – | Refreeze auf v5.27.2 erst mit verifizierter Quelle (Sourcify): extern/Betreiberentscheidung |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

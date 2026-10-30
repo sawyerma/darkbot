@@ -1132,6 +1132,13 @@ impl LiveRuntime {
             {
                 return self.close(crate::sources::LIVE_GRANT_CHANGED.into());
             }
+            // BSC3-012: an arm rests on the one qualification record it
+            // was armed with; another one verified on file (rebuilt, or
+            // changed while armed) ends it: what admits its intents never
+            // changes under it.
+            if x.end().qualification_sha256() != verified.sha256 {
+                return self.close(crate::sources::LIVE_QUALIFICATION_CHANGED.into());
+            }
             // BSC3-048: this arm cannot take the buyer's free nonce (its
             // window over, or taken by an earlier arm's transaction that
             // landed late): a new arm takes it (an unresolved transaction
@@ -5267,6 +5274,112 @@ mod tests {
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-001 (the authorization matrix of a process of the owner's own
+    /// account, without any presence artifact): the owner applies its
+    /// switch, limit and grant requests on the generation CAS alone (no
+    /// second trust anchor: the register's open decision), so the gate
+    /// comes clear; the LIVE path still arms only with the buyer's key
+    /// file and a verified qualification, and SEND off ends it.
+    #[test]
+    fn a_same_account_process_clears_the_gate_but_not_the_key_or_the_evidence() {
+        use crate::sources::SwitchId;
+        // Every switch, both limits and the grant: requests of this very
+        // process, applied with no presence asked.
+        let r = Rig::new("live-authz", LiveStrategies::C3);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let q = crate::live_qualification::view(&r.root).0.view;
+        assert!(s.live_now(&[ComponentId::ExecC3], &q, NOW).is_ok());
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        // Without the buyer's key file: no arm.
+        let mut keyless = r.live.clone();
+        keyless.key_path = r.d.join("absent.key");
+        let mut x = LiveRuntime::with_prober(
+            keyless,
+            r.exec.clone(),
+            &r.root,
+            r.state.clone(),
+            r.d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", fixed);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(reason(&x).0, "KEY_REFUSED", "{:?}", reason(&x));
+        // Without a verified qualification: no arm.
+        let record = r.root.join(LIVE_QUALIFICATION_PATH);
+        let aside = r.root.join("qualification.aside");
+        fs::rename(&record, &aside).unwrap();
+        let mut y = r.runtime("boot-1");
+        settle(&mut y, &c2);
+        assert!(!y.armed());
+        let why = reason(&y).1.unwrap_or_default();
+        assert!(why.contains("UNQUALIFIED"), "{why}");
+        y.shutdown();
+        fs::rename(&aside, &record).unwrap();
+        // All of it: it arms; SEND off (a request of the same process)
+        // ends it at the next pass.
+        let mut z = r.runtime("boot-1");
+        settle(&mut z, &c2);
+        assert!(z.armed(), "{:?}", reason(&z));
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.request(
+                "send-off",
+                Entity::Switch(SwitchId::Send),
+                Mode::Disabled,
+                g,
+                NOW
+            )
+            .unwrap()
+            .applied()
+        );
+        settle(&mut z, &c2);
+        assert!(!z.armed(), "{:?}", reason(&z));
+        z.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-012: an armed path rests on the one qualification record it
+    /// was armed with. Another record verified on file (a same-account
+    /// process rebuilt the chain while it was armed) ends the arm at the
+    /// next pass, before any further intent; a damaged one too.
+    #[test]
+    fn a_qualification_changed_under_an_armed_path_ends_it() {
+        let r = Rig::new("live-q-changed", LiveStrategies::C3);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let other = Spec {
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: acquisition(),
+            risk: Some(("operator".into(), 2, "another synthetic scope".into(), ev())),
+        };
+        fs::write(
+            r.root.join(LIVE_QUALIFICATION_PATH),
+            build(&r.root, &other, 2).unwrap(),
+        )
+        .unwrap();
+        // It verifies (a whole, consistent record), yet it is not the one
+        // the arm rests on.
+        let (verified, invalid) = crate::live_qualification::view(&r.root);
+        assert!(invalid.is_none() && verified.view.risk_decision);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(
+            reason(&x),
+            (
+                "ENDED".to_string(),
+                Some(crate::sources::LIVE_QUALIFICATION_CHANGED.to_string())
+            )
+        );
         r.clean();
     }
 }

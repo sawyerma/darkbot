@@ -370,6 +370,12 @@ impl LiveEnd {
         &self.armed
     }
 
+    /// The SHA-256 of the LIVE qualification record this end was armed
+    /// with (BSC3-012): every admission of the arm rests on it.
+    pub fn qualification_sha256(&self) -> [u8; 32] {
+        self.qualification.sha256
+    }
+
     /// Every transaction whose bytes may have left, in dispatch order.
     pub fn released(&self) -> &[Released] {
         &self.released

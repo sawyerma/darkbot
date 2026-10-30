@@ -268,6 +268,9 @@ pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
 pub const LIVE_GRANT_RISK_MISSING: &str = "LIVE_GRANT_RISK_MISSING";
 /// BSC3-069: the executor's configuration signs beyond the granted risk.
 pub const LIVE_RISK_OUTSIDE_GRANT: &str = "LIVE_RISK_OUTSIDE_GRANT";
+/// BSC3-012: the verified LIVE qualification on file is another record than
+/// the one the armed path rests on.
+pub const LIVE_QUALIFICATION_CHANGED: &str = "LIVE_QUALIFICATION_CHANGED";
 /// A BUY would leave the grant less than the exits of the open positions
 /// and of its own may still cost (BSC3-057): it is refused, the exits are
 /// not.

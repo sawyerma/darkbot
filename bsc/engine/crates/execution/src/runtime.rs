@@ -1492,6 +1492,26 @@ fn spawn_adapter(
 
 /// Writes `bytes` to `path` atomically (temp file in the same directory).
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    replace_with(path, bytes, true)
+}
+
+/// [`replace`] without the flush to the device (BSC3-039): for the runtime
+/// status, a display record rewritten every status interval on the main
+/// loop. Still published by an atomic rename (a reader never sees a part
+/// of it); after a host crash it may be the previous one or unreadable
+/// until the next interval rewrites it. A full flush costs milliseconds
+/// here (F_FULLFSYNC on macOS), each interval, while launches wait.
+fn replace_volatile(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    replace_with(path, bytes, false)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the replacements this thread flushed to the device.
+    static FLUSHED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn replace_with(path: &Path, bytes: &[u8], flush: bool) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     let _ = fs::remove_file(&tmp);
     let written = fs::OpenOptions::new()
@@ -1499,7 +1519,15 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .create_new(true)
         .mode(0o600)
         .open(&tmp)
-        .and_then(|mut f| std::io::Write::write_all(&mut f, bytes).and_then(|()| f.sync_all()))
+        .and_then(|mut f| {
+            std::io::Write::write_all(&mut f, bytes)?;
+            if flush {
+                #[cfg(test)]
+                FLUSHED.with(|n| n.set(n.get() + 1));
+                f.sync_all()?;
+            }
+            Ok(())
+        })
         .and_then(|()| fs::rename(&tmp, path));
     written.map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -2379,7 +2407,7 @@ pub fn run(
                 config.status_ms,
                 &census_refresh,
             )?;
-            replace(&status_path, &bytes)?;
+            replace_volatile(&status_path, &bytes)?;
         }
         if let Some(o) = owner.as_mut()
             && (stopping || Instant::now() >= next_checkpoint)
@@ -3295,6 +3323,25 @@ mod tests {
         fs::remove_dir_all(&base).unwrap();
     }
 
+    /// BSC3-039: a durable replacement is flushed to the device, the
+    /// status's is not; both publish the whole new content.
+    #[test]
+    fn only_durable_records_are_flushed() {
+        let dir = std::env::temp_dir().join(format!("bsc-runtime-flush-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("record.dbrec");
+        let before = FLUSHED.with(std::cell::Cell::get);
+        replace_volatile(&path, b"status").unwrap();
+        assert_eq!(FLUSHED.with(std::cell::Cell::get), before);
+        assert_eq!(fs::read(&path).unwrap(), b"status");
+        replace(&path, b"census").unwrap();
+        assert_eq!(FLUSHED.with(std::cell::Cell::get), before + 1);
+        assert_eq!(fs::read(&path).unwrap(), b"census");
+        assert!(!dir.join("record.tmp").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// With every source OFF the runtime connects nothing, writes its
     /// status (all OFF, READ_ONLY) and stops on the stop file with a
     /// committed journal.
@@ -3318,8 +3365,12 @@ mod tests {
         let sources = base.join("bsc-sources");
         Store::open(&sources, 8).unwrap().init(1).unwrap();
         let rundir = base.clone();
-        let runner =
-            thread::spawn(move || run(&config, &sources, &rundir, Path::new("/nonexistent-repo")));
+        // BSC3-039: the loop writes its status every interval, never
+        // flushing it to the device (counted on the loop's own thread).
+        let runner = thread::spawn(move || {
+            let ran = run(&config, &sources, &rundir, Path::new("/nonexistent-repo"));
+            (ran, FLUSHED.with(std::cell::Cell::get))
+        });
         let status = base.join("bsc-runtime/status.dbrec");
         let started = Instant::now();
         // A liveness bound, not a timing claim: a loaded host starts slowly.
@@ -3328,7 +3379,11 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         fs::write(base.join("bsc.runtime.stop"), b"stop\n").unwrap();
-        runner.join().unwrap().unwrap();
+        let (ran, flushed) = runner.join().unwrap();
+        ran.unwrap();
+        // The census at the stop is durable; the status, written every
+        // interval, never is.
+        assert_eq!(flushed, 1, "the loop flushes only its final census");
         // Paket 8 review L7: the stop is consumed; the next start runs.
         assert!(!base.join("bsc.runtime.stop").exists());
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &fs::read(&status).unwrap()).unwrap();
