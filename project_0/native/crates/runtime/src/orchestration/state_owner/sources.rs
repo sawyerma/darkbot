@@ -113,6 +113,7 @@ impl OwnerCapabilities {
             econ: &self.econ,
             wallets: &self.wallets,
             fe06: self.fe06.as_ref(),
+            now_unix_s: super::accounts::wall_unix_s().ok(),
         }
     }
 
@@ -481,6 +482,9 @@ impl ShadowOwner {
         };
         // P8-CTRL.1: an economic switch, or the switch of a configured signer (only those).
         let econ = matches!(&request_capability, Some(c) if cap::ECON.contains(&c.as_str()));
+        // P8-CTRL.3: a grant of a previewed scope, or the revocation of the grant in force.
+        let fe06_grant = request_capability.as_deref() == Some(cap::FE06_GRANT);
+        let fe06_revoke = request_capability.as_deref() == Some(cap::FE06_REVOKE);
         let wallet = request_capability
             .as_deref()
             .and_then(cap::wallet_of)
@@ -499,6 +503,21 @@ impl ShadowOwner {
                 Err(format!(
                     "WALLET_NOT_CONFIGURED: {} is no configured signer of this owner",
                     cap::shown(request_capability.as_deref().unwrap_or(""), &requested)
+                ))
+            }
+            // P8-CTRL.3: no grant without the operator's own authentication (undecided).
+            Ok(_) if fe06_grant => Err(cap::FE06_AUTH_UNDECIDED.into()),
+            Ok(digest)
+                if fe06_revoke
+                    && self
+                        .sources
+                        .capabilities
+                        .fe06
+                        .as_ref()
+                        .is_none_or(|a| a.digest() != digest) =>
+            {
+                Err(format!(
+                    "FE06_NOT_IN_FORCE: no grant of digest {digest} is in force; nothing to revoke"
                 ))
             }
             other => other,
@@ -533,7 +552,10 @@ impl ShadowOwner {
         }
         if let Ok(requested) = &valid {
             let on = requested == cap::ENABLED;
-            if econ {
+            if fe06_revoke {
+                // P8-CTRL.3: the grant ends at once and the submitter closes with it.
+                c.fe06 = None;
+            } else if econ {
                 c.econ.set(request_capability.as_deref().unwrap_or(""), on);
             } else if let Some(pk) = wallet {
                 if let Some(w) = c.wallets.iter_mut().find(|w| w.pubkey == pk) {
@@ -559,44 +581,56 @@ impl ShadowOwner {
         } else {
             c.refused = c.refused.saturating_add(1);
         }
+        if fe06_revoke && applied {
+            self.submitter.close();
+        }
         let switch = |on: bool| if on { cap::ENABLED } else { cap::DISABLED };
-        let (requested, effective, block_reason): (&str, &str, String) = if econ {
-            // P8-CTRL.1: a partial permission — effective as requested, never a command.
-            let on = self
-                .sources
-                .capabilities
-                .econ
-                .get(request_capability.as_deref().unwrap_or(""))
-                .unwrap_or(false);
-            (switch(on), switch(on), String::new())
-        } else if let Some(pk) = wallet {
-            let on = self
-                .sources
-                .capabilities
-                .wallets
-                .iter()
-                .any(|w| w.pubkey == pk && w.enabled);
-            (switch(on), switch(on), String::new())
-        } else if jito {
-            self.apply_bundle_path();
-            let c = &self.sources.capabilities;
-            (c.jito_requested, c.jito_effective, c.jito_block.into())
-        } else if hold_b {
-            self.refresh_hold_gate(true);
-            let c = &self.sources.capabilities;
-            (
-                c.hold_b_requested.code(),
-                self.hold_gate.mode.code(),
-                c.hold_b_block.into(),
-            )
-        } else if threshold {
-            let t = &self.threshold;
-            (t.requested.code(), t.effective.code(), t.block.into())
-        } else {
-            let c = &self.sources.capabilities;
-            let (effective, block_reason) = cap::live_decision(&c.live_gates());
-            (c.live_requested, effective, block_reason)
+        let fe06_state = |c: &OwnerCapabilities| match &c.fe06 {
+            Some(_) => "IN_FORCE",
+            None => "NONE",
         };
+        let digest_requested = request_value.clone().unwrap_or_default();
+        let (requested, effective, block_reason): (&str, &str, String) =
+            if fe06_grant || fe06_revoke {
+                let c = &self.sources.capabilities;
+                (digest_requested.as_str(), fe06_state(c), String::new())
+            } else if econ {
+                // P8-CTRL.1: a partial permission — effective as requested, never a command.
+                let on = self
+                    .sources
+                    .capabilities
+                    .econ
+                    .get(request_capability.as_deref().unwrap_or(""))
+                    .unwrap_or(false);
+                (switch(on), switch(on), String::new())
+            } else if let Some(pk) = wallet {
+                let on = self
+                    .sources
+                    .capabilities
+                    .wallets
+                    .iter()
+                    .any(|w| w.pubkey == pk && w.enabled);
+                (switch(on), switch(on), String::new())
+            } else if jito {
+                self.apply_bundle_path();
+                let c = &self.sources.capabilities;
+                (c.jito_requested, c.jito_effective, c.jito_block.into())
+            } else if hold_b {
+                self.refresh_hold_gate(true);
+                let c = &self.sources.capabilities;
+                (
+                    c.hold_b_requested.code(),
+                    self.hold_gate.mode.code(),
+                    c.hold_b_block.into(),
+                )
+            } else if threshold {
+                let t = &self.threshold;
+                (t.requested.code(), t.effective.code(), t.block.into())
+            } else {
+                let c = &self.sources.capabilities;
+                let (effective, block_reason) = cap::live_decision(&c.live_gates());
+                (c.live_requested, effective, block_reason)
+            };
         let (requested, effective) = (requested.to_string(), effective.to_string());
         let detail = match valid {
             Ok(_) => format!("requested {requested} · effective {effective} · {block_reason}"),

@@ -2006,7 +2006,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
 
 /// DEC-13/P8-CTRL: the operator's capability request (`set`), the same controller path as
 /// `source`: written only for a running owner of this project, under a one-time request id (the
@@ -2042,9 +2042,12 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if let Some(id) = &request_id {
                 capability_control::validate_request_id(id)?;
             }
-            // P8-CTRL.6: an economic or wallet switch states its version, epoch and id.
+            // P8-CTRL.6: an economic or wallet switch and an FE-06 grant or revocation state
+            // their version, epoch and id.
             let economic = capability_control::ECON.contains(&capability.as_str())
-                || capability.starts_with(capability_control::WALLET_PREFIX);
+                || capability.starts_with(capability_control::WALLET_PREFIX)
+                || capability == capability_control::FE06_GRANT
+                || capability == capability_control::FE06_REVOKE;
             if economic && (expected.is_none() || stated_epoch.is_none() || request_id.is_none()) {
                 return Err(format!("CAPABILITY_BINDING_REQUIRED: {capability} states --expect-version, --expect-epoch and --request-id (P8-CTRL.6); {CAPABILITY_USAGE}"));
             }
@@ -2167,6 +2170,89 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         _ => Err(CAPABILITY_USAGE.into()),
+    }
+}
+
+const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant|revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status";
+
+/// P8-CTRL.3/.8: the FE-06 scope, grant and revocation — a scope is previewed natively (read,
+/// validated against the registry's ceilings, stored under its digest and shown in full); a grant
+/// or a revocation names that digest and is decided by the running owner through the capability
+/// path (version, epoch, request id, receipt). A grant needs the operator's own authentication.
+fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::{capability_control, fe06};
+    match args {
+        [scope, flag, file] if scope == "scope" && flag == "--file" => {
+            let bytes =
+                darkbot_runner::execution::one_shot::approval_file::read_bytes(Path::new(file))
+                    .map_err(|e| e.replace("APPROVAL", "FE06_SCOPE"))?;
+            let limits =
+                darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
+                    .config
+                    .limits;
+            let s = fe06::parse(&bytes, &fe06::Ceilings::of(&limits))?;
+            let digest = fe06::put_preview(project, &s)?;
+            print!("{}", fe06::terminal(&s)?);
+            println!("[p0ctl] scope previewed: digest={digest}; a grant names exactly this digest (p0ctl live grant --digest {digest} --expect-version N --expect-epoch E --request-id ID)");
+            Ok(true)
+        }
+        [verb, rest @ ..] if verb == "grant" || verb == "revoke" => {
+            let digest = match rest.iter().position(|a| a == "--digest") {
+                Some(i) => rest.get(i + 1).ok_or(LIVE_USAGE)?.clone(),
+                None => return Err(LIVE_USAGE.into()),
+            };
+            let flags: Vec<String> = rest
+                .iter()
+                .enumerate()
+                .filter(|(i, a)| {
+                    *a != "--digest" && rest.get(i.wrapping_sub(1)).is_none_or(|p| p != "--digest")
+                })
+                .map(|(_, a)| a.clone())
+                .collect();
+            let capability = if verb == "grant" {
+                // The scope must have been previewed: the operator confirms what was shown.
+                fe06::preview(project, &digest)?;
+                capability_control::FE06_GRANT
+            } else {
+                capability_control::FE06_REVOKE
+            };
+            let mut set = vec!["set".to_string(), capability.into(), digest];
+            set.extend(flags);
+            capability_cmd(project, &set)
+        }
+        [status] if status == "status" => {
+            let dir = capability_control::request_dir(project);
+            let epoch = capability_control::current_epoch(&dir)?;
+            let decided: Vec<_> = capability_control::epoch_decisions(&dir, epoch)?
+                .into_iter()
+                .filter(|d| {
+                    d.capability == capability_control::FE06_GRANT
+                        || d.capability == capability_control::FE06_REVOKE
+                })
+                .collect();
+            println!("owner epoch: {epoch} (no grant survives an owner restart)");
+            for d in &decided {
+                println!(
+                    "  {} digest={} effective={} seq={} request_id={}",
+                    d.capability, d.requested, d.effective, d.seq, d.request_id
+                );
+            }
+            let in_force = decided
+                .iter()
+                .max_by_key(|d| d.seq)
+                .map(|d| d.effective.as_str());
+            println!(
+                "grant in force: {} · {}",
+                if in_force == Some("IN_FORCE") {
+                    "yes"
+                } else {
+                    "none"
+                },
+                capability_control::FE06_AUTH_UNDECIDED
+            );
+            Ok(true)
+        }
+        _ => Err(LIVE_USAGE.into()),
     }
 }
 
@@ -2595,6 +2681,7 @@ fn main() -> ExitCode {
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("capability"), _) => capability_cmd(&project, &rest),
+            (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),
             (Some("autostart"), _) => autostart_cmd(&project, &rest),
@@ -2605,7 +2692,7 @@ fn main() -> ExitCode {
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04 …".into()),
         }
     });
     match result {

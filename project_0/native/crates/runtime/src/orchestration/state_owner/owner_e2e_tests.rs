@@ -4750,6 +4750,86 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
     );
 }
 
+/// P8-CTRL-02: no grant is taken while the operator authentication is undecided; the grant in
+/// force is revoked by its digest only — LIVE is BLOCKED at once and the submitter refuses again —
+/// and another digest revokes nothing.
+#[test]
+fn p8ctrl02_no_grant_without_the_operator_and_a_revocation_ends_it_at_once() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::{capability_control as cap, fe06};
+    use darkbot_solana::submit::SubmissionAdapter;
+    let mut f = fixture_with("p8ctrl02", None);
+    let dir = f.dir.join("capability-control");
+    let scope = fe06::parse(
+        fe06::tests::text(&f.owner.liquidator, &[]).as_bytes(),
+        &fe06::tests::ceilings(),
+    )
+    .unwrap();
+    let digest = fe06::digest(&scope).unwrap();
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(3));
+    }
+    let request = |seq, capability: &str, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: capability.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+            request_id: format!("r-{seq}"),
+            owner_epoch: 3,
+        })
+    };
+    let detail = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
+    f.owner
+        .apply_capability_control(1, request(1, cap::FE06_GRANT, &digest));
+    let o = detail(1);
+    assert!(
+        !o.applied && o.detail == cap::FE06_AUTH_UNDECIDED,
+        "{}",
+        o.detail
+    );
+    assert!(f.owner.sources.capabilities.fe06.is_none());
+    // A grant in force (the offline tests' stand-in of an authenticated one), the submitter open.
+    let grant = cap::Fe06Authorization::offline_test_of(scope);
+    f.owner.submitter.open(&grant);
+    f.owner.sources.capabilities.fe06 = Some(grant);
+    f.owner
+        .apply_capability_control(2, request(2, cap::FE06_REVOKE, &"0".repeat(64)));
+    assert!(detail(2).detail.starts_with("FE06_NOT_IN_FORCE"));
+    assert!(f.owner.sources.capabilities.fe06.is_some());
+    f.owner
+        .apply_capability_control(3, request(3, cap::FE06_REVOKE, &digest));
+    let o = detail(3);
+    assert!(o.applied, "{}", o.detail);
+    assert_eq!(
+        (
+            o.capability.as_str(),
+            o.requested.as_str(),
+            o.effective.as_str()
+        ),
+        (cap::FE06_REVOKE, digest.as_str(), "NONE")
+    );
+    assert!(f.owner.sources.capabilities.fe06.is_none() && !f.owner.live_effective());
+    // The submitter refuses again (counted, never forwarded).
+    let refused = f
+        .owner
+        .submitter
+        .attempts
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let tx = solana_sdk::transaction::VersionedTransaction::default();
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    assert!(f.owner.submitter.submit(&tx, 0, deadline).is_err());
+    assert_eq!(
+        f.owner
+            .submitter
+            .attempts
+            .load(std::sync::atomic::Ordering::Relaxed),
+        refused + 1
+    );
+    cleanup(f);
+}
+
 /// DEC-16 (D-4, D-7): the real owner pass of an unbounded Shadow run opens its first window at
 /// the first tradable READY; the operator's stop ends the owner loop with that reason, the
 /// winner watches drain, and `finish` ends the run in order — the open window's record carries

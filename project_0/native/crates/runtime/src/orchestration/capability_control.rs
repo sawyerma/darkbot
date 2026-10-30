@@ -47,6 +47,13 @@ pub const ECON: [&str; 5] = [ECON_LIVE, ECON_ARM, ECON_SIGN, ECON_SEND, ECON_ATT
 /// P8-CTRL.5: the switches an exit of an open position needs — every one but ECON_ATTEMPT,
 /// which governs new liquidations only.
 pub const ECON_EXIT: [&str; 4] = [ECON_LIVE, ECON_ARM, ECON_SIGN, ECON_SEND];
+/// P8-CTRL.3: a grant of the previewed FE-06 scope its value names (its digest), and the
+/// revocation of the grant in force of that digest.
+pub const FE06_GRANT: &str = "FE06_GRANT";
+pub const FE06_REVOKE: &str = "FE06_REVOKE";
+/// Why no grant is taken while the operator authentication of a grant is not decided (P8-CTRL.3:
+/// a confirmation alone is no cryptographic identity).
+pub const FE06_AUTH_UNDECIDED: &str = "FE06_OPERATOR_AUTHORIZATION_UNDECIDED: a grant needs the operator's own authentication (P8-CTRL.3), not decided yet; no grant is taken";
 /// P8-CTRL.1: the switch of one configured signer is `WALLET:<pubkey>`.
 pub const WALLET_PREFIX: &str = "WALLET:";
 /// P8-CTRL.1: the validated roles of a configured signer.
@@ -139,6 +146,20 @@ pub fn wallet_of(capability: &str) -> Option<Result<Pubkey, String>> {
 
 /// A request names a known capability and one of its values.
 pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
+    if capability == FE06_GRANT || capability == FE06_REVOKE {
+        return if requested.len() == 64
+            && requested
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "CAPABILITY_VALUE_INVALID: {} (the scope digest: 64 lowercase hex digits)",
+                shown(capability, requested)
+            ))
+        };
+    }
     let values: &[&str] = match wallet_of(capability) {
         Some(Err(e)) => return Err(e),
         Some(Ok(_)) => &SWITCH_VALUES,
@@ -147,7 +168,7 @@ pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
             Some((_, values)) => values,
             None => {
                 return Err(format!(
-                    "CAPABILITY_UNKNOWN: {} (LIVE|HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE|WALLET:<pubkey>)",
+                    "CAPABILITY_UNKNOWN: {} (LIVE|HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE|WALLET:<pubkey>|FE06_GRANT|FE06_REVOKE)",
                     shown(capability, "")
                 ))
             }
@@ -429,14 +450,51 @@ pub fn epoch_decisions(dir: &Path, epoch: u64) -> Result<Vec<CapabilityControlOu
 /// and Safety LIVE — never the mode alone (review L7).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fe06Authorization {
-    _sealed: (),
+    /// The digest of its scope (P8-CTRL.3).
+    digest: String,
+    /// Its scope; `None` only for the offline tests' stand-in.
+    scope: Option<Box<super::fe06::Scope>>,
+    not_before_unix_s: u64,
+    expires_unix_s: u64,
 }
 
 impl Fe06Authorization {
-    /// The offline tests' stand-in of an FE-06 authorization (never part of a build).
+    /// The digest of its scope.
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    /// Its scope (`None`: the offline tests' stand-in).
+    pub fn scope(&self) -> Option<&super::fe06::Scope> {
+        self.scope.as_deref()
+    }
+
+    /// P8-CTRL.3: in force at `now_unix_s` — within its scope's validity (expired: no grant).
+    pub fn in_force(&self, now_unix_s: u64) -> bool {
+        (self.not_before_unix_s..self.expires_unix_s).contains(&now_unix_s)
+    }
+
+    /// The offline tests' stand-in of an FE-06 authorization, always in force (never part of a
+    /// build).
     #[cfg(test)]
     pub(crate) fn offline_test() -> Self {
-        Self { _sealed: () }
+        Self {
+            digest: "offline-test".into(),
+            scope: None,
+            not_before_unix_s: 0,
+            expires_unix_s: u64::MAX,
+        }
+    }
+
+    /// The offline tests' grant of `scope` (never part of a build).
+    #[cfg(test)]
+    pub(crate) fn offline_test_of(scope: super::fe06::Scope) -> Self {
+        Self {
+            digest: super::fe06::digest(&scope).unwrap(),
+            not_before_unix_s: scope.not_before_unix_s,
+            expires_unix_s: scope.expires_unix_s,
+            scope: Some(Box::new(scope)),
+        }
     }
 }
 
@@ -501,6 +559,8 @@ pub struct LiveGates<'a> {
     /// Every signer the economic path needs.
     pub wallets: &'a [WalletSwitch],
     pub fe06: Option<&'a Fe06Authorization>,
+    /// The wall clock (unix s) a grant's validity is read at; `None`: unreadable — no grant.
+    pub now_unix_s: Option<u64>,
 }
 
 /// P8-CTRL.2: LIVE's effective value for a new liquidation — BLOCKED while any gate is missing
@@ -532,8 +592,13 @@ fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
             .filter(|w| !w.enabled)
             .map(|w| format!("{} {DISABLED}", w.capability())),
     );
-    if g.fe06.is_none() {
-        missing.push(LIVE_BLOCK_REASON.into());
+    match g.fe06 {
+        None => missing.push(LIVE_BLOCK_REASON.into()),
+        Some(a) if !g.now_unix_s.is_some_and(|now| a.in_force(now)) => missing.push(format!(
+            "FE-06 grant {} not in force (expired, not yet valid or no readable clock)",
+            a.digest()
+        )),
+        Some(_) => {}
     }
     match missing.split_first() {
         None if g.requested == LIVE => (LIVE, String::new()),
@@ -663,6 +728,7 @@ mod tests {
                 econ: &econ,
                 wallets: &wallets,
                 fe06: None,
+                now_unix_s: Some(0),
             };
             let (effective, reason) = live_decision(&g);
             assert_eq!(effective, "BLOCKED");
@@ -728,6 +794,7 @@ mod tests {
                 econ,
                 wallets,
                 fe06,
+                now_unix_s: Some(0),
             })
         };
         // Every gate: the requested value.
@@ -778,7 +845,8 @@ mod tests {
                 requested: LIVE,
                 econ: &econ,
                 wallets: &wallets,
-                fe06: Some(&fe06)
+                fe06: Some(&fe06),
+                now_unix_s: Some(0),
             }),
             crate::execution::pipeline::Mode::Live
         );
@@ -944,6 +1012,7 @@ mod tests {
                 econ,
                 wallets,
                 fe06,
+                now_unix_s: Some(0),
             }
         }
         let gates = |econ| at(econ, &wallets, Some(&fe06));
@@ -1090,5 +1159,59 @@ mod tests {
         .unwrap_err();
         assert!(err.starts_with("CAPABILITY_EPOCH_STALE"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// P8-CTRL.3: a grant is in force only within its scope's validity and with a readable clock
+    /// — expired, not yet valid or without a clock LIVE is BLOCKED, naming the grant; the grant
+    /// capabilities take a scope digest.
+    #[test]
+    fn p8ctrl02_a_grant_is_in_force_only_within_its_validity() {
+        use super::super::fe06;
+        let scope = fe06::parse(
+            fe06::tests::text(&Pubkey::new_unique(), &[]).as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        let grant = Fe06Authorization::offline_test_of(scope.clone());
+        assert_eq!(grant.digest(), fe06::digest(&scope).unwrap());
+        assert_eq!(grant.scope(), Some(&scope));
+        let mut econ = EconSwitches::default();
+        ECON.iter().for_each(|e| {
+            econ.set(e, true);
+        });
+        let mut w = WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_FEE_PAYER]);
+        w.enabled = true;
+        let wallets = [w];
+        let at = |now_unix_s| {
+            live_decision(&LiveGates {
+                requested: LIVE,
+                econ: &econ,
+                wallets: &wallets,
+                fe06: Some(&grant),
+                now_unix_s,
+            })
+        };
+        assert_eq!(at(Some(scope.not_before_unix_s)).0, LIVE);
+        assert_eq!(at(Some(scope.expires_unix_s - 1)).0, LIVE);
+        for now in [
+            Some(scope.not_before_unix_s - 1),
+            Some(scope.expires_unix_s),
+            None,
+        ] {
+            let (effective, reason) = at(now);
+            assert_eq!(effective, "BLOCKED");
+            assert!(
+                reason.contains(grant.digest()) && reason.contains("not in force"),
+                "{reason}"
+            );
+        }
+        let digest = "a".repeat(64);
+        assert_eq!(validate(FE06_GRANT, &digest), Ok(()));
+        assert_eq!(validate(FE06_REVOKE, &digest), Ok(()));
+        for bad in ["", &"A".repeat(64), &"a".repeat(63), ENABLED] {
+            assert!(validate(FE06_GRANT, bad)
+                .unwrap_err()
+                .starts_with("CAPABILITY_VALUE_INVALID"));
+        }
     }
 }

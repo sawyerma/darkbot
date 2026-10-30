@@ -30,6 +30,10 @@ impl<S> ObserveOnly<S> {
     pub fn open(&mut self, _fe06: &crate::orchestration::capability_control::Fe06Authorization) {
         self.opened = true;
     }
+    /// P8-CTRL.3: submissions are refused again (the grant was revoked or ended).
+    pub fn close(&mut self) {
+        self.opened = false;
+    }
     /// The wrapped adapter, to reconfigure (DEC-11: the bundle path); submissions stay refused.
     pub fn inner_mut(&mut self) -> &mut S {
         &mut self.inner

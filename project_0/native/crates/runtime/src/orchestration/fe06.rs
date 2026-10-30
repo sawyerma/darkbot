@@ -500,7 +500,7 @@ pub fn preview(project: &Path, digest: &str) -> Result<Scope, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const KEY: &str = "11111111111111111111111111111112";
