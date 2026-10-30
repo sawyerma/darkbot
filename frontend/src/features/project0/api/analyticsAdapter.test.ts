@@ -53,7 +53,7 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     if (pre.kind !== "H0") throw new Error("H0");
     expect([pre.competitive, pre.transactions, pre.failedAttempts, pre.coveredSeconds, pre.bandsBounded, pre.bandsBelowOurMinProfit, pre.tipAccounts])
       .toEqual([null, null, null, null, null, null, null]);
-    expect(h0Line(pre)).toBe("2025-08-28 … 2025-09-27 (covered — h) · 7 liquidations (— competitive, 0 seen again) · — transactions"
+    expect(h0Line(pre)).toBe("pre-review result (9a41e808: winners, shares and bands include non-competitive events) · 2025-08-28 … 2025-09-27 (covered — h) · 7 liquidations (— competitive, 0 seen again) · — transactions"
       + " · runs 1 verified / 0 without · 2 winners · top 70.00 % · — failed attempts · —/1 min-profit bands bounded (upper bounds; — below ours)"
       + " · tips — · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 needs the 0.1.12 deployment");
     expect(view.jobs[2]?.verification).toEqual({ chainVerify: "strict", offline: true });

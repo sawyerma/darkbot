@@ -517,7 +517,6 @@ fn admit(
     a
 }
 
-/// The seconds of `window` that the union of `spans` (unix s, half-open) covers.
 /// The run's fresh events as liquidations, each with its transaction's attributes — every event
 /// of a transaction carries them (review: a later event of a multi-event transaction kept none).
 fn attach(
@@ -537,6 +536,7 @@ fn attach(
     Ok(())
 }
 
+/// The seconds of `window` that the union of `spans` (unix s, half-open) covers.
 fn covered_seconds(spans: &[(i64, i64)], window: Window) -> u64 {
     let mut clipped: Vec<(i64, i64)> = spans
         .iter()

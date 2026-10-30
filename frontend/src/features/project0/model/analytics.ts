@@ -360,7 +360,9 @@ export function h0Line(r: Extract<JobResultView, { kind: "H0" }>): string {
   const share = r.topWinnerShareBps == null ? "—" : `${r.topWinnerShareBps / 100n}.${(r.topWinnerShareBps % 100n).toString().padStart(2, "0")} %`;
   const covered = r.coveredSeconds == null ? "—" : (Number(r.coveredSeconds) / 3600).toFixed(1);
   const tips = r.tipAccounts == null ? "—" : r.tipAccounts > 0n ? `${r.tipAccounts} accounts` : "unknown";
-  return `${day(r.windowStartUnixS)} … ${day(r.windowEndUnixS)} (covered ${covered} h) · ${r.liquidations} liquidations (${n(r.competitive)} competitive, ${r.duplicates} seen again)`
+  // Its winners, shares and bands also count non-competitive events (the rules before the review).
+  const pre = r.competitive == null ? "pre-review result (9a41e808: winners, shares and bands include non-competitive events) · " : "";
+  return `${pre}${day(r.windowStartUnixS)} … ${day(r.windowEndUnixS)} (covered ${covered} h) · ${r.liquidations} liquidations (${n(r.competitive)} competitive, ${r.duplicates} seen again)`
     + ` · ${n(r.transactions)} transactions · runs ${r.runsVerified} verified / ${r.runsWithoutResult} without · ${r.winners} winners · top ${share}`
     + ` · ${n(r.failedAttempts)} failed attempts · ${n(r.bandsBounded)}/${r.bands} min-profit bands bounded (upper bounds; ${n(r.bandsBelowOurMinProfit)} below ours)`
     + ` · tips ${tips} · ${r.sampleStatus} · tags ${r.tags}`;
