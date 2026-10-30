@@ -52,6 +52,8 @@ pub struct AttemptRecord {
     pub open_positions: BTreeMap<String, Position>,
     /// DEC-04: the holds the attempt was admitted with (`None`: OFF or before DEC-04).
     pub hold: Option<crate::execution::hold_b::HoldEvidence>,
+    /// P8-CTRL.5: the FE-06 grant it is booked against (`None`: none, or before P8-CTRL).
+    pub fe06: Option<crate::execution::one_shot::Fe06Attempt>,
 }
 
 /// FE-07: the cumulative decision.
@@ -357,6 +359,7 @@ mod tests {
             exits: vec![],
             open_positions: BTreeMap::new(),
             hold: None,
+            fe06: None,
         }
     }
 

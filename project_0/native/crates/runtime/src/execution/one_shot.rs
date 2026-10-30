@@ -233,6 +233,51 @@ struct Saved {
     /// written by the reservation only (`None`: OFF, or a frame before DEC-04).
     #[serde(default)]
     hold: Option<crate::execution::hold_b::HoldEvidence>,
+    /// P8-CTRL.5 (schema 8): the FE-06 grant the attempt is booked against, written by the
+    /// reservation before any dispatch (`None`: no grant, or a frame before P8-CTRL).
+    #[serde(default)]
+    fe06: Option<Fe06Attempt>,
+}
+
+/// P8-CTRL.5: an attempt's booking against its FE-06 grant — the grant's digest, its campaign,
+/// the UTC day and the owner epoch of the reservation. Every attempt booked so, UNKNOWN or sent,
+/// consumes the grant's, the campaign's and the day's quota (`archive::records`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fe06Attempt {
+    pub grant: String,
+    pub campaign: String,
+    /// `unix_ms / 86_400_000` of the reservation.
+    pub utc_day: u64,
+    pub owner_epoch: Option<u64>,
+}
+
+/// Schema-7 layout of `Saved` (the DEC-04 holds, before the P8-CTRL.5 grant booking).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV7 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    exits: Vec<exit::ExitAttempt>,
+    non_landing: Option<non_landing::NonLandingRelease>,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+}
+impl From<SavedV7> for Saved {
+    fn from(v: SavedV7) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: v.exits,
+            non_landing: v.non_landing,
+            hold: v.hold,
+            fe06: None,
+        }
+    }
 }
 /// Schema ≤ 3 layout of `Phase` (its settlement before the realized/unrealized split).
 #[derive(Deserialize)]
@@ -276,6 +321,7 @@ impl TryFrom<SavedV2> for Saved {
             exits: Vec::new(),
             non_landing: None,
             hold: None,
+            fe06: None,
         })
     }
 }
@@ -301,6 +347,7 @@ impl TryFrom<SavedV3> for Saved {
             exits: Vec::new(),
             non_landing: None,
             hold: None,
+            fe06: None,
         })
     }
 }
@@ -325,6 +372,7 @@ impl From<SavedV4> for Saved {
             exits: Vec::new(),
             non_landing: None,
             hold: None,
+            fe06: None,
         }
     }
 }
@@ -351,6 +399,7 @@ impl From<SavedV6> for Saved {
             exits: v.exits,
             non_landing: v.non_landing,
             hold: None,
+            fe06: None,
         }
     }
 }
@@ -376,6 +425,7 @@ impl From<SavedV5> for Saved {
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: None,
             hold: None,
+            fe06: None,
         }
     }
 }
@@ -497,9 +547,16 @@ struct VersionV6 {
     transition: Transition,
     state: SavedV6,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV7 {
+    transition: Transition,
+    state: SavedV7,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    const SCHEMA: u16 = 7;
+    /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking.
+    const SCHEMA: u16 = 8;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -524,6 +581,10 @@ impl crate::analytics::payload::Payload for Version {
                 state: v.state.into(),
             })),
             6 => Some(decode_wire::<VersionV6>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            7 => Some(decode_wire::<VersionV7>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -564,9 +625,14 @@ struct LegacyImportV6 {
     legacy_sha256: String,
     state: SavedV6,
 }
+#[derive(Deserialize)]
+struct LegacyImportV7 {
+    legacy_sha256: String,
+    state: SavedV7,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 7;
+    const SCHEMA: u16 = 8;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -591,6 +657,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 state: v.state.into(),
             })),
             6 => Some(decode_wire::<LegacyImportV6>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            7 => Some(decode_wire::<LegacyImportV7>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -881,7 +951,7 @@ pub(crate) fn test_unknown_attempt_held(
     a.wallet = wallet.into();
     i.wallet = wallet.into();
     let mut j = Journal::open(dir, wallet).unwrap();
-    j.reserve_held(a, i.clone(), &c, hold).unwrap();
+    j.reserve_held(a, i.clone(), &c, hold, None).unwrap();
     j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
     i
 }
@@ -1031,7 +1101,14 @@ impl Journal {
     }
     #[cfg(test)]
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
-        self.reserve_held(approval, intent, now, None)
+        self.reserve_held(approval, intent, now, None, None)
+    }
+    /// P8-CTRL.5: every own attempt of this wallet (archived and active) — what the FE-06 limits
+    /// count.
+    pub fn attempt_records(
+        &self,
+    ) -> Result<Vec<crate::execution::accounting::AttemptRecord>, String> {
+        archive::records(&self.directory, &self.wallet)
     }
     /// The reservation with the attempt's holds (DEC-04, `None`: OFF).
     fn reserve_held(
@@ -1040,6 +1117,7 @@ impl Journal {
         intent: Intent,
         now: &Current,
         hold: Option<crate::execution::hold_b::HoldEvidence>,
+        fe06: Option<Fe06Attempt>,
     ) -> Result<(), String> {
         if self.saved.is_some() {
             return Err(err("ONE_SHOT_ALREADY_CONSUMED_OR_UNKNOWN"));
@@ -1060,6 +1138,7 @@ impl Journal {
                 exits: Vec::new(),
                 non_landing: None,
                 hold,
+                fe06,
             },
             Transition::Reserve,
         )
@@ -1344,6 +1423,7 @@ mod tests {
             exits: Vec::new(),
             non_landing: None,
             hold: None,
+            fe06: None,
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -1655,16 +1735,26 @@ mod tests {
             }),
             reserved_inventory_usd_micro: 1_100,
         });
-        let version = Version {
+        // The schema-7 mirror reproduces its pinned bytes, which read without a grant booking.
+        let v7 = VersionV7 {
             transition: Transition::ExitNotLanded,
-            state: held.clone(),
+            state: SavedV7 {
+                approval: held.approval.clone(),
+                intent: held.intent.clone(),
+                phase: held.phase.clone(),
+                finalized: held.finalized.clone(),
+                observations: held.observations.clone(),
+                exits: held.exits.clone(),
+                non_landing: held.non_landing.clone(),
+                hold: held.hold.clone(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let bytes = crate::analytics::payload::encode_wire(&v7).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 7, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitNotLanded, held)
+            (Transition::ExitNotLanded, held.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -1674,9 +1764,106 @@ mod tests {
             ),
             "FE04_TRANSITION schema-7 layout changed"
         );
+        // Schema 8 (P8-CTRL.5) is pinned with the attempt's FE-06 grant booking.
+        let mut booked = held;
+        booked.fe06 = Some(Fe06Attempt {
+            grant: "a".repeat(64),
+            campaign: "first-profit".into(),
+            utc_day: 20_390,
+            owner_epoch: Some(3),
+        });
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: booked.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 8, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, booked)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2365,
+                "3uDH7ZajpnVMCcQXa22BxtkJEQPk1HadsXXPFDrciaX5".to_string()
+            ),
+            "FE04_TRANSITION schema-8 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 7, no JSON value
+    /// P8-CTRL.5: the attempts booked against FE-06 grants in the wallet's journals bound the
+    /// next new attempt — per UTC day, per campaign and per grant, each against the scope; a
+    /// reserved (or UNKNOWN) attempt counts, one of another day, campaign or grant not.
+    #[test]
+    fn p8ctrl03_booked_attempts_bound_the_next_one_per_day_campaign_and_grant() {
+        use crate::orchestration::fe06;
+        let (dir, a, i, c) = setup();
+        let booking = |grant: &str, campaign: &str, utc_day| Fe06Attempt {
+            grant: grant.into(),
+            campaign: campaign.into(),
+            utc_day,
+            owner_epoch: Some(1),
+        };
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve_held(
+            a.clone(),
+            i.clone(),
+            &c,
+            None,
+            Some(booking("g1", "k1", 10)),
+        )
+        .unwrap();
+        assert_eq!(
+            j.attempt_records().unwrap()[0].fe06,
+            Some(booking("g1", "k1", 10))
+        );
+        let scope = |day: &str, campaign: &str, grant: &str| {
+            fe06::parse(
+                fe06::tests::text(
+                    &solana_sdk::pubkey::Pubkey::new_unique(),
+                    &[
+                        ("max_attempts_per_utc_day", day),
+                        ("max_attempts_campaign", campaign),
+                        ("max_attempts_grant", grant),
+                    ],
+                )
+                .as_bytes(),
+                &fe06::tests::ceilings(),
+            )
+            .unwrap()
+        };
+        let check = |b: Fe06Attempt, s: &fe06::Scope| super::admission::within_limits(&j, &b, s);
+        assert_eq!(
+            check(booking("g1", "k1", 10), &scope("1", "5", "5")),
+            Err("FE06_ATTEMPT_LIMIT_UTC_DAY: 1 of 1 attempts used".into())
+        );
+        assert_eq!(
+            check(booking("g1", "k1", 11), &scope("1", "5", "5")),
+            Ok(())
+        );
+        assert_eq!(
+            check(booking("g2", "k1", 11), &scope("5", "1", "5")),
+            Err("FE06_ATTEMPT_LIMIT_CAMPAIGN: 1 of 1 attempts used".into())
+        );
+        assert_eq!(
+            check(booking("g2", "k2", 11), &scope("5", "1", "5")),
+            Ok(())
+        );
+        assert_eq!(
+            check(booking("g1", "k2", 11), &scope("5", "5", "1")),
+            Err("FE06_ATTEMPT_LIMIT_GRANT: 1 of 1 attempts used".into())
+        );
+        assert_eq!(
+            check(booking("g2", "k2", 11), &scope("5", "5", "1")),
+            Ok(())
+        );
+        drop(j);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 8, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -1692,10 +1879,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 7 since the DEC-04 holds; schemas 6 … 2 stay readable.
+        // Schema 8 since the P8-CTRL.5 grant booking; schemas 7 … 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 7)
+            (journal::kind::FE04_TRANSITION, 8)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -1742,7 +1929,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 7],
+                [1, 8],
                 "historical frame kept, the reopen transition is typed"
             );
         }
@@ -2346,7 +2533,7 @@ mod tests {
                     .simulate(&adapter, test_deadline(), test_binding())
                     .unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
-                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None)
+                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
                     .unwrap();
                 let result =
                     j.submit_payload(&simulated, &c, 123, test_deadline(), permit(&simulated));
@@ -2408,7 +2595,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
             .unwrap();
         let past = std::time::Instant::now();
         assert_eq!(
@@ -2673,7 +2860,7 @@ mod tests {
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
-            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None)
+            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None, None)
             .is_err());
         // DEC-11: a bundle token is reserved only with current bundle evidence.
         let stale = Current {
@@ -2681,13 +2868,13 @@ mod tests {
             ..c.clone()
         };
         let refused = j
-            .reserve_payload(a.clone(), i.clone(), &stale, &original, None)
+            .reserve_payload(a.clone(), i.clone(), &stale, &original, None, None)
             .unwrap_err();
         assert!(
             refused.contains("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"),
             "{refused}"
         );
-        j.reserve_payload(a, i, &c, &original, None).unwrap();
+        j.reserve_payload(a, i, &c, &original, None, None).unwrap();
         assert!(j
             .submit_payload(&reversed, &c, 1, test_deadline(), permit(&reversed))
             .is_err());
@@ -2813,6 +3000,7 @@ mod tests {
             exits: Vec::new(),
             non_landing: None,
             hold: None,
+            fe06: None,
         }
     }
     pub(super) fn path_of(j: &Journal) -> PathBuf {

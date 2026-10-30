@@ -589,6 +589,7 @@ mod tests {
                 })
                 .collect(),
             hold: None,
+            fe06: None,
         }
     }
 

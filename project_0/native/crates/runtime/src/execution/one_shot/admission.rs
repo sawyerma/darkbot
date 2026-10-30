@@ -57,6 +57,44 @@ pub(crate) fn economics_known(input: &darkbot_project0::economics::CandidateInpu
     input.gross_seized_realizable_usd_micro.is_some() && input.rent_and_token_usd_micro.is_some()
 }
 
+/// P8-CTRL.5: a new attempt within its grant's limits — the attempts of this UTC day, of the
+/// grant's campaign and of the grant itself, each against its ceiling of the scope (an unreadable
+/// journal refuses).
+pub(super) fn within_limits(
+    journal: &Journal,
+    booking: &super::Fe06Attempt,
+    scope: &crate::orchestration::fe06::Scope,
+) -> Result<(), String> {
+    let records = journal.attempt_records()?;
+    let booked: Vec<&super::Fe06Attempt> = records.iter().filter_map(|r| r.fe06.as_ref()).collect();
+    let count =
+        |f: &dyn Fn(&super::Fe06Attempt) -> bool| booked.iter().filter(|b| f(b)).count() as u64;
+    for (what, used, limit) in [
+        (
+            "UTC_DAY",
+            count(&|b| b.utc_day == booking.utc_day),
+            scope.max_attempts_per_utc_day,
+        ),
+        (
+            "CAMPAIGN",
+            count(&|b| b.campaign == booking.campaign),
+            scope.max_attempts_campaign,
+        ),
+        (
+            "GRANT",
+            count(&|b| b.grant == booking.grant),
+            scope.max_attempts_grant,
+        ),
+    ] {
+        if used >= limit {
+            return Err(format!(
+                "FE06_ATTEMPT_LIMIT_{what}: {used} of {limit} attempts used"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Everything the pipeline hands over for one actionable, simulated candidate.
 pub struct Candidate<'a> {
     pub plan: &'a ReceivershipPlan,
@@ -202,6 +240,26 @@ impl Fe04Admission {
             Some(Err(e)) => return Admission::Refused(e),
             None => return refuse("EGRESS_NOT_PERMITTED: no egress authority"),
         };
+        // P8-CTRL.5: the grant's new-attempt limits — every attempt booked against it, UNKNOWN or
+        // sent, counts; the booking is written with the reservation, before any dispatch.
+        let fe06 = match gates
+            .and_then(|g| g.fe06)
+            .and_then(|a| a.scope().map(|s| (a, s)))
+        {
+            Some((grant, scope)) => {
+                let booking = super::Fe06Attempt {
+                    grant: grant.digest().to_string(),
+                    campaign: scope.campaign_id.clone(),
+                    utc_day: c.now_unix_ms / 86_400_000,
+                    owner_epoch: permit.epoch(),
+                };
+                if let Err(e) = within_limits(&self.journal, &booking, scope) {
+                    return Admission::Refused(e);
+                }
+                Some(booking)
+            }
+            None => None,
+        };
         let intent = Intent {
             code_sha: a.code_sha.clone(),
             binary_sha256: a.binary_sha256.clone(),
@@ -244,7 +302,7 @@ impl Fe04Admission {
         };
         if let Err(e) =
             self.journal
-                .reserve_payload(a.clone(), intent, &current, &simulated, c.hold)
+                .reserve_payload(a.clone(), intent, &current, &simulated, c.hold, fe06)
         {
             // A failed write may still have reached the disk: never treated as nothing.
             return if e.starts_with("JOURNAL") {
