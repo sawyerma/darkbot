@@ -114,6 +114,7 @@ impl OwnerCapabilities {
             wallets: &self.wallets,
             fe06: self.fe06.as_ref(),
             now_unix_s: super::accounts::wall_unix_s().ok(),
+            epoch: self.epoch,
         }
     }
 

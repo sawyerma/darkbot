@@ -482,6 +482,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub fe04: Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>,
     /// DEC-04: the hold mode a LIVE candidate's inventory hold and B are evaluated with.
     pub hold: &'a crate::execution::hold_b::HoldGate,
+    /// P8-CTRL.7: the owner's gates an egress permit is issued from at the FE-04 handoff
+    /// (`None`: no permit, no egress).
+    pub egress: Option<crate::orchestration::capability_control::LiveGates<'a>>,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -1380,6 +1383,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }),
             },
             self.submitter,
+            self.egress.as_ref(),
         );
         use crate::execution::one_shot::admission::Admission;
         match admission {

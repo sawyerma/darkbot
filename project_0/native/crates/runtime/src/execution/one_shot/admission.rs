@@ -99,7 +99,14 @@ pub enum Admission {
 }
 
 impl Fe04Admission {
-    pub fn admit(&mut self, c: Candidate<'_>, adapter: &dyn SubmissionAdapter) -> Admission {
+    /// P8-CTRL.7: `gates` issue the egress permit of exactly this payload before anything is
+    /// reserved (`None` or a refusal: nothing durable, nothing sent).
+    pub fn admit(
+        &mut self,
+        c: Candidate<'_>,
+        adapter: &dyn SubmissionAdapter,
+        gates: Option<&crate::orchestration::capability_control::LiveGates<'_>>,
+    ) -> Admission {
         let refuse = |s: &str| Admission::Refused(s.into());
         let a = &self.approval;
         // DEC-11: a bundle is admitted like a single TX — its summed fee, the tip and every
@@ -181,6 +188,20 @@ impl Fe04Admission {
         if std::time::Instant::now() >= c.deadline {
             return refuse("FE04_HANDOFF_DEADLINE");
         }
+        // P8-CTRL.7: the egress permit of exactly this payload, before anything is reserved.
+        let permit = match gates.map(|g| {
+            crate::orchestration::capability_control::EgressPermit::issue(
+                g,
+                crate::orchestration::capability_control::Purpose::NewAttempt,
+                simulated.signatures(),
+                simulated.path(),
+                c.deadline,
+            )
+        }) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => return Admission::Refused(e),
+            None => return refuse("EGRESS_NOT_PERMITTED: no egress authority"),
+        };
         let intent = Intent {
             code_sha: a.code_sha.clone(),
             binary_sha256: a.binary_sha256.clone(),
@@ -241,10 +262,13 @@ impl Fe04Admission {
             slot: c.slot.max((c.slot_now)()),
             ..current
         };
-        match self
-            .journal
-            .submit_payload(&simulated, &at_handoff, c.t_handoff_ns, c.deadline)
-        {
+        match self.journal.submit_payload(
+            &simulated,
+            &at_handoff,
+            c.t_handoff_ns,
+            c.deadline,
+            permit,
+        ) {
             Ok(ack) => Admission::Submitted(ack),
             Err(e) => Admission::Unknown(e),
         }

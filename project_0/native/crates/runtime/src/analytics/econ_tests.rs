@@ -970,6 +970,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1130,6 +1131,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let account = Pubkey::new_unique();
     let key = |r: &OpportunityRecord| {
@@ -1330,6 +1332,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+            egress: None,
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
     };
@@ -1441,6 +1444,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1654,6 +1658,10 @@ fn evaluate_in(
     let slots = darkbot_solana::ingress::SlotWatch::new();
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::new(usize::MAX, deadline_ns);
+    // P8-CTRL.7: a LIVE evaluation's egress permit (every gate, the FE-06 stand-in).
+    let gates = crate::orchestration::capability_control::OfflineGates::enabled(
+        solana_sdk::signature::Signer::pubkey(payer),
+    );
     let mut p = Pipeline {
         mode,
         clock: &clock,
@@ -1687,6 +1695,7 @@ fn evaluate_in(
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04,
         hold,
+        egress: Some(gates.gates()),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -2345,6 +2354,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -2470,6 +2480,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+            egress: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason_text().unwrap_or_default();
@@ -2630,6 +2641,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+            egress: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -3429,6 +3441,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -3720,6 +3733,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         blockhash_park: park,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
@@ -4911,6 +4925,7 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
         wallets: std::slice::from_ref(&signer),
         fe06: None,
         now_unix_s: Some(0),
+        epoch: None,
     };
     assert_eq!(
         capability_control::live_decision(&gates).1,
@@ -5099,6 +5114,10 @@ fn bundle_evaluate<S: SubmissionAdapter>(
     slots.observe(10);
     let prereq_program = [Pubkey::new_from_array([8; 32])];
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    // P8-CTRL.7: the LIVE bundle's egress permit (every gate, the FE-06 stand-in).
+    let gates = crate::orchestration::capability_control::OfflineGates::enabled(
+        solana_sdk::signature::Signer::pubkey(payer),
+    );
     let mut p = Pipeline {
         mode: Mode::Live,
         clock: &clock,
@@ -5132,6 +5151,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: Some(fe04),
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: Some(gates.gates()),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }

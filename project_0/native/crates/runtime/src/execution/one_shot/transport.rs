@@ -178,6 +178,14 @@ pub struct SimulatedPayload<'a> {
 }
 
 impl SimulatedPayload<'_> {
+    /// P8-CTRL.7: the signatures of the payload it simulated (what an egress permit binds).
+    pub fn signatures(&self) -> &[String] {
+        &self.payload.signatures
+    }
+    /// P8-CTRL.7: its submission path.
+    pub fn path(&self) -> SubmissionPath {
+        self.payload.path
+    }
     /// DEC-02 (7): derived from the token — only a typed `Ok` simulation of these exact signed
     /// bytes makes one; never a literal.
     pub fn exact_signed_payload_simulated(&self) -> bool {
@@ -244,12 +252,15 @@ impl Journal {
     /// Exactly one adapter call, only after the UNKNOWN state was fsynced, bounded by the
     /// candidate's monotonic `deadline` (DEC-12). No error (including Rejected, the deadline or
     /// a malformed ACK) releases the hold.
+    /// P8-CTRL.7: `permit` is consumed immediately before the handoff — another payload's, a
+    /// passed deadline or an expired grant refuses the egress (the reservation stays UNKNOWN-safe).
     pub fn submit_payload(
         &mut self,
         simulated: &SimulatedPayload<'_>,
         now: &Current,
         t_handoff_ns: u64,
         deadline: std::time::Instant,
+        permit: crate::orchestration::capability_control::EgressPermit,
     ) -> Result<SubmitAck, String> {
         let p = &simulated.payload;
         if p.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
@@ -259,6 +270,12 @@ impl Journal {
         if !p.matches(&saved.intent) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
+        permit.admit(
+            crate::orchestration::capability_control::Purpose::NewAttempt,
+            &p.signatures,
+            p.path,
+            now.now_unix_ms / 1000,
+        )?;
         let ack = self.handoff(&p.digest, now, || {
             let result = if p.path == SubmissionPath::JitoBundle {
                 simulated
@@ -324,6 +341,7 @@ impl Journal {
         now: &Current,
         t_handoff_ns: u64,
         deadline: std::time::Instant,
+        permit: crate::orchestration::capability_control::EgressPermit,
     ) -> Result<SubmitAck, String> {
         let p = &simulated.payload;
         let (intent, _) = self
@@ -332,6 +350,12 @@ impl Journal {
         if p.path == SubmissionPath::JitoBundle || !p.matches_exit(&intent) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
+        permit.admit(
+            crate::orchestration::capability_control::Purpose::Exit,
+            &p.signatures,
+            p.path,
+            now.now_unix_ms / 1000,
+        )?;
         let ack = self.handoff_exit(&p.digest, now, || {
             simulated
                 .adapter

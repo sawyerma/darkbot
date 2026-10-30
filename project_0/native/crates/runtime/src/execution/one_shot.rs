@@ -2348,24 +2348,41 @@ mod tests {
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
                 j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None)
                     .unwrap();
-                let result = j.submit_payload(&simulated, &c, 123, test_deadline());
+                let result =
+                    j.submit_payload(&simulated, &c, 123, test_deadline(), permit(&simulated));
                 assert_eq!(result.is_ok(), failure == 0);
                 assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
                 assert_eq!(j.holds(), i.holds);
                 assert!(j
-                    .submit_payload(&simulated, &c, 124, test_deadline())
+                    .submit_payload(&simulated, &c, 124, test_deadline(), permit(&simulated))
                     .is_err());
                 assert_eq!(adapter.calls.get(), 1);
                 drop(j);
                 let mut reopened = Journal::open(&dir, &a.wallet).unwrap();
                 assert!(reopened
-                    .submit_payload(&simulated, &c, 125, test_deadline())
+                    .submit_payload(&simulated, &c, 125, test_deadline(), permit(&simulated))
                     .is_err());
                 assert_eq!(reopened.holds(), i.holds);
                 drop(reopened);
                 fs::remove_dir_all(dir).unwrap();
             }
         }
+    }
+    /// P8-CTRL.7: the egress permit of a simulated payload under the offline tests' fully
+    /// enabled gates.
+    fn permit(
+        simulated: &transport::SimulatedPayload<'_>,
+    ) -> crate::orchestration::capability_control::EgressPermit {
+        use crate::orchestration::capability_control as cap;
+        let gates = cap::OfflineGates::enabled(solana_sdk::pubkey::Pubkey::new_unique());
+        cap::EgressPermit::issue(
+            &gates.gates(),
+            cap::Purpose::NewAttempt,
+            simulated.signatures(),
+            simulated.path(),
+            test_deadline(),
+        )
+        .unwrap()
     }
     /// DEC-12: a handoff whose deadline passed after the durable reservation stays UNKNOWN with
     /// its holds (the adapter sent nothing, but the fsynced handoff state is never released
@@ -2395,13 +2412,14 @@ mod tests {
             .unwrap();
         let past = std::time::Instant::now();
         assert_eq!(
-            j.submit_payload(&simulated, &c, 123, past).unwrap_err(),
+            j.submit_payload(&simulated, &c, 123, past, permit(&simulated))
+                .unwrap_err(),
             err("SUBMISSION_RESULT_UNKNOWN:DEADLINE_NOT_SENT")
         );
         assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
         assert_eq!(j.holds(), i.holds);
         assert!(j
-            .submit_payload(&simulated, &c, 124, test_deadline())
+            .submit_payload(&simulated, &c, 124, test_deadline(), permit(&simulated))
             .is_err());
         assert_eq!(adapter.calls.get(), 1);
         drop(j);
@@ -2670,7 +2688,9 @@ mod tests {
             "{refused}"
         );
         j.reserve_payload(a, i, &c, &original, None).unwrap();
-        assert!(j.submit_payload(&reversed, &c, 1, test_deadline()).is_err());
+        assert!(j
+            .submit_payload(&reversed, &c, 1, test_deadline(), permit(&reversed))
+            .is_err());
         assert_eq!(adapter.calls.get(), 0);
         drop(j);
         fs::remove_dir_all(dir).unwrap();

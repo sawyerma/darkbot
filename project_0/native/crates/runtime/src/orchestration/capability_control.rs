@@ -561,6 +561,8 @@ pub struct LiveGates<'a> {
     pub fe06: Option<&'a Fe06Authorization>,
     /// The wall clock (unix s) a grant's validity is read at; `None`: unreadable — no grant.
     pub now_unix_s: Option<u64>,
+    /// P8-CTRL.7: the owner epoch an egress permit binds (`None`: no capability control).
+    pub epoch: Option<u64>,
 }
 
 /// P8-CTRL.2: LIVE's effective value for a new liquidation — BLOCKED while any gate is missing
@@ -608,6 +610,161 @@ fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
             "BLOCKED",
             format!("{first} (missing too: {})", rest.join("; ")),
         ),
+    }
+}
+
+/// P8-CTRL.7: what an egress is for — a new liquidation (every economic switch) or the exit of an
+/// open position (every switch but ECON_ATTEMPT).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    NewAttempt,
+    Exit,
+}
+
+/// P8-CTRL.7: the one-use permission of exactly one network egress — issued from the owner's
+/// gates at the handoff (no CLI, test or other crate constructs one: its fields are private and
+/// `issue` decides), bound to the owner epoch, the FE-06 grant (digest, validity, mode, adapters),
+/// the payload's signatures and path and the candidate's deadline; consumed by the FE-04 transport
+/// immediately before the adapter call, where anything that differs refuses the egress.
+#[derive(Debug)]
+pub struct EgressPermit {
+    epoch: Option<u64>,
+    grant: String,
+    grant_expires_unix_s: u64,
+    purpose: Purpose,
+    signatures: Vec<String>,
+    path: darkbot_solana::submit::SubmissionPath,
+    deadline: std::time::Instant,
+}
+
+impl EgressPermit {
+    /// The permit of a payload (its signatures and path) under the gates now: LIVE effective for
+    /// `purpose` with a grant in force whose scope takes this purpose and this adapter.
+    pub fn issue(
+        g: &LiveGates,
+        purpose: Purpose,
+        signatures: &[String],
+        path: darkbot_solana::submit::SubmissionPath,
+        deadline: std::time::Instant,
+    ) -> Result<Self, String> {
+        let (effective, reason) = match purpose {
+            Purpose::NewAttempt => live_decision(g),
+            Purpose::Exit => exit_decision(g),
+        };
+        if effective != LIVE {
+            return Err(format!(
+                "EGRESS_NOT_PERMITTED: LIVE {effective}{}{reason}",
+                if reason.is_empty() { "" } else { " · " }
+            ));
+        }
+        let grant = g.fe06.ok_or("EGRESS_NOT_PERMITTED: no FE-06 grant")?;
+        let mut expires = u64::MAX;
+        if let Some(scope) = grant.scope() {
+            use super::fe06::Mode;
+            let takes = matches!(
+                (purpose, scope.mode),
+                (Purpose::NewAttempt, Mode::All) | (Purpose::Exit, Mode::All | Mode::ExitOnly)
+            );
+            if !takes {
+                return Err(format!(
+                    "EGRESS_SCOPE_MODE: the grant's scope is {}, no {:?}",
+                    scope.mode.code(),
+                    purpose
+                ));
+            }
+            let adapter = match path {
+                darkbot_solana::submit::SubmissionPath::Rpc => "rpc",
+                darkbot_solana::submit::SubmissionPath::JitoSingle => "jito_single",
+                darkbot_solana::submit::SubmissionPath::JitoBundle => "jito_bundle",
+            };
+            if !scope.submission_adapters.contains(adapter) {
+                return Err(format!(
+                    "EGRESS_ADAPTER_NOT_IN_SCOPE: {adapter} is no adapter of the grant's scope"
+                ));
+            }
+            expires = scope.expires_unix_s;
+        }
+        if signatures.is_empty() {
+            return Err("EGRESS_PERMIT_PAYLOAD: no signature".into());
+        }
+        Ok(Self {
+            epoch: g.epoch,
+            grant: grant.digest().to_string(),
+            grant_expires_unix_s: expires,
+            purpose,
+            signatures: signatures.to_vec(),
+            path,
+            deadline,
+        })
+    }
+
+    /// The grant the permit was issued under.
+    pub fn grant(&self) -> &str {
+        &self.grant
+    }
+
+    /// The owner epoch the permit binds.
+    pub fn epoch(&self) -> Option<u64> {
+        self.epoch
+    }
+
+    /// The transport's check immediately before the adapter call (it consumes the permit): the
+    /// payload is the permit's, of its purpose, before its deadline and while its grant is in
+    /// force at the handoff's wall clock.
+    pub fn admit(
+        self,
+        purpose: Purpose,
+        signatures: &[String],
+        path: darkbot_solana::submit::SubmissionPath,
+        now_unix_s: u64,
+    ) -> Result<(), String> {
+        if self.purpose != purpose || self.signatures != signatures || self.path != path {
+            return Err("EGRESS_PERMIT_PAYLOAD: the permit is another payload's".into());
+        }
+        if std::time::Instant::now() >= self.deadline {
+            return Err("EGRESS_PERMIT_DEADLINE".into());
+        }
+        if now_unix_s >= self.grant_expires_unix_s {
+            return Err("EGRESS_PERMIT_GRANT_EXPIRED".into());
+        }
+        Ok(())
+    }
+}
+
+/// The offline tests' gates of a fully enabled owner: every switch and `signer` ENABLED, the
+/// FE-06 stand-in in force (never part of a build).
+#[cfg(test)]
+pub(crate) struct OfflineGates {
+    pub econ: EconSwitches,
+    pub wallets: Vec<WalletSwitch>,
+    pub fe06: Fe06Authorization,
+}
+
+#[cfg(test)]
+impl OfflineGates {
+    pub(crate) fn enabled(signer: Pubkey) -> Self {
+        let mut econ = EconSwitches::default();
+        for e in ECON {
+            econ.set(e, true);
+        }
+        let mut w = WalletSwitch::configured(signer, &[ROLE_LIQUIDATOR, ROLE_FEE_PAYER]);
+        w.enabled = true;
+        Self {
+            econ,
+            wallets: vec![w],
+            fe06: Fe06Authorization::offline_test(),
+        }
+    }
+
+    pub(crate) fn gates(&self) -> LiveGates<'_> {
+        LiveGates {
+            requested: LIVE,
+            econ: &self.econ,
+            wallets: &self.wallets,
+            fe06: Some(&self.fe06),
+            now_unix_s: Some(0),
+            epoch: None,
+        }
     }
 }
 
@@ -729,6 +886,7 @@ mod tests {
                 wallets: &wallets,
                 fe06: None,
                 now_unix_s: Some(0),
+                epoch: None,
             };
             let (effective, reason) = live_decision(&g);
             assert_eq!(effective, "BLOCKED");
@@ -795,6 +953,7 @@ mod tests {
                 wallets,
                 fe06,
                 now_unix_s: Some(0),
+                epoch: None,
             })
         };
         // Every gate: the requested value.
@@ -847,6 +1006,7 @@ mod tests {
                 wallets: &wallets,
                 fe06: Some(&fe06),
                 now_unix_s: Some(0),
+                epoch: None,
             }),
             crate::execution::pipeline::Mode::Live
         );
@@ -1013,6 +1173,7 @@ mod tests {
                 wallets,
                 fe06,
                 now_unix_s: Some(0),
+                epoch: None,
             }
         }
         let gates = |econ| at(econ, &wallets, Some(&fe06));
@@ -1189,6 +1350,7 @@ mod tests {
                 wallets: &wallets,
                 fe06: Some(&grant),
                 now_unix_s,
+                epoch: None,
             })
         };
         assert_eq!(at(Some(scope.not_before_unix_s)).0, LIVE);
@@ -1213,5 +1375,177 @@ mod tests {
                 .unwrap_err()
                 .starts_with("CAPABILITY_VALUE_INVALID"));
         }
+    }
+
+    /// P8-CTRL.7: an egress permit is issued only from a LIVE decision of its purpose with a grant
+    /// whose scope takes the purpose and the adapter; it admits exactly its payload, purpose,
+    /// path, deadline and grant validity — and only once (it is consumed).
+    #[test]
+    fn p8ctrl03_an_egress_permit_binds_its_payload_and_is_used_once() {
+        use super::super::fe06;
+        use darkbot_solana::submit::SubmissionPath;
+        let signer = Pubkey::new_unique();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let sigs = vec!["sig-1".to_string()];
+        let offline = OfflineGates::enabled(signer);
+        let issue =
+            |g: &LiveGates, purpose, path| EgressPermit::issue(g, purpose, &sigs, path, deadline);
+        // Every gate: the permit of this payload.
+        let p = issue(&offline.gates(), Purpose::NewAttempt, SubmissionPath::Rpc).unwrap();
+        assert_eq!((p.grant(), p.epoch()), ("offline-test", None));
+        assert_eq!(
+            p.admit(Purpose::NewAttempt, &sigs, SubmissionPath::Rpc, 0),
+            Ok(())
+        );
+        // LIVE not requested, a switch DISABLED, no grant: none.
+        let off = LiveGates {
+            requested: LIVE_OFF,
+            ..offline.gates()
+        };
+        assert!(issue(&off, Purpose::NewAttempt, SubmissionPath::Rpc)
+            .unwrap_err()
+            .starts_with("EGRESS_NOT_PERMITTED: LIVE OFF"));
+        let mut send_off = offline.econ;
+        send_off.set(ECON_SEND, false);
+        let g = LiveGates {
+            econ: &send_off,
+            ..offline.gates()
+        };
+        assert_eq!(
+            issue(&g, Purpose::NewAttempt, SubmissionPath::Rpc).unwrap_err(),
+            "EGRESS_NOT_PERMITTED: LIVE BLOCKED · ECON_SEND DISABLED"
+        );
+        let mut attempt_off = offline.econ;
+        attempt_off.set(ECON_ATTEMPT, false);
+        let g = LiveGates {
+            econ: &attempt_off,
+            ..offline.gates()
+        };
+        assert!(issue(&g, Purpose::NewAttempt, SubmissionPath::Rpc).is_err());
+        assert!(
+            issue(&g, Purpose::Exit, SubmissionPath::Rpc).is_ok(),
+            "exits need no ATTEMPT"
+        );
+        let g = LiveGates {
+            fe06: None,
+            ..offline.gates()
+        };
+        assert!(issue(&g, Purpose::Exit, SubmissionPath::Rpc).is_err());
+        // The scope's mode and adapters bound it.
+        let scope = |overrides: &[(&str, &str)]| {
+            fe06::parse(
+                fe06::tests::text(&signer, overrides).as_bytes(),
+                &fe06::tests::ceilings(),
+            )
+            .unwrap()
+        };
+        let all = Fe06Authorization::offline_test_of(scope(&[]));
+        fn with<'a>(
+            offline: &'a OfflineGates,
+            a: &'a Fe06Authorization,
+            now: u64,
+        ) -> LiveGates<'a> {
+            LiveGates {
+                fe06: Some(a),
+                now_unix_s: Some(now),
+                ..offline.gates()
+            }
+        }
+        let sim = Fe06Authorization::offline_test_of(scope(&[
+            ("mode", "SIM_ONLY"),
+            ("max_attempts_per_utc_day", "0"),
+            ("max_attempts_campaign", "0"),
+            ("max_attempts_grant", "0"),
+            ("max_exits_grant", "0"),
+        ]));
+        let exit_only = Fe06Authorization::offline_test_of(scope(&[
+            ("mode", "EXIT_ONLY"),
+            (
+                "exit_positions",
+                "attempt-1:11111111111111111111111111111112",
+            ),
+            ("max_attempts_per_utc_day", "0"),
+            ("max_attempts_campaign", "0"),
+            ("max_attempts_grant", "0"),
+        ]));
+        assert!(issue(
+            &with(&offline, &all, 1000),
+            Purpose::NewAttempt,
+            SubmissionPath::Rpc
+        )
+        .is_ok());
+        assert!(issue(
+            &with(&offline, &all, 1000),
+            Purpose::NewAttempt,
+            SubmissionPath::JitoBundle
+        )
+        .unwrap_err()
+        .starts_with("EGRESS_ADAPTER_NOT_IN_SCOPE"));
+        for purpose in [Purpose::NewAttempt, Purpose::Exit] {
+            assert!(
+                issue(&with(&offline, &sim, 1000), purpose, SubmissionPath::Rpc)
+                    .unwrap_err()
+                    .starts_with("EGRESS_SCOPE_MODE")
+            );
+        }
+        assert!(issue(
+            &with(&offline, &exit_only, 1000),
+            Purpose::NewAttempt,
+            SubmissionPath::Rpc
+        )
+        .unwrap_err()
+        .starts_with("EGRESS_SCOPE_MODE"));
+        assert!(issue(
+            &with(&offline, &exit_only, 1000),
+            Purpose::Exit,
+            SubmissionPath::Rpc
+        )
+        .is_ok());
+        // At the handoff: another payload, purpose or path, a passed deadline, an expired grant.
+        let p = || {
+            issue(
+                &with(&offline, &all, 1000),
+                Purpose::NewAttempt,
+                SubmissionPath::Rpc,
+            )
+            .unwrap()
+        };
+        let other = vec!["sig-2".to_string()];
+        for refused in [
+            p().admit(Purpose::NewAttempt, &other, SubmissionPath::Rpc, 1000),
+            p().admit(Purpose::Exit, &sigs, SubmissionPath::Rpc, 1000),
+            p().admit(Purpose::NewAttempt, &sigs, SubmissionPath::JitoSingle, 1000),
+        ] {
+            assert_eq!(
+                refused.unwrap_err(),
+                "EGRESS_PERMIT_PAYLOAD: the permit is another payload's"
+            );
+        }
+        assert_eq!(
+            p().admit(Purpose::NewAttempt, &sigs, SubmissionPath::Rpc, 4600),
+            Err("EGRESS_PERMIT_GRANT_EXPIRED".into())
+        );
+        let past = EgressPermit::issue(
+            &with(&offline, &all, 1000),
+            Purpose::NewAttempt,
+            &sigs,
+            SubmissionPath::Rpc,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+        assert_eq!(
+            past.admit(Purpose::NewAttempt, &sigs, SubmissionPath::Rpc, 1000),
+            Err("EGRESS_PERMIT_DEADLINE".into())
+        );
+        assert!(issue(&offline.gates(), Purpose::NewAttempt, SubmissionPath::Rpc).is_ok());
+        assert!(EgressPermit::issue(
+            &offline.gates(),
+            Purpose::NewAttempt,
+            &[],
+            SubmissionPath::Rpc,
+            deadline
+        )
+        .unwrap_err()
+        .starts_with("EGRESS_PERMIT_PAYLOAD"));
     }
 }

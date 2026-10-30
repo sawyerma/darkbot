@@ -6491,6 +6491,54 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
     cleanup(f);
 }
 
+/// P8-CTRL.7: with LIVE effective the egress still needs a permit of the grant's scope — a scope
+/// without the RPC adapter permits no send: the candidate is refused before anything durable.
+#[test]
+fn p8ctrl03_a_grant_whose_scope_lacks_the_adapter_permits_no_send() {
+    use crate::orchestration::{capability_control as cap, fe06};
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl03_adapter", true);
+    let now = super::accounts::wall_unix_s().unwrap();
+    let (from, until) = ((now - 60).to_string(), (now + 3_000).to_string());
+    let scope = fe06::parse(
+        fe06::tests::text(
+            &f.owner.liquidator,
+            &[
+                ("submission_adapters", "jito_single"),
+                ("not_before_unix_s", &from),
+                ("expires_unix_s", &until),
+            ],
+        )
+        .as_bytes(),
+        &fe06::tests::ceilings(),
+    )
+    .unwrap();
+    f.owner.sources.capabilities.fe06 = Some(cap::Fe06Authorization::offline_test_of(scope));
+    assert!(f.owner.live_effective());
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let methods = calls.lock().unwrap().clone();
+    assert!(
+        !methods.contains(&"sendTransaction".to_string()),
+        "{methods:?}"
+    );
+    assert!(f.owner.fe04_held.is_none(), "nothing durable");
+    assert!(
+        f.owner
+            .fe04_admissions
+            .last_refusal
+            .starts_with("EGRESS_ADAPTER_NOT_IN_SCOPE"),
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    cleanup(f);
+}
+
 /// DEC-13 (negative): a LIVE request without FE-06 stays Shadow on the same candidate — built,
 /// signed and simulated, no FE-04 admission (the wallet journal is not even opened) and not a
 /// single submit call; the admission is OFF with LIVE's block reason.

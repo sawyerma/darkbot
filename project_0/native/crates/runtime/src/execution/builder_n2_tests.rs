@@ -370,6 +370,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+        egress: None,
     };
     let started = std::time::Instant::now();
     let rec = p.evaluate(f.account, "n2", clock.now_ns(), 1_000, 10, true);
@@ -1047,6 +1048,7 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
         approval,
         exit_candidate(&route, &payer, &mint_s, 0),
         &adapter,
+        Some(&crate::orchestration::capability_control::OfflineGates::enabled(taker).gates()),
     );
     assert!(matches!(admitted, Admission::Submitted(_)), "{admitted:?}");
     assert_eq!(adapter.submits.get(), 1, "exactly one send");
@@ -1156,6 +1158,7 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
             approval,
             exit_candidate(route, &payer, &mint_s, wsol),
             &adapter,
+            Some(&crate::orchestration::capability_control::OfflineGates::enabled(taker).gates()),
         );
         match admitted {
             Admission::Refused(reason) => assert!(reason.starts_with(code), "{code}: {reason}"),
@@ -1177,6 +1180,7 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
         crate::execution::one_shot::exit::tests::exit_approval(&taker.to_string(), &mint_s, jup),
         late,
         &adapter,
+        Some(&crate::orchestration::capability_control::OfflineGates::enabled(taker).gates()),
     );
     assert!(matches!(admitted, Admission::Refused(_)), "{admitted:?}");
     assert_eq!(adapter.submits.get(), 0, "deadline: no send");

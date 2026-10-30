@@ -37,11 +37,13 @@ pub struct ExitCandidate<'a> {
     pub t_handoff_ns: u64,
 }
 
+/// P8-CTRL.7: `gates` issue the exit's egress permit before anything is reserved.
 pub fn admit_exit(
     journal: &mut Journal,
     approval: ExitApproval,
     c: ExitCandidate<'_>,
     adapter: &dyn SubmissionAdapter,
+    gates: Option<&crate::orchestration::capability_control::LiveGates<'_>>,
 ) -> Admission {
     let refuse = |s: &str| Admission::Refused(s.into());
     let payer = c.payer.pubkey();
@@ -133,6 +135,20 @@ pub fn admit_exit(
     if std::time::Instant::now() >= c.deadline {
         return Admission::Refused("FE04_HANDOFF_DEADLINE".into());
     }
+    // P8-CTRL.7: the exit's egress permit, before anything is reserved.
+    let permit = match gates.map(|g| {
+        crate::orchestration::capability_control::EgressPermit::issue(
+            g,
+            crate::orchestration::capability_control::Purpose::Exit,
+            simulated.signatures(),
+            simulated.path(),
+            c.deadline,
+        )
+    }) {
+        Some(Ok(p)) => p,
+        Some(Err(e)) => return Admission::Refused(e),
+        None => return Admission::Refused("EGRESS_NOT_PERMITTED: no egress authority".into()),
+    };
     if let Err(e) = journal.reserve_exit_payload(approval, intent, &current, &simulated) {
         // A failed write may still have reached the disk: never treated as nothing.
         return if e.starts_with("JOURNAL") {
@@ -141,7 +157,7 @@ pub fn admit_exit(
             Admission::Refused(e)
         };
     }
-    match journal.submit_exit_payload(&simulated, &current, c.t_handoff_ns, c.deadline) {
+    match journal.submit_exit_payload(&simulated, &current, c.t_handoff_ns, c.deadline, permit) {
         Ok(ack) => Admission::Submitted(ack),
         Err(e) => Admission::Unknown(e),
     }

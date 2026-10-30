@@ -824,7 +824,13 @@ impl ShadowOwner {
         let Some(mut journal) = self.fe04_held.take() else {
             return;
         };
-        let admitted = admit_exit(&mut journal, approval, candidate, &self.submitter);
+        let admitted = admit_exit(
+            &mut journal,
+            approval,
+            candidate,
+            &self.submitter,
+            Some(&self.sources.capabilities.live_gates()),
+        );
         self.fe04_held = Some(journal);
         let s = &mut self.fe04_admissions;
         match admitted {

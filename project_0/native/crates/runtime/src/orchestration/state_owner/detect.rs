@@ -603,6 +603,7 @@ impl ShadowOwner {
             },
             fe04: admission.as_mut(),
             hold: &self.hold_gate,
+            egress: Some(self.sources.capabilities.live_gates()),
         };
         #[cfg(feature = "crate_health")]
         let pipeline_started_ns = self.clock.now_ns();
