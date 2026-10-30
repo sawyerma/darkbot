@@ -209,6 +209,13 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
             && out.contains("every switch DISABLED and LIVE requested OFF"),
         "{out}"
     );
+    // P8-CTRL.6: the epoch must be the running owner's own — one another process opened is
+    // refused before anything is written.
+    assert_eq!(capability_control::open_epoch(&dir, 1, None).unwrap(), 2);
+    let (code, _, err) = set("ENABLED", &["--expect-epoch", "2", "--expect-version", "2"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("CAPABILITY_EPOCH_FOREIGN"), "{err}");
+    assert_eq!(capability_control::head(&dir).unwrap(), 2);
     shutdown.request();
     thread.join().unwrap();
     let _ = std::fs::remove_dir_all(&d);

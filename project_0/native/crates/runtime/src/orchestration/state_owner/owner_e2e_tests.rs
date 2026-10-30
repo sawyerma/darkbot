@@ -6762,6 +6762,11 @@ fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
     // Not read again yet: while LIVE is effective the FE-04 refresh reads it (no status tap).
     f.owner.fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
     dec13b_live(&mut f, true);
+    // P8-CTRL.5: ECON_ATTEMPT DISABLED stops new liquidations, never this exit.
+    f.owner.sources.capabilities.econ.set(
+        crate::orchestration::capability_control::ECON_ATTEMPT,
+        false,
+    );
     f.owner.fe04_refreshed = std::time::Instant::now()
         .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
         .unwrap();
