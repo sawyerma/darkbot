@@ -290,3 +290,106 @@ fn hex_quantities_and_data_are_strict() {
     assert_eq!(data_fixed::<2>("0xabcd"), Some([0xab, 0xcd]));
     assert_eq!(data_fixed::<2>("0xab"), None);
 }
+
+/// BSC3-063: the source's libsecp256k1 recovery accepts and refuses exactly
+/// what the core's k256 `recover_signer` does, with the same error: k256
+/// signatures of many keys, their other parity, their high-`s` twin, `r`
+/// or `s` zero, at the order or one below it, `s` at and above n/2, an `r`
+/// that is no point's x, prehashes 0, n, n + 1 and 2^256 - 1, and a
+/// signature whose recovered key is the point at infinity.
+#[test]
+fn the_source_recovers_exactly_what_the_core_recovers() {
+    use darkbot_bsc_trading::signer::{SignerError, recover_signer};
+    use darkbot_bsc_trading::transactions::legacy::RecoverableSignature;
+    use k256::elliptic_curve::PrimeField;
+    use k256::elliptic_curve::point::AffineCoordinates;
+    use k256::{ProjectivePoint, Scalar};
+    let u256 = alloy_primitives::U256::from_be_bytes::<32>;
+    let bytes = |x: alloy_primitives::U256| x.to_be_bytes::<32>();
+    let order: [u8; 32] =
+        alloy_primitives::hex!("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+    let half: [u8; 32] =
+        alloy_primitives::hex!("7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0");
+    let one = alloy_primitives::U256::from(1u8);
+    let one_less = bytes(u256(order) - one);
+    let above_half = bytes(u256(half) + one);
+    let edge_prehashes = [[0u8; 32], order, bytes(u256(order) + one), [0xff; 32]];
+    let mut errors = std::collections::BTreeSet::new();
+    let mut recovered = 0;
+    let mut check = |prehash: [u8; 32], r: [u8; 32], s: [u8; 32], y_parity: bool| {
+        let core = recover_signer(
+            &alloy_primitives::B256::from(prehash),
+            &RecoverableSignature { r, s, y_parity },
+        )
+        .map(|a| a.0.0);
+        let source = verify::recover(&prehash, &r, &s, y_parity);
+        assert_eq!(
+            source, core,
+            "prehash {prehash:02x?} r {r:02x?} s {s:02x?} parity {y_parity}"
+        );
+        match source {
+            Ok(_) => recovered += 1,
+            Err(e) => {
+                errors.insert(format!("{e:?}"));
+            }
+        }
+        source
+    };
+    let mut seed = [0x5au8; 32];
+    for n in 0..100u32 {
+        seed = keccak256(seed).0;
+        let key = k256::ecdsa::SigningKey::from_slice(&seed).unwrap();
+        let prehash = keccak256(n.to_be_bytes()).0;
+        let (signature, id) = key.sign_prehash_recoverable(&prehash).unwrap();
+        let sig = signature.to_bytes();
+        let (r, s): ([u8; 32], [u8; 32]) =
+            (sig[..32].try_into().unwrap(), sig[32..].try_into().unwrap());
+        let parity = id.is_y_odd();
+        for (r, s, y_parity) in [
+            (r, s, parity),
+            (r, s, !parity),
+            (r, bytes(u256(order) - u256(s)), !parity),
+            ([0; 32], s, parity),
+            (r, [0; 32], parity),
+            (order, s, parity),
+            (r, order, parity),
+            (one_less, s, parity),
+            (r, half, parity),
+            (r, above_half, parity),
+            (keccak256(seed).0, s, parity),
+        ] {
+            let _ = check(prehash, r, s, y_parity);
+        }
+        for prehash in edge_prehashes {
+            let _ = check(prehash, r, s, parity);
+            let _ = check(prehash, r, s, !parity);
+        }
+        // The point at infinity: R = kG, s = 1 and z = k (mod n) make
+        // r⁻¹(sR − zG) the identity.
+        let k = Scalar::from_repr(keccak256(seed).0.into())
+            .into_option()
+            .filter(|k| !bool::from(k.is_zero()))
+            .unwrap_or(Scalar::ONE);
+        let big_r = (ProjectivePoint::GENERATOR * k).to_affine();
+        let x: [u8; 32] = big_r.x().into();
+        if x < order {
+            let mut s_one = [0u8; 32];
+            s_one[31] = 1;
+            let infinity = check(k.to_repr().into(), x, s_one, bool::from(big_r.y_is_odd()));
+            assert_eq!(infinity, Err(SignerError::RecoveryFailed));
+        }
+    }
+    // Most signatures and the boundary ones recover; every refusal of the
+    // core occurs.
+    assert!(recovered > 300, "{recovered}");
+    for e in [
+        SignerError::InvalidSignature,
+        SignerError::HighS,
+        SignerError::RecoveryFailed,
+    ] {
+        assert!(
+            errors.contains(&format!("{e:?}")),
+            "{e:?} never occurred: {errors:?}"
+        );
+    }
+}

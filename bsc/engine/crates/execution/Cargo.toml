@@ -30,6 +30,8 @@ zeroize = { version = "=1.9.0", optional = true }
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"], optional = true }
 darkbot-bsc-tx-encoding = { path = "../tx_encoding", optional = true }
 darkbot-bsc-geth-ipc = { path = "../geth_ipc", optional = true }
+# The source's signer recovery for every full transaction (BSC3-063).
+secp256k1 = { workspace = true, optional = true }
 # SIGTERM/SIGINT of the runtime process become its stop request (a safe
 # signal iterator; the crate forbids unsafe code).
 signal-hook = { version = "=0.3.18", default-features = false, features = ["iterator"], optional = true }
@@ -48,14 +50,21 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 rpc-wire = []
 # The BSC runtime's native configuration owners (C0/C1): binary records only.
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
-runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2"]
+runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2", "dep:secp256k1"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
+
+[lints.rust]
+# BSC3-063 review: under `secp256k1_fuzz` libsecp256k1 recovers a key from
+# the signature bytes alone; the source refuses to build so (`wss::verify`).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(secp256k1_fuzz)"] }
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.
 darkbot-bsc-trading = { path = "../trading", features = ["test-support"] }
 alloy-primitives = { workspace = true }
 darkbot-bsc-record = { path = "../record" }
+# BSC3-063: the core's k256 signatures the source's recovery is held against.
+k256 = { workspace = true }
 # BSC3-023: what an admission asks of the drive, in this crate's tests.
 darkbot-bsc-journal = { path = "../journal", features = ["test-hooks"] }
 

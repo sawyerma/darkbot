@@ -722,6 +722,7 @@ dependencies = [
  "hex",
  "k256",
  "rustls",
+ "secp256k1",
  "serde_json",
  "sha2",
  "signal-hook",
