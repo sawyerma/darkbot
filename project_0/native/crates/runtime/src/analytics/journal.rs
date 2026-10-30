@@ -199,6 +199,9 @@ pub mod kind {
     /// P8-CTRL.6: one owner start's capability epoch, a sealed single-value journal
     /// `data/capability-control/epoch_<n>.p0j`.
     pub const CAPABILITY_OWNER_EPOCH: u16 = 1104;
+    /// P8-CTRL.3: one previewed FE-06 scope, a sealed single-value journal
+    /// `data/fe06/scope_<digest>.p0j`.
+    pub const FE06_SCOPE: u16 = 1105;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -283,6 +286,7 @@ pub mod kind {
         CAPABILITY_CONTROL_REQUEST,
         CAPABILITY_CONTROL_OUTCOME,
         CAPABILITY_OWNER_EPOCH,
+        FE06_SCOPE,
         super::MANIFEST,
     ];
 }

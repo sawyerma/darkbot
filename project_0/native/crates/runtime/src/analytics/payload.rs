@@ -993,6 +993,7 @@ macro_rules! typed_kinds {
             k::CAPABILITY_CONTROL_REQUEST => $f::<CapabilityControlRequest>($kind, $schema, $bytes),
             k::CAPABILITY_CONTROL_OUTCOME => $f::<CapabilityControlOutcome>($kind, $schema, $bytes),
             k::CAPABILITY_OWNER_EPOCH => $f::<CapabilityOwnerEpoch>($kind, $schema, $bytes),
+            k::FE06_SCOPE => $f::<crate::orchestration::fe06::Scope>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_ACCOUNT => $f::<C0CensusImportAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_GROUP_ACCOUNT => $f::<C0CensusImportGroupAccount>($kind, $schema, $bytes),

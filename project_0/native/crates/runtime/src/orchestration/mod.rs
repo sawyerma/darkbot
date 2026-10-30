@@ -5,6 +5,7 @@ pub mod boot_audit;
 pub mod boot_control;
 pub mod capability_control;
 pub mod control;
+pub mod fe06;
 #[cfg(feature = "crate_health")]
 pub mod fe_freeze;
 #[cfg(feature = "crate_health")]

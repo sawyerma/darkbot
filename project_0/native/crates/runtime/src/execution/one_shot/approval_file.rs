@@ -86,14 +86,8 @@ pub fn parse(bytes: &[u8]) -> Result<ApprovalFile, String> {
         return Err("APPROVAL_JSON_REFUSED: an approval is the native key = value text; a JSON approval is historical and never authorizes".into());
     }
     let text = std::str::from_utf8(bytes).map_err(|_| "APPROVAL_UNREADABLE: not text")?;
-    let mut fields: BTreeMap<String, String> = darkbot_solana::runtime_config::key_values(text)
-        .map_err(|e| format!("APPROVAL_INVALID: {e}"))?
-        .into_iter()
-        .collect();
-    let schema = fields
-        .remove("schema")
-        .ok_or("APPROVAL_FIELD_MISSING: schema")?;
-    let mut f = Fields(fields);
+    let mut f = Fields::of(text, "APPROVAL")?;
+    let schema = f.raw("schema")?;
     let parsed = match schema.as_str() {
         ATTEMPT_SCHEMA => {
             let a = Approval {
@@ -146,72 +140,104 @@ pub fn parse(bytes: &[u8]) -> Result<ApprovalFile, String> {
         }
         _ => return Err("APPROVAL_SCHEMA_UNKNOWN".into()),
     };
-    if let Some(unknown) = f.0.keys().next() {
-        return Err(format!("APPROVAL_FIELD_UNKNOWN: {unknown}"));
-    }
+    f.finish()?;
     Ok(parsed)
 }
 
-/// The fields of one approval, each taken exactly once.
-struct Fields(BTreeMap<String, String>);
+/// The fields of one native `key = value` text (an approval, P8-CTRL.3 an FE-06 scope), each
+/// taken exactly once; its refusals carry the text's own code prefix.
+pub(crate) struct Fields {
+    map: BTreeMap<String, String>,
+    prefix: &'static str,
+}
 impl Fields {
-    fn text(&mut self, key: &str) -> Result<String, String> {
-        let v = self
-            .0
+    /// The fields of `text` (a malformed text: `<prefix>_INVALID`).
+    pub(crate) fn of(text: &str, prefix: &'static str) -> Result<Self, String> {
+        let map = darkbot_solana::runtime_config::key_values(text)
+            .map_err(|e| format!("{prefix}_INVALID: {e}"))?
+            .into_iter()
+            .collect();
+        Ok(Self { map, prefix })
+    }
+    fn invalid(&self, key: &str) -> String {
+        format!("{}_FIELD_INVALID: {key}", self.prefix)
+    }
+    /// A field as written.
+    pub(crate) fn raw(&mut self, key: &str) -> Result<String, String> {
+        self.map
             .remove(key)
-            .ok_or_else(|| format!("APPROVAL_FIELD_MISSING: {key}"))?;
+            .ok_or_else(|| format!("{}_FIELD_MISSING: {key}", self.prefix))
+    }
+    /// No field left unread (an unknown key is refused).
+    pub(crate) fn finish(self) -> Result<(), String> {
+        match self.map.keys().next() {
+            Some(unknown) => Err(format!("{}_FIELD_UNKNOWN: {unknown}", self.prefix)),
+            None => Ok(()),
+        }
+    }
+    pub(crate) fn text(&mut self, key: &str) -> Result<String, String> {
+        let v = self.raw(key)?;
         if v.is_empty() || v.chars().any(char::is_whitespace) {
-            return Err(format!("APPROVAL_FIELD_INVALID: {key}"));
+            return Err(self.invalid(key));
         }
         Ok(v)
     }
     /// A plain decimal integer: digits only, no sign, no leading zero, within u64.
-    fn number(&mut self, key: &str) -> Result<u64, String> {
+    pub(crate) fn number(&mut self, key: &str) -> Result<u64, String> {
         let v = self.text(key)?;
         if !v.bytes().all(|b| b.is_ascii_digit()) || (v.len() > 1 && v.starts_with('0')) {
-            return Err(format!("APPROVAL_FIELD_INVALID: {key}"));
+            return Err(self.invalid(key));
         }
-        v.parse()
-            .map_err(|_| format!("APPROVAL_FIELD_INVALID: {key}"))
+        v.parse().map_err(|_| self.invalid(key))
     }
     /// A capital, debit or fee cap: an approval granting nothing is not an approval.
-    fn positive(&mut self, key: &str) -> Result<u64, String> {
+    pub(crate) fn positive(&mut self, key: &str) -> Result<u64, String> {
         match self.number(key)? {
-            0 => Err(format!("APPROVAL_FIELD_INVALID: {key}")),
+            0 => Err(self.invalid(key)),
             n => Ok(n),
         }
     }
     /// An approval id: the archive name of its attempt (`[A-Za-z0-9_-]{1,64}`).
-    fn id(&mut self, key: &str) -> Result<String, String> {
+    pub(crate) fn id(&mut self, key: &str) -> Result<String, String> {
         let v = self.text(key)?;
         if !super::archive::approval_id_valid(&v) {
-            return Err(format!("APPROVAL_FIELD_INVALID: {key}"));
+            return Err(self.invalid(key));
         }
         Ok(v)
     }
     /// A ProgramData hash as the deployment pin observes it (base58 SHA-256).
-    fn hash(&mut self, key: &str) -> Result<String, String> {
+    pub(crate) fn hash(&mut self, key: &str) -> Result<String, String> {
         let v = self.text(key)?;
         v.parse::<solana_sdk::hash::Hash>()
-            .map_err(|_| format!("APPROVAL_FIELD_INVALID: {key}"))?;
+            .map_err(|_| self.invalid(key))?;
         Ok(v)
     }
-    fn flag(&mut self, key: &str) -> Result<bool, String> {
+    pub(crate) fn flag(&mut self, key: &str) -> Result<bool, String> {
         match self.text(key)?.as_str() {
             "true" => Ok(true),
             "false" => Ok(false),
-            _ => Err(format!("APPROVAL_FIELD_INVALID: {key}")),
+            _ => Err(self.invalid(key)),
         }
     }
     /// Comma-separated entries, none empty, none repeated.
-    fn list(&mut self, key: &str) -> Result<BTreeSet<String>, String> {
+    pub(crate) fn list(&mut self, key: &str) -> Result<BTreeSet<String>, String> {
         let v = self.text(key)?;
         let entries: Vec<&str> = v.split(',').collect();
         let set: BTreeSet<String> = entries.iter().map(|s| s.to_string()).collect();
         if entries.iter().any(|s| s.is_empty()) || set.len() != entries.len() {
-            return Err(format!("APPROVAL_FIELD_INVALID: {key}"));
+            return Err(self.invalid(key));
         }
         Ok(set)
+    }
+    /// A list, or `NONE` for none.
+    pub(crate) fn list_or_none(&mut self, key: &str) -> Result<BTreeSet<String>, String> {
+        match self.map.get(key).map(String::as_str) {
+            Some("NONE") => {
+                self.map.remove(key);
+                Ok(BTreeSet::new())
+            }
+            _ => self.list(key),
+        }
     }
 }
 

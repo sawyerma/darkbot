@@ -237,6 +237,8 @@ parameters! {
     h0_window_days = 30, "days", "P0_H0_WINDOW_DAYS";
     h0_extended_window_days = 90, "days", "P0_H0_EXTENDED_WINDOW_DAYS";
     h0_recurring_min_wins = 2, "wins", "P0_H0_RECURRING_MIN_WINS";
+    // P8-CTRL.3: the longest validity of one FE-06 scope (revision 17).
+    fe06_grant_max_lifetime_seconds = 86400, "s", "P0_FE06_GRANT_MAX_LIFETIME_SECS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -254,8 +256,9 @@ parameters! {
 /// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07); 14:
 /// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06); 15: `index_rps` …
 /// `crosscheck_mib` (DEC-08, the verifiers' budgets per method); 16: `h0_window_days`,
-/// `h0_extended_window_days`, `h0_recurring_min_wins` (H0).
-pub const LIMITS_REVISION: u16 = 16;
+/// `h0_extended_window_days`, `h0_recurring_min_wins` (H0); 17: `fe06_grant_max_lifetime_seconds`
+/// (P8-CTRL.3).
+pub const LIMITS_REVISION: u16 = 17;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -276,6 +279,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("fe06_grant_max_lifetime_seconds") => 17,
         f if position(f) >= position("h0_window_days") => 16,
         f if position(f) >= position("index_rps") => 15,
         f if position(f) >= position("threshold_observe_budget_ppm") => 14,
@@ -2121,9 +2125,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                16,
-                153,
-                "5qqvfGUQa6BufXLgymdNrud3qDC5gmxg4sUEeKkC2gbD".to_string()
+                17,
+                154,
+                "DmuoC1E9uB74gJJDZJqFyzL4zsNZhTvgsiPkQnn4wtzh".to_string()
             )
         );
     }
