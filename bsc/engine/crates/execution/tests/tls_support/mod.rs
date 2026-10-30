@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use darkbot_bsc_execution::submission::tls::{
-    TlsConnectionOwner, TlsEndpoint, TlsPolicy, TlsSetup,
+    ConnectionFacts, Maintenance, TlsConnectionOwner, TlsEndpoint, TlsPolicy, TlsSetup,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -267,4 +267,23 @@ pub fn wait_until(mut done: impl FnMut() -> bool) -> bool {
         thread::sleep(Duration::from_millis(2));
     }
     done()
+}
+
+/// BSC3-025: a maintenance pass that replaces the connection only begins
+/// it (`Connecting`, at once); a later pass installs it once established.
+/// The new connection's facts.
+pub fn reconnected(owner: &mut TlsConnectionOwner) -> ConnectionFacts {
+    assert_eq!(owner.maintain(), Maintenance::Connecting, "not replaced");
+    let mut outcome = Maintenance::Connecting;
+    assert!(
+        wait_until(|| {
+            outcome = owner.maintain();
+            outcome != Maintenance::Connecting
+        }),
+        "never established"
+    );
+    match outcome {
+        Maintenance::Connected(facts) => facts,
+        other => panic!("not reconnected: {other:?}"),
+    }
 }

@@ -167,6 +167,36 @@ impl core::fmt::Debug for Released {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: the address this thread's builder connections go to (a local
+    /// listener) instead of the documented hosts'; name and policy stay.
+    pub(crate) static BUILDERS_AT: std::cell::Cell<Option<std::net::SocketAddr>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// A builder's documented endpoint.
+fn builder_endpoint(target: &ProviderTarget) -> TlsEndpoint {
+    let endpoint = target.tls_endpoint().clone();
+    #[cfg(test)]
+    if let Some(address) = BUILDERS_AT.with(std::cell::Cell::get) {
+        return endpoint.with_address(address);
+    }
+    endpoint
+}
+
+/// Where the adapters' connections begun by [`LiveEnd::begin_connect`]
+/// stand (BSC3-025).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Connecting {
+    /// Every one is ready.
+    Ready,
+    /// One at least is still being established; none failed.
+    Pending,
+    /// These failed, and why.
+    Failed(Vec<(LiveAdapter, String)>),
+}
+
 /// The armed LIVE end.
 pub struct LiveEnd {
     key: LiveKey,
@@ -275,7 +305,7 @@ impl LiveEnd {
             let link = match &route {
                 LiveRoute::Builders { setup, .. } => Link::Tls(Box::new(
                     TlsConnectionOwner::new(
-                        target.tls_endpoint().clone(),
+                        builder_endpoint(&target),
                         setup.clone(),
                         Q5A_TLS_POLICY,
                     )
@@ -317,13 +347,30 @@ impl LiveEnd {
         })
     }
 
-    /// Establishes every adapter's connection (startup and maintenance,
-    /// never in a dispatch): which adapter failed and why.
+    /// Establishes every adapter's connection and waits for them (tools
+    /// and tests; the runtime uses [`Self::begin_connect`]): which adapter
+    /// failed and why.
     pub fn connect(&mut self, timeout: Duration) -> Vec<(LiveAdapter, String)> {
+        let mut failed = self.begin_connect(timeout);
+        for slot in &mut self.slots {
+            if let Link::Tls(owner) = &mut slot.link
+                && owner.connecting()
+                && let Err(e) = owner.connect()
+            {
+                failed.push((slot.live, e.to_string()));
+            }
+        }
+        failed
+    }
+
+    /// Begins every adapter's connection and returns at once (BSC3-025): a
+    /// builder's TLS connection is established on a thread of its own, a
+    /// loopback link (a local socket) here. Which adapter could not begin.
+    pub fn begin_connect(&mut self, timeout: Duration) -> Vec<(LiveAdapter, String)> {
         let mut failed = Vec::new();
         for slot in &mut self.slots {
             let result = match &mut slot.link {
-                Link::Tls(owner) => owner.connect().map(|_| ()).map_err(|e| e.to_string()),
+                Link::Tls(owner) => owner.begin_connect().map_err(|e| e.to_string()),
                 Link::Loopback(t) => t.connect(timeout).map_err(|e| e.to_string()),
             };
             if let Err(e) = result {
@@ -333,9 +380,57 @@ impl LiveEnd {
         failed
     }
 
-    /// One maintenance pass outside any dispatch: a TLS owner probes,
-    /// gives up and replaces its connection as its policy says; a loopback
-    /// link that is not ready connects again. Which adapter failed and why.
+    /// Whether every adapter's connection begun by [`Self::begin_connect`]
+    /// is ready, still being established, or failed (which and why);
+    /// never waits.
+    pub fn connected(&mut self) -> Connecting {
+        use crate::submission::transport::{ConnectionState, Transport};
+        let mut failed = Vec::new();
+        let mut pending = false;
+        for slot in &mut self.slots {
+            match &mut slot.link {
+                Link::Tls(owner) => match owner.poll_connect() {
+                    None if owner.connecting() => pending = true,
+                    Some(Err(e)) => failed.push((slot.live, e.to_string())),
+                    // Installed now or before: ready, or not (review LOW-2).
+                    None | Some(Ok(_)) if owner.state() != ConnectionState::Ready => {
+                        failed.push((slot.live, format!("not ready: {:?}", owner.state())));
+                    }
+                    None | Some(Ok(_)) => {}
+                },
+                Link::Loopback(t) if t.state() != ConnectionState::Ready => {
+                    failed.push((slot.live, "loopback link not ready".into()));
+                }
+                Link::Loopback(_) => {}
+            }
+        }
+        match (failed.is_empty(), pending) {
+            (false, _) => Connecting::Failed(failed),
+            (true, true) => Connecting::Pending,
+            (true, false) => Connecting::Ready,
+        }
+    }
+
+    /// Installs every builder connection established meanwhile, never
+    /// beginning one and never waiting (BSC3-025 review): before each
+    /// decision, outside any hand-over, so a connection replaced while
+    /// armed is usable as soon as its handshake completed, not only after
+    /// the next maintenance pass. A failure is left to the maintenance.
+    pub fn install_ready(&mut self) {
+        for slot in &mut self.slots {
+            if let Link::Tls(owner) = &mut slot.link
+                && owner.connecting()
+            {
+                let _ = owner.poll_connect();
+            }
+        }
+    }
+
+    /// One maintenance pass outside any dispatch, never waiting for a
+    /// connection (BSC3-025): a TLS owner probes, gives up and begins
+    /// replacing its connection as its policy says, and installs one
+    /// established meanwhile; a loopback link that is not ready connects
+    /// again. Which adapter failed and why.
     pub fn maintain(&mut self, timeout: Duration) -> Vec<(LiveAdapter, String)> {
         use crate::submission::transport::{ConnectionState, Transport};
         let mut failed = Vec::new();
@@ -1067,6 +1162,69 @@ pub(crate) mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// BSC3-025: a builder connection is begun and installed later, never
+    /// waited for: with a builder that never answers the handshake (Q5A
+    /// waits up to 5 s for it), beginning, the readiness check, the
+    /// maintenance and the install before a decision all return at once.
+    #[test]
+    fn no_pass_waits_for_a_builder_handshake() {
+        use std::net::TcpListener;
+        use std::time::Instant;
+        let (state, store, now) = live_ready_granting("live-end-025", |now| LiveGrant {
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = verified();
+        let armed = store
+            .live_now(&[ComponentId::ExecC3], &q.view, now)
+            .unwrap();
+        let d = std::env::temp_dir().join(format!("bsc-live-end-025-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let (key_path, buyer) = key_file(&d);
+        let key = LiveKey::load(
+            &key_path,
+            Path::new("/nonexistent-repo"),
+            buyer,
+            &[],
+            &armed,
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        BUILDERS_AT.with(|at| at.set(Some(listener.local_addr().unwrap())));
+        let mut end = LiveEnd::new(
+            key,
+            armed,
+            store,
+            q,
+            LiveRoute::Builders {
+                setup: TlsSetup::web_pki_roots().unwrap(),
+                blockrazor: None,
+            },
+            56,
+            1,
+            Box::new(move || now),
+        )
+        .unwrap();
+        let wait = Duration::from_secs(2);
+        let started = Instant::now();
+        assert!(end.begin_connect(wait).is_empty());
+        assert_eq!(end.connected(), Connecting::Pending);
+        assert!(end.maintain(wait).is_empty());
+        end.install_ready();
+        assert_eq!(end.connected(), Connecting::Pending);
+        // A liveness margin, not a timing claim: the handshake takes 5 s.
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        BUILDERS_AT.with(|at| at.set(None));
+        drop(end);
+        drop(listener);
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&state);
     }
 
     /// BSC3-031: the request id the release writes is the lowercase hex of

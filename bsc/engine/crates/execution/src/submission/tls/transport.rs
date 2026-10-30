@@ -103,9 +103,9 @@ impl TlsTransport {
 
     /// Takes over a newly established connection: ready.
     pub(crate) fn install(&mut self, connection: WarmTlsConnection) {
+        self.last_activity = connection.established;
         self.connection = Some(connection);
         self.state = ConnectionState::Ready;
-        self.last_activity = Instant::now();
         self.prepared = 0;
         self.wire_bytes = 0;
     }

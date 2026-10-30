@@ -248,6 +248,84 @@ fn a_handshake_that_never_completes_times_out() {
     assert_ne!(owner.state(), ConnectionState::Ready);
 }
 
+/// BSC3-025: a maintenance pass never waits for a connection: with a
+/// handshake that never completes it begins one and returns `Connecting`
+/// at once (it waited for the handshake timeout), the transport is not
+/// eligible meanwhile, and a later pass reports the timeout.
+#[test]
+fn a_slow_handshake_never_holds_up_the_maintenance_pass() {
+    let server = TestServer::start(Served::Localhost, ServerAlpn::Http11, Behaviour::SilentTcp);
+    let slow = TlsPolicy {
+        handshake_timeout: Duration::from_millis(800),
+        ..policy()
+    };
+    let mut owner = owner_with(&server, trusting(TEST_CA), slow);
+    let started = Instant::now();
+    assert_eq!(owner.maintain(), Maintenance::Connecting);
+    // A liveness margin, not a timing claim: the handshake takes 800 ms.
+    assert!(
+        started.elapsed() < Duration::from_millis(400),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(owner.connecting());
+    assert_ne!(owner.state(), ConnectionState::Ready);
+    assert_eq!(owner.maintain(), Maintenance::Connecting);
+    let mut outcome = Maintenance::Connecting;
+    assert!(wait_until(|| {
+        outcome = owner.maintain();
+        outcome != Maintenance::Connecting
+    }));
+    assert_eq!(outcome, Maintenance::Failed(ConnectError::HandshakeTimeout));
+    assert!(!owner.connecting());
+    assert_ne!(owner.state(), ConnectionState::Ready);
+}
+
+/// BSC3-025: a connection begun is installed only by a later pass, as the
+/// next generation; until then the transport is not eligible; beginning
+/// again while one is being established starts no second one.
+#[test]
+fn a_connection_begun_is_installed_by_a_later_pass() {
+    let server = TestServer::start(Served::Localhost, ServerAlpn::Http11, Behaviour::Hold);
+    let mut owner = owner(&server);
+    owner.begin_connect().unwrap();
+    owner.begin_connect().unwrap();
+    assert_eq!(owner.generation(), 0);
+    assert_ne!(owner.state(), ConnectionState::Ready);
+    let mut installed = None;
+    assert!(wait_until(|| {
+        installed = owner.poll_connect();
+        installed.is_some()
+    }));
+    let facts = installed.unwrap().unwrap();
+    assert_eq!(facts.generation, 1);
+    assert_eq!(owner.generation(), 1);
+    assert!(owner.is_current(&facts));
+    assert_eq!(owner.state(), ConnectionState::Ready);
+    assert_eq!(owner.poll_connect(), None);
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(server.accepted(), 1);
+}
+
+/// BSC3-025 review: a connection's idle time runs from its handshake, also
+/// when it is installed later: one installed after its idle limit is not
+/// eligible (it was taken as fresh at the install).
+#[test]
+fn a_connection_installed_late_keeps_its_idle_time() {
+    let server = TestServer::start(Served::Localhost, ServerAlpn::Http11, Behaviour::Hold);
+    let short = TlsPolicy {
+        max_idle: Duration::from_millis(150),
+        ..policy()
+    };
+    let mut owner = owner_with(&server, trusting(TEST_CA), short);
+    owner.begin_connect().unwrap();
+    assert!(wait_until(|| server.accepted() == 1));
+    thread::sleep(Duration::from_millis(400));
+    let installed = owner.poll_connect();
+    assert!(matches!(installed, Some(Ok(_))), "{installed:?}");
+    assert_ne!(owner.state(), ConnectionState::Ready);
+}
+
 #[test]
 fn nothing_listening_is_a_connect_failure() {
     let address = {
@@ -445,9 +523,7 @@ fn a_malformed_response_makes_the_connection_stale_and_maintenance_replaces_it()
     assert_eq!(submission(&world, CLUB48), SubmissionState::HandedOff);
 
     // Maintenance, not the dispatch, replaces the connection.
-    let Maintenance::Connected(second) = owner.maintain() else {
-        panic!("not reconnected");
-    };
+    let second = reconnected(&mut owner);
     assert_eq!(second.generation, first.generation + 1);
     assert!(!owner.is_current(&first));
     assert!(wait_until(|| server.accepted() == 2));
@@ -503,9 +579,7 @@ fn an_overdue_response_gives_the_connection_up_in_maintenance() {
 
     assert_eq!(owner.maintain(), Maintenance::Awaiting);
     thread::sleep(Duration::from_millis(100));
-    let Maintenance::Connected(second) = owner.maintain() else {
-        panic!("overdue connection kept");
-    };
+    let second = reconnected(&mut owner);
     assert_eq!(second.generation, first.generation + 1);
     // The answer is no longer awaited on the new connection; the
     // submission stays handed off, its outcome for the chain owner.
@@ -544,7 +618,7 @@ fn an_idle_connection_is_not_eligible() {
     assert!(!report.admitted());
     assert_eq!(world.lane.state(world.ticket), Ok(IntentState::Prepared));
     assert!(server.requests().is_empty());
-    assert!(matches!(owner.maintain(), Maintenance::Connected(_)));
+    reconnected(&mut owner);
 }
 
 #[test]
@@ -622,9 +696,7 @@ fn a_disconnected_transport_is_skipped_and_only_maintenance_reconnects() {
     assert_eq!(server.accepted(), 1);
     assert_eq!(owner.generation(), 1);
 
-    let Maintenance::Connected(second) = owner.maintain() else {
-        panic!("not reconnected");
-    };
+    let second = reconnected(&mut owner);
     assert_eq!(second.generation, 2);
     assert!(!owner.is_current(&first));
     assert!(owner.is_current(&second));
@@ -642,9 +714,7 @@ fn maintenance_finds_a_peer_that_closed_an_idle_connection() {
     owner.connect().unwrap();
     thread::sleep(Duration::from_millis(100));
     // The dispatch could not know; maintenance does, and replaces it.
-    let Maintenance::Connected(second) = owner.maintain() else {
-        panic!("closed connection kept");
-    };
+    let second = reconnected(&mut owner);
     assert_eq!(second.generation, 2);
 }
 
@@ -826,7 +896,7 @@ fn a_late_check_after_tls_preparation_writes_nothing_to_the_wire() {
     assert_eq!(owner.state(), ConnectionState::Stale);
     thread::sleep(Duration::from_millis(50));
     assert!(server.requests().is_empty());
-    assert!(matches!(owner.maintain(), Maintenance::Connected(_)));
+    reconnected(&mut owner);
     assert_eq!(owner.transport().wire_bytes(), 0);
 }
 

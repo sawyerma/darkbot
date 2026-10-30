@@ -43,7 +43,7 @@
 //! starts over, with a new fence.
 
 use crate::chain_follower::{CanonicalEvent, FollowerLimits};
-use crate::live_end::{LiveEnd, LiveHandoff, LiveRoute};
+use crate::live_end::{Connecting, LiveEnd, LiveHandoff, LiveRoute};
 use crate::live_key::LiveKey;
 use crate::live_ledger::{Book, Fact, FactKind, Ledger, PositionState, fold};
 use crate::live_qualification;
@@ -51,10 +51,10 @@ use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Re
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
 use crate::runtime::state::{LaneEvidence, StateOwner};
 use crate::sources::{
-    ComponentId, KEEP_GENERATIONS, LiveIntentKind, LiveStrategies, NonceCosts, NonceKey,
-    NonceOrigin, SourceId, Store,
+    ComponentId, KEEP_GENERATIONS, LiveAdapter, LiveIntentKind, LiveStrategies, NonceCosts,
+    NonceKey, NonceOrigin, SourceId, Store,
 };
-use crate::submission::tls::{AuthorizationToken, TlsSetup};
+use crate::submission::tls::{AuthorizationToken, Q5A_TLS_POLICY, TlsSetup};
 use crate::submission::transport::Clock;
 use crate::venue_probe::VenueObservation;
 use alloy_primitives::{Address, U256};
@@ -142,11 +142,21 @@ enum Phase {
     Unfunded(String),
     WaitingNonce,
     KeyRefused(String),
+    /// BSC3-025: the builders' connections are being established off the
+    /// decision loop; a later pass arms once they are ready.
+    Connecting,
     ConnectFailed(String),
     ArmFailed(String),
     Armed,
     /// Armed until the gate closed: the reason it ended.
     Ended(String),
+}
+
+/// BSC3-025: how long an end being connected waits for a pass that arms
+/// it: Q5A's connect and handshake limits and its idle time, after which
+/// its connections are of no use any more.
+fn connecting_hold() -> Duration {
+    Q5A_TLS_POLICY.connect_timeout + Q5A_TLS_POLICY.handshake_timeout + Q5A_TLS_POLICY.max_idle
 }
 
 impl Phase {
@@ -178,6 +188,7 @@ impl Phase {
             Self::Unfunded(r) => ("UNFUNDED", Some(r)),
             Self::WaitingNonce => ("WAITING_NONCE", None),
             Self::KeyRefused(r) => ("KEY_REFUSED", Some(r)),
+            Self::Connecting => ("CONNECTING", None),
             Self::ConnectFailed(r) => ("CONNECT_FAILED", Some(r)),
             Self::ArmFailed(r) => ("ARM_FAILED", Some(r)),
             Self::Armed => ("ARMED", None),
@@ -287,6 +298,10 @@ pub struct LiveRuntime {
     observation: Option<VenueObservation>,
     validated: Option<(ValidatedDeployment, VenueBuyTerms)>,
     executor: Option<Executor<LiveEnd>>,
+    /// BSC3-025: an end whose connections are being established, and since
+    /// when: kept across passes for at most [`connecting_hold`] (a closed
+    /// gate or a stop drops it at once, its key with it).
+    connecting: Option<(LiveEnd, Instant)>,
     codehash_generation: u64,
     arms: u64,
     last_probe: Option<Instant>,
@@ -398,6 +413,7 @@ impl LiveRuntime {
             arms: 0,
             last_probe: None,
             last_attempt: None,
+            connecting: None,
             probes: 0,
             disarm_errors: 0,
             next_nonce: None,
@@ -873,6 +889,7 @@ impl LiveRuntime {
 
     fn stop(&mut self, phase: Phase) {
         self.disarm();
+        self.connecting = None;
         self.validated = None;
         self.phase = phase;
     }
@@ -1073,6 +1090,17 @@ impl LiveRuntime {
         session: u64,
         now_ms: u64,
     ) {
+        // BSC3-025: an end being connected waits across passes that do not
+        // come back to arming (review LOW-3: a flapping precondition never
+        // restarts it), at most as long as Q5A lets its connections take
+        // and stay idle.
+        if self
+            .connecting
+            .as_ref()
+            .is_some_and(|(_, since)| since.elapsed() > connecting_hold())
+        {
+            self.connecting = None;
+        }
         // The gate, as it holds now.
         let opened = match &self.boot {
             Some(boot) => {
@@ -1264,65 +1292,81 @@ impl LiveRuntime {
             self.phase = Phase::Blocked(why);
             return;
         }
-        let refused: Vec<[u8; 20]> = self.paper_sender.into_iter().collect();
-        let key = match LiveKey::load(
-            &self.setup.key_path,
-            &self.repo_root,
-            self.setup.buyer,
-            &refused,
-            &live_now,
-        ) {
-            Ok(k) => k,
-            Err(e) => return self.stop(Phase::KeyRefused(e)),
-        };
-        let route = match &self.setup.route {
-            LiveRouteConfig::Loopback { port } => {
-                if let Some(why) =
-                    loopback_refused(store.dir(), crate::sources::canonical_state_dir())
-                {
-                    return self.stop(Phase::ArmFailed(why));
-                }
-                LiveRoute::Loopback { port: *port }
+        // BSC3-025: an end of this grant and this qualification whose
+        // connections are being established is waited for, never built again.
+        let (mut end, since) = match self.connecting.take() {
+            Some((end, since))
+                if end.armed().grant_generation() == live_now.grant_generation()
+                    && end.armed().grant() == live_now.grant()
+                    && end.qualification_sha256() == verified.sha256 =>
+            {
+                (end, since)
             }
-            LiveRouteConfig::Builders { blockrazor_token } => {
-                let setup = match TlsSetup::web_pki_roots() {
-                    Ok(s) => s,
-                    Err(e) => return self.stop(Phase::ArmFailed(format!("TLS setup: {e:?}"))),
+            _ => {
+                let refused: Vec<[u8; 20]> = self.paper_sender.into_iter().collect();
+                let key = match LiveKey::load(
+                    &self.setup.key_path,
+                    &self.repo_root,
+                    self.setup.buyer,
+                    &refused,
+                    &live_now,
+                ) {
+                    Ok(k) => k,
+                    Err(e) => return self.stop(Phase::KeyRefused(e)),
                 };
-                let blockrazor = match blockrazor_token.as_deref().map(token_from).transpose() {
-                    Ok(t) => t,
+                let route = match &self.setup.route {
+                    LiveRouteConfig::Loopback { port } => {
+                        if let Some(why) =
+                            loopback_refused(store.dir(), crate::sources::canonical_state_dir())
+                        {
+                            return self.stop(Phase::ArmFailed(why));
+                        }
+                        LiveRoute::Loopback { port: *port }
+                    }
+                    LiveRouteConfig::Builders { blockrazor_token } => {
+                        let setup = match TlsSetup::web_pki_roots() {
+                            Ok(s) => s,
+                            Err(e) => {
+                                return self.stop(Phase::ArmFailed(format!("TLS setup: {e:?}")));
+                            }
+                        };
+                        let blockrazor =
+                            match blockrazor_token.as_deref().map(token_from).transpose() {
+                                Ok(t) => t,
+                                Err(e) => return self.stop(Phase::ArmFailed(e)),
+                            };
+                        LiveRoute::Builders { setup, blockrazor }
+                    }
+                };
+                let end = LiveEnd::new(
+                    key,
+                    live_now,
+                    store,
+                    verified.clone(),
+                    route,
+                    deployment.deployment().chain_id,
+                    self.exec.exec.capability_generation,
+                    Box::new(self.wall),
+                );
+                let mut end = match end {
+                    Ok(e) => e,
                     Err(e) => return self.stop(Phase::ArmFailed(e)),
                 };
-                LiveRoute::Builders { setup, blockrazor }
+                let failed = end.begin_connect(self.setup.connect_timeout);
+                if !failed.is_empty() {
+                    return self.connect_failed(end, failed);
+                }
+                (end, Instant::now())
             }
         };
-        let end = LiveEnd::new(
-            key,
-            live_now,
-            store,
-            verified.clone(),
-            route,
-            deployment.deployment().chain_id,
-            self.exec.exec.capability_generation,
-            Box::new(self.wall),
-        );
-        let mut end = match end {
-            Ok(e) => e,
-            Err(e) => return self.stop(Phase::ArmFailed(e)),
-        };
-        let failed = end.connect(self.setup.connect_timeout);
-        if !failed.is_empty() {
-            // The end and its key go; a later pass tries again.
-            drop(end);
-            self.last_attempt = Some(Instant::now());
-            self.phase = Phase::ConnectFailed(
-                failed
-                    .iter()
-                    .map(|(a, e)| format!("{}: {e}", a.name()))
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            );
-            return;
+        match end.connected() {
+            Connecting::Pending => {
+                self.connecting = Some((end, since));
+                self.phase = Phase::Connecting;
+                return;
+            }
+            Connecting::Failed(failed) => return self.connect_failed(end, failed),
+            Connecting::Ready => {}
         }
         // Everything earlier arms released is resolved: their fences are.
         if let Err(e) = self.settle_fences() {
@@ -1367,10 +1411,24 @@ impl LiveRuntime {
         }
     }
 
+    /// The end and its key go; a later pass tries again.
+    fn connect_failed(&mut self, end: LiveEnd, failed: Vec<(LiveAdapter, String)>) {
+        drop(end);
+        self.last_attempt = Some(Instant::now());
+        self.phase = Phase::ConnectFailed(
+            failed
+                .iter()
+                .map(|(a, e)| format!("{}: {e}", a.name()))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+
     /// The gate is closed: an armed path ends with the reason, an unarmed
     /// one shows it.
     fn close(&mut self, why: String) {
         self.probe = None;
+        self.connecting = None;
         if self.executor.is_some() {
             self.stop(Phase::Ended(why));
         } else {
@@ -1579,6 +1637,9 @@ impl LiveRuntime {
     /// written. [`Self::record_responses`] writes them.
     pub fn poll_responses(&mut self, clock: &dyn Clock) {
         if let Some(x) = self.executor.as_mut() {
+            // BSC3-025 review: a connection replaced while armed is usable
+            // as soon as it is established.
+            x.end_mut().install_ready();
             x.poll_responses(clock);
         }
     }
@@ -1909,6 +1970,238 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// BSC3-025 review: before every decision the armed end installs the
+    /// connections established meanwhile (a replaced one is usable once its
+    /// handshake completed, not only after the next maintenance pass).
+    #[test]
+    fn every_decision_installs_the_connections_established_meanwhile() {
+        let source = include_str!("runtime_live.rs");
+        let body = &source[source
+            .find("    pub fn poll_responses(&mut self, clock: &dyn Clock) {")
+            .unwrap()..];
+        let body = &body[..body.find("\n    }\n").unwrap()];
+        let install = body.find("x.end_mut().install_ready();").expect("installs");
+        assert!(install < body.find("x.poll_responses(clock);").unwrap());
+        for decision in ["pub fn on_launch(", "pub fn on_strategy("] {
+            let at = source.find(decision).unwrap();
+            let next = source[at..].find("self.poll_responses(clock);").unwrap();
+            let end = source[at..].find("\n    }\n").unwrap();
+            assert!(next < end, "{decision} polls before deciding");
+        }
+    }
+
+    /// BSC3-025: arming over the builders never waits for their TLS
+    /// connection on the decision loop (it did, up to Q5A's 5 s connect
+    /// and 5 s handshake): the pass begins it and returns CONNECTING; the
+    /// passes after it wait for that one end, never build another; a pass
+    /// that does not come back to arming drops it (its key with it); a
+    /// connection that fails makes a later pass CONNECT_FAILED.
+    #[test]
+    fn arming_over_the_builders_never_waits_for_their_connection() {
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        // A liveness bound, not a timing claim.
+        fn wait_until(mut done: impl FnMut() -> bool) -> bool {
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_secs(30) {
+                if done() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            done()
+        }
+        let (state, _store, now) = live_ready_granting("live-rt-025", |now| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        assert_eq!(now, NOW);
+        let root = fixture("live-rt-025", "PASS");
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let spec = Spec {
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: acquisition(),
+            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+        };
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(
+            root.join(LIVE_QUALIFICATION_PATH),
+            build(&root, &spec, 1).unwrap(),
+        )
+        .unwrap();
+        let d = std::env::temp_dir().join(format!("bsc-live-rt-025-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let (key, buyer) = key_file(&d);
+        // A builder that takes the TCP connection and never answers the
+        // handshake until told to close.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let close = Arc::new(AtomicBool::new(false));
+        let (a, c) = (Arc::clone(&accepted), Arc::clone(&close));
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            while !c.load(Ordering::SeqCst) {
+                if let Ok((stream, _)) = listener.accept() {
+                    a.fetch_add(1, Ordering::SeqCst);
+                    held.push(stream);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        });
+        crate::live_end::BUILDERS_AT.with(|at| at.set(Some(address)));
+        let live_setup = LiveSetup {
+            key_path: key,
+            buyer,
+            route: LiveRouteConfig::Builders {
+                blockrazor_token: None,
+            },
+            connect_timeout: Duration::from_secs(2),
+        };
+        let exec = setup(d.join("unused.key"), Duration::from_secs(3_600));
+        let mut x = LiveRuntime::with_prober(
+            live_setup,
+            exec,
+            &root,
+            state.clone(),
+            d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", fixed);
+        let mut c2 = owner(&d, buyer);
+        settle(&mut x, &c2);
+        assert_eq!(record(&x).text(l::STATE).unwrap(), "WAITING_NONCE");
+        c2.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: buyer,
+            next_nonce: 5,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        let lim = limits();
+        // One pass, or the passes until the deployment probe settled; each
+        // returns at once. The longest one.
+        let pass = |x: &mut LiveRuntime, owner: Option<&StateOwner>| {
+            let mut longest = Duration::ZERO;
+            for _ in 0..2_000 {
+                let t = Instant::now();
+                x.tick(owner, Some(("https://probe.invalid", &lim)), 7, NOW);
+                longest = longest.max(t.elapsed());
+                if record(x).text(l::STATE).unwrap() != "PROBING" {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            longest
+        };
+        // A liveness margin, not a timing claim: the handshake would hold
+        // the pass 5 s.
+        let took = pass(&mut x, Some(&c2));
+        assert!(took < Duration::from_secs(2), "{took:?}");
+        let state_now = |x: &LiveRuntime| record(x).text(l::STATE).unwrap().to_string();
+        assert_eq!(state_now(&x), "CONNECTING");
+        assert!(!x.armed());
+        assert!(wait_until(|| accepted.load(Ordering::SeqCst) == 1));
+        assert!(pass(&mut x, Some(&c2)) < Duration::from_secs(2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "a second end was built");
+        // A pass that does not come back to arming (C2 not watching) keeps
+        // the end (review LOW-3): the next arming pass waits for the same
+        // connection, it does not begin another.
+        pass(&mut x, None);
+        assert_ne!(state_now(&x), "CONNECTING");
+        assert!(x.connecting.is_some());
+        assert!(pass(&mut x, Some(&c2)) < Duration::from_secs(2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        // Review MEDIUM-2: another grant (a new generation) or another
+        // qualification record is another end; the old one never arms.
+        let owner_store = Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap();
+        let regrant = |name: &str| {
+            let grant = LiveGrant {
+                max_input_wei: 10_000_000_000_000_000,
+                max_spend_wei: 100_000_000_000_000_000,
+                adapters: vec![LiveAdapter::Club48BuilderV1],
+                ..grant_of(NOW + 3_600_000, LiveStrategies::C3)
+            };
+            let g = owner_store.current().unwrap().generation;
+            let r = owner_store
+                .grant_live(name, grant.clone(), grant.scope_sha256(), g, NOW)
+                .unwrap();
+            assert!(r.applied(), "{}", r.line());
+        };
+        regrant("regrant-1");
+        assert!(pass(&mut x, Some(&c2)) < Duration::from_secs(2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        assert!(wait_until(|| accepted.load(Ordering::SeqCst) == 2));
+        fs::write(
+            root.join(LIVE_QUALIFICATION_PATH),
+            build(&root, &spec, 2).unwrap(),
+        )
+        .unwrap();
+        assert!(pass(&mut x, Some(&c2)) < Duration::from_secs(2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        assert!(wait_until(|| accepted.load(Ordering::SeqCst) == 3));
+        assert!(!x.armed());
+        // A closed gate (revoked) drops it at once, its key with it.
+        let g = owner_store.current().unwrap().generation;
+        assert!(
+            owner_store
+                .request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
+                .unwrap()
+                .applied()
+        );
+        pass(&mut x, Some(&c2));
+        assert!(x.connecting.is_none());
+        assert_eq!(state_now(&x), "BLOCKED");
+        // Granted again: a new end; the stop drops it.
+        regrant("regrant-2");
+        assert!(pass(&mut x, Some(&c2)) < Duration::from_secs(2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        assert!(wait_until(|| accepted.load(Ordering::SeqCst) == 4));
+        // The builder closes: the handshake fails, a later pass says so.
+        close.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        let failed = wait_until(|| {
+            pass(&mut x, Some(&c2));
+            state_now(&x) == "CONNECT_FAILED"
+        });
+        assert!(failed, "{}", state_now(&x));
+        assert!(x.connecting.is_none());
+        assert!(!x.armed());
+        // A stop while connecting drops the end.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        crate::live_end::BUILDERS_AT.with(|at| at.set(Some(listener.local_addr().unwrap())));
+        regrant("regrant-3");
+        x.last_attempt = None;
+        pass(&mut x, Some(&c2));
+        assert_eq!(state_now(&x), "CONNECTING");
+        x.shutdown();
+        assert!(x.connecting.is_none());
+        drop(listener);
+        crate::live_end::BUILDERS_AT.with(|at| at.set(None));
+        fs::remove_dir_all(&d).unwrap();
     }
 
     /// Plan 28.10.: the LIVE path arms only under the owner's clear gate

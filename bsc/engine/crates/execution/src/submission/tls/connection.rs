@@ -89,6 +89,9 @@ pub struct WarmTlsConnection {
     pub(crate) socket: TcpStream,
     pub(crate) tls: ClientConnection,
     facts: ConnectionFacts,
+    /// When its handshake completed (BSC3-025 review: its idle time runs
+    /// from there, also when it is installed later).
+    pub(crate) established: Instant,
 }
 
 impl WarmTlsConnection {
@@ -139,6 +142,7 @@ impl WarmTlsConnection {
         Ok(Self {
             socket,
             tls,
+            established: Instant::now(),
             facts: ConnectionFacts {
                 generation,
                 peer,
