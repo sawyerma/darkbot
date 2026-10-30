@@ -36,13 +36,17 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(view.jobs[3]?.result).toEqual({
       kind: "H0", resultId: "h0-1", windowStartUnixS: 1_757_408_000n, windowEndUnixS: 1_760_000_000n, liquidations: 12n,
       duplicates: 3n, runsVerified: 2n, runsWithoutResult: 1n, winners: 4n, topWinnerShareBps: 5_000n, bands: 2n,
-      sampleStatus: "MIN_SAMPLE_UNDECIDED", tags: "BLOCKED: H0-04 needs the 0.1.12 deployment",
+      sampleStatus: "MIN_SAMPLE_UNDECIDED", tags: "BLOCKED: H0-04 (tags, take times, premium(t), our t_profitable) needs the 0.1.12 deployment",
+      competitive: 10n, transactions: 11n, failedAttempts: 5n, coveredSeconds: 86_400n, bandsBounded: 1n,
+      bandsBelowOurMinProfit: 1n, tipAccounts: 8n,
     });
     const r = view.jobs[3]!.result!;
     if (r.kind !== "H0") throw new Error("H0");
-    expect(h0Line(r)).toBe("2025-09-09 … 2025-10-09 · 12 liquidations (3 seen again) · runs 2 verified / 1 without · 4 winners · top 50.00 %"
-      + " · 2 min-profit bands (upper bounds) · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 needs the 0.1.12 deployment");
+    expect(h0Line(r)).toBe("2025-09-09 … 2025-10-09 (covered 24.0 h) · 12 liquidations (10 competitive, 3 seen again) · 11 transactions"
+      + " · runs 2 verified / 1 without · 4 winners · top 50.00 % · 5 failed attempts · 1/2 min-profit bands bounded (upper bounds; 1 below ours)"
+      + " · tips 8 accounts · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 (tags, take times, premium(t), our t_profitable) needs the 0.1.12 deployment");
     expect(h0Line({ ...r, topWinnerShareBps: null })).toContain("top —");
+    expect(h0Line({ ...r, tipAccounts: 0n })).toContain("tips unknown");
     expect(view.jobs[2]?.verification).toEqual({ chainVerify: "strict", offline: true });
     expect(view.jobs[2]?.result).toEqual({ kind: "POST_CAPTURE", verificationOk: false, reportOk: true, verdict: null });
     expect(view.jobs[2]?.params).toBeNull();

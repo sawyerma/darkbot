@@ -144,6 +144,18 @@ pub enum JobResult {
         bands: u64,
         sample_status: String,
         tags: String,
+        /// Permissionless profit opportunities (the winners' sample) and distinct transactions.
+        competitive: u64,
+        transactions: u64,
+        /// Failed classic/receivership attempts in the window (the competition that lost).
+        failed_attempts: u64,
+        /// Seconds of the window the runs' captures cover.
+        covered_seconds: u64,
+        /// Bands with an upper bound, and those below our minimum profit.
+        bands_bounded: u64,
+        bands_below_our_min_profit: u64,
+        /// Configured Jito tip accounts (0: tips unknown).
+        tip_accounts: u64,
     },
 }
 
@@ -581,6 +593,13 @@ impl Executed {
                 bands: r.bands.len() as u64,
                 sample_status: r.sample_status.clone(),
                 tags: r.tags.clone(),
+                competitive: r.competitive,
+                transactions: r.transactions,
+                failed_attempts: r.failed_attempts,
+                covered_seconds: r.covered_seconds,
+                bands_bounded: r.bands_bounded,
+                bands_below_our_min_profit: r.bands_below_our_min_profit,
+                tip_accounts: r.tip_accounts,
             },
         }
     }
@@ -671,14 +690,13 @@ fn execute(
                 .checked_add(std::time::Duration::from_secs(r.max_seconds))
                 .ok_or("BACKTEST_BUDGET_INVALID")?;
             let stop = h0_stop(cancelled, deadline);
-            let limits = &darkbot_solana::runtime_config::active().limits;
             super::h0::run_job(
                 &run,
                 &r.job_id,
                 *end_unix_s,
                 *window_days,
                 *min_sample,
-                limits,
+                r.max_ram_bytes,
                 &|k| std::env::var(k).ok(),
                 &stop,
             )
@@ -808,7 +826,6 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
             },
         }
     };
-    let budget = backtest::parse_budget(args)?;
     let number = |name: &str| -> Result<Option<u64>, String> {
         flag(name)?
             .map(|v| v.parse::<u64>().map_err(|_| format!("{name}: a number")))
@@ -816,10 +833,15 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
     };
     // H0 reads every saved run of the project: no run, its window fixed now.
     if kind == "h0" {
-        if flag("--run")?.is_some() {
-            return Err("H0_READS_ALL_RUNS: no --run".into());
+        if flag("--run")?.is_some() || flag("--verification-result")?.is_some() {
+            return Err("H0_READS_ALL_RUNS: no --run or --verification-result".into());
         }
-        let limits = &darkbot_solana::runtime_config::active().limits;
+        let budget = backtest::parse_budget(args)?;
+        // The registry's window (profile < environment < config file), as the job resolves it.
+        let limits =
+            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
+                .config
+                .limits;
         let now = crate::status_tap::unix_ms_now().ok_or("CLOCK_UNAVAILABLE")? / 1_000;
         return Ok(JobRequest {
             job_id: match flag("--id")? {
@@ -841,6 +863,7 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
     let run_arg = flag("--run")?.ok_or("--run ID|PATH required")?;
     let run = find_run(project, &run_arg).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
     native_layout(&run)?;
+    let budget = backtest::parse_budget(args)?;
     let spec = match kind {
         "backtest" => JobSpec::Backtest {
             params: backtest::parse_params(&run, args)?,
@@ -1300,7 +1323,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let parsed = request_of(&d, "h0", &args(&["--id", "h", "--min-sample", "7"])).unwrap();
-        let limits = &darkbot_solana::runtime_config::active().limits;
+        let limits = darkbot_solana::runtime_config::Limits::default();
         match parsed.spec {
             JobSpec::H0 {
                 window_days,
@@ -1324,7 +1347,11 @@ mod tests {
         ));
         assert_eq!(
             request_of(&d, "h0", &args(&["--run", "r"])).unwrap_err(),
-            "H0_READS_ALL_RUNS: no --run"
+            "H0_READS_ALL_RUNS: no --run or --verification-result"
+        );
+        assert_eq!(
+            request_of(&d, "h0", &args(&["--verification-result", "v"])).unwrap_err(),
+            "H0_READS_ALL_RUNS: no --run or --verification-result"
         );
         assert_eq!(
             request_of(&d, "h0", &args(&["--min-sample", "x"])).unwrap_err(),

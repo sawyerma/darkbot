@@ -2184,11 +2184,18 @@ A completed H0 report&#39;s headline (the full report is the job&#39;s typed H0 
 | duplicates | [uint64](#uint64) |  | The same events seen again in another run. |
 | runs_verified | [uint64](#uint64) |  | Runs with a verified result. |
 | runs_without_result | [uint64](#uint64) |  | Runs without a verified result or unreadable. |
-| winners | [uint64](#uint64) |  | Distinct winners. |
-| top_winner_share_bps | [uint64](#uint64) | optional | The top winner&#39;s share (bps); unset without liquidations. |
+| winners | [uint64](#uint64) |  | Distinct winners of the competitive liquidations. |
+| top_winner_share_bps | [uint64](#uint64) | optional | The top winner&#39;s share of the competitive liquidations (bps); unset without any. |
 | bands | [uint64](#uint64) |  | Recurring winners with an implied minimum-profit band (an upper bound, never a config). |
-| sample_status | [string](#string) |  | SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED. |
+| sample_status | [string](#string) |  | SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED (over the competitive liquidations). |
 | tags | [string](#string) |  | The tag timeline&#39;s state (BLOCKED until 0.1.12, H0-04). |
+| competitive | [uint64](#uint64) |  | Permissionless profit opportunities (classic, receivership): the winners&#39; sample. |
+| transactions | [uint64](#uint64) |  | Distinct liquidation transactions. |
+| failed_attempts | [uint64](#uint64) |  | Failed classic or receivership attempts in the window (the competition that lost). |
+| covered_seconds | [uint64](#uint64) |  | Seconds of the window the runs&#39; captures cover. |
+| bands_bounded | [uint64](#uint64) |  | Bands with an upper bound. |
+| bands_below_our_min_profit | [uint64](#uint64) |  | Bands whose bound lies below our minimum profit. |
+| tip_accounts | [uint64](#uint64) |  | Configured Jito tip accounts (0: tips unknown). |
 
 
 

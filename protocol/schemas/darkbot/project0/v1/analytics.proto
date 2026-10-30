@@ -364,16 +364,30 @@ message H0Result {
   uint64 runs_verified = 6;
   // Runs without a verified result or unreadable.
   uint64 runs_without_result = 7;
-  // Distinct winners.
+  // Distinct winners of the competitive liquidations.
   uint64 winners = 8;
-  // The top winner's share (bps); unset without liquidations.
+  // The top winner's share of the competitive liquidations (bps); unset without any.
   optional uint64 top_winner_share_bps = 9;
   // Recurring winners with an implied minimum-profit band (an upper bound, never a config).
   uint64 bands = 10;
-  // SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED.
+  // SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED (over the competitive liquidations).
   string sample_status = 11;
   // The tag timeline's state (BLOCKED until 0.1.12, H0-04).
   string tags = 12;
+  // Permissionless profit opportunities (classic, receivership): the winners' sample.
+  uint64 competitive = 13;
+  // Distinct liquidation transactions.
+  uint64 transactions = 14;
+  // Failed classic or receivership attempts in the window (the competition that lost).
+  uint64 failed_attempts = 15;
+  // Seconds of the window the runs' captures cover.
+  uint64 covered_seconds = 16;
+  // Bands with an upper bound.
+  uint64 bands_bounded = 17;
+  // Bands whose bound lies below our minimum profit.
+  uint64 bands_below_our_min_profit = 18;
+  // Configured Jito tip accounts (0: tips unknown).
+  uint64 tip_accounts = 19;
 }
 
 // The verification request of a post-capture job (A08/F-02).

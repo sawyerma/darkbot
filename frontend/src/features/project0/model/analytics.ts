@@ -130,7 +130,8 @@ export type JobResultView =
   | { kind: "POST_CAPTURE"; verificationOk: boolean; reportOk: boolean; verdict: string | null }
   | { kind: "H0"; resultId: string; windowStartUnixS: bigint; windowEndUnixS: bigint; liquidations: bigint; duplicates: bigint;
       runsVerified: bigint; runsWithoutResult: bigint; winners: bigint; topWinnerShareBps: bigint | null; bands: bigint;
-      sampleStatus: string; tags: string };
+      sampleStatus: string; tags: string; competitive: bigint; transactions: bigint; failedAttempts: bigint;
+      coveredSeconds: bigint; bandsBounded: bigint; bandsBelowOurMinProfit: bigint; tipAccounts: bigint };
 
 export interface AnalyticsJobView {
   jobId: string;
@@ -348,12 +349,16 @@ export function jobReadableRuns(view: AnalyticsView | null): readonly AnalyticsR
   return (view?.runs ?? []).filter((r) => r.layout === "NATIVE_V2" && r.captureComplete && !r.running);
 }
 
-/** H0: one line of a report's headline — the window, the verified liquidations (each once), the
- *  runs, the winners and the inferred bands (upper bounds, never a competitor's configuration). */
+/** H0: one line of a report's headline — the window and how much of it the runs cover, the verified
+ *  liquidations (each once; the competitive ones are the winners' sample), the runs, the winners and
+ *  the lost attempts, the inferred bands (upper bounds, never a competitor's configuration) against
+ *  our minimum profit, and whether tips are attributable. */
 export function h0Line(r: Extract<JobResultView, { kind: "H0" }>): string {
   const day = (s: bigint) => new Date(Number(s) * 1000).toISOString().slice(0, 10);
   const share = r.topWinnerShareBps == null ? "—" : `${r.topWinnerShareBps / 100n}.${(r.topWinnerShareBps % 100n).toString().padStart(2, "0")} %`;
-  return `${day(r.windowStartUnixS)} … ${day(r.windowEndUnixS)} · ${r.liquidations} liquidations (${r.duplicates} seen again)`
-    + ` · runs ${r.runsVerified} verified / ${r.runsWithoutResult} without · ${r.winners} winners · top ${share}`
-    + ` · ${r.bands} min-profit bands (upper bounds) · ${r.sampleStatus} · tags ${r.tags}`;
+  const covered = (Number(r.coveredSeconds) / 3600).toFixed(1);
+  return `${day(r.windowStartUnixS)} … ${day(r.windowEndUnixS)} (covered ${covered} h) · ${r.liquidations} liquidations (${r.competitive} competitive, ${r.duplicates} seen again)`
+    + ` · ${r.transactions} transactions · runs ${r.runsVerified} verified / ${r.runsWithoutResult} without · ${r.winners} winners · top ${share}`
+    + ` · ${r.failedAttempts} failed attempts · ${r.bandsBounded}/${r.bands} min-profit bands bounded (upper bounds; ${r.bandsBelowOurMinProfit} below ours)`
+    + ` · tips ${r.tipAccounts > 0n ? `${r.tipAccounts} accounts` : "unknown"} · ${r.sampleStatus} · tags ${r.tags}`;
 }

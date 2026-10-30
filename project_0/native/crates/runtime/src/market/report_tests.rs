@@ -133,6 +133,16 @@ mod report_e2e {
 
     /// `canonical_run` whose launcher recorded the minimum profit `min_profit` (USD-micro).
     fn canonical_run_recording(tag: u32, complete: bool, min_profit: &'static str) -> Fixture {
+        canonical_run_full(tag, complete, min_profit, false)
+    }
+
+    /// `canonical_run` whose finalized slot 31 also holds a failed receivership attempt
+    /// (`lost-sig`, a competitor that lost).
+    fn canonical_run_with_lost_attempt(tag: u32) -> Fixture {
+        canonical_run_full(tag, true, "0", true)
+    }
+
+    fn canonical_run_full(tag: u32, complete: bool, min_profit: &'static str, lost: bool) -> Fixture {
         let d = std::env::temp_dir().join(format!("p0_report_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let run = d.join("run_r");
@@ -325,7 +335,11 @@ mod report_e2e {
             );
         }
         for slot in 10u64..=90 {
-            let txs = if slot == 30 { vec![tx.clone()] } else { vec![] };
+            let txs = match slot {
+                30 => vec![tx.clone()],
+                31 if lost => vec![with_inner(gap_liquidation("lost-sig", 31, true))],
+                _ => vec![],
+            };
             cache(
                 &cache_dir,
                 ChainRead::FullBlock { slot },
@@ -1145,8 +1159,8 @@ mod report_e2e {
     #[test]
     fn h0_extracts_the_verified_liquidations_of_the_window_across_runs() {
         use crate::analytics::h0;
-        let a = canonical_run(line!(), true);
-        let b = canonical_run(line!() + 1_000, true);
+        let a = canonical_run_with_lost_attempt(line!());
+        let b = canonical_run_with_lost_attempt(line!() + 1_000);
         let bare = a.d.join("run_bare");
         std::fs::create_dir_all(&bare).unwrap();
         let runs = vec![
@@ -1166,26 +1180,67 @@ mod report_e2e {
         // The fixture's signature `liq-sig` is no signature: the wire length is unknown, never
         // guessed.
         assert_eq!(tx.serialized_bytes, None);
-        assert_eq!(x.execution_class, "RECEIVERSHIP:NO_SWAP:BUNDLE_UNOBSERVABLE");
-        let status: Vec<(&str, &str, u64)> = e
+        assert_eq!(x.execution_class, "RECEIVERSHIP:NO_KNOWN_SWAP:BUNDLE_UNOBSERVABLE");
+        assert!(tx.cpi_known, "the keeper CPI group is evidence");
+        let status: Vec<(&str, &str, u64, u64)> = e
             .runs
             .iter()
-            .map(|c| (c.run_id.as_str(), c.status.as_str(), c.events))
+            .map(|c| (c.run_id.as_str(), c.status.as_str(), c.events, c.failed_attempts))
             .collect();
         assert_eq!(
             status,
             vec![
-                ("run-a", "CANONICAL_VERIFIED", 1),
-                ("run-b", "CANONICAL_VERIFIED", 1),
-                ("run-bare", "UNREADABLE", 0),
+                ("run-a", "CANONICAL_VERIFIED", 1, 1),
+                ("run-b", "CANONICAL_VERIFIED", 1, 1),
+                ("run-bare", "UNREADABLE", 0, 0),
             ]
         );
+        // The lost attempt is the same transaction in both runs: one attempt, one actor.
+        assert_eq!((e.failed_attempts, e.failed_attempt_actors), (1, 1));
+        // The runs cover the union of their capture windows.
+        let spans: Vec<(i64, i64)> = e.runs.iter().filter_map(|c| c.capture_unix_s).collect();
+        assert_eq!(spans.len(), 2);
+        let union = spans.iter().map(|s| s.1).max().unwrap() - spans.iter().map(|s| s.0).min().unwrap();
+        assert!(spans[0].1 >= spans[1].0 && spans[1].1 >= spans[0].0, "overlapping: {spans:?}");
+        assert_eq!(e.covered_seconds, union as u64);
+        // A stop while a run is read ends the extraction with the stop, never as the run's
+        // failure; the memory budget does too.
+        let calls = std::cell::Cell::new(0u32);
+        let stop = || {
+            calls.set(calls.get() + 1);
+            if calls.get() > 1 { Err("JOB_CANCELLED".to_string()) } else { Ok(()) }
+        };
+        assert_eq!(
+            h0::extract_with(&runs, all, &Default::default(), &stop, u64::MAX).unwrap_err(),
+            "JOB_CANCELLED"
+        );
+        assert_eq!(
+            h0::extract_with(&runs, all, &Default::default(), &|| Ok(()), 64).unwrap_err(),
+            "H0_RAM_BUDGET"
+        );
+        // The stop is asked before the runs, for every row of both reads and after the last run.
+        let capture = super::super::strict_driver::bind_capture(&a.run).unwrap();
+        let selected = crate::analytics::report::select_result(&capture, None).unwrap().unwrap();
+        let mut rows = 0u32;
+        crate::analytics::report::verified_events(&selected, &mut |_| {
+            rows += 1;
+            Ok(())
+        })
+        .unwrap();
+        let asked = std::cell::Cell::new(0u32);
+        let count = || {
+            asked.set(asked.get() + 1);
+            Ok(())
+        };
+        h0::extract_with(&runs[..1], all, &Default::default(), &count, u64::MAX).unwrap();
+        assert!(rows > 0);
+        assert_eq!(asked.get(), 1 + 2 * rows + 1);
         // A window that ends before the event takes nothing.
         let t = x.event.block_time.unwrap();
         let before = h0::Window { start_unix_s: 0, end_unix_s: t };
         assert!(h0::extract(&runs, before, &Default::default()).unwrap().liquidations.is_empty());
         // The typed output and its render.
-        let r = h0::report(all, &e, 2, None, None);
+        let r = h0::report(all, &e, 2, None, 0, 0);
         let out = a.d.join("h0-out");
         let path = h0::write(&out, &e, &r).unwrap();
         let mut reader = journal::Reader::open(&path).unwrap();
@@ -1208,7 +1263,7 @@ mod report_e2e {
         assert_eq!(back.as_ref(), Some(&r));
         assert!(std::fs::read_to_string(out.join(h0::H0_RENDER))
             .unwrap()
-            .contains("| run-a | CANONICAL_VERIFIED | 1 |"));
+            .contains("| run-a | CANONICAL_VERIFIED |"));
         assert_eq!(h0::write(&out, &e, &r).unwrap_err(), "H0_OUTPUT_EXISTS");
         std::fs::remove_dir_all(&a.d).unwrap();
         std::fs::remove_dir_all(&b.d).unwrap();
@@ -1307,6 +1362,16 @@ mod report_e2e {
             }
             other => panic!("{other:?}"),
         }
+        // The job's memory budget bounds what the extraction holds.
+        let mut tight = request("h0-4", "");
+        tight.max_ram_bytes = 64;
+        jobs::submit(&project, &tight).unwrap();
+        let (outcome, none) = jobs::run(&project, "h0-4", None).unwrap();
+        assert!(none.is_none());
+        assert_eq!(
+            (outcome.state.as_str(), outcome.code.as_str()),
+            (jobs::FAILED, "H0_RAM_BUDGET")
+        );
         std::fs::remove_dir_all(&a.d).unwrap();
         std::fs::remove_dir_all(&b.d).unwrap();
     }

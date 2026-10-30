@@ -389,7 +389,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await tab(page, "Analytics");
   // H0: the newest completed report's headline and a start over every saved run (typed budget).
   await expect(page.locator(".p0-line", { hasText: "H0 · historical liquidations" }))
-    .toContainText("12 liquidations (3 seen again) · runs 2 verified / 1 without · 4 winners · top 50.00 % · 2 min-profit bands (upper bounds) · MIN_SAMPLE_UNDECIDED");
+    .toContainText("12 liquidations (10 competitive, 3 seen again) · 11 transactions · runs 2 verified / 1 without · 4 winners · top 50.00 % · 5 failed attempts · 1/2 min-profit bands bounded (upper bounds; 1 below ours) · tips 8 accounts · MIN_SAMPLE_UNDECIDED");
   await page.getByLabel("H0 budget · seconds").fill("60");
   await page.getByLabel("H0 budget · RAM MiB").fill("256");
   await page.getByRole("button", { name: "Run H0 report" }).click();

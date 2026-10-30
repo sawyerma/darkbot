@@ -437,6 +437,11 @@ cmd_p0() {
     export P0_ENV_FILE="$ENV_FILES"
     DARKBOT_CTL="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     export DARKBOT_CTL
+  elif [ "$1" = job ] && [ "${2:-}" = start ] && [ "${3:-}" = h0 ]; then
+    # H0: the historical report's inputs (tip accounts, minimum profit, registry) are the
+    # operator's env files of the capture.
+    capture_env_files
+    export P0_ENV_FILE="$ENV_FILES"
   fi
   P0_PROJECT_DIR="$APP_HOME" exec "$P0CTL_BIN" "$@"
 }

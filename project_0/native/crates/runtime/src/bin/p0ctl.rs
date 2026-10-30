@@ -2098,6 +2098,9 @@ fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
 /// `backtest|optimize`: one analytics job in the foreground (the same request and worker body as
 /// `job start`), its result rendered in full.
 fn foreground_job(project: &Path, kind: &str, args: &[String]) -> Result<bool, String> {
+    if kind == "h0" {
+        load_capture_env()?;
+    }
     let request = jobs::request_of(project, kind, args)?;
     jobs::submit(project, &request)?;
     // `job cancel` (SIGTERM) ends a foreground job as CANCELLED, as it ends a worker.
@@ -2146,6 +2149,11 @@ fn job_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     match args.first().map(String::as_str) {
         Some("start") => {
             let kind = args.get(1).ok_or(JOB_USAGE)?;
+            // H0's inputs (tip accounts, minimum profit, registry) are the operator's env files,
+            // as for the capture; its worker inherits them.
+            if kind == "h0" {
+                load_capture_env()?;
+            }
             let request = jobs::request_of(project, kind, &args[2..])?;
             let worker = std::env::current_exe().map_err(|e| format!("JOB_WORKER: {e}"))?;
             jobs::start(project, &request, &worker)?;

@@ -511,6 +511,52 @@ pub fn measure_v1(
     })
 }
 
+/// H0-01: the exact wire length of a decoded v1 transaction — its SIMD-0385 message as the
+/// official v1 serializer writes it, then `signatures` signatures; `None` for an incomplete
+/// decoded message (header, blockhash or configuration missing).
+#[cfg(feature = "txv1")]
+pub fn v1_wire_len(m: &crate::chain::ChainMessage, signatures: usize) -> Option<usize> {
+    use solana_message_v1::{compiled_instruction::CompiledInstruction, v1, MessageHeader};
+    let (required, readonly_signed, readonly_unsigned) = m.header?;
+    let c = m.transaction_config?;
+    let hash: Hash = m.recent_blockhash.as_deref()?.parse().ok()?;
+    let msg = v1::Message {
+        header: MessageHeader {
+            num_required_signatures: required,
+            num_readonly_signed_accounts: readonly_signed,
+            num_readonly_unsigned_accounts: readonly_unsigned,
+        },
+        config: v1::TransactionConfig {
+            priority_fee: c.priority_fee,
+            compute_unit_limit: c.compute_unit_limit,
+            loaded_accounts_data_size_limit: c.loaded_accounts_data_size_limit,
+            heap_size: c.heap_size,
+        },
+        lifetime_specifier: solana_hash_v1::Hash::new_from_array(hash.to_bytes()),
+        account_keys: m
+            .account_keys
+            .iter()
+            .map(|k| solana_pubkey_v1::Pubkey::new_from_array(k.to_bytes()))
+            .collect(),
+        instructions: m
+            .instructions
+            .iter()
+            .map(|ix| CompiledInstruction {
+                program_id_index: ix.program_id_index,
+                accounts: ix.accounts.clone(),
+                data: ix.data.clone(),
+            })
+            .collect(),
+    };
+    Some(msg.serialize().len() + signatures * 64)
+}
+
+/// Without `txv1` no v1 message can be serialized: its length is unknown.
+#[cfg(not(feature = "txv1"))]
+pub fn v1_wire_len(_m: &crate::chain::ChainMessage, _signatures: usize) -> Option<usize> {
+    None
+}
+
 /// Canonical SIMD-0385 wire, currently used only by the explicit no-send probe.
 /// Signatures follow the version-prefixed message, with no count prefix.
 #[cfg(feature = "txv1")]
@@ -868,6 +914,69 @@ mod tests {
             assert!(!e.contains(&format!(" {secret_byte}")), "{name}: {e}");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// H0-01: a decoded v1 transaction's wire length is the signed wire's exact length; an
+    /// incomplete decoded message is unknown.
+    #[cfg(feature = "txv1")]
+    #[test]
+    fn h0_v1_wire_len_is_the_signed_wire_length() {
+        let payer = Keypair::new();
+        let plan = TxPlan {
+            version: BuildVersion::V1,
+            payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(
+                &payer.pubkey(),
+                &Pubkey::new_unique(),
+                7,
+            )],
+            lookup_tables: vec![].into(),
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 3_000_000,
+                loaded_accounts_data_size: Some(64 * 1024),
+            },
+        };
+        let hash = Hash::new_unique();
+        let wire = signed_v1_wire(&plan, hash, &TxLimits::default(), &[&payer]).unwrap();
+        let msg = compile_v1_message(&plan, hash, &TxLimits::default()).unwrap();
+        let decoded = crate::chain::ChainMessage {
+            header: Some((
+                msg.header.num_required_signatures,
+                msg.header.num_readonly_signed_accounts,
+                msg.header.num_readonly_unsigned_accounts,
+            )),
+            account_keys: msg
+                .account_keys
+                .iter()
+                .map(|k| Pubkey::new_from_array(k.to_bytes()))
+                .collect(),
+            recent_blockhash: Some(hash.to_string()),
+            instructions: msg
+                .instructions
+                .iter()
+                .map(|ix| crate::chain::ChainInstruction {
+                    program_id_index: ix.program_id_index,
+                    accounts: ix.accounts.clone(),
+                    data: ix.data.clone(),
+                    stack_height: None,
+                })
+                .collect(),
+            address_table_lookups: None,
+            transaction_config: Some(crate::chain::TransactionConfig {
+                compute_unit_limit: msg.config.compute_unit_limit,
+                heap_size: msg.config.heap_size,
+                loaded_accounts_data_size_limit: msg.config.loaded_accounts_data_size_limit,
+                priority_fee: msg.config.priority_fee,
+            }),
+        };
+        assert_eq!(v1_wire_len(&decoded, 1), Some(wire.len()));
+        let mut no_config = decoded.clone();
+        no_config.transaction_config = None;
+        assert_eq!(v1_wire_len(&no_config, 1), None);
+        let mut no_hash = decoded;
+        no_hash.recent_blockhash = None;
+        assert_eq!(v1_wire_len(&no_hash, 1), None);
     }
 
     #[cfg(feature = "txv1")]

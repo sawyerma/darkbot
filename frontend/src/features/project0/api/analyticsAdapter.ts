@@ -132,6 +132,10 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
                     runsWithoutResult: j.result.value.runsWithoutResult, winners: j.result.value.winners,
                     topWinnerShareBps: j.result.value.topWinnerShareBps ?? null, bands: j.result.value.bands,
                     sampleStatus: j.result.value.sampleStatus, tags: j.result.value.tags,
+                    competitive: j.result.value.competitive, transactions: j.result.value.transactions,
+                    failedAttempts: j.result.value.failedAttempts, coveredSeconds: j.result.value.coveredSeconds,
+                    bandsBounded: j.result.value.bandsBounded, bandsBelowOurMinProfit: j.result.value.bandsBelowOurMinProfit,
+                    tipAccounts: j.result.value.tipAccounts,
                   }
                 : null,
     })),
