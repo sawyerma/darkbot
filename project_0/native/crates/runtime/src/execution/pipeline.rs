@@ -1,6 +1,6 @@
 //! Die Kette. Jede Stufe setzt ihren Timing-Punkt; Fehler sind Records, keine Panics.
 
-use crate::analytics::record::{Decision, LossReason, OpportunityRecord};
+use crate::analytics::record::{Decision, LossReason, OpportunityRecord, Signing};
 use crate::analytics::rejection::{PlanCause, PlanInvalid, PlanRejection, Rejection};
 use crate::execution::one_shot::transport::{SignedPayload, SimulationBinding};
 use darkbot_common::timing::{Clock, Stage, Timeline};
@@ -452,6 +452,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub safety: &'a mut Safety,
     pub blockhash: &'a BlockhashCache,
     pub payer: &'a Keypair,
+    /// P8-CTRL.4: the owner's ephemeral synthetic signer (never a wallet's key, never stored):
+    /// the signature of a simulation without a sign permit.
+    pub synthetic: &'a Keypair,
     pub allowlist: &'a Allowlist,
     pub failed_costs: &'a FailedCostMatrix,
     pub limits: TxLimits,
@@ -488,6 +491,39 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
+    /// P8-CTRL.4: one payload transaction's signature — the wallet's key under a sign permit of
+    /// this evaluation's purpose (LIVE: a new attempt; Shadow: a simulation under a SIM_ONLY
+    /// grant), else in Shadow the synthetic signer's; LIVE never signs without a permit.
+    fn sign(
+        &self,
+        tx: &mut solana_sdk::transaction::VersionedTransaction,
+    ) -> Result<Signing, darkbot_solana::tx::BuildError> {
+        use crate::orchestration::capability_control::{SignPermit, SignPurpose};
+        let purpose = match self.mode {
+            Mode::Live => SignPurpose::NewAttempt,
+            Mode::Shadow => SignPurpose::Simulation,
+        };
+        let payer = tx::payer_of(self.payer);
+        let permit = self
+            .egress
+            .as_ref()
+            .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message));
+        match (permit, self.mode) {
+            (Some(Ok(p)), _) => p
+                .sign(tx, &[self.payer])
+                .map(|()| Signing::Wallet)
+                .map_err(darkbot_solana::tx::BuildError::Sign),
+            (refused, Mode::Live) => Err(darkbot_solana::tx::BuildError::Sign(
+                refused
+                    .and_then(Result::err)
+                    .unwrap_or_else(|| "SIGN_NOT_PERMITTED: no authority".into()),
+            )),
+            (_, Mode::Shadow) => {
+                tx::sign_synthetic(tx, self.synthetic).map(|()| Signing::Synthetic)
+            }
+        }
+    }
+
     /// Ein Kandidat, ein Trigger → ein Record. T_rx wird vom Aufrufer gesetzt.
     ///
     /// Computes the candidate's Health itself (one computation, the `Pipeline` site): for
@@ -581,6 +617,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             intervals_ns: vec![],
             reason: None,
             loss: None,
+            signing: None,
         };
 
         if !state_valid {
@@ -1106,11 +1143,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         rec.tx_version = Some(built.version.record_name().into());
         tl.mark(Stage::Ready, self.clock.now_ns());
 
-        if let Err(e) = tx::sign(&mut built, &[self.payer]) {
-            rec.loss = Some(LossReason::Build);
-            rec.reason = Some(Rejection::Sign(e));
-            return rec.with_timeline(&tl);
-        }
+        // P8-CTRL.4: the wallet's own signature only under a permit of the candidate's purpose
+        // (LIVE: a new attempt; Shadow: a SIM_ONLY simulation); else a synthetic one — the same
+        // work and wire bytes, restricted: simulated without verification, never sent.
+        let signing = match self.sign(&mut built.tx) {
+            Ok(signing) => signing,
+            Err(e) => {
+                rec.loss = Some(LossReason::Build);
+                rec.reason = Some(Rejection::Sign(e));
+                return rec.with_timeline(&tl);
+            }
+        };
+        rec.signing = Some(signing);
         // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
         // path; otherwise this single signed TX is the payload.
         let use_bundle = self.bundles(&plan);
@@ -1157,7 +1201,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
             };
             for mut b in prerequisites {
-                if let Err(e) = tx::sign(&mut b, &[self.payer]) {
+                if let Err(e) = self.sign(&mut b.tx) {
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(Rejection::PrerequisiteSign(e));
                     return rec.with_timeline(&tl);
@@ -1165,6 +1209,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 bundle_txs.push(b.tx);
             }
             bundle_txs.push(built.tx.clone());
+            let mut tip_tx = tip_tx;
+            if let Err(e) = self.sign(&mut tip_tx) {
+                rec.loss = Some(LossReason::Build);
+                rec.reason = Some(Rejection::Sign(e));
+                return rec.with_timeline(&tl);
+            }
             rec.submitted_tip =
                 tip_tx
                     .signatures
@@ -1218,6 +1268,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 result
             }
             _ if use_bundle => self.submitter.simulate_bundle(&bundle_txs, deadline),
+            // P8-CTRL.4: a synthetic signature is simulated without verification.
+            _ if signing == Signing::Synthetic => {
+                self.submitter.simulate_unverified(&built.tx, deadline)
+            }
             _ => self.submitter.simulate(&built.tx, deadline),
         };
         record_timing(
@@ -1565,8 +1619,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .map_err(|code| (LossReason::Build, Rejection::PrerequisiteMessage(code)))?;
             prerequisites.push(b);
         }
-        let tip_tx = submit::build_tip_tx(self.payer, &tip.account, plan.tip, blockhash)
-            .map_err(|e| (LossReason::Build, Rejection::TipBuild(e)))?;
+        let tip_tx =
+            submit::build_tip_tx(&tx::payer_of(self.payer), &tip.account, plan.tip, blockhash)
+                .map_err(|e| (LossReason::Build, Rejection::TipBuild(e)))?;
         submit::tip_matches(&tip_tx, &tx::payer_of(self.payer), &tip.account, plan.tip)
             .map_err(|code| (LossReason::Build, Rejection::TipMismatch(code)))?;
         Ok(BundleParts {
@@ -1574,6 +1629,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             tip_tx,
         })
     }
+}
+
+/// The tests' synthetic signer of every evaluation (one per test process).
+#[cfg(test)]
+pub(crate) fn test_synthetic() -> &'static Keypair {
+    static KEY: std::sync::OnceLock<Keypair> = std::sync::OnceLock::new();
+    KEY.get_or_init(Keypair::new)
 }
 
 #[cfg(test)]

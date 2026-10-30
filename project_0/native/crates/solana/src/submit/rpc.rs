@@ -234,8 +234,9 @@ impl RpcSubmitter {
             requested.push(clock_key);
         }
 
+        // P8-CTRL.4: a projection is a simulation only — synthetically signed, never verified.
         let cfg = RpcSimulateTransactionConfig {
-            sig_verify: true,
+            sig_verify: false,
             replace_recent_blockhash: false,
             commitment: Some(CommitmentConfig::confirmed()),
             encoding: Some(UiTransactionEncoding::Base64),
@@ -317,6 +318,58 @@ impl RpcSubmitter {
             out,
             response.value.units_consumed,
         ))
+    }
+}
+
+impl RpcSubmitter {
+    /// [FIX-6] the one candidate simulation call; `sig_verify` false only for a synthetically
+    /// signed transaction (P8-CTRL.4).
+    fn simulate_checked(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+        sig_verify: bool,
+    ) -> SimResult {
+        let cfg = RpcSimulateTransactionConfig {
+            sig_verify,
+            replace_recent_blockhash: false,
+            commitment: Some(CommitmentConfig::confirmed()),
+            encoding: Some(UiTransactionEncoding::Base64),
+            accounts: None,
+            min_context_slot: None,
+            inner_instructions: false,
+        };
+        let Some(candidate) = &self.candidate else {
+            return SimResult::Unavailable("NO_CANDIDATE_TRANSPORT".into());
+        };
+        let Ok(encoded) = super::encode_base64(tx) else {
+            return SimResult::Unavailable("SIMULATION_ENCODE".into());
+        };
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let simulated = candidate.call(
+            solana_client::rpc_request::RpcRequest::SimulateTransaction,
+            serde_json::json!([encoded, cfg]),
+            deadline,
+        );
+        darkbot_common::mt0::MT0.record_remote(
+            darkbot_common::mt0::RemoteClass::Simulation,
+            mt0_start.elapsed(),
+            remote_outcome(&simulated),
+        );
+        let value = match simulated {
+            Ok(v) => v,
+            Err(crate::provider::CallError::Deadline(_)) => return SimResult::Deadline,
+            Err(crate::provider::CallError::Budget(code)) => {
+                return SimResult::BudgetRejected(code)
+            }
+            Err(crate::provider::CallError::Transport(code)) => {
+                return SimResult::Unavailable(code.into())
+            }
+            Err(crate::provider::CallError::Remote(e)) => {
+                return SimResult::Unavailable(safe_rpc_error(&e))
+            }
+        };
+        sim_result_of(value)
     }
 }
 
@@ -431,46 +484,16 @@ impl SubmissionAdapter for RpcSubmitter {
     /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
     /// N2: bounded by `deadline` like the fee quote.
     fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
-        let cfg = RpcSimulateTransactionConfig {
-            sig_verify: true,
-            replace_recent_blockhash: false,
-            commitment: Some(CommitmentConfig::confirmed()),
-            encoding: Some(UiTransactionEncoding::Base64),
-            accounts: None,
-            min_context_slot: None,
-            inner_instructions: false,
-        };
-        let Some(candidate) = &self.candidate else {
-            return SimResult::Unavailable("NO_CANDIDATE_TRANSPORT".into());
-        };
-        let Ok(encoded) = super::encode_base64(tx) else {
-            return SimResult::Unavailable("SIMULATION_ENCODE".into());
-        };
-        let mt0_start = std::time::Instant::now(); // [MT0]
-        let simulated = candidate.call(
-            solana_client::rpc_request::RpcRequest::SimulateTransaction,
-            serde_json::json!([encoded, cfg]),
-            deadline,
-        );
-        darkbot_common::mt0::MT0.record_remote(
-            darkbot_common::mt0::RemoteClass::Simulation,
-            mt0_start.elapsed(),
-            remote_outcome(&simulated),
-        );
-        let value = match simulated {
-            Ok(v) => v,
-            Err(crate::provider::CallError::Deadline(_)) => return SimResult::Deadline,
-            Err(crate::provider::CallError::Budget(code)) => {
-                return SimResult::BudgetRejected(code)
-            }
-            Err(crate::provider::CallError::Transport(code)) => {
-                return SimResult::Unavailable(code.into())
-            }
-            Err(crate::provider::CallError::Remote(e)) => {
-                return SimResult::Unavailable(safe_rpc_error(&e))
-            }
-        };
-        sim_result_of(value)
+        self.simulate_checked(tx, deadline, true)
+    }
+
+    /// P8-CTRL.4: a synthetically signed transaction, simulated without signature verification.
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        self.simulate_checked(tx, deadline, false)
     }
 
     /// The RPC path has no bundle simulation (no network call).

@@ -148,13 +148,29 @@ fn a2_without_receipts_or_commitment_nothing_is_claimed() {
 #[test]
 fn a2_earlier_schema_frames_stay_readable() {
     use crate::analytics::payload::{decode, encode, encode_wire, Payload, TYPED};
-    fn earlier<P: Payload, T: Serialize>(current: &P, appended: &T) -> Vec<u8> {
-        let full = encode(current).unwrap();
-        let tail = encode_wire(appended).unwrap();
-        assert!(full.ends_with(&tail));
-        full[..full.len() - tail.len()].to_vec()
-    }
     let r = identified();
+    // P8-CTRL.4: an earlier row's record has no signing (the record's last byte, `None`).
+    let rec_bytes = encode_wire(&r).unwrap();
+    let before_signing = |bytes: Vec<u8>| -> Vec<u8> {
+        let n = rec_bytes.len();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i..].starts_with(&rec_bytes) {
+                out.extend_from_slice(&rec_bytes[..n - 1]);
+                i += n;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        out
+    };
+    let earlier = |current: &dyn Fn() -> Vec<u8>, tail: Vec<u8>| -> Vec<u8> {
+        let full = current();
+        assert!(full.ends_with(&tail));
+        before_signing(full[..full.len() - tail.len()].to_vec())
+    };
     let opp = OpportunityRow {
         rec: r.clone(),
         winner: None,
@@ -166,7 +182,7 @@ fn a2_earlier_schema_frames_stay_readable() {
     let back: OpportunityRow = decode(
         OpportunityRow::KIND,
         TYPED,
-        &earlier(&opp, &opp.market_commitment),
+        &earlier(&|| encode(&opp).unwrap(), encode_wire(&opp.market_commitment).unwrap()),
     )
     .unwrap();
     assert_eq!(
@@ -184,12 +200,13 @@ fn a2_earlier_schema_frames_stay_readable() {
         Joined::KIND,
         TYPED,
         &earlier(
-            &joined,
-            &(
+            &|| encode(&joined).unwrap(),
+            encode_wire(&(
                 &joined.market_commitment,
                 joined.winner_slot_first_seen_ns,
                 &joined.capital,
-            ),
+            ))
+            .unwrap(),
         ),
     )
     .unwrap();
@@ -200,7 +217,12 @@ fn a2_earlier_schema_frames_stay_readable() {
     );
     assert_eq!(back.capital, CAPITAL_USD.to_vec(), "the list its view used");
     assert_eq!(joined_facts(&back).local_observed_race_margin_ns, None);
-    let back: Joined = decode(Joined::KIND, 3, &earlier(&joined, &joined.capital)).unwrap();
+    let back: Joined = decode(
+        Joined::KIND,
+        3,
+        &earlier(&|| encode(&joined).unwrap(), encode_wire(&joined.capital).unwrap()),
+    )
+    .unwrap();
     assert_eq!(
         (back.market_commitment.as_str(), back.winner_slot_first_seen_ns),
         ("confirmed", Some(60))

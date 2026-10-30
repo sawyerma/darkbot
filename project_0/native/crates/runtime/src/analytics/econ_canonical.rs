@@ -27,13 +27,24 @@ pub struct Joined {
 }
 impl crate::analytics::payload::Payload for Joined {
     const KIND: u16 = journal::kind::ECON_CANONICAL;
-    /// DEC-12: 5 — the records with the typed rejection and the native message hash.
-    const SCHEMA: u16 = 5;
+    /// DEC-12: 5 — the records with the typed rejection and the native message hash; P8-CTRL.4:
+    /// 6 — the records' signing.
+    const SCHEMA: u16 = 6;
     /// Schema 2 (before A2) and 3 (before A6) — their views used the default capital list —
     /// and 4; all three carry the records before DEC-12.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::decode_wire;
         use crate::analytics::record::OpportunityRecordV2 as V2;
+        if schema == 5 {
+            return Some(
+                decode_wire::<JoinedWire<crate::analytics::record::OpportunityRecordV3>>(bytes)
+                    .and_then(JoinedWire::current)
+                    .and_then(|v| {
+                        v.into_joined()
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    }),
+            );
+        }
         if schema == 4 {
             return Some(
                 decode_wire::<JoinedWire<V2>>(bytes)
@@ -142,8 +153,8 @@ struct JoinedWireV2<R> {
     our: Option<R>,
     diagnostic: Option<R>,
 }
-impl JoinedWire<crate::analytics::record::OpportunityRecordV2> {
-    /// DEC-12: the records of an earlier layout in the current one.
+impl<R: TryInto<OpportunityRecord, Error = std::io::Error>> JoinedWire<R> {
+    /// DEC-12/P8-CTRL.4: the records of an earlier layout in the current one.
     fn current(self) -> std::io::Result<JoinedWire> {
         Ok(JoinedWire {
             market: self.market,
@@ -1327,15 +1338,15 @@ mod regression {
             payload::decode(journal::kind::ECON_SHADOW_EVALUATION, 2, &raw).unwrap();
         v.record.loss = Some(LossReason::Build);
         v.record.reason = Some(crate::analytics::rejection::Rejection::BlockhashStaleLate);
-        // Schemas 3 and 4 carry the record layout before DEC-12, schema 5 the current one.
+        // Schemas 3 and 4 carry the record layout before DEC-12, schema 5 the one before its
+        // signing (P8-CTRL.4: the record's last field, the evaluation's last byte), 6 the current.
         let earlier_layout = with_loss(&raw, LossReason::Build);
         let current_layout = payload::encode_wire(&v).unwrap();
-        let bytes = |schema: u16| {
-            if schema < 5 {
-                earlier_layout.clone()
-            } else {
-                current_layout.clone()
-            }
+        let before_signing = current_layout[..current_layout.len() - 1].to_vec();
+        let bytes = |schema: u16| match schema {
+            ..5 => earlier_layout.clone(),
+            5 => before_signing.clone(),
+            _ => current_layout.clone(),
         };
         let mut event = row(&v.record, 10, 0).market;
         event.block_time = Some(101);
@@ -1350,6 +1361,7 @@ mod regression {
             (3u16, 1u64, LOSS_ATTRIBUTION_EARLIER_RECORDS),
             (4, 0, LOSS_ATTRIBUTION_MODEL),
             (5, 0, LOSS_ATTRIBUTION_MODEL),
+            (6, 0, LOSS_ATTRIBUTION_MODEL),
         ] {
             let run = std::env::temp_dir()
                 .join(format!("p0-dec01-policy-{}-{schema}", std::process::id()));

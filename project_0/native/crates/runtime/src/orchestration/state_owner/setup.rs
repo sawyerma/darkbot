@@ -1256,6 +1256,7 @@ pub(super) fn prepare(
         program,
         group,
         payer,
+        synthetic_signer: solana_sdk::signature::Keypair::new(),
         liquidator,
         shutdown,
         stop_poll,

@@ -78,7 +78,20 @@ pub fn admit_exit(
     if tx::message_matches_plan(&built.tx.message, &plan).is_err() {
         return refuse("EXIT_MESSAGE_MISMATCH");
     }
-    if tx::sign(&mut built, &[c.payer]).is_err() {
+    // P8-CTRL.4/.7: the exit is signed with the wallet's key only under its sign permit.
+    let permit = match gates.map(|g| {
+        crate::orchestration::capability_control::SignPermit::issue(
+            g,
+            crate::orchestration::capability_control::SignPurpose::Exit,
+            &[payer],
+            &built.tx.message,
+        )
+    }) {
+        Some(Ok(p)) => p,
+        Some(Err(e)) => return Admission::Refused(e),
+        None => return refuse("SIGN_NOT_PERMITTED: no authority"),
+    };
+    if permit.sign(&mut built.tx, &[c.payer]).is_err() {
         return refuse("EXIT_SIGN");
     }
     let Ok(fee) = adapter.fee_for_message(&built.tx, c.deadline) else {

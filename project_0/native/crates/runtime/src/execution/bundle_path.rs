@@ -129,6 +129,13 @@ impl SubmissionAdapter for OwnerSubmitter {
     fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
         self.rpc.simulate(tx, deadline)
     }
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        self.rpc.simulate_unverified(tx, deadline)
+    }
     /// The simulation boundary: no qualified bundle simulator, no call.
     fn simulate_bundle(
         &self,

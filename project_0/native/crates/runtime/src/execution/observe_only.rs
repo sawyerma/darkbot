@@ -59,6 +59,13 @@ impl<S: SubmissionAdapter> SubmissionAdapter for ObserveOnly<S> {
     fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
         self.inner.simulate(tx, deadline)
     }
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        self.inner.simulate_unverified(tx, deadline)
+    }
     fn simulate_bundle(
         &self,
         txs: &[VersionedTransaction],

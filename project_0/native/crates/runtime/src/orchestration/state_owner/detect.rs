@@ -244,7 +244,8 @@ impl ShadowOwner {
                                     return Ok(false);
                                 }
                             };
-                        if let Err(e) = tx::sign(&mut built, &[&self.payer]) {
+                        // P8-CTRL.4: a projection is a simulation only: synthetically signed.
+                        if let Err(e) = tx::sign_synthetic(&mut built.tx, &self.synthetic_signer) {
                             self.evidence.emit(OwnerEvidence::Record(
                                 RecordEvent::IntegrationSkip {
                                     account: acct,
@@ -604,6 +605,7 @@ impl ShadowOwner {
             fe04: admission.as_mut(),
             hold: &self.hold_gate,
             egress: Some(self.sources.capabilities.live_gates()),
+            synthetic: &self.synthetic_signer,
         };
         #[cfg(feature = "crate_health")]
         let pipeline_started_ns = self.clock.now_ns();

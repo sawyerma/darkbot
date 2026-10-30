@@ -1018,9 +1018,10 @@ impl ShadowOwner {
                                                     continue;
                                                 }
                                             };
-                                            if let Err(sign_error) =
-                                                tx::sign(&mut built, &[&self.payer])
-                                            {
+                                            if let Err(sign_error) = tx::sign_synthetic(
+                                                &mut built.tx,
+                                                &self.synthetic_signer,
+                                            ) {
                                                 self.metrics.oracle_price_fallbacks = self
                                                     .metrics
                                                     .oracle_price_fallbacks

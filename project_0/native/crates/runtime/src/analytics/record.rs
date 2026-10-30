@@ -223,6 +223,16 @@ pub struct MarketPlanIdentity {
     pub liability_bank: String,
 }
 
+/// P8-CTRL.4: how a record's payload was signed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Signing {
+    /// The wallet's own keys under a sign permit (LIVE, or a SIM_ONLY simulation).
+    Wallet,
+    /// Restricted: a synthetic signature (the same work and wire bytes, never the wallet's key),
+    /// simulated without signature verification, never sent; no FE-02/FE-03 PASS rests on it.
+    Synthetic,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpportunityRecord {
     #[serde(default)]
@@ -263,6 +273,9 @@ pub struct OpportunityRecord {
     /// DEC-12: typed at its source; its text is made by the writer (`Rejection::text`).
     pub reason: Option<super::rejection::Rejection>,
     pub loss: Option<LossReason>,
+    /// P8-CTRL.4: how its payload was signed (`None`: not signed, or a record before P8-CTRL).
+    #[serde(default)]
+    pub signing: Option<Signing>,
 }
 
 impl OpportunityRecord {
@@ -291,12 +304,15 @@ impl OpportunityRecord {
 
 impl super::payload::Payload for OpportunityRecord {
     const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
-    /// DEC-12: 3 — the typed rejection and the native message hash.
-    const SCHEMA: u16 = 3;
+    /// DEC-12: 3 — the typed rejection and the native message hash; P8-CTRL.4: 4 — the signing.
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == super::payload::TYPED).then(|| {
-            super::payload::decode_wire::<OpportunityRecordV2>(bytes).and_then(TryInto::try_into)
-        })
+        use super::payload::decode_wire;
+        match schema {
+            2 => Some(decode_wire::<OpportunityRecordV2>(bytes).and_then(TryInto::try_into)),
+            3 => Some(decode_wire::<OpportunityRecordV3>(bytes).and_then(TryInto::try_into)),
+            _ => None,
+        }
     }
 }
 
@@ -446,6 +462,85 @@ impl TryFrom<OpportunityRecordV2> for OpportunityRecord {
             intervals_ns: v.intervals_ns,
             reason: v.reason.map(super::rejection::Rejection::earlier),
             loss: v.loss,
+            signing: None,
+        })
+    }
+}
+/// P8-CTRL.4: the record layout before its signing (`OWNER_OPPORTUNITY` schema 3, embedded in
+/// `ECON_SHADOW_EVALUATION` 5, `ECON_OPPORTUNITY` 4, `ECON_CANONICAL` 5) — read only; its
+/// signing is not recorded (`None`: every such payload was signed with the wallet's key).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct OpportunityRecordV3 {
+    #[serde(default)]
+    progress: PipelineProgress,
+    #[serde(default)]
+    market_plan_identity: Option<MarketPlanIdentity>,
+    timing: TimingEvidence,
+    rx_slot: Option<u64>,
+    detect_slot: Option<u64>,
+    selected_costs: Option<CandidateCostRecord>,
+    simulation_result: Option<String>,
+    account: String,
+    trigger: String,
+    decision: Decision,
+    net_profit: Option<i128>,
+    economics_known: bool,
+    premium_bps: Option<u64>,
+    t_profitable_unix_s: Option<u64>,
+    tx_version: Option<String>,
+    serialized_bytes: Option<usize>,
+    locked_accounts: Option<usize>,
+    path: Option<String>,
+    funding: Option<String>,
+    signature: Option<String>,
+    sign_slot: Option<u64>,
+    simulated_cu: Option<u64>,
+    candidate_costs: Vec<CandidateCostRecord>,
+    exposure: Option<u64>,
+    all_signatures: Vec<String>,
+    bundle_id: Option<String>,
+    submitted_tip: Option<crate::execution::pending::SubmittedTip>,
+    intervals_ns: Vec<(String, Option<u64>)>,
+    reason: Option<super::rejection::Rejection>,
+    loss: Option<LossReason>,
+}
+
+impl TryFrom<OpportunityRecordV3> for OpportunityRecord {
+    type Error = std::io::Error;
+    fn try_from(v: OpportunityRecordV3) -> std::io::Result<Self> {
+        Ok(Self {
+            progress: v.progress,
+            market_plan_identity: v.market_plan_identity,
+            timing: v.timing,
+            rx_slot: v.rx_slot,
+            detect_slot: v.detect_slot,
+            selected_costs: v.selected_costs,
+            simulation_result: v.simulation_result,
+            account: v.account,
+            trigger: v.trigger,
+            decision: v.decision,
+            net_profit: v.net_profit,
+            economics_known: v.economics_known,
+            premium_bps: v.premium_bps,
+            t_profitable_unix_s: v.t_profitable_unix_s,
+            tx_version: v.tx_version,
+            serialized_bytes: v.serialized_bytes,
+            locked_accounts: v.locked_accounts,
+            path: v.path,
+            funding: v.funding,
+            signature: v.signature,
+            sign_slot: v.sign_slot,
+            simulated_cu: v.simulated_cu,
+            candidate_costs: v.candidate_costs,
+            exposure: v.exposure,
+            all_signatures: v.all_signatures,
+            bundle_id: v.bundle_id,
+            submitted_tip: v.submitted_tip,
+            intervals_ns: v.intervals_ns,
+            reason: v.reason,
+            loss: v.loss,
+            signing: None,
         })
     }
 }
@@ -541,7 +636,16 @@ mod dec12_tests {
         assert!(payload::decode::<OpportunityRecord>(OWNER_OPPORTUNITY, 2, &forged).is_err());
         // The current schema: 32 hash bytes, round trip, human-readable texts.
         let current = payload::encode(&rec).unwrap();
-        let back: OpportunityRecord = payload::decode(OWNER_OPPORTUNITY, 3, &current).unwrap();
+        let back: OpportunityRecord = payload::decode(
+            OWNER_OPPORTUNITY,
+            <OpportunityRecord as payload::Payload>::SCHEMA,
+            &current,
+        )
+        .unwrap();
+        // P8-CTRL.4: schema 3 is the layout before the signing (its last byte, `None`).
+        let before: OpportunityRecord =
+            payload::decode(OWNER_OPPORTUNITY, 3, &current[..current.len() - 1]).unwrap();
+        assert_eq!(before.signing, None);
         assert_eq!(
             back.candidate_costs[0]
                 .message_fee_quote

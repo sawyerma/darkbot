@@ -393,6 +393,15 @@ pub trait SubmissionAdapter {
     fn supports_tx_version(&self, v: crate::tx::BuildVersion) -> bool {
         !matches!(v, crate::tx::BuildVersion::V1)
     }
+    /// P8-CTRL.4: the simulation of a synthetically signed transaction (`tx::sign_synthetic`):
+    /// without signature verification. An adapter that verifies signatures overrides it.
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        self.simulate(tx, deadline)
+    }
     /// [FIX-15] Bundle-Simulation (sequenziell, atomar); without a bundle simulator: Unavailable.
     fn simulate_bundle(
         &self,
@@ -451,18 +460,25 @@ pub fn tip_matches(
     )
 }
 
+/// The tip transaction of a bundle, unsigned (P8-CTRL.4: it is signed with the bundle — the
+/// wallet's key under a permit, else synthetically).
 pub fn build_tip_tx(
-    payer: &solana_sdk::signature::Keypair,
+    payer: &solana_sdk::pubkey::Pubkey,
     tip_account: &solana_sdk::pubkey::Pubkey,
     lamports: u64,
     blockhash: solana_sdk::hash::Hash,
 ) -> Result<VersionedTransaction, SubmitError> {
-    use solana_sdk::signature::Signer;
-    let ix = tip_instruction(&payer.pubkey(), tip_account, lamports);
-    let msg =
-        solana_sdk::message::Message::new_with_blockhash(&[ix], Some(&payer.pubkey()), &blockhash);
-    VersionedTransaction::try_new(solana_sdk::message::VersionedMessage::Legacy(msg), &[payer])
-        .map_err(|e| SubmitError::Serialize(e.to_string()))
+    let ix = tip_instruction(payer, tip_account, lamports);
+    let msg = solana_sdk::message::Message::new_with_blockhash(&[ix], Some(payer), &blockhash);
+    let message = solana_sdk::message::VersionedMessage::Legacy(msg);
+    let signatures = vec![
+        solana_sdk::signature::Signature::default();
+        usize::from(message.header().num_required_signatures)
+    ];
+    Ok(VersionedTransaction {
+        signatures,
+        message,
+    })
 }
 
 /// Serialisierung (bincode-kompatibles Wire-Format). VERIFY: `bincode` als
@@ -490,7 +506,13 @@ mod tests {
         use solana_sdk::signature::{Keypair, Signer};
         let payer = Keypair::new();
         let tip = Pubkey::new_unique();
-        let tx = build_tip_tx(&payer, &tip, 1_000, solana_sdk::hash::Hash::default()).unwrap();
+        let tx = build_tip_tx(
+            &payer.pubkey(),
+            &tip,
+            1_000,
+            solana_sdk::hash::Hash::default(),
+        )
+        .unwrap();
         let me = payer.pubkey();
         assert_eq!(tip_matches(&tx, &me, &tip, 1_000), Ok(()));
         assert_eq!(tip_matches(&tx, &me, &tip, 999), Err("MESSAGE_DATA"));

@@ -79,6 +79,7 @@ pub(crate) fn rec() -> OpportunityRecord {
         intervals_ns: vec![],
         reason: None,
         loss: None,
+        signing: None,
     }
 }
 fn pair(rec: &OpportunityRecord, slot: u64, rx: u64) -> (Winner, MarketEvent) {
@@ -755,6 +756,19 @@ impl SubmissionAdapter for CountingSubmitter {
             context_slot: None,
         }
     }
+    /// P8-CTRL.4: a Shadow simulation without a sign permit — signed, but never by the wallet.
+    fn simulate_unverified(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
+        assert!(
+            tx.signatures.iter().all(|s| *s != Default::default())
+                && tx.verify_and_hash_message().is_err(),
+            "a synthetic signature, never the wallet's"
+        );
+        self.sims.fetch_add(1, Ordering::Relaxed);
+        SimResult::Ok {
+            units_consumed: Some(100),
+            context_slot: None,
+        }
+    }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
         SimResult::Unavailable("test adapter: no bundle simulation".into())
     }
@@ -971,10 +985,16 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
+    // P8-CTRL.4: Shadow without a SIM_ONLY grant signs synthetically (restricted).
+    assert_eq!(
+        r.signing,
+        Some(crate::analytics::record::Signing::Synthetic)
+    );
     assert_eq!(r.sign_slot, Some(10));
     assert!(r.timing.t_sign_ns.is_some());
     assert_eq!(r.timing.t_handoff_ns, None);
@@ -1132,6 +1152,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     let account = Pubkey::new_unique();
     let key = |r: &OpportunityRecord| {
@@ -1333,6 +1354,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
+            synthetic: crate::execution::pipeline::test_synthetic(),
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
     };
@@ -1411,6 +1433,10 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
     let slots = darkbot_solana::ingress::SlotWatch::new();
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    // P8-CTRL.4/.7: a LIVE evaluation signs under the gates (every switch, the FE-06 stand-in).
+    let gates = crate::orchestration::capability_control::OfflineGates::enabled(
+        solana_sdk::signature::Signer::pubkey(&payer),
+    );
     let mut p = Pipeline {
         mode: Mode::Live,
         clock: &clock,
@@ -1444,7 +1470,8 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
-        egress: None,
+        egress: Some(gates.gates()),
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1453,6 +1480,8 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         .as_deref()
         .is_some_and(|x| x.starts_with(LIVE_SEND_REQUIRES_FE04)));
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
+    // P8-CTRL.4: LIVE signs with the wallet's key under its permit.
+    assert_eq!(r.signing, Some(crate::analytics::record::Signing::Wallet));
     assert_eq!(
         (r.signature, r.exposure, r.timing.t_handoff_ns),
         (None, None, None)
@@ -1475,6 +1504,25 @@ struct HandoffSubmitter {
     context_slot: Option<u64>,
     context_slot_again: Option<u64>,
 }
+impl HandoffSubmitter {
+    fn simulated(&self, _deadline: std::time::Instant) -> SimResult {
+        let earlier = self.sims.fetch_add(1, Ordering::Relaxed);
+        std::thread::sleep(if earlier == 0 {
+            self.simulate_delay
+        } else {
+            self.simulate_delay_again
+        });
+        SimResult::Ok {
+            units_consumed: Some(100),
+            context_slot: if earlier == 0 {
+                self.context_slot
+            } else {
+                self.context_slot_again
+            },
+        }
+    }
+}
+
 impl SubmissionAdapter for HandoffSubmitter {
     fn path(&self) -> SubmissionPath {
         SubmissionPath::Rpc
@@ -1490,22 +1538,22 @@ impl SubmissionAdapter for HandoffSubmitter {
             lamports: 200,
         })
     }
-    fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
+    /// P8-CTRL.4: a Shadow simulation without a sign permit — signed, but never by the wallet.
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        assert!(
+            tx.signatures.iter().all(|s| *s != Default::default())
+                && tx.verify_and_hash_message().is_err(),
+            "a synthetic signature, never the wallet's"
+        );
+        self.simulated(deadline)
+    }
+    fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
         assert!(tx.verify_and_hash_message().is_ok());
-        let earlier = self.sims.fetch_add(1, Ordering::Relaxed);
-        std::thread::sleep(if earlier == 0 {
-            self.simulate_delay
-        } else {
-            self.simulate_delay_again
-        });
-        SimResult::Ok {
-            units_consumed: Some(100),
-            context_slot: if earlier == 0 {
-                self.context_slot
-            } else {
-                self.context_slot_again
-            },
-        }
+        self.simulated(deadline)
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
         SimResult::Unavailable("no bundle".into())
@@ -1696,6 +1744,7 @@ fn evaluate_in(
         fe04,
         hold,
         egress: Some(gates.gates()),
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -2355,6 +2404,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -2481,6 +2531,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
+            synthetic: crate::execution::pipeline::test_synthetic(),
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason_text().unwrap_or_default();
@@ -2642,6 +2693,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             fe04: None,
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
+            synthetic: crate::execution::pipeline::test_synthetic(),
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -2917,10 +2969,11 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
         if frame.kind == journal::MANIFEST {
             continue;
         }
-        // DEC-01: written under EXHAUSTIVE_V3; DEC-12: the typed record layout (schema 5).
+        // DEC-01: written under EXHAUSTIVE_V3; DEC-12: the typed record layout; P8-CTRL.4: with
+        // its signing (schema 6).
         assert_eq!(
             (frame.kind, frame.schema),
-            (kind::ECON_SHADOW_EVALUATION, 5)
+            (kind::ECON_SHADOW_EVALUATION, 6)
         );
         count += 1;
     }
@@ -3442,6 +3495,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -3734,6 +3788,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         fe04: None,
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
@@ -3760,6 +3815,13 @@ impl SubmissionAdapter for SlowFeeSubmitter {
     }
     fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
         self.inner.simulate(tx, deadline)
+    }
+    fn simulate_unverified(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> SimResult {
+        self.inner.simulate_unverified(tx, deadline)
     }
     fn simulate_bundle(&self, txs: &[VersionedTransaction], d: std::time::Instant) -> SimResult {
         self.inner.simulate_bundle(txs, d)
@@ -5152,6 +5214,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         fe04: Some(fe04),
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: Some(gates.gates()),
+        synthetic: crate::execution::pipeline::test_synthetic(),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }

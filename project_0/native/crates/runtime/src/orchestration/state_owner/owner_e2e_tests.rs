@@ -185,6 +185,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         program,
         group,
         payer: solana_sdk::signature::Keypair::new(),
+        synthetic_signer: solana_sdk::signature::Keypair::new(),
         liquidator,
         shutdown: shutdown.clone(),
         stop_poll: || false,

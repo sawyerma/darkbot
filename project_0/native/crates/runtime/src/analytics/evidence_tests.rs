@@ -513,6 +513,7 @@ fn opportunity_fixture() -> OpportunityRecord {
         intervals_ns: vec![],
         reason: None,
         loss: None,
+        signing: None,
     }
 }
 #[test]

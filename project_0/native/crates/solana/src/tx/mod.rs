@@ -630,6 +630,29 @@ pub fn sign(built: &mut BuiltTx, signers: &[&Keypair]) -> Result<(), BuildError>
     Ok(())
 }
 
+/// P8-CTRL.4: a synthetic signature in every signer slot — the same signing work and the same wire
+/// bytes as a real one, made with `key`, never a wallet's key: the transaction is never valid,
+/// it is simulated without signature verification only (`simulate_unverified`).
+pub fn sign_synthetic(tx: &mut VersionedTransaction, key: &Keypair) -> Result<(), BuildError> {
+    let n = usize::from(tx.message.header().num_required_signatures);
+    if n == 0 {
+        return Err(BuildError::Sign("NO_SIGNER".into()));
+    }
+    let signature = key.sign_message(&tx.message.serialize());
+    tx.signatures = vec![signature; n];
+    Ok(())
+}
+
+/// The wallet's own signature of an already built transaction (`sign` of a `BuiltTx`).
+pub fn sign_transaction(
+    tx: &mut VersionedTransaction,
+    signers: &[&Keypair],
+) -> Result<(), BuildError> {
+    *tx = VersionedTransaction::try_new(tx.message.clone(), signers)
+        .map_err(|e| BuildError::Sign(e.to_string()))?;
+    Ok(())
+}
+
 /// Keypair aus Solana-CLI-JSON (Array von 64 Bytes) laden. Kein Key im Code, keine Env-Defaults.
 /// B10: errors are fixed codes (no wallet path, no parser text that could quote a secret byte);
 /// the file bytes are read into one buffer sized up front (no reallocation copies) and, like the

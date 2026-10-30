@@ -276,6 +276,9 @@ pub(super) struct ShadowOwner {
     program: Pubkey,
     group: Pubkey,
     payer: solana_sdk::signature::Keypair,
+    /// P8-CTRL.4: an ephemeral key of this owner only (never a wallet's, never stored): the
+    /// synthetic signature of a simulation without a sign permit.
+    synthetic_signer: solana_sdk::signature::Keypair,
     liquidator: Pubkey,
     shutdown: Shutdown,
     /// F-01: the operator stop of a standalone Shadow run (`p0ctl run stop`, SIGTERM/SIGINT);

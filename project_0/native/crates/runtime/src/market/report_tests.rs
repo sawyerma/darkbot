@@ -55,6 +55,7 @@ mod report_e2e {
             intervals_ns: vec![],
             reason: None,
             loss: None,
+            signing: None,
         }
     }
 

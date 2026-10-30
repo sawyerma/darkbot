@@ -731,6 +731,108 @@ impl EgressPermit {
     }
 }
 
+/// P8-CTRL.4/.7: what a real signature is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignPurpose {
+    /// The payload of a new liquidation (LIVE).
+    NewAttempt,
+    /// The exit of an open position (LIVE).
+    Exit,
+    /// A simulation only: needs a SIM_ONLY grant; never armed, never sent.
+    Simulation,
+}
+
+/// P8-CTRL.4/.7: the one-use permission of one real signature with the wallet's own keys —
+/// issued from the owner's gates (its fields are private: no CLI, test or other crate makes one)
+/// for exactly one message and its signers: a new attempt or an exit while LIVE is effective for
+/// it under a grant whose scope takes it, or a simulation under a SIM_ONLY grant in force with
+/// ECON_SIGN and every signer ENABLED. Without one, a simulation is signed synthetically.
+#[derive(Debug)]
+pub struct SignPermit {
+    purpose: SignPurpose,
+    signers: Vec<Pubkey>,
+    message: solana_sdk::hash::Hash,
+}
+
+impl SignPermit {
+    pub fn issue(
+        g: &LiveGates,
+        purpose: SignPurpose,
+        signers: &[Pubkey],
+        message: &solana_sdk::message::VersionedMessage,
+    ) -> Result<Self, String> {
+        use super::fe06::Mode;
+        let mode = g.fe06.and_then(|a| a.scope()).map(|s| s.mode);
+        match purpose {
+            SignPurpose::NewAttempt | SignPurpose::Exit => {
+                let (effective, reason) = if purpose == SignPurpose::NewAttempt {
+                    live_decision(g)
+                } else {
+                    exit_decision(g)
+                };
+                if effective != LIVE {
+                    return Err(format!("SIGN_NOT_PERMITTED: LIVE {effective} · {reason}"));
+                }
+                let takes = matches!(
+                    (purpose, mode),
+                    (_, None)
+                        | (SignPurpose::NewAttempt, Some(Mode::All))
+                        | (SignPurpose::Exit, Some(Mode::All | Mode::ExitOnly))
+                );
+                if !takes {
+                    return Err("SIGN_SCOPE_MODE: the grant's scope takes no such signature".into());
+                }
+            }
+            SignPurpose::Simulation => {
+                if g.econ.get(ECON_SIGN) != Some(true) {
+                    return Err("SIGN_NOT_PERMITTED: ECON_SIGN DISABLED".into());
+                }
+                let in_force = g
+                    .fe06
+                    .is_some_and(|a| g.now_unix_s.is_some_and(|now| a.in_force(now)));
+                if !in_force || mode != Some(Mode::SimOnly) {
+                    return Err("SIGN_NOT_PERMITTED: no SIM_ONLY grant in force".into());
+                }
+            }
+        }
+        for s in signers {
+            if !g.wallets.iter().any(|w| w.pubkey == *s && w.enabled) {
+                return Err(format!("SIGN_NOT_PERMITTED: {WALLET_PREFIX}{s} DISABLED"));
+            }
+        }
+        if signers.is_empty() {
+            return Err("SIGN_NOT_PERMITTED: no signer".into());
+        }
+        Ok(Self {
+            purpose,
+            signers: signers.to_vec(),
+            message: solana_sdk::hash::hash(&message.serialize()),
+        })
+    }
+
+    /// Its purpose.
+    pub fn purpose(&self) -> SignPurpose {
+        self.purpose
+    }
+
+    /// The real signature of exactly the permitted message by exactly the permitted signers.
+    pub fn sign(
+        self,
+        tx: &mut solana_sdk::transaction::VersionedTransaction,
+        keys: &[&solana_sdk::signature::Keypair],
+    ) -> Result<(), String> {
+        use solana_sdk::signature::Signer;
+        if solana_sdk::hash::hash(&tx.message.serialize()) != self.message {
+            return Err("SIGN_PERMIT_MESSAGE: the permit is another message's".into());
+        }
+        let keys_of: Vec<Pubkey> = keys.iter().map(|k| k.pubkey()).collect();
+        if keys_of != self.signers {
+            return Err("SIGN_PERMIT_SIGNERS: the permit is other signers'".into());
+        }
+        darkbot_solana::tx::sign_transaction(tx, keys).map_err(|e| e.to_string())
+    }
+}
+
 /// The offline tests' gates of a fully enabled owner: every switch and `signer` ENABLED, the
 /// FE-06 stand-in in force (never part of a build).
 #[cfg(test)]
@@ -1547,5 +1649,137 @@ mod tests {
         )
         .unwrap_err()
         .starts_with("EGRESS_PERMIT_PAYLOAD"));
+    }
+
+    /// P8-CTRL.4/.7: a real signature only under a sign permit of its purpose — a new attempt or
+    /// an exit while LIVE is effective for it (an EXIT_ONLY scope signs no new attempt), a
+    /// simulation only under a SIM_ONLY grant with ECON_SIGN and the signer ENABLED; the permit
+    /// signs exactly its message with exactly its signers. Without one a simulation is signed
+    /// synthetically: the same wire bytes, never the wallet's key.
+    #[test]
+    fn p8ctrl03_a_real_signature_needs_its_sign_permit() {
+        use super::super::fe06;
+        use solana_sdk::signature::{Keypair, Signer};
+        let payer = Keypair::new();
+        let message = |n: u64| {
+            solana_sdk::message::VersionedMessage::Legacy(solana_sdk::message::Message::new(
+                &[solana_sdk::instruction::Instruction::new_with_bytes(
+                    Pubkey::new_from_array([7; 32]),
+                    &n.to_le_bytes(),
+                    vec![solana_sdk::instruction::AccountMeta::new(
+                        payer.pubkey(),
+                        true,
+                    )],
+                )],
+                Some(&payer.pubkey()),
+            ))
+        };
+        let unsigned = |m: solana_sdk::message::VersionedMessage| {
+            solana_sdk::transaction::VersionedTransaction {
+                signatures: vec![Default::default(); 1],
+                message: m,
+            }
+        };
+        let offline = OfflineGates::enabled(payer.pubkey());
+        let pk = [payer.pubkey()];
+        // A new attempt under every gate: exactly this message, exactly this signer.
+        let mut tx = unsigned(message(1));
+        SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &tx.message)
+            .unwrap()
+            .sign(&mut tx, &[&payer])
+            .unwrap();
+        assert!(tx.verify_and_hash_message().is_ok());
+        let p =
+            SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &message(1)).unwrap();
+        let mut other = unsigned(message(2));
+        assert!(p
+            .sign(&mut other, &[&payer])
+            .unwrap_err()
+            .starts_with("SIGN_PERMIT_MESSAGE"));
+        let p =
+            SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &message(1)).unwrap();
+        let mut same = unsigned(message(1));
+        assert!(p
+            .sign(&mut same, &[&Keypair::new()])
+            .unwrap_err()
+            .starts_with("SIGN_PERMIT_SIGNERS"));
+        // Not LIVE, a signer DISABLED: none.
+        let off = LiveGates {
+            requested: LIVE_OFF,
+            ..offline.gates()
+        };
+        assert!(
+            SignPermit::issue(&off, SignPurpose::NewAttempt, &pk, &message(1))
+                .unwrap_err()
+                .starts_with("SIGN_NOT_PERMITTED")
+        );
+        assert!(SignPermit::issue(
+            &offline.gates(),
+            SignPurpose::NewAttempt,
+            &[Pubkey::new_unique()],
+            &message(1)
+        )
+        .unwrap_err()
+        .starts_with("SIGN_NOT_PERMITTED: WALLET:"));
+        // A simulation: never by a LIVE grant alone, only by a SIM_ONLY one in force.
+        assert!(
+            SignPermit::issue(&offline.gates(), SignPurpose::Simulation, &pk, &message(1))
+                .unwrap_err()
+                .starts_with("SIGN_NOT_PERMITTED: no SIM_ONLY grant")
+        );
+        let now = 2_000;
+        let sim_scope = fe06::parse(
+            fe06::tests::text(
+                &payer.pubkey(),
+                &[
+                    ("mode", "SIM_ONLY"),
+                    ("max_attempts_per_utc_day", "0"),
+                    ("max_attempts_campaign", "0"),
+                    ("max_attempts_grant", "0"),
+                    ("max_exits_grant", "0"),
+                ],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        let sim = Fe06Authorization::offline_test_of(sim_scope);
+        let with_sim = LiveGates {
+            fe06: Some(&sim),
+            now_unix_s: Some(now),
+            ..offline.gates()
+        };
+        assert_eq!(
+            SignPermit::issue(&with_sim, SignPurpose::Simulation, &pk, &message(1))
+                .unwrap()
+                .purpose(),
+            SignPurpose::Simulation
+        );
+        let mut sign_off = offline.econ;
+        sign_off.set(ECON_SIGN, false);
+        let g = LiveGates {
+            econ: &sign_off,
+            ..with_sim
+        };
+        assert!(
+            SignPermit::issue(&g, SignPurpose::Simulation, &pk, &message(1))
+                .unwrap_err()
+                .starts_with("SIGN_NOT_PERMITTED: ECON_SIGN")
+        );
+        // A SIM_ONLY grant signs no attempt and no exit.
+        for purpose in [SignPurpose::NewAttempt, SignPurpose::Exit] {
+            assert!(SignPermit::issue(&with_sim, purpose, &pk, &message(1)).is_err());
+        }
+        // The synthetic signature: the same wire length, filled, never verifying.
+        let mut real = unsigned(message(1));
+        let mut synthetic = unsigned(message(1));
+        darkbot_solana::tx::sign_transaction(&mut real, &[&payer]).unwrap();
+        darkbot_solana::tx::sign_synthetic(&mut synthetic, &Keypair::new()).unwrap();
+        assert_eq!(
+            bincode::serialize(&real).unwrap().len(),
+            bincode::serialize(&synthetic).unwrap().len()
+        );
+        assert!(synthetic.signatures[0] != Default::default());
+        assert!(synthetic.verify_and_hash_message().is_err());
     }
 }

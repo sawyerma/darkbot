@@ -224,12 +224,23 @@ impl crate::analytics::payload::Payload for ShadowEvaluation {
     const KIND: u16 = kind::ECON_SHADOW_EVALUATION;
     /// V9/V17: 3 — attributed under EXHAUSTIVE_V2 (`LossReason::Plan`/`Safety`); DEC-01: 4 —
     /// under EXHAUSTIVE_V3 (a stale blockhash is `Build` decided before planning); DEC-12: 5 —
-    /// the typed rejection and the native message hash (still EXHAUSTIVE_V3).
-    const SCHEMA: u16 = 5;
+    /// the typed rejection and the native message hash (still EXHAUSTIVE_V3); P8-CTRL.4: 6 — the
+    /// record's signing.
+    const SCHEMA: u16 = 6;
     /// Schemas 2–4 have the record layout before DEC-12 (`LossReason` only gained variants at
     /// its end); 2 and 3 were written under an earlier attribution, and schema 2 cannot carry a
     /// cause added since.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        if schema == 5 {
+            return Some(
+                crate::analytics::payload::decode_wire::<ShadowEvaluationV5>(bytes).and_then(|v| {
+                    Ok(Self {
+                        previous: v.previous,
+                        record: v.record.try_into()?,
+                    })
+                }),
+            );
+        }
         (2..=4).contains(&schema).then(|| {
             crate::analytics::payload::decode_wire::<ShadowEvaluationV4>(bytes).and_then(|v| {
                 if schema == 2 && v.record.loss.is_some_and(LossReason::since_exhaustive_v2) {
@@ -251,6 +262,13 @@ pub const SHADOW_POLICY_V3_SCHEMA: u16 = 4;
 struct ShadowEvaluationV4 {
     previous: Option<EvalRef>,
     record: crate::analytics::record::OpportunityRecordV2,
+}
+/// P8-CTRL.4: `ShadowEvaluation` schema 5 (the record before its signing).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct ShadowEvaluationV5 {
+    previous: Option<EvalRef>,
+    record: crate::analytics::record::OpportunityRecordV3,
 }
 
 /// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
@@ -858,12 +876,36 @@ struct OpportunityRowV3 {
     capital: Vec<u64>,
     market_commitment: String,
 }
+/// P8-CTRL.4: layout of schema 4 (the record before its signing).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct OpportunityRowV4 {
+    rec: crate::analytics::record::OpportunityRecordV3,
+    winner: Option<Winner>,
+    market: Option<MarketEvent>,
+    slot_seen: Option<u64>,
+    capital: Vec<u64>,
+    market_commitment: String,
+}
 impl crate::analytics::payload::Payload for OpportunityRow {
     const KIND: u16 = kind::ECON_OPPORTUNITY;
-    /// DEC-12: 4 — the record with the typed rejection and the native message hash.
-    const SCHEMA: u16 = 4;
+    /// DEC-12: 4 — the record with the typed rejection and the native message hash; P8-CTRL.4: 5
+    /// — the record's signing.
+    const SCHEMA: u16 = 5;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::decode_wire;
+        if schema == 4 {
+            return Some(decode_wire::<OpportunityRowV4>(bytes).and_then(|v| {
+                Ok(Self {
+                    rec: v.rec.try_into()?,
+                    winner: v.winner,
+                    market: v.market,
+                    slot_seen: v.slot_seen,
+                    capital: v.capital,
+                    market_commitment: v.market_commitment,
+                })
+            }));
+        }
         let v = match schema {
             2 => decode_wire::<OpportunityRowV2>(bytes).map(|v| OpportunityRowV3 {
                 rec: v.rec,
