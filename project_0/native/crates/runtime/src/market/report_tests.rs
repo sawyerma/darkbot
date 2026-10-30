@@ -1218,6 +1218,20 @@ mod report_e2e {
             h0::extract_with(&runs, all, &Default::default(), &|| Ok(()), 64).unwrap_err(),
             "H0_RAM_BUDGET"
         );
+        // H0 mutation H18e: a stop asked once (in the first read) is the extraction's stop too.
+        calls.set(0);
+        let once = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                Err("JOB_CANCELLED".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        assert_eq!(
+            h0::extract_with(&runs, all, &Default::default(), &once, u64::MAX).unwrap_err(),
+            "JOB_CANCELLED"
+        );
         // The stop is asked before the runs, for every row of both reads and after the last run.
         let capture = super::super::strict_driver::bind_capture(&a.run).unwrap();
         let selected = crate::analytics::report::select_result(&capture, None).unwrap().unwrap();
