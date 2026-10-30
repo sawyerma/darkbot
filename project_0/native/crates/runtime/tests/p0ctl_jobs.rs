@@ -61,8 +61,16 @@ fn a_started_job_runs_in_its_detached_worker_and_records_the_outcome() {
         line.starts_with("job-1 BACKTEST FAILED run=run-a "),
         "{line}"
     );
-    let log = std::fs::read_to_string(project.join("data/analytics-jobs/job-1/worker.log"));
-    assert!(log.unwrap().contains("job job-1 FAILED"));
+    // The worker records its outcome first, then logs it: the log line follows the status.
+    let log = loop {
+        let log = std::fs::read_to_string(project.join("data/analytics-jobs/job-1/worker.log"))
+            .unwrap_or_default();
+        if log.contains("job job-1 FAILED") || Instant::now() >= deadline {
+            break log;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(log.contains("job job-1 FAILED"), "{log}");
     let (code, _, err) = p0ctl(&project, &["job", "cancel", "--id", "job-1"]);
     assert_ne!(code, 0);
     assert!(err.contains("JOB_NOT_RUNNING: FAILED"), "{err}");
