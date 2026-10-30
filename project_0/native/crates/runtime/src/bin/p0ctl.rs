@@ -2042,6 +2042,12 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if let Some(id) = &request_id {
                 capability_control::validate_request_id(id)?;
             }
+            // P8-CTRL.6: an economic or wallet switch states its version, epoch and id.
+            let economic = capability_control::ECON.contains(&capability.as_str())
+                || capability.starts_with(capability_control::WALLET_PREFIX);
+            if economic && (expected.is_none() || stated_epoch.is_none() || request_id.is_none()) {
+                return Err(format!("CAPABILITY_BINDING_REQUIRED: {capability} states --expect-version, --expect-epoch and --request-id (P8-CTRL.6); {CAPABILITY_USAGE}"));
+            }
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "CAPABILITY_CONTROL_CLOCK")?
@@ -2058,6 +2064,11 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     "CAPABILITY_NO_OWNER_EPOCH: the running owner opened no capability epoch"
                         .into(),
                 );
+            }
+            // The epoch is the running owner's own (its record names this pid).
+            let opener = capability_control::epoch_owner(&dir, epoch)?;
+            if opener != pid {
+                return Err(format!("CAPABILITY_EPOCH_FOREIGN: epoch {epoch} was opened by pid {opener}, the running owner is pid {pid}"));
             }
             if let Some(stated) = stated_epoch.filter(|e| *e != epoch) {
                 return Err(format!(

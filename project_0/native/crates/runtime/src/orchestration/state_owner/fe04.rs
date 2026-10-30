@@ -541,6 +541,15 @@ pub(super) fn admission_for(
 }
 
 impl ShadowOwner {
+    /// P8-CTRL.5: the exit of an open position may run — LIVE effective for exits (every gate
+    /// but ECON_ATTEMPT, which governs new liquidations only).
+    pub(super) fn exit_live_effective(&self) -> bool {
+        crate::orchestration::capability_control::exit_decision(
+            &self.sources.capabilities.live_gates(),
+        )
+        .0 == crate::orchestration::capability_control::LIVE
+    }
+
     /// DEC-13: LIVE is effective (the controller's request with an FE-06 authorization).
     pub(super) fn live_effective(&self) -> bool {
         crate::orchestration::capability_control::pipeline_mode(
@@ -728,7 +737,7 @@ impl ShadowOwner {
         use crate::execution::one_shot::approval_file::ApprovalFile;
         use crate::execution::one_shot::exit_admission::{admit_exit, ExitCandidate};
         // An UNKNOWN exit ends the exits of this run (review L4): its holds stay, it is settled.
-        if !self.live_effective() || self.fe04_admissions.exits_unknown > 0 {
+        if !self.exit_live_effective() || self.fe04_admissions.exits_unknown > 0 {
             return;
         }
         let Some(held) = self.fe04_held.as_ref() else {

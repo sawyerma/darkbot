@@ -44,6 +44,9 @@ pub const ECON_ATTEMPT: &str = "ECON_ATTEMPT";
 pub const ECON_LIVE: &str = "ECON_LIVE";
 /// The economic switches, in the order LIVE names a missing one.
 pub const ECON: [&str; 5] = [ECON_LIVE, ECON_ARM, ECON_SIGN, ECON_SEND, ECON_ATTEMPT];
+/// P8-CTRL.5: the switches an exit of an open position needs — every one but ECON_ATTEMPT,
+/// which governs new liquidations only.
+pub const ECON_EXIT: [&str; 4] = [ECON_LIVE, ECON_ARM, ECON_SIGN, ECON_SEND];
 /// P8-CTRL.1: the switch of one configured signer is `WALLET:<pubkey>`.
 pub const WALLET_PREFIX: &str = "WALLET:";
 /// P8-CTRL.1: the validated roles of a configured signer.
@@ -198,7 +201,7 @@ pub fn current_epoch(dir: &Path) -> Result<u64, String> {
 /// Requests of every earlier epoch are refused from now on.
 pub fn open_epoch(dir: &Path, owner_pid: u32, now_unix_s: Option<u64>) -> Result<u64, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))?;
-    for _ in 0..16 {
+    loop {
         let epoch = current_epoch(dir)? + 1;
         let value = CapabilityOwnerEpoch {
             epoch,
@@ -215,7 +218,19 @@ pub fn open_epoch(dir: &Path, owner_pid: u32, now_unix_s: Option<u64>) -> Result
             Err(e) => return Err(format!("CAPABILITY_CONTROL_IO: {e}")),
         }
     }
-    Err("CAPABILITY_EPOCH_CONTENDED: no epoch number could be taken".into())
+}
+
+/// P8-CTRL.6: the owner process that opened `epoch` (its sealed epoch record).
+pub fn epoch_owner(dir: &Path, epoch: u64) -> Result<u32, String> {
+    let path = epoch_path(dir, epoch);
+    regular(&path)?;
+    match journal::read_typed_value::<CapabilityOwnerEpoch>(&path) {
+        Ok(e) if e.epoch == epoch => Ok(e.owner_pid),
+        Ok(_) => Err(format!(
+            "CAPABILITY_EPOCH_INVALID: epoch_{epoch:08}.p0j names another epoch"
+        )),
+        Err(e) => Err(format!("CAPABILITY_EPOCH_INVALID: {e}")),
+    }
 }
 
 /// One capability request as the operator states it (`write_request`).
@@ -255,22 +270,7 @@ pub fn write_request(dir: &Path, r: &NewRequest) -> Result<Written, String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))?;
     if let Some(prior) = request_with_id(dir, r.request_id)? {
-        return if (
-            prior.capability.as_str(),
-            prior.requested.as_str(),
-            prior.owner_epoch,
-        ) == (r.capability, r.requested, r.owner_epoch)
-        {
-            Ok(Written {
-                seq: prior.seq,
-                replayed: true,
-            })
-        } else {
-            Err(format!(
-                "CAPABILITY_REQUEST_ID_CONFLICT: request id {} is seq {} with other content",
-                r.request_id, prior.seq
-            ))
-        };
+        return same_request(&prior, r);
     }
     let current = head(dir)?;
     let conflict = |current: u64| {
@@ -291,21 +291,47 @@ pub fn write_request(dir: &Path, r: &NewRequest) -> Result<Written, String> {
         request_id: r.request_id.into(),
         owner_epoch: r.owner_epoch,
     };
-    journal::create_typed_value(
+    match journal::create_typed_value(
         &request_path(dir, seq),
         journal::source::CAPABILITY_CONTROL,
         &request,
-    )
-    .map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            conflict(head(dir).unwrap_or(seq))
-        } else {
-            format!("CAPABILITY_CONTROL_IO: {e}")
+    ) {
+        Ok(()) => {}
+        // Of two writers of one version exactly one wins — the winner may be this very request
+        // (the same id, a retry racing its original).
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return match request_with_id(dir, r.request_id)? {
+                Some(prior) => same_request(&prior, r),
+                None => Err(conflict(head(dir).unwrap_or(seq))),
+            };
         }
-    })?;
+        Err(e) => return Err(format!("CAPABILITY_CONTROL_IO: {e}")),
+    }
     Ok(Written {
         seq,
         replayed: false,
+    })
+}
+
+/// P8-CTRL.6: `r` against the written request of its id — the same request again (its sequence
+/// number), the same action of an earlier epoch (stale: a new action needs a new id), or other
+/// content under the id (a conflict).
+fn same_request(prior: &CapabilityControlRequest, r: &NewRequest) -> Result<Written, String> {
+    if (prior.capability.as_str(), prior.requested.as_str()) != (r.capability, r.requested) {
+        return Err(format!(
+            "CAPABILITY_REQUEST_ID_CONFLICT: request id {} is seq {} with other content",
+            r.request_id, prior.seq
+        ));
+    }
+    if prior.owner_epoch != r.owner_epoch {
+        return Err(format!(
+            "CAPABILITY_EPOCH_STALE: request id {} was seq {} of owner epoch {}, the owner is epoch {}; a new action needs a new request id",
+            r.request_id, prior.seq, prior.owner_epoch, r.owner_epoch
+        ));
+    }
+    Ok(Written {
+        seq: prior.seq,
+        replayed: true,
     })
 }
 
@@ -477,11 +503,22 @@ pub struct LiveGates<'a> {
     pub fe06: Option<&'a Fe06Authorization>,
 }
 
-/// P8-CTRL.2: LIVE's effective value — BLOCKED while any gate is missing (every economic switch,
-/// every required wallet, the FE-06 authorization), whatever is requested, with the first missing
-/// gate as its reason and every other one named after it; else the requested value.
+/// P8-CTRL.2: LIVE's effective value for a new liquidation — BLOCKED while any gate is missing
+/// (every economic switch, every required wallet, the FE-06 authorization), whatever is
+/// requested, with the first missing gate as its reason and every other one named after it; else
+/// the requested value.
 pub fn live_decision(g: &LiveGates) -> (&'static str, String) {
-    let mut missing: Vec<String> = ECON
+    decision(g, &ECON)
+}
+
+/// P8-CTRL.5: the same decision for the exit of an open position: ECON_ATTEMPT (new liquidations
+/// only) is not one of its gates; ECON_LIVE, ARM, SIGN, SEND, the wallets and FE-06 are.
+pub fn exit_decision(g: &LiveGates) -> (&'static str, String) {
+    decision(g, &ECON_EXIT)
+}
+
+fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
+    let mut missing: Vec<String> = switches
         .iter()
         .filter(|e| g.econ.get(e) != Some(true))
         .map(|e| format!("{e} {DISABLED}"))
@@ -807,10 +844,6 @@ mod tests {
         for other in [
             new(ECON_SIGN, DISABLED, "id-1"),
             new(ECON_ARM, ENABLED, "id-1"),
-            NewRequest {
-                owner_epoch: 2,
-                ..new(ECON_SIGN, ENABLED, "id-1")
-            },
         ] {
             assert!(write_request(&dir, &other)
                 .unwrap_err()
@@ -886,6 +919,176 @@ mod tests {
         assert_eq!(epoch_decisions(&dir, 3).unwrap(), vec![]);
         assert_eq!(outcome_at(&dir, 9).unwrap(), None);
         assert_eq!(latest_outcome(&dir).unwrap().unwrap().seq, 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// P8-CTRL.5 (review M1): an exit needs every gate but ECON_ATTEMPT — taking ATTEMPT back
+    /// stops new liquidations, never the exit of an open position; ECON_LIVE stops both.
+    #[test]
+    fn p8ctrl01_exits_need_every_gate_but_attempt() {
+        let fe06 = Fe06Authorization::offline_test();
+        let mut econ = EconSwitches::default();
+        ECON.iter().for_each(|e| {
+            econ.set(e, true);
+        });
+        let mut w = WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_FEE_PAYER]);
+        w.enabled = true;
+        let wallets = [w];
+        fn at<'a>(
+            econ: &'a EconSwitches,
+            wallets: &'a [WalletSwitch],
+            fe06: Option<&'a Fe06Authorization>,
+        ) -> LiveGates<'a> {
+            LiveGates {
+                requested: LIVE,
+                econ,
+                wallets,
+                fe06,
+            }
+        }
+        let gates = |econ| at(econ, &wallets, Some(&fe06));
+        assert_eq!(exit_decision(&gates(&econ)).0, LIVE);
+        let mut no_attempt = econ;
+        no_attempt.set(ECON_ATTEMPT, false);
+        assert_eq!(
+            live_decision(&at(&no_attempt, &wallets, Some(&fe06))),
+            ("BLOCKED", "ECON_ATTEMPT DISABLED".to_string())
+        );
+        assert_eq!(
+            exit_decision(&at(&no_attempt, &wallets, Some(&fe06))),
+            (LIVE, String::new())
+        );
+        for e in ECON_EXIT {
+            let mut one = econ;
+            one.set(e, false);
+            assert_eq!(
+                exit_decision(&at(&one, &wallets, Some(&fe06))),
+                ("BLOCKED", format!("{e} DISABLED"))
+            );
+        }
+        assert_eq!(
+            exit_decision(&at(&econ, &wallets, None)).1,
+            LIVE_BLOCK_REASON
+        );
+    }
+
+    /// Review M3: the request and receipt frames DEC-13 wrote (schema 2) stay readable — without
+    /// id and epoch (0: no owner admits them, no epoch's decision); the epoch record round-trips.
+    #[test]
+    fn p8ctrl01_schema_2_frames_stay_readable() {
+        use crate::analytics::payload::{self, Payload};
+        #[derive(serde::Serialize)]
+        struct RequestV2 {
+            seq: u64,
+            capability: String,
+            requested: String,
+            requested_unix_s: u64,
+        }
+        #[derive(serde::Serialize)]
+        struct OutcomeV2 {
+            seq: u64,
+            request: String,
+            applied: bool,
+            requested: String,
+            effective: String,
+            detail: String,
+            owner_pid: u32,
+            decided_unix_s: Option<u64>,
+        }
+        let r = payload::decode::<CapabilityControlRequest>(
+            CapabilityControlRequest::KIND,
+            2,
+            &payload::encode_wire(&RequestV2 {
+                seq: 4,
+                capability: LIVE.into(),
+                requested: LIVE.into(),
+                requested_unix_s: 9,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                r.seq,
+                r.capability.as_str(),
+                r.requested_unix_s,
+                r.request_id.as_str(),
+                r.owner_epoch
+            ),
+            (4, LIVE, 9, "", 0)
+        );
+        let o = payload::decode::<CapabilityControlOutcome>(
+            CapabilityControlOutcome::KIND,
+            2,
+            &payload::encode_wire(&OutcomeV2 {
+                seq: 4,
+                request: "LIVE LIVE".into(),
+                applied: true,
+                requested: LIVE.into(),
+                effective: "BLOCKED".into(),
+                detail: "d".into(),
+                owner_pid: 7,
+                decided_unix_s: Some(10),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                o.seq,
+                o.applied,
+                o.effective.as_str(),
+                o.owner_pid,
+                o.capability.as_str(),
+                o.owner_epoch
+            ),
+            (4, true, "BLOCKED", 7, "", 0)
+        );
+        assert!(payload::decode::<CapabilityControlRequest>(
+            CapabilityControlRequest::KIND,
+            1,
+            &[]
+        )
+        .is_err());
+        let e = CapabilityOwnerEpoch {
+            epoch: 3,
+            owner_pid: 5,
+            opened_unix_s: None,
+        };
+        let bytes = payload::encode(&e).unwrap();
+        assert_eq!(
+            payload::decode::<CapabilityOwnerEpoch>(
+                journal::kind::CAPABILITY_OWNER_EPOCH,
+                CapabilityOwnerEpoch::SCHEMA,
+                &bytes
+            )
+            .unwrap(),
+            e
+        );
+        assert_eq!(
+            payload::registered_schema(journal::kind::CAPABILITY_OWNER_EPOCH),
+            Some(2)
+        );
+    }
+
+    /// Review L4/L7: an epoch names the process that opened it; a same-id action of an earlier
+    /// epoch is stale (not a conflict).
+    #[test]
+    fn p8ctrl01_epochs_name_their_owner_and_old_ids_are_stale() {
+        let dir = temp("owner");
+        assert_eq!(open_epoch(&dir, 41, None).unwrap(), 1);
+        assert_eq!(epoch_owner(&dir, 1).unwrap(), 41);
+        assert!(epoch_owner(&dir, 2).is_err());
+        write_request(&dir, &new(ECON_SIGN, ENABLED, "id-1")).unwrap();
+        let err = write_request(
+            &dir,
+            &NewRequest {
+                owner_epoch: 2,
+                ..new(ECON_SIGN, ENABLED, "id-1")
+            },
+        )
+        .unwrap_err();
+        assert!(err.starts_with("CAPABILITY_EPOCH_STALE"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

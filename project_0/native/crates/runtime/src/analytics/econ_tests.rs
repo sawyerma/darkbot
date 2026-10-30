@@ -4895,12 +4895,27 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
     let dir = std::env::temp_dir().join(format!("p0-dec13-{}", Pubkey::new_unique()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
-    let mode = capability_control::pipeline_mode(&capability_control::LiveGates {
+    // Review L5: every switch and the signer ENABLED — FE-06 alone keeps it Shadow.
+    let mut econ = capability_control::EconSwitches::default();
+    for e in capability_control::ECON {
+        econ.set(e, true);
+    }
+    let mut signer = capability_control::WalletSwitch::configured(
+        solana_sdk::signature::Signer::pubkey(&payer),
+        &[capability_control::ROLE_FEE_PAYER],
+    );
+    signer.enabled = true;
+    let gates = capability_control::LiveGates {
         requested: capability_control::LIVE,
-        econ: &Default::default(),
-        wallets: &[],
+        econ: &econ,
+        wallets: std::slice::from_ref(&signer),
         fe06: None,
-    });
+    };
+    assert_eq!(
+        capability_control::live_decision(&gates).1,
+        capability_control::LIVE_BLOCK_REASON
+    );
+    let mode = capability_control::pipeline_mode(&gates);
     let r = evaluate_in(
         mode,
         (&counting, &mut safety, Some(&mut fe04)),

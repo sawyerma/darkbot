@@ -139,7 +139,18 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         args.extend_from_slice(extra);
         p0ctl(&d, &args)
     };
-    let (code, out, err) = set("ENABLED", &["--expect-epoch", "1"]);
+    // P8-CTRL.6 (review M2): an economic switch states version, epoch and id.
+    for extra in [
+        &[][..],
+        &["--expect-epoch", "1"][..],
+        &["--expect-version", "1"][..],
+    ] {
+        let (code, _, err) = set("ENABLED", extra);
+        assert_eq!(code, 2);
+        assert!(err.contains("CAPABILITY_BINDING_REQUIRED"), "{err}");
+    }
+    let bound = ["--expect-epoch", "1", "--expect-version", "1"];
+    let (code, out, err) = set("ENABLED", &bound);
     assert_eq!(code, 0, "{out}{err}");
     assert!(
         out.contains("seq=2 ECON_SIGN ENABLED request_id=op-1 epoch=1 sent"),
@@ -159,20 +170,25 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         }
         other => panic!("{other:?}"),
     }
-    let (code, out, _) = set("ENABLED", &[]);
+    // The retry of the same action (its version is stale by now): the same request.
+    let (code, out, _) = set("ENABLED", &bound);
     assert_eq!(code, 0);
     assert!(
         out.contains("seq=2") && out.contains("the same request again"),
         "{out}"
     );
     for (value, extra, refusal) in [
-        ("DISABLED", &[][..], "CAPABILITY_REQUEST_ID_CONFLICT"),
+        (
+            "DISABLED",
+            &["--expect-epoch", "1", "--expect-version", "2"][..],
+            "CAPABILITY_REQUEST_ID_CONFLICT",
+        ),
         (
             "ENABLED",
-            &["--expect-epoch", "9"][..],
+            &["--expect-epoch", "9", "--expect-version", "2"][..],
             "CAPABILITY_EPOCH_STALE",
         ),
-        ("ON", &[][..], "CAPABILITY_VALUE_INVALID"),
+        ("ON", &bound[..], "CAPABILITY_VALUE_INVALID"),
     ] {
         let (code, _, err) = set(value, extra);
         assert_eq!(code, 2);

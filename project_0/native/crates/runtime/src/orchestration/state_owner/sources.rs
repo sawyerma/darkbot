@@ -467,6 +467,7 @@ impl ShadowOwner {
         let request_id = request
             .as_ref()
             .map_or(String::new(), |r| r.request_id.clone());
+        let request_value = request.as_ref().ok().map(|r| r.requested.clone());
         let (text, valid) = match request {
             Ok(r) => (
                 cap::shown(&r.capability, &r.requested),
@@ -522,16 +523,15 @@ impl ShadowOwner {
         };
         let c = &mut self.sources.capabilities;
         let applied = valid.is_ok();
-        if let Ok(requested) = &valid {
-            if let Some(capability) = request_capability
-                .as_ref()
-                .filter(|_| !request_id.is_empty())
-            {
-                c.decided_ids.insert(
-                    request_id.clone(),
-                    (seq, capability.clone(), requested.clone()),
-                );
+        // P8-CTRL.6: every decided id of this epoch, applied or refused — its first decision.
+        if let (Some(capability), Some(requested)) = (&request_capability, &request_value) {
+            if !request_id.is_empty() {
+                c.decided_ids
+                    .entry(request_id.clone())
+                    .or_insert_with(|| (seq, capability.clone(), requested.clone()));
             }
+        }
+        if let Ok(requested) = &valid {
             let on = requested == cap::ENABLED;
             if econ {
                 c.econ.set(request_capability.as_deref().unwrap_or(""), on);
@@ -642,6 +642,13 @@ impl ShadowOwner {
             // P8-CTRL.1/.6: a permission stands only with its durable receipt — an unrecorded
             // ENABLED or LIVE is taken back (DISABLED, OFF).
             let c = &mut self.sources.capabilities;
+            if let Some(d) = c.last_decision.as_mut().filter(|d| d.seq == seq) {
+                d.applied = false;
+                d.detail = format!(
+                    "{} · RECEIPT_NOT_RECORDED: {e}; an ENABLED or LIVE is taken back",
+                    d.detail
+                );
+            }
             if applied && outcome.requested != cap::DISABLED {
                 if econ {
                     c.econ

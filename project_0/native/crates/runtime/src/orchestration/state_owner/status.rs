@@ -278,8 +278,8 @@ impl ShadowOwner {
                 self.threshold.block,
             ),
         ];
-        // P8-CTRL.1: the economic switches and one switch per configured signer (its roles
-        // named) — partial permissions, effective as requested; LIVE above needs all of them.
+        // P8-CTRL.1: the economic switches and one switch per configured signer — partial
+        // permissions, effective as requested; LIVE above needs all of them.
         use crate::orchestration::capability_control as c;
         let switch = |on: bool| if on { c::ENABLED } else { c::DISABLED };
         let caps = &self.sources.capabilities;
@@ -298,7 +298,7 @@ impl ShadowOwner {
                 name: w.capability().into(),
                 requested: on,
                 effective: on,
-                block_reason: format!("roles {}", w.roles.join("+")).into(),
+                block_reason: "".into(),
             }
         }));
         all

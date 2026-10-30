@@ -30,8 +30,9 @@ impl ShadowOwner {
                     .unwrap_or_default();
                 // P0-PROD-CTRL-04: the accounting the status projection carries, read only when
                 // a status tap is installed (read-only, no wallet lock).
+                // P8-CTRL.5: exits (and their approval) need every gate but ECON_ATTEMPT.
                 #[cfg(feature = "crate_health")]
-                let live = self.live_effective();
+                let live = self.exit_live_effective();
                 #[cfg(feature = "crate_health")]
                 if crate::status_tap::installed().is_some() {
                     self.ledger_view = Some(status_view::LedgerView::load(dir, &wallet));

@@ -4651,11 +4651,7 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
     );
     assert_eq!(
         shown(&f, &wallet),
-        (
-            "ENABLED".into(),
-            "ENABLED".into(),
-            "roles LIQUIDATOR+FEE_PAYER".into()
-        )
+        ("ENABLED".into(), "ENABLED".into(), String::new())
     );
     assert_eq!(
         (
@@ -4672,8 +4668,41 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
     assert!(!f.owner.live_effective());
     // With the FE-06 stand-in every gate holds; one switch taken back blocks LIVE again.
     f.owner.sources.capabilities.fe06 = Some(cap::Fe06Authorization::offline_test());
-    assert!(f.owner.live_effective());
+    assert!(f.owner.live_effective() && f.owner.exit_live_effective());
     assert_eq!(shown(&f, cap::LIVE).1, "LIVE");
+    // Review M1: ECON_ATTEMPT stops new liquidations only — an open position still exits.
+    seq += 1;
+    f.owner.apply_capability_control(
+        seq,
+        request(seq, cap::ECON_ATTEMPT, cap::DISABLED, "no-new", 3),
+    );
+    assert!(!f.owner.live_effective() && f.owner.exit_live_effective());
+    seq += 1;
+    f.owner.apply_capability_control(
+        seq,
+        request(seq, cap::ECON_ATTEMPT, cap::ENABLED, "new-again", 3),
+    );
+    assert!(f.owner.live_effective());
+    // Review M3: a request DEC-13 wrote (schema 2: no id, epoch 0) is refused by this owner.
+    seq += 1;
+    let mut old = request(seq, cap::LIVE, cap::LIVE_OFF, "", 0).unwrap();
+    old.request_id.clear();
+    f.owner.apply_capability_control(seq, Ok(old));
+    assert!(detail(seq).detail.starts_with("CAPABILITY_EPOCH_STALE"));
+    assert_eq!(f.owner.sources.capabilities.live_requested, cap::LIVE);
+    // Review L1: a refused id stays decided — the same id with other content is a conflict.
+    seq += 1;
+    f.owner
+        .apply_capability_control(seq, request(seq, cap::ECON_LIVE, "ON", "refused-1", 3));
+    seq += 1;
+    f.owner.apply_capability_control(
+        seq,
+        request(seq, cap::ECON_LIVE, cap::DISABLED, "refused-1", 3),
+    );
+    assert!(detail(seq)
+        .detail
+        .starts_with("CAPABILITY_REQUEST_ID_CONFLICT"));
+    assert!(f.owner.live_effective());
     seq += 1;
     f.owner
         .apply_capability_control(seq, request(seq, cap::ECON_SEND, cap::DISABLED, "off", 3));
@@ -4704,6 +4733,13 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
         Some(false)
     );
     assert!(!f.owner.live_effective());
+    // Review L2: the projected decision says it was not recorded.
+    let last = f.owner.sources.capabilities.last_decision.clone().unwrap();
+    assert!(
+        !last.applied && last.detail.contains("RECEIPT_NOT_RECORDED"),
+        "{}",
+        last.detail
+    );
     cleanup(f);
     // A new owner: a fresh start, every switch DISABLED and LIVE requested OFF.
     let fresh = super::sources::OwnerCapabilities::default();
