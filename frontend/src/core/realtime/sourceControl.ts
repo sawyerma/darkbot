@@ -54,6 +54,13 @@ export interface LiveGrantScope {
   maxInputWei: string; maxSpendWei: string; maxAttempts: number; expiresUnixMs: bigint;
   /** BSC3-058: the exits of open positions alone, no BUY (a separate authorization). */
   exitOnly: boolean;
+  /** BSC3-069: the execution risk the operator grants, every bound. */
+  risk: LiveGrantRiskScope;
+}
+/** The execution risk of a LIVE grant (BSC3-069): the executor arms only within it. */
+export interface LiveGrantRiskScope {
+  maxBuySlippageBps: number; maxExitSlippageBps: number; maxGasPriceWei: bigint;
+  maxBuyGasLimit: bigint; maxApproveGasLimit: bigint; maxSellGasLimit: bigint;
 }
 /** `bsc.live.grant`: the confirmed scope with the SHA-256 of its canonical text the operator was
  *  shown, at the owner generation; the native owner recomputes the digest. */

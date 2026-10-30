@@ -1680,6 +1680,14 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         max_attempts: 2,
         expires_unix_ms: now + 3_600_000,
         exit_only: false,
+        risk: Some(darkbot_bsc_execution::sources::GrantRisk {
+            max_buy_slippage_bps: 300,
+            max_exit_slippage_bps: 500,
+            max_gas_price_wei: 1_000_000_000,
+            max_buy_gas_limit: 3_000_000,
+            max_approve_gas_limit: 100_000,
+            max_sell_gas_limit: 1_500_000,
+        }),
     };
     let r = store
         .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
@@ -1712,12 +1720,19 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         Some("LIVE_VENUE_UNQUALIFIED")
     );
     assert_eq!(live.qualification, "NONE");
-    assert_eq!(live.preconditions.len(), 19);
+    assert_eq!(live.preconditions.len(), 20);
     let met = |id: &str| live.preconditions.iter().find(|p| p.id == id).unwrap().met;
     assert!(met("ECONOMIC_LIVE") && met("LIVE_GRANT") && met("WALLET_BUYER"));
+    // BSC3-069: the grant names its execution risk, shown as granted.
+    assert!(met("GRANT_RISK"));
     assert!(!met("VENUE_QUALIFIED") && !met("RISK_DECISION"));
     let shown = live.grant.as_ref().unwrap();
     assert_eq!(shown.scope_text, grant.scope_text());
+    let risk = shown.risk.as_ref().unwrap();
+    assert_eq!(
+        (risk.max_buy_slippage_bps, risk.max_gas_price_wei, risk.max_sell_gas_limit),
+        (300, 1_000_000_000, 1_500_000)
+    );
     assert_eq!(
         shown.scope_sha256,
         darkbot_bsc_record::hex(&grant.scope_sha256())

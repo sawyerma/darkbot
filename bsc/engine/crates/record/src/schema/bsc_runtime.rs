@@ -183,6 +183,16 @@ pub mod source_modes {
         /// The grant admits the exits of open positions only, no BUY
         /// (BSC3-058); absent: BUYs and exits.
         pub const EXIT_ONLY: u16 = 13;
+        /// The execution risk the operator granted (BSC3-069): the most
+        /// slippage of a BUY and of an exit (bps), the most gas price
+        /// (wei) and gas limits of a BUY, an approval and a SELL. Absent in
+        /// a grant written before: it admits nothing.
+        pub const MAX_BUY_SLIPPAGE_BPS: u16 = 14;
+        pub const MAX_EXIT_SLIPPAGE_BPS: u16 = 15;
+        pub const MAX_GAS_PRICE_WEI: u16 = 16;
+        pub const MAX_BUY_GAS_LIMIT: u16 = 17;
+        pub const MAX_APPROVE_GAS_LIMIT: u16 = 18;
+        pub const MAX_SELL_GAS_LIMIT: u16 = 19;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.source-modes.live",
@@ -202,6 +212,12 @@ pub mod source_modes {
                 Field::opt(REQUEST_ID, "request_id", Text),
                 Field::opt(SET_GENERATION, "set_generation", U64),
                 Field::opt(EXIT_ONLY, "exit_only", Bool),
+                Field::opt(MAX_BUY_SLIPPAGE_BPS, "max_buy_slippage_bps", U64),
+                Field::opt(MAX_EXIT_SLIPPAGE_BPS, "max_exit_slippage_bps", U64),
+                Field::opt(MAX_GAS_PRICE_WEI, "max_gas_price_wei", U64),
+                Field::opt(MAX_BUY_GAS_LIMIT, "max_buy_gas_limit", U64),
+                Field::opt(MAX_APPROVE_GAS_LIMIT, "max_approve_gas_limit", U64),
+                Field::opt(MAX_SELL_GAS_LIMIT, "max_sell_gas_limit", U64),
             ],
         };
     }

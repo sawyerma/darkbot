@@ -28,6 +28,7 @@ export const CONDITION_TEXT: Record<string, { label: string; where: string }> = 
   GRANT_ATTEMPTS: { label: "The grant's attempts left", where: "A new grant" },
   GRANT_SPEND: { label: "The grant's spend left", where: "A new grant" },
   GRANT_BUYS: { label: "The grant admits BUYs (not EXIT-ONLY)", where: "A new grant" },
+  GRANT_RISK: { label: "The grant names its execution risk", where: "A new grant (slippage, gas price and limits)" },
   VENUE_QUALIFIED: { label: "Venue qualified", where: "LIVE qualification record (bsc_runtime live qualify)" },
   SOURCES_QUALIFIED: { label: "Sources qualified", where: "LIVE qualification record" },
   ADAPTERS_QUALIFIED: { label: "Adapters qualified", where: "LIVE qualification record" },
@@ -49,6 +50,9 @@ export function scopeText(s: LiveGrantScope): string {
   return "darkbot.bsc.live-grant.v1\n"
     + `venue=${s.venue}\nstrategies=${s.strategies}\nsources=${s.sources.join(",")}\nadapters=${s.adapters.join(",")}\n`
     + `max_input_wei=${s.maxInputWei}\nmax_spend_wei=${s.maxSpendWei}\nmax_attempts=${s.maxAttempts}\nexpires_unix_ms=${s.expiresUnixMs.toString()}\n`
+    + `max_buy_slippage_bps=${s.risk.maxBuySlippageBps}\nmax_exit_slippage_bps=${s.risk.maxExitSlippageBps}\n`
+    + `max_gas_price_wei=${s.risk.maxGasPriceWei.toString()}\nmax_buy_gas_limit=${s.risk.maxBuyGasLimit.toString()}\n`
+    + `max_approve_gas_limit=${s.risk.maxApproveGasLimit.toString()}\nmax_sell_gas_limit=${s.risk.maxSellGasLimit.toString()}\n`
     + (s.exitOnly ? "exit_only=true\n" : "");
 }
 
@@ -69,7 +73,22 @@ export interface GrantForm {
   strategies: string; sources: string[]; adapters: string[];
   maxInputWei: string; maxSpendWei: string; maxAttempts: string; hours: string;
   exitOnly: boolean;
+  /** BSC3-069: the execution risk, as typed. */
+  buySlippageBps: string; exitSlippageBps: string; gasPriceWei: string;
+  buyGasLimit: string; approveGasLimit: string; sellGasLimit: string;
 }
+
+const U64_MAX = (1n << 64n) - 1n;
+/** A plain decimal within 64 bits of at least `min`. */
+function u64Ok(text: string, min: bigint): boolean {
+  return /^(0|[1-9][0-9]{0,19})$/.test(text) && BigInt(text) >= min && BigInt(text) <= U64_MAX;
+}
+/** A slippage in basis points below 100 % (the owner's rule). */
+function bpsOk(text: string): boolean {
+  return /^(0|[1-9][0-9]{0,3})$/.test(text) && Number(text) < 10_000;
+}
+/** The least gas limit of a transaction (a plain transfer's). */
+const MIN_GAS_LIMIT = 21_000n;
 
 /** The scope of a grant form at `nowMs`, or why it is not one (the owner checks again). */
 export function grantScope(f: GrantForm, nowMs: number): { scope: LiveGrantScope } | { error: string } {
@@ -81,11 +100,19 @@ export function grantScope(f: GrantForm, nowMs: number): { scope: LiveGrantScope
   if (!weiOk(f.maxSpendWei) || BigInt(f.maxSpendWei) < BigInt(f.maxInputWei)) return { error: "max spend: a plain decimal in wei, at least the max input" };
   if (!/^([1-9]|10)$/.test(f.maxAttempts) || Number(f.maxAttempts) > MAX_ATTEMPTS_TOTAL) return { error: `attempts: 1..${MAX_ATTEMPTS_TOTAL}` };
   if (!/^[1-9][0-9]{0,3}$/.test(f.hours)) return { error: "validity: whole hours" };
+  if (!bpsOk(f.buySlippageBps) || !bpsOk(f.exitSlippageBps)) return { error: "slippage: basis points below 10000" };
+  if (!u64Ok(f.gasPriceWei, 1n)) return { error: "gas price: a positive plain decimal in wei" };
+  if (![f.buyGasLimit, f.approveGasLimit, f.sellGasLimit].every(l => u64Ok(l, MIN_GAS_LIMIT))) return { error: `gas limits: at least ${MIN_GAS_LIMIT.toString()}` };
   return {
     scope: {
       venue: LIVE_VENUES[0], strategies: f.strategies, sources: f.sources, adapters: f.adapters,
       maxInputWei: f.maxInputWei, maxSpendWei: f.maxSpendWei, maxAttempts: Number(f.maxAttempts),
       expiresUnixMs: BigInt(nowMs) + BigInt(f.hours) * 3_600_000n, exitOnly: f.exitOnly,
+      risk: {
+        maxBuySlippageBps: Number(f.buySlippageBps), maxExitSlippageBps: Number(f.exitSlippageBps),
+        maxGasPriceWei: BigInt(f.gasPriceWei), maxBuyGasLimit: BigInt(f.buyGasLimit),
+        maxApproveGasLimit: BigInt(f.approveGasLimit), maxSellGasLimit: BigInt(f.sellGasLimit),
+      },
     },
   };
 }

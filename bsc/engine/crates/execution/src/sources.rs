@@ -263,6 +263,11 @@ pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
 /// The grant admits the exits of open positions only (BSC3-058): no BUY.
 pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
+/// BSC3-069: a grant without the execution risk the operator confirmed
+/// (written before it): it admits nothing.
+pub const LIVE_GRANT_RISK_MISSING: &str = "LIVE_GRANT_RISK_MISSING";
+/// BSC3-069: the executor's configuration signs beyond the granted risk.
+pub const LIVE_RISK_OUTSIDE_GRANT: &str = "LIVE_RISK_OUTSIDE_GRANT";
 /// A BUY would leave the grant less than the exits of the open positions
 /// and of its own may still cost (BSC3-057): it is refused, the exits are
 /// not.
@@ -278,7 +283,7 @@ pub const LIVE_LEDGER_UNREADABLE: &str = "LIVE_LEDGER_UNREADABLE";
 /// with the reasons that say it does not hold (plan 28.10.): the LIVE tab's
 /// checklist. The scope conditions (from GRANT_ATTEMPTS on) are judged only
 /// against a grant.
-pub const LIVE_CONDITIONS: [(&str, &[&str]); 19] = [
+pub const LIVE_CONDITIONS: [(&str, &[&str]); 20] = [
     ("ECONOMIC_LIVE", &[ECONOMIC_LIVE_DISABLED]),
     (
         "LIVE_GRANT",
@@ -309,6 +314,7 @@ pub const LIVE_CONDITIONS: [(&str, &[&str]); 19] = [
         &[LIVE_SPEND_UNREADABLE, LIVE_GRANT_SPEND_EXHAUSTED],
     ),
     ("GRANT_BUYS", &[LIVE_GRANT_EXIT_ONLY]),
+    ("GRANT_RISK", &[LIVE_GRANT_RISK_MISSING]),
     ("VENUE_QUALIFIED", &[LIVE_VENUE_UNQUALIFIED]),
     ("SOURCES_QUALIFIED", &[LIVE_SOURCE_UNQUALIFIED]),
     ("ADAPTERS_QUALIFIED", &[LIVE_ADAPTER_UNQUALIFIED]),
@@ -824,6 +830,155 @@ pub struct LiveGrant {
     /// positions alone (BSC3-058): no BUY under it. A full stop (a switch
     /// off), its expiry and a restart still end it.
     pub exit_only: bool,
+    /// The execution risk the operator confirmed (BSC3-069); none in a
+    /// grant written before it: such a grant admits nothing.
+    pub risk: Option<GrantRisk>,
+}
+
+/// The execution risk of a LIVE grant (BSC3-069): the most slippage a BUY
+/// and an exit may accept, and the most gas price and gas limits a BUY, an
+/// approval and a SELL may be signed with. The executor's configuration
+/// arms only within it; the grant's spend still bounds what all of it may
+/// cost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GrantRisk {
+    pub max_buy_slippage_bps: u16,
+    pub max_exit_slippage_bps: u16,
+    pub max_gas_price_wei: u64,
+    pub max_buy_gas_limit: u64,
+    pub max_approve_gas_limit: u64,
+    pub max_sell_gas_limit: u64,
+}
+
+/// The risk of a stored grant: all six bounds, or none (a grant written
+/// before them); a part of them is refused.
+fn grant_risk_of(row: &Record) -> Result<Option<GrantRisk>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::source_modes::live as k;
+    let e = |x: darkbot_bsc_record::RecordError| x.0;
+    let values = [
+        row.opt_u64(k::MAX_BUY_SLIPPAGE_BPS).map_err(e)?,
+        row.opt_u64(k::MAX_EXIT_SLIPPAGE_BPS).map_err(e)?,
+        row.opt_u64(k::MAX_GAS_PRICE_WEI).map_err(e)?,
+        row.opt_u64(k::MAX_BUY_GAS_LIMIT).map_err(e)?,
+        row.opt_u64(k::MAX_APPROVE_GAS_LIMIT).map_err(e)?,
+        row.opt_u64(k::MAX_SELL_GAS_LIMIT).map_err(e)?,
+    ];
+    let bps = |v: u64| u16::try_from(v).map_err(|_| "a granted slippage out of range".to_string());
+    match values {
+        [None, None, None, None, None, None] => Ok(None),
+        [
+            Some(buy),
+            Some(exit),
+            Some(price),
+            Some(gas),
+            Some(approve),
+            Some(sell),
+        ] => Ok(Some(GrantRisk {
+            max_buy_slippage_bps: bps(buy)?,
+            max_exit_slippage_bps: bps(exit)?,
+            max_gas_price_wei: price,
+            max_buy_gas_limit: gas,
+            max_approve_gas_limit: approve,
+            max_sell_gas_limit: sell,
+        })),
+        _ => Err("a LIVE grant names its risk whole or not at all".into()),
+    }
+}
+
+/// What an executor signs with, as [`GrantRisk::admits`] compares it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignedRisk {
+    pub buy_slippage_bps: u16,
+    pub exit_slippage_bps: u16,
+    pub gas_price_wei: u64,
+    pub buy_gas_limit: u64,
+    pub approve_gas_limit: u64,
+    pub sell_gas_limit: u64,
+}
+
+impl GrantRisk {
+    /// The least gas limit of a transaction (a plain transfer's).
+    const MIN_GAS_LIMIT: u64 = 21_000;
+
+    /// Refused unless each bound is one a transaction can be signed within:
+    /// slippage below 100 %, a gas price, gas limits of at least a plain
+    /// transfer.
+    fn validate(&self) -> Result<(), String> {
+        if self.max_buy_slippage_bps >= 10_000 || self.max_exit_slippage_bps >= 10_000 {
+            return Err("a granted slippage is below 10000 bps".into());
+        }
+        if self.max_gas_price_wei == 0 {
+            return Err("the granted gas price must be positive".into());
+        }
+        if [
+            self.max_buy_gas_limit,
+            self.max_approve_gas_limit,
+            self.max_sell_gas_limit,
+        ]
+        .iter()
+        .any(|l| *l < Self::MIN_GAS_LIMIT)
+        {
+            return Err(format!(
+                "a granted gas limit is at least {}",
+                Self::MIN_GAS_LIMIT
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether an executor signing with `signed` stays within this risk;
+    /// otherwise every value beyond it. Under a grant of exits only
+    /// (`exits`, BSC3-058) the BUY's bounds do not apply: no BUY is
+    /// signed, and they never keep the exits of open positions from going.
+    pub fn admits(&self, signed: &SignedRisk, exits: bool) -> Result<(), String> {
+        let bounds = [
+            (
+                "buy_slippage_bps",
+                u64::from(signed.buy_slippage_bps),
+                u64::from(self.max_buy_slippage_bps),
+                true,
+            ),
+            (
+                "exit_slippage_bps",
+                u64::from(signed.exit_slippage_bps),
+                u64::from(self.max_exit_slippage_bps),
+                false,
+            ),
+            (
+                "gas_price_wei",
+                signed.gas_price_wei,
+                self.max_gas_price_wei,
+                false,
+            ),
+            (
+                "buy_gas_limit",
+                signed.buy_gas_limit,
+                self.max_buy_gas_limit,
+                true,
+            ),
+            (
+                "approve_gas_limit",
+                signed.approve_gas_limit,
+                self.max_approve_gas_limit,
+                false,
+            ),
+            (
+                "sell_gas_limit",
+                signed.sell_gas_limit,
+                self.max_sell_gas_limit,
+                false,
+            ),
+        ];
+        let over: Vec<String> = bounds
+            .iter()
+            .filter(|(_, has, most, buy)| !(exits && *buy) && has > most)
+            .map(|(name, has, most, _)| format!("{name} {has} above {most}"))
+            .collect();
+        match over.is_empty() {
+            true => Ok(()),
+            false => Err(format!("{LIVE_RISK_OUTSIDE_GRANT}: {}", over.join("; "))),
+        }
+    }
 }
 
 impl LiveGrant {
@@ -863,6 +1018,9 @@ impl LiveGrant {
         if self.expires_unix_ms == 0 {
             return Err("expires_unix_ms must be set".into());
         }
+        if let Some(r) = &self.risk {
+            r.validate()?;
+        }
         Ok(())
     }
 
@@ -880,7 +1038,17 @@ impl LiveGrant {
             self.max_spend_wei,
             self.max_attempts,
             self.expires_unix_ms
-        ) + if self.exit_only {
+        ) + &self.risk.map_or(String::new(), |r| {
+            format!(
+                "max_buy_slippage_bps={}\nmax_exit_slippage_bps={}\nmax_gas_price_wei={}\nmax_buy_gas_limit={}\nmax_approve_gas_limit={}\nmax_sell_gas_limit={}\n",
+                r.max_buy_slippage_bps,
+                r.max_exit_slippage_bps,
+                r.max_gas_price_wei,
+                r.max_buy_gas_limit,
+                r.max_approve_gas_limit,
+                r.max_sell_gas_limit
+            )
+        }) + if self.exit_only {
             "exit_only=true\n"
         } else {
             ""
@@ -1223,6 +1391,9 @@ impl Generation {
         }
         if grant.is_some_and(|g| g.exit_only) {
             out.push(LIVE_GRANT_EXIT_ONLY);
+        }
+        if grant.is_some_and(|g| g.risk.is_none()) {
+            out.push(LIVE_GRANT_RISK_MISSING);
         }
         if let Some(g) = grant {
             let q = ctx.qualification;
@@ -1569,6 +1740,14 @@ impl Generation {
                             darkbot_bsc_record::Value::B256(g.scope_sha256()),
                         )
                         .set_opt(k::EXIT_ONLY, g.exit_only.then_some(true));
+                    if let Some(r) = &g.risk {
+                        e.set(k::MAX_BUY_SLIPPAGE_BPS, u64::from(r.max_buy_slippage_bps))
+                            .set(k::MAX_EXIT_SLIPPAGE_BPS, u64::from(r.max_exit_slippage_bps))
+                            .set(k::MAX_GAS_PRICE_WEI, r.max_gas_price_wei)
+                            .set(k::MAX_BUY_GAS_LIMIT, r.max_buy_gas_limit)
+                            .set(k::MAX_APPROVE_GAS_LIMIT, r.max_approve_gas_limit)
+                            .set(k::MAX_SELL_GAS_LIMIT, r.max_sell_gas_limit);
+                    }
                     for s in &g.sources {
                         e.push(k::SOURCES, s.name());
                     }
@@ -1844,6 +2023,7 @@ impl Generation {
                             .map_err(|_| "LIVE max_attempts out of range")?,
                         expires_unix_ms: expires,
                         exit_only: row.opt_bool(k::EXIT_ONLY).map_err(e)?.unwrap_or(false),
+                        risk: grant_risk_of(&row)?,
                     };
                     grant.validate()?;
                     if grant.scope_sha256() != digest {
@@ -3442,6 +3622,12 @@ impl Store {
         now_ms: u64,
     ) -> Result<Receipt, String> {
         grant.validate()?;
+        // BSC3-069: a new grant names the execution risk it admits.
+        if grant.risk.is_none() {
+            return Err(format!(
+                "{LIVE_GRANT_RISK_MISSING}: a LIVE grant names its execution risk"
+            ));
+        }
         let digest = grant.scope_sha256();
         if digest != confirmed_sha256 {
             return Err(format!(
@@ -4768,8 +4954,19 @@ pub(crate) mod tests {
             max_attempts: 2,
             expires_unix_ms: expires,
             exit_only: false,
+            risk: Some(TEST_RISK),
         }
     }
+
+    /// A granted risk the tests' executor signs within.
+    pub(crate) const TEST_RISK: GrantRisk = GrantRisk {
+        max_buy_slippage_bps: 1_000,
+        max_exit_slippage_bps: 1_000,
+        max_gas_price_wei: 1_000_000_000_000,
+        max_buy_gas_limit: 10_000_000,
+        max_approve_gas_limit: 1_000_000,
+        max_sell_gas_limit: 5_000_000,
+    };
 
     /// Evidence for exactly that scope.
     pub(crate) fn qualified() -> LiveQualification {
@@ -5427,6 +5624,190 @@ pub(crate) mod tests {
         }
         fs::write(&path, d.encode().unwrap()).unwrap();
         assert!(s.current().unwrap_err().contains("not the owner's"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-069: a grant names the execution risk the operator confirms:
+    /// its scope text carries every bound (another risk, another digest),
+    /// the owner record keeps it, a bound no transaction is signed within
+    /// is refused; a new grant without one is refused, one held without it
+    /// admits nothing, exits neither (GRANT_RISK); every bound an executor
+    /// is beyond is named (a grant of exits only: not the BUY's).
+    #[test]
+    fn a_grant_names_the_execution_risk_it_admits() {
+        let (dir, s, now) = live_ready_granting("live-risk", |now| {
+            grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let g = s.current().unwrap();
+        let grant = g.live.clone().unwrap();
+        assert_eq!(grant.risk, Some(TEST_RISK));
+        assert!(grant.scope_text().ends_with(
+            "max_buy_slippage_bps=1000\nmax_exit_slippage_bps=1000\nmax_gas_price_wei=1000000000000\n\
+             max_buy_gas_limit=10000000\nmax_approve_gas_limit=1000000\nmax_sell_gas_limit=5000000\n"
+        ));
+        let tighter = LiveGrant {
+            risk: Some(GrantRisk {
+                max_buy_slippage_bps: 999,
+                ..TEST_RISK
+            }),
+            ..grant.clone()
+        };
+        assert_ne!(tighter.scope_sha256(), grant.scope_sha256());
+        assert!(s.live_now(&[ComponentId::ExecC3], &q, now).is_ok());
+        for bad in [
+            GrantRisk {
+                max_buy_slippage_bps: 10_000,
+                ..TEST_RISK
+            },
+            GrantRisk {
+                max_exit_slippage_bps: 10_000,
+                ..TEST_RISK
+            },
+            GrantRisk {
+                max_gas_price_wei: 0,
+                ..TEST_RISK
+            },
+            GrantRisk {
+                max_approve_gas_limit: 20_999,
+                ..TEST_RISK
+            },
+        ] {
+            let refused = LiveGrant {
+                risk: Some(bad),
+                ..grant.clone()
+            };
+            assert!(refused.validate().is_err(), "{bad:?}");
+        }
+        // Every bound on its own: at the granted value it admits, one above
+        // it it names that bound; several at once are all named; a grant
+        // of exits only ignores the BUY's two.
+        let signed = SignedRisk {
+            buy_slippage_bps: 1_000,
+            exit_slippage_bps: 1_000,
+            gas_price_wei: 1_000_000_000_000,
+            buy_gas_limit: 10_000_000,
+            approve_gas_limit: 1_000_000,
+            sell_gas_limit: 5_000_000,
+        };
+        assert_eq!(TEST_RISK.admits(&signed, false), Ok(()));
+        let cases: [(&str, SignedRisk, bool); 6] = [
+            (
+                "buy_slippage_bps 1001 above 1000",
+                SignedRisk {
+                    buy_slippage_bps: 1_001,
+                    ..signed
+                },
+                true,
+            ),
+            (
+                "exit_slippage_bps 1001 above 1000",
+                SignedRisk {
+                    exit_slippage_bps: 1_001,
+                    ..signed
+                },
+                false,
+            ),
+            (
+                "gas_price_wei 1000000000001 above 1000000000000",
+                SignedRisk {
+                    gas_price_wei: 1_000_000_000_001,
+                    ..signed
+                },
+                false,
+            ),
+            (
+                "buy_gas_limit 10000001 above 10000000",
+                SignedRisk {
+                    buy_gas_limit: 10_000_001,
+                    ..signed
+                },
+                true,
+            ),
+            (
+                "approve_gas_limit 1000001 above 1000000",
+                SignedRisk {
+                    approve_gas_limit: 1_000_001,
+                    ..signed
+                },
+                false,
+            ),
+            (
+                "sell_gas_limit 5000001 above 5000000",
+                SignedRisk {
+                    sell_gas_limit: 5_000_001,
+                    ..signed
+                },
+                false,
+            ),
+        ];
+        for (named, over, buy_only) in cases {
+            assert_eq!(
+                TEST_RISK.admits(&over, false),
+                Err(format!("{LIVE_RISK_OUTSIDE_GRANT}: {named}"))
+            );
+            assert_eq!(TEST_RISK.admits(&over, true).is_ok(), buy_only, "{named}");
+        }
+        assert_eq!(
+            TEST_RISK.admits(
+                &SignedRisk {
+                    buy_slippage_bps: 1_001,
+                    sell_gas_limit: 5_000_001,
+                    ..signed
+                },
+                false
+            ),
+            Err(format!(
+                "{LIVE_RISK_OUTSIDE_GRANT}: buy_slippage_bps 1001 above 1000; sell_gas_limit 5000001 above 5000000"
+            ))
+        );
+        for bad in [
+            GrantRisk {
+                max_buy_gas_limit: 20_999,
+                ..TEST_RISK
+            },
+            GrantRisk {
+                max_sell_gas_limit: 20_999,
+                ..TEST_RISK
+            },
+        ] {
+            let refused = LiveGrant {
+                risk: Some(bad),
+                ..grant.clone()
+            };
+            assert!(refused.validate().is_err(), "{bad:?}");
+        }
+        // A new grant without the risk is refused, nothing written.
+        let none = LiveGrant {
+            risk: None,
+            ..grant.clone()
+        };
+        let before = s.current().unwrap().generation;
+        assert!(
+            s.grant_live("no-risk", none.clone(), none.scope_sha256(), before, now)
+                .unwrap_err()
+                .starts_with(LIVE_GRANT_RISK_MISSING)
+        );
+        assert_eq!(s.current().unwrap().generation, before);
+        // A grant held without one (written before it): nothing is LIVE,
+        // exits neither.
+        let mut g = s.current().unwrap();
+        g.live.as_mut().unwrap().risk = None;
+        let (_, daily, total) = live_inputs(&dir, now).unwrap();
+        let ctx = LiveContext {
+            boot: Some("boot-1"),
+            now_unix_ms: now,
+            daily: Some(&daily),
+            total: Some(&total),
+            spent_wei: Some(0),
+            qualification: &q,
+        };
+        assert!(
+            g.live_checklist(&ctx)
+                .contains(&("GRANT_RISK", Some(LIVE_GRANT_RISK_MISSING)))
+        );
+        assert!(g.live_blockers(&ctx).contains(&LIVE_GRANT_RISK_MISSING));
+        assert!(g.exit_blockers(&ctx).contains(&LIVE_GRANT_RISK_MISSING));
         fs::remove_dir_all(dir).unwrap();
     }
 

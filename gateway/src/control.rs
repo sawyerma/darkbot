@@ -253,6 +253,19 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
         return None;
     };
     let c = BscLiveGrantCommand::decode(req.params.as_ref()).ok()?;
+    // BSC3-069: the execution risk, every bound one a transaction can be
+    // signed within (the native owner checks again).
+    let risk = c.risk?;
+    let risk_ok = risk.max_buy_slippage_bps < 10_000
+        && risk.max_exit_slippage_bps < 10_000
+        && risk.max_gas_price_wei > 0
+        && [
+            risk.max_buy_gas_limit,
+            risk.max_approve_gas_limit,
+            risk.max_sell_gas_limit,
+        ]
+        .iter()
+        .all(|l| *l >= 21_000);
     let ingress =
         |s: &String| s.starts_with("BSC_INGRESS_") && BSC_SOURCE_IDS.contains(&s.as_str());
     let ok = BSC_VENUE_IDS.contains(&c.venue.as_str())
@@ -270,7 +283,8 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
         && c.scope_sha256.len() == 64
         && c.scope_sha256
             .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && risk_ok;
     ok.then(|| {
         vec![
             "bsc".into(),
@@ -286,6 +300,12 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             c.expires_unix_ms.to_string(),
             // BSC3-058: a separate authorization of the exits alone.
             if c.exit_only { "EXIT_ONLY" } else { "ALL" }.into(),
+            risk.max_buy_slippage_bps.to_string(),
+            risk.max_exit_slippage_bps.to_string(),
+            risk.max_gas_price_wei.to_string(),
+            risk.max_buy_gas_limit.to_string(),
+            risk.max_approve_gas_limit.to_string(),
+            risk.max_sell_gas_limit.to_string(),
             c.scope_sha256,
             generation.to_string(),
         ]
@@ -1164,7 +1184,7 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, 1..=10 attempts, expiry, the confirmed scope SHA-256) and the config_version generation",
+                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, 1..=10 attempts, expiry, the execution risk, the confirmed scope SHA-256) and the config_version generation",
                     );
                 }
             }
@@ -2820,7 +2840,7 @@ mod tests {
     /// most ten) are owner requests; anything else never reaches the owner.
     #[tokio::test]
     async fn the_live_grant_revoke_and_total_limit_reach_the_native_owner() {
-        use crate::proto::bsc::v1::BscLiveGrantCommand;
+        use crate::proto::bsc::v1::{BscLiveGrantCommand, LiveGrantRisk};
         use crate::proto::expected_version::Version::{ConfigVersion, WalletPolicyVersion};
         let request =
             |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
@@ -2843,6 +2863,14 @@ mod tests {
             expires_unix_ms: 1_793_000_000_000,
             scope_sha256: "ab".repeat(32),
             exit_only: false,
+            risk: Some(LiveGrantRisk {
+                max_buy_slippage_bps: 300,
+                max_exit_slippage_bps: 500,
+                max_gas_price_wei: 1_000_000_000,
+                max_buy_gas_limit: 3_000_000,
+                max_approve_gas_limit: 100_000,
+                max_sell_gas_limit: 1_500_000,
+            }),
         };
         let grant = |c: &BscLiveGrantCommand, resource: &str, v| {
             let mut r = request(BSC_LIVE_GRANT, resource, Some(v));
@@ -2864,6 +2892,12 @@ mod tests {
                 "2",
                 "1793000000000",
                 "ALL",
+                "300",
+                "500",
+                "1000000000",
+                "3000000",
+                "100000",
+                "1500000",
                 &"ab".repeat(32),
                 "9",
             ]
@@ -2898,6 +2932,53 @@ mod tests {
             },
             BscLiveGrantCommand {
                 scope_sha256: "AB".repeat(32),
+                ..scope.clone()
+            },
+            // BSC3-069: no risk, or a bound no transaction is signed within.
+            BscLiveGrantCommand {
+                risk: None,
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_buy_slippage_bps: 10_000,
+                    ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_exit_slippage_bps: 10_000,
+                    ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_gas_price_wei: 0,
+                    ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_buy_gas_limit: 20_999,
+                    ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_approve_gas_limit: 20_999,
+                    ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                risk: Some(LiveGrantRisk {
+                    max_sell_gas_limit: 20_999,
+                    ..scope.risk.unwrap()
+                }),
                 ..scope.clone()
             },
         ] {

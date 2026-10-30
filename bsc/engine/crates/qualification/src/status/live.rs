@@ -240,6 +240,14 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
             request_id: by.request_id.clone(),
             set_generation: by.generation,
             exit_only: grant.exit_only,
+            risk: grant.risk.map(|r| LiveGrantRisk {
+                max_buy_slippage_bps: u32::from(r.max_buy_slippage_bps),
+                max_exit_slippage_bps: u32::from(r.max_exit_slippage_bps),
+                max_gas_price_wei: r.max_gas_price_wei,
+                max_buy_gas_limit: r.max_buy_gas_limit,
+                max_approve_gas_limit: r.max_approve_gas_limit,
+                max_sell_gas_limit: r.max_sell_gas_limit,
+            }),
         });
         let mut scope = vec![Entity::Runtime, ComponentId::StateC2.into()];
         if grant.strategies.c3() {

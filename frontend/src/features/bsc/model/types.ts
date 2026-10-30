@@ -22,7 +22,9 @@ export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contr
 export interface BscMonitoringView {state:string;evidence?:Evidence;results:PublicField[];records:NativeRecordView[]}
 /** Plan 28.10.: the LIVE tab, as the native owner, runtime and ledger hold it; never a permission. */
 export interface LivePreconditionView {id:string;met:boolean;reason:string}
-export interface LiveGrantView {venue:string;strategies:string;sources:string[];adapters:string[];maxInputWei:string;maxSpendWei:string;maxAttempts:number;expiresUnixMs:bigint;scopeSha256:string;scopeText:string;requestId:string;setGeneration:bigint;exitOnly:boolean}
+export interface LiveGrantView {venue:string;strategies:string;sources:string[];adapters:string[];maxInputWei:string;maxSpendWei:string;maxAttempts:number;expiresUnixMs:bigint;scopeSha256:string;scopeText:string;requestId:string;setGeneration:bigint;exitOnly:boolean;risk?:LiveGrantRiskView}
+/** BSC3-069: the execution risk a grant names; absent: the grant admits nothing. */
+export interface LiveGrantRiskView {maxBuySlippageBps:number;maxExitSlippageBps:number;maxGasPriceWei:bigint;maxBuyGasLimit:bigint;maxApproveGasLimit:bigint;maxSellGasLimit:bigint}
 export interface LivePositionView {lot:string;token:string;component:string;state:string;tokens:string;inputWei:string;proceedsWei:string;gasWei:string;pnlWei?:string}
 export interface LiveTransactionView {txHash:string;intent:string;token:string;nonce:bigint;state:string;blockNumber?:bigint}
 export interface BscLiveView {gate:string;blockers:string[];preconditions:LivePreconditionView[];grant?:LiveGrantView;generation:bigint;runtimeMode?:ControlSwitchView;economicLive?:ControlSwitchView;daily?:BuyAttemptLimitView;totalLimit:bigint;totalUsed:bigint;grantAttemptsUsed:bigint;spentWei:string;qualification:string;qualificationDetail:string;pathState:string;pathReason:string;route:string;buyer:string;buyerBalanceWei?:string;released:bigint;unknown:bigint;lastRefusal:string;positions:LivePositionView[];transactions:LiveTransactionView[];realizedPnlWei:string;gasWei:string;warnings:string[];scope:ControlSwitchView[]}

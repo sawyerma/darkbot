@@ -383,6 +383,19 @@ fn activate(state: &Path, skip: &[&str], expires: u64) {
                 "2",
                 "--expires-unix-ms",
                 &expires,
+                // BSC3-069: the execution risk, exactly the executor's.
+                "--max-buy-slippage-bps",
+                "100",
+                "--max-exit-slippage-bps",
+                "100",
+                "--max-gas-price-wei",
+                "50000000",
+                "--max-buy-gas-limit",
+                "3000000",
+                "--max-approve-gas-limit",
+                "100000",
+                "--max-sell-gas-limit",
+                "1500000",
             ];
             let (code, out) = cli(&[&["live", "scope"][..], &scope].concat());
             assert_eq!(code, 0, "{out}");

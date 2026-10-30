@@ -19,6 +19,7 @@
     - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
     - [JobStatus](#darkbot-bsc-v1-JobStatus)
     - [LiveGrant](#darkbot-bsc-v1-LiveGrant)
+    - [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk)
     - [LivePosition](#darkbot-bsc-v1-LivePosition)
     - [LivePrecondition](#darkbot-bsc-v1-LivePrecondition)
     - [LiveTransaction](#darkbot-bsc-v1-LiveTransaction)
@@ -241,6 +242,7 @@ The parameters of `bsc.live.grant`: the scope the operator confirmed and its dig
 | expires_unix_ms | [uint64](#uint64) |  | Expiry, unix milliseconds. |
 | scope_sha256 | [string](#string) |  | SHA-256 of the canonical scope text the operator was shown, lowercase hex. |
 | exit_only | [bool](#bool) |  | A separate authorization of the exits of open positions only, no BUY (BSC3-058). |
+| risk | [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk) |  | The execution risk the operator grants (BSC3-069), every bound; required. |
 
 
 
@@ -551,6 +553,27 @@ The operator&#39;s LIVE grant of one scope as the native owner holds it.
 | request_id | [string](#string) |  | The request that wrote the grant. |
 | set_generation | [uint64](#uint64) |  | The owner generation that request wrote. |
 | exit_only | [bool](#bool) |  | The grant admits the exits of open positions only, no BUY (BSC3-058). |
+| risk | [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk) |  | The execution risk the operator granted (BSC3-069); absent in a grant written before it, which admits nothing. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveGrantRisk"></a>
+
+### LiveGrantRisk
+The execution risk of a LIVE grant (BSC3-069): the executor arms only within it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| max_buy_slippage_bps | [uint32](#uint32) |  | Most slippage a BUY may accept, basis points (below 10000). |
+| max_exit_slippage_bps | [uint32](#uint32) |  | Most slippage an exit (SELL) may accept, basis points (below 10000). |
+| max_gas_price_wei | [uint64](#uint64) |  | Most gas price a transaction may be signed with, wei. |
+| max_buy_gas_limit | [uint64](#uint64) |  | Most gas limit of a BUY. |
+| max_approve_gas_limit | [uint64](#uint64) |  | Most gas limit of an approval. |
+| max_sell_gas_limit | [uint64](#uint64) |  | Most gas limit of a SELL. |
 
 
 
@@ -589,7 +612,7 @@ them; LIVE is effective only while every one holds.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  | Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE, BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, VENUE_QUALIFIED, SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION. |
+| id | [string](#string) |  | Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE, BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, GRANT_RISK, VENUE_QUALIFIED, SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION. |
 | met | [bool](#bool) |  | Whether the condition holds now. |
 | reason | [string](#string) |  | The owner&#39;s reason when it does not (the gate&#39;s own block reason). |
 

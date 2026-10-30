@@ -38,6 +38,8 @@ export function LivePanel() {
     <PlacedSection panel="live" section={2} records={records}>
       {l?.grant ? <>
         <Line label="Grant" value={`${l.grant.strategies} · ${l.grant.venue}${l.grant.exitOnly ? " · EXIT-ONLY" : ""}`} hint={`request ${l.grant.requestId} @ generation ${l.grant.setGeneration.toString()}`} />
+        <Line label="Granted risk" value={l.grant.risk ? `slippage BUY ≤ ${l.grant.risk.maxBuySlippageBps} bps · exit ≤ ${l.grant.risk.maxExitSlippageBps} bps · gas price ≤ ${l.grant.risk.maxGasPriceWei.toString()} wei` : "none (the grant admits nothing)"}
+          hint={l.grant.risk ? `gas limits BUY ≤ ${l.grant.risk.maxBuyGasLimit.toString()} · approval ≤ ${l.grant.risk.maxApproveGasLimit.toString()} · SELL ≤ ${l.grant.risk.maxSellGasLimit.toString()}` : "BSC3-069"} />
         <Line label="Grant expiry" value={new Date(Number(l.grant.expiresUnixMs)).toISOString()} />
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>

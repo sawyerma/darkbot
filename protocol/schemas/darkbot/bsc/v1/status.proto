@@ -325,7 +325,7 @@ message BscWalletsState {
 // them; LIVE is effective only while every one holds.
 message LivePrecondition {
   // Stable condition ID, e.g. ECONOMIC_LIVE, LIVE_GRANT, WALLET_BUYER, ECON_SEND, RUNTIME_LIVE,
-  // BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, VENUE_QUALIFIED,
+  // BUY_LIMIT_DAILY, BUY_LIMIT_TOTAL, GRANT_ATTEMPTS, GRANT_SPEND, GRANT_BUYS, GRANT_RISK, VENUE_QUALIFIED,
   // SOURCES_QUALIFIED, ADAPTERS_QUALIFIED, ACQUISITION_PROVEN or RISK_DECISION.
   string id = 1;
   // Whether the condition holds now.
@@ -361,6 +361,24 @@ message LiveGrant {
   uint64 set_generation = 12;
   // The grant admits the exits of open positions only, no BUY (BSC3-058).
   bool exit_only = 13;
+  // The execution risk the operator granted (BSC3-069); absent in a grant written before it,
+  // which admits nothing.
+  LiveGrantRisk risk = 14;
+}
+// The execution risk of a LIVE grant (BSC3-069): the executor arms only within it.
+message LiveGrantRisk {
+  // Most slippage a BUY may accept, basis points (below 10000).
+  uint32 max_buy_slippage_bps = 1;
+  // Most slippage an exit (SELL) may accept, basis points (below 10000).
+  uint32 max_exit_slippage_bps = 2;
+  // Most gas price a transaction may be signed with, wei.
+  uint64 max_gas_price_wei = 3;
+  // Most gas limit of a BUY.
+  uint64 max_buy_gas_limit = 4;
+  // Most gas limit of an approval.
+  uint64 max_approve_gas_limit = 5;
+  // Most gas limit of a SELL.
+  uint64 max_sell_gas_limit = 6;
 }
 // One LIVE position of the ledger: its BUY, exit and native result.
 message LivePosition {
@@ -482,4 +500,6 @@ message BscLiveGrantCommand {
   string scope_sha256 = 9;
   // A separate authorization of the exits of open positions only, no BUY (BSC3-058).
   bool exit_only = 10;
+  // The execution risk the operator grants (BSC3-069), every bound; required.
+  LiveGrantRisk risk = 11;
 }

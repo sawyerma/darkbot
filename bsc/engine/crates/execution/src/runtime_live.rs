@@ -234,6 +234,29 @@ fn token_from(path: &Path) -> Result<AuthorizationToken, String> {
     AuthorizationToken::new(text.trim().to_string()).map_err(|e| format!("{e:?}"))
 }
 
+/// Why the executor configured as `x` may not sign under `grant`
+/// (BSC3-069): beyond its execution risk, or a grant without one.
+fn risk_refusal(
+    grant: &crate::sources::LiveGrant,
+    x: &crate::paper_exec::ExecConfig,
+) -> Option<String> {
+    let Some(risk) = grant.risk else {
+        return Some(crate::sources::LIVE_GRANT_RISK_MISSING.into());
+    };
+    risk.admits(
+        &crate::sources::SignedRisk {
+            buy_slippage_bps: x.slippage_bps,
+            exit_slippage_bps: x.exit_slippage_bps,
+            gas_price_wei: x.gas_price_wei,
+            buy_gas_limit: x.gas_limit,
+            approve_gas_limit: x.approve_gas_limit,
+            sell_gas_limit: x.sell_gas_limit,
+        },
+        grant.exit_only,
+    )
+    .err()
+}
+
 fn wall_ms() -> u64 {
     // Unreadable: every grant counts as expired (BSC3-015: counted).
     crate::runtime::wall_or_expired(darkbot_bsc_record::observed_now())
@@ -1226,6 +1249,12 @@ impl LiveRuntime {
             return;
         }
         if matches!(self.phase, Phase::ConnectFailed(_)) && !self.retry_due() {
+            return;
+        }
+        // BSC3-069: the executor signs within the execution risk the grant
+        // names (a grant without it is not clear at all).
+        if let Some(why) = risk_refusal(live_now.grant(), &self.exec.exec) {
+            self.phase = Phase::Blocked(why);
             return;
         }
         let refused: Vec<[u8; 20]> = self.paper_sender.into_iter().collect();
@@ -4172,7 +4201,7 @@ mod tests {
     #[test]
     fn an_exit_only_grant_arms_for_the_exits_of_open_positions_only() {
         use crate::paper_exec::IntentKind;
-        let r = Rig::new("live-exit-only", LiveStrategies::StrategyC);
+        let r = Rig::new("live-rt-exit-only", LiveStrategies::StrategyC);
         let sc = Sc::new(r.buyer);
         let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
         let grant = LiveGrant {
@@ -5088,6 +5117,155 @@ mod tests {
         assert!(fresh.is_some(), "{:?}", reason(&x));
         assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
         assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-069: each bound of the granted risk one below what the
+    /// executor signs with (its exit slippage apart from its BUY's) is the
+    /// one named; a grant of exits only is not refused for the BUY's
+    /// bounds, for an exit's it is.
+    #[test]
+    fn every_granted_bound_is_held_against_what_the_executor_signs() {
+        use crate::sources::{GrantRisk, tests::TEST_RISK};
+        let mut x = setup(
+            std::path::PathBuf::from("unused.key"),
+            Duration::from_secs(1),
+        )
+        .exec;
+        x.exit_slippage_bps = 300;
+        let grant = |risk: GrantRisk, exit_only: bool| LiveGrant {
+            risk: Some(risk),
+            exit_only,
+            ..grant_of(NOW + 3_600_000, LiveStrategies::C3)
+        };
+        assert_eq!(risk_refusal(&grant(TEST_RISK, false), &x), None);
+        let below: [(GrantRisk, &str); 6] = [
+            (
+                GrantRisk {
+                    max_buy_slippage_bps: 99,
+                    ..TEST_RISK
+                },
+                "buy_slippage_bps 100 above 99",
+            ),
+            (
+                GrantRisk {
+                    max_exit_slippage_bps: 299,
+                    ..TEST_RISK
+                },
+                "exit_slippage_bps 300 above 299",
+            ),
+            (
+                GrantRisk {
+                    max_gas_price_wei: 49_999_999,
+                    ..TEST_RISK
+                },
+                "gas_price_wei 50000000 above 49999999",
+            ),
+            (
+                GrantRisk {
+                    max_buy_gas_limit: 2_999_999,
+                    ..TEST_RISK
+                },
+                "buy_gas_limit 3000000 above 2999999",
+            ),
+            (
+                GrantRisk {
+                    max_approve_gas_limit: 99_999,
+                    ..TEST_RISK
+                },
+                "approve_gas_limit 100000 above 99999",
+            ),
+            (
+                GrantRisk {
+                    max_sell_gas_limit: 1_499_999,
+                    ..TEST_RISK
+                },
+                "sell_gas_limit 1500000 above 1499999",
+            ),
+        ];
+        for (risk, named) in below {
+            assert_eq!(
+                risk_refusal(&grant(risk, false), &x),
+                Some(format!(
+                    "{}: {named}",
+                    crate::sources::LIVE_RISK_OUTSIDE_GRANT
+                ))
+            );
+        }
+        let no_buys = GrantRisk {
+            max_buy_slippage_bps: 0,
+            max_buy_gas_limit: 21_000,
+            ..TEST_RISK
+        };
+        assert_eq!(risk_refusal(&grant(no_buys, true), &x), None);
+        assert!(risk_refusal(&grant(no_buys, false), &x).is_some());
+        assert!(
+            risk_refusal(
+                &grant(
+                    GrantRisk {
+                        max_exit_slippage_bps: 299,
+                        ..no_buys
+                    },
+                    true
+                ),
+                &x
+            )
+            .is_some_and(|why| why.ends_with("exit_slippage_bps 300 above 299"))
+        );
+        let none = LiveGrant {
+            risk: None,
+            ..grant(TEST_RISK, false)
+        };
+        assert_eq!(
+            risk_refusal(&none, &x),
+            Some(crate::sources::LIVE_GRANT_RISK_MISSING.into())
+        );
+    }
+
+    /// BSC3-069: an executor configured beyond the execution risk the
+    /// grant names does not arm (its key is not loaded) and says which
+    /// bound; under a grant whose risk admits it, it arms.
+    #[test]
+    fn an_executor_beyond_the_granted_risk_does_not_arm() {
+        use crate::sources::{GrantRisk, tests::TEST_RISK};
+        let r = Rig::new("live-risk-arm", LiveStrategies::C3);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let grant = |risk: GrantRisk| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            risk: Some(risk),
+            ..grant_of(NOW + 3_600_000, LiveStrategies::C3)
+        };
+        let tight = grant(GrantRisk {
+            max_buy_slippage_bps: 50,
+            ..TEST_RISK
+        });
+        let g = s.current().unwrap().generation;
+        let receipt = s
+            .grant_live("tight", tight.clone(), tight.scope_sha256(), g, NOW)
+            .unwrap();
+        assert!(receipt.applied(), "{}", receipt.line());
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        let (state, why) = reason(&x);
+        assert!(!x.armed());
+        assert_eq!(state, "BLOCKED", "{why:?}");
+        assert_eq!(
+            why.as_deref(),
+            Some("LIVE_RISK_OUTSIDE_GRANT: buy_slippage_bps 100 above 50")
+        );
+        let fits = grant(TEST_RISK);
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.grant_live("fits", fits.clone(), fits.scope_sha256(), g, NOW)
+                .unwrap()
+                .applied()
+        );
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
         x.shutdown();
         r.clean();
     }

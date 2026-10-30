@@ -26,7 +26,17 @@ function Confirm({ open, title, children, onConfirm, onClose, testId }: { open: 
 }
 
 const GRANT = "bsc-live-grant";
-const EMPTY: GrantForm = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false };
+const EMPTY: GrantForm = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false,
+  buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "" };
+/** BSC3-069: the execution risk's inputs, each a bound the executor must stay within. */
+const RISK_INPUTS: { key: "buySlippageBps" | "exitSlippageBps" | "gasPriceWei" | "buyGasLimit" | "approveGasLimit" | "sellGasLimit"; label: string; test: string }[] = [
+  { key: "buySlippageBps", label: "Max BUY slippage (bps)", test: "buy-slippage" },
+  { key: "exitSlippageBps", label: "Max exit slippage (bps)", test: "exit-slippage" },
+  { key: "gasPriceWei", label: "Max gas price (wei)", test: "gas-price" },
+  { key: "buyGasLimit", label: "Max BUY gas limit", test: "buy-gas" },
+  { key: "approveGasLimit", label: "Max approval gas limit", test: "approve-gas" },
+  { key: "sellGasLimit", label: "Max SELL gas limit", test: "sell-gas" },
+];
 
 /** The grant of one scope: the form, then the exact canonical scope and its SHA-256 to confirm. */
 export function LiveGrantActions({ generation, available }: { generation: bigint; available: boolean }) {
@@ -52,6 +62,7 @@ export function LiveGrantActions({ generation, available }: { generation: bigint
       <input inputMode="numeric" aria-label="Max spend (wei)" placeholder="max spend wei" value={form.maxSpendWei} onChange={e => setForm({ ...form, maxSpendWei: e.target.value.trim() })} data-testid={`${GRANT}-max-spend`} />
       <input inputMode="numeric" aria-label="BUY attempts" placeholder="attempts 1..10" value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />
       <input inputMode="numeric" aria-label="Valid for hours" placeholder="hours" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value.trim() })} data-testid={`${GRANT}-hours`} />
+      {RISK_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
       <label title="BSC3-058: only the exits of open positions, no BUY"><input type="checkbox" checked={form.exitOnly} onChange={() => setForm({ ...form, exitOnly: !form.exitOnly })} data-testid={`${GRANT}-exit-only`} />EXIT-ONLY</label>
       <button className="g-secondary" disabled={!available || busy || "error" in checked} title={"error" in checked ? checked.error : `Grant at generation ${generation.toString()}`}
         data-testid={`${GRANT}-review`} onClick={() => void review()}>Grant LIVE…</button>

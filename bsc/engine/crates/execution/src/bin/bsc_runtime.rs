@@ -129,6 +129,21 @@ fn grant_args(rest: &[String]) -> Result<darkbot_bsc_execution::sources::LiveGra
         expires_unix_ms: u64::try_from(number("--expires-unix-ms")?)
             .map_err(|_| "--expires-unix-ms out of range")?,
         exit_only: rest.iter().any(|a| a == "--exit-only"),
+        // BSC3-069: the execution risk the operator grants, every bound.
+        risk: Some(darkbot_bsc_execution::sources::GrantRisk {
+            max_buy_slippage_bps: u16::try_from(number("--max-buy-slippage-bps")?)
+                .map_err(|_| "--max-buy-slippage-bps out of range")?,
+            max_exit_slippage_bps: u16::try_from(number("--max-exit-slippage-bps")?)
+                .map_err(|_| "--max-exit-slippage-bps out of range")?,
+            max_gas_price_wei: u64::try_from(number("--max-gas-price-wei")?)
+                .map_err(|_| "--max-gas-price-wei out of range")?,
+            max_buy_gas_limit: u64::try_from(number("--max-buy-gas-limit")?)
+                .map_err(|_| "--max-buy-gas-limit out of range")?,
+            max_approve_gas_limit: u64::try_from(number("--max-approve-gas-limit")?)
+                .map_err(|_| "--max-approve-gas-limit out of range")?,
+            max_sell_gas_limit: u64::try_from(number("--max-sell-gas-limit")?)
+                .map_err(|_| "--max-sell-gas-limit out of range")?,
+        }),
     })
 }
 
@@ -772,7 +787,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
