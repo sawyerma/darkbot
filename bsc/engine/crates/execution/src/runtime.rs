@@ -69,7 +69,7 @@ pub mod live;
 
 use exec::{ExecRuntime, ExecSetup};
 use live::LiveRuntime;
-use state::{StateConfig, StateOwner};
+use state::{CheckpointWriter, StateConfig, StateOwner};
 
 /// Strategy C's configuration (`BSC_STRATEGY_C_*`): the engine's policy
 /// and the frozen gas evidence files (repository-relative) its costs use.
@@ -1490,6 +1490,33 @@ fn spawn_adapter(
     Ok(Adapter { stop, handle })
 }
 
+/// One pass of the C2 checkpoint (BSC3-039): the writes the writer
+/// finished are counted; when one is `due` the window is handed to the
+/// writer, never written on this loop, except at the stop: then here,
+/// after the writer's writes and never beside one, durable before the
+/// process ends.
+fn checkpoint_pass(
+    o: &mut StateOwner,
+    writer: &CheckpointWriter,
+    due: bool,
+    stopping: bool,
+    replace: impl Fn(&Path, &[u8]) -> Result<(), String>,
+) {
+    for written in writer.finished() {
+        o.checkpoint_written(written);
+    }
+    match (due, stopping) {
+        (true, true) => {
+            o.checkpoint(|p, b| writer.write_now(p, b, &replace));
+            for written in writer.finished() {
+                o.checkpoint_written(written);
+            }
+        }
+        (true, false) => writer.submit(o.checkpoint_bytes()),
+        (false, _) => {}
+    }
+}
+
 /// Writes `bytes` to `path` atomically (temp file in the same directory).
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     replace_with(path, bytes, true)
@@ -1528,7 +1555,18 @@ fn replace_with(path: &Path, bytes: &[u8], flush: bool) -> Result<(), String> {
             }
             Ok(())
         })
-        .and_then(|()| fs::rename(&tmp, path));
+        .and_then(|()| fs::rename(&tmp, path))
+        .and_then(|()| {
+            // BSC3-039 review: the rename itself durable (a stop followed
+            // by a power loss kept the previous file): the directory
+            // handed to the drive and the medium flushed.
+            if flush {
+                let dir = fs::File::open(path.parent().unwrap_or(Path::new(".")))?;
+                darkbot_bsc_journal::durable::handed(&dir)?;
+                darkbot_bsc_journal::durable::flush(&dir)?;
+            }
+            Ok(())
+        });
     written.map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -1925,6 +1963,11 @@ pub fn run(
         .as_ref()
         .map(|c| Canonical::new(c, started_ms));
     let checkpoint_path = dir.join("c2-checkpoint.bin");
+    // BSC3-039: the periodic checkpoint is written off this loop.
+    let checkpoints = canonical_config
+        .as_ref()
+        .map(|_| CheckpointWriter::spawn(checkpoint_path.clone(), Arc::new(replace)))
+        .transpose()?;
     let c2_wanted =
         |g: &Generation| g.component(ComponentId::StateC2).effective == Effective::Shadow;
     // The C2 owner restores its window at start; the follower resumes after it.
@@ -2054,8 +2097,17 @@ pub fn run(
                     }
                     c.strategy_config = strategy_on.then(|| config.strategy.engine.clone());
                 }
-                if let Some(c) = &canonical_config {
-                    StateOwner::switch(&mut owner, c2_on, &c.state, &checkpoint_path, replace)?;
+                if let (Some(c), Some(w)) = (&canonical_config, &checkpoints) {
+                    // Switched off, the last window is written here, after
+                    // the writer's writes (counted first) and never beside one.
+                    if !c2_on && let Some(o) = owner.as_mut() {
+                        for written in w.idle() {
+                            o.checkpoint_written(written);
+                        }
+                    }
+                    StateOwner::switch(&mut owner, c2_on, &c.state, &checkpoint_path, |p, b| {
+                        w.write_now(p, b, replace)
+                    })?;
                 }
                 if let Some(x) = exec.as_mut() {
                     let wanted = flap_admitted
@@ -2409,17 +2461,18 @@ pub fn run(
             )?;
             replace_volatile(&status_path, &bytes)?;
         }
-        if let Some(o) = owner.as_mut()
-            && (stopping || Instant::now() >= next_checkpoint)
-        {
+        if let (Some(o), Some(w)) = (owner.as_mut(), &checkpoints) {
+            let due = stopping || Instant::now() >= next_checkpoint;
+            if due {
+                next_checkpoint = Instant::now()
+                    + Duration::from_millis(
+                        canonical_config
+                            .as_ref()
+                            .map_or(0, |c| c.state.checkpoint_ms),
+                    );
+            }
             // At stop after the follower's last events (processed above).
-            next_checkpoint = Instant::now()
-                + Duration::from_millis(
-                    canonical_config
-                        .as_ref()
-                        .map_or(0, |c| c.state.checkpoint_ms),
-                );
-            o.checkpoint(replace);
+            checkpoint_pass(o, w, due, stopping, replace);
         }
         // BSC3-016 review L5: a finished census reaches the status at once.
         if let Some(done) = census_job.take_if(|j| j.is_finished()) {
@@ -3323,6 +3376,75 @@ mod tests {
         fs::remove_dir_all(&base).unwrap();
     }
 
+    /// BSC3-039: a due checkpoint is handed to the writer, the loop never
+    /// waits for its write (it was written here, 10–34 ms measured for
+    /// 479 KB, every 30 s); the next pass counts it; at the stop the loop
+    /// writes the last window itself, after the writer's and never beside
+    /// it.
+    #[test]
+    fn the_loop_hands_its_checkpoint_over_and_writes_only_the_last() {
+        use darkbot_bsc_trading::chain_state::engine::StateLimits;
+        let dir = std::env::temp_dir().join(format!("bsc-runtime-ckpt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c2-checkpoint.bin");
+        let config = StateConfig {
+            limits: StateLimits {
+                max_txs: 1_024,
+                max_candidates_per_nonce: 4,
+                max_watched_senders: 4,
+                reorg_window: 8,
+                finality_depth: 2,
+            },
+            watched: Vec::new(),
+            checkpoint_ms: 1_000,
+            nonce_fact_blocks: 1,
+        };
+        let mut o = StateOwner::fresh(&config, path.clone()).unwrap();
+        static WRITING: AtomicBool = AtomicBool::new(false);
+        static OVERLAPPED: AtomicBool = AtomicBool::new(false);
+        fn slow(path: &Path, bytes: &[u8]) -> Result<(), String> {
+            if WRITING.swap(true, Ordering::SeqCst) {
+                OVERLAPPED.store(true, Ordering::SeqCst);
+            }
+            thread::sleep(Duration::from_millis(600));
+            let written = replace(path, bytes);
+            WRITING.store(false, Ordering::SeqCst);
+            written
+        }
+        let writer = CheckpointWriter::spawn(path.clone(), Arc::new(slow)).unwrap();
+        let t = Instant::now();
+        checkpoint_pass(&mut o, &writer, true, false, slow);
+        // A liveness margin, not a timing claim: the write takes 600 ms.
+        assert!(
+            t.elapsed() < Duration::from_millis(400),
+            "{:?}",
+            t.elapsed()
+        );
+        assert_eq!(o.checkpoint_counts(), (0, 0));
+        // Passes not due hand nothing over; one of them counts the write.
+        let counted = Instant::now();
+        while o.checkpoint_counts().0 == 0 {
+            assert!(
+                counted.elapsed() < Duration::from_secs(120),
+                "never counted"
+            );
+            checkpoint_pass(&mut o, &writer, false, false, slow);
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(o.checkpoint_counts(), (1, 0));
+        assert_eq!(fs::read(&path).unwrap(), o.checkpoint_bytes());
+        // The stop: waits for the writer's write, then writes the last
+        // window itself.
+        checkpoint_pass(&mut o, &writer, true, false, slow);
+        checkpoint_pass(&mut o, &writer, true, true, slow);
+        assert_eq!(o.checkpoint_counts(), (3, 0));
+        assert!(!OVERLAPPED.load(Ordering::SeqCst), "two writes at once");
+        assert!(!dir.join("c2-checkpoint.tmp").exists());
+        drop(writer);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// BSC3-039: a durable replacement is flushed to the device, the
     /// status's is not; both publish the whole new content.
     #[test]
@@ -3331,12 +3453,17 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("record.dbrec");
+        use darkbot_bsc_journal::durable::{Op, hooks};
         let before = FLUSHED.with(std::cell::Cell::get);
+        hooks::record();
         replace_volatile(&path, b"status").unwrap();
         assert_eq!(FLUSHED.with(std::cell::Cell::get), before);
+        assert_eq!(hooks::take(), []);
         assert_eq!(fs::read(&path).unwrap(), b"status");
         replace(&path, b"census").unwrap();
         assert_eq!(FLUSHED.with(std::cell::Cell::get), before + 1);
+        // Its rename too, on the medium (BSC3-039 review).
+        assert_eq!(hooks::take(), [Op::Fsync, Op::FullFlush]);
         assert_eq!(fs::read(&path).unwrap(), b"census");
         assert!(!dir.join("record.tmp").exists());
         fs::remove_dir_all(&dir).unwrap();

@@ -28,7 +28,11 @@ use darkbot_bsc_trading::chain_state::engine::{ChainState, Conflict, StateLimits
 use darkbot_bsc_trading::chain_state::input::{
     CanonicalBlock, CanonicalTx, ChainInput, FirstSeen, PendingObservation,
 };
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::thread::{self, JoinHandle};
 
 /// The C2 bounds and the watched senders (`BSC_STATE_*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -370,7 +374,25 @@ impl StateOwner {
     /// Writes the retained window atomically; a failure is counted and
     /// logged, the owner goes on.
     pub fn checkpoint(&mut self, replace: impl Fn(&Path, &[u8]) -> Result<(), String>) {
-        match replace(&self.path, &self.state.encode_checkpoint()) {
+        let written = replace(&self.path, &self.checkpoint_bytes());
+        self.checkpoint_written(written);
+    }
+
+    /// The retained window as a checkpoint: an immutable copy another
+    /// thread may write ([`CheckpointWriter`]).
+    pub fn checkpoint_bytes(&self) -> Vec<u8> {
+        self.state.encode_checkpoint()
+    }
+
+    /// Tests: the checkpoint writes and failures counted.
+    #[cfg(test)]
+    pub(crate) fn checkpoint_counts(&self) -> (u64, u64) {
+        (self.checkpoint_writes, self.checkpoint_errors)
+    }
+
+    /// Counts one checkpoint write; a failure is logged, the owner goes on.
+    pub fn checkpoint_written(&mut self, written: Result<(), String>) {
+        match written {
             Ok(()) => self.checkpoint_writes += 1,
             Err(e) => {
                 self.checkpoint_errors += 1;
@@ -463,6 +485,177 @@ fn conflict_kind(c: &Conflict) -> &'static str {
         Conflict::ReorgMismatch => "REORG_MISMATCH",
         Conflict::GapMismatch { .. } => "GAP_MISMATCH",
         Conflict::NonceDiscontinuity { .. } => "NONCE_DISCONTINUITY",
+    }
+}
+
+/// How a checkpoint reaches its file (the runtime's durable `replace`).
+pub type Replace = Arc<dyn Fn(&Path, &[u8]) -> Result<(), String> + Send + Sync>;
+
+/// One finished write: its window's generation and how it went.
+type Written = (u64, Result<(), String>);
+
+/// BSC3-039: the C2 checkpoint written off the decision loop. The loop
+/// encodes the retained window (an immutable copy, 1.3 ms for 1.25 MB
+/// measured) and hands it over; one writer thread replaces the file
+/// durably (10–34 ms measured for 479 KB). At most one write runs and one
+/// waits: a newer window replaces a waiting older one, so the memory is
+/// bounded and the newest wins. Every finished write returns with its
+/// window's generation to the loop, which counts it on the owner
+/// ([`CheckpointWriter::finished`]). The file has one writer at a time:
+/// the loop writes the last window (the component switched off, the stop)
+/// through [`CheckpointWriter::write_now`], which waits until nothing
+/// waits or runs and holds the writer meanwhile. A writer thread that
+/// ended (it never should) leaves the writes to the loop.
+pub struct CheckpointWriter {
+    shared: Arc<(Mutex<Slot>, Condvar)>,
+    done: Receiver<Written>,
+    handle: Option<JoinHandle<()>>,
+    path: PathBuf,
+    replace: Replace,
+    /// The generation of the next window handed over.
+    next: Cell<u64>,
+    /// The newest generation counted.
+    counted: Cell<u64>,
+    /// Writes the loop made because the writer thread had ended.
+    here: RefCell<Vec<Written>>,
+}
+
+#[derive(Default)]
+struct Slot {
+    waiting: Option<(u64, Vec<u8>)>,
+    busy: bool,
+    stop: bool,
+}
+
+impl CheckpointWriter {
+    pub fn spawn(path: PathBuf, replace: Replace) -> Result<CheckpointWriter, String> {
+        let shared = Arc::new((Mutex::new(Slot::default()), Condvar::new()));
+        let (tx, done) = channel();
+        let theirs = Arc::clone(&shared);
+        let (their_path, their_replace) = (path.clone(), Arc::clone(&replace));
+        let handle = thread::Builder::new()
+            .name("bsc-c2-checkpoint".into())
+            .spawn(move || {
+                let (slot, changed) = &*theirs;
+                loop {
+                    let (generation, bytes) = {
+                        let mut s = slot.lock().unwrap_or_else(PoisonError::into_inner);
+                        while s.waiting.is_none() && !s.stop {
+                            s = changed.wait(s).unwrap_or_else(PoisonError::into_inner);
+                        }
+                        let Some(window) = s.waiting.take() else {
+                            return;
+                        };
+                        s.busy = true;
+                        window
+                    };
+                    let written = their_replace(&their_path, &bytes);
+                    let _ = tx.send((generation, written));
+                    slot.lock().unwrap_or_else(PoisonError::into_inner).busy = false;
+                    changed.notify_all();
+                }
+            })
+            .map_err(|e| format!("c2 checkpoint writer: {e}"))?;
+        Ok(CheckpointWriter {
+            shared,
+            done,
+            handle: Some(handle),
+            path,
+            replace,
+            next: Cell::new(1),
+            counted: Cell::new(0),
+            here: RefCell::new(Vec::new()),
+        })
+    }
+
+    fn alive(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// Hands `bytes` to the writer; it never waits for a write (a writer
+    /// that ended: written here).
+    pub fn submit(&self, bytes: Vec<u8>) {
+        let generation = self.next.replace(self.next.get() + 1);
+        if !self.alive() {
+            let written = (self.replace)(&self.path, &bytes);
+            self.here.borrow_mut().push((generation, written));
+            return;
+        }
+        let (slot, changed) = &*self.shared;
+        slot.lock().unwrap_or_else(PoisonError::into_inner).waiting = Some((generation, bytes));
+        changed.notify_all();
+    }
+
+    /// The writes finished since the last call, oldest first, never
+    /// waiting; one older than a write already counted is refused.
+    pub fn finished(&self) -> Vec<Result<(), String>> {
+        let mut writes: Vec<Written> = self.done.try_iter().collect();
+        writes.append(&mut self.here.borrow_mut());
+        writes.sort_by_key(|(generation, _)| *generation);
+        writes
+            .into_iter()
+            .map(|(generation, written)| {
+                if generation <= self.counted.get() {
+                    return Err(format!(
+                        "window {generation} finished after window {}",
+                        self.counted.get()
+                    ));
+                }
+                self.counted.set(generation);
+                written
+            })
+            .collect()
+    }
+
+    /// Waits until no write waits or runs: every write finished since the
+    /// last call.
+    pub fn idle(&self) -> Vec<Result<(), String>> {
+        drop(self.held());
+        self.finished()
+    }
+
+    /// Writes `bytes` with `replace` on the calling thread once no write
+    /// waits or runs, holding the writer meanwhile: never beside one of its
+    /// writes, always after them.
+    pub fn write_now(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        replace: impl Fn(&Path, &[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut s = self.held();
+        s.busy = true;
+        drop(s);
+        let written = replace(path, bytes);
+        let (slot, changed) = &*self.shared;
+        slot.lock().unwrap_or_else(PoisonError::into_inner).busy = false;
+        changed.notify_all();
+        written
+    }
+
+    /// The slot once nothing waits or runs (a writer that ended leaves
+    /// nothing to wait for).
+    fn held(&self) -> std::sync::MutexGuard<'_, Slot> {
+        let (slot, changed) = &*self.shared;
+        let mut s = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        while (s.waiting.is_some() || s.busy) && self.alive() {
+            s = changed
+                .wait_timeout(s, std::time::Duration::from_millis(100))
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        s
+    }
+}
+
+impl Drop for CheckpointWriter {
+    fn drop(&mut self) {
+        let (slot, changed) = &*self.shared;
+        slot.lock().unwrap_or_else(PoisonError::into_inner).stop = true;
+        changed.notify_all();
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -790,5 +983,155 @@ mod tests {
         assert!(twice.validate().is_err());
         twice.watched = vec![W];
         assert!(twice.validate().is_ok());
+    }
+
+    /// BSC3-039: a write never holds up whoever hands the window over; a
+    /// newer window replaces one still waiting (at most one runs, one
+    /// waits) and the newest is the file; `idle` returns once nothing
+    /// waits or runs, with every result; a failure returns as it failed.
+    #[test]
+    fn a_checkpoint_is_written_off_the_loop_and_the_newest_wins() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        let written = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        let started = Arc::new(AtomicBool::new(false));
+        let (w, st) = (Arc::clone(&written), Arc::clone(&started));
+        let slow: Replace = Arc::new(move |_: &Path, bytes: &[u8]| {
+            st.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(600));
+            w.lock().unwrap().push(bytes.to_vec());
+            Ok(())
+        });
+        let writer = CheckpointWriter::spawn(PathBuf::from("/nonexistent/c2"), slow).unwrap();
+        let t = Instant::now();
+        writer.submit(b"A".to_vec());
+        while !started.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        writer.submit(b"B".to_vec());
+        writer.submit(b"C".to_vec());
+        // A liveness margin, not a timing claim: three hand-overs while
+        // the first write takes 600 ms.
+        assert!(
+            t.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            t.elapsed()
+        );
+        assert!(writer.finished().is_empty());
+        assert_eq!(writer.idle(), [Ok(()), Ok(())]);
+        assert_eq!(*written.lock().unwrap(), [b"A".to_vec(), b"C".to_vec()]);
+        let failing: Replace = Arc::new(|_: &Path, _: &[u8]| Err("disk full".into()));
+        let writer = CheckpointWriter::spawn(PathBuf::from("/nonexistent/c2"), failing).unwrap();
+        writer.submit(b"D".to_vec());
+        assert_eq!(writer.idle(), [Err("disk full".to_string())]);
+    }
+
+    /// BSC3-039 review: the file has one writer at a time. The loop's own
+    /// write waits for the writer's (one running, one waiting) and holds
+    /// the writer meanwhile, so it is the last; a window waiting when the
+    /// writer is dropped is written first; a writer thread that ended
+    /// leaves its writes to the caller, counted in order.
+    #[test]
+    fn the_checkpoint_file_has_one_writer_at_a_time() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+        use std::time::Duration;
+        let written = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        let (writing, overlapped) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let flagging = {
+            let (w, writing, overlapped) = (
+                Arc::clone(&written),
+                Arc::clone(&writing),
+                Arc::clone(&overlapped),
+            );
+            move |_: &Path, bytes: &[u8]| -> Result<(), String> {
+                if writing.swap(true, Ordering::SeqCst) {
+                    overlapped.store(true, Ordering::SeqCst);
+                }
+                thread::sleep(Duration::from_millis(300));
+                w.lock().unwrap().push(bytes.to_vec());
+                writing.store(false, Ordering::SeqCst);
+                Ok(())
+            }
+        };
+        let flagging = Arc::new(flagging);
+        let theirs: Replace = flagging.clone();
+        let writer = CheckpointWriter::spawn(PathBuf::from("/nonexistent/c2"), theirs).unwrap();
+        writer.submit(b"A".to_vec());
+        while !writing.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        writer.submit(b"B".to_vec());
+        writer
+            .write_now(
+                Path::new("/nonexistent/c2"),
+                b"LAST",
+                |p: &Path, b: &[u8]| flagging(p, b),
+            )
+            .unwrap();
+        assert!(!overlapped.load(Ordering::SeqCst), "two writes at once");
+        assert_eq!(
+            *written.lock().unwrap(),
+            [b"A".to_vec(), b"B".to_vec(), b"LAST".to_vec()]
+        );
+        assert_eq!(writer.finished(), [Ok(()), Ok(())]);
+        // Dropped while a window waits behind a running write: both written.
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let held = {
+            let (w, gate, writing) = (
+                Arc::clone(&written),
+                Arc::clone(&gate),
+                Arc::clone(&writing),
+            );
+            move |_: &Path, bytes: &[u8]| -> Result<(), String> {
+                writing.store(true, Ordering::SeqCst);
+                let (open, opened) = &*gate;
+                let mut o = open.lock().unwrap();
+                while !*o {
+                    o = opened.wait(o).unwrap();
+                }
+                w.lock().unwrap().push(bytes.to_vec());
+                Ok(())
+            }
+        };
+        writing.store(false, Ordering::SeqCst);
+        let writer =
+            CheckpointWriter::spawn(PathBuf::from("/nonexistent/c2"), Arc::new(held)).unwrap();
+        writer.submit(b"D".to_vec());
+        while !writing.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        writer.submit(b"E".to_vec());
+        let opener = Arc::clone(&gate);
+        let open = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            *opener.0.lock().unwrap() = true;
+            opener.1.notify_all();
+        });
+        drop(writer);
+        open.join().unwrap();
+        assert_eq!(written.lock().unwrap()[3..], [b"D".to_vec(), b"E".to_vec()]);
+        // A writer thread that ended: the next windows are written by the
+        // caller, in order.
+        let calls = Arc::new(AtomicU32::new(0));
+        let dying = {
+            let calls = Arc::clone(&calls);
+            move |_: &Path, _: &[u8]| -> Result<(), String> {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    panic!("the writer thread ends (test)");
+                }
+                Ok(())
+            }
+        };
+        let writer =
+            CheckpointWriter::spawn(PathBuf::from("/nonexistent/c2"), Arc::new(dying)).unwrap();
+        writer.submit(b"F".to_vec());
+        assert_eq!(writer.idle(), []);
+        writer.submit(b"G".to_vec());
+        writer.submit(b"H".to_vec());
+        assert_eq!(writer.finished(), [Ok(()), Ok(())]);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 }

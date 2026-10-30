@@ -1730,7 +1730,11 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     assert_eq!(shown.scope_text, grant.scope_text());
     let risk = shown.risk.as_ref().unwrap();
     assert_eq!(
-        (risk.max_buy_slippage_bps, risk.max_gas_price_wei, risk.max_sell_gas_limit),
+        (
+            risk.max_buy_slippage_bps,
+            risk.max_gas_price_wei,
+            risk.max_sell_gas_limit
+        ),
         (300, 1_000_000_000, 1_500_000)
     );
     assert_eq!(
