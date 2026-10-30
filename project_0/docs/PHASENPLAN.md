@@ -932,6 +932,8 @@ Landing Evidence:
 
 # 7. Gesamtphasenplan — FIRST PROFIT vor Ausbau
 
+> **REV.1.0-Vorrang:** Die historische First-Profit-Überschrift erlaubt keine Verschiebung verbindlicher REV.1.0-Entwicklung bis nach FE-07. Der aktuelle REV.1.0-Vertrag am Dokumentanfang einschließlich P8-CTRL ist maßgeblich; operative Gates bleiben separat.
+
 > **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Ältere First-Profit-vor-Vollausbau-Reihenfolge ersetzt; REV.1.0 umfasst alle bisher verpflichtenden Produktanforderungen.
 
 ```text
@@ -3923,6 +3925,161 @@ Nur Forward-/Shadow-validierte Policy darf LIVE.
 
 Echter finaler Code mit begrenztem Risiko.
 
+## P8-CTRL — Vollständige native Wallet-, ECON-, FE-06- und LIVE-Freischaltung (REV.1.0 Pflicht)
+
+**Gültigkeit:** Teil der bestehenden Phase P8 und der wirtschaftlich wirksamen REV.1.0-Ausführungspfade. Kein zusätzlicher Bot, kein zweiter State-/Finance-/Journal-Owner, kein Parallel-Controller. Bestehende DEC-13b-, FE-04-, Safety-, P8-RES-, PERSIST-, JFI-, Long-Tail- und Race-Verträge bleiben vollständig in Kraft. BSC ist technische Fehler-/Funktionsreferenz, jedoch **keine** Quelle für EVM-spezifische Nonce-/Gas-/Walletrollen oder BSC-BUY-Grenzen. Das gesamte System wird vor dem ersten wirtschaftlichen Betrieb im echten Produktions-Rust-Code **vollständig** implementiert, verdrahtet und offline geprüft; keine spätere Grundintegration.
+
+**Entwicklung ≠ Betreiberfreigabe.** Der Code der bisherigen harten ObserveOnly-/P0_LIVE_ENABLED-/P0_SUBMISSION_ENABLED-/P0_MODE=live-Sperren darf ausschließlich nach nachgewiesen vollständiger, mindestens gleich strenger Ersetzung durch P8-CTRL an jeder wirtschaftlichen Produktionsgrenze angepasst werden. Nie ersatzlos lockern, nie ein produktives Test-Bypass einbauen. BUGS §0.2 Nr. 5 bleibt in seiner Sicherheitswirkung bestehen. Mainnet-Signierung, wirtschaftliche Submission, Provider-/Netzwerkzugriff und Value-Transfer werden dadurch **nicht** genehmigt; jeweils gesonderte FE-06-/Provider-/Safety-Gates bleiben BLOCKED/NOT_AUTHORIZED, bis der konkrete Nutzerbeschluss und die erforderliche Evidence vorliegen.
+
+### P8-CTRL.1 — Ein Rust-Owner, dynamische Wallets, getrennte ECON-Schalter
+
+Der bestehende Owner mit orchestration/capability_control.rs und state_owner/sources.rs entscheidet allein über die wirksamen Berechtigungen. p0ctl, Gateway, Protobuf und bestehende Frontend-Reiter sind gleichwertige Clients **desselben** Control-/CAS-/Receipt-Pfades. ENABLED ist ausschließlich eine Teilberechtigung, **kein** Befehl zum Signieren, Senden oder Starten; ein Schalter aktiviert nie automatisch einen anderen. Jede Capability führt requested, effective, block_reason, Konfigurationsgeneration, Owner-Epoche, Request-ID und dauerhafte native Quittung. Bei fehlendem, beschädigtem oder nicht aktuellem Zustand: DISABLED/BLOCKED. LIVE-Status meldet ersten Blockgrund und alle fehlenden Gates.
+
+**WALLET:<Pubkey>** wird dynamisch je konfiguriertem Solana-Signer mit validierter Rolle (Liquidator, Fee-Payer oder weiterer erforderlicher Signer) angelegt. Keine fest codierten BSC-Rollen LAUNCHER/BUYER. Unbekannte/ausgetauschte/fremde Keys können nicht aktiviert werden. Bei einer TX mit mehreren Signern ist **jeder** benötigte Key einzeln zuzulassen. ENABLED erlaubt keine allgemeinen SOL-/Token-Transfers, Auto-Sweeps oder Key-Exporte; lesender Balance-/Positionssync bleibt unabhängig. Private Schlüssel werden nie über CLI-Argumente, Gateway, Protobuf, UI oder Receipts transportiert.
+
+| Schalter | Werte | Genaue Wirkung |
+|---|---|---|
+| WALLET:<Pubkey>, pro validiertem Solana-Signer | DISABLED / ENABLED | Nutzung dieses realen Signers für den genau gebundenen wirtschaftlichen Pfad |
+| ECON_SIGN | DISABLED / ENABLED | reale wirtschaftliche Signieroperation; alle Fee-Payer-, Bundle-, Prerequisite-, Tip- und Exit-Signer |
+| ECON_ARM | DISABLED / ENABLED | Inanspruchnahme eines aktuell gültigen FE-06-Ausführungsgrants |
+| ECON_SEND | DISABLED / ENABLED | tatsächliche wirtschaftliche Übergabe an alle RPC-/Jito-/künftigen Netzwerkadapter |
+| ECON_ATTEMPT | DISABLED / ENABLED | Aufnahme einer **neuen** Liquidation in die wirtschaftliche FE-04-Admission |
+| ECON_LIVE | DISABLED / ENABLED | globaler wirtschaftlicher Hauptschalter, sperrt bei DISABLED **auch** neue EXIT_ONLY-Egress-Vorgänge |
+
+**Initialzustand für alle Wallet-/ECON-Schalter: DISABLED.** Die bereits vorhandene LIVE-Capability requested OFF|LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER und die Source-Modi bleiben in ihrer bisherigen Fachsemantik erhalten. Es gibt keinen zweiten Project_0-LIVE-Modus.
+
+### P8-CTRL.2 — Wirksames LIVE und FE-04-/FE-06-Trennung
+
+Drei getrennte Ebenen sind obligatorisch: (1) bestehendes LIVE requested=LIVE, (2) ECON_LIVE und die notwendigen individuellen Wallet-/SIGN-/ARM-/SEND-/ATTEMPT-Berechtigungen, (3) ein konkret autorisierter, passender FE-06-Grant. Ein FE-04-One-Shot-Approval ist **zusätzlich** für jeden konkreten Intent/Exit erforderlich; kein Approval oder Grant ersetzt den jeweils anderen.
+
+**effective=LIVE für eine neue wirtschaftliche Liquidation** nur wenn kumulativ:
+- LIVE requested=LIVE, ECON_LIVE/ARM/SIGN/SEND/ATTEMPT und alle erforderlichen WALLET:<Pubkey> ENABLED;
+- gültiger, nicht widerrufener, nicht verbrauchter FE-06-Grant der aktuellen Owner-Epoche und vollständig gebundener Scope;
+- passender FE-04-Approval-/Intent-/Simulation-/Single-Flight-Nachweis und durable Reservation/Attempt-Fakt;
+- gepinnte qualifizierte Chain-/Genesis-/ProgramData-/Programm-/Binary-/Konfigurations-/Wallet-/Funding-/Asset-/Strategie-/Submission-Identität;
+- aktuelle Bank-/Health-/Oracle-/State-/Slot-/Blockhash-/Source-/Deadline-Evidence ohne unzulässigen Fork/Gap/Drift;
+- konservativ nachgewiesene Wirtschaftlichkeit, mögliche sichere Exit-Route, vollständige SOL-/Input-/Fee-/Priority-/Jito-Tip-/Rent-/Protokoll-/Exit-Kosten und ausreichend atomar reserviertes Kapital;
+- alle Risk-, Slippage-, MinOut-, Daily-/Campaign-/Grant-/Loss-/Exposure-Grenzen eingehalten und keine sperrende UNKNOWN-/Recovery-/HALT-Situation.
+
+Fehlt eine Bedingung, bleibt effective=BLOCKED unabhängig vom GUI-Schalterbild. **Der erste P8-LT-/FE-06-Mainnet-Pilot bleibt genau ein separat genehmigter Versuch, danach automatischer HALT.** Spätere wiederholte LIVE-Versuche brauchen eine neue ausdrückliche wirtschaftliche Autorisierung. Eine LIVE-Anforderung oder ein einzelner boolescher Config-Flag ist kein Operator-Grant.
+
+### P8-CTRL.3 — Verbindlicher FE-06-Scope, Grant, Revoke, Operator-Identität
+
+Die derzeit nur in Tests konstruierbare Fe06Authorization wird zu einer ausschließlich vom bestehenden Rust-Owner kontrollierten, nicht frei erzeugbaren Produktionsberechtigung weiterentwickelt. Keine Shell-/Gateway-/Frontend-Datenstruktur darf sie selbst erzeugen.
+
+**Ein vollständig versionierter und kanonisch binär serialisierter Scope bindet mindestens:**
+- Solana-Cluster und Genesis; freigegebene Program-IDs, ProgramData-/Deployment-Hash, Binary-/Build-/Konfigurations-/Risk-Policy-Fingerprint;
+- exakt alle Wallet-Pubkeys, Signerrollen und Fee-Payer; Strategie/Execution-Klasse, Fundingklasse, Banken, zulässige Mints und gegebenenfalls Exit-Positionen;
+- qualifizierte RPC-/Jito-/Submission-Adapter, unabhängige Datenquellen und die zugehörigen gültigen Provider-/Deployment-/Economics-/Shadow-/Safety-Evidence-IDs;
+- Kapital/Input/Exposure pro Versuch und gesamt; konservative Verlust- und Spendobergrenzen; vollständige Netzwerk-/Priority-/Tip-/Rent-/Protocol-/Exit-Kosten und vorhandene Reserven;
+- Slippage, MinOut und Risiko für Liquidation/Swap/Exit; erlaubte Ausführungsroute, Gültigkeit/Ablauf, Owner-Epoche;
+- Limits neuer Versuche pro UTC-Tag, Kampagne und Grant; Scope-Modus ALL, EXIT_ONLY oder SIM_ONLY.
+
+**Freigabeverfahren:** Native Scope-Erzeugung validiert Feldformate, Einheiten, unbekannte Kosten/Assets und Bounds, erzeugt deterministische Binärbytes und SHA-256. CLI/Frontend zeigen dem Operator exakt diesen Umfang, alle finanziellen Risiken, Ablauf und Digest. Der folgende Grant-Request enthält erwartete CAS-Generation und einmalige Request-ID, bestätigt den **exakt angezeigten Scope**; Rust-Owner prüft SHA, Autorisierungsidentität, Wallets, Deployment, Budget, Evidence und Zeitpunkt bei der Übernahme erneut. Geänderte Bytes, fremde Epoche, alte Generation, fehlender Nachweis und expired Grant werden verweigert.
+
+Die separate **Operator-Authentisierung** (vom Trading-Wallet-Key unabhängig) muss für die LIVE-/Grant-Freigabe technisch spezifiziert, implementiert und offline bewiesen werden; ein Hash/Bestätigungsdialog allein ist keine kryptografische Identitätsprüfung. MacOS-gestützte Authentisierung ist zulässig, aber keine bereits erteilte Freigabe. Grant/Revoke sind Berechtigungsoperationen, niemals automatische Transaktionsbefehle.
+
+**Revoke/Expiry/Reset:** Jede noch nicht linearisiert zum Egress zugelassene Aktion wird durch Widerruf, Ablauf, Drift, Limiterschöpfung oder Owner-Neustart gesperrt. Bereits möglicherweise versendete Payloads bleiben SUBMITTED/UNKNOWN bis zur belegten Chain-Klärung. Kein nachträgliches Löschen von Holds, Contingent, Signaturen, Versuchsfakten oder Positionen.
+
+### P8-CTRL.4 — Simulationssignaturen und reale Wallet-Sicherheit
+
+Der bestehende Shadow-/Simulationspfad erzeugt bereits gültige Solana-Signaturen. Ein wirtschaftlich verwendbarer Signaturvorgang mit **realem Produktivschlüssel** darf ECON_SIGN/WALLET/Scope nicht durch die Bezeichnung SHADOW umgehen.
+
+- Isolierte Offline-/Replay-Tests verwenden synthetische Schlüssel und einen **garantiert nichtsendenden** lokalen Recording-Adapter.
+- Reale Produktivsignaturen für ausschließlich genehmigte Simulationen brauchen einen **separaten, zeitlich und nach Wallet/Bytes gebundenen SIM_ONLY-Kontext** unter WALLET+ECON_SIGN. Er erteilt ausdrücklich keine wirtschaftliche FE-06-LIVE-, ARM- oder SEND-Berechtigung; seine signierten Bytes dürfen weder exportiert noch an sendefähige Adapter/Prozesse weitergegeben werden. SIM_ONLY kann nicht nachträglich zu LIVE aufgewertet werden.
+- Fehlt diese Autorisierung, dürfen nur ausdrücklich als eingeschränkt markierte synthetic/unsigned Shadow-Prüfungen laufen. Eine fehlende wirklich signierte Produktivsimulation darf nicht als vollwertiger FE-02-/FE-03-PASS ausgewiesen werden.
+- Für jede wirklich wirtschaftlich signierbare Receivership-, JIT-, Prerequisite-, Tip-, Bundle- oder Exit-Payload sind aktuelle Wallet-/SIGN- und passende konkrete LIVE-Grant-Bindungen Pflicht.
+
+Die bestehenden Simulations-/Shadow-Evidenzketten werden regressionsgeprüft; weder versteckte Freigabe noch stiller Messverlust ist zulässig.
+
+### P8-CTRL.5 — Persistente Versuchsgrenzen, Kapital-/Exit-Holds, EXIT_ONLY
+
+Keine feste BSC-Zahl wirtschaftlicher BUY-Versuche übernehmen. Project_0 benötigt ausdrücklich konfigurierte und genehmigte Grenzen für **neue** Liquidationen je UTC-Tag, insgesamt und je FE-06-Grant, sowie einzelne/gesamte Input-/Exposure-/Verlust-/Spend-/SOL-/Tip-/Rent-/Exit-Budgets. Standard ist null wirtschaftliche Erlaubnis. Kein unqualifiziertes Feld wird als null benötigte Kosten interpretiert.
+
+Die Attempt-Verbrauchsbuchung und die vollständige wirtschaftliche Verpflichtung sind **vor einem möglicherweise realen Dispatch dauerhaft** im **bestehenden FE-04-/Safety-Journal** zu halten; UNKNOWN oder möglicherweise gesendete Versuche verbrauchen ein Kontingent. Nur der Tageszähler darf am UTC-Tageswechsel erneuert werden, nicht Gesamt-/Grant-Zähler; Änderungen und Senkung der Limits wirken für neue Versuche unmittelbar. Kein zweiter Versuchszähler/Financial-Ledger.
+
+Reserviert werden **atomar** die vollständige SOL-/Fee-/Priority-/Tip-/Rent-/Protokoll-/Mint-/Liability-/Inventory-/Exit-Verpflichtung unter P8-RES/P6-MT/FE-04 abzüglich konkurrierender Holds und Policy-Reserve. Fehlt eine berechenbare sichere Exit-/Fee-Reserve, erfolgt keine neue Liquidation. Ein finalisiertes Settlement gibt die zugehörigen Holds/Safety-/Inventory-Buchungen **genau einmal** frei; UNKNOWN behält sie.
+
+**EXIT_ONLY ist ein separater, ausdrücklich bestätigter FE-06-Scope für die Exits exakt identifizierter bereits offener Positionen.** Er autorisiert keine neuen Liquidationen. Er darf unabhängig von ECON_ATTEMPT und erschöpften **neuen** Liquidationsversuchslimits arbeiten, benötigt aber eigene Exit-Limits/Spends/Expiry, alle passenden WALLET-Schalter, ECON_SIGN/ARM/SEND/LIVE, gültige Owner-Epoche, FE-04-Positions-/Exit-Intent und qualifizierte Submission-/Reconciliation-/Kapital-Evidence. **Kein globaler Kill-/Stop-Bypass:** ECON_LIVE=DISABLED, ECON_SEND=DISABLED, HALT oder Widerruf blockiert jeden neuen EXIT_ONLY-Egress. Ein Exit nach vollständigem Stop verlangt einen neuen expliziten Grant; bereits gesendete Exits/UNKNOWN bleiben offen bis Reconciliation.
+
+### P8-CTRL.6 — Zustand, CAS, Neustart und Crash-Recovery
+
+Jede Control-Mutation enthält eine erwartete Owner-Config-Generation und eindeutige Request-ID. Gleiche ID+identische Bytes ⇒ dieselbe durable native .p0j-Quittung und **kein** zweiter Effekt; gleiche ID+geänderte Bytes ⇒ Konflikt. Gleichzeitige CLI-/GUI-/Worker-Requests werden durch denselben Owner und CAS linearisiert; Lost-Receipt nach erfolgreichem durable Generationswrite ist rekonstruierbar. Unsichere Speicher-/Datei-/Symlink-/HOME-Pfade oder korrupte Stores dürfen niemals eine Freigabe erzeugen.
+
+**Nach jedem echten Owner-Neustart oder vollständigen Stop:** alle Wallet-/ECON-Schalter DISABLED, LIVE requested=OFF, FE-06-Grants für neue wirtschaftliche Aktionen ungültig, frische Owner-Epoche. Kein Launchd-/Autostart-/Crash-Resume-/p0ctl-/Frontend-Autorearm. Gateway-Neustart oder Browser-Reload sind kein neuer nativer Owner und können selbst keine alte oder neue Freigabe erzeugen.
+
+**Über alle Restarts dauerhaft erhalten:** FE-04-Journal und Single-Flight-Holds, verbrauchte Tages-/Gesamt-/Grant-Versuche, Positionen, getrennte Exit-Reserve, bereits signierte/übergebene TX-Identitäten, UNKNOWN, finale Token-/Lamport-Beobachtungen, Idempotenz- und Settlement-Fakten. Erst Recovery/reconcile, dann gegebenenfalls neue separate Betreiberfreigabe. Unlesbare Uhr/Journal/Owner-Epoche/Grant/Limit ⇒ fail-closed.
+
+### P8-CTRL.7 — Nie umgehbare Grenzen an tatsächlichen Produktions-Call-Sites
+
+Nicht frei durch CLI, Tests oder fremde Crates konstruierbare, kurzlebige **typisierte native Berechtigungsobjekte** binden Owner-Epoche/Control-Generation, FE-06-Digest, Wallet-Rollen, konkrete FE-04-Intent-/signierte Wire-Identität, Submission-Adapter, Ablauf und Single-Use. Existierende FE-04-/Approval-/Safety-/SubmissionAdapter- und Journal-Implementierungen werden erweitert; keine zweite Geldengine.
+
+| Grenze | Verpflichtende Prüfungen |
+|---|---|
+| detect/state_owner | LIVE, Scope, noch erlaubte neue Attempts, aktuelle State-/Blockhash-/Deadline-Bedingungen |
+| execution/one_shot/admission | FE-04-Approval, exakte SignedPayload und Simulation, Single-Flight, Holds/Attempt persistent **vor** Egress |
+| jeder echte Signer-Aufruf | WALLET pro benötigtem Signer, ECON_SIGN, passender LIVE-/SIM_ONLY-Scope und gebundene Payload |
+| jeder RPC-/Jito-Single-/Jito-Bundle-/künftige Submit-Caller | ECON_LIVE/ARM/SEND, Owner-Epoche, FE-06-Grant, FE-04-Intent, exakte Wire-Bytes, Adapter, Deadline |
+| **unmittelbar vor** Netz-/OS-Egress | neueste Generation/Grant/Revoke/Deadline/One-Shot und durable Dispatch-Fakt, atomar gegen konkurrierendes DISABLE |
+| FE-04-Settlement/Exit | finale Chain-Evidence, Token-/Lamport-Deltas, konservativer UNKNOWN-/Non-Landing-Nachweis, Buchung genau einmal |
+
+Ein einmaliger Check beim Programmstart, vor FE-04 oder nur beim Signieren ist unzureichend. **Revoke und finale Egress-Zulassung benötigen eine definierte atomare Reihenfolge ohne langes Netzwerk-Warten unter Owner-Lock.** Ist der Egress noch nicht zugelassen, verhindert DISABLE dessen Start. Bereits an Netzwerk/OS übergebene Bytes sind nicht zurückholbar: dann SUBMITTED/UNKNOWN, nicht behaupteter Null-Versand.
+
+**Caller-Inventar vor Abschluss:** native Dateien orchestration/capability_control.rs, state_owner/{sources.rs,detect.rs,fe04.rs}, execution/{observe_only.rs,pipeline.rs,one_shot/admission.rs} sowie sämtliche **im aktuellen Code tatsächlich identifizierten** Signierer, RPC-/Jito-/SubmissionAdapter- und direkten CLI-/Gateway-Pfade. Keine ungesicherten Sidepaths für Tip-/Prerequisite-/JIT-/Exit-/Prepared-/Race-TX; keine Hotpath-Shell-Child oder unabhängige Owner-Berechtigung.
+
+### P8-CTRL.8 — Einheitliche CLI-, Protobuf-, Gateway- und GUI-Steuerung
+
+**Zu implementierende CLI-Verträge, keine Behauptung vorhandener Funktionen:**
+- p0ctl capability set WALLET:<PUBKEY> ENABLED|DISABLED;
+- p0ctl capability set ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE ENABLED|DISABLED;
+- bestehendes p0ctl capability set LIVE OFF|LIVE bleibt erhalten;
+- p0ctl live scope/grant/revoke/status/attempts mit strikt typisierten Parametern, Request-ID, CAS und Receipt.
+
+**Ein gemeinsamer Hin-/Rückweg:** CLI bzw. Frontend → authentifiziertes Gateway/Control-Protobuf → bestehender Owner → durable Control-Receipt/Statusprojektion → WebSocket/Frontend. Die vorhandenen darkbot/control/v1 und darkbot/project0/v1 werden versioniert und mit Wire-/Golden-/Schema-ID-/Gateway-/React-Tests erweitert. Keine frei formulierbaren Shell-Befehle, keine zweiten Frontend-Defaults, keine Key-/Wallet-Secrets, kein neues internes JSON, keine zweite Control-Autorität.
+
+**Feste fünf Hauptreiter bleiben.** Wallets zeigt je konfiguriertem Public Key und Rolle requested/effective/block_reason, ENABLE/DISABLE, Generation, native Receipt, aktuelle/historische Balanceprovenienz, verfügbare/gebundene SOL/Mints und offene Positionen. Liquidator zeigt alle ECON-Schalter, requested/effective LIVE, vollständige Gate-/Qualifikations-/Budget-/Risk-Checkliste, Scope-Vorschau + Digest-Bestätigung, Grant/Revoke, Attemptverbrauch, EXIT_ONLY und FE-04-/Exit-Status. Keine zusätzlichen Hauptreiter. Bei DETACHED/STALE darf niemals aktuelles LIVE behauptet oder eine wirtschaftliche Mutation ohne aktuelle native CAS-Generation freigegeben werden. Ein Klick ist noch kein Erfolg; erst die native Receipt gilt.
+
+### P8-CTRL.9 — Umsetzungspakete und Anschluss an restliche REV.1.0
+
+1. **P8-CTRL-01:** Rust-Owner, dynamische Wallets, ECON-Schalter, requested/effective/Blockgründe, CAS/Receipts, Owner-Epoche/Reset.
+2. **P8-CTRL-02:** FE-06-Scope/Hash/Grant/Revoke, getrennte Operator-Authentisierung, SIM_ONLY/EXIT_ONLY, Limits.
+3. **P8-CTRL-03:** Signierer-/FE-04-/Safety-/RPC-/Jito-/Exit-Gates, verbindliche Egress-Linearisation, persistent Counts/Holds, Settlement/UNKNOWN.
+4. **P8-CTRL-04:** p0ctl, Control-/Owner-Protobuf, Gateway/Reporter, Versionierung und Wire-/CLI-/Gateway-Tests.
+5. **P8-CTRL-05:** Wallets-/Liquidator-Frontend, echte Buttons, Quittungen/Blockgründe, aktualitätsgeprüfte native Status-/Browser-E2E.
+6. **P8-CTRL-06:** vollumfängliche nichtsendende End-to-End-Prüfung auf Produktions-Call-Sites, Review-/Mutation-/Crash-/Race-/Release-Gate, GitHub-CI.
+
+Die H0-/gemeinsamen Schema-/CI-Regressionen sind vor der Paketabnahme zu beheben; keine roten Vorgänger-Gates als akzeptiert melden. **Ab Abschluss von P8-CTRL und bereits beim Bau der folgenden Wirtschaftsmodule** müssen S1-RACE, Prepared TX, Jito-Single/Bundle/gRPC/Prewarm, JIT-ExactIn/Funding, P6-MT/M4, Multi-Wallet, P8-RES/INV, Rebalancing, Exit und P9-Dauerbetrieb **sofort** dieselbe vorhandene Berechtigungs-/FE-04-/Egress-Grenze verwenden. Keine spätere Gesamtverdrahtung.
+
+### P8-CTRL.10 — Vollständige verbindliche Offline-Abnahme
+
+Die gesamte Matrix läuft über die echten Produktions-APIs mit isolierten synthetischen Schlüsseln und einem lokalen, garantiert nicht an Mainnet sendenden Recording-Receiver; keine produktiven Mocks und keine Netzwerkfreigabe durch Testdurchführung.
+
+| ID | Test | Erfolgskriterium |
+|---|---|---|
+| L01 | neuer Owner / Stop / Crash / Restart | alle Wallet-/ECON-Schalter DISABLED, LIVE nicht wirksam; Finanzfakten bleiben |
+| L02 | **jeder** fehlende Wallet-, ECON-, FE-06-, FE-04-, Provider-, Program-/Risk-Gate einzeln | keine neue wirtschaftliche Egress-Zulassung, genauer Blockgrund |
+| L03 | falsche Wallet, Rolle, Programm-/Binary-/Chain-/Genesis-/Adapter-Identität | Refused, keine fremde Signatur |
+| L04 | Scope falscher Hash, Ablauf, Revoke, Generation, Autorisierung, geänderte Evidence | Refused, kein Egress |
+| L05 | parallele CLI-/GUI-CAS; gleiche Request-ID+identische bzw. andere Bytes | genau eine Mutation / gespeichertes Receipt bzw. Konflikt |
+| L06 | Crash nach Generation vor Receipt; vor/bei FE-04-Reserve und Dispatch | rekonstruierbar, kein doppelter Hold/Attempt |
+| L07 | DISABLE vor Sign, nach Sign, vor Egress, gleichzeitig mit Egress, nach Netzstart | vor linearisiertem Start kein Egress, danach SUBMITTED/UNKNOWN |
+| L08 | zwei identische Intents, zwei Worker, UNKNOWN-Restart und doppeltes Settlement | Single-Flight, einmalige Freigabe, keine Wiederholung |
+| L09 | UTC-Tageswechsel, Limitabsenkung, Grant-/Gesamtlimit, unbekannter Attempt | dauerhaft korrekt gezählt; keine neue Liquidation über Limit |
+| L10 | fehlende Fee-/Tip-/Rent-/Mint-/Exit-Reserve, stale Blockhash, ungültige Simulation | keine wirtschaftliche Zulassung |
+| L11 | EXIT_ONLY offene Position, falsche Position, neuer Versuch, globaler Stop | nur erlaubte Exits, keine neue Liquidation, kein Stop-Bypass |
+| L12 | RPC, Jito Single/Bundle, Prerequisite-/Tip-/JIT-/Prepared-/Race-Pfad | dieselben Gates, kein Sidepath |
+| L13 | Terminal ↔ Gateway ↔ Owner ↔ Frontend, Stale-/Detached-State | gleiche requested/effective/Receipt/Generation/Blockgründe |
+| L14 | einmalig genehmigter **Offline**-Fall | genau ein Recording-Egress, korrektes Journal/Settlement/Exit, danach HALT |
+| L15 | Shadow/SIM_ONLY echte und synthetische Signaturen | keine SIGN-/SEND-Umgehung, Evidence-Provenienz korrekt |
+| L16 | Neustart bei UNKNOWN/offener Position | Schalter reset; Holds/Position/Exit-Reserve/journalisierte Fakten überleben |
+
+Zusätzlich typisierte Compile-Fail-/Capability-Tests, gezielte RED→GREEN-, Mutation-/Concurrency-/Kill-/Crash-/Journal-I/O-Tests, Release-/Feature-Gates, cargo fmt/Clippy, betroffene Python-/Verifier-/Protobuf-/Gateway-/Browser- und BSC-Kompatibilitäts-Regressionen. **OFFLINE_VERIFIED** ausschließlich nach vollständigem Review ohne offene HIGH/CRITICAL, bestandenem gate.sh und grüner GitHub-CI auf genau dem finalen Commit. Reale Mainnet-/Landing-/Profit-/Provider-Gates bleiben bis tatsächlicher Nutzerfreigabe und Evidence NOT_RUN/BLOCKED.
+
+### P8-CTRL.11 — Abgeschlossen ist nur der vollständig integrierte Geldpfad
+
+Fertig erst wenn alle Wallets einzeln schaltbar, ECON_SIGN/ARM/SEND/ATTEMPT/LIVE wirksam, FE-06 als reale native Berechtigung vollständig, jeder Signer-/FE-04-/RPC-/Jito-/Exit-Caller unübergehbar kontrolliert, CLI und GUI identisch, Crash/UNKNOWN/CAS/Restart/Limits/EXIT_ONLY bestanden und CI auf finalem main-SHA grün sind. Dies ist ein **technischer Offline-Abschluss**, keine reale Betreiber- oder Wirtschaftlichkeitsfreigabe. Künftige echte Evidence darf nachweisbare Korrekturen erfordern, aber keinen bisher fehlenden zweiten LIVE-Integrationsauftrag.
+
+
 ## Kein P8-Sonderbot
 
 Es läuft derselbe Production-Core.
@@ -4269,7 +4426,7 @@ FE-02  exact Health/Size/Route/Build/Sim/Fees + überprüfbarer Collateral-Exit
 FE-03  production Shadow + replay/competition for selected class
 FE-04  one-shot CLI / persistenter single-flight Wallet-/Fee-Hold / UNKNOWN / Exit-Ledger
 FE-05  provider-aware read-only smoke (nur nach separater Freigabe)
-FE-06  einzeln genehmigter, budgetierter Mainnet-Versuch + Auto-HALT
+FE-06  einzeln genehmigter, budgetierter Mainnet-Versuch + Auto-HALT; vollständige technische Wallet-/ECON-/Scope-/Egress-Steuerung nach P8-CTRL (Phase P8), operative Freigabe separat
 FE-07  finalized chain/cost/exit reconciliation + kumulierter REALIZED NET PNL; GO/STOP
 ```
 
@@ -4692,7 +4849,7 @@ Erst nach dieser Prüfung darf v4.4 die autoritative v4.2 ersetzen.
 | **FE-03 – Targeted Production Shadow** | Dieselbe Production-Pipeline ohne Submission über echte erreichbare Kandidaten; verifizierbare Winner-/Loss-/State-/Queue-Latenz und eine vollständige Replay-/Simulationsbeweiskette | Genug echte positive und negative Kandidaten- und Replay-Evidence für genau diese Klasse; kein Mindeststundenwert erfindet fehlende Marktereignisse |
 | **FE-04 – Serial Safety + Accounting** | Versioniertes CLI-Einmalfreigabeprofil, harte nominelle/Max-Fee/Tip/Rent-/Verlustgrenzen, `max_inflight=1`, persistent signiertes Intent-/Hold-Journal vor Handoff, Reload→UNKNOWN-Hold und finalisierte Chain-Reconciliation; kontrollierte Inventory-Exit/Realized-PnL-Kette | Crash/Restart, Doppelereignis, TX-failed, nicht gelandet, unknown, Feed-Gap und unvollständiger Exit mit fail-closed-Tests bestanden. **Kein Parallel-LIVE** |
 | **FE-05 – Read-only Vorprüfung** | Offline-Freeze und kurzer, ausdrücklichermaßen genehmigter FREE_ONLY Mainnet-WSS/RPC-/Shadow-Smoke mit gültiger Anbieterqualifikation; gezielte Programm-/TX-Simulation gegen reale Zustände | Kein fehlender oder unqualifizierter Provider-/Archive-/Snapshot-Beleg für die im Pilot benötigten Zugriffe, kein stiller Paid-Fallback; vierstündiger C0-E1-Master bleibt separat |
-| **FE-06 – Controlled ONE-SHOT** | Nutzer sieht Signatur-/Code-/Programm-/Wallet-Bindung, maximalen Gesamtaufwand und Verlustgrenze; erst nach **separater expliziter Werttransfer-Freigabe** einmaligen `P0_MODE=live`-Pilot-Gate für den freigegebenen Pfad implementierungsseitig öffnen | Genau EIN begrenzter, vom User genehmigter Versuch, danach HALT; keine Auto-Retries/Auto-Arm, kein Jito-ACK als Landing-Nachweis |
+| **FE-06 – Controlled ONE-SHOT (siehe P8-CTRL in Phase P8)** | Nutzer sieht Signatur-/Code-/Programm-/Wallet-Bindung, maximalen Gesamtaufwand und Verlustgrenze; erst nach **separater expliziter Werttransfer-Freigabe** einmaligen `P0_MODE=live`-Pilot-Gate für den freigegebenen Pfad implementierungsseitig öffnen | Genau EIN begrenzter, vom User genehmigter Versuch, danach HALT; keine Auto-Retries/Auto-Arm, kein Jito-ACK als Landing-Nachweis |
 | **FE-07 – Profit / Stop Decision** | TX-/Bundle-Outcome, Signature, finalized Token-/Lamport-Deltas, Gebühren aller eigenen Versuche, Restinventar und belegten tatsächlichen Verkauf/Exit auswerten; kumulierten realisierten Nettoertrag berichten | `FIRST_REALIZED_PROFIT_EVIDENCED` nur bei positiver *kumulierter* realisierter Bilanz nach allen angefallenen Kosten; sonst `LOSS/UNKNOWN/NO_TRADE`, STOP und Analyse |
 
 **Spezifische Scope-Regeln vor dem ersten Profit:**
@@ -5483,7 +5640,7 @@ Ownership: darkbot-common besitzt Channel-/Config-Primitiven, darkbot-solana die
 | \`p0ctl run start --chain-verify\` | Capture: off/index/strict/crosscheck | **IST (DEC-08 `94a15749`):** \`index\`/\`crosscheck\` nativ wirksam (offline/Checkpoint; online nur mit Provider-Nachweis). **SOLL (P0-DEC-08, erledigt):** beide nativ über den bestehenden Rust-Verification-Owner samt `.p0j`-Resume, gemeinsamen Controller, Protobuf/Gateway/React implementieren; diese reine Code-Sperre nach bestandenen E2E-Tests entfernen. Reale Providerqualifikation separat `NOT_RUN/BLOCKED`; historisches Python nur read-only. |
 | \`market::MarketStats\`, \`status_tap::MarketSnapshot/TransportSnapshot/StorageSnapshot\` | Project0 Overview, Health, Capture | Verfügbare protobuf STATE-Topics \`project0.status\` (10, \`SystemStatus\`) und \`project0.capture.state\` (13, \`CaptureState\`); Sample-, Gap-, Detached-, UNKNOWN- und Coverage-Semantik behalten |
 | \`solana::ingress::sources::{SourceUnit,SourceControl,OperatingMode,Qualification,ProviderConfig,SourceArbiter}\` | Bestehender Capture-/Health-Bereich: unabhängige WSS-/BinaryGeyser-Provider-/Deshred-/LocalShred-Status/Modi | S1-02/S1-08/K-02/K-02b/S1-RACE, A23-03/04: \`OFF/OBSERVE/ACTIVE\` unterscheidet sich von \`P0_MODE=live\`. Native Modus-/Qualifikations-/Generation-Owner und API derzeit noch nicht vollständig verdrahtet: **SOLL/NO_BACKEND**, kein eingeschalteter Fake-Button |
-| \`health\`, \`sizing\`, \`economics\`, \`funding\`, \`Safety\`, \`one_shot::admission/settlement\`, WalletReservations | Liquidator: Single-Bot-/FE-Status, Safety, Gebühren, Limits, Kapital; Analytics: Economics und qualifizierte Ergebnisse | FE-00…FE-07, P4A-JIT, P8-RES/INV, PERSIST, JFI; Browser-Fleet-Drafts sind keine nativen Profile. LIVE/SEND bleibt NO_AUTHORIZATION |
+| \`health\`, \`sizing\`, \`economics\`, \`funding\`, \`Safety\`, \`one_shot::admission/settlement\`, WalletReservations | Liquidator: Single-Bot-/FE-Status, Safety, Gebühren, Limits, Kapital; Analytics: Economics und qualifizierte Ergebnisse | FE-00…FE-07, P4A-JIT, P8-RES/INV, PERSIST, JFI; Browser-Fleet-Drafts sind keine nativen Profile. LIVE/SEND bleibt bis zur separaten FE-06-Betreiberfreigabe NO_AUTHORIZATION; vollständige Wallet-/ECON-/FE-06-/LIVE-Steuerung ist verbindlich nach P8-CTRL zu implementieren |
 | \`ReportQuery.markers/types/related_types/view/provenance\`, \`measurement_contract.py\`, native Market-Reader/Journale | Capture/Analytics: **sechs Marker, vier Klassen, vier Related-Types**, eindeutige reine Reportfilter plus getrennte Provider-/Strict-/Census-Provenienz | C0-E1/H0/JFI: Roh-Capture niemals durch die Reportfilter beschneiden; Report-Minimum != Trading-Minimum; kein Winner-Bruttogewinn als eigene realisierte Netto-PnL |
 | \`one_shot::Journal/Receipt/FinalizedObservation\`, \`Safety\`, \`WalletReservations\` und **erst künftig** qualifizierter PortfolioFinancialSnapshot | Wallets: exakt sieben bestehende Finanzzeilen und Send/Auto-Sweep-Preview; Overview dieselbe künftige finance_snapshot_id | FE-04/FE-07/P8/FEUI-10A/B/C: \`project0.finance.summary\` (11) und \`project0.wallets.state\` (14) **reserviert/unavailable**. Eigene finalisierte Portfolio-PnL, Transfers und Treasury-Controls nicht aus internem Rust-Code oder historischen Winners ableiten |
 | \`p0-econ-replay\`, \`p0ctl report/verify/qualify\`, \`.p0j\` Reader, \`P0_ECON_CAPITAL_USD\` | Analytics vorhandene Report/Backtest/Optimize-Unterreiter | C0-E1/P6-MT/F7: \`project0.analytics.jobs\` (15) noch reserviert/unavailable; native Report/Replay ist kein vorhandener UI-Job-Dispatcher, Optimize nur Entwurf |
@@ -5629,9 +5786,9 @@ Ein strikt schema-/version-/einheiten-/min-max-validierter Parser mit eindeutige
 
 Typisierte Rejection-/Loss- und native `message_hash`-Identität, harte **konfigurierbare** monotone Jito-/Submission-Handoff-Deadline, sichere Budget-/Cancellation-/Unknown-Receipt-Semantik. Keine Latenz-PASS-Behauptung ohne Benchmark, keine separaten ungeprüften Verzweigungen; RED→GREEN an produktiven Call-Sites und Boundary-/Replay-/Zeit-/Budgettests.
 
-### DEC-13 — FS-F-09/FE-04/FE-06: **JA, Admission voll erreichbar und LIVE weiter gesperrt**
+### DEC-13 — FS-F-09/FE-04/FE-06: **JA, Admission voll erreichbar; reales LIVE bleibt bis FE-06 gesperrt (P8-CTRL)**
 
-> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: OFFLINE_VERIFIED `2210fe21` (BUGS §22.5); LIVE gesperrt bis FE-06 (Nutzerentscheidung Format/Quelle).
+> **REV.1.0 – Revisionsmarkierung für den noch offenen Rest:** Code-Rest erledigt: OFFLINE_VERIFIED `2210fe21` (BUGS §22.5); Reales LIVE weiterhin gesperrt bis gesonderter FE-06-Betreiberfreigabe; die technische Wallet-/ECON-/Scope-/Grant-Implementierung ist verbindlich in P8-CTRL festgelegt.
 
 Vorhandenen echten one-shot `reserve→validate→submit→settle/recover`-Pfad als einen nativen Controller-Consumer und kompletten Liquidator-/Wallets-Protobuf-Rundweg verdrahten, nicht nur als aufrufbare Tests. **Gilt für Versuch und Exit. Die In-Run-Admission gibt die eigene `check()`-Reservierung ausschließlich über das durable Journal-Settlement frei (BUGS C3-Rest), ohne eine zweite RAM-Freigabe oder doppelte Kapitalbuchung.** Persistente atomare Single-Flight-Holds, maximal zulässige Gebühren, Idempotenz, Replay, Crash, UNKNOWN, finalisierte Token-/Lamport-Deltas und harte Stop-/HALT-Gates nachweisen. **Ohne separate FE-06-Freigabe keine werttragende Signierung/Submission**; durch negativen Loopback-/Gateway-Test belegen. Keine neue eigenständige Admission-Engine.
 
