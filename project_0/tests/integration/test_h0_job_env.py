@@ -15,6 +15,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 class H0JobEnv(unittest.TestCase):
     def test_only_an_h0_start_gets_the_capture_env_files(self):
+        # darkbotctl is the macOS operator (launchd): its isolated mode exists under /private/tmp only.
+        if not pathlib.Path('/private/tmp').is_dir():
+            self.skipTest('NOT_RUN: darkbotctl isolation needs /private/tmp (macOS)')
         with tempfile.TemporaryDirectory(prefix='darkbot-test.', dir='/private/tmp') as tmp:
             work = pathlib.Path(tmp)
             (work / '.isolated').touch()
