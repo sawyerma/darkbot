@@ -1335,6 +1335,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
+    /// H0 mutation H28: the headline counts a run of a historical, incomplete verification as
+    /// verified (its events up to the last verified batch were taken), one without a result or
+    /// unreadable as without.
+    #[test]
+    fn h0_headline_counts_incomplete_verifications_as_verified() {
+        use super::super::h0;
+        let run = |id: &str, status: &str| h0::RunCoverage {
+            run_id: id.into(),
+            status: status.into(),
+            reason: None,
+            events: 0,
+            capture_unix_s: None,
+            failed_attempts: 0,
+        };
+        let e = h0::Extract {
+            liquidations: vec![],
+            runs: vec![
+                run("a", "CANONICAL_VERIFIED"),
+                run("b", "HISTORICAL_INCOMPLETE"),
+                run("c", "NO_VERIFIED_RESULT"),
+                run("d", "UNREADABLE"),
+            ],
+            duplicates: 0,
+            without_block_time: 0,
+            failed_attempts: 0,
+            failed_attempt_actors: 0,
+            covered_seconds: 0,
+        };
+        let window = h0::Window {
+            start_unix_s: 0,
+            end_unix_s: 1,
+        };
+        let report = Box::new(h0::report(window, &e, 2, None, 0, 0));
+        match (Executed::H0 {
+            job_id: "j".into(),
+            report,
+        })
+        .result()
+        {
+            JobResult::H0 {
+                runs_verified,
+                runs_without_result,
+                ..
+            } => assert_eq!((runs_verified, runs_without_result), (2, 2)),
+            other => panic!("{other:?}"),
+        }
+    }
+
     /// Review (CTRL-10 re-check): an H0 job outcome of 9a41e808 stays readable — its result
     /// decodes at its old variant index as the pre-review headline (never as today's H0).
     #[test]
