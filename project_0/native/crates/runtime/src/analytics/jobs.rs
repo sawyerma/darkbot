@@ -1261,6 +1261,12 @@ mod tests {
         assert_eq!((failed.state.as_str(), &failed.result), (FAILED, &None));
         assert!(!failed.code.is_empty());
         assert_eq!(failed.worker_pid, std::process::id());
+        // A child another test thread forked while `run` held the runner lock shares it until its
+        // exec: the release is observed within a bounded wait.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while runner_busy(&d).unwrap() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         // A worker that cannot be spawned leaves its reason as the outcome.
         let spawn = start(&d, &request("fourth"), Path::new("/nonexistent/p0ctl")).unwrap_err();
         assert!(spawn.starts_with("JOB_SPAWN_FAILED"), "{spawn}");
