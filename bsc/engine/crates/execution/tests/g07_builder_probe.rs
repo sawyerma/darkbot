@@ -31,8 +31,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// C1 binary evidence: record/geth-ipc lines in Cargo.lock (was 19078cc4…).
 /// Runtime SIGTERM handling: signal-hook in Cargo.lock (was 1207890f…).
 /// Plan 27.10.: a live probe needs the native SEND switch (was 3a9dc0da…).
+/// BSC3-023: libc for the journal's drive calls in Cargo.lock (was 331cec21…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "331cec21c688bb5437e271076ae49dd4a486a44a427b98af9b88cb416f4aa9c6";
+const PINNED_PLAN_SHA256: &str = "9aca2d99c61a86e80d87cd6947cf97c2871d1eaf7f596b9aede2c8f075f4e207";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

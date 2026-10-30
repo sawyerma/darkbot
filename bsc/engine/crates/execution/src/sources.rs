@@ -2182,6 +2182,114 @@ fn safe_id(id: &str) -> bool {
 /// with `AlreadyExists` if another writer won), so a reader never sees a
 /// partial record.
 pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_new_as(path, bytes, Durability::Full)
+}
+
+/// How a create-new write reaches the medium (BSC3-023).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Durability {
+    /// Durable when the write returns: the file and its directory each
+    /// flushed to the medium.
+    Full,
+    /// Handed to the drive only; durable once the caller has flushed the
+    /// device ([`flush_device`]) before anything depends on it.
+    Handed,
+}
+
+/// Tests: what reached the drive on this thread, in order (BSC3-023).
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Medium {
+    /// A file (named by its final path) or a directory flushed on its own.
+    Full(PathBuf),
+    /// A file's content handed to the drive, before anything after it.
+    Ordered(PathBuf),
+    /// A new file linked into place.
+    Linked(PathBuf),
+    /// A directory handed to the drive.
+    Handed(PathBuf),
+    /// The device flushed through this directory, for these written ones.
+    Flush(PathBuf, Vec<PathBuf>),
+    /// A file's content synced while its path was already published.
+    Published(PathBuf),
+}
+
+#[cfg(test)]
+thread_local! {
+    static MEDIUM: std::cell::RefCell<Vec<Medium>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Tests: the next device flush on this thread fails.
+    static FLUSH_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn medium(event: Medium) {
+    MEDIUM.with(|m| m.borrow_mut().push(event));
+}
+
+/// A new file's content (named by its final `path`) synced: under
+/// `Handed` ordered before the link that publishes it.
+fn sync_content_as(file: &fs::File, path: &Path, durability: Durability) -> std::io::Result<()> {
+    #[cfg(test)]
+    if path.exists() {
+        medium(Medium::Published(path.to_path_buf()));
+    }
+    #[cfg(not(test))]
+    let _ = path;
+    match durability {
+        Durability::Full => {
+            #[cfg(test)]
+            medium(Medium::Full(path.to_path_buf()));
+            file.sync_all()
+        }
+        Durability::Handed => {
+            #[cfg(test)]
+            medium(Medium::Ordered(path.to_path_buf()));
+            darkbot_bsc_journal::durable::ordered(file)
+        }
+    }
+}
+
+fn sync_dir_as(dir: &Path, durability: Durability) -> std::io::Result<()> {
+    let file = fs::File::open(dir)?;
+    match durability {
+        Durability::Full => {
+            #[cfg(test)]
+            medium(Medium::Full(dir.to_path_buf()));
+            file.sync_all()
+        }
+        Durability::Handed => {
+            #[cfg(test)]
+            medium(Medium::Handed(dir.to_path_buf()));
+            darkbot_bsc_journal::durable::handed(&file)
+        }
+    }
+}
+
+/// Puts every write handed to the drive before it on the medium
+/// (BSC3-023), through the directory `dir`. The flush covers `dir`'s
+/// device only: every directory in `written` must be on it.
+fn flush_device(dir: &Path, written: &[PathBuf]) -> std::io::Result<()> {
+    let device = fs::metadata(dir)?.dev();
+    for w in written {
+        if fs::metadata(w)?.dev() != device {
+            return Err(std::io::Error::other(format!(
+                "{} is not on the device of {}",
+                w.display(),
+                dir.display()
+            )));
+        }
+    }
+    #[cfg(test)]
+    {
+        medium(Medium::Flush(dir.to_path_buf(), written.to_vec()));
+        if FLUSH_FAILS.with(|f| f.replace(false)) {
+            return Err(std::io::Error::other("the device flush failed (test)"));
+        }
+    }
+    darkbot_bsc_journal::durable::flush(&fs::File::open(dir)?)
+}
+
+fn write_new_as(path: &Path, bytes: &[u8], durability: Durability) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut nonce = [0u8; 8];
     fs::File::open("/dev/urandom")
@@ -2198,12 +2306,15 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             .mode(0o600)
             .open(&tmp)?;
         f.write_all(bytes)?;
-        f.sync_all()?;
-        fs::hard_link(&tmp, path)
+        sync_content_as(&f, path, durability)?;
+        fs::hard_link(&tmp, path)?;
+        #[cfg(test)]
+        medium(Medium::Linked(path.to_path_buf()));
+        Ok::<(), std::io::Error>(())
     })();
     let _ = fs::remove_file(&tmp);
     written?;
-    fs::File::open(dir)?.sync_all()
+    sync_dir_as(dir, durability)
 }
 
 /// Why a directory or file of a private store is refused.
@@ -3225,7 +3336,7 @@ impl Store {
     /// so concurrent attempts never share one; a lost race or a crash can
     /// only over-count, never under-count.
     pub fn consume_buy_attempt(&self, attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
-        self.consume_attempt(attempt_id, 0, now_ms)
+        self.consume_attempt_as(attempt_id, 0, now_ms, Durability::Full)
             .map(|(day, _)| day)
     }
 
@@ -3237,6 +3348,16 @@ impl Store {
         grant_generation: u64,
         now_ms: u64,
     ) -> Result<(BuySlot, TotalSlot), String> {
+        self.consume_attempt_as(attempt_id, grant_generation, now_ms, Durability::Full)
+    }
+
+    fn consume_attempt_as(
+        &self,
+        attempt_id: &str,
+        grant_generation: u64,
+        now_ms: u64,
+        durability: Durability,
+    ) -> Result<(BuySlot, TotalSlot), String> {
         // BSC3-004: a clock set back takes no slot (its day would be one
         // already counted, or a day before the campaign's last attempt).
         if let Some(latest) = latest_slot_ms(&self.dir)?
@@ -3246,8 +3367,8 @@ impl Store {
                 "BUY_ATTEMPT_CLOCK_BEHIND: now {now_ms} ms is before the last BUY attempt at {latest} ms"
             ));
         }
-        let day = self.consume_daily(attempt_id, now_ms)?;
-        let total = self.consume_total(attempt_id, grant_generation, now_ms)?;
+        let day = self.consume_daily(attempt_id, now_ms, durability)?;
+        let total = self.consume_total(attempt_id, grant_generation, now_ms, durability)?;
         Ok((day, total))
     }
 
@@ -3363,7 +3484,12 @@ impl Store {
             return Err(LIVE_INTENT_SEEN.into());
         }
         let slots = match exit {
-            false => Some(self.consume_attempt(intent.id, armed.grant_generation, now_ms)?),
+            false => Some(self.consume_attempt_as(
+                intent.id,
+                armed.grant_generation,
+                now_ms,
+                Durability::Handed,
+            )?),
             true => None,
         };
         let mut d = Draft::new(&ls::SCHEMA);
@@ -3392,13 +3518,23 @@ impl Store {
             );
         let bytes = d.encode().map_err(|e| e.to_string())?;
         create_durable_dir(&spend_dir(&self.dir))?;
-        match write_new(&entry, &bytes) {
+        match write_new_as(&entry, &bytes, Durability::Handed) {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                 return Err(LIVE_INTENT_SEEN.into());
             }
             Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: entry not written: {e}")),
         }
+        // BSC3-023: the slots and the entry were handed to the drive; one
+        // flush puts them on the medium before the admission returns, so
+        // before any byte of the intent can leave (BSC3-024). Not flushed:
+        // no admission (they over-count, nothing went).
+        let written: Vec<PathBuf> = slots
+            .iter()
+            .flat_map(|(day, _)| [buy_day_dir(&self.dir, &day.day), total_dir(&self.dir)])
+            .collect();
+        flush_device(&spend_dir(&self.dir), &written)
+            .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: not on the medium: {e}"))?;
         Ok(LiveAdmission {
             slots,
             spent_wei: after,
@@ -3471,6 +3607,7 @@ impl Store {
         attempt_id: &str,
         grant_generation: u64,
         now_ms: u64,
+        durability: Durability,
     ) -> Result<TotalSlot, String> {
         use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_total_slot as ts;
         let g = self.current()?;
@@ -3486,9 +3623,16 @@ impl Store {
                     "BUY_ATTEMPT_TOTAL_REACHED: slot {slot} is beyond the limit {limit}"
                 ));
             }
+            // Review (BSC3-023): its link may have been all of a write that
+            // ended before its directory was synced.
+            sync_dir_as(&total_dir(&self.dir), durability)
+                .map_err(|e| format!("total buy attempt slot not synced: {e}"))?;
             return Ok(TotalSlot { slot: *slot, limit });
         }
         for slot in 0..u64::from(limit) {
+            if taken.iter().any(|(t, _, _)| *t == slot) {
+                continue;
+            }
             let mut d = Draft::new(&ts::SCHEMA);
             d.set(ts::ATTEMPT_ID, attempt_id)
                 .set(ts::SLOT, slot)
@@ -3498,9 +3642,10 @@ impl Store {
                 .set(ts::PROVENANCE_TOOL, "bsc_runtime")
                 .set(ts::PROVENANCE_OBSERVED_UNIX_MS, now_ms);
             let bytes = d.encode().map_err(|e| e.to_string())?;
-            match write_new(
+            match write_new_as(
                 &total_dir(&self.dir).join(format!("{slot:010}.dbrec")),
                 &bytes,
+                durability,
             ) {
                 Ok(()) => {
                     let now = self.current()?.buy_attempts_total();
@@ -3522,7 +3667,12 @@ impl Store {
         ))
     }
 
-    fn consume_daily(&self, attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
+    fn consume_daily(
+        &self,
+        attempt_id: &str,
+        now_ms: u64,
+        durability: Durability,
+    ) -> Result<BuySlot, String> {
         use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot as bs;
         // The G0.7 runner's attempt ID rule, exactly (the slot files are
         // named by their number, the ID is only their content).
@@ -3549,10 +3699,17 @@ impl Store {
                     day.utc
                 ));
             }
+            sync_dir_as(&buy_day_dir(&self.dir, &day), durability)
+                .map_err(|e| format!("buy attempt slot not synced: {e}"))?;
             return Ok(BuySlot { day, slot, limit });
         }
         let taken = buy_slots(&day_dir)?;
         for slot in 0..u64::from(limit) {
+            // BSC3-023: a slot seen taken costs no write (one taken
+            // meanwhile still fails its link below).
+            if taken.iter().any(|(t, _)| *t == slot) {
+                continue;
+            }
             let mut d = Draft::new(&bs::SCHEMA);
             d.set(bs::ATTEMPT_ID, attempt_id)
                 .set(bs::DAY_UTC, day.utc.as_str())
@@ -3564,7 +3721,11 @@ impl Store {
                 .set(bs::PROVENANCE_OBSERVED_UNIX_MS, now_ms);
             let bytes = d.encode().map_err(|e| e.to_string())?;
             before_slot_write();
-            match write_new(&day_dir.join(format!("{slot:010}.dbrec")), &bytes) {
+            match write_new_as(
+                &day_dir.join(format!("{slot:010}.dbrec")),
+                &bytes,
+                durability,
+            ) {
                 Ok(()) => {
                     // BSC3-004: a limit lowered meanwhile holds; the slot
                     // stays taken (counted, never given back).
@@ -6266,6 +6427,169 @@ pub(crate) mod tests {
             11_000 + 3_000 + 4_000 + old
         );
         assert_eq!(spent_by_grant(&dir, 6).unwrap(), 12_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-023: an admission hands its slots and its entry to the drive,
+    /// each record's content ordered before its link (a barrier, not a
+    /// plain fsync), and puts them on the medium with one flush, its last
+    /// step before it returns (it was a medium flush per file and
+    /// directory, six for a BUY); a retry's slots found taken have their
+    /// directory synced again; a G0.7 attempt's slots stay durable each on
+    /// its own when written.
+    #[test]
+    fn an_admission_flushes_the_medium_once_before_it_returns() {
+        use darkbot_bsc_journal::durable::{Op, hooks};
+        let (dir, s, now) = live_ready_limited("live-flush-once", (5, 5), |now| LiveGrant {
+            max_attempts: 5,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let ids: Vec<String> = (0..4u8).map(|n| hex32(&[n; 32])).collect();
+        let medium = || MEDIUM.with(|m| std::mem::take(&mut *m.borrow_mut()));
+        let spend = spend_dir(&dir);
+        let entry = |id: &str| spend.join(format!("{id}.dbrec"));
+        let day = buy_day_dir(&dir, &BuyDay::at(now));
+        let total = total_dir(&dir);
+        let slot = |d: &Path, n: u64| d.join(format!("{n:010}.dbrec"));
+        hooks::record();
+        // The first creates the directories.
+        s.admit_live(&armed, &nonce_buy(&ids[0], 7, 1_000), &q, now)
+            .unwrap();
+        medium();
+        hooks::take();
+        s.admit_live(&armed, &nonce_buy(&ids[1], 8, 1_000), &q, now)
+            .unwrap();
+        // Per slot kind its own slot (the one taken before costs no write)
+        // and its directory; then the entry and the spend directory; then
+        // the one flush, for both slot directories.
+        assert_eq!(
+            medium(),
+            [
+                Medium::Ordered(slot(&day, 1)),
+                Medium::Linked(slot(&day, 1)),
+                Medium::Handed(day.clone()),
+                Medium::Ordered(slot(&total, 1)),
+                Medium::Linked(slot(&total, 1)),
+                Medium::Handed(total.clone()),
+                Medium::Ordered(entry(&ids[1])),
+                Medium::Linked(entry(&ids[1])),
+                Medium::Handed(spend.clone()),
+                Medium::Flush(spend.clone(), vec![day.clone(), total.clone()]),
+            ]
+        );
+        // What the drive was asked, in that order.
+        let handed = [Op::Barrier, Op::Fsync];
+        assert_eq!(
+            hooks::take(),
+            [handed, handed, handed]
+                .concat()
+                .into_iter()
+                .chain([Op::FullFlush])
+                .collect::<Vec<_>>()
+        );
+        let exit = LiveIntent {
+            kind: LiveIntentKind::Approve,
+            input_wei: 0,
+            ..nonce_buy(&ids[2], 9, 1_000)
+        };
+        s.admit_live(&armed, &exit, &q, now).unwrap();
+        assert_eq!(
+            medium(),
+            [
+                Medium::Ordered(entry(&ids[2])),
+                Medium::Linked(entry(&ids[2])),
+                Medium::Handed(spend.clone()),
+                Medium::Flush(spend.clone(), vec![]),
+            ]
+        );
+        assert_eq!(hooks::take(), [Op::Barrier, Op::Fsync, Op::FullFlush]);
+        // A retry whose slots a failed admission took: their directories
+        // synced again before the entry.
+        s.consume_attempt_as(&ids[3], armed.grant_generation(), now, Durability::Handed)
+            .unwrap();
+        medium();
+        hooks::take();
+        s.admit_live(&armed, &nonce_buy(&ids[3], 10, 1_000), &q, now)
+            .unwrap();
+        assert_eq!(
+            medium(),
+            [
+                Medium::Handed(day.clone()),
+                Medium::Handed(total.clone()),
+                Medium::Ordered(entry(&ids[3])),
+                Medium::Linked(entry(&ids[3])),
+                Medium::Handed(spend.clone()),
+                Medium::Flush(spend.clone(), vec![day.clone(), total.clone()]),
+            ]
+        );
+        assert_eq!(
+            hooks::take(),
+            [Op::Fsync, Op::Fsync, Op::Barrier, Op::Fsync, Op::FullFlush]
+        );
+        s.consume_buy_attempt("g07-attempt", now).unwrap();
+        // Durable each on its own: no write handed over, no device flush.
+        assert_eq!(
+            medium(),
+            [
+                Medium::Full(slot(&day, 3)),
+                Medium::Linked(slot(&day, 3)),
+                Medium::Full(day.clone()),
+                Medium::Full(slot(&total, 3)),
+                Medium::Linked(slot(&total, 3)),
+                Medium::Full(total.clone()),
+            ]
+        );
+        assert_eq!(hooks::take(), []);
+        assert_eq!(admitted_intents(&dir).unwrap().len(), 4);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-023: a device flush that fails leaves no admission; its entry
+    /// stays (it may be on the medium), so the same intent is never
+    /// admitted again and nothing of it leaves.
+    #[test]
+    fn an_admission_whose_flush_fails_is_refused_for_good() {
+        let (dir, s, now) = live_ready_granting("live-flush-fails", |now| {
+            grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified();
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let id = hex32(&[0x42; 32]);
+        let buy = nonce_buy(&id, 7, 1_000);
+        FLUSH_FAILS.with(|f| f.set(true));
+        let refused = s.admit_live(&armed, &buy, &q, now).unwrap_err();
+        assert!(
+            refused.starts_with(&format!("{LIVE_SPEND_UNREADABLE}: not on the medium")),
+            "{refused}"
+        );
+        assert!(!FLUSH_FAILS.with(std::cell::Cell::get));
+        assert!(matches!(
+            MEDIUM.with(|m| m.borrow().last().cloned()),
+            Some(Medium::Flush(d, _)) if d == spend_dir(&dir)
+        ));
+        assert_eq!(
+            s.admit_live(&armed, &buy, &q, now).unwrap_err(),
+            LIVE_INTENT_SEEN
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-023: one flush covers one device; a written directory on
+    /// another is refused before the flush.
+    #[test]
+    fn a_flush_refuses_a_directory_on_another_device() {
+        let dir = std::env::temp_dir().join(format!("bsc-flush-device-{}", std::process::id()));
+        create_durable_dir(&dir).unwrap();
+        flush_device(&dir, std::slice::from_ref(&dir)).unwrap();
+        let other = Path::new("/dev");
+        assert_ne!(
+            fs::metadata(other).unwrap().dev(),
+            fs::metadata(&dir).unwrap().dev()
+        );
+        let refused = flush_device(&dir, &[other.to_path_buf()]).unwrap_err();
+        assert!(refused.to_string().contains("is not on the device of"));
         fs::remove_dir_all(dir).unwrap();
     }
 

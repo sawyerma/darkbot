@@ -7,3 +7,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+libc = { workspace = true }
+
+[features]
+# Tests of dependent crates: record what a thread asked of the drive.
+test-hooks = []

@@ -56,6 +56,8 @@ g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "de
 darkbot-bsc-trading = { path = "../trading", features = ["test-support"] }
 alloy-primitives = { workspace = true }
 darkbot-bsc-record = { path = "../record" }
+# BSC3-023: what an admission asks of the drive, in this crate's tests.
+darkbot-bsc-journal = { path = "../journal", features = ["test-hooks"] }
 
 [[test]]
 name = "acceptance_guard"

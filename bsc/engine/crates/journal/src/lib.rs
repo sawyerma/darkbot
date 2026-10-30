@@ -10,6 +10,10 @@
 //! Allocation freedom and final Fast-Lane placement are later C1/C3
 //! qualification concerns; this module makes no latency claim.
 
+#![deny(unsafe_code)]
+
+#[allow(unsafe_code)]
+pub mod durable;
 mod format;
 mod recorder;
 mod replay;
