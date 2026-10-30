@@ -30,6 +30,7 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
       ["bt-1", "BACKTEST", "COMPLETED"],
       ["pc-1", "POST_CAPTURE", "COMPLETED"],
       ["h0-1", "H0", "COMPLETED"],
+      ["h0-0", "H0", "COMPLETED"],
     ]);
     // H0: every saved run (no run), its headline as the job store holds it.
     expect(view.jobs[3]?.run).toBe("");
@@ -47,6 +48,14 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
       + " · tips 8 accounts · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 (tags, take times, premium(t), our t_profitable) needs the 0.1.12 deployment");
     expect(h0Line({ ...r, topWinnerShareBps: null })).toContain("top —");
     expect(h0Line({ ...r, tipAccounts: 0n })).toContain("tips unknown");
+    // A report of 9a41e808 (before the H0 review): its headline, the later counts unknown — never 0.
+    const pre = view.jobs[4]!.result!;
+    if (pre.kind !== "H0") throw new Error("H0");
+    expect([pre.competitive, pre.transactions, pre.failedAttempts, pre.coveredSeconds, pre.bandsBounded, pre.bandsBelowOurMinProfit, pre.tipAccounts])
+      .toEqual([null, null, null, null, null, null, null]);
+    expect(h0Line(pre)).toBe("2025-08-28 … 2025-09-27 (covered — h) · 7 liquidations (— competitive, 0 seen again) · — transactions"
+      + " · runs 1 verified / 0 without · 2 winners · top 70.00 % · — failed attempts · —/1 min-profit bands bounded (upper bounds; — below ours)"
+      + " · tips — · MIN_SAMPLE_UNDECIDED · tags BLOCKED: H0-04 needs the 0.1.12 deployment");
     expect(view.jobs[2]?.verification).toEqual({ chainVerify: "strict", offline: true });
     expect(view.jobs[2]?.result).toEqual({ kind: "POST_CAPTURE", verificationOk: false, reportOk: true, verdict: null });
     expect(view.jobs[2]?.params).toBeNull();

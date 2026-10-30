@@ -2189,13 +2189,13 @@ A completed H0 report&#39;s headline (the full report is the job&#39;s typed H0 
 | bands | [uint64](#uint64) |  | Recurring winners with an implied minimum-profit band (an upper bound, never a config). |
 | sample_status | [string](#string) |  | SUFFICIENT, SMALL_SAMPLE or MIN_SAMPLE_UNDECIDED (over the competitive liquidations). |
 | tags | [string](#string) |  | The tag timeline&#39;s state (BLOCKED until 0.1.12, H0-04). |
-| competitive | [uint64](#uint64) |  | Permissionless profit opportunities (classic, receivership): the winners&#39; sample. |
-| transactions | [uint64](#uint64) |  | Distinct liquidation transactions. |
-| failed_attempts | [uint64](#uint64) |  | Failed classic or receivership attempts in the window (the competition that lost). |
-| covered_seconds | [uint64](#uint64) |  | Seconds of the window the runs&#39; captures cover. |
-| bands_bounded | [uint64](#uint64) |  | Bands with an upper bound. |
-| bands_below_our_min_profit | [uint64](#uint64) |  | Bands whose bound lies below our minimum profit. |
-| tip_accounts | [uint64](#uint64) |  | Configured Jito tip accounts (0: tips unknown). |
+| competitive | [uint64](#uint64) | optional | Fields 13–19: unset for a result of the layout before the review (9a41e808), never 0. Permissionless profit opportunities (classic, receivership): the winners&#39; sample. |
+| transactions | [uint64](#uint64) | optional | Distinct liquidation transactions. |
+| failed_attempts | [uint64](#uint64) | optional | Failed classic or receivership attempts in the window (the competition that lost). |
+| covered_seconds | [uint64](#uint64) | optional | Seconds of the window the runs&#39; captures cover. |
+| bands_bounded | [uint64](#uint64) | optional | Bands with an upper bound. |
+| bands_below_our_min_profit | [uint64](#uint64) | optional | Bands whose bound lies below our minimum profit. |
+| tip_accounts | [uint64](#uint64) | optional | Configured Jito tip accounts (0: tips unknown). |
 
 
 

@@ -130,6 +130,22 @@ pub enum JobResult {
         /// The master verdict; `None`: the qualification could not run.
         verdict: Option<String>,
     },
+    /// The headline of an H0 job of 9a41e808 (before its review): read-only at its old variant
+    /// index, so that outcome stays readable; never written (`h0_pre`).
+    H0PreReview {
+        result_id: String,
+        window_start_unix_s: i64,
+        window_end_unix_s: i64,
+        liquidations: u64,
+        duplicates: u64,
+        runs_verified: u64,
+        runs_without_result: u64,
+        winners: u64,
+        top_winner_share_bps: Option<u64>,
+        bands: u64,
+        sample_status: String,
+        tags: String,
+    },
     /// The H0 report's headline (the full report is `data/h0/<job>/h0.p0j` and its render).
     H0 {
         result_id: String,
@@ -934,6 +950,15 @@ pub fn render(s: &JobStatus) -> String {
             }) => format!(
                 "liquidations={liquidations} winners={winners} bands={bands} sample={sample_status}"
             ),
+            Some(JobResult::H0PreReview {
+                liquidations,
+                winners,
+                bands,
+                sample_status,
+                ..
+            }) => format!(
+                "pre-review (9a41e808) liquidations={liquidations} winners={winners} bands={bands} sample={sample_status}"
+            ),
             None => String::new(),
         },
         _ => String::new(),
@@ -1308,6 +1333,85 @@ mod tests {
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGTERM));
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Review (CTRL-10 re-check): an H0 job outcome of 9a41e808 stays readable — its result
+    /// decodes at its old variant index as the pre-review headline (never as today's H0).
+    #[test]
+    fn h0_outcomes_of_the_pre_review_layout_stay_readable() {
+        #[derive(Serialize)]
+        enum Old {
+            _Backtest,
+            _Optimize,
+            _PostCapture,
+            H0 {
+                result_id: String,
+                window_start_unix_s: i64,
+                window_end_unix_s: i64,
+                liquidations: u64,
+                duplicates: u64,
+                runs_verified: u64,
+                runs_without_result: u64,
+                winners: u64,
+                top_winner_share_bps: Option<u64>,
+                bands: u64,
+                sample_status: String,
+                tags: String,
+            },
+        }
+        #[derive(Serialize)]
+        struct OldOutcome {
+            job_id: String,
+            state: String,
+            code: String,
+            result: Option<Old>,
+            worker_pid: u32,
+            started_unix_ms: Option<u64>,
+            finished_unix_ms: Option<u64>,
+        }
+        let bytes = crate::analytics::payload::encode_wire(&OldOutcome {
+            job_id: "h0-old".into(),
+            state: COMPLETED.into(),
+            code: String::new(),
+            result: Some(Old::H0 {
+                result_id: "r".into(),
+                window_start_unix_s: 1,
+                window_end_unix_s: 2,
+                liquidations: 3,
+                duplicates: 4,
+                runs_verified: 5,
+                runs_without_result: 6,
+                winners: 7,
+                top_winner_share_bps: Some(8),
+                bands: 9,
+                sample_status: "SMALL_SAMPLE".into(),
+                tags: "BLOCKED".into(),
+            }),
+            worker_pid: 10,
+            started_unix_ms: Some(11),
+            finished_unix_ms: None,
+        })
+        .unwrap();
+        let o =
+            crate::analytics::payload::decode::<JobOutcome>(JobOutcome::KIND, 2, &bytes).unwrap();
+        assert_eq!(
+            o.result,
+            Some(JobResult::H0PreReview {
+                result_id: "r".into(),
+                window_start_unix_s: 1,
+                window_end_unix_s: 2,
+                liquidations: 3,
+                duplicates: 4,
+                runs_verified: 5,
+                runs_without_result: 6,
+                winners: 7,
+                top_winner_share_bps: Some(8),
+                bands: 9,
+                sample_status: "SMALL_SAMPLE".into(),
+                tags: "BLOCKED".into(),
+            })
+        );
+        assert_eq!((o.job_id.as_str(), o.worker_pid), ("h0-old", 10));
     }
 
     /// H0: `job start h0` reads every saved run (a `--run` is refused), takes the registry's

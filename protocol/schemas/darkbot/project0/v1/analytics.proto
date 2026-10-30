@@ -374,20 +374,21 @@ message H0Result {
   string sample_status = 11;
   // The tag timeline's state (BLOCKED until 0.1.12, H0-04).
   string tags = 12;
+  // Fields 13–19: unset for a result of the layout before the review (9a41e808), never 0.
   // Permissionless profit opportunities (classic, receivership): the winners' sample.
-  uint64 competitive = 13;
+  optional uint64 competitive = 13;
   // Distinct liquidation transactions.
-  uint64 transactions = 14;
+  optional uint64 transactions = 14;
   // Failed classic or receivership attempts in the window (the competition that lost).
-  uint64 failed_attempts = 15;
+  optional uint64 failed_attempts = 15;
   // Seconds of the window the runs' captures cover.
-  uint64 covered_seconds = 16;
+  optional uint64 covered_seconds = 16;
   // Bands with an upper bound.
-  uint64 bands_bounded = 17;
+  optional uint64 bands_bounded = 17;
   // Bands whose bound lies below our minimum profit.
-  uint64 bands_below_our_min_profit = 18;
+  optional uint64 bands_below_our_min_profit = 18;
   // Configured Jito tip accounts (0: tips unknown).
-  uint64 tip_accounts = 19;
+  optional uint64 tip_accounts = 19;
 }
 
 // The verification request of a post-capture job (A08/F-02).

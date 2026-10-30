@@ -931,6 +931,10 @@ macro_rules! typed_kinds {
             k::BACKTEST_ATTEMPT => $f::<super::backtest::Attempt>($kind, $schema, $bytes),
             k::ANALYTICS_JOB_REQUEST => $f::<super::jobs::JobRequest>($kind, $schema, $bytes),
             k::ANALYTICS_JOB_OUTCOME => $f::<super::jobs::JobOutcome>($kind, $schema, $bytes),
+            k::H0_LIQUIDATION_PRE_REVIEW => {
+                $f::<super::h0_pre::H0Liquidation>($kind, $schema, $bytes)
+            }
+            k::H0_REPORT_PRE_REVIEW => $f::<super::h0_pre::H0Report>($kind, $schema, $bytes),
             k::H0_LIQUIDATION => $f::<super::h0::H0Liquidation>($kind, $schema, $bytes),
             k::H0_REPORT => $f::<super::h0::H0Report>($kind, $schema, $bytes),
             k::C0E1_QUALIFICATION => {

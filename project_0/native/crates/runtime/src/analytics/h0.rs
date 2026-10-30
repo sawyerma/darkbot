@@ -441,12 +441,14 @@ pub fn extract_with(
                 }
             }
         }
-        for event in fresh {
-            let tx = attrs.remove(&event.signature);
-            let l = liquidation(run_id, event, tx, tips);
-            held.charge(&l)?;
-            out.liquidations.push(l);
-        }
+        attach(
+            fresh,
+            &attrs,
+            run_id,
+            tips,
+            &mut held,
+            &mut out.liquidations,
+        )?;
         let status = selected.result.status.as_str();
         let reason = (selected.result.status == StrictStatus::HistoricalIncomplete)
             .then(|| selected.result.reason.clone())
@@ -516,6 +518,25 @@ fn admit(
 }
 
 /// The seconds of `window` that the union of `spans` (unix s, half-open) covers.
+/// The run's fresh events as liquidations, each with its transaction's attributes — every event
+/// of a transaction carries them (review: a later event of a multi-event transaction kept none).
+fn attach(
+    fresh: Vec<TruthEvent>,
+    attrs: &BTreeMap<String, TxAttributes>,
+    run_id: &str,
+    tips: &BTreeSet<Pubkey>,
+    held: &mut Held,
+    out: &mut Vec<H0Liquidation>,
+) -> Result<(), String> {
+    for event in fresh {
+        let tx = attrs.get(&event.signature).cloned();
+        let l = liquidation(run_id, event, tx, tips);
+        held.charge(&l)?;
+        out.push(l);
+    }
+    Ok(())
+}
+
 fn covered_seconds(spans: &[(i64, i64)], window: Window) -> u64 {
     let mut clipped: Vec<(i64, i64)> = spans
         .iter()
@@ -1817,6 +1838,56 @@ mod tests {
         );
     }
 
+    /// Review (CTRL-10 re-check): every event of a multi-event transaction carries the
+    /// transaction's attributes, not only the first one.
+    #[test]
+    fn h0_every_event_of_a_transaction_carries_its_attributes() {
+        let at = |index: u32| {
+            let mut e = event("multi", LiquidationType::Receivership, "w", None, false);
+            e.event_index = index;
+            e
+        };
+        let a = TxAttributes {
+            version: Some("v0".into()),
+            cpi_known: true,
+            ..Default::default()
+        };
+        let attrs = BTreeMap::from([("multi".to_string(), a.clone())]);
+        let mut held = Held {
+            bytes: 0,
+            max: u64::MAX,
+        };
+        let mut out = Vec::new();
+        attach(
+            vec![
+                at(0),
+                at(1),
+                event("other", LiquidationType::Classic, "w", None, false),
+            ],
+            &attrs,
+            "run",
+            &BTreeSet::new(),
+            &mut held,
+            &mut out,
+        )
+        .unwrap();
+        let txs: Vec<Option<&TxAttributes>> = out.iter().map(|l| l.tx.as_ref()).collect();
+        assert_eq!(txs, vec![Some(&a), Some(&a), None]);
+        assert_eq!(out[0].execution_class, out[1].execution_class);
+        let mut tight = Held { bytes: 0, max: 1 };
+        assert_eq!(
+            attach(
+                vec![at(0)],
+                &attrs,
+                "run",
+                &BTreeSet::new(),
+                &mut tight,
+                &mut Vec::new()
+            ),
+            Err("H0_RAM_BUDGET".to_string())
+        );
+    }
+
     /// H0: a window is the given days before its end; zero days or one before the epoch is
     /// refused; the runs cover the union of their capture windows inside it.
     #[test]
@@ -1924,17 +1995,116 @@ mod tests {
             ],
             [
                 (
-                    360,
+                    362,
                     2,
                     "7mBZKV2aUvnZ6twbLmNWKJq7zzwcjCE6Ew8KWaZ9Mjju".to_string()
                 ),
                 (
-                    361,
+                    363,
                     2,
                     "92boB86YNXA7ornUBAthVwJKWBp73fnN1LCXqtKc67g7".to_string()
                 )
             ]
         );
+    }
+
+    /// Review (CTRL-10 re-check): the frames 9a41e808 wrote stay readable — kind 360 decodes the
+    /// liquidation layout of that commit exactly (its pinned hash), kind 361 its report; neither
+    /// is the reviewed layout (kinds 362/363).
+    #[test]
+    fn h0_pre_review_frames_stay_readable() {
+        use crate::analytics::{h0_pre as pre, payload};
+        let mut e = event("pinned", LiquidationType::Classic, "alpha", Some(1.0), true);
+        e.visible_payments = Some(vec![]);
+        let l = pre::H0Liquidation {
+            run_id: "run".into(),
+            event: e,
+            tx: Some(pre::TxAttributes {
+                version: Some("v0".into()),
+                serialized_bytes: Some(900),
+                account_count: Some(20),
+                lookup_tables: 1,
+                instruction_count: 5,
+                compute_units_consumed: Some(150_000),
+                compute_unit_limit: Some(400_000),
+                compute_unit_price_micro_lamports: Some(1),
+                swap_programs: vec![p::JUP_SWAP_PROGRAM_ID.into()],
+                integration_instructions: 1,
+                oracle_instructions: 1,
+                program_sequence: vec![p::PROGRAM_ID_MAINNET.into()],
+            }),
+            jito_tip_lamports: Some(0),
+            premium_bps: Some(500),
+            execution_class: "CLASSIC:SWAP:UNTIPPED".into(),
+        };
+        let lb = payload::encode(&l).unwrap();
+        assert_eq!(
+            (
+                pre::H0Liquidation::KIND,
+                pre::H0Liquidation::SCHEMA,
+                solana_sdk::hash::hash(&lb).to_string()
+            ),
+            (
+                360,
+                2,
+                "EYqS5VFvFKnB1zLPqdnKUz1NxqjaimxgbhyRvDovdTww".to_string()
+            )
+        );
+        assert_eq!(
+            payload::decode::<pre::H0Liquidation>(360, 2, &lb).unwrap(),
+            l
+        );
+        assert!(payload::decode::<H0Liquidation>(360, 2, &lb).is_err());
+        let r = pre::H0Report {
+            window: pre::Window {
+                start_unix_s: 0,
+                end_unix_s: 2_000,
+            },
+            runs: vec![pre::RunCoverage {
+                run_id: "run".into(),
+                status: "CANONICAL_VERIFIED".into(),
+                reason: None,
+                events: 1,
+            }],
+            liquidations: 1,
+            duplicates: 0,
+            by_type: vec![("CLASSIC".into(), 1)],
+            by_execution_class: vec![("CLASSIC:SWAP:UNTIPPED".into(), 1)],
+            by_tx_version: vec![("v0".into(), 1)],
+            winners: vec![pre::WinnerStats {
+                winner: "alpha".into(),
+                wins: 1,
+                share_bps: 10_000,
+                shapes: 1,
+            }],
+            top_winner_share_bps: Some(10_000),
+            winner_hhi_bps: Some(10_000),
+            tipped: 0,
+            tip_unobservable: 0,
+            tip_unknown: 0,
+            tip_lamports: pre::Percentiles::default(),
+            priority_fee_lamports: pre::Percentiles::default(),
+            compute_units: pre::Percentiles::default(),
+            serialized_bytes: pre::Percentiles::default(),
+            premium_bps: pre::Percentiles::default(),
+            bands: vec![pre::MinProfitBand {
+                winner: "alpha".into(),
+                wins: 1,
+                complete: 1,
+                incomplete: 0,
+                upper_bound_usd_micro: Some(1_000_000),
+                p10_usd_micro: Some(1_000_000),
+                p50_usd_micro: Some(1_000_000),
+                uncertainty: vec!["UPPER_BOUND_ONLY".into()],
+            }],
+            recurring_min_wins: 1,
+            our_min_profit_usd_micro: Some(1),
+            sample_status: "SUFFICIENT".into(),
+            tags: "BLOCKED".into(),
+        };
+        let rb = payload::encode(&r).unwrap();
+        assert_eq!(payload::decode::<pre::H0Report>(361, 2, &rb).unwrap(), r);
+        assert!(payload::decode::<H0Report>(361, 2, &rb).is_err());
     }
 
     /// H0: the job's inputs — the Jito tip accounts from the environment (an invalid key is

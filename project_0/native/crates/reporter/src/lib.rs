@@ -1546,6 +1546,42 @@ mod contract_tests {
                         finished_unix_ms: Some(1_760_000_000_900),
                     })),
                 },
+                // H0 of 9a41e808 (before its review): its headline only, the rest unknown.
+                JobStatus {
+                    request: darkbot_runner::analytics::jobs::JobRequest {
+                        run: String::new(),
+                        ..request(
+                            "h0-0",
+                            JobSpec::H0 {
+                                window_days: 30,
+                                min_sample: None,
+                                end_unix_s: 1_759_000_000,
+                            },
+                        )
+                    },
+                    state: JobState::Done(Box::new(JobOutcome {
+                        job_id: "h0-0".into(),
+                        state: COMPLETED.into(),
+                        code: String::new(),
+                        result: Some(JobResult::H0PreReview {
+                            result_id: "h0-0".into(),
+                            window_start_unix_s: 1_756_408_000,
+                            window_end_unix_s: 1_759_000_000,
+                            liquidations: 7,
+                            duplicates: 0,
+                            runs_verified: 1,
+                            runs_without_result: 0,
+                            winners: 2,
+                            top_winner_share_bps: Some(7_000),
+                            bands: 1,
+                            sample_status: "MIN_SAMPLE_UNDECIDED".into(),
+                            tags: "BLOCKED: H0-04 needs the 0.1.12 deployment".into(),
+                        }),
+                        worker_pid: 10,
+                        started_unix_ms: Some(1_759_000_000_800),
+                        finished_unix_ms: Some(1_759_000_000_900),
+                    })),
+                },
             ],
             error: None,
             // DEC-07: a flow whose network audit is READY, awaiting the start approval.
