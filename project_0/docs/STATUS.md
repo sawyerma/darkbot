@@ -301,12 +301,12 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | C0-02 health classification | `census.rs`, Shadow census worker | Ticket 2, C0-FIX-01…05 | LOCAL_PASS · current **NOT_RUN** | permitted Shadow start with measured cost model |
 | C0-03 race opportunity map | census facts (distance, oracles, integrations, TX load) | `evidence/C0_MARKET_CENSUS.md` | PARTIAL | exact v0/v1 fit per account needs built TX (pipeline); current data NOT_RUN |
 | C0-04 long-tail / `t_profitable` | `economics.rs`, census `model_long_tail` | same | LOCAL_PASS (model) | current data NOT_RUN; tagging only from 0.1.12 |
-| H0-01 historical extractor | `market/*`, `market_truth.rs`, gap/reconcile | C0-E1 runs (INCOMPLETE) | CODE | 30-day window over saved runs; Ticket 3 A1–A4 (typed capture + native verifier) first |
+| H0-01 historical extractor | `analytics/h0.rs` over every saved run (`market/*`, `market_truth.rs`) | `f8a360e8` (review PASS, 60 mutations), CI `e87181b6` | OFFLINE_VERIFIED · real run NOT_RUN | 30-day window over saved runs |
 | H0-02 winner matcher | `market/winner.rs`, `winner_tracker.rs` | 6/6 audit fixtures; absent-`meta.err` fix 2026-10-17 | LOCAL_PASS | historical window evaluation |
-| H0-03 execution classifier | `market_truth.rs` (four types / six markers) | C0E1-P3 evidence | PARTIAL | apply to H0 window |
+| H0-03 execution classifier | `h0.rs` `TYPE:ROUTE:CARRIER` | `f8a360e8` | OFFLINE_VERIFIED | v1 wire length only with `txv1` (darkbotctl build: None) |
 | H0-04 tag timeline after 0.1.12 | — | — | OPEN · BLOCKED | needs 0.1.12 deployed |
-| H0-05 competitor min-profit inference | — | — | OPEN | after H0-01…03 |
-| H0-06 report | — | — | OPEN | `evidence/H0_LIQUIDATIONS.md` |
+| H0-05 competitor min-profit inference | `h0.rs` bands (competitive wins, NET/GROSS upper bounds) | `f8a360e8` | OFFLINE_VERIFIED · real data NOT_RUN | — |
+| H0-06 report | kinds 362/363 + render, job `h0` (p0ctl/gateway/Analytics) | `f8a360e8` | OFFLINE_VERIFIED · `evidence/H0_LIQUIDATIONS.md` NOT_RUN | needs a real run |
 | S0-01 workspace | 4 crates | builds/tests per ledger | LOCAL_PASS | — |
 | S0-02 timing / S0-03 telemetry | `common/timing.rs`, `mt0.rs` | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
 | S0-04 bounded channels / lifecycle | `common/channel.rs`, `lifecycle.rs` | unit tests | LOCAL_PASS | — |
@@ -361,6 +361,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P4B-01…05 | — | — | OPEN · DEFERRED_PRIORITY | after P7 |
 | P8-01 safety gates / P8-02 limits | `safety.rs`, pipeline | unit tests | PARTIAL | full P8 before multi-LIVE |
 | P8-03 staging live / P8-04 controlled mainnet | LIVE refused in code | — | NOT_AUTHORIZED | separate approvals |
+| P8-CTRL-01 owner switches | `capability_control.rs`, `state_owner/sources.rs` (WALLET/ECON, epoch, request id, receipts) | `f8a360e8` (review PASS, mutations) | OFFLINE_VERIFIED | P8-CTRL-02…06 open; operator auth = user decision |
 | P8-05 reconciliation / P8-RES-01/02 | FE-04 `one_shot.rs` journal, holds, UNKNOWN | FE-04 local evidence; P8 clock fix ledger 2026-10-17 | PARTIAL_LOCAL | reconcile wall-clock `unwrap_or(0)` **fixed fail-closed** (owner HALT, submission stays pending, LOCAL_PASS); global multi-mint reservation; FE-04 typed journal (FIX-06) before any financial handoff |
 | P8-INV-01 inventory / rebalance | `execution/inventory.rs` | `2774a5e` | PARTIAL | Bänder + Reserve-Gate aktiv; Planner ohne Aufrufer (braucht Live-Bestände + Quotes) |
 | P9-01…03 | — | — | OPEN | after pilot |
