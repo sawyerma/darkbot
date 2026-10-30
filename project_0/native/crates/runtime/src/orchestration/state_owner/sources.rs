@@ -67,14 +67,24 @@ pub(super) struct OwnerSources {
     pub(super) capabilities: OwnerCapabilities,
 }
 
-/// DEC-13: the requested capability values (`p0ctl capability set`) and the owner's decisions;
-/// what is effective is `capability_control::live_effective`'s alone.
+/// DEC-13/P8-CTRL: the requested capability values (`p0ctl capability set`) and the owner's
+/// decisions; what LIVE makes effective is `capability_control::live_decision`'s alone.
 #[derive(Debug)]
 pub(super) struct OwnerCapabilities {
     /// Where the owner records its decisions; `None`: no capability control in this runtime.
     pub(super) dir: Option<std::path::PathBuf>,
     /// CTRL-03: the capability configuration version decided up to; `None` without control.
     pub(super) config_version: Option<u64>,
+    /// P8-CTRL.6: this start's owner epoch (`None` without capability control): a request of
+    /// another epoch is refused.
+    pub(super) epoch: Option<u64>,
+    /// P8-CTRL.1: the requested economic switches — DISABLED at every start.
+    pub(super) econ: crate::orchestration::capability_control::EconSwitches,
+    /// P8-CTRL.1: one switch per configured signer — DISABLED at every start.
+    pub(super) wallets: Vec<crate::orchestration::capability_control::WalletSwitch>,
+    /// P8-CTRL.6: the request ids decided in this epoch — the first request's sequence number and
+    /// content (a second request with the id has no second effect).
+    pub(super) decided_ids: std::collections::BTreeMap<String, (u64, String, String)>,
     /// The requested LIVE value: `OFF` at every start (a run never inherits a LIVE request).
     pub(super) live_requested: &'static str,
     /// DEC-04: the requested B hold mode: OBSERVE at every start; the effective one is the
@@ -95,11 +105,59 @@ pub(super) struct OwnerCapabilities {
     pub(super) refused: u64,
 }
 
+impl OwnerCapabilities {
+    /// P8-CTRL.2: what LIVE's effective value rests on now.
+    pub(super) fn live_gates(&self) -> crate::orchestration::capability_control::LiveGates<'_> {
+        crate::orchestration::capability_control::LiveGates {
+            requested: self.live_requested,
+            econ: &self.econ,
+            wallets: &self.wallets,
+            fe06: self.fe06.as_ref(),
+        }
+    }
+
+    /// P8-CTRL.6: a request of this owner's epoch whose id is new; the same id again is the same
+    /// request (refused: no second effect), with other content a conflict.
+    fn admit(&self, r: &crate::analytics::payload::CapabilityControlRequest) -> Result<(), String> {
+        if let Some(epoch) = self.epoch {
+            if r.owner_epoch != epoch {
+                return Err(format!(
+                    "CAPABILITY_EPOCH_STALE: the request names owner epoch {}, this owner is epoch {epoch}; reload and retry",
+                    r.owner_epoch
+                ));
+            }
+            crate::orchestration::capability_control::validate_request_id(&r.request_id)?;
+        }
+        if r.request_id.is_empty() {
+            return Ok(());
+        }
+        match self.decided_ids.get(&r.request_id) {
+            Some((seq, capability, requested))
+                if (capability, requested) == (&r.capability, &r.requested) =>
+            {
+                Err(format!(
+                    "CAPABILITY_REQUEST_REPLAYED: request id {} was decided as seq {seq}; no second effect",
+                    r.request_id
+                ))
+            }
+            Some((seq, _, _)) => Err(format!(
+                "CAPABILITY_REQUEST_ID_CONFLICT: request id {} is seq {seq} with other content",
+                r.request_id
+            )),
+            None => Ok(()),
+        }
+    }
+}
+
 impl Default for OwnerCapabilities {
     fn default() -> Self {
         Self {
             dir: None,
             config_version: None,
+            epoch: None,
+            econ: Default::default(),
+            wallets: Vec::new(),
+            decided_ids: Default::default(),
             live_requested: crate::orchestration::capability_control::LIVE_OFF,
             hold_b_requested: crate::execution::hold_b::HoldMode::Observe,
             hold_b_block: "",
@@ -151,9 +209,15 @@ impl OwnerSources {
 
     /// DEC-13: the owner decides capability requests from `baseline` on and records them in
     /// `dir` (`p0ctl capability status`).
-    pub(super) fn capability_control_in(mut self, dir: std::path::PathBuf, baseline: u64) -> Self {
+    pub(super) fn capability_control_in(
+        mut self,
+        dir: std::path::PathBuf,
+        baseline: u64,
+        epoch: u64,
+    ) -> Self {
         self.capabilities.dir = Some(dir);
         self.capabilities.config_version = Some(baseline);
+        self.capabilities.epoch = Some(epoch);
         self
     }
 
@@ -400,12 +464,43 @@ impl ShadowOwner {
     ) {
         use crate::orchestration::capability_control as cap;
         let request_capability = request.as_ref().ok().map(|r| r.capability.clone());
+        let request_id = request
+            .as_ref()
+            .map_or(String::new(), |r| r.request_id.clone());
         let (text, valid) = match request {
             Ok(r) => (
                 cap::shown(&r.capability, &r.requested),
-                cap::validate(&r.capability, &r.requested).map(|()| r.requested),
+                self.sources
+                    .capabilities
+                    .admit(&r)
+                    .and_then(|()| cap::validate(&r.capability, &r.requested))
+                    .map(|()| r.requested),
             ),
             Err(reason) => ("unreadable".to_string(), Err(reason)),
+        };
+        // P8-CTRL.1: an economic switch, or the switch of a configured signer (only those).
+        let econ = matches!(&request_capability, Some(c) if cap::ECON.contains(&c.as_str()));
+        let wallet = request_capability
+            .as_deref()
+            .and_then(cap::wallet_of)
+            .and_then(Result::ok);
+        let valid = match valid {
+            Ok(requested)
+                if wallet.is_some_and(|pk| {
+                    !self
+                        .sources
+                        .capabilities
+                        .wallets
+                        .iter()
+                        .any(|w| w.pubkey == pk)
+                }) =>
+            {
+                Err(format!(
+                    "WALLET_NOT_CONFIGURED: {} is no configured signer of this owner",
+                    cap::shown(request_capability.as_deref().unwrap_or(""), &requested)
+                ))
+            }
+            other => other,
         };
         let hold_b =
             matches!(&request_capability, Some(c) if c == crate::execution::hold_b::HOLD_B);
@@ -428,7 +523,23 @@ impl ShadowOwner {
         let c = &mut self.sources.capabilities;
         let applied = valid.is_ok();
         if let Ok(requested) = &valid {
-            if jito {
+            if let Some(capability) = request_capability
+                .as_ref()
+                .filter(|_| !request_id.is_empty())
+            {
+                c.decided_ids.insert(
+                    request_id.clone(),
+                    (seq, capability.clone(), requested.clone()),
+                );
+            }
+            let on = requested == cap::ENABLED;
+            if econ {
+                c.econ.set(request_capability.as_deref().unwrap_or(""), on);
+            } else if let Some(pk) = wallet {
+                if let Some(w) = c.wallets.iter_mut().find(|w| w.pubkey == pk) {
+                    w.enabled = on;
+                }
+            } else if jito {
                 c.jito_requested = crate::execution::bundle_path::JITO_BUNDLE_VALUES
                     .into_iter()
                     .find(|v| v == requested)
@@ -448,27 +559,45 @@ impl ShadowOwner {
         } else {
             c.refused = c.refused.saturating_add(1);
         }
-        let (requested, effective, block_reason) = if jito {
+        let switch = |on: bool| if on { cap::ENABLED } else { cap::DISABLED };
+        let (requested, effective, block_reason): (&str, &str, String) = if econ {
+            // P8-CTRL.1: a partial permission — effective as requested, never a command.
+            let on = self
+                .sources
+                .capabilities
+                .econ
+                .get(request_capability.as_deref().unwrap_or(""))
+                .unwrap_or(false);
+            (switch(on), switch(on), String::new())
+        } else if let Some(pk) = wallet {
+            let on = self
+                .sources
+                .capabilities
+                .wallets
+                .iter()
+                .any(|w| w.pubkey == pk && w.enabled);
+            (switch(on), switch(on), String::new())
+        } else if jito {
             self.apply_bundle_path();
             let c = &self.sources.capabilities;
-            (c.jito_requested, c.jito_effective, c.jito_block)
+            (c.jito_requested, c.jito_effective, c.jito_block.into())
         } else if hold_b {
             self.refresh_hold_gate(true);
             let c = &self.sources.capabilities;
             (
                 c.hold_b_requested.code(),
                 self.hold_gate.mode.code(),
-                c.hold_b_block,
+                c.hold_b_block.into(),
             )
         } else if threshold {
             let t = &self.threshold;
-            (t.requested.code(), t.effective.code(), t.block)
+            (t.requested.code(), t.effective.code(), t.block.into())
         } else {
-            let requested = self.sources.capabilities.live_requested;
-            let (effective, block_reason) =
-                cap::live_effective(requested, self.sources.capabilities.fe06.as_ref());
-            (requested, effective, block_reason)
+            let c = &self.sources.capabilities;
+            let (effective, block_reason) = cap::live_decision(&c.live_gates());
+            (c.live_requested, effective, block_reason)
         };
+        let (requested, effective) = (requested.to_string(), effective.to_string());
         let detail = match valid {
             Ok(_) => format!("requested {requested} · effective {effective} · {block_reason}"),
             Err(reason) => reason,
@@ -495,17 +624,37 @@ impl ShadowOwner {
             seq,
             request: text,
             applied,
-            requested: requested.into(),
-            effective: effective.into(),
+            requested,
+            effective,
             detail,
             owner_pid: std::process::id(),
             decided_unix_s: super::accounts::wall_unix_s().ok(),
+            capability: request_capability.clone().unwrap_or_default(),
+            block_reason,
+            request_id,
+            owner_epoch: c.epoch.unwrap_or(0),
         };
         if let Err(e) = cap::write_outcome(&dir, &outcome) {
             owner_log!(
                 self,
                 "capability_control: decision seq={seq} not recorded: {e}"
             );
+            // P8-CTRL.1/.6: a permission stands only with its durable receipt — an unrecorded
+            // ENABLED or LIVE is taken back (DISABLED, OFF).
+            let c = &mut self.sources.capabilities;
+            if applied && outcome.requested != cap::DISABLED {
+                if econ {
+                    c.econ
+                        .set(request_capability.as_deref().unwrap_or(""), false);
+                } else if let Some(pk) = wallet {
+                    c.wallets
+                        .iter_mut()
+                        .filter(|w| w.pubkey == pk)
+                        .for_each(|w| w.enabled = false);
+                } else if request_capability.as_deref() == Some(cap::LIVE) {
+                    c.live_requested = cap::LIVE_OFF;
+                }
+            }
             // DEC-06: a threshold ACTIVE request stands only recorded (durable receipts).
             if threshold
                 && self.threshold.requested

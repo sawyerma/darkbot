@@ -4895,7 +4895,12 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
     let dir = std::env::temp_dir().join(format!("p0-dec13-{}", Pubkey::new_unique()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
-    let mode = capability_control::pipeline_mode("LIVE", None);
+    let mode = capability_control::pipeline_mode(&capability_control::LiveGates {
+        requested: capability_control::LIVE,
+        econ: &Default::default(),
+        wallets: &[],
+        fe06: None,
+    });
     let r = evaluate_in(
         mode,
         (&counting, &mut safety, Some(&mut fe04)),

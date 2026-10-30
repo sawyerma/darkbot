@@ -544,8 +544,7 @@ impl ShadowOwner {
     /// DEC-13: LIVE is effective (the controller's request with an FE-06 authorization).
     pub(super) fn live_effective(&self) -> bool {
         crate::orchestration::capability_control::pipeline_mode(
-            self.sources.capabilities.live_requested,
-            self.sources.capabilities.fe06.as_ref(),
+            &self.sources.capabilities.live_gates(),
         ) == crate::execution::pipeline::Mode::Live
     }
 

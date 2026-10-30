@@ -476,13 +476,14 @@ pub struct OwnerSafety {
     pub day_attempts: u32,
 }
 
-/// One switchable capability (P0-PROD-CTRL-03): requested, effective, why blocked.
+/// One switchable capability (P0-PROD-CTRL-03): requested, effective, why blocked. P8-CTRL.1:
+/// a wallet's name and LIVE's gates are known only at runtime.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OwnerCapability {
-    pub name: &'static str,
+    pub name: std::borrow::Cow<'static, str>,
     pub requested: &'static str,
     pub effective: &'static str,
-    pub block_reason: &'static str,
+    pub block_reason: std::borrow::Cow<'static, str>,
 }
 
 /// FE-04 wallet state from the accounting ledger and the reservation book.

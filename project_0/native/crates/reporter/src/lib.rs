@@ -259,10 +259,10 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             .capabilities
             .iter()
             .map(|c| Capability {
-                name: c.name.into(),
-                requested: c.requested.into(),
-                effective: c.effective.into(),
-                block_reason: c.block_reason.into(),
+                name: c.name.to_string(),
+                requested: c.requested.to_string(),
+                effective: c.effective.to_string(),
+                block_reason: c.block_reason.to_string(),
             })
             .collect(),
         rebalance: o.rebalance.as_ref().map(|r| RebalancePlan {
@@ -1848,32 +1848,33 @@ mod contract_tests {
             // DEC-13: LIVE requested by the operator, still not effective without FE-06.
             capabilities: vec![
                 OwnerCapability {
-                    name: "LIVE",
+                    name: "LIVE".into(),
                     requested: "LIVE",
                     effective: "BLOCKED",
-                    block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)",
+                    block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)".into(),
                 },
                 // DEC-04: ACTIVE requested, OBSERVE effective while N (B-8) is undecided.
                 OwnerCapability {
-                    name: "HOLD_B",
+                    name: "HOLD_B".into(),
                     requested: "ACTIVE",
                     effective: "OBSERVE",
-                    block_reason: "B-8: N not decided (hold_b_min_attempts unset)",
+                    block_reason: "B-8: N not decided (hold_b_min_attempts unset)".into(),
                 },
                 // DEC-11: the bundle path requested ACTIVE, OBSERVE without a qualified simulator.
                 OwnerCapability {
-                    name: darkbot_runner::execution::bundle_path::JITO_BUNDLE,
+                    name: darkbot_runner::execution::bundle_path::JITO_BUNDLE.into(),
                     requested: "ACTIVE",
                     effective: "OBSERVE",
                     block_reason:
-                        darkbot_runner::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED,
+                        darkbot_runner::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED.into(),
                 },
                 // DEC-06: the threshold mode requested ACTIVE, OBSERVE while N is undecided.
                 OwnerCapability {
-                    name: darkbot_runner::orchestration::threshold_mode::THRESHOLD_TRIGGER,
+                    name: darkbot_runner::orchestration::threshold_mode::THRESHOLD_TRIGGER.into(),
                     requested: "ACTIVE",
                     effective: "OBSERVE",
-                    block_reason: darkbot_runner::orchestration::threshold_mode::B8_UNDECIDED,
+                    block_reason: darkbot_runner::orchestration::threshold_mode::B8_UNDECIDED
+                        .into(),
                 },
             ],
             wallets: OwnerWallets {

@@ -2006,28 +2006,42 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE [--expect-version N] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
 
-/// DEC-13: the operator's capability request (`set`), the same controller path as `source`:
-/// written only for a running owner of this project, CAS-versioned, then its doorbell rung; the
-/// owner decides the effective value (LIVE stays BLOCKED without FE-06).
+/// DEC-13/P8-CTRL: the operator's capability request (`set`), the same controller path as
+/// `source`: written only for a running owner of this project, under a one-time request id (the
+/// same id again is the same request) and the owner's epoch, CAS-versioned, then its doorbell
+/// rung; the owner decides the effective value and records its receipt (LIVE stays BLOCKED until
+/// every economic switch, every wallet and FE-06).
 fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::orchestration::capability_control;
     let dir = capability_control::request_dir(project);
     match args {
-        [set, capability, requested, cas @ ..] if set == "set" => {
-            let expected = match cas {
-                [] => None,
-                [flag, v] if flag == "--expect-version" => {
-                    Some(v.parse::<u64>().map_err(|_| {
-                        format!(
-                            "CAPABILITY_VERSION_INVALID: --expect-version {v}; {CAPABILITY_USAGE}"
-                        )
-                    })?)
+        [set, capability, requested, opts @ ..] if set == "set" => {
+            let (mut expected, mut stated_epoch, mut request_id) = (None, None, None);
+            let mut opts = opts.iter();
+            while let Some(flag) = opts.next() {
+                let value = opts.next().ok_or(CAPABILITY_USAGE)?;
+                let number = |code: &str| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| format!("{code}: {flag} {value}; {CAPABILITY_USAGE}"))
+                };
+                match flag.as_str() {
+                    "--expect-version" if expected.is_none() => {
+                        expected = Some(number("CAPABILITY_VERSION_INVALID")?)
+                    }
+                    "--expect-epoch" if stated_epoch.is_none() => {
+                        stated_epoch = Some(number("CAPABILITY_EPOCH_INVALID")?)
+                    }
+                    "--request-id" if request_id.is_none() => request_id = Some(value.clone()),
+                    _ => return Err(CAPABILITY_USAGE.into()),
                 }
-                _ => return Err(CAPABILITY_USAGE.into()),
-            };
+            }
             capability_control::validate(capability, requested)?;
+            if let Some(id) = &request_id {
+                capability_control::validate_request_id(id)?;
+            }
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "CAPABILITY_CONTROL_CLOCK")?
@@ -2037,29 +2051,67 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             else {
                 return Err("CAPABILITY_NO_RUNTIME: no runtime owner runs for this project; nothing would decide the request".into());
             };
-            let seq = capability_control::write_request_expecting(
-                &dir, capability, requested, now, expected,
+            // P8-CTRL.6: the running owner's epoch — the one the operator states must be it.
+            let epoch = capability_control::current_epoch(&dir)?;
+            if epoch == 0 {
+                return Err(
+                    "CAPABILITY_NO_OWNER_EPOCH: the running owner opened no capability epoch"
+                        .into(),
+                );
+            }
+            if let Some(stated) = stated_epoch.filter(|e| *e != epoch) {
+                return Err(format!(
+                    "CAPABILITY_EPOCH_STALE: --expect-epoch {stated}, the running owner is epoch {epoch}; reload and retry"
+                ));
+            }
+            let request_id = match request_id {
+                Some(id) => id,
+                None => capability_control::new_request_id()?,
+            };
+            let written = capability_control::write_request(
+                &dir,
+                &capability_control::NewRequest {
+                    capability,
+                    requested,
+                    request_id: &request_id,
+                    owner_epoch: epoch,
+                    expected,
+                    now_unix_s: now,
+                },
             )?;
             source_control::signal(pid)?;
-            println!("[p0ctl] capability request seq={seq} {capability} {requested} sent to runtime pid {pid} (run {run_id}); the owner journals `capability_control: applied|refused seq={seq}`; LIVE stays effective BLOCKED until FE-06");
+            println!(
+                "[p0ctl] capability request seq={} {capability} {requested} request_id={request_id} epoch={epoch}{} sent to runtime pid {pid} (run {run_id}); the owner journals `capability_control: applied|refused seq={}` and records its receipt; LIVE stays effective BLOCKED until every economic switch, every wallet and FE-06",
+                written.seq,
+                if written.replayed {
+                    " (the same request again: nothing new written)"
+                } else {
+                    ""
+                },
+                written.seq
+            );
             Ok(true)
         }
         [status] if status == "status" => {
             let request = capability_control::latest_request(&dir)?;
             match &request {
-                Some(r) => println!(
-                    "last capability request: seq={} {} requested_unix_s={}",
+                Some(r) => {
+                    println!(
+                    "last capability request: seq={} {} request_id={} epoch={} requested_unix_s={}",
                     r.seq,
                     capability_control::shown(&r.capability, &r.requested),
+                    if r.request_id.is_empty() { "-" } else { &r.request_id },
+                    r.owner_epoch,
                     r.requested_unix_s
-                ),
+                )
+                }
                 None => println!("no capability request"),
             }
-            // What applies is the owner's decision, not the request; every run starts OFF.
+            // What applies is the owner's decision, not the request; every start is DISABLED/OFF.
             let decision = capability_control::latest_outcome(&dir)?;
             match &decision {
                 Some(d) => println!(
-                    "last owner decision: seq={} {} request=\"{}\" requested={} effective={} detail={} owner_pid={} decided_unix_s={}",
+                    "last owner decision: seq={} {} request=\"{}\" requested={} effective={} detail={} owner_pid={} epoch={} decided_unix_s={}",
                     d.seq,
                     if d.applied { "APPLIED" } else { "REFUSED" },
                     d.request,
@@ -2067,6 +2119,7 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     d.effective,
                     d.detail,
                     d.owner_pid,
+                    d.owner_epoch,
                     d.decided_unix_s.map_or("UNKNOWN".into(), |s| s.to_string())
                 ),
                 None => println!("no owner decision"),
@@ -2075,12 +2128,30 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if let Some(r) = request.filter(|r| r.seq > decided) {
                 println!("undecided: requests after seq={decided} up to seq={} (no runtime has decided them yet)", r.seq);
             }
+            // P8-CTRL.6: the switches of the newest epoch as its receipts decided them.
+            let epoch = capability_control::current_epoch(&dir)?;
+            println!("owner epoch: {epoch} (every switch starts DISABLED and LIVE OFF in an epoch; unlisted capabilities are at their start value)");
+            for d in capability_control::epoch_decisions(&dir, epoch)? {
+                println!(
+                    "  {} requested={} effective={} seq={} request_id={}{}",
+                    d.capability,
+                    d.requested,
+                    d.effective,
+                    d.seq,
+                    d.request_id,
+                    if d.block_reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" block_reason={}", d.block_reason)
+                    }
+                );
+            }
             match control::owner_state(&lock_path(project))? {
                 OwnerState::Running { pid, run_id, .. } => println!(
-                    "runtime: running pid={pid} run_id={run_id}; last decision from this runtime: {} (a run starts with LIVE requested OFF; the version to state is the owner's projected capability_config_version)",
+                    "runtime: running pid={pid} run_id={run_id}; last decision from this runtime: {} (a run starts with every switch DISABLED and LIVE requested OFF; state the owner's projected capability_config_version and epoch)",
                     decision.is_some_and(|d| d.owner_pid == pid)
                 ),
-                OwnerState::NotRunning { .. } => println!("runtime: not running (the next run starts with LIVE requested OFF)"),
+                OwnerState::NotRunning { .. } => println!("runtime: not running (the next run opens a new epoch: every switch DISABLED, LIVE requested OFF)"),
             }
             Ok(true)
         }

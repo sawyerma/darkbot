@@ -550,8 +550,7 @@ impl ShadowOwner {
         // without an FE-06 authorization it never is. DEC-13b: a LIVE candidate is handed the
         // owner's FE-04 admission (none: the pipeline stops at its send boundary).
         let mode = crate::orchestration::capability_control::pipeline_mode(
-            self.sources.capabilities.live_requested,
-            self.sources.capabilities.fe06.as_ref(),
+            &self.sources.capabilities.live_gates(),
         );
         let mut admission = match mode {
             crate::execution::pipeline::Mode::Live => {

@@ -163,11 +163,14 @@ impl ShadowOwner {
     /// P0-PROD-CTRL-03: requested vs effective of every switchable capability; a gate that
     /// blocks it names itself (never a fake ACTIVE).
     fn capabilities(&self) -> Vec<OwnerCapability> {
-        let cap = |name, requested, effective, block_reason| OwnerCapability {
-            name,
+        let cap = |name: &'static str,
+                   requested: &'static str,
+                   effective: &'static str,
+                   block_reason: &'static str| OwnerCapability {
+            name: name.into(),
             requested,
             effective,
-            block_reason,
+            block_reason: block_reason.into(),
         };
         let on = |b: bool| if b { "ACTIVE" } else { "OFF" };
         let jit = self.jit_funding_bank.is_some();
@@ -177,16 +180,19 @@ impl ShadowOwner {
         };
         let rebalancing = !self.inventory_targets.is_empty();
         let observing = self.rebalance.mode == crate::execution::inventory::RebalanceMode::Observe;
-        vec![
+        let mut all = vec![
             {
-                // DEC-13: the operator's request and the one effective decision (FE-06).
-                let requested = self.sources.capabilities.live_requested;
+                // DEC-13/P8-CTRL.2: the operator's request and the one effective decision — every
+                // economic switch, every wallet and FE-06; the first missing gate, then the rest.
+                let c = &self.sources.capabilities;
                 let (effective, block_reason) =
-                    crate::orchestration::capability_control::live_effective(
-                        requested,
-                        self.sources.capabilities.fe06.as_ref(),
-                    );
-                cap("LIVE", requested, effective, block_reason)
+                    crate::orchestration::capability_control::live_decision(&c.live_gates());
+                OwnerCapability {
+                    name: crate::orchestration::capability_control::LIVE.into(),
+                    requested: c.live_requested,
+                    effective,
+                    block_reason: block_reason.into(),
+                }
             },
             // DEC-04: the B hold mode, requested and effective (ACTIVE gated by N and evidence).
             cap(
@@ -271,7 +277,31 @@ impl ShadowOwner {
                 self.threshold.effective.code(),
                 self.threshold.block,
             ),
-        ]
+        ];
+        // P8-CTRL.1: the economic switches and one switch per configured signer (its roles
+        // named) — partial permissions, effective as requested; LIVE above needs all of them.
+        use crate::orchestration::capability_control as c;
+        let switch = |on: bool| if on { c::ENABLED } else { c::DISABLED };
+        let caps = &self.sources.capabilities;
+        all.extend(c::ECON.iter().map(|e| {
+            let on = switch(caps.econ.get(e) == Some(true));
+            OwnerCapability {
+                name: (*e).into(),
+                requested: on,
+                effective: on,
+                block_reason: "".into(),
+            }
+        }));
+        all.extend(caps.wallets.iter().map(|w| {
+            let on = switch(w.enabled);
+            OwnerCapability {
+                name: w.capability().into(),
+                requested: on,
+                effective: on,
+                block_reason: format!("roles {}", w.roles.join("+")).into(),
+            }
+        }));
+        all
     }
 
     fn wallets_status(&self) -> OwnerWallets {
@@ -460,11 +490,10 @@ impl ShadowOwner {
     fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
         let a = &self.fe04_admissions;
         let (state, block_reason) = if !self.live_effective() {
-            let (_, reason) = crate::orchestration::capability_control::live_effective(
-                self.sources.capabilities.live_requested,
-                self.sources.capabilities.fe06.as_ref(),
+            let (_, reason) = crate::orchestration::capability_control::live_decision(
+                &self.sources.capabilities.live_gates(),
             );
-            ("OFF", reason.to_string())
+            ("OFF", reason)
         } else if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
             // Single flight: the held attempt blocks every admission.
             ("BLOCKED", format!("FE04_ATTEMPT_HELD:{}", state.name()))

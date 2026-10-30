@@ -196,6 +196,9 @@ pub mod kind {
     /// DEC-13: the state owner's decision on one capability request (requested and effective),
     /// a sealed single-value journal `data/capability-control/outcome_<seq>.p0j`.
     pub const CAPABILITY_CONTROL_OUTCOME: u16 = 1103;
+    /// P8-CTRL.6: one owner start's capability epoch, a sealed single-value journal
+    /// `data/capability-control/epoch_<n>.p0j`.
+    pub const CAPABILITY_OWNER_EPOCH: u16 = 1104;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -279,6 +282,7 @@ pub mod kind {
         SOURCE_CONTROL_OUTCOME,
         CAPABILITY_CONTROL_REQUEST,
         CAPABILITY_CONTROL_OUTCOME,
+        CAPABILITY_OWNER_EPOCH,
         super::MANIFEST,
     ];
 }

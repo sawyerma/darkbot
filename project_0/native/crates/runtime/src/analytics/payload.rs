@@ -284,23 +284,53 @@ impl Payload for SourceControlOutcome {
     const KIND: u16 = journal::kind::SOURCE_CONTROL_OUTCOME;
 }
 
-/// DEC-13: one operator request for a capability (`p0ctl capability set`): what the operator
-/// asks for; only the state owner decides what is effective.
+/// DEC-13/P8-CTRL: one operator request for a capability (`p0ctl capability set`): what the
+/// operator asks for, its one-time id and the owner epoch its view showed; only the state owner
+/// decides what is effective.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CapabilityControlRequest {
     pub seq: u64,
-    /// `LIVE`.
+    /// `LIVE`, `HOLD_B`, …, `ECON_SIGN`, …, `WALLET:<pubkey>`.
     pub capability: String,
-    /// `OFF` or `LIVE`.
+    /// One of the capability's values (`capability_control::validate`).
     pub requested: String,
     pub requested_unix_s: u64,
+    /// P8-CTRL.6: the one-time id of the operator action (empty: written before P8-CTRL).
+    pub request_id: String,
+    /// P8-CTRL.6: the owner epoch the request was made against (0: written before P8-CTRL).
+    pub owner_epoch: u64,
 }
 impl Payload for CapabilityControlRequest {
     const KIND: u16 = journal::kind::CAPABILITY_CONTROL_REQUEST;
+    /// P8-CTRL.6: 3 — the request id and the owner epoch.
+    const SCHEMA: u16 = 3;
+    /// Schema 2 (DEC-13) had neither: readable without them — no owner epoch is 0, so every
+    /// owner refuses such a request.
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<io::Result<Self>> {
+        (schema == TYPED).then(|| {
+            decode_wire::<CapabilityControlRequestV2>(bytes).map(|v| Self {
+                seq: v.seq,
+                capability: v.capability,
+                requested: v.requested,
+                requested_unix_s: v.requested_unix_s,
+                request_id: String::new(),
+                owner_epoch: 0,
+            })
+        })
+    }
+}
+/// `CapabilityControlRequest` schema 2 (DEC-13).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CapabilityControlRequestV2 {
+    seq: u64,
+    capability: String,
+    requested: String,
+    requested_unix_s: u64,
 }
 
-/// DEC-13: the state owner's decision on one capability request — the requested value it took
-/// over and the effective one with its block reason (`p0ctl capability status`).
+/// DEC-13/P8-CTRL: the state owner's decision on one capability request, its durable receipt —
+/// the requested value it took over and the effective one with its block reason, under the
+/// request's id and the owner's epoch (`p0ctl capability status`).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CapabilityControlOutcome {
     pub seq: u64,
@@ -315,9 +345,62 @@ pub struct CapabilityControlOutcome {
     pub owner_pid: u32,
     /// `None`: the wall clock was not readable.
     pub decided_unix_s: Option<u64>,
+    /// P8-CTRL.6: the capability decided (empty: the request was unreadable, or a schema-2 receipt).
+    pub capability: String,
+    /// P8-CTRL.1: why the effective value is not the requested one ("" when it is).
+    pub block_reason: String,
+    /// P8-CTRL.6: the request's id and the epoch of the owner that decided it (0: before P8-CTRL).
+    pub request_id: String,
+    pub owner_epoch: u64,
 }
 impl Payload for CapabilityControlOutcome {
     const KIND: u16 = journal::kind::CAPABILITY_CONTROL_OUTCOME;
+    /// P8-CTRL.6: 3 — capability, block reason, request id and owner epoch.
+    const SCHEMA: u16 = 3;
+    /// Schema 2 (DEC-13): readable without them — epoch 0, so no epoch's decision.
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<io::Result<Self>> {
+        (schema == TYPED).then(|| {
+            decode_wire::<CapabilityControlOutcomeV2>(bytes).map(|v| Self {
+                seq: v.seq,
+                request: v.request,
+                applied: v.applied,
+                requested: v.requested,
+                effective: v.effective,
+                detail: v.detail,
+                owner_pid: v.owner_pid,
+                decided_unix_s: v.decided_unix_s,
+                capability: String::new(),
+                block_reason: String::new(),
+                request_id: String::new(),
+                owner_epoch: 0,
+            })
+        })
+    }
+}
+/// `CapabilityControlOutcome` schema 2 (DEC-13).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CapabilityControlOutcomeV2 {
+    seq: u64,
+    request: String,
+    applied: bool,
+    requested: String,
+    effective: String,
+    detail: String,
+    owner_pid: u32,
+    decided_unix_s: Option<u64>,
+}
+
+/// P8-CTRL.6: one owner start's epoch (`data/capability-control/epoch_<n>.p0j`): requests name
+/// it; a request of another epoch is refused; every switch starts DISABLED in it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityOwnerEpoch {
+    pub epoch: u64,
+    pub owner_pid: u32,
+    /// `None`: the wall clock was not readable.
+    pub opened_unix_s: Option<u64>,
+}
+impl Payload for CapabilityOwnerEpoch {
+    const KIND: u16 = journal::kind::CAPABILITY_OWNER_EPOCH;
 }
 
 /// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against
@@ -909,6 +992,7 @@ macro_rules! typed_kinds {
             k::SOURCE_CONTROL_OUTCOME => $f::<SourceControlOutcome>($kind, $schema, $bytes),
             k::CAPABILITY_CONTROL_REQUEST => $f::<CapabilityControlRequest>($kind, $schema, $bytes),
             k::CAPABILITY_CONTROL_OUTCOME => $f::<CapabilityControlOutcome>($kind, $schema, $bytes),
+            k::CAPABILITY_OWNER_EPOCH => $f::<CapabilityOwnerEpoch>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_ACCOUNT => $f::<C0CensusImportAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_GROUP_ACCOUNT => $f::<C0CensusImportGroupAccount>($kind, $schema, $bytes),

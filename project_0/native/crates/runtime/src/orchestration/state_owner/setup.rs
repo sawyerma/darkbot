@@ -65,10 +65,16 @@ fn configured_sources(
             // CTRL-03: the configuration version the owner starts from (the request log's head).
             let baseline = source_control::head(&dir)?;
             // DEC-13: the capability log, decided from its head at the start (a run never
-            // inherits an earlier LIVE request).
+            // inherits an earlier LIVE request). P8-CTRL.6: this start's fresh owner epoch —
+            // every switch DISABLED in it, every request of an earlier epoch refused.
             let capabilities = crate::orchestration::capability_control::request_dir(project);
             let capability_baseline =
                 crate::orchestration::capability_control::head(&capabilities)?;
+            let epoch = crate::orchestration::capability_control::open_epoch(
+                &capabilities,
+                std::process::id(),
+                super::accounts::wall_unix_s().ok(),
+            )?;
             source_control::spawn(
                 dir.clone(),
                 tx.with_wakeup(wake),
@@ -76,7 +82,10 @@ fn configured_sources(
                 baseline,
                 Some((capabilities.clone(), capability_baseline)),
             )?;
-            Some((rx, (dir, baseline, capabilities, capability_baseline)))
+            Some((
+                rx,
+                (dir, baseline, capabilities, capability_baseline, epoch),
+            ))
         }
         None => None,
     };
@@ -84,9 +93,9 @@ fn configured_sources(
     let sources =
         super::sources::OwnerSources::new(arbiter, Some(unit), spawn, 4_096, wake, controls);
     Ok(match decisions {
-        Some((dir, baseline, capabilities, capability_baseline)) => sources
+        Some((dir, baseline, capabilities, capability_baseline, epoch)) => sources
             .record_decisions_in(dir, baseline)
-            .capability_control_in(capabilities, capability_baseline),
+            .capability_control_in(capabilities, capability_baseline, epoch),
         None => sources,
     })
 }
@@ -397,7 +406,18 @@ pub(super) fn prepare(
     let required_set: HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
     let optional_set: HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
     // Refused source controls fail the start before any session runs.
-    let sources = configured_sources(econ.as_ref(), clock, &wake, &shutdown)?;
+    let mut sources = configured_sources(econ.as_ref(), clock, &wake, &shutdown)?;
+    // P8-CTRL.1: one switch per configured signer, DISABLED at the start — the one keypair signs
+    // every liquidation as its liquidator and pays its fees.
+    sources.capabilities.wallets = vec![
+        crate::orchestration::capability_control::WalletSwitch::configured(
+            liquidator,
+            &[
+                crate::orchestration::capability_control::ROLE_LIQUIDATOR,
+                crate::orchestration::capability_control::ROLE_FEE_PAYER,
+            ],
+        ),
+    ];
     let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone(), 1)?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).

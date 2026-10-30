@@ -2421,6 +2421,8 @@ fn dec11_owner_builds_the_bundle_path_through_the_capability() {
         capability: crate::execution::bundle_path::JITO_BUNDLE.into(),
         requested: requested.into(),
         requested_unix_s: 1,
+        request_id: format!("t-{seq}"),
+        owner_epoch: 0,
     };
     let row = |f: &Fixture| {
         let r = f
@@ -2430,15 +2432,16 @@ fn dec11_owner_builds_the_bundle_path_through_the_capability() {
             .into_iter()
             .find(|c| c.name == crate::execution::bundle_path::JITO_BUNDLE)
             .unwrap();
-        (r.requested, r.effective, r.block_reason)
+        (r.requested, r.effective, r.block_reason.into_owned())
     };
-    assert_eq!(row(&f), ("OFF", "OFF", ""));
+    let exp = |requested, effective, reason: &str| (requested, effective, reason.to_string());
+    assert_eq!(row(&f), exp("OFF", "OFF", ""));
     assert!(!f.owner.submitter.supports_bundle());
     f.owner
         .apply_capability_control(1, Ok(request("OBSERVE", 1)));
     assert_eq!(
         row(&f),
-        (
+        exp(
             "OBSERVE",
             "OFF",
             crate::execution::bundle_path::JITO_UNCONFIGURED
@@ -2455,20 +2458,20 @@ fn dec11_owner_builds_the_bundle_path_through_the_capability() {
     });
     f.owner
         .apply_capability_control(2, Ok(request("OBSERVE", 2)));
-    assert_eq!(row(&f), ("OBSERVE", "OBSERVE", ""));
+    assert_eq!(row(&f), exp("OBSERVE", "OBSERVE", ""));
     assert!(f.owner.submitter.supports_bundle());
     f.owner
         .apply_capability_control(3, Ok(request("ACTIVE", 3)));
     assert_eq!(
         row(&f),
-        (
+        exp(
             "ACTIVE",
             "OBSERVE",
             crate::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED
         )
     );
     f.owner.apply_capability_control(4, Ok(request("OFF", 4)));
-    assert_eq!(row(&f), ("OFF", "OFF", ""));
+    assert_eq!(row(&f), exp("OFF", "OFF", ""));
     assert!(!f.owner.submitter.supports_bundle());
     cleanup(f);
 }
@@ -2513,6 +2516,8 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
         capability: crate::execution::hold_b::HOLD_B.into(),
         requested: requested.into(),
         requested_unix_s: 1,
+        request_id: format!("t-{seq}"),
+        owner_epoch: 0,
     };
     f.owner
         .apply_capability_control(1, Ok(request("ACTIVE", 1)));
@@ -2569,7 +2574,7 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
         .find(|c| c.name == crate::execution::hold_b::HOLD_B)
         .unwrap();
     assert_eq!(
-        (row.requested, row.effective, row.block_reason),
+        (row.requested, row.effective, row.block_reason.as_ref()),
         ("ACTIVE", "ACTIVE", "")
     );
     let dir = f.dir.clone();
@@ -4435,6 +4440,8 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
             capability: capability.into(),
             requested: requested.into(),
             requested_unix_s: 1,
+            request_id: format!("t-{seq}"),
+            owner_epoch: 0,
         })
     };
     f.owner
@@ -4445,10 +4452,14 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         .iter()
         .find(|c| c.name == "LIVE")
         .unwrap();
-    assert_eq!(
-        (live.requested, live.effective, live.block_reason),
-        ("LIVE", "BLOCKED", capability_control::LIVE_BLOCK_REASON)
-    );
+    assert_eq!((live.requested, live.effective), ("LIVE", "BLOCKED"));
+    // P8-CTRL.2: every missing gate, the first one first — FE-06 among them.
+    assert!(live
+        .block_reason
+        .starts_with("ECON_LIVE DISABLED (missing too:"));
+    assert!(live
+        .block_reason
+        .ends_with(&format!("{})", capability_control::LIVE_BLOCK_REASON)));
     assert_eq!(snapshot.capability_config_version, Some(1));
     assert!(snapshot.last_capability_decision.unwrap().applied);
     let outcome = capability_control::latest_outcome(&dir).unwrap().unwrap();
@@ -4462,10 +4473,7 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         (1, "LIVE", "BLOCKED", true)
     );
     assert_eq!(
-        capability_control::pipeline_mode(
-            f.owner.sources.capabilities.live_requested,
-            f.owner.sources.capabilities.fe06.as_ref()
-        ),
+        capability_control::pipeline_mode(&f.owner.sources.capabilities.live_gates()),
         crate::execution::pipeline::Mode::Shadow
     );
     f.owner
@@ -4487,6 +4495,223 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         .apply_capability_control(4, request(4, "LIVE", "OFF"));
     assert_eq!(f.owner.sources.capabilities.live_requested, "OFF");
     cleanup(f);
+}
+
+/// P8-CTRL-01: the owner decides the economic and wallet switches of its epoch — each a partial
+/// permission, effective as requested and recorded with the request's id and the epoch; the same
+/// id again has no second effect, with other content it is a conflict; another epoch, an
+/// unconfigured signer or a missing id is refused. LIVE stays BLOCKED with every switch and the
+/// signer ENABLED until FE-06 (its only missing gate then), and any one switch taken back blocks
+/// it again; an ENABLED without its receipt does not stand; a new owner starts all DISABLED.
+#[test]
+fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::capability_control as cap;
+    let mut f = fixture_with("p8ctrl01", None);
+    let dir = f.dir.join("capability-control");
+    let signer = f.owner.liquidator;
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(3));
+        c.wallets = vec![cap::WalletSwitch::configured(
+            signer,
+            &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
+        )];
+    }
+    let request = |seq, capability: &str, requested: &str, id: &str, epoch| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: capability.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+            request_id: id.into(),
+            owner_epoch: epoch,
+        })
+    };
+    let shown = |f: &Fixture, name: &str| {
+        let c = f
+            .owner
+            .owner_snapshot(0)
+            .capabilities
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap();
+        (
+            c.requested.to_string(),
+            c.effective.to_string(),
+            c.block_reason.to_string(),
+        )
+    };
+    let detail = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
+    f.owner
+        .apply_capability_control(1, request(1, cap::ECON_SIGN, cap::ENABLED, "a", 3));
+    assert_eq!(
+        shown(&f, cap::ECON_SIGN),
+        ("ENABLED".into(), "ENABLED".into(), String::new())
+    );
+    let r = detail(1);
+    assert_eq!(
+        (
+            r.applied,
+            r.capability.as_str(),
+            r.request_id.as_str(),
+            r.owner_epoch,
+            r.effective.as_str()
+        ),
+        (true, cap::ECON_SIGN, "a", 3, "ENABLED")
+    );
+    let unknown = format!("WALLET:{}", Pubkey::new_unique());
+    for (seq, capability, value, id, epoch, refusal) in [
+        (
+            2,
+            cap::ECON_SIGN,
+            cap::ENABLED,
+            "a",
+            3,
+            "CAPABILITY_REQUEST_REPLAYED",
+        ),
+        (
+            3,
+            cap::ECON_SIGN,
+            cap::DISABLED,
+            "a",
+            3,
+            "CAPABILITY_REQUEST_ID_CONFLICT",
+        ),
+        (
+            4,
+            cap::ECON_ARM,
+            cap::ENABLED,
+            "b",
+            2,
+            "CAPABILITY_EPOCH_STALE",
+        ),
+        (
+            5,
+            unknown.as_str(),
+            cap::ENABLED,
+            "c",
+            3,
+            "WALLET_NOT_CONFIGURED",
+        ),
+        (
+            6,
+            cap::ECON_ARM,
+            cap::ENABLED,
+            "",
+            3,
+            "CAPABILITY_REQUEST_ID_INVALID",
+        ),
+    ] {
+        f.owner
+            .apply_capability_control(seq, request(seq, capability, value, id, epoch));
+        let o = detail(seq);
+        assert!(
+            !o.applied && o.detail.starts_with(refusal),
+            "{seq}: {}",
+            o.detail
+        );
+    }
+    let c = &f.owner.sources.capabilities;
+    assert_eq!(
+        (
+            c.econ.get(cap::ECON_SIGN),
+            c.econ.get(cap::ECON_ARM),
+            c.applied,
+            c.refused
+        ),
+        (Some(true), Some(false), 1, 5)
+    );
+    // Every switch and the signer: LIVE needs FE-06 alone.
+    let wallet = format!("WALLET:{signer}");
+    let mut seq = 7;
+    for capability in [
+        cap::ECON_LIVE,
+        cap::ECON_ARM,
+        cap::ECON_SEND,
+        cap::ECON_ATTEMPT,
+        wallet.as_str(),
+    ] {
+        f.owner.apply_capability_control(
+            seq,
+            request(seq, capability, cap::ENABLED, &format!("on-{seq}"), 3),
+        );
+        assert!(detail(seq).applied, "{capability}");
+        seq += 1;
+    }
+    f.owner
+        .apply_capability_control(seq, request(seq, cap::LIVE, cap::LIVE, "live", 3));
+    assert_eq!(
+        shown(&f, cap::LIVE),
+        (
+            "LIVE".into(),
+            "BLOCKED".into(),
+            cap::LIVE_BLOCK_REASON.into()
+        )
+    );
+    assert_eq!(
+        shown(&f, &wallet),
+        (
+            "ENABLED".into(),
+            "ENABLED".into(),
+            "roles LIQUIDATOR+FEE_PAYER".into()
+        )
+    );
+    assert_eq!(
+        (
+            detail(seq).effective.as_str(),
+            detail(seq).block_reason.as_str()
+        ),
+        ("BLOCKED", cap::LIVE_BLOCK_REASON)
+    );
+    let admission = f.owner.owner_snapshot(0).admission;
+    assert_eq!(
+        (admission.state, admission.block_reason.as_str()),
+        ("OFF", cap::LIVE_BLOCK_REASON)
+    );
+    assert!(!f.owner.live_effective());
+    // With the FE-06 stand-in every gate holds; one switch taken back blocks LIVE again.
+    f.owner.sources.capabilities.fe06 = Some(cap::Fe06Authorization::offline_test());
+    assert!(f.owner.live_effective());
+    assert_eq!(shown(&f, cap::LIVE).1, "LIVE");
+    seq += 1;
+    f.owner
+        .apply_capability_control(seq, request(seq, cap::ECON_SEND, cap::DISABLED, "off", 3));
+    assert!(!f.owner.live_effective());
+    assert_eq!(
+        shown(&f, cap::LIVE),
+        ("LIVE".into(), "BLOCKED".into(), "ECON_SEND DISABLED".into())
+    );
+    // The receipts are the epoch's decisions.
+    let decided: Vec<(String, String)> = cap::epoch_decisions(&dir, 3)
+        .unwrap()
+        .into_iter()
+        .map(|o| (o.capability, o.requested))
+        .collect();
+    assert!(decided.contains(&(cap::ECON_SEND.into(), cap::DISABLED.into())));
+    assert!(decided.contains(&(wallet.clone(), cap::ENABLED.into())));
+    // A permission stands only recorded: no receipt, no ENABLED.
+    let blocked = f.dir.join("capability-blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    f.owner.sources.capabilities.dir = Some(blocked);
+    seq += 1;
+    f.owner.apply_capability_control(
+        seq,
+        request(seq, cap::ECON_SEND, cap::ENABLED, "unrecorded", 3),
+    );
+    assert_eq!(
+        f.owner.sources.capabilities.econ.get(cap::ECON_SEND),
+        Some(false)
+    );
+    assert!(!f.owner.live_effective());
+    cleanup(f);
+    // A new owner: a fresh start, every switch DISABLED and LIVE requested OFF.
+    let fresh = super::sources::OwnerCapabilities::default();
+    assert!(cap::ECON.iter().all(|e| fresh.econ.get(e) == Some(false)));
+    assert_eq!(
+        (fresh.live_requested, fresh.epoch, fresh.fe06.is_none()),
+        (cap::LIVE_OFF, None, true)
+    );
 }
 
 /// DEC-16 (D-4, D-7): the real owner pass of an unbounded Shadow run opens its first window at
@@ -5244,6 +5469,8 @@ fn dec06_the_controller_switches_the_threshold_mode_hot() {
             capability: tm::THRESHOLD_TRIGGER.into(),
             requested: requested.into(),
             requested_unix_s: 1,
+            request_id: format!("t-{seq}"),
+            owner_epoch: 0,
         })
     };
     let decided = |f: &Fixture| {
@@ -5409,6 +5636,8 @@ fn dec06_an_unrecorded_active_request_does_not_stand() {
             capability: tm::THRESHOLD_TRIGGER.into(),
             requested: requested.into(),
             requested_unix_s: 1,
+            request_id: format!("t-{seq}"),
+            owner_epoch: 0,
         })
     };
     f.owner.apply_capability_control(1, request(1, "OBSERVE"));
@@ -5588,6 +5817,8 @@ fn dec06_an_unrecorded_active_is_never_restored() {
             capability: tm::THRESHOLD_TRIGGER.into(),
             requested: requested.into(),
             requested_unix_s: 1,
+            request_id: format!("t-{seq}"),
+            owner_epoch: 0,
         })
     };
     f.owner.apply_capability_control(1, request(1, "OBSERVE"));
@@ -5712,9 +5943,22 @@ fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mu
     calls
 }
 
-/// DEC-13b: LIVE requested and, with `fe06`, the FE-06 stand-in opening it and the submitter.
+/// DEC-13b: LIVE requested — P8-CTRL.1: every economic switch and the owner's signer ENABLED —
+/// and, with `fe06`, the FE-06 stand-in opening it and the submitter (without it FE-06 alone is
+/// missing).
 fn dec13b_live(f: &mut Fixture, fe06: bool) {
-    f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
+    use crate::orchestration::capability_control as cap;
+    let c = &mut f.owner.sources.capabilities;
+    c.live_requested = cap::LIVE;
+    for e in cap::ECON {
+        c.econ.set(e, true);
+    }
+    let mut signer = cap::WalletSwitch::configured(
+        f.owner.liquidator,
+        &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
+    );
+    signer.enabled = true;
+    c.wallets = vec![signer];
     if fe06 {
         let fe06 = crate::orchestration::capability_control::Fe06Authorization::offline_test();
         f.owner.submitter.open(&fe06);
