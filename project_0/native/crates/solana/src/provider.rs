@@ -40,6 +40,22 @@ pub enum Workload {
 /// Pacing slots: one per workload; `Reconcile` (the last) shares `Winner`'s.
 const WORKLOAD_SLOTS: usize = Workload::Reconcile as usize;
 impl Workload {
+    /// S4-04: the MT0 class of its admission wait.
+    fn admission_class(self) -> darkbot_common::mt0::AdmissionClass {
+        use darkbot_common::mt0::AdmissionClass as A;
+        match self {
+            Workload::Bootstrap => A::Bootstrap,
+            Workload::LiveRead => A::LiveRead,
+            Workload::Simulation => A::Simulation,
+            Workload::Winner => A::Winner,
+            Workload::Deployment => A::Deployment,
+            Workload::History => A::History,
+            Workload::Websocket => A::Websocket,
+            Workload::FeeQuote => A::FeeQuote,
+            Workload::Send => A::Send,
+            Workload::Reconcile => A::Reconcile,
+        }
+    }
     /// Pacing slot. `Reconcile` shares `Winner`'s, so it gains precedence, never extra rate.
     fn index(self) -> usize {
         match self {
@@ -380,7 +396,10 @@ impl Budget {
             && (s.active as u64) < self.limits.rpc_concurrency
             && window_bytes(&s) < self.limits.max_total_mib * 1024 * 1024
             && window_requests(&s) < self.limits.max_requests;
-        free.then(|| self.grant(&mut s, work, now))
+        free.then(|| {
+            darkbot_common::mt0::MT0.record_admission_wait(work.admission_class(), 0);
+            self.grant(&mut s, work, now)
+        })
     }
     /// N2: the admission with a typed refusal — `deadline_bound` when the permit cannot be
     /// granted before `deadline` (pacing, cooldown, concurrency), as opposed to a refusal by the
@@ -395,6 +414,7 @@ impl Budget {
             code,
             deadline_bound: false,
         };
+        let entered = Instant::now();
         let mut s = self.lock_state();
         if let Some(code) = halted(&s) {
             return Err(refused(code));
@@ -480,6 +500,12 @@ impl Budget {
                 && now >= ready
             {
                 s.queue.retain(|(t, _)| *t != ticket);
+                darkbot_common::mt0::MT0.record_admission_wait(
+                    work.admission_class(),
+                    now.saturating_duration_since(entered)
+                        .as_nanos()
+                        .min(u128::from(u64::MAX)) as u64,
+                );
                 return Ok(self.grant(&mut s, work, now));
             }
             // S4-04: a waiter whose token or pacing is due at `ready` wakes then — no release
@@ -1493,6 +1519,8 @@ mod tests {
         (c.limits.fee_rps, c.limits.rpc_rps, c.limits.rpc_burst) = (1_000, 1_000, 100);
         let b = Arc::new(Budget::configured(&c));
         let deadline = Instant::now() + Duration::from_secs(5);
+        let class = darkbot_common::mt0::AdmissionClass::FeeQuote;
+        let before = darkbot_common::mt0::MT0.admission_wait(class).count;
         drop(b.acquire(Workload::FeeQuote, deadline).unwrap());
         let started = Instant::now();
         drop(b.acquire(Workload::FeeQuote, deadline).unwrap());
@@ -1501,6 +1529,8 @@ mod tests {
             waited < Duration::from_millis(25),
             "admitted {waited:?} after a 1 ms pacing interval"
         );
+        // Every admission's wait is measured (MT0, per workload).
+        assert!(darkbot_common::mt0::MT0.admission_wait(class).count >= before + 2);
     }
     /// Review E3 (V2-07): the inline admission grants nothing at or after the caller's deadline
     /// — no token, no request count, no pacing slot (as `admit` refuses it); before the deadline

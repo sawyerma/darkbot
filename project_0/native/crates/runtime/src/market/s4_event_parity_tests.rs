@@ -424,3 +424,111 @@ fn s4_02_real_receiver_events_decode_as_the_official_event() {
         }
     }
 }
+
+/// Review L1: the variant appended for 0.1.12 keeps every recorded variant's encoding — the
+/// three-variant layout as the journals wrote it decodes unchanged, and re-encodes identically.
+#[test]
+fn s4_02_recorded_native_evidence_decodes_unchanged() {
+    use crate::analytics::payload::{decode_wire, encode_wire};
+    #[derive(serde::Serialize)]
+    enum Recorded {
+        Classic {
+            provenance: String,
+            pre_balances: [f64; 5],
+            post_balances: [f64; 5],
+            pre_health: f64,
+            post_health: f64,
+            liquidator_liability_cost_native_f64: f64,
+            target_debt_reduction_native_f64: f64,
+            insurance_component_native_f64: f64,
+            asset_decimals: Option<u8>,
+            liability_decimals: Option<u8>,
+            historical_asset_price: Option<f64>,
+            historical_liability_price: Option<f64>,
+        },
+        Bankruptcy {
+            provenance: String,
+            bad_debt_native_f64: f64,
+            covered_native_f64: f64,
+            socialized_native_f64: f64,
+            liability_decimals: Option<u8>,
+        },
+        Flows {
+            scope: String,
+            flows: Vec<NativeFlow>,
+            units: String,
+        },
+    }
+    let flow = || NativeFlow {
+        kind: "WITHDRAW".into(),
+        target: key(2).to_string(),
+        bank: key(9).to_string(),
+        mint: key(10).to_string(),
+        amount: "42".into(),
+    };
+    let cases = [
+        (
+            Recorded::Classic {
+                provenance: "p".into(),
+                pre_balances: [1.0, 2.0, 3.0, 4.0, 5.0],
+                post_balances: [6.0, 7.0, 8.0, 9.0, 10.0],
+                pre_health: -1.5,
+                post_health: 0.5,
+                liquidator_liability_cost_native_f64: 3.0,
+                target_debt_reduction_native_f64: 2.0,
+                insurance_component_native_f64: 1.0,
+                asset_decimals: Some(6),
+                liability_decimals: None,
+                historical_asset_price: Some(1.25),
+                historical_liability_price: None,
+            },
+            NativeEvidence::Classic {
+                provenance: "p".into(),
+                pre_balances: [1.0, 2.0, 3.0, 4.0, 5.0],
+                post_balances: [6.0, 7.0, 8.0, 9.0, 10.0],
+                pre_health: -1.5,
+                post_health: 0.5,
+                liquidator_liability_cost_native_f64: 3.0,
+                target_debt_reduction_native_f64: 2.0,
+                insurance_component_native_f64: 1.0,
+                asset_decimals: Some(6),
+                liability_decimals: None,
+                historical_asset_price: Some(1.25),
+                historical_liability_price: None,
+            },
+        ),
+        (
+            Recorded::Bankruptcy {
+                provenance: "b".into(),
+                bad_debt_native_f64: 100.0,
+                covered_native_f64: 40.0,
+                socialized_native_f64: 60.0,
+                liability_decimals: Some(9),
+            },
+            NativeEvidence::Bankruptcy {
+                provenance: "b".into(),
+                bad_debt_native_f64: 100.0,
+                covered_native_f64: 40.0,
+                socialized_native_f64: 60.0,
+                liability_decimals: Some(9),
+            },
+        ),
+        (
+            Recorded::Flows {
+                scope: "s".into(),
+                flows: vec![flow()],
+                units: "native".into(),
+            },
+            NativeEvidence::Flows {
+                scope: "s".into(),
+                flows: vec![flow()],
+                units: "native".into(),
+            },
+        ),
+    ];
+    for (recorded, now) in cases {
+        let bytes = encode_wire(&recorded).unwrap();
+        assert_eq!(decode_wire::<NativeEvidence>(&bytes).unwrap(), now);
+        assert_eq!(encode_wire(&now).unwrap(), bytes);
+    }
+}

@@ -37,7 +37,8 @@ pub struct ExitCandidate<'a> {
     pub reserved_elsewhere: BTreeMap<String, u64>,
     pub policy_reserve: BTreeMap<String, u64>,
     pub deadline: std::time::Instant,
-    pub t_handoff_ns: u64,
+    /// S4-04: the clock `T_handoff` is read on, immediately before the adapter call.
+    pub clock: &'a darkbot_common::timing::Clock,
 }
 
 /// P8-CTRL.5: a new exit within its grant's exit limit — the exits booked against the grant in
@@ -279,8 +280,8 @@ pub fn admit_exit(
         now_unix_ms: c.now_unix_ms.saturating_add(elapsed_ms),
         ..current
     };
-    match journal.submit_exit_payload(&simulated, &at_handoff, c.t_handoff_ns, c.deadline, permit) {
-        Ok(ack) => Admission::Submitted(ack),
+    match journal.submit_exit_payload(&simulated, &at_handoff, c.clock, c.deadline, permit) {
+        Ok((ack, handoff)) => Admission::Submitted(ack, handoff),
         Err(e) => Admission::Unknown(e),
     }
 }

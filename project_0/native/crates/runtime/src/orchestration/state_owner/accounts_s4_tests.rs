@@ -2,7 +2,10 @@
 //! the liquidator's token accounts (`validated_liquidator_ata`) and its ATA derivation
 //! (`associated_token_address`) against the official SPL interfaces — spl-token-interface 2.0.0,
 //! spl-token-2022-interface 2.1.0 and spl-associated-token-account 8.0.0, the versions the graph
-//! already builds — on accounts the official packers write.
+//! already builds — on accounts the official packers write: what the core takes it reads as the
+//! official layout does; a program-written account the official layout refuses (uninitialized,
+//! not an account) the core refuses too. (The core reads neither the COption tags nor a Multisig
+//! length; no token program writes such an account at an ATA address.)
 //!
 //! Explained deviation E-FROZEN: the official layout reads a frozen account; the core takes none
 //! (a frozen account cannot transfer what it holds, C11).

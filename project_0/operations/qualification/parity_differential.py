@@ -41,7 +41,55 @@ MUTATIONS = {
     'logs_missing': lambda t: t['meta'].pop('logMessages'),
     'loaded_missing': lambda t: t['meta'].pop('loadedAddresses'),
     'inner_missing': lambda t: t['meta'].pop('innerInstructions'),
+    # S4-02: one consistent bankruptcy settlement appended, its event in the 0.1.11 layout (three
+    # amounts) and in the mrgn-0.1.12 layout (the premium written off appended).
+    'bankruptcy_0111': lambda t: log_bankruptcy(t, premium=False),
+    'bankruptcy_0112': lambda t: log_bankruptcy(t, premium=True),
 }
+
+B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+
+def log_bankruptcy(t, premium):
+    """Appends one consistent bankruptcy settlement: a top-level `lending_pool_handle_bankruptcy`
+    instruction of the marginfi program (actor = the fee payer, target and bank = the
+    receivership's MarginfiAccount) and, in its own log frame, its `LendingPoolBankHandleBankruptcyEvent`
+    (pinned layout: discriminator, header with signer, bank, mint, bad debt, covered, socialized
+    [, premium written off])."""
+    import base64
+    import struct
+
+    def key(text):
+        n = 0
+        for c in text:
+            n = n * 58 + B58.index(c)
+        return n.to_bytes(32, 'big')
+
+    def b58(data):
+        n, out = int.from_bytes(data, 'big'), ''
+        while n:
+            n, r = divmod(n, 58)
+            out = B58[r] + out
+        return out
+
+    message = t['transaction']['message']
+    keys = message['accountKeys']
+    program = keys.index(a.PROGRAM)
+    start = next(ix for ix in message['instructions'] if ix['programIdIndex'] == program)
+    target, actor = start['accounts'][0], 0
+    message['instructions'].append({'programIdIndex': program, 'accounts': [target, actor, target, target],
+                                    'data': b58(bytes([162, 11, 56, 139, 90, 128, 70, 173])),
+                                    'stackHeight': None})
+    raw = bytes([166, 77, 41, 140, 36, 94, 10, 57]) + bytes([1]) + key(keys[actor]) + key(keys[target])
+    # authority, group; the bank the instruction names (account 2), a mint.
+    raw += bytes(32) + bytes(32) + key(keys[target]) + bytes(range(97, 129))
+    amounts = (100.0, 40.0, 60.0) + ((7.5,) if premium else ())
+    raw += struct.pack('<' + 'd' * len(amounts), *amounts)
+    t['meta']['logMessages'] += [f'Program {a.PROGRAM} invoke [1]',
+                                 'Program log: Instruction: LendingPoolHandleBankruptcy',
+                                 'Program data: ' + base64.b64encode(raw).decode(),
+                                 f'Program {a.PROGRAM} consumed 1000 of 200000 compute units',
+                                 f'Program {a.PROGRAM} success']
 
 
 def opt(v):
@@ -164,6 +212,12 @@ def explain(diff, r, p):
             and r.get('class') == p.get('class') == 'UNKNOWN' and not r.get('events') and not p.get('events')
             and not r.get('markers') and not p.get('markers') and 'LOADED_ADDRESSES_MISSING' in rr):
         notes.append('E6_RELATED_UNKNOWN_WITHOUT_ACCOUNT_KEYS (Rust cannot prove absence; Python stops before instruction evidence)')
+    elif (d <= {'class', 'events'} and r.get('class') == 'CLASSIFIED' and p.get('class') == 'UNKNOWN'
+            and set(p.get('reasons', '').split(',')) <= MRGN_0112_BANKRUPTCY_REASONS
+            and 'MALFORMED_PROGRAM_EVENT' in p.get('reasons', '').split(',')
+            and events_without_bankruptcy(r) == events_of(p) and events_without_bankruptcy(r) != events_of(r)):
+        notes.append('E7_PINNED_VERIFIER_PREDATES_MRGN_0_1_12 (the pinned verifier refuses the 0.1.12 bankruptcy event '
+                     'layout as malformed and misses exactly the settlement; every other event agrees)')
     else:
         return None
     return ' + '.join(notes)
@@ -229,7 +283,42 @@ def explain_index(diff, r, p):
             and pr == ['TRANSACTION_LAYOUT_OR_PAYLOAD_UNKNOWN'] and p.get('program_events') == '0,0,0,0'):
         return ('I6_PYTHON_STOPS_BEFORE_THE_LOGS (successful transaction without its loaded addresses: the pinned '
                 'verifier stops at key resolution; the native INDEX reads the program-attributed log events as observed only, never qualified)')
+    if (d <= {'class', 'events', 'program_events'} and r.get('class') == 'CLASSIFIED' and p.get('class') == 'UNKNOWN'
+            and 'MALFORMED_PROGRAM_EVENT' in pr and set(pr) <= MRGN_0112_BANKRUPTCY_REASONS
+            and only_bankruptcy_missing(r, p)):
+        return ('I7_PINNED_VERIFIER_PREDATES_MRGN_0_1_12 (the 0.1.12 bankruptcy event appends premium_written_off: the '
+                'pinned verifier refuses that layout as malformed and misses exactly the settlement; the native INDEX '
+                'reads both pinned layouts exactly, every other event and count agree)')
     return None
+
+
+# I7: what the pinned verifier reports for a 0.1.12 bankruptcy settlement — the malformed event and
+# the settlement it then misses.
+MRGN_0112_BANKRUPTCY_REASONS = {'MALFORMED_PROGRAM_EVENT', 'COMPLETION_EVENT_POSITION_AMBIGUOUS',
+                                'COMPLETION_EVENT_COUNT_MISMATCH_BANKRUPTCY_SETTLEMENT'}
+
+
+def events_of(line):
+    return [x for x in line.get('events', '').split(';') if x]
+
+
+def events_without_bankruptcy(line):
+    return [x for x in events_of(line) if not x.startswith('BANKRUPTCY_SETTLEMENT:')]
+
+
+def only_bankruptcy_missing(r, p):
+    """The native reading has every event and count of the pinned one plus bankruptcy
+    settlements only (same order otherwise)."""
+    kinds = list(a.KINDS)
+    rc, pc = r.get('program_events', '').split(','), p.get('program_events', '').split(',')
+    if len(rc) != len(kinds) or len(pc) != len(kinds):
+        return False
+    b = kinds.index('BANKRUPTCY_SETTLEMENT')
+    if any(rc[i] != pc[i] for i in range(len(kinds)) if i != b) or int(rc[b]) <= int(pc[b]):
+        return False
+    strip = lambda e: [x.rsplit(':', 1)[0] for x in e.split(';') if x]
+    native = [x for x in strip(r.get('events', '')) if not x.startswith('BANKRUPTCY_SETTLEMENT:')]
+    return native == strip(p.get('events', '')) and len(strip(r.get('events', ''))) > len(native)
 
 
 def main_index(binary, rest):

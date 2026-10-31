@@ -2825,6 +2825,8 @@ mod tests {
         failure: u8,
         calls: std::cell::Cell<u32>,
         simulated: std::cell::RefCell<Vec<Vec<u8>>>,
+        /// S4-04: what a test checks at the adapter call, with the `T_handoff` it is given.
+        on_submit: Option<Box<dyn Fn(u64)>>,
     }
     impl darkbot_solana::submit::SubmissionAdapter for RecordingAdapter {
         fn path(&self) -> darkbot_solana::submit::SubmissionPath {
@@ -2878,6 +2880,9 @@ mod tests {
         ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError>
         {
             self.calls.set(self.calls.get() + 1);
+            if let Some(check) = &self.on_submit {
+                check(t);
+            }
             // DEC-12: like every adapter, nothing is sent after the handoff deadline.
             if std::time::Instant::now() >= deadline {
                 return Err(darkbot_solana::submit::SubmitError::Deadline { sent: false });
@@ -2918,6 +2923,7 @@ mod tests {
             failure,
             calls: Default::default(),
             simulated: Default::default(),
+            on_submit: None,
             simulation: darkbot_solana::submit::SimResult::Ok {
                 units_consumed: Some(10),
                 context_slot: None,
@@ -2978,19 +2984,20 @@ mod tests {
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
                 j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
                     .unwrap();
+                let clock = darkbot_common::timing::Clock::new();
                 let result =
-                    j.submit_payload(&simulated, &c, 123, test_deadline(), permit(&simulated));
+                    j.submit_payload(&simulated, &c, &clock, test_deadline(), permit(&simulated));
                 assert_eq!(result.is_ok(), failure == 0);
                 assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
                 assert_eq!(j.holds(), i.holds);
                 assert!(j
-                    .submit_payload(&simulated, &c, 124, test_deadline(), permit(&simulated))
+                    .submit_payload(&simulated, &c, &clock, test_deadline(), permit(&simulated))
                     .is_err());
                 assert_eq!(adapter.calls.get(), 1);
                 drop(j);
                 let mut reopened = Journal::open(&dir, &a.wallet).unwrap();
                 assert!(reopened
-                    .submit_payload(&simulated, &c, 125, test_deadline(), permit(&simulated))
+                    .submit_payload(&simulated, &c, &clock, test_deadline(), permit(&simulated))
                     .is_err());
                 assert_eq!(reopened.holds(), i.holds);
                 drop(reopened);
@@ -3016,6 +3023,56 @@ mod tests {
             test_deadline(),
         )
         .unwrap()
+    }
+    /// S4-04 (review H1): `T_handoff` is read in the journal where the handoff happens — after the
+    /// reservation and the durable HANDOFF_UNKNOWN write, immediately before the adapter call —
+    /// and returned with the ACK; nothing outside the journal chooses it.
+    #[test]
+    fn s4_04_t_handoff_is_read_after_the_durable_writes_before_the_adapter_call() {
+        use darkbot_solana::submit::SubmissionPath;
+        use solana_sdk::signature::{Keypair, Signer};
+        let (dir, mut a, mut i, c) = setup();
+        let payer = Keypair::new();
+        a.wallet = payer.pubkey().to_string();
+        i.wallet = a.wallet.clone();
+        let payload = transport::SignedPayload::new(
+            vec![signed(&payer)],
+            SubmissionPath::Rpc,
+            payer.pubkey(),
+        )
+        .unwrap();
+        i.signatures = payload.signatures().to_vec();
+        i.signed_wire_sha256 = payload.wire_sha256().into();
+        let clock = darkbot_common::timing::Clock::new();
+        let seen = std::rc::Rc::new(std::cell::Cell::new(None));
+        let mut adapter = adapter(SubmissionPath::Rpc, 0);
+        let (at_call, read_dir, wallet) = (seen.clone(), dir.clone(), a.wallet.clone());
+        adapter.on_submit = Some(Box::new(move |t| {
+            // What a crash at this instant leaves: the handoff is durable already.
+            let ledger = crate::execution::accounting::Ledger::load(&read_dir, &wallet).unwrap();
+            let last = ledger.attempts.last().map(|r| r.state);
+            at_call.set(Some((t, clock.now_ns(), last)));
+        }));
+        let simulated = payload
+            .simulate(&adapter, test_deadline(), test_binding())
+            .unwrap();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
+            .unwrap();
+        let reserved = clock.now_ns();
+        let (ack, handoff) = j
+            .submit_payload(&simulated, &c, &clock, test_deadline(), permit(&simulated))
+            .unwrap();
+        let (given, called, state) = seen.get().expect("the adapter was called");
+        assert_eq!((ack.t_handoff_ns, given), (handoff.ns, handoff.ns));
+        assert!(reserved <= handoff.ns && handoff.ns <= called);
+        assert_eq!(
+            state,
+            Some(crate::execution::accounting::StepState::Unknown),
+            "durable before the call"
+        );
+        drop(j);
+        fs::remove_dir_all(dir).unwrap();
     }
     /// DEC-12: a handoff whose deadline passed after the durable reservation stays UNKNOWN with
     /// its holds (the adapter sent nothing, but the fsynced handoff state is never released
@@ -3043,16 +3100,17 @@ mod tests {
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
             .unwrap();
+        let clock = darkbot_common::timing::Clock::new();
         let past = std::time::Instant::now();
         assert_eq!(
-            j.submit_payload(&simulated, &c, 123, past, permit(&simulated))
+            j.submit_payload(&simulated, &c, &clock, past, permit(&simulated))
                 .unwrap_err(),
             err("SUBMISSION_RESULT_UNKNOWN:DEADLINE_NOT_SENT")
         );
         assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
         assert_eq!(j.holds(), i.holds);
         assert!(j
-            .submit_payload(&simulated, &c, 124, test_deadline(), permit(&simulated))
+            .submit_payload(&simulated, &c, &clock, test_deadline(), permit(&simulated))
             .is_err());
         assert_eq!(adapter.calls.get(), 1);
         drop(j);
@@ -3321,8 +3379,9 @@ mod tests {
             "{refused}"
         );
         j.reserve_payload(a, i, &c, &original, None, None).unwrap();
+        let clock = darkbot_common::timing::Clock::new();
         assert!(j
-            .submit_payload(&reversed, &c, 1, test_deadline(), permit(&reversed))
+            .submit_payload(&reversed, &c, &clock, test_deadline(), permit(&reversed))
             .is_err());
         assert_eq!(adapter.calls.get(), 0);
         drop(j);

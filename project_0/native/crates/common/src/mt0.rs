@@ -295,6 +295,52 @@ impl TriggerClass {
     }
 }
 
+/// S4-04: the RPC budget's workloads (`darkbot_solana::provider::Workload`), for the wait of
+/// their admission — the queue in front of every RPC call of a core stage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionClass {
+    Bootstrap,
+    LiveRead,
+    Simulation,
+    Winner,
+    Deployment,
+    History,
+    Websocket,
+    FeeQuote,
+    Send,
+    Reconcile,
+}
+
+pub const ADMISSION_CLASSES: [AdmissionClass; 10] = [
+    AdmissionClass::Bootstrap,
+    AdmissionClass::LiveRead,
+    AdmissionClass::Simulation,
+    AdmissionClass::Winner,
+    AdmissionClass::Deployment,
+    AdmissionClass::History,
+    AdmissionClass::Websocket,
+    AdmissionClass::FeeQuote,
+    AdmissionClass::Send,
+    AdmissionClass::Reconcile,
+];
+
+impl AdmissionClass {
+    pub fn name(self) -> &'static str {
+        match self {
+            AdmissionClass::Bootstrap => "bootstrap",
+            AdmissionClass::LiveRead => "live_read",
+            AdmissionClass::Simulation => "simulation",
+            AdmissionClass::Winner => "winner",
+            AdmissionClass::Deployment => "deployment",
+            AdmissionClass::History => "history",
+            AdmissionClass::Websocket => "websocket",
+            AdmissionClass::FeeQuote => "fee_quote",
+            AdmissionClass::Send => "send",
+            AdmissionClass::Reconcile => "reconcile",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HealthSite {
     Sweep,
@@ -372,6 +418,8 @@ pub struct Registry {
     /// S4-04: each core stage's duration and, in a counting build, its allocations.
     core_stage_ns: [Hist; 5],
     core_stage_allocations: [Hist; 5],
+    /// S4-04: the wait of every RPC budget admission, per workload.
+    admission_wait: [Hist; 10],
     health_calls: [AtomicU64; HEALTH_SITES],
     counters: [AtomicU64; COUNTERS],
     pending_current: AtomicU64,
@@ -399,6 +447,7 @@ impl Registry {
             ingress_queue_wait: Hist::new(),
             core_stage_ns: [HIST; 5],
             core_stage_allocations: [HIST; 5],
+            admission_wait: [HIST; 10],
             health_calls: [ZERO; HEALTH_SITES],
             counters: [ZERO; COUNTERS],
             pending_current: ZERO,
@@ -551,6 +600,16 @@ impl Registry {
             self.core_stage_ns[stage as usize].snapshot(),
             self.core_stage_allocations[stage as usize].snapshot(),
         )
+    }
+
+    /// S4-04: one RPC budget admission of `class` granted after waiting `ns` (0: at once).
+    pub fn record_admission_wait(&self, class: AdmissionClass, ns: u64) {
+        self.admission_wait[class as usize].record(ns);
+    }
+
+    /// S4-04: the admission waits of `class` so far (in-process, like the core stages).
+    pub fn admission_wait(&self, class: AdmissionClass) -> HistSnapshot {
+        self.admission_wait[class as usize].snapshot()
     }
 
     pub fn count_health(&self, site: HealthSite) {

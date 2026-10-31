@@ -255,14 +255,16 @@ impl Journal {
     /// a malformed ACK) releases the hold.
     /// P8-CTRL.7: `permit` is consumed immediately before the handoff — another payload's, a
     /// passed deadline or an expired grant refuses the egress (the reservation stays UNKNOWN-safe).
+    /// S4-04 (review H1): `T_handoff` is read on `clock` where it happens — after the durable
+    /// writes, immediately before the adapter call — and returned with the ACK.
     pub fn submit_payload(
         &mut self,
         simulated: &SimulatedPayload<'_>,
         now: &Current,
-        t_handoff_ns: u64,
+        clock: &darkbot_common::timing::Clock,
         deadline: std::time::Instant,
         permit: crate::orchestration::capability_control::EgressPermit,
-    ) -> Result<SubmitAck, String> {
+    ) -> Result<(SubmitAck, darkbot_common::timing::Point), String> {
         let p = &simulated.payload;
         if p.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
             return Err(err("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"));
@@ -277,30 +279,31 @@ impl Journal {
             p.path,
             now.now_unix_ms / 1000,
         )?;
-        let ack = self.handoff(&p.digest, now, || {
+        let (ack, handoff) = self.handoff(&p.digest, now, || {
+            let handoff = darkbot_common::timing::Point::now(clock);
             let result = if p.path == SubmissionPath::JitoBundle {
                 simulated
                     .adapter
-                    .submit_bundle(&p.txs, t_handoff_ns, deadline)
+                    .submit_bundle(&p.txs, handoff.ns, deadline)
             } else {
-                simulated.adapter.submit(&p.txs[0], t_handoff_ns, deadline)
+                simulated.adapter.submit(&p.txs[0], handoff.ns, deadline)
             };
             // M6: the adapter's typed class; whatever it is (a local or remote definitive refusal
             // included), the attempt stays UNKNOWN and keeps its hold. C06: one mapping.
-            result.map_err(unknown)
+            result.map(|ack| (ack, handoff)).map_err(unknown)
         })?;
         let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
         if ack.path != p.path
             || returned != p.signatures
             || !p.signatures.contains(&ack.signature.to_string())
             || ack.serialized_len != p.wire_len
-            || ack.t_handoff_ns != t_handoff_ns
+            || ack.t_handoff_ns != handoff.ns
             || (p.path == SubmissionPath::JitoBundle
                 && ack.submission_id.as_ref().is_none_or(String::is_empty))
         {
             return Err(err("SUBMISSION_ACK_MISMATCH_UNKNOWN"));
         }
-        Ok(ack) // ACK is deliberately not a receipt or a released hold.
+        Ok((ack, handoff)) // ACK is deliberately not a receipt or a released hold.
     }
 }
 
@@ -337,14 +340,15 @@ impl Journal {
 
     /// FE-04 exit: exactly one adapter call, only after the exit's UNKNOWN state was fsynced and
     /// bounded by `deadline` (DEC-12); no error releases its hold; the ACK must be this payload's.
+    /// Its `T_handoff` is read on `clock` immediately before the adapter call (S4-04).
     pub fn submit_exit_payload(
         &mut self,
         simulated: &SimulatedPayload<'_>,
         now: &Current,
-        t_handoff_ns: u64,
+        clock: &darkbot_common::timing::Clock,
         deadline: std::time::Instant,
         permit: crate::orchestration::capability_control::EgressPermit,
-    ) -> Result<SubmitAck, String> {
+    ) -> Result<(SubmitAck, darkbot_common::timing::Point), String> {
         let p = &simulated.payload;
         let (intent, _) = self
             .exit_reserved()
@@ -358,10 +362,12 @@ impl Journal {
             p.path,
             now.now_unix_ms / 1000,
         )?;
-        let ack = self.handoff_exit(&p.digest, now, || {
+        let (ack, handoff) = self.handoff_exit(&p.digest, now, || {
+            let handoff = darkbot_common::timing::Point::now(clock);
             simulated
                 .adapter
-                .submit(&p.txs[0], t_handoff_ns, deadline)
+                .submit(&p.txs[0], handoff.ns, deadline)
+                .map(|ack| (ack, handoff))
                 .map_err(unknown)
         })?;
         let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
@@ -369,11 +375,11 @@ impl Journal {
             || returned != p.signatures
             || ack.signature.to_string() != p.signatures[0]
             || ack.serialized_len != p.wire_len
-            || ack.t_handoff_ns != t_handoff_ns
+            || ack.t_handoff_ns != handoff.ns
         {
             return Err(err("SUBMISSION_ACK_MISMATCH_UNKNOWN"));
         }
-        Ok(ack)
+        Ok((ack, handoff))
     }
 }
 

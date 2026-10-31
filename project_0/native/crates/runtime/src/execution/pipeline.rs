@@ -1462,7 +1462,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if let Some(valid) = bh.valid_until_slot() {
             fe04.valid_until_slot = fe04.valid_until_slot.min(valid);
         }
-        let t_handoff_ns = self.clock.now_ns();
         let admission = fe04.admit(
             crate::execution::one_shot::admission::Candidate {
                 plan: &plan,
@@ -1480,7 +1479,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 slot_now: &|| self.slot_watch.get(),
                 state_valid,
                 deadline,
-                t_handoff_ns,
+                clock: self.clock,
                 simulated: simulated_payload,
                 hold: hold_b.map(|b| crate::execution::hold_b::HoldEvidence {
                     mode: self.hold.mode,
@@ -1494,13 +1493,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         );
         use crate::execution::one_shot::admission::Admission;
         match admission {
-            Admission::Submitted(ack) => {
+            Admission::Submitted(ack, handoff) => {
                 // DEC-13b: the reservation stays until the journal settlement books it.
                 fe04.reserved = Some(crate::execution::one_shot::admission::SafetyReserved {
                     capital: plan.exposure,
                     inventory: inventory_hold,
                 });
-                tl.mark(Stage::Handoff, ack.t_handoff_ns);
+                // Review H1: T_handoff as read in the journal, after its durable writes and
+                // immediately before the adapter call — its time and allocation sample at once.
+                tl.mark_point(Stage::Handoff, handoff);
                 rec.decision = Decision::Submitted;
                 rec.signature = Some(ack.signature.to_string());
                 rec.all_signatures = ack.signatures.iter().map(ToString::to_string).collect();

@@ -156,13 +156,50 @@ impl CoreStage {
     }
 }
 
+/// S4-04: a thread's allocation count at one instant (`crate::alloc`), with the thread that read
+/// it — counts of two threads are never subtracted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllocationSample {
+    pub allocations: u64,
+    thread: std::thread::ThreadId,
+}
+
+impl AllocationSample {
+    /// The calling thread's count now; `None` in a build that counts none.
+    pub fn now() -> Option<Self> {
+        crate::alloc::thread_allocations().map(|allocations| AllocationSample {
+            allocations,
+            thread: std::thread::current().id(),
+        })
+    }
+}
+
+/// S4-04: a point read at once where it happens — its time on a `Clock` and the reading thread's
+/// allocation sample (the handoff, read in the FE-04 journal immediately before the adapter
+/// call, after its durable writes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Point {
+    pub ns: u64,
+    pub allocations: Option<AllocationSample>,
+}
+
+impl Point {
+    pub fn now(clock: &Clock) -> Self {
+        let allocations = AllocationSample::now();
+        Point {
+            ns: clock.now_ns(),
+            allocations,
+        }
+    }
+}
+
 /// Zeitleiste einer Opportunity/Transaktion. Allokationsfrei.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Timeline {
     marks: [Option<u64>; 7],
-    /// S4-04: the marking thread's allocations at each point (`crate::alloc`); `None` for a point
-    /// measured elsewhere (`mark_elsewhere`) or in a build that counts none.
-    allocations: [Option<u64>; 7],
+    /// S4-04: the marking thread's allocation sample at each point; `None` for a point measured
+    /// elsewhere (`mark_elsewhere`) or in a build that counts none.
+    allocations: [Option<AllocationSample>; 7],
 }
 
 impl Timeline {
@@ -176,7 +213,12 @@ impl Timeline {
     /// Setzt einen Messpunkt. Ein bereits gesetzter Punkt wird nicht überschrieben
     /// (Rückgabe `false`), damit Provenienz nicht stillschweigend verloren geht.
     pub fn mark(&mut self, stage: Stage, mono_ns: u64) -> bool {
-        self.mark_with(stage, mono_ns, crate::alloc::thread_allocations())
+        self.mark_with(stage, mono_ns, AllocationSample::now())
+    }
+
+    /// `mark` of a point read where it happened (`Point::now`).
+    pub fn mark_point(&mut self, stage: Stage, point: Point) -> bool {
+        self.mark_with(stage, point.ns, point.allocations)
     }
 
     /// `mark` of a point measured on another thread (its time, e.g. the ingress `T_rx`): no
@@ -185,7 +227,12 @@ impl Timeline {
         self.mark_with(stage, mono_ns, None)
     }
 
-    fn mark_with(&mut self, stage: Stage, mono_ns: u64, allocations: Option<u64>) -> bool {
+    fn mark_with(
+        &mut self,
+        stage: Stage,
+        mono_ns: u64,
+        allocations: Option<AllocationSample>,
+    ) -> bool {
         let slot = &mut self.marks[stage as usize];
         if slot.is_some() {
             return false;
@@ -210,16 +257,18 @@ impl Timeline {
         Some(b - a)
     }
 
-    /// S4-04: the core stage's duration (`interval` of its bounds) and the allocations the
-    /// marking thread made within it — `None` unless both points were marked on that thread in
-    /// a counting build.
+    /// S4-04: the core stage's duration (`interval` of its bounds) and the allocations made
+    /// within it — `None` unless both points carry a sample of the same thread (a counting build;
+    /// neither point measured elsewhere).
     pub fn core_stage(&self, stage: CoreStage) -> (Option<u64>, Option<u64>) {
         let (from, to) = stage.bounds();
         let allocations = match (
             self.allocations[from as usize],
             self.allocations[to as usize],
         ) {
-            (Some(a), Some(b)) if b >= a => Some(b - a),
+            (Some(a), Some(b)) if a.thread == b.thread && b.allocations >= a.allocations => {
+                Some(b.allocations - a.allocations)
+            }
             _ => None,
         };
         (self.interval(from, to), allocations)
@@ -326,22 +375,56 @@ mod tests {
         assert_eq!(t.core_stage(CoreStage::StateToDetect), (Some(50), None));
         assert_eq!(t.core_stage(CoreStage::DetectToReady), (None, None));
         let mut e = Timeline::new();
-        e.mark_with(Stage::Rx, 1, Some(4));
+        e.mark_with(
+            Stage::Rx,
+            1,
+            Some(AllocationSample {
+                allocations: 4,
+                thread: std::thread::current().id(),
+            }),
+        );
         e.mark_elsewhere(Stage::State, 2);
         assert_eq!(e.core_stage(CoreStage::IngressToState), (Some(1), None));
         // Samples as a counting build takes them.
+        let here = std::thread::current().id();
+        let sample = |allocations| {
+            Some(AllocationSample {
+                allocations,
+                thread: here,
+            })
+        };
         let mut c = Timeline::new();
-        c.mark_with(Stage::Ready, 10, Some(7));
-        c.mark_with(Stage::Sign, 30, Some(19));
-        c.mark_with(Stage::Handoff, 35, Some(3));
+        c.mark_with(Stage::Ready, 10, sample(7));
+        c.mark_with(Stage::Sign, 30, sample(19));
+        c.mark_with(Stage::Handoff, 35, sample(3));
         assert_eq!(c.core_stage(CoreStage::ReadyToSign), (Some(20), Some(12)));
         assert_eq!(
             c.core_stage(CoreStage::SignToHandoff),
             (Some(5), None),
             "a count that went back is no count"
         );
-        assert!(!c.mark_with(Stage::Ready, 11, Some(8)), "never overwritten");
+        assert!(
+            !c.mark_with(Stage::Ready, 11, sample(8)),
+            "never overwritten"
+        );
         assert_eq!(c.core_stage(CoreStage::ReadyToSign), (Some(20), Some(12)));
+        // Another thread's count is never subtracted (review L3).
+        let elsewhere = std::thread::spawn(|| std::thread::current().id())
+            .join()
+            .unwrap();
+        let mut t2 = Timeline::new();
+        t2.mark_with(Stage::Ready, 1, sample(5));
+        t2.mark_point(
+            Stage::Sign,
+            Point {
+                ns: 4,
+                allocations: Some(AllocationSample {
+                    allocations: 9,
+                    thread: elsewhere,
+                }),
+            },
+        );
+        assert_eq!(t2.core_stage(CoreStage::ReadyToSign), (Some(3), None));
     }
 
     #[test]

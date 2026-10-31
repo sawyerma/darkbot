@@ -1,6 +1,6 @@
 //! DEC-08 parity gate (PHASENPLAN DEC-08: before the Python productive dependency is removed): the
 //! native INDEX reading of the committed A4 sources — the six real liquidation transactions and
-//! their 48 documented mutations — against the pinned Python verifier on the same bytes. Every
+//! their 60 documented mutations — against the pinned Python verifier on the same bytes. Every
 //! difference must be one of the documented I-rules; the pinned verifier must be the pinned file.
 //! The full A4 scope (2,917 sources) is the local evidence `docs/evidence/DEC08_INDEX_PARITY_20261028`.
 use std::path::{Path, PathBuf};
@@ -53,10 +53,11 @@ fn dec08_native_index_matches_the_pinned_verifier_on_the_committed_sources() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("compared=54 kinds={'INDEX': 54} identical=33 explained=21 unexplained=0"),
+        stdout.contains("compared=66 kinds={'INDEX': 66} identical=39 explained=27 unexplained=0"),
         "{stdout}"
     );
-    for rule in ["I2=E2", "I3=E3", "I4=E4", "I6_"] {
+    // S4-02: I7 — a 0.1.12 bankruptcy settlement (its 0.1.11 control agrees exactly).
+    for rule in ["I2=E2", "I3=E3", "I4=E4", "I6_", "I7_"] {
         assert!(stdout.contains(rule), "{rule}: {stdout}");
     }
 }

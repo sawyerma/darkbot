@@ -103,7 +103,8 @@ impl<'de> Deserialize<'de> for NativeEvidence {
         if !d.is_human_readable() {
             return NativeEvidence::deserialize(d);
         }
-        // Untagged: the first variant whose required fields are present, in declaration order.
+        // Untagged: the first variant whose required fields are present, in this order — the
+        // 0.1.12 bankruptcy before 0.1.11's (a 0.1.11 body lacks the premium; serde would ignore it).
         #[cfg(feature = "historical")]
         {
             let body = Value::deserialize(d)?;

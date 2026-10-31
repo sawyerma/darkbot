@@ -964,6 +964,10 @@ fn exit_build(
     build
 }
 
+/// The clock the test exits read their `T_handoff` on.
+static EXIT_CLOCK: std::sync::LazyLock<darkbot_common::timing::Clock> =
+    std::sync::LazyLock::new(darkbot_common::timing::Clock::new);
+
 /// FE-04 exit: the candidate of an exit by `payer` with the given route and WSOL balance.
 fn exit_candidate<'a>(
     route: &'a Route,
@@ -995,7 +999,7 @@ fn exit_candidate<'a>(
         reserved_elsewhere: Default::default(),
         policy_reserve: Default::default(),
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
-        t_handoff_ns: 7,
+        clock: &EXIT_CLOCK,
     }
 }
 
@@ -1053,7 +1057,7 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
         &adapter,
         Some(&crate::orchestration::capability_control::OfflineGates::enabled(taker).gates()),
     );
-    assert!(matches!(admitted, Admission::Submitted(_)), "{admitted:?}");
+    assert!(matches!(admitted, Admission::Submitted(..)), "{admitted:?}");
     assert_eq!(adapter.submits.get(), 1, "exactly one send");
     let (intent, _) = journal.exit_job().expect("the exit is UNKNOWN");
     assert_eq!(

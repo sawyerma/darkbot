@@ -852,7 +852,7 @@ impl ShadowOwner {
             reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
             deadline,
-            t_handoff_ns: self.clock.now_ns(),
+            clock: &self.clock,
         };
         let Some(mut journal) = self.fe04_held.take() else {
             return;
@@ -867,7 +867,7 @@ impl ShadowOwner {
         self.fe04_held = Some(journal);
         let s = &mut self.fe04_admissions;
         match admitted {
-            Admission::Submitted(ack) => {
+            Admission::Submitted(ack, _) => {
                 s.exits_submitted = s.exits_submitted.saturating_add(1);
                 owner_log!(self, "fe04_exit: handed off signature={}", ack.signature);
             }

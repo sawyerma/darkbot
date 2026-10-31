@@ -14,8 +14,9 @@
 //!   default — the same heap at no cost.
 //! - E-PRIV: a winner asks for the marginfi group writable, which every one of its instructions
 //!   only reads (the official account metas, read-only in both pinned program versions), or for
-//!   the invoked marginfi program writable, which the runtime always demotes; the core asks for
-//!   exactly the program's privileges — less lock contention, the same instructions.
+//!   the invoked marginfi program writable, which the runtime demotes (no upgradeable loader in
+//!   the message: checked); the core asks for exactly the program's privileges — less lock
+//!   contention, the same instructions.
 //! - E-FEE: a winner names its own wallet as EndLiquidation's optional `fee_payer`; without one
 //!   the liquidation receiver pays the flat fee — the same wallet, so the same payer.
 //! - E-ORDER: one winner was compiled by a client with another account order; the E2 check finds
@@ -364,6 +365,7 @@ fn s4_03_the_core_rebuilds_and_compiles_every_winner() {
     let allowlist = protocol::receivership_allowlist();
     let global = protocol::receivership_allowed_programs();
     let token_2022 = Pubkey::from_str(protocol::TOKEN_2022_PROGRAM_ID).unwrap();
+    let upgradeable_loader = Pubkey::from_str(protocol::BPF_LOADER_UPGRADEABLE_ID).unwrap();
     let limits = TxLimits::default();
     let mut observed = Vec::new();
     for (tx, winner) in corpus() {
@@ -542,6 +544,12 @@ fn s4_03_the_core_rebuilds_and_compiles_every_winner() {
             .filter(|(k, p)| real_p[*k] != **p)
             .map(|(k, p)| {
                 assert!([group, program].contains(k), "{name}: only E-PRIV: {k}");
+                // The runtime demotes an invoked program's write lock only without the
+                // upgradeable loader among the message's keys.
+                assert!(
+                    *k != program || !tx.account_keys().unwrap().contains(&upgradeable_loader),
+                    "{name}"
+                );
                 assert_eq!((*p, real_p[k]), ((false, false), (false, true)), "{name}");
                 *k
             })

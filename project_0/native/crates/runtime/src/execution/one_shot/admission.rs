@@ -159,7 +159,9 @@ pub struct Candidate<'a> {
     pub slot_now: &'a dyn Fn() -> u64,
     pub state_valid: bool,
     pub deadline: std::time::Instant,
-    pub t_handoff_ns: u64,
+    /// S4-04: the clock `T_handoff` is read on, in the journal immediately before the adapter
+    /// call.
+    pub clock: &'a darkbot_common::timing::Clock,
     /// DEC-02: the pipeline's simulation of exactly `txs`, when it passed (`None`: none).
     pub simulated: Option<super::transport::SimulatedPayload<'a>>,
     /// DEC-04: the mode, A's inventory hold and B the attempt is admitted with (`None`: OFF).
@@ -168,8 +170,9 @@ pub struct Candidate<'a> {
 
 #[derive(Debug)]
 pub enum Admission {
-    /// Durably handed off and submitted once; the outcome is UNKNOWN until settled.
-    Submitted(SubmitAck),
+    /// Durably handed off and submitted once; the outcome is UNKNOWN until settled. With the
+    /// handoff point as read immediately before the adapter call (S4-04).
+    Submitted(SubmitAck, darkbot_common::timing::Point),
     /// Refused before anything durable: no hold exists, nothing was sent.
     Refused(String),
     /// A durable reservation or handoff exists but the submission's fate is unknown: every hold
@@ -392,14 +395,11 @@ impl Fe04Admission {
             slot: c.slot.max((c.slot_now)()),
             ..current
         };
-        match self.journal.submit_payload(
-            &simulated,
-            &at_handoff,
-            c.t_handoff_ns,
-            c.deadline,
-            permit,
-        ) {
-            Ok(ack) => Admission::Submitted(ack),
+        match self
+            .journal
+            .submit_payload(&simulated, &at_handoff, c.clock, c.deadline, permit)
+        {
+            Ok((ack, handoff)) => Admission::Submitted(ack, handoff),
             Err(e) => Admission::Unknown(e),
         }
     }

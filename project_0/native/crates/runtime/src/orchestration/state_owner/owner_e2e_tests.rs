@@ -8219,7 +8219,7 @@ fn s4_04_core_stage_baseline() {
                 "ingress_queue_wait {}",
                 row(&snapshot.ingress_queue_wait_ns)
             ),
-            _ => "inline (owner thread, no queue)".to_string(),
+            _ => "owner thread; its RPC calls' admission waits below".to_string(),
         };
         println!(
             "{} | {} | {} | {queue}",
@@ -8241,6 +8241,13 @@ fn s4_04_core_stage_baseline() {
     for (class, h) in &snapshot.queue_wait_latest_ns {
         if h.count > 0 {
             println!("trigger_queue_wait {class} {}", row(h));
+        }
+    }
+    // The queue in front of every RPC call inside the stages (the RPC budget's admission).
+    for class in darkbot_common::mt0::ADMISSION_CLASSES {
+        let h = MT0.admission_wait(class);
+        if h.count > 0 {
+            println!("rpc_admission_wait {} {}", class.name(), row(&h));
         }
     }
     // The loopback's own answers inside the stages (remote boundaries, not core work).
