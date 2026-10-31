@@ -69,7 +69,11 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         tx,
         shutdown.clone(),
         source_control::head(&sources).unwrap(),
-        Some((dir.clone(), capability_control::head(&dir).unwrap())),
+        Some((
+            dir.clone(),
+            capability_control::head(&dir).unwrap(),
+            Default::default(),
+        )),
     )
     .unwrap();
     let next = || {

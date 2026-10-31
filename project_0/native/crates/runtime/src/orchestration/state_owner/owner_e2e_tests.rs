@@ -6502,37 +6502,23 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
     cleanup(f);
 }
 
-/// P8-CTRL.7: with LIVE effective the egress still needs a permit of the grant's scope — a scope
-/// without the RPC adapter permits no send: the candidate is refused before anything durable.
+/// P8-CTRL.7 (L03): with LIVE effective the payload still needs its grant's scope — a scope
+/// without the RPC adapter permits no real signature of it (review H1: nothing signed, simulated
+/// or sent) and nothing durable.
 #[test]
 fn p8ctrl03_a_grant_whose_scope_lacks_the_adapter_permits_no_send() {
     let (mut f, target, calls) = dec13b_fixture("p8ctrl03_adapter", true);
     // A scope that binds what runs, without the RPC adapter.
     p8ctrl03_scoped(&mut f, &[("submission_adapters", "jito_single")], |_| {});
     assert!(f.owner.live_effective());
-    f.owner
-        .detect(Some((
-            target,
-            f.owner.clock.now_ns(),
-            100,
-            "account_update",
-        )))
-        .unwrap();
-    let methods = calls.lock().unwrap().clone();
-    assert!(
-        !methods.contains(&"sendTransaction".to_string()),
-        "{methods:?}"
+    // Review H1: refused by its sign permit — no real signature, no simulation, no send.
+    p8ctrl03_refused(
+        f,
+        target,
+        &calls,
+        "adapter",
+        "SIGN_ADAPTER_NOT_IN_SCOPE: rpc ",
     );
-    assert!(f.owner.fe04_held.is_none(), "nothing durable");
-    assert!(
-        f.owner
-            .fe04_admissions
-            .last_refusal
-            .starts_with("EGRESS_ADAPTER_NOT_IN_SCOPE"),
-        "{:?}",
-        f.owner.fe04_admissions
-    );
-    cleanup(f);
 }
 
 /// DEC-13 (negative): a LIVE request without FE-06 stays Shadow on the same candidate — built,
@@ -7355,6 +7341,24 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         shown.contains(&later_digest) && shown.len() == 2,
         "{shown:?}"
     );
+    // A preview no longer in the store is no preview any more (review NEW-L1).
+    std::fs::remove_file(
+        f.dir
+            .join(fe06::STORE)
+            .join(format!("scope_{later_digest}.p0j")),
+    )
+    .unwrap();
+    f.owner
+        .sources
+        .capabilities
+        .refresh_previews(Duration::ZERO);
+    assert!(!f
+        .owner
+        .owner_snapshot(3)
+        .fe06
+        .previews
+        .iter()
+        .any(|p| p.digest == later_digest));
     // An unreadable journal: the usage is unknown, never 0.
     f.owner.ledger_view = Some(Err("JOURNAL_CORRUPT".into()));
     let s = f.owner.owner_snapshot(4).fe06;
@@ -7443,9 +7447,11 @@ fn p8ctrl03_scoped(
 }
 
 /// P8-CTRL.3/.5 (L03/L04/L14): a grant whose scope binds exactly what runs sends the candidate
-/// once; one differing identity — the signers, the binary, an unknown identity — refuses its
-/// real signature (nothing signed, simulated or sent), and one fact of the attempt outside the
-/// scope — its fee, its banks, its data source — refuses its egress before anything durable.
+/// once; one differing identity — the signers, the binary, an unknown identity — keeps LIVE
+/// BLOCKED (a Shadow candidate, never a real signature), and one fact of the attempt outside the
+/// scope — its fee, data source, the grant's spend, the reserve, the priority fee, no canonical
+/// source — refuses its real signature (review H1: before any byte is signed, simulated or
+/// sent), nothing durable.
 #[test]
 fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
     let detect = |f: &mut Fixture, target: Pubkey| {
@@ -7501,27 +7507,19 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         if tag == "unknown" {
             f.owner.sources.capabilities.running = None;
         }
+        // Review M3: LIVE says so — BLOCKED with the binding's reason; the candidate is a
+        // Shadow one, signed synthetically (P8-CTRL.4), never sent.
+        assert!(!f.owner.live_effective(), "{tag}");
+        let (_, blocked) =
+            crate::orchestration::capability_control::live_decision(&f.owner.sources.live_gates());
+        assert!(blocked.contains(reason), "{tag}: {blocked}");
         detect(&mut f, target);
         let m = methods(&calls);
-        assert!(
-            !m.iter()
-                .any(|m| m == "sendTransaction" || m == "simulateTransaction"),
-            "{tag}: {m:?}"
-        );
+        assert!(!m.iter().any(|m| m == "sendTransaction"), "{tag}: {m:?}");
         assert!(f.owner.fe04_held.is_none(), "{tag}");
-        // The candidate's record names the refused signature.
-        let dir = f.dir.clone();
-        f.owner.finish().unwrap();
-        let journal = std::fs::read(dir.join("opportunities.p0j")).unwrap();
-        assert!(
-            journal
-                .windows(reason.len())
-                .any(|w| w == reason.as_bytes()),
-            "{tag}: {reason}"
-        );
-        let _ = std::fs::remove_dir_all(dir);
+        cleanup(f);
     }
-    // One fact of the attempt outside the scope: refused at its egress permit, nothing durable.
+    // One fact of the attempt outside the scope: refused by its sign permit, nothing durable.
     let facts: [(&str, (&str, &str), &str); 3] = [
         (
             "fee",
@@ -7534,35 +7532,111 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
             "FE06_SCOPE_USE: data_source ",
         ),
         (
-            "tip",
+            "spend",
             ("max_spend_lamports", "1"),
-            "FE06_SCOPE_USE: spend_lamports ",
+            "FE06_SCOPE_USE: grant_spend_lamports ",
         ),
     ];
     for (tag, field, reason) in facts {
         let (mut f, target, calls) = dec13b_fixture(&format!("p8ctrl03_use_{tag}"), true);
         p8ctrl03_scoped(&mut f, &[field], |_| {});
-        detect(&mut f, target);
-        let m = methods(&calls);
-        assert!(!m.iter().any(|m| m == "sendTransaction"), "{tag}: {m:?}");
-        assert!(f.owner.fe04_held.is_none(), "{tag}: nothing durable");
-        assert!(
-            f.owner.fe04_admissions.last_refusal.starts_with(reason),
-            "{tag}: {:?}",
-            f.owner.fe04_admissions
-        );
-        cleanup(f);
+        p8ctrl03_refused(f, target, &calls, tag, reason);
     }
+    // The wallet's SOL after the whole spend below the scope's reserve (10 SOL held).
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl03_use_reserve", true);
+    p8ctrl03_scoped(&mut f, &[("reserve_lamports", "10000000000")], |_| {});
+    let reason = "FE06_SCOPE_USE: sol_after_spend_lamports ";
+    p8ctrl03_refused(f, target, &calls, "reserve", reason);
+    // The priority fee the signed payload requests (1 400 000 CU × 1 000 µL ⇒ 1 400 lamports).
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl03_use_priority", true);
+    f.owner.resources.priority_micro_lamports_per_cu = 1_000;
+    p8ctrl03_scoped(&mut f, &[("max_priority_fee_lamports", "1399")], |_| {});
+    let reason = "FE06_SCOPE_USE: priority_fee_lamports 1400 ";
+    p8ctrl03_refused(f, target, &calls, "priority", reason);
+    // No canonical source (WS OFF): the state's source is unknown.
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl03_use_no_source", true);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
+    p8ctrl06_sources(
+        &mut f,
+        darkbot_solana::ingress::sources::OperatingMode::Off,
+        None,
+    );
+    let reason = "FE06_SCOPE_USE_UNKNOWN: data_source ";
+    p8ctrl03_refused(f, target, &calls, "no_source", reason);
 }
 
-/// P8-CTRL.7/.10 (L07): a DISABLE is linearized against the egress by the one owner — one that
-/// arrives through the owner's control queue while the candidate is being simulated and sent is
-/// applied only after that step: the payload already handed off stays held (SUBMITTED, UNKNOWN
-/// until its settlement, never released by the DISABLE), and from then on LIVE is BLOCKED by it.
-/// A switch DISABLED before the candidate signs, simulates and sends nothing.
+/// The candidate of `target` refused by its sign permit with `reason` (review H1: before any byte
+/// is signed): nothing signed with the wallet, simulated or sent, nothing durable; the candidate's
+/// record names the refusal.
+fn p8ctrl03_refused(
+    mut f: Fixture,
+    target: Pubkey,
+    calls: &Arc<Mutex<Vec<String>>>,
+    tag: &str,
+    reason: &str,
+) {
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let m = calls.lock().unwrap().clone();
+    assert!(
+        !m.iter()
+            .any(|m| m == "sendTransaction" || m == "simulateTransaction"),
+        "{tag}: {m:?}"
+    );
+    assert!(f.owner.fe04_held.is_none(), "{tag}: nothing durable");
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let journal = std::fs::read(dir.join("opportunities.p0j")).unwrap();
+    assert!(
+        journal
+            .windows(reason.len())
+            .any(|w| w == reason.as_bytes()),
+        "{tag}: {reason}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// P8-CTRL.6/.7: the fixture owner's sources rebuilt with the WS unit in `mode` and the control
+/// queue `controls`, its capability state kept.
+fn p8ctrl06_sources(
+    f: &mut Fixture,
+    mode: darkbot_solana::ingress::sources::OperatingMode,
+    controls: Option<
+        darkbot_common::channel::Consumer<crate::orchestration::source_control::ControlMessage>,
+    >,
+) {
+    let capabilities = std::mem::take(&mut f.owner.sources.capabilities);
+    f.owner.sources = sources::OwnerSources::new(
+        darkbot_solana::ingress::sources::SourceArbiter::new(&[
+            crate::orchestration::source_control::control_of(
+                darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
+                mode,
+            )
+            .unwrap(),
+        ])
+        .unwrap(),
+        None,
+        Box::new(|_, _, _, _, _, _, _| Err("P8CTRL06_NO_SOURCE".to_string())),
+        64,
+        &f.owner.wake.clone(),
+        controls,
+    );
+    f.owner.sources.capabilities = capabilities;
+}
+
+/// P8-CTRL.7/.10 (L07): a DISABLE is linearized against the egress — before the candidate it
+/// leaves a Shadow one (never sent); durably requested while the candidate is simulated it waits
+/// as a counted stop and prevents the egress before anything durable (review M5: no network wait
+/// delays it); once the payload is handed off it cannot recall it: the attempt stays held
+/// (SUBMITTED, UNKNOWN until its settlement) and LIVE is BLOCKED from then on.
 #[test]
 fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside() {
-    use crate::analytics::payload::CapabilityControlRequest;
     use crate::orchestration::capability_control as cap;
     use crate::orchestration::source_control::ControlMessage;
     // Before: ECON_SIGN DISABLED — LIVE is BLOCKED by it; the candidate is a Shadow one,
@@ -7582,43 +7656,54 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
     assert!(!calls.lock().unwrap().iter().any(|m| m == "sendTransaction"));
     assert!(f.owner.fe04_held.is_none());
     cleanup(f);
-    // During: the DISABLE arrives while the candidate's simulation runs.
-    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 300);
+    // During (review M5): a DISABLE durably requested while the candidate is being simulated —
+    // p0ctl's request log, the real control thread — waits as a counted stop before the owner's
+    // next step: the egress permit is refused, nothing durable, nothing sent.
+    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 1_500);
     p8ctrl03_scoped(&mut f, &[], |_| {});
+    let control = cap::request_dir(&f.dir);
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(control.clone()), Some(0), Some(3));
+    }
     let (tx, rx) = darkbot_common::channel::bounded::<ControlMessage>("p8ctrl06-l07", 8);
-    let capabilities = std::mem::take(&mut f.owner.sources.capabilities);
-    f.owner.sources = sources::OwnerSources::new(
-        darkbot_solana::ingress::sources::SourceArbiter::new(&[
-            crate::orchestration::source_control::control_of(
-                darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
-                darkbot_solana::ingress::sources::OperatingMode::Active,
-            )
-            .unwrap(),
-        ])
-        .unwrap(),
-        None,
-        Box::new(|_, _, _, _, _, _, _| Err("P8CTRL06_NO_SOURCE".to_string())),
-        64,
-        &f.owner.wake.clone(),
+    p8ctrl06_sources(
+        &mut f,
+        darkbot_solana::ingress::sources::OperatingMode::Active,
         Some(rx),
     );
-    f.owner.sources.capabilities = capabilities;
-    let disable = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
-        tx.try_push(ControlMessage::Capability {
-            seq: 1,
-            request: Ok(CapabilityControlRequest {
-                seq: 1,
-                capability: cap::ECON_SEND.into(),
-                requested: cap::DISABLED.into(),
-                requested_unix_s: 1,
-                request_id: "l07-disable".into(),
-                owner_epoch: 3,
-            }),
+    let shutdown = darkbot_common::lifecycle::Shutdown::new();
+    let sources_dir = crate::orchestration::source_control::request_dir(&f.dir);
+    let thread = crate::orchestration::source_control::spawn(
+        sources_dir.clone(),
+        tx,
+        shutdown.clone(),
+        crate::orchestration::source_control::head(&sources_dir).unwrap(),
+        Some((
+            control.clone(),
+            cap::head(&control).unwrap(),
+            f.owner.sources.capabilities.stop.clone(),
+        )),
+    )
+    .unwrap();
+    let writer = {
+        let control = control.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            cap::write_request(
+                &control,
+                &cap::NewRequest {
+                    capability: cap::ECON_SEND,
+                    requested: cap::DISABLED,
+                    request_id: "l07-disable",
+                    owner_epoch: 3,
+                    expected: Some(0),
+                    now_unix_s: 1,
+                },
+            )
+            .unwrap();
         })
-        .unwrap();
-        tx
-    });
+    };
     f.owner
         .detect(Some((
             target,
@@ -7627,8 +7712,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
             "account_update",
         )))
         .unwrap();
-    let _tx = disable.join().unwrap();
-    // The DISABLE waited for the step: the one payload was handed off and stays held.
+    writer.join().unwrap();
     let sent = |calls: &Arc<Mutex<Vec<String>>>| {
         calls
             .lock()
@@ -7637,40 +7721,96 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
             .filter(|m| *m == "sendTransaction")
             .count()
     };
-    assert_eq!(sent(&calls), 1);
-    assert!(f.owner.live_effective(), "not applied inside the step");
-    f.owner.sources_step(&f.ingress).unwrap();
-    assert!(!f.owner.live_effective());
+    assert_eq!(sent(&calls), 0, "the waiting stop prevented the egress");
+    assert!(f.owner.fe04_held.is_none(), "nothing durable");
+    assert_eq!(f.owner.fe04_admissions.last_refusal, cap::STOP_PENDING);
+    // The owner's next step decides it: from then on LIVE is BLOCKED by it.
+    let t = std::time::Instant::now();
+    while f.owner.sources.capabilities.stop.pending() {
+        f.owner.sources_step(&f.ingress).unwrap();
+        assert!(t.elapsed() < Duration::from_secs(5), "the stop is decided");
+    }
     let (effective, reason) = cap::live_decision(&f.owner.sources.live_gates());
     assert_eq!(effective, "BLOCKED");
     assert!(reason.starts_with("ECON_SEND DISABLED"), "{reason}");
-    assert!(
-        f.owner.fe04_held.is_some() && f.owner.fe04_unbooked.is_some(),
-        "the handed-off attempt keeps every hold"
-    );
-    // Nothing is sent again after it.
+    shutdown.request();
+    thread.join().unwrap();
+    cleanup(f);
+    // After the start: a DISABLE that comes once the payload is handed off cannot recall it —
+    // the attempt stays held (SUBMITTED, UNKNOWN until its settlement), LIVE is BLOCKED.
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl06_l07_after", true);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
     f.owner
         .detect(Some((
             target,
             f.owner.clock.now_ns(),
-            101,
+            100,
             "account_update",
         )))
         .unwrap();
     assert_eq!(sent(&calls), 1);
+    f.owner.apply_capability_control(
+        1,
+        Ok(crate::analytics::payload::CapabilityControlRequest {
+            seq: 1,
+            capability: cap::ECON_SEND.into(),
+            requested: cap::DISABLED.into(),
+            requested_unix_s: 1,
+            request_id: "l07-after".into(),
+            owner_epoch: 3,
+        }),
+    );
+    assert!(!f.owner.live_effective());
+    assert!(
+        f.owner.fe04_held.is_some() && f.owner.fe04_unbooked.is_some(),
+        "the handed-off attempt keeps every hold"
+    );
     cleanup(f);
 }
 
 /// P8-CTRL.5/.10 (L11): EXIT_ONLY exits exactly its named open positions — the named one exits
-/// once, booked against the grant; another position is refused at its egress permit; a global
-/// stop (ECON_LIVE DISABLED) blocks every new exit (no stop bypass).
+/// once, booked against the grant; another position is refused by its sign permit (nothing
+/// signed, simulated or sent); ALL takes no position neither named nor of its own attempts; a
+/// stop — ECON_LIVE or ECON_SEND DISABLED, the grant revoked — blocks every new exit (no stop
+/// bypass).
 #[test]
 fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
     use crate::orchestration::capability_control as cap;
-    for (tag, named, live) in [
-        ("named", true, true),
-        ("other", false, true),
-        ("stopped", true, false),
+    // ALL (review M18): only the positions it names or of attempts booked against it — the
+    // fixture's attempt was made under no grant.
+    let (mut f, calls, e) = dec13b_exit_fixture("p8ctrl06_l11_all", true);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    dec13b_live(&mut f, true);
+    p8ctrl03_scoped(&mut f, &[("mints", e.mint.as_str())], |_| {});
+    f.owner.fe04_refreshed = std::time::Instant::now()
+        .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+        .unwrap();
+    f.owner.lifecycle();
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|m| m == "sendTransaction" || m == "simulateTransaction"));
+    assert!(
+        f.owner
+            .fe04_admissions
+            .last_exit_refusal
+            .starts_with("FE06_SCOPE_USE: exit_position "),
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    cleanup(f);
+    for (tag, named, stop) in [
+        ("named", true, None),
+        ("other", false, None),
+        ("stopped", true, Some(cap::ECON_LIVE)),
+        ("send_off", true, Some(cap::ECON_SEND)),
+        ("revoked", true, Some(cap::FE06_REVOKE)),
     ] {
         let (mut f, calls, e) = dec13b_exit_fixture(&format!("p8ctrl06_l11_{tag}"), true);
         let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
@@ -7706,8 +7846,13 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
             .unwrap()
             .digest()
             .to_string();
-        if !live {
-            f.owner.sources.capabilities.econ.set(cap::ECON_LIVE, false);
+        // No stop bypass (P8-CTRL.5): ECON_LIVE or ECON_SEND DISABLED, or the grant revoked.
+        match stop {
+            Some(cap::FE06_REVOKE) => f.owner.sources.capabilities.fe06 = None,
+            Some(switch) => {
+                f.owner.sources.capabilities.econ.set(switch, false);
+            }
+            None => {}
         }
         f.owner.fe04_refreshed = std::time::Instant::now()
             .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
@@ -7738,7 +7883,12 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
                 assert_eq!(booked, [digest], "the exit is booked against its grant");
             }
             "other" => {
-                assert_eq!(sends, 0);
+                // Review H1: refused by its sign permit — nothing signed, simulated or sent.
+                assert!(!calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m == "sendTransaction" || m == "simulateTransaction"));
                 assert!(
                     f.owner
                         .fe04_admissions
@@ -7759,7 +7909,8 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
 
 /// P8-CTRL.6/.10 (L16): a restart with an UNKNOWN attempt resets every switch and the grant,
 /// while the attempt, its holds and its FE-06 booking survive in the FE-04 journal and are
-/// replayed by the owner's start (`reservation_book`); a request of the old epoch is stale.
+/// replayed by the owner's start (`reservation_book`); a request of the earlier epoch reaches the
+/// new owner refused (nothing re-armed).
 #[test]
 fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking() {
     use crate::orchestration::capability_control as cap;
@@ -7834,5 +7985,31 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
     let first = cap::open_epoch(&control, std::process::id(), None).unwrap();
     let second = cap::open_epoch(&control, std::process::id(), None).unwrap();
     assert!(second > first);
+    // Review LOW: a request of the earlier epoch reaches the new owner refused — nothing re-armed.
+    {
+        let c = &mut f.owner.sources.capabilities;
+        *c = sources::OwnerCapabilities::default();
+        (c.dir, c.config_version, c.epoch) = (Some(control.clone()), Some(0), Some(second));
+    }
+    f.owner.apply_capability_control(
+        1,
+        Ok(crate::analytics::payload::CapabilityControlRequest {
+            seq: 1,
+            capability: cap::ECON_SIGN.into(),
+            requested: cap::ENABLED.into(),
+            requested_unix_s: 1,
+            request_id: "l16-earlier-epoch".into(),
+            owner_epoch: first,
+        }),
+    );
+    assert_ne!(
+        f.owner.sources.capabilities.econ.get(cap::ECON_SIGN),
+        Some(true)
+    );
+    let d = f.owner.sources.capabilities.last_decision.clone().unwrap();
+    assert!(
+        !d.applied && d.detail.starts_with("CAPABILITY_EPOCH_STALE"),
+        "{d:?}"
+    );
     cleanup(f);
 }

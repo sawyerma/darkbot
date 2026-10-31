@@ -75,16 +75,27 @@ fn configured_sources(
                 std::process::id(),
                 super::accounts::wall_unix_s().ok(),
             )?;
+            // P8-CTRL.7 (review M5): the stops the control thread hands over, shared with it.
+            let stop = std::sync::Arc::new(
+                crate::orchestration::capability_control::StopSignal::default(),
+            );
             source_control::spawn(
                 dir.clone(),
                 tx.with_wakeup(wake),
                 shutdown.clone(),
                 baseline,
-                Some((capabilities.clone(), capability_baseline)),
+                Some((capabilities.clone(), capability_baseline, stop.clone())),
             )?;
             Some((
                 rx,
-                (dir, baseline, capabilities, capability_baseline, epoch),
+                (
+                    dir,
+                    baseline,
+                    capabilities,
+                    capability_baseline,
+                    epoch,
+                    stop,
+                ),
             ))
         }
         None => None,
@@ -93,9 +104,9 @@ fn configured_sources(
     let sources =
         super::sources::OwnerSources::new(arbiter, Some(unit), spawn, 4_096, wake, controls);
     Ok(match decisions {
-        Some((dir, baseline, capabilities, capability_baseline, epoch)) => sources
+        Some((dir, baseline, capabilities, capability_baseline, epoch, stop)) => sources
             .record_decisions_in(dir, baseline)
-            .capability_control_in(capabilities, capability_baseline, epoch),
+            .capability_control_in(capabilities, capability_baseline, epoch, stop),
         None => sources,
     })
 }
@@ -419,29 +430,18 @@ pub(super) fn prepare(
         ),
     ];
     // P8-CTRL.3: what this owner runs, fixed once at its start — a grant's scope must bind
-    // exactly it (genesis pin, program, the observed ProgramData, the clean source, these
-    // binaries, the operational config, the signers with their roles, this epoch).
+    // exactly it.
     if let Some(epoch) = sources.capabilities.epoch {
-        use crate::orchestration::boot_audit;
-        sources.capabilities.running = Some(crate::orchestration::fe06::Running {
-            genesis_hash: genesis.to_string(),
-            program: program.to_string(),
-            program_data_hash: program_data_baseline_hash.to_string(),
-            code_sha: std::env::var("P0_PROJECT_DIR")
-                .ok()
-                .and_then(|p| boot_audit::clean_source_head(std::path::Path::new(&p))),
-            binary_sha256: boot_audit::runtime_binary_identity().ok(),
-            runtime_config_sha256: boot_audit::runtime_config_sha256(
-                darkbot_solana::runtime_config::active(),
-            )?,
-            signers: sources
-                .capabilities
-                .wallets
-                .iter()
-                .map(crate::orchestration::capability_control::WalletSwitch::scope_entry)
-                .collect(),
-            owner_epoch: epoch,
-        });
+        let project = std::env::var("P0_PROJECT_DIR").ok();
+        sources.capabilities.running = Some(running_identity(
+            &genesis.to_string(),
+            &program,
+            &program_data_baseline_hash.to_string(),
+            project.as_deref().map(std::path::Path::new),
+            darkbot_solana::runtime_config::active(),
+            &sources.capabilities.wallets,
+            epoch,
+        )?);
     }
     let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone(), 1)?;
 
@@ -1641,6 +1641,40 @@ mod cluster_tests {
         }
     }
     use std::str::FromStr;
+    /// P8-CTRL.3 (mutation M24): the running identity names the signers exactly as a scope
+    /// does, the audit's config digest and the epoch; without a project no source is known.
+    #[test]
+    fn p8ctrl03_the_running_identity_is_what_a_scope_binds() {
+        use crate::orchestration::{capability_control as cap, fe06};
+        let signer = Pubkey::new_unique();
+        let wallets = [cap::WalletSwitch::configured(
+            signer,
+            &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
+        )];
+        let config = darkbot_solana::runtime_config::RuntimeConfig::default();
+        let r = running_identity(
+            darkbot_project0::protocol::GENESIS_HASH_MAINNET,
+            &Pubkey::new_unique(),
+            "deployment",
+            None,
+            &config,
+            &wallets,
+            7,
+        )
+        .unwrap();
+        let scope = fe06::parse(
+            fe06::tests::text(&signer, &[]).as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        assert_eq!(r.signers, scope.signers);
+        assert_eq!(
+            r.runtime_config_sha256,
+            crate::orchestration::boot_audit::runtime_config_sha256(&config).unwrap()
+        );
+        assert_eq!((r.code_sha, r.owner_epoch), (None, 7));
+    }
+
     #[test]
     fn cluster_check_accepts_only_the_mainnet_genesis_pin() {
         let pin =
@@ -1891,6 +1925,36 @@ mod blockhash_tests {
             .expect("refresh loop ignored shutdown after the refresh in flight");
         assert_eq!(calls.load(SeqCst), 1);
     }
+}
+
+/// P8-CTRL.3: what an owner runs, from what its start established — the genesis pin, the program
+/// and its observed ProgramData, the clean source of `project`, these binaries, the operational
+/// config digest of the audit, the signers with their roles and the epoch. The one construction
+/// of the running identity a grant's scope must bind (an undeterminable part stays `None`: never
+/// a match).
+pub(super) fn running_identity(
+    genesis: &str,
+    program: &Pubkey,
+    program_data_hash: &str,
+    project: Option<&std::path::Path>,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    wallets: &[crate::orchestration::capability_control::WalletSwitch],
+    epoch: u64,
+) -> Result<crate::orchestration::fe06::Running, String> {
+    use crate::orchestration::boot_audit;
+    Ok(crate::orchestration::fe06::Running {
+        genesis_hash: genesis.to_string(),
+        program: program.to_string(),
+        program_data_hash: program_data_hash.to_string(),
+        code_sha: project.and_then(boot_audit::clean_source_head),
+        binary_sha256: boot_audit::runtime_binary_identity().ok(),
+        runtime_config_sha256: boot_audit::runtime_config_sha256(config)?,
+        signers: wallets
+            .iter()
+            .map(crate::orchestration::capability_control::WalletSwitch::scope_entry)
+            .collect(),
+        owner_epoch: epoch,
+    })
 }
 
 /// DEC-10: the FE-04 approval configured with `P0_FE04_APPROVAL` (native `key = value` file),

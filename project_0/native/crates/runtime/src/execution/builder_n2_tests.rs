@@ -983,6 +983,7 @@ fn exit_candidate<'a>(
         limits: darkbot_solana::tx::TxLimits::default(),
         slot: 90,
         now_unix_ms: 3_000,
+        evaluated: std::time::Instant::now(),
         state_valid: true,
         balances: [
             ("SOL".to_string(), 1_000_000),

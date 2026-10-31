@@ -281,6 +281,41 @@ impl Fe06Quota<'_> {
     }
 }
 
+/// P8-CTRL.3/.5: what the attempts and exits booked against `grant` have committed — their
+/// capital (exposure), worst-case loss and SOL debit, each exit's fee; UNKNOWN or sent alike.
+/// `None` if an attempt's SOL debit is unknown or a sum overflows (never a smaller total).
+pub fn fe06_grant_totals(
+    records: &[crate::execution::accounting::AttemptRecord],
+    grant: &str,
+) -> Option<crate::orchestration::fe06::GrantTotals> {
+    let mut t = crate::orchestration::fe06::GrantTotals::default();
+    let under = |b: &Option<Fe06Attempt>| b.as_ref().is_some_and(|b| b.grant == grant);
+    for r in records {
+        if under(&r.fe06) {
+            t.exposure_usd_micro = t.exposure_usd_micro.checked_add(r.capital_usd_micro)?;
+            t.loss_usd_micro = t.loss_usd_micro.checked_add(r.max_loss_usd_micro)?;
+            t.spend_lamports = t.spend_lamports.checked_add(r.sol_debit_lamports?)?;
+        }
+        for e in r.exits.iter().filter(|e| under(&e.fe06)) {
+            t.spend_lamports = t.spend_lamports.checked_add(e.fee_lamports)?;
+        }
+    }
+    Some(t)
+}
+
+/// P8-CTRL.3/.5: the wallet's free SOL — reconciled, less what other attempts hold and the policy
+/// reserve (`None`: no reconciled SOL, or held beyond it).
+pub fn free_sol(
+    balances: &BTreeMap<String, u64>,
+    elsewhere: &BTreeMap<String, u64>,
+    policy: &BTreeMap<String, u64>,
+) -> Option<u64> {
+    balances
+        .get("SOL")?
+        .checked_sub(elsewhere.get("SOL").copied().unwrap_or(0))?
+        .checked_sub(policy.get("SOL").copied().unwrap_or(0))
+}
+
 /// P8-CTRL.5/.8 (`p0ctl live attempts`): a wallet's attempts as they are booked against FE-06
 /// grants — each booking, the quotas of the UTC day `today`, of every campaign and every grant,
 /// and with `scope` that scope's three quotas against its limits (the count the admission refuses
@@ -790,6 +825,7 @@ struct LegacyImportV7 {
     state: SavedV7,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 struct LegacyImportV8 {
     legacy_sha256: String,
     state: SavedV8,
@@ -1974,6 +2010,29 @@ mod tests {
             ),
             "FE04_TRANSITION schema-8 layout changed"
         );
+        // Review LOW: a schema-8 legacy import reads the same state (its exits unbooked).
+        let import = LegacyImportV8 {
+            legacy_sha256: "a".repeat(64),
+            state: SavedV8 {
+                approval: booked.approval.clone(),
+                intent: booked.intent.clone(),
+                phase: booked.phase.clone(),
+                finalized: booked.finalized.clone(),
+                observations: booked.observations.clone(),
+                exits: booked.exits.iter().cloned().map(Into::into).collect(),
+                non_landing: booked.non_landing.clone(),
+                hold: booked.hold.clone(),
+                fe06: booked.fe06.clone(),
+            },
+        };
+        let bytes = crate::analytics::payload::encode_wire(&import).unwrap();
+        let back: LegacyImport =
+            crate::analytics::payload::decode(journal::kind::FE04_LEGACY_IMPORT, 8, &bytes)
+                .unwrap();
+        assert_eq!(
+            (back.legacy_sha256.as_str(), &back.state),
+            ("a".repeat(64).as_str(), &booked)
+        );
         // Schema 9 (P8-CTRL.5) is pinned with the exit's own FE-06 grant booking.
         let mut exit_booked = booked;
         assert!(!exit_booked.exits.is_empty());
@@ -2001,6 +2060,78 @@ mod tests {
         );
     }
 
+    /// P8-CTRL.3/.5 (review M1): the free SOL is the reconciled SOL less what other attempts hold
+    /// and the policy reserve; held beyond it, or no reconciled SOL, is unknown (never 0).
+    #[test]
+    fn p8ctrl06_free_sol_is_the_reconciled_less_every_hold_and_the_reserve() {
+        let map = |sol: Option<u64>| -> BTreeMap<String, u64> {
+            sol.map(|v| ("SOL".to_string(), v)).into_iter().collect()
+        };
+        assert_eq!(
+            free_sol(&map(Some(100)), &map(Some(30)), &map(Some(20))),
+            Some(50)
+        );
+        assert_eq!(free_sol(&map(Some(100)), &map(None), &map(None)), Some(100));
+        assert_eq!(
+            free_sol(&map(Some(100)), &map(Some(80)), &map(Some(30))),
+            None
+        );
+        assert_eq!(free_sol(&map(None), &map(None), &map(None)), None);
+    }
+
+    /// P8-CTRL.3/.5 (review M2): a grant's totals are those of the attempts and exits booked
+    /// against it — capital, worst-case loss and SOL debit of each attempt, each exit's fee —
+    /// another grant's and an unbooked attempt's never; an unknown SOL debit leaves them unknown.
+    #[test]
+    fn p8ctrl06_grant_totals_count_only_what_is_booked_against_the_grant() {
+        use crate::execution::accounting::{AttemptRecord, ExitRecord, StepState};
+        let booking = |grant: &str| {
+            Some(Fe06Attempt {
+                grant: grant.into(),
+                campaign: "k".into(),
+                utc_day: 1,
+                owner_epoch: Some(1),
+            })
+        };
+        let exit = |grant: &str, fee| ExitRecord {
+            approval_id: "x".into(),
+            mint: "m".into(),
+            state: StepState::Settled,
+            settlement: None,
+            fe06: booking(grant),
+            fee_lamports: fee,
+        };
+        let record = |grant: Option<&str>, capital, loss, debit: Option<u64>| AttemptRecord {
+            approval_id: "a".into(),
+            target: "t".into(),
+            funding_class: "ZERO_PREFUND_SAME_TX".into(),
+            archived: true,
+            state: StepState::Settled,
+            settlement: None,
+            exits: vec![exit("g", 7), exit("h", 1_000)],
+            open_positions: Default::default(),
+            hold: None,
+            fe06: grant.and_then(booking),
+            capital_usd_micro: capital,
+            max_loss_usd_micro: loss,
+            sol_debit_lamports: debit,
+        };
+        let records = [
+            record(Some("g"), 10, 2, Some(100)),
+            record(Some("h"), 1_000, 1_000, Some(1_000)),
+            record(None, 1_000, 1_000, Some(1_000)),
+        ];
+        let t = fe06_grant_totals(&records, "g").unwrap();
+        // One attempt under "g" (capital 10, loss 2, debit 100) and each attempt's exit under it
+        // (3 × 7): the exits count wherever their attempt is booked.
+        assert_eq!(
+            (t.exposure_usd_micro, t.loss_usd_micro, t.spend_lamports),
+            (10, 2, 121)
+        );
+        let unknown = [record(Some("g"), 10, 2, None)];
+        assert_eq!(fe06_grant_totals(&unknown, "g"), None);
+    }
+
     /// P8-CTRL.5/.8 (review M3): `live attempts` counts each booking where it belongs — the
     /// UTC day, its campaign, its grant — names an exhausted quota, and counts an attempt
     /// without a grant apart.
@@ -2019,6 +2150,9 @@ mod tests {
             open_positions: Default::default(),
             hold: None,
             fe06,
+            capital_usd_micro: 0,
+            max_loss_usd_micro: 0,
+            sol_debit_lamports: Some(0),
         };
         let booking = |grant: &str, campaign: &str, utc_day| {
             Some(Fe06Attempt {
@@ -2058,6 +2192,7 @@ mod tests {
                 state: StepState::Unknown,
                 settlement: None,
                 fe06: booking(&g, "k1", 10),
+                fee_lamports: 5_000,
             });
         let lines = fe06_attempts_report(&records, "W", 10, Some((&g, &scope)));
         assert_eq!(

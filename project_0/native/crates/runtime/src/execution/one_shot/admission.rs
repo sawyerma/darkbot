@@ -132,6 +132,53 @@ pub enum Admission {
 }
 
 impl Fe04Admission {
+    /// P8-CTRL.3/.5: a new attempt of `plan` as its grant's scope bounds it — the payload's facts
+    /// (all known before its signature), the wallet's free SOL and what `grant` has booked in
+    /// this wallet's journals (unreadable: unknown). The one construction for the sign permit
+    /// and the egress permit.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn attempt_use(
+        &self,
+        plan: &ReceivershipPlan,
+        payer: &Pubkey,
+        fee_lamports: Option<u64>,
+        max_loss_usd_micro: Option<u64>,
+        priority_fee_lamports: Option<u64>,
+        source: Option<darkbot_solana::ingress::sources::SourceUnit>,
+        grant: Option<&str>,
+    ) -> crate::orchestration::fe06::Use {
+        use crate::orchestration::fe06;
+        let market = plan.market_identity.as_ref();
+        fe06::Use::Attempt(fe06::AttemptUse {
+            execution_class: market.map(|m| m.liquidation_type.clone()),
+            funding_class: plan.input.funding.as_str().to_string(),
+            fee_payer: payer.to_string(),
+            banks: market.map(|m| [m.asset_bank.clone(), m.liability_bank.clone()]),
+            mints: plan.assets.iter().map(ToString::to_string).collect(),
+            input_usd_micro: plan.input.required_capital_usd_micro,
+            exposure_usd_micro: plan.exposure,
+            max_loss_usd_micro,
+            fee_lamports,
+            priority_fee_lamports,
+            tip_lamports: plan.tip,
+            rent_lamports: plan.sol_costs.record_rent_lamports,
+            protocol_fee_lamports: plan.sol_costs.flat_fee_lamports,
+            spend_lamports: plan.sol_debit_lamports(fee_lamports),
+            sol_free_lamports: super::free_sol(
+                &self.balances,
+                &self.reserved_elsewhere,
+                &self.policy_reserve,
+            ),
+            booked: grant.and_then(|g| {
+                let records = self.journal.attempt_records().ok()?;
+                super::fe06_grant_totals(&records, g)
+            }),
+            slippage_bps: plan.slippage_bps,
+            route: fe06::route_class(plan.route),
+            data_source: source,
+        })
+    }
+
     /// P8-CTRL.7: `gates` issue the egress permit of exactly this payload before anything is
     /// reserved (`None` or a refusal: nothing durable, nothing sent).
     pub fn admit(
@@ -228,28 +275,15 @@ impl Fe04Admission {
         // P8-CTRL.7: the egress permit of exactly this payload, before anything is reserved —
         // P8-CTRL.3/.5: within its grant's scope with every fact of the attempt.
         let permit = match gates.map(|g| {
-            use crate::orchestration::fe06;
-            let market = c.plan.market_identity.as_ref();
-            let use_ = fe06::Use::Attempt(fe06::AttemptUse {
-                execution_class: market.map(|m| m.liquidation_type.clone()),
-                funding_class: a.funding_class.clone(),
-                fee_payer: c.payer.to_string(),
-                banks: market.map(|m| [m.asset_bank.clone(), m.liability_bank.clone()]),
-                mints: c.plan.assets.iter().map(ToString::to_string).collect(),
-                input_usd_micro: c.plan.input.required_capital_usd_micro,
-                exposure_usd_micro: c.plan.exposure,
-                max_loss_usd_micro: max_loss,
-                fee_lamports: fee,
-                priority_fee_lamports: priority,
-                tip_lamports: c.plan.tip,
-                rent_lamports: rent,
-                protocol_fee_lamports: c.plan.sol_costs.flat_fee_lamports,
-                spend_lamports: sol_debit,
-                sol_balance_lamports: self.balances.get("SOL").copied(),
-                slippage_bps: c.plan.slippage_bps,
-                route: fe06::route_class(c.plan.route),
-                data_source: g.source.cloned(),
-            });
+            let use_ = self.attempt_use(
+                c.plan,
+                &c.payer,
+                Some(fee),
+                Some(max_loss),
+                priority,
+                g.source.cloned(),
+                g.fe06.map(|a| a.digest()),
+            );
             crate::orchestration::capability_control::EgressPermit::issue(
                 g,
                 &use_,

@@ -556,6 +556,52 @@ impl WalletSwitch {
     }
 }
 
+/// P8-CTRL.7 (review M5): no egress while a stop waits for the owner.
+pub const STOP_PENDING: &str =
+    "EGRESS_STOP_PENDING: a stop (DISABLE, LIVE OFF or a revocation) waits for the owner";
+
+/// P8-CTRL.7 (review M5): the economic stops — a switch DISABLED, LIVE OFF, an FE-06 revocation —
+/// the control thread has handed to the owner and the owner has decided. While one waits no
+/// egress is permitted: a stop durably requested before an egress prevents its start without
+/// waiting for the owner's next step (which may be behind a network call). Counted by the
+/// control thread before it hands a stop over (taken back if the queue refuses it), and by the
+/// owner once it has decided it.
+#[derive(Debug, Default)]
+pub struct StopSignal {
+    queued: std::sync::atomic::AtomicU64,
+    decided: std::sync::atomic::AtomicU64,
+}
+
+impl StopSignal {
+    /// A stop is handed to the owner.
+    pub fn queue(&self) {
+        self.queued
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// A stop that could not be handed over (it is handed again later).
+    pub fn unqueue(&self) {
+        self.queued
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// The owner decided a stop (applied or refused).
+    pub fn decide(&self) {
+        self.decided
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// A stop waits for the owner.
+    pub fn pending(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.decided.load(SeqCst) < self.queued.load(SeqCst)
+    }
+}
+
+/// P8-CTRL.7: whether a request is an economic stop (one an egress never runs ahead of).
+pub fn is_stop(capability: &str, requested: &str) -> bool {
+    ((ECON.contains(&capability) || capability.starts_with(WALLET_PREFIX)) && requested == DISABLED)
+        || (capability == LIVE && requested == LIVE_OFF)
+        || capability == FE06_REVOKE
+}
+
 /// P8-CTRL.2: what LIVE's effective value rests on at one instant.
 #[derive(Clone, Copy, Debug)]
 pub struct LiveGates<'a> {
@@ -573,6 +619,8 @@ pub struct LiveGates<'a> {
     pub running: Option<&'a super::fe06::Running>,
     /// P8-CTRL.3: the canonical data source the owner's state comes from (`None`: none).
     pub source: Option<&'a darkbot_solana::ingress::sources::SourceUnit>,
+    /// P8-CTRL.7 (review M5): the stops waiting for the owner (`None`: no control thread).
+    pub stop: Option<&'a std::sync::Arc<StopSignal>>,
 }
 
 /// P8-CTRL.3: a grant's scope against what runs now (no identity or no clock: refused).
@@ -586,18 +634,64 @@ fn scope_runs(g: &LiveGates, scope: &super::fe06::Scope, refusal: &str) -> Resul
     super::fe06::check_running(scope, running, now)
 }
 
+/// P8-CTRL.3/.5: whether a scope of `mode` takes a use of `purpose` (a new attempt: ALL; an exit:
+/// ALL or EXIT_ONLY; SIM_ONLY neither).
+fn mode_takes(purpose: Purpose, mode: super::fe06::Mode) -> bool {
+    use super::fe06::Mode;
+    matches!(
+        (purpose, mode),
+        (Purpose::NewAttempt, Mode::All) | (Purpose::Exit, Mode::All | Mode::ExitOnly)
+    )
+}
+
+/// The purpose of a use.
+fn purpose_of(use_: &super::fe06::Use) -> Purpose {
+    match use_ {
+        super::fe06::Use::Attempt(_) => Purpose::NewAttempt,
+        super::fe06::Use::Exit(_) => Purpose::Exit,
+    }
+}
+
+/// The scope's name of a submission adapter.
+fn adapter_name(path: darkbot_solana::submit::SubmissionPath) -> &'static str {
+    match path {
+        darkbot_solana::submit::SubmissionPath::Rpc => "rpc",
+        darkbot_solana::submit::SubmissionPath::JitoSingle => "jito_single",
+        darkbot_solana::submit::SubmissionPath::JitoBundle => "jito_bundle",
+    }
+}
+
+/// P8-CTRL.3/.5/.7: what a grant's scope demands of one real signature or one egress of `use_`
+/// over `path` — it names the adapter and bounds every fact of the use (that it takes the
+/// purpose and binds what runs is LIVE's own gate, `decision`, which both permits require).
+/// The one check of both permits (`refusal` names which).
+fn scope_admits(
+    scope: &super::fe06::Scope,
+    use_: &super::fe06::Use,
+    path: darkbot_solana::submit::SubmissionPath,
+    refusal: &str,
+) -> Result<(), String> {
+    let adapter = adapter_name(path);
+    if !scope.submission_adapters.contains(adapter) {
+        return Err(format!(
+            "{refusal}_ADAPTER_NOT_IN_SCOPE: {adapter} is no adapter of the grant's scope"
+        ));
+    }
+    super::fe06::check_use(scope, use_)
+}
+
 /// P8-CTRL.2: LIVE's effective value for a new liquidation — BLOCKED while any gate is missing
 /// (every economic switch, every required wallet, the FE-06 authorization), whatever is
 /// requested, with the first missing gate as its reason and every other one named after it; else
 /// the requested value.
 pub fn live_decision(g: &LiveGates) -> (&'static str, String) {
-    decision(g, &ECON)
+    decision(g, Purpose::NewAttempt)
 }
 
 /// P8-CTRL.5: the same decision for the exit of an open position: ECON_ATTEMPT (new liquidations
 /// only) is not one of its gates; ECON_LIVE, ARM, SIGN, SEND, the wallets and FE-06 are.
 pub fn exit_decision(g: &LiveGates) -> (&'static str, String) {
-    decision(g, &ECON_EXIT)
+    decision(g, Purpose::Exit)
 }
 
 /// P8-CTRL.3: the one reason of a grant outside its validity (LIVE, the status, `p0ctl`).
@@ -605,7 +699,11 @@ pub fn grant_not_in_force(digest: &str) -> String {
     format!("FE-06 grant {digest} not in force (expired, not yet valid or no readable clock)")
 }
 
-fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
+fn decision(g: &LiveGates, purpose: Purpose) -> (&'static str, String) {
+    let switches: &[&str] = match purpose {
+        Purpose::NewAttempt => &ECON,
+        Purpose::Exit => &ECON_EXIT,
+    };
     let mut missing: Vec<String> = switches
         .iter()
         .filter(|e| g.econ.get(e) != Some(true))
@@ -625,7 +723,22 @@ fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
         Some(a) if !g.now_unix_s.is_some_and(|now| a.in_force(now)) => {
             missing.push(grant_not_in_force(a.digest()))
         }
-        Some(_) => {}
+        // Review M3: a grant whose scope takes no such use, or does not bind what runs, opens
+        // nothing — LIVE says so (and stays Shadow: SIM_ONLY evidence is never lost to it).
+        Some(a) => {
+            if let Some(scope) = a.scope() {
+                if !mode_takes(purpose, scope.mode) {
+                    missing.push(format!(
+                        "FE-06 grant {} is {}: it takes no {purpose:?}",
+                        a.digest(),
+                        scope.mode.code()
+                    ));
+                }
+                if let Err(e) = scope_runs(g, scope, "FE06_SCOPE_BINDING") {
+                    missing.push(e);
+                }
+            }
+        }
     }
     match missing.split_first() {
         None if g.requested == LIVE => (LIVE, String::new()),
@@ -653,6 +766,7 @@ pub enum Purpose {
 /// immediately before the adapter call, where anything that differs refuses the egress.
 #[derive(Debug)]
 pub struct EgressPermit {
+    stop: Option<std::sync::Arc<StopSignal>>,
     epoch: Option<u64>,
     grant: String,
     grant_expires_unix_s: u64,
@@ -673,10 +787,10 @@ impl EgressPermit {
         path: darkbot_solana::submit::SubmissionPath,
         deadline: std::time::Instant,
     ) -> Result<Self, String> {
-        let purpose = match use_ {
-            super::fe06::Use::Attempt(_) => Purpose::NewAttempt,
-            super::fe06::Use::Exit(_) => Purpose::Exit,
-        };
+        let purpose = purpose_of(use_);
+        if g.stop.is_some_and(|s| s.pending()) {
+            return Err(STOP_PENDING.into());
+        }
         let (effective, reason) = match purpose {
             Purpose::NewAttempt => live_decision(g),
             Purpose::Exit => exit_decision(g),
@@ -690,36 +804,14 @@ impl EgressPermit {
         let grant = g.fe06.ok_or("EGRESS_NOT_PERMITTED: no FE-06 grant")?;
         let mut expires = u64::MAX;
         if let Some(scope) = grant.scope() {
-            use super::fe06::Mode;
-            let takes = matches!(
-                (purpose, scope.mode),
-                (Purpose::NewAttempt, Mode::All) | (Purpose::Exit, Mode::All | Mode::ExitOnly)
-            );
-            if !takes {
-                return Err(format!(
-                    "EGRESS_SCOPE_MODE: the grant's scope is {}, no {:?}",
-                    scope.mode.code(),
-                    purpose
-                ));
-            }
-            let adapter = match path {
-                darkbot_solana::submit::SubmissionPath::Rpc => "rpc",
-                darkbot_solana::submit::SubmissionPath::JitoSingle => "jito_single",
-                darkbot_solana::submit::SubmissionPath::JitoBundle => "jito_bundle",
-            };
-            if !scope.submission_adapters.contains(adapter) {
-                return Err(format!(
-                    "EGRESS_ADAPTER_NOT_IN_SCOPE: {adapter} is no adapter of the grant's scope"
-                ));
-            }
-            scope_runs(g, scope, "EGRESS_SCOPE_BINDING")?;
-            super::fe06::check_use(scope, use_)?;
+            scope_admits(scope, use_, path, "EGRESS")?;
             expires = scope.expires_unix_s;
         }
         if signatures.is_empty() {
             return Err("EGRESS_PERMIT_PAYLOAD: no signature".into());
         }
         Ok(Self {
+            stop: g.stop.cloned(),
             epoch: g.epoch,
             grant: grant.digest().to_string(),
             grant_expires_unix_s: expires,
@@ -752,6 +844,10 @@ impl EgressPermit {
     ) -> Result<(), String> {
         if self.purpose != purpose || self.signatures != signatures || self.path != path {
             return Err("EGRESS_PERMIT_PAYLOAD: the permit is another payload's".into());
+        }
+        // Review M5: immediately before the adapter call a stop that waits still prevents it.
+        if self.stop.as_ref().is_some_and(|s| s.pending()) {
+            return Err(STOP_PENDING.into());
         }
         if std::time::Instant::now() >= self.deadline {
             return Err("EGRESS_PERMIT_DEADLINE".into());
@@ -787,14 +883,20 @@ pub struct SignPermit {
 }
 
 impl SignPermit {
+    /// The permit of one real signature of `message` by `signers` for `purpose`. Under a grant
+    /// with a scope `bound` names the signature's use and adapter: the scope's whole check runs
+    /// here, before any byte is signed (review H1 — no signed payload ever leaves for a
+    /// simulation or a send that its scope would refuse).
     pub fn issue(
         g: &LiveGates,
         purpose: SignPurpose,
         signers: &[Pubkey],
         message: &solana_sdk::message::VersionedMessage,
+        bound: Option<(&super::fe06::Use, darkbot_solana::submit::SubmissionPath)>,
     ) -> Result<Self, String> {
         use super::fe06::Mode;
-        let mode = g.fe06.and_then(|a| a.scope()).map(|s| s.mode);
+        let scope = g.fe06.and_then(|a| a.scope());
+        let unbound = "SIGN_SCOPE_USE: the signature's use is unknown";
         match purpose {
             SignPurpose::NewAttempt | SignPurpose::Exit => {
                 let (effective, reason) = if purpose == SignPurpose::NewAttempt {
@@ -805,14 +907,16 @@ impl SignPermit {
                 if effective != LIVE {
                     return Err(format!("SIGN_NOT_PERMITTED: LIVE {effective} · {reason}"));
                 }
-                let takes = matches!(
-                    (purpose, mode),
-                    (_, None)
-                        | (SignPurpose::NewAttempt, Some(Mode::All))
-                        | (SignPurpose::Exit, Some(Mode::All | Mode::ExitOnly))
-                );
-                if !takes {
-                    return Err("SIGN_SCOPE_MODE: the grant's scope takes no such signature".into());
+                if let Some(scope) = scope {
+                    let (use_, path) = bound.ok_or(unbound)?;
+                    let of = match purpose {
+                        SignPurpose::NewAttempt => Purpose::NewAttempt,
+                        _ => Purpose::Exit,
+                    };
+                    if purpose_of(use_) != of {
+                        return Err("SIGN_SCOPE_USE: the use is another purpose's".into());
+                    }
+                    scope_admits(scope, use_, path, "SIGN")?;
                 }
             }
             SignPurpose::Simulation => {
@@ -822,14 +926,15 @@ impl SignPermit {
                 let in_force = g
                     .fe06
                     .is_some_and(|a| g.now_unix_s.is_some_and(|now| a.in_force(now)));
-                if !in_force || mode != Some(Mode::SimOnly) {
+                let Some(scope) = scope.filter(|s| s.mode == Mode::SimOnly && in_force) else {
                     return Err("SIGN_NOT_PERMITTED: no SIM_ONLY grant in force".into());
-                }
+                };
+                // A simulation is never handed to an adapter that sends: no adapter binds it;
+                // what runs and every fact of its use do.
+                let (use_, _) = bound.ok_or(unbound)?;
+                scope_runs(g, scope, "SIGN_SCOPE_BINDING")?;
+                super::fe06::check_use(scope, use_)?;
             }
-        }
-        // P8-CTRL.3: never a real signature under a scope that does not bind what runs.
-        if let Some(scope) = g.fe06.and_then(|a| a.scope()) {
-            scope_runs(g, scope, "SIGN_SCOPE_BINDING")?;
         }
         for s in signers {
             if !g.wallets.iter().any(|w| w.pubkey == *s && w.enabled) {
@@ -909,6 +1014,7 @@ impl OfflineGates {
             epoch: None,
             running: Some(&self.running),
             source: Some(&self.source),
+            stop: None,
         }
     }
 }
@@ -1034,6 +1140,7 @@ mod tests {
                 epoch: None,
                 running: None,
                 source: None,
+                stop: None,
             };
             let (effective, reason) = live_decision(&g);
             assert_eq!(effective, "BLOCKED");
@@ -1103,6 +1210,7 @@ mod tests {
                 epoch: None,
                 running: None,
                 source: None,
+                stop: None,
             })
         };
         // Every gate: the requested value.
@@ -1158,6 +1266,7 @@ mod tests {
                 epoch: None,
                 running: None,
                 source: None,
+                stop: None,
             }),
             crate::execution::pipeline::Mode::Live
         );
@@ -1327,6 +1436,7 @@ mod tests {
                 epoch: None,
                 running: None,
                 source: None,
+                stop: None,
             }
         }
         let gates = |econ| at(econ, &wallets, Some(&fe06));
@@ -1481,11 +1591,13 @@ mod tests {
     #[test]
     fn p8ctrl02_a_grant_is_in_force_only_within_its_validity() {
         use super::super::fe06;
+        let signer = Pubkey::new_unique();
         let scope = fe06::parse(
-            fe06::tests::text(&Pubkey::new_unique(), &[]).as_bytes(),
+            fe06::tests::text(&signer, &[]).as_bytes(),
             &fe06::tests::ceilings(),
         )
         .unwrap();
+        let running = fe06::tests::running(&signer);
         let grant = Fe06Authorization::offline_test_of(scope.clone());
         assert_eq!(grant.digest(), fe06::digest(&scope).unwrap());
         assert_eq!(grant.scope(), Some(&scope));
@@ -1504,8 +1616,9 @@ mod tests {
                 fe06: Some(&grant),
                 now_unix_s,
                 epoch: None,
-                running: None,
+                running: Some(&running),
                 source: None,
+                stop: None,
             })
         };
         assert_eq!(at(Some(scope.not_before_unix_s)).0, LIVE);
@@ -1530,6 +1643,64 @@ mod tests {
                 .unwrap_err()
                 .starts_with("CAPABILITY_VALUE_INVALID"));
         }
+    }
+
+    /// P8-CTRL.7 (review M5): the stops no egress runs ahead of — a switch or a signer DISABLED,
+    /// LIVE OFF, a revocation; never an enabling request, a grant or a mode; a stop waits from
+    /// its hand-over until the owner decided it (one taken back waits no more).
+    #[test]
+    fn p8ctrl06_stops_are_counted_from_their_hand_over_to_their_decision() {
+        let wallet = format!("{WALLET_PREFIX}{}", Pubkey::new_unique());
+        for (capability, requested) in [
+            (ECON_SEND, DISABLED),
+            (ECON_LIVE, DISABLED),
+            (wallet.as_str(), DISABLED),
+            (LIVE, LIVE_OFF),
+            (FE06_REVOKE, "d"),
+        ] {
+            assert!(is_stop(capability, requested), "{capability} {requested}");
+        }
+        for (capability, requested) in [
+            (ECON_SEND, ENABLED),
+            (wallet.as_str(), ENABLED),
+            (LIVE, LIVE),
+            (FE06_GRANT, "d"),
+            ("HOLD_B", "OFF"),
+        ] {
+            assert!(!is_stop(capability, requested), "{capability} {requested}");
+        }
+        let s = StopSignal::default();
+        assert!(!s.pending());
+        s.queue();
+        assert!(s.pending());
+        s.decide();
+        assert!(!s.pending());
+        s.queue();
+        s.unqueue();
+        assert!(!s.pending(), "a stop the queue refused waits no more");
+        // A permit issued before a stop arrived is refused at its adapter call while it waits.
+        let signer = Pubkey::new_unique();
+        let offline = OfflineGates::enabled(signer);
+        let stop = std::sync::Arc::new(StopSignal::default());
+        let g = LiveGates {
+            stop: Some(&stop),
+            ..offline.gates()
+        };
+        let sigs = vec!["sig-1".to_string()];
+        let use_ =
+            super::super::fe06::Use::Attempt(super::super::fe06::tests::attempt_use(&signer));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let rpc = darkbot_solana::submit::SubmissionPath::Rpc;
+        let permit = EgressPermit::issue(&g, &use_, &sigs, rpc, deadline).unwrap();
+        stop.queue();
+        assert_eq!(
+            EgressPermit::issue(&g, &use_, &sigs, rpc, deadline).unwrap_err(),
+            STOP_PENDING
+        );
+        assert_eq!(
+            permit.admit(Purpose::NewAttempt, &sigs, rpc, 0),
+            Err(STOP_PENDING.into())
+        );
     }
 
     /// P8-CTRL.7: an egress permit is issued only from a LIVE decision of its purpose with a grant
@@ -1612,6 +1783,26 @@ mod tests {
                 ..offline.gates()
             }
         }
+        // P8-CTRL.3: a scope that does not bind what runs, or an unknown identity: no permit.
+        let mut elsewhere = offline.running.clone();
+        elsewhere.binary_sha256 = Some("a".repeat(64));
+        let g = LiveGates {
+            running: Some(&elsewhere),
+            ..with(&offline, &all, 1000)
+        };
+        assert!(issue(&g, Purpose::NewAttempt, SubmissionPath::Rpc)
+            .unwrap_err()
+            .starts_with(
+                "EGRESS_NOT_PERMITTED: LIVE BLOCKED · FE06_SCOPE_BINDING: binary_sha256 differs"
+            ));
+        let g = LiveGates {
+            running: None,
+            ..with(&offline, &all, 1000)
+        };
+        assert_eq!(
+            issue(&g, Purpose::NewAttempt, SubmissionPath::Rpc).unwrap_err(),
+            "EGRESS_NOT_PERMITTED: LIVE BLOCKED · FE06_SCOPE_BINDING: what the owner runs is unknown"
+        );
         let sim = Fe06Authorization::offline_test_of(scope(&[
             ("mode", "SIM_ONLY"),
             ("max_attempts_per_utc_day", "0"),
@@ -1642,20 +1833,25 @@ mod tests {
         )
         .unwrap_err()
         .starts_with("EGRESS_ADAPTER_NOT_IN_SCOPE"));
+        // Review M3: a scope that takes no such use keeps LIVE BLOCKED for it, naming the grant.
         for purpose in [Purpose::NewAttempt, Purpose::Exit] {
+            let e = issue(&with(&offline, &sim, 1000), purpose, SubmissionPath::Rpc).unwrap_err();
             assert!(
-                issue(&with(&offline, &sim, 1000), purpose, SubmissionPath::Rpc)
-                    .unwrap_err()
-                    .starts_with("EGRESS_SCOPE_MODE")
+                e.starts_with("EGRESS_NOT_PERMITTED: LIVE BLOCKED")
+                    && e.contains(&format!(
+                        "{} is SIM_ONLY: it takes no {purpose:?}",
+                        sim.digest()
+                    )),
+                "{e}"
             );
         }
-        assert!(issue(
+        let e = issue(
             &with(&offline, &exit_only, 1000),
             Purpose::NewAttempt,
-            SubmissionPath::Rpc
+            SubmissionPath::Rpc,
         )
-        .unwrap_err()
-        .starts_with("EGRESS_SCOPE_MODE"));
+        .unwrap_err();
+        assert!(e.contains("is EXIT_ONLY: it takes no NewAttempt"), "{e}");
         assert!(issue(
             &with(&offline, &exit_only, 1000),
             Purpose::Exit,
@@ -1743,20 +1939,38 @@ mod tests {
         let pk = [payer.pubkey()];
         // A new attempt under every gate: exactly this message, exactly this signer.
         let mut tx = unsigned(message(1));
-        SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &tx.message)
-            .unwrap()
-            .sign(&mut tx, &[&payer])
-            .unwrap();
+        SignPermit::issue(
+            &offline.gates(),
+            SignPurpose::NewAttempt,
+            &pk,
+            &tx.message,
+            None,
+        )
+        .unwrap()
+        .sign(&mut tx, &[&payer])
+        .unwrap();
         assert!(tx.verify_and_hash_message().is_ok());
-        let p =
-            SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &message(1)).unwrap();
+        let p = SignPermit::issue(
+            &offline.gates(),
+            SignPurpose::NewAttempt,
+            &pk,
+            &message(1),
+            None,
+        )
+        .unwrap();
         let mut other = unsigned(message(2));
         assert!(p
             .sign(&mut other, &[&payer])
             .unwrap_err()
             .starts_with("SIGN_PERMIT_MESSAGE"));
-        let p =
-            SignPermit::issue(&offline.gates(), SignPurpose::NewAttempt, &pk, &message(1)).unwrap();
+        let p = SignPermit::issue(
+            &offline.gates(),
+            SignPurpose::NewAttempt,
+            &pk,
+            &message(1),
+            None,
+        )
+        .unwrap();
         let mut same = unsigned(message(1));
         assert!(p
             .sign(&mut same, &[&Keypair::new()])
@@ -1768,7 +1982,7 @@ mod tests {
             ..offline.gates()
         };
         assert!(
-            SignPermit::issue(&off, SignPurpose::NewAttempt, &pk, &message(1))
+            SignPermit::issue(&off, SignPurpose::NewAttempt, &pk, &message(1), None)
                 .unwrap_err()
                 .starts_with("SIGN_NOT_PERMITTED")
         );
@@ -1776,16 +1990,21 @@ mod tests {
             &offline.gates(),
             SignPurpose::NewAttempt,
             &[Pubkey::new_unique()],
-            &message(1)
+            &message(1),
+            None
         )
         .unwrap_err()
         .starts_with("SIGN_NOT_PERMITTED: WALLET:"));
         // A simulation: never by a LIVE grant alone, only by a SIM_ONLY one in force.
-        assert!(
-            SignPermit::issue(&offline.gates(), SignPurpose::Simulation, &pk, &message(1))
-                .unwrap_err()
-                .starts_with("SIGN_NOT_PERMITTED: no SIM_ONLY grant")
-        );
+        assert!(SignPermit::issue(
+            &offline.gates(),
+            SignPurpose::Simulation,
+            &pk,
+            &message(1),
+            None
+        )
+        .unwrap_err()
+        .starts_with("SIGN_NOT_PERMITTED: no SIM_ONLY grant"));
         let now = 2_000;
         let sim_scope = fe06::parse(
             fe06::tests::text(
@@ -1803,15 +2022,23 @@ mod tests {
         )
         .unwrap();
         let sim = Fe06Authorization::offline_test_of(sim_scope);
+        let sim_use = fe06::Use::Attempt(fe06::tests::attempt_use(&payer.pubkey()));
+        let rpc = darkbot_solana::submit::SubmissionPath::Rpc;
         let with_sim = LiveGates {
             fe06: Some(&sim),
             now_unix_s: Some(now),
             ..offline.gates()
         };
         assert_eq!(
-            SignPermit::issue(&with_sim, SignPurpose::Simulation, &pk, &message(1))
-                .unwrap()
-                .purpose(),
+            SignPermit::issue(
+                &with_sim,
+                SignPurpose::Simulation,
+                &pk,
+                &message(1),
+                Some((&sim_use, rpc))
+            )
+            .unwrap()
+            .purpose(),
             SignPurpose::Simulation
         );
         let mut sign_off = offline.econ;
@@ -1820,15 +2047,78 @@ mod tests {
             econ: &sign_off,
             ..with_sim
         };
-        assert!(
-            SignPermit::issue(&g, SignPurpose::Simulation, &pk, &message(1))
-                .unwrap_err()
-                .starts_with("SIGN_NOT_PERMITTED: ECON_SIGN")
-        );
+        assert!(SignPermit::issue(
+            &g,
+            SignPurpose::Simulation,
+            &pk,
+            &message(1),
+            Some((&sim_use, rpc))
+        )
+        .unwrap_err()
+        .starts_with("SIGN_NOT_PERMITTED: ECON_SIGN"));
         // A SIM_ONLY grant signs no attempt and no exit.
         for purpose in [SignPurpose::NewAttempt, SignPurpose::Exit] {
-            assert!(SignPermit::issue(&with_sim, purpose, &pk, &message(1)).is_err());
+            assert!(
+                SignPermit::issue(&with_sim, purpose, &pk, &message(1), Some((&sim_use, rpc)))
+                    .is_err()
+            );
         }
+        // Review H1: under a grant with a scope the whole scope check runs before the wallet
+        // signs — its use, its adapter, what runs; an unbound signature is refused.
+        let all_scope = fe06::parse(
+            fe06::tests::text(&payer.pubkey(), &[]).as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        let all = Fe06Authorization::offline_test_of(all_scope);
+        let with_all = LiveGates {
+            fe06: Some(&all),
+            now_unix_s: Some(now),
+            ..offline.gates()
+        };
+        let attempt = fe06::tests::attempt_use(&payer.pubkey());
+        let sign = |use_: &fe06::AttemptUse, path| {
+            SignPermit::issue(
+                &with_all,
+                SignPurpose::NewAttempt,
+                &pk,
+                &message(1),
+                Some((&fe06::Use::Attempt(use_.clone()), path)),
+            )
+        };
+        assert!(sign(&attempt, rpc).is_ok());
+        let costly = fe06::AttemptUse {
+            fee_lamports: Some(100_001),
+            ..attempt.clone()
+        };
+        assert!(sign(&costly, rpc)
+            .unwrap_err()
+            .starts_with("FE06_SCOPE_USE: fee_lamports 100001 "));
+        assert!(
+            sign(&attempt, darkbot_solana::submit::SubmissionPath::JitoSingle)
+                .unwrap_err()
+                .starts_with("SIGN_ADAPTER_NOT_IN_SCOPE: jito_single")
+        );
+        assert_eq!(
+            SignPermit::issue(&with_all, SignPurpose::NewAttempt, &pk, &message(1), None)
+                .unwrap_err(),
+            "SIGN_SCOPE_USE: the signature's use is unknown"
+        );
+        let elsewhere = LiveGates {
+            running: None,
+            ..with_all
+        };
+        assert!(SignPermit::issue(
+            &elsewhere,
+            SignPurpose::NewAttempt,
+            &pk,
+            &message(1),
+            Some((&fe06::Use::Attempt(attempt.clone()), rpc))
+        )
+        .unwrap_err()
+        .starts_with(
+            "SIGN_NOT_PERMITTED: LIVE BLOCKED · FE06_SCOPE_BINDING: what the owner runs is unknown"
+        ));
         // The synthetic signature: the same wire length, filled, never verifying.
         let mut real = unsigned(message(1));
         let mut synthetic = unsigned(message(1));

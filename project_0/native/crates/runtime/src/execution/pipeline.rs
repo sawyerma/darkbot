@@ -497,6 +497,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     fn sign(
         &self,
         tx: &mut solana_sdk::transaction::VersionedTransaction,
+        bound: Option<(&crate::orchestration::fe06::Use, SubmissionPath)>,
     ) -> Result<Signing, darkbot_solana::tx::BuildError> {
         use crate::orchestration::capability_control::{SignPermit, SignPurpose};
         let purpose = match self.mode {
@@ -507,7 +508,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let permit = self
             .egress
             .as_ref()
-            .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message));
+            .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message, bound));
         match (permit, self.mode) {
             (Some(Ok(p)), _) => p
                 .sign(tx, &[self.payer])
@@ -1143,10 +1144,80 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         rec.tx_version = Some(built.version.record_name().into());
         tl.mark(Stage::Ready, self.clock.now_ns());
 
+        // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
+        // path; otherwise this single TX is the payload. P8-CTRL.3 (review H1): the whole
+        // payload exists before any signature — its every fact is bound by the sign permit, so
+        // no signed byte ever leaves for a simulation or a send its grant's scope would refuse.
+        let use_bundle = self.bundles(&plan);
+        // DEC-11: a bundle's fee is the sum quoted for exactly its transactions, a single TX's
+        // its message quote; the worst-case loss follows from it (FE-02).
+        let fee_lamports = if use_bundle {
+            bundle.as_ref().and_then(|b| b.fee_lamports)
+        } else {
+            rec.selected_costs
+                .as_ref()
+                .and_then(|c| c.message_fee_quote.as_ref())
+                .map(|q| q.lamports)
+        };
+        let max_loss_usd_micro = plan
+            .sol_debit_lamports(fee_lamports)
+            .and_then(|l| self.builder.native_cost_usd_micro(l))
+            .and_then(|usd| usd.checked_add(plan.input.required_capital_usd_micro));
+        let parts = if use_bundle {
+            // The parts quoted with the plan (or, for a plan priced as a single TX, built now).
+            let parts = match bundle {
+                Some(quoted) => quoted.parts,
+                None => self.bundle_parts(&plan, bh.hash),
+            };
+            match parts {
+                Ok(parts) => Some(parts),
+                Err((loss, reason)) => {
+                    rec.loss = Some(loss);
+                    rec.reason = Some(reason);
+                    return rec.with_timeline(&tl);
+                }
+            }
+        } else {
+            None
+        };
+        let path = if use_bundle {
+            SubmissionPath::JitoBundle
+        } else {
+            self.submitter.path()
+        };
+        let use_ = {
+            let payload: Vec<&solana_sdk::transaction::VersionedTransaction> = match &parts {
+                Some(p) => p
+                    .prerequisites
+                    .iter()
+                    .map(|b| &b.tx)
+                    .chain([&built.tx, &p.tip_tx])
+                    .collect(),
+                None => vec![&built.tx],
+            };
+            let priority = payload.iter().try_fold(0u64, |sum, tx| {
+                sum.checked_add(tx::requested_priority_lamports(tx)?)
+            });
+            self.fe04
+                .as_deref()
+                .zip(self.egress.as_ref())
+                .map(|(fe04, g)| {
+                    fe04.attempt_use(
+                        &plan,
+                        &tx::payer_of(self.payer),
+                        fee_lamports,
+                        max_loss_usd_micro,
+                        priority,
+                        g.source.cloned(),
+                        g.fe06.map(|a| a.digest()),
+                    )
+                })
+        };
+        let bound = use_.as_ref().map(|u| (u, path));
         // P8-CTRL.4: the wallet's own signature only under a permit of the candidate's purpose
         // (LIVE: a new attempt; Shadow: a SIM_ONLY simulation); else a synthetic one — the same
         // work and wire bytes, restricted: simulated without verification, never sent.
-        let signing = match self.sign(&mut built.tx) {
+        let signing = match self.sign(&mut built.tx, bound) {
             Ok(signing) => signing,
             Err(e) => {
                 rec.loss = Some(LossReason::Build);
@@ -1155,9 +1226,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
         };
         rec.signing = Some(signing);
-        // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
-        // path; otherwise this single signed TX is the payload.
-        let use_bundle = self.bundles(&plan);
         // B18: T_sign and its slot exactly once, when the payload is completely signed — here for
         // the single TX (also with a tip but no bundle path), after the bundle otherwise.
         // [FIX-40] the slot is read at T_sign, lock-free.
@@ -1181,27 +1249,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // [FIX-15] Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX als Einzel-TX — nie gemischt.
         // [FIX-4] Bundle = [prerequisite TXs…, receivership TX, tip TX]; Tip nie in der Receivership-TX.
         let mut bundle_txs: Vec<solana_sdk::transaction::VersionedTransaction> = Vec::new();
-        // DEC-11: the bundle's fee is the sum quoted for exactly these transactions.
-        let bundle_fee_lamports = bundle.as_ref().and_then(|b| b.fee_lamports);
-        if use_bundle {
-            // The parts quoted with the plan (or, for a plan priced as a single TX, built now).
-            let parts = match bundle {
-                Some(quoted) => quoted.parts,
-                None => self.bundle_parts(&plan, bh.hash),
-            };
-            let BundleParts {
-                prerequisites,
-                tip_tx,
-            } = match parts {
-                Ok(parts) => parts,
-                Err((loss, reason)) => {
-                    rec.loss = Some(loss);
-                    rec.reason = Some(reason);
-                    return rec.with_timeline(&tl);
-                }
-            };
+        if let Some(BundleParts {
+            prerequisites,
+            tip_tx,
+        }) = parts
+        {
             for mut b in prerequisites {
-                if let Err(e) = self.sign(&mut b.tx) {
+                if let Err(e) = self.sign(&mut b.tx, bound) {
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(Rejection::PrerequisiteSign(e));
                     return rec.with_timeline(&tl);
@@ -1210,7 +1264,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             bundle_txs.push(built.tx.clone());
             let mut tip_tx = tip_tx;
-            if let Err(e) = self.sign(&mut tip_tx) {
+            if let Err(e) = self.sign(&mut tip_tx, bound) {
                 rec.loss = Some(LossReason::Build);
                 rec.reason = Some(Rejection::Sign(e));
                 return rec.with_timeline(&tl);
@@ -1351,19 +1405,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(Rejection::LiveSendRequiresFe04 { bundle: use_bundle });
             return rec.with_timeline(&tl);
         };
-        // DEC-11: a bundle's fee is the sum of its transactions' quotes, a single TX's its quote.
-        let fee_lamports = if use_bundle {
-            bundle_fee_lamports
-        } else {
-            rec.selected_costs
-                .as_ref()
-                .and_then(|c| c.message_fee_quote.as_ref())
-                .map(|q| q.lamports)
-        };
-        let max_loss_usd_micro = plan
-            .sol_debit_lamports(fee_lamports)
-            .and_then(|l| self.builder.native_cost_usd_micro(l))
-            .and_then(|usd| usd.checked_add(plan.input.required_capital_usd_micro));
+        // DEC-11/FE-02: the fee and the worst-case loss bound before the signature.
         // FE-02: the day's loss limit holds with this attempt's worst case (an unknown worst case
         // is refused by the admission).
         if let Some(max_loss) = max_loss_usd_micro {

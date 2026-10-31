@@ -38,6 +38,8 @@ pub struct ExitRecord {
     pub settlement: Option<ExitSettlement>,
     /// P8-CTRL.5: the FE-06 grant the exit is booked against (`None`: none, or before it).
     pub fe06: Option<crate::execution::one_shot::Fe06Attempt>,
+    /// The exit's bound network fee — what it may spend.
+    pub fee_lamports: u64,
 }
 
 /// One own attempt with its exits, as its journal holds it.
@@ -56,6 +58,11 @@ pub struct AttemptRecord {
     pub hold: Option<crate::execution::hold_b::HoldEvidence>,
     /// P8-CTRL.5: the FE-06 grant it is booked against (`None`: none, or before P8-CTRL).
     pub fe06: Option<crate::execution::one_shot::Fe06Attempt>,
+    /// P8-CTRL.5: what its intent committed — its capital, worst-case loss and SOL debit (the
+    /// intent's SOL hold; `None` without one).
+    pub capital_usd_micro: u64,
+    pub max_loss_usd_micro: u64,
+    pub sol_debit_lamports: Option<u64>,
 }
 
 /// FE-07: the cumulative decision.
@@ -362,6 +369,9 @@ mod tests {
             open_positions: BTreeMap::new(),
             hold: None,
             fe06: None,
+            capital_usd_micro: 0,
+            max_loss_usd_micro: 0,
+            sol_debit_lamports: Some(0),
         }
     }
 

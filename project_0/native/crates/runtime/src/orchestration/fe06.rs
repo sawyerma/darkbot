@@ -231,18 +231,13 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
     for signer in &s.signers {
         let (key, roles) = signer.split_once(':').ok_or_else(|| invalid("signers"))?;
         pubkey("signers", key)?;
-        let roles: Vec<&str> = roles.split('+').collect();
-        let known = [
-            super::capability_control::ROLE_LIQUIDATOR,
-            super::capability_control::ROLE_FEE_PAYER,
-        ];
-        // Each role once, in the canonical order (what the owner runs names them so).
-        let mut order = known.iter();
-        if roles.is_empty() || !roles.iter().all(|r| order.any(|k| k == r)) {
+        if !canonical_roles(roles) {
             return Err(invalid("signers"));
         }
-        fee_payer_role |=
-            key == s.fee_payer && roles.contains(&super::capability_control::ROLE_FEE_PAYER);
+        fee_payer_role |= key == s.fee_payer
+            && roles
+                .split('+')
+                .any(|r| r == super::capability_control::ROLE_FEE_PAYER);
     }
     pubkey("fee_payer", &s.fee_payer)?;
     if !fee_payer_role {
@@ -404,8 +399,18 @@ pub fn route_class(r: darkbot_project0::planner::RouteKind) -> &'static str {
     }
 }
 
-/// P8-CTRL.3/.5: what one new attempt does, as its grant's scope bounds it — the exact payload's
-/// facts at the handoff (`None`: unknown, never within a bound).
+/// P8-CTRL.3/.5: what the attempts and exits already booked against a grant have committed — the
+/// attempts' capital (exposure) and worst-case loss, and the SOL every booked attempt and exit
+/// may spend; UNKNOWN or sent alike (`one_shot::fe06_grant_totals`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GrantTotals {
+    pub exposure_usd_micro: u64,
+    pub loss_usd_micro: u64,
+    pub spend_lamports: u64,
+}
+
+/// P8-CTRL.3/.5: what one new attempt does, as its grant's scope bounds it — the payload's facts
+/// before its signature (`None`: unknown, never within a bound).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttemptUse {
     /// The plan's liquidation type (`RECEIVERSHIP`; `None`: a plan without its market identity).
@@ -417,18 +422,21 @@ pub struct AttemptUse {
     pub mints: Vec<String>,
     pub input_usd_micro: u64,
     pub exposure_usd_micro: u64,
-    pub max_loss_usd_micro: u64,
+    pub max_loss_usd_micro: Option<u64>,
     /// The exact message's network fee (base and priority).
-    pub fee_lamports: u64,
-    /// The priority fee the signed payload requests (`tx::requested_priority_lamports`).
+    pub fee_lamports: Option<u64>,
+    /// The priority fee the payload itself requests (`tx::requested_priority_lamports`).
     pub priority_fee_lamports: Option<u64>,
     pub tip_lamports: u64,
-    pub rent_lamports: u64,
+    pub rent_lamports: Option<u64>,
     pub protocol_fee_lamports: u64,
     /// Every lamport the attempt debits (fee, tip, protocol fee, rent).
-    pub spend_lamports: u64,
-    /// The wallet's reconciled SOL before the attempt.
-    pub sol_balance_lamports: Option<u64>,
+    pub spend_lamports: Option<u64>,
+    /// The wallet's free SOL before the attempt: reconciled, less what other attempts hold and
+    /// the policy reserve.
+    pub sol_free_lamports: Option<u64>,
+    /// What the grant has booked so far.
+    pub booked: Option<GrantTotals>,
     pub slippage_bps: u64,
     pub route: &'static str,
     /// The canonical data source the state comes from (`None`: none canonical).
@@ -442,8 +450,13 @@ pub struct ExitUse {
     pub position: String,
     pub mint: String,
     pub fee_payer: String,
+    /// The exit's network fee — its whole SOL cost (a router swap of the position).
     pub fee_lamports: u64,
     pub priority_fee_lamports: Option<u64>,
+    /// The wallet's free SOL before the exit (as for an attempt).
+    pub sol_free_lamports: Option<u64>,
+    /// What the grant has booked so far.
+    pub booked: Option<GrantTotals>,
     pub slippage_bps: u64,
     pub route: &'static str,
     pub data_source: Option<darkbot_solana::ingress::sources::SourceUnit>,
@@ -512,8 +525,39 @@ fn source_within(
     Ok(())
 }
 
-/// P8-CTRL.3/.5: the egress stays within its grant's scope — every class, identity, bank, mint,
-/// cost, reserve, slippage, route and source the scope bounds; an unknown fact is never within.
+/// The grant's total of `what`: what it has booked plus this use, within `bound`.
+fn total(what: &str, booked: u64, this: u64, bound: u64) -> Result<(), String> {
+    let sum = booked.checked_add(this).ok_or_else(|| unknown(what))?;
+    at_most(what, sum, bound)
+}
+
+/// The wallet's free SOL after `spend`, against what must stay in it.
+fn reserve_within(
+    free: Option<u64>,
+    spend: u64,
+    keep: Option<u64>,
+    s: &Scope,
+) -> Result<(), String> {
+    let free = free.ok_or_else(|| unknown("sol_free_lamports"))?;
+    let keep = keep.ok_or_else(|| unknown("sol_reserve_lamports"))?;
+    let left = free.checked_sub(spend);
+    if left.is_none_or(|l| l < keep) {
+        return Err(outside(
+            "sol_after_spend_lamports",
+            left.map_or_else(|| "below 0".to_string(), |l| l.to_string()),
+            format!(
+                "≥ {keep} (reserve {}, a later exit's cost {})",
+                s.reserve_lamports,
+                keep.saturating_sub(s.reserve_lamports)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// P8-CTRL.3/.5: the use stays within its grant's scope — every class, identity, bank, mint,
+/// cost, the grant's totals of exposure, loss and spend, the reserve, slippage, route and source
+/// the scope bounds; an unknown fact is never within.
 pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
     let member = |what: &str, value: &str, set: &BTreeSet<String>| {
         if set.contains(value) {
@@ -522,6 +566,7 @@ pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
             Err(outside(what, value, what))
         }
     };
+    let known = |what: &str, v: Option<u64>| v.ok_or_else(|| unknown(what));
     match u {
         Use::Attempt(a) => {
             let class = a
@@ -542,50 +587,54 @@ pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
             for m in &a.mints {
                 member("mints", m, &s.mints)?;
             }
+            // Each attempt's own bounds.
             at_most(
                 "input_usd_micro",
                 a.input_usd_micro,
                 s.max_input_per_attempt_usd_micro,
             )?;
-            at_most(
-                "exposure_usd_micro",
-                a.exposure_usd_micro,
-                s.max_exposure_usd_micro,
-            )?;
-            at_most(
-                "max_loss_usd_micro",
-                a.max_loss_usd_micro,
-                s.max_loss_usd_micro,
-            )?;
-            at_most("fee_lamports", a.fee_lamports, s.max_fee_lamports)?;
-            let priority = a
-                .priority_fee_lamports
-                .ok_or_else(|| unknown("priority_fee_lamports"))?;
+            let fee = known("fee_lamports", a.fee_lamports)?;
+            at_most("fee_lamports", fee, s.max_fee_lamports)?;
+            let priority = known("priority_fee_lamports", a.priority_fee_lamports)?;
             at_most(
                 "priority_fee_lamports",
                 priority,
                 s.max_priority_fee_lamports,
             )?;
             at_most("tip_lamports", a.tip_lamports, s.max_tip_lamports)?;
-            at_most("rent_lamports", a.rent_lamports, s.max_rent_lamports)?;
+            let rent = known("rent_lamports", a.rent_lamports)?;
+            at_most("rent_lamports", rent, s.max_rent_lamports)?;
             at_most(
                 "protocol_fee_lamports",
                 a.protocol_fee_lamports,
                 s.max_protocol_fee_lamports,
             )?;
-            at_most("spend_lamports", a.spend_lamports, s.max_spend_lamports)?;
-            // The reserve stays in the wallet after the attempt's whole debit.
-            let balance = a
-                .sol_balance_lamports
-                .ok_or_else(|| unknown("sol_balance_lamports"))?;
-            let left = balance.checked_sub(a.spend_lamports);
-            if left.is_none_or(|l| l < s.reserve_lamports) {
-                return Err(outside(
-                    "sol_after_spend_lamports",
-                    left.map_or_else(|| "below 0".to_string(), |l| l.to_string()),
-                    format!("≥ reserve {}", s.reserve_lamports),
-                ));
-            }
+            // The grant's totals: every attempt and exit booked against it, and this one.
+            let loss = known("max_loss_usd_micro", a.max_loss_usd_micro)?;
+            let spend = known("spend_lamports", a.spend_lamports)?;
+            let booked = a.booked.ok_or_else(|| unknown("grant_totals"))?;
+            total(
+                "grant_exposure_usd_micro",
+                booked.exposure_usd_micro,
+                a.exposure_usd_micro,
+                s.max_exposure_usd_micro,
+            )?;
+            total(
+                "grant_loss_usd_micro",
+                booked.loss_usd_micro,
+                loss,
+                s.max_loss_usd_micro,
+            )?;
+            total(
+                "grant_spend_lamports",
+                booked.spend_lamports,
+                spend,
+                s.max_spend_lamports,
+            )?;
+            // The reserve, and what the position the attempt leaves costs to exit, stay in the
+            // wallet after its whole debit (P8-CTRL.5: no new liquidation without them).
+            let keep = s.reserve_lamports.checked_add(s.max_exit_cost_lamports);
+            reserve_within(a.sol_free_lamports, spend, keep, s)?;
             slippage_within(a.slippage_bps, s)?;
             route_within(a.route, s)?;
             source_within(&a.data_source, s)
@@ -602,9 +651,7 @@ pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
                 return Err(outside("fee_payer", &e.fee_payer, &s.fee_payer));
             }
             at_most("fee_lamports", e.fee_lamports, s.max_fee_lamports)?;
-            let priority = e
-                .priority_fee_lamports
-                .ok_or_else(|| unknown("priority_fee_lamports"))?;
+            let priority = known("priority_fee_lamports", e.priority_fee_lamports)?;
             at_most(
                 "priority_fee_lamports",
                 priority,
@@ -615,11 +662,45 @@ pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
                 e.fee_lamports,
                 s.max_exit_cost_lamports,
             )?;
+            let booked = e.booked.ok_or_else(|| unknown("grant_totals"))?;
+            total(
+                "grant_spend_lamports",
+                booked.spend_lamports,
+                e.fee_lamports,
+                s.max_spend_lamports,
+            )?;
+            reserve_within(
+                e.sol_free_lamports,
+                e.fee_lamports,
+                Some(s.reserve_lamports),
+                s,
+            )?;
             slippage_within(e.slippage_bps, s)?;
             route_within(e.route, s)?;
             source_within(&e.data_source, s)
         }
     }
+}
+
+/// P8-CTRL.3: a signer's roles — each known one once, in the canonical order (what the owner runs
+/// names them so: `WalletSwitch::scope_entry`).
+fn canonical_roles(roles: &str) -> bool {
+    let known = [
+        super::capability_control::ROLE_LIQUIDATOR,
+        super::capability_control::ROLE_FEE_PAYER,
+    ];
+    let mut order = known.iter();
+    !roles.is_empty() && roles.split('+').all(|r| order.any(|k| *k == r))
+}
+
+/// P8-CTRL.3: whether a scope follows the rules of its route class and signer roles that hold now
+/// (one previewed under an earlier rule would be refused at its use).
+fn current_rules(s: &Scope) -> bool {
+    ROUTES.contains(&s.route.as_str())
+        && s.signers.iter().all(|e| {
+            e.split_once(':')
+                .is_some_and(|(_, roles)| canonical_roles(roles))
+        })
 }
 
 /// P8-CTRL.3: the scope binds exactly what runs now — the first difference refuses it.
@@ -767,6 +848,13 @@ pub fn preview(project: &Path, digest: &str) -> Result<Scope, String> {
     if self::digest(&s)? != digest {
         return Err("FE06_SCOPE_CHANGED: the stored scope is not the digest's".into());
     }
+    // Review LOW: a scope previewed under an earlier rule is no preview any more.
+    if !current_rules(&s) {
+        return Err(
+            "FE06_SCOPE_STALE: previewed under an earlier rule (route class or signer roles); preview it again"
+                .into(),
+        );
+    }
     Ok(s)
 }
 
@@ -801,7 +889,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// An attempt within the default test scope of `signer`.
+    /// An attempt within the default test scope of `signer` (its reserve and a later exit's
+    /// cost left exactly).
     pub(crate) fn attempt_use(signer: &Pubkey) -> AttemptUse {
         AttemptUse {
             execution_class: Some("RECEIVERSHIP".into()),
@@ -811,14 +900,15 @@ pub(crate) mod tests {
             mints: vec![KEY.into()],
             input_usd_micro: 10_000_000,
             exposure_usd_micro: 10_000_000,
-            max_loss_usd_micro: 1_000_000,
-            fee_lamports: 100_000,
+            max_loss_usd_micro: Some(1_000_000),
+            fee_lamports: Some(100_000),
             priority_fee_lamports: Some(50_000),
             tip_lamports: 10_000,
-            rent_lamports: 3_000_000,
+            rent_lamports: Some(3_000_000),
             protocol_fee_lamports: 10_000,
-            spend_lamports: 3_120_000,
-            sol_balance_lamports: Some(13_120_000),
+            spend_lamports: Some(3_120_000),
+            sol_free_lamports: Some(13_220_000),
+            booked: Some(GrantTotals::default()),
             slippage_bps: 50,
             route: "FREE_PUBLIC",
             data_source: Some(darkbot_solana::ingress::sources::SourceUnit::WsRpcControl),
@@ -833,6 +923,8 @@ pub(crate) mod tests {
             fee_payer: signer.to_string(),
             fee_lamports: 100_000,
             priority_fee_lamports: Some(0),
+            sol_free_lamports: Some(10_100_000),
+            booked: Some(GrantTotals::default()),
             slippage_bps: 50,
             route: "FREE_PUBLIC",
             data_source: Some(darkbot_solana::ingress::sources::SourceUnit::WsRpcControl),
@@ -1149,11 +1241,38 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(project);
     }
 
+    /// P8-CTRL.3 (review LOW): a scope previewed under an earlier rule — a route that is no class,
+    /// signer roles out of their order — is no preview any more (it would be refused at its use).
+    #[test]
+    fn p8ctrl06_stale_previews_are_no_previews() {
+        let signer = Pubkey::new_unique();
+        let d = std::env::temp_dir().join(format!("fe06_stale_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let good = parse(text(&signer, &[]).as_bytes(), &ceilings()).unwrap();
+        let digest = put_preview(&d, &good).unwrap();
+        assert_eq!(preview(&d, &digest), Ok(good.clone()));
+        let earlier_route = Scope {
+            route: "jupiter_v2".into(),
+            ..good.clone()
+        };
+        let reordered = Scope {
+            signers: [format!("{signer}:FEE_PAYER+LIQUIDATOR")].into(),
+            ..good
+        };
+        for stale in [earlier_route, reordered] {
+            let digest = put_preview(&d, &stale).unwrap();
+            assert!(preview(&d, &digest)
+                .unwrap_err()
+                .starts_with("FE06_SCOPE_STALE"));
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// P8-CTRL.3/.5: an egress stays within its grant's scope — every fact the scope bounds; one
     /// outside or unknown refuses with its name (never a default, never a zero).
     #[test]
     fn p8ctrl03_a_scope_bounds_every_fact_of_an_attempt_and_an_exit() {
-        use super::{check_use, AttemptUse, ExitUse, Use};
+        use super::{check_use, AttemptUse, ExitUse, GrantTotals, Use};
         use darkbot_solana::ingress::sources::SourceUnit;
         let signer = Pubkey::new_unique();
         let scope_of =
@@ -1173,7 +1292,7 @@ pub(crate) mod tests {
         );
         let other = Pubkey::new_unique().to_string();
         type Change<'a> = (&'a str, &'a dyn Fn(&mut AttemptUse));
-        let outside: [Change; 18] = [
+        let outside: [Change; 20] = [
             ("execution_classes", &|a| {
                 a.execution_class = Some("CLASSIC".into())
             }),
@@ -1182,18 +1301,36 @@ pub(crate) mod tests {
             ("banks", &|a| a.banks = Some([KEY.into(), other.clone()])),
             ("mints", &|a| a.mints.push(other.clone())),
             ("input_usd_micro", &|a| a.input_usd_micro += 1),
-            ("exposure_usd_micro", &|a| a.exposure_usd_micro += 1),
-            ("max_loss_usd_micro", &|a| a.max_loss_usd_micro += 1),
-            ("fee_lamports", &|a| a.fee_lamports += 1),
+            ("fee_lamports", &|a| a.fee_lamports = Some(100_001)),
             ("priority_fee_lamports", &|a| {
                 a.priority_fee_lamports = Some(50_001)
             }),
             ("tip_lamports", &|a| a.tip_lamports += 1),
-            ("rent_lamports", &|a| a.rent_lamports += 1),
+            ("rent_lamports", &|a| a.rent_lamports = Some(3_000_001)),
             ("protocol_fee_lamports", &|a| a.protocol_fee_lamports += 1),
-            ("spend_lamports", &|a| a.spend_lamports = 50_000_001),
+            // The grant's totals: this attempt and what it has booked (P8-CTRL.5 "gesamt").
+            ("grant_exposure_usd_micro", &|a| a.exposure_usd_micro += 1),
+            ("grant_loss_usd_micro", &|a| {
+                a.max_loss_usd_micro = Some(1_000_001)
+            }),
+            ("grant_spend_lamports", &|a| {
+                a.spend_lamports = Some(50_000_001)
+            }),
+            ("grant_exposure_usd_micro", &|a| {
+                a.booked = Some(GrantTotals {
+                    exposure_usd_micro: 1,
+                    ..Default::default()
+                })
+            }),
+            ("grant_spend_lamports", &|a| {
+                a.booked = Some(GrantTotals {
+                    spend_lamports: 46_880_001,
+                    ..Default::default()
+                })
+            }),
+            // The reserve and a later exit's cost stay after the whole debit.
             ("sol_after_spend_lamports", &|a| {
-                a.sol_balance_lamports = Some(13_119_999)
+                a.sol_free_lamports = Some(13_219_999)
             }),
             ("slippage_bps", &|a| a.slippage_bps = 51),
             ("route", &|a| a.route = "PAID"),
@@ -1210,11 +1347,16 @@ pub(crate) mod tests {
                 "{what}: {e}"
             );
         }
-        let unknown: [Change; 5] = [
+        let unknown: [Change; 10] = [
             ("execution_class", &|a| a.execution_class = None),
             ("banks", &|a| a.banks = None),
+            ("fee_lamports", &|a| a.fee_lamports = None),
             ("priority_fee_lamports", &|a| a.priority_fee_lamports = None),
-            ("sol_balance_lamports", &|a| a.sol_balance_lamports = None),
+            ("rent_lamports", &|a| a.rent_lamports = None),
+            ("max_loss_usd_micro", &|a| a.max_loss_usd_micro = None),
+            ("spend_lamports", &|a| a.spend_lamports = None),
+            ("grant_totals", &|a| a.booked = None),
+            ("sol_free_lamports", &|a| a.sol_free_lamports = None),
             ("data_source", &|a| a.data_source = None),
         ];
         for (what, f) in unknown {
@@ -1253,6 +1395,27 @@ pub(crate) mod tests {
         };
         let e = check_use(&only, &Use::Exit(unnamed)).unwrap_err();
         assert!(e.starts_with("FE06_SCOPE_USE: exit_position "), "{e}");
+        let poor = ExitUse {
+            sol_free_lamports: Some(10_099_999),
+            ..exit.clone()
+        };
+        let e = check_use(&s, &Use::Exit(poor)).unwrap_err();
+        assert!(
+            e.starts_with("FE06_SCOPE_USE: sol_after_spend_lamports "),
+            "{e}"
+        );
+        let spent = ExitUse {
+            booked: Some(GrantTotals {
+                spend_lamports: 49_900_001,
+                ..Default::default()
+            }),
+            ..exit.clone()
+        };
+        let e = check_use(&s, &Use::Exit(spent)).unwrap_err();
+        assert!(
+            e.starts_with("FE06_SCOPE_USE: grant_spend_lamports "),
+            "{e}"
+        );
         let cheap = scope_of(&[("max_exit_cost_lamports", "90000")]);
         let e = check_use(&cheap, &Use::Exit(exit.clone())).unwrap_err();
         assert!(e.starts_with("FE06_SCOPE_USE: exit_cost_lamports "), "{e}");

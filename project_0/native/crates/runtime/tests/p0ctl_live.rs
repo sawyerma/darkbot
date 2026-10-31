@@ -183,7 +183,11 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
         tx,
         shutdown.clone(),
         source_control::head(&sources).unwrap(),
-        Some((dir.clone(), capability_control::head(&dir).unwrap())),
+        Some((
+            dir.clone(),
+            capability_control::head(&dir).unwrap(),
+            Default::default(),
+        )),
     )
     .unwrap();
     let (code, out, err) = grant(&digest, &bound);

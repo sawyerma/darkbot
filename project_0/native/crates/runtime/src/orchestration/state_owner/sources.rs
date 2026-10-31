@@ -108,6 +108,8 @@ pub(super) struct OwnerCapabilities {
     pub(super) previews: Fe06Previews,
     /// P8-CTRL.3: what this owner runs, fixed at its start (`None`: no capability control).
     pub(super) running: Option<crate::orchestration::fe06::Running>,
+    /// P8-CTRL.7 (review M5): the stops the control thread handed over, shared with it.
+    pub(super) stop: std::sync::Arc<crate::orchestration::capability_control::StopSignal>,
 }
 
 /// P8-CTRL.3: the cache of the FE-06 preview store. Each entry is decoded once (a store entry is
@@ -184,6 +186,7 @@ impl OwnerCapabilities {
             epoch: self.epoch,
             running: self.running.as_ref(),
             source: None,
+            stop: Some(&self.stop),
         }
     }
 
@@ -241,6 +244,7 @@ impl Default for OwnerCapabilities {
             refused: 0,
             previews: Fe06Previews::default(),
             running: None,
+            stop: Default::default(),
         }
     }
 }
@@ -296,10 +300,12 @@ impl OwnerSources {
         dir: std::path::PathBuf,
         baseline: u64,
         epoch: u64,
+        stop: std::sync::Arc<crate::orchestration::capability_control::StopSignal>,
     ) -> Self {
         self.capabilities.dir = Some(dir);
         self.capabilities.config_version = Some(baseline);
         self.capabilities.epoch = Some(epoch);
+        self.capabilities.stop = stop;
         self
     }
 
@@ -540,6 +546,22 @@ impl ShadowOwner {
     /// one is decided by `capability_control::live_effective` alone (BLOCKED without FE-06).
     /// Recorded like a source decision (`outcome_<seq>.p0j`, the projection's last decision).
     pub(super) fn apply_capability_control(
+        &mut self,
+        seq: u64,
+        request: Result<crate::analytics::payload::CapabilityControlRequest, String>,
+    ) {
+        use crate::orchestration::capability_control as cap;
+        let stop = request
+            .as_ref()
+            .is_ok_and(|r| cap::is_stop(&r.capability, &r.requested));
+        self.decide_capability_control(seq, request);
+        // P8-CTRL.7 (review M5): the stop is decided (applied or refused) — it waits no more.
+        if stop {
+            self.sources.capabilities.stop.decide();
+        }
+    }
+
+    fn decide_capability_control(
         &mut self,
         seq: u64,
         request: Result<crate::analytics::payload::CapabilityControlRequest, String>,

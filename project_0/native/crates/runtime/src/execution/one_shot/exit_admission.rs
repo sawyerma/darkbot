@@ -28,6 +28,9 @@ pub struct ExitCandidate<'a> {
     pub limits: TxLimits,
     pub slot: u64,
     pub now_unix_ms: u64,
+    /// The monotonic instant at which `now_unix_ms` was read (review M4: the handoff's time is
+    /// that time advanced by the monotonic time since).
+    pub evaluated: std::time::Instant,
     pub state_valid: bool,
     /// Reconciled wallet balances (`"SOL"` lamports, mint base units; the WSOL mint's must be 0).
     pub balances: BTreeMap<String, u64>,
@@ -60,6 +63,42 @@ pub(super) fn within_exit_limit(
         ));
     }
     Ok(())
+}
+
+/// P8-CTRL.3/.5: the exit as its grant's scope bounds it — the one construction of its sign and
+/// egress permit: its position, mint, payer, fee (its whole SOL cost) and priority fee, the
+/// wallet's free SOL, what the grant has booked, its slippage, route class and source.
+#[allow(clippy::too_many_arguments)]
+fn exit_use(
+    journal: &Journal,
+    approval: &ExitApproval,
+    payer: &solana_sdk::pubkey::Pubkey,
+    fee_lamports: u64,
+    priority_fee_lamports: Option<u64>,
+    slippage_bps: u64,
+    c: &ExitCandidate<'_>,
+    g: &crate::orchestration::capability_control::LiveGates<'_>,
+) -> crate::orchestration::fe06::Use {
+    use crate::orchestration::fe06;
+    let grant = g.fe06.map(|a| a.digest());
+    let booked_grant = journal.attempt_booking().map(|b| b.grant.as_str());
+    fe06::Use::Exit(fe06::ExitUse {
+        position: format!("{}:{}", approval.attempt_approval_id, approval.mint),
+        mint: approval.mint.clone(),
+        fee_payer: payer.to_string(),
+        fee_lamports,
+        priority_fee_lamports,
+        sol_free_lamports: super::free_sol(&c.balances, &c.reserved_elsewhere, &c.policy_reserve),
+        booked: grant.and_then(|g| {
+            let records = journal.attempt_records().ok()?;
+            super::fe06_grant_totals(&records, g)
+        }),
+        slippage_bps,
+        // A router's route: the class the builder gives a plan with one.
+        route: fe06::route_class(darkbot_project0::planner::RouteKind::FreePublicAllowed),
+        data_source: g.source.cloned(),
+        booked_under_grant: booked_grant.is_some() && booked_grant == grant,
+    })
 }
 
 /// P8-CTRL.7: `gates` issue the exit's egress permit before anything is reserved.
@@ -103,6 +142,25 @@ pub fn admit_exit(
     if tx::message_matches_plan(&built.tx.message, &plan).is_err() {
         return refuse("EXIT_MESSAGE_MISMATCH");
     }
+    // P8-CTRL.3 (review H1): the exit's fee is quoted on its unsigned message, and every fact of
+    // its use is bound by the sign permit before the wallet signs it.
+    let Ok(fee) = adapter.fee_for_message(&built.tx, c.deadline) else {
+        return refuse("EXIT_FEE_UNKNOWN");
+    };
+    let priority = tx::requested_priority_lamports(&built.tx);
+    let slippage_bps = u64::from(terms.slippage_bps);
+    let use_ = gates.map(|g| {
+        exit_use(
+            journal,
+            &approval,
+            &payer,
+            fee.lamports,
+            priority,
+            slippage_bps,
+            &c,
+            g,
+        )
+    });
     // P8-CTRL.4/.7: the exit is signed with the wallet's key only under its sign permit.
     let permit = match gates.map(|g| {
         crate::orchestration::capability_control::SignPermit::issue(
@@ -110,6 +168,7 @@ pub fn admit_exit(
             crate::orchestration::capability_control::SignPurpose::Exit,
             &[payer],
             &built.tx.message,
+            use_.as_ref().map(|u| (u, adapter.path())),
         )
     }) {
         Some(Ok(p)) => p,
@@ -119,10 +178,6 @@ pub fn admit_exit(
     if permit.sign(&mut built.tx, &[c.payer]).is_err() {
         return refuse("EXIT_SIGN");
     }
-    let Ok(fee) = adapter.fee_for_message(&built.tx, c.deadline) else {
-        return refuse("EXIT_FEE_UNKNOWN");
-    };
-    let priority = tx::requested_priority_lamports(&built.tx);
     let payload = match SignedPayload::new(vec![built.tx], adapter.path(), payer) {
         Ok(p) => p,
         Err(e) => return Admission::Refused(e),
@@ -149,7 +204,7 @@ pub fn admit_exit(
         route_program: r.swap_program.to_string(),
         amount_in: terms.in_amount,
         minimum_out_lamports: terms.minimum_out,
-        slippage_bps: u64::from(terms.slippage_bps),
+        slippage_bps,
         transaction_fee_lamports: fee.lamports,
         signatures,
         signed_wire_sha256: wire,
@@ -175,25 +230,11 @@ pub fn admit_exit(
         return Admission::Refused("FE04_HANDOFF_DEADLINE".into());
     }
     // P8-CTRL.7: the exit's egress permit, before anything is reserved — P8-CTRL.3/.5: within
-    // its grant's scope with every fact of the exit.
-    let booked = journal.attempt_booking().map(|b| b.grant.clone());
-    let permit = match gates.map(|g| {
-        use crate::orchestration::fe06;
-        let use_ = fe06::Use::Exit(fe06::ExitUse {
-            position: format!("{}:{}", approval.attempt_approval_id, approval.mint),
-            mint: approval.mint.clone(),
-            fee_payer: payer.to_string(),
-            fee_lamports: fee.lamports,
-            priority_fee_lamports: priority,
-            slippage_bps: u64::from(terms.slippage_bps),
-            // A router's route: the class the builder gives a plan with one.
-            route: fe06::route_class(darkbot_project0::planner::RouteKind::FreePublicAllowed),
-            data_source: g.source.cloned(),
-            booked_under_grant: booked.is_some() && booked.as_deref() == g.fe06.map(|a| a.digest()),
-        });
+    // its grant's scope with the same use its signature was bound to.
+    let permit = match gates.zip(use_.as_ref()).map(|(g, use_)| {
         crate::orchestration::capability_control::EgressPermit::issue(
             g,
-            &use_,
+            use_,
             simulated.signatures(),
             simulated.path(),
             c.deadline,
@@ -231,7 +272,14 @@ pub fn admit_exit(
             Admission::Refused(e)
         };
     }
-    match journal.submit_exit_payload(&simulated, &current, c.t_handoff_ns, c.deadline, permit) {
+    // Review M4: the handoff is checked at its own time — the evaluation's time advanced by the
+    // monotonic time since (one clock domain), as an attempt's is.
+    let elapsed_ms = u64::try_from(c.evaluated.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let at_handoff = Current {
+        now_unix_ms: c.now_unix_ms.saturating_add(elapsed_ms),
+        ..current
+    };
+    match journal.submit_exit_payload(&simulated, &at_handoff, c.t_handoff_ns, c.deadline, permit) {
         Ok(ack) => Admission::Submitted(ack),
         Err(e) => Admission::Unknown(e),
     }

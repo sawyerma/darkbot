@@ -198,12 +198,16 @@ fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::Attemp
                     state,
                     settlement,
                     fe06: e.fe06.clone(),
+                    fee_lamports: e.intent.transaction_fee_lamports,
                 }
             })
             .collect(),
         open_positions: exit::open_positions(saved),
         hold: saved.hold.clone(),
         fe06: saved.fe06.clone(),
+        capital_usd_micro: saved.intent.capital_usd_micro,
+        max_loss_usd_micro: saved.intent.max_loss_usd_micro,
+        sol_debit_lamports: saved.intent.holds.get("SOL").copied(),
     }
 }
 

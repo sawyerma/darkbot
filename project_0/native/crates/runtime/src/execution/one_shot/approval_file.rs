@@ -575,6 +575,7 @@ mod tests {
                     state: StepState::Settled,
                     settlement: None,
                     fe06: None,
+                    fee_lamports: 0,
                 })
                 .collect(),
             open_positions: open_mint
@@ -591,6 +592,9 @@ mod tests {
                 .collect(),
             hold: None,
             fe06: None,
+            capital_usd_micro: 0,
+            max_loss_usd_micro: 0,
+            sol_debit_lamports: Some(0),
         }
     }
 

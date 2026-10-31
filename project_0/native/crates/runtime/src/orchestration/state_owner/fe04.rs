@@ -776,6 +776,7 @@ impl ShadowOwner {
             return refuse(self, "EXIT_MINT_INVALID".into());
         };
         let now_ns = self.clock.now_ns();
+        let evaluated = std::time::Instant::now();
         let Some(bh) = self.blockhash.fresh(now_ns, self.blockhash_max_age_ns) else {
             return refuse(self, "EXIT_BLOCKHASH_STALE".into());
         };
@@ -811,6 +812,7 @@ impl ShadowOwner {
             limits: darkbot_solana::tx::TxLimits::default(),
             slot: self.slot_watch.get(),
             now_unix_ms: (self.clock.unix_ns(now_ns) / 1_000_000) as u64,
+            evaluated,
             state_valid: self.st.run_state().is_tradable() && !self.program_upgrade_latched,
             balances,
             reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
