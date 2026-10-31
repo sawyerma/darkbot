@@ -23,7 +23,7 @@ use darkbot_bsc_trading::venues::flap::abi::{
     LaunchParamsV6, NEW_TOKEN_V6_SELECTOR, decode_new_token_v6,
 };
 use darkbot_bsc_trading::venues::flap::deployment::{
-    ObservedDeployment, ValidatedDeployment, bsc_mainnet_v5_27_0,
+    ObservedDeployment, ValidatedDeployment, bsc_mainnet_v5_27_2,
 };
 use darkbot_bsc_trading::venues::flap::profile::classify_launch;
 use std::collections::{BTreeMap, HashSet};
@@ -107,7 +107,7 @@ fn main() -> ExitCode {
         eprintln!("usage: g02_flap_launch_profiles <journal dir> [<journal dir> ...]");
         return ExitCode::from(2);
     }
-    let frozen = bsc_mainnet_v5_27_0();
+    let frozen = bsc_mainnet_v5_27_2();
     let portal = frozen.portal;
     // The frozen deployment as the runtime validates it (its own observed
     // identity): the classification of a launch, not of the live Portal.

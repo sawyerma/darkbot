@@ -42,7 +42,9 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::transactions::legacy::LegacyTx;
 use darkbot_bsc_trading::venues::flap::abi::{LaunchParamsV6, encode_new_token_v6};
-use darkbot_bsc_trading::venues::flap::deployment::{FlapDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{
+    FlapDeployment, behaviour_reference, bsc_mainnet_v5_27_2,
+};
 use std::cell::Cell;
 use std::fs;
 use std::io::{Read, Write};
@@ -109,10 +111,11 @@ const BUYER_SECRET: [u8; 32] = [0x44; 32];
 fn write_evidence(root: &Path, ev: &str, verdict: &str) {
     use darkbot_bsc_record::schema::bsc_census::{census, verdict as gv};
     use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
+    use darkbot_bsc_record::schema::bsc_flap_impl_parity::flap_impl_parity as fp;
     use darkbot_bsc_record::schema::{bsc_runtime, g06a, g07, g08};
     fs::create_dir_all(root.join(ev)).unwrap();
     fs::create_dir_all(root.join("bsc/config")).unwrap();
-    let pin = bsc_mainnet_v5_27_0();
+    let pin = bsc_mainnet_v5_27_2();
     let portal = Value::Address(pin.portal.into_array());
     let implementation = Value::Address(pin.portal_implementation.into_array());
     let mut upgrade = filled(&ff::upgrade_check::SCHEMA);
@@ -129,6 +132,52 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
         .set(ff::PIN_RECHECKED, true)
         .set(ff::UPGRADE_CHECK, upgrade.into_nested());
     fs::write(root.join(ev).join("freeze.dbrec"), f.encode().unwrap()).unwrap();
+    // BSC3-065: the pinned implementation's behaviour parity with its
+    // source-verified reference.
+    let reference = behaviour_reference(&pin).unwrap();
+    let mut p = filled(&fp::SCHEMA);
+    p.set(fp::CHAIN_ID, pin.chain_id)
+        .set(fp::PORTAL, portal.clone())
+        .set(fp::OBSERVED_IMPLEMENTATION, implementation.clone())
+        .set(
+            fp::OBSERVED_RUNTIME_SHA256,
+            Value::B256(pin.portal_implementation_runtime_sha256),
+        )
+        .set(fp::OBSERVED_VERSION, pin.portal_version)
+        .set(
+            fp::SOURCE_IMPLEMENTATION,
+            Value::Address(reference.portal_implementation.into_array()),
+        )
+        .set(
+            fp::SOURCE_RUNTIME_SHA256,
+            Value::B256(reference.portal_implementation_runtime_sha256),
+        )
+        .set(fp::VERDICT, "BEHAVIOUR_PARITY")
+        .set(fp::DIFFERENT, 0u64)
+        .set(fp::PRODUCTION_SELECTORS_PRESENT, true)
+        .set(fp::CHAIN_VERSION_CHECKED, true);
+    // Per traded path the floor of cases executed under both, each
+    // identical (the qualification counts them from the cases).
+    let floor = darkbot_bsc_execution::live_qualification::PARITY_MIN_EXECUTED_PER_PATH;
+    for (path, min) in [
+        ("LAUNCH", fp::MIN_LAUNCHES),
+        ("BUY", fp::MIN_BUYS),
+        ("SELL", fp::MIN_SELLS),
+        ("LAUNCH_THEN_BUY", fp::MIN_LAUNCH_BUYS),
+    ] {
+        for _ in 0..floor {
+            let mut c = filled(&fp::case::SCHEMA);
+            c.set(fp::case::CLASS, path)
+                .set(fp::case::SOURCE_STATUS, 1u64)
+                .set(fp::case::OBSERVED_STATUS, 1u64)
+                .set(fp::case::OUTCOME, "IDENTICAL");
+            p.push(fp::CASES, c.into_nested());
+        }
+        p.set(min, floor);
+    }
+    p.set(fp::IDENTICAL, 4 * floor)
+        .set(fp::IDENTICAL_BUT_CREATED, 0u64);
+    fs::write(root.join(ev).join("parity.dbrec"), p.encode().unwrap()).unwrap();
     let mut flap = filled(&gv::venue::SCHEMA);
     flap.set(gv::venue::VENUE, gv::RATED_VENUES[0])
         .set(gv::venue::VERDICT, gv::CONTINUE);
@@ -295,7 +344,7 @@ fn qualified_build() -> String {
 
 fn qualify_in(root: &Path, ev: &str, (strategies, attempts): (&str, &str)) {
     let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{ev}/g07.dbrec");
-    let venue = format!("BSC_VENUE_FLAP@{ev}/freeze.dbrec");
+    let venue = format!("BSC_VENUE_FLAP@{ev}/freeze.dbrec,{ev}/parity.dbrec");
     let source = format!("BSC_INGRESS_PUBLICNODE@{ev}/g04.dbrec");
     let g08 = format!("{ev}/g08.dbrec@{ev}/g07.dbrec");
     let risk = format!("{ev}/g08.dbrec");
@@ -627,7 +676,7 @@ fn launch() -> ([u8; 32], Vec<u8>, [u8; 20]) {
                 nonce: 3,
                 gas_price: 1_000_000_000,
                 gas_limit: 6_000_000,
-                to: bsc_mainnet_v5_27_0().portal,
+                to: bsc_mainnet_v5_27_2().portal,
                 value: U256::ZERO,
                 input: &input,
             },

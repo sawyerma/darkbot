@@ -1161,7 +1161,7 @@ impl LiveGrant {
     pub fn risk_scope_text(&self) -> String {
         let code = match self.venue {
             VenueId::Flap => {
-                let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+                let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2();
                 format!(
                     "{}:{}",
                     pin.portal_implementation,
@@ -6385,7 +6385,7 @@ pub(crate) mod tests {
              max_open_positions=16\nmax_realized_loss_wei=1000000000000000000\n\
              max_daily_realized_loss_wei=1000000000000000000\nmin_buy_interval_ms=0\n"
         );
-        let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+        let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2();
         assert_eq!(
             g.risk_scope_text(),
             g.scope_text()

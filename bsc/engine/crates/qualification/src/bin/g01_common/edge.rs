@@ -106,6 +106,9 @@ pub struct SimResult {
     pub gas_used: u64,
     pub logs: Vec<SimLog>,
     pub error: Option<String>,
+    /// The revert data a failed call's `error.data` holds (empty when none):
+    /// the node leaves `returnData` empty then.
+    pub revert_data: Vec<u8>,
 }
 
 /// The block every state read names.
@@ -322,6 +325,10 @@ fn sim_result_of(v: &Json) -> Result<SimResult, String> {
                 200,
             )
         }),
+        revert_data: match present(v, "error").and_then(|e| e.get("data")) {
+            Some(d) => bytes_of(d, "error.data")?,
+            None => Vec::new(),
+        },
     })
 }
 

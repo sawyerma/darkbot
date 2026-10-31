@@ -34,7 +34,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     quote_native_buy,
 };
 use darkbot_bsc_trading::submission_policy::plan::ChainHead;
-use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_2};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::fs;
@@ -145,7 +145,7 @@ fn strategy_paper_path_latency() {
     PaperIdentity::create(&key, Path::new("/nonexistent-repo")).unwrap();
     let identity = PaperIdentity::load(&key, Path::new("/nonexistent-repo"), &[]).unwrap();
     let sender = Address::from(identity.address());
-    let d = bsc_mainnet_v5_27_0();
+    let d = bsc_mainnet_v5_27_2();
     let validated = d
         .validate(
             &ObservedDeployment {

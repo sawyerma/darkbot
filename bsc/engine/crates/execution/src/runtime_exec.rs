@@ -37,7 +37,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     VenueBuyTerms, WITNESSED_MAINNET_TERMS,
 };
 use darkbot_bsc_trading::venues::flap::deployment::{
-    FlapDeployment, ValidatedDeployment, bsc_mainnet_v5_27_0,
+    FlapDeployment, ValidatedDeployment, bsc_mainnet_v5_27_2,
 };
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -240,7 +240,7 @@ impl ExecRuntime {
                 let _ = tx.send(prober(
                     &endpoint,
                     &limits,
-                    &bsc_mainnet_v5_27_0(),
+                    &bsc_mainnet_v5_27_2(),
                     Address::from(sender),
                 ));
             });
@@ -272,7 +272,7 @@ impl ExecRuntime {
         self.reprobe_failed = 0;
         self.last_probe_error = None;
         let generation = self.codehash_generation + 1;
-        let validated = bsc_mainnet_v5_27_0().validate(&observation.deployment(), generation);
+        let validated = bsc_mainnet_v5_27_2().validate(&observation.deployment(), generation);
         let terms = observation.terms;
         let balance = observation.caller_balance_wei;
         let o = &observation.observed;
@@ -768,7 +768,7 @@ pub(crate) mod tests {
 
     /// The live deployment exactly as the constants witness it.
     pub(crate) fn observation(version: &str, implementation: Address) -> VenueObservation {
-        let d = bsc_mainnet_v5_27_0();
+        let d = bsc_mainnet_v5_27_2();
         let fingerprint = |sha256| CodeFingerprint {
             sha256,
             keccak256: B256::ZERO,
@@ -799,13 +799,15 @@ pub(crate) mod tests {
         Ok(observation(d.portal_version, d.portal_implementation))
     }
 
+    /// A Portal upgraded beyond the pin: a version and implementation
+    /// neither pin names.
     fn upgraded(
         _: &str,
         _: &FollowerLimits,
         _: &FlapDeployment,
         _: Address,
     ) -> Result<VenueObservation, String> {
-        Ok(observation("v5.27.2", Address::repeat_byte(0x6f)))
+        Ok(observation("v5.28.0", Address::repeat_byte(0x7e)))
     }
 
     fn unreachable(
@@ -872,7 +874,7 @@ pub(crate) mod tests {
                     nonce: 3 + u64::from(n),
                     gas_price: 1_000_000_000,
                     gas_limit: 6_000_000,
-                    to: bsc_mainnet_v5_27_0().portal,
+                    to: bsc_mainnet_v5_27_2().portal,
                     value: U256::ZERO,
                     input: &input,
                 },
@@ -1163,7 +1165,7 @@ pub(crate) mod tests {
         }
         let (s, reason) = state(&x);
         assert_eq!(s, "DEPLOYMENT_DRIFT");
-        assert!(reason.unwrap().contains("v5.27.2"));
+        assert!(reason.unwrap().contains("v5.28.0"));
         assert_eq!(record(&x).u64(e::LANES_ARMED).unwrap(), 0);
         assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
         assert!(x.on_launch(hash, &raw, 30, &owner, &clock).is_none());

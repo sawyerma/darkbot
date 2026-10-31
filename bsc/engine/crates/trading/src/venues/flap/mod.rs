@@ -1,12 +1,13 @@
-//! Flap protocol, the full production decoder (Phase D) of the verified
-//! Portal v5.27.0: pending recognition of every launch and trade call of
+//! Flap protocol, the full production decoder (Phase D) of the Portal's
+//! verified v5.27.0 ABI, which v5.27.2 (production since BSC3-065) keeps on
+//! every traded path: pending recognition of every launch and trade call of
 //! the verified ABI ([`recognize`]; `newTokenV6` and `swapExactInput`
 //! decoded, the others explicitly unsupported) and canonical decode of the
 //! Portal's events with a witnessed live log ([`events`]: launch, BUY,
 //! SELL, mode and configuration; migration and the others of the ABI are
 //! explicitly unsupported). Trading admission stays the `TOKEN_TAXED_V3`
 //! profile, and only on a deployment whose economics are witnessed on its
-//! implementation (v5.27.0: G0.6a reconfirmed, `deployment`).
+//! implementation (v5.27.2: reconfirmed on it, `deployment`).
 //!
 //! This is the single implementation of the Flap ABI, the token-address
 //! derivation, the deployment binding, the launch classification and the

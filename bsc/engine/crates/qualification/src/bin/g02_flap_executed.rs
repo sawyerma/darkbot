@@ -14,7 +14,9 @@
 //! (another version, an NFT gate, a fee-exempt trader) is recorded, not
 //! compared, and one off the native curve 20 is recorded with its reason.
 //! `--windows` repeats the scan over several state windows of the node,
-//! `--window-pause-ms` apart, into one fixture (each trade once).
+//! `--window-pause-ms` apart, into one fixture (each trade once). Every
+//! compared trade's parent block runs the production deployment's Portal
+//! implementation (`bsc_mainnet_v5_27_2()`, BSC3-065/020).
 //! Nothing is signed or sent.
 #![forbid(unsafe_code)]
 
@@ -23,6 +25,7 @@ mod common;
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_sol_types::{SolCall, sol};
+use common::bytecode::ImplementationCheck;
 use common::chain::bloom_has;
 use common::edge::{self, CallOutcome, Endpoint, Pin};
 use common::util::{bounded, rpc_from_config};
@@ -34,7 +37,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     WITNESSED_MAINNET_TERMS, curve20, quote_native_buy, quote_native_sell,
 };
 use darkbot_bsc_trading::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
-use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
+use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2;
 use darkbot_bsc_trading::venues::flap::events::{
     CurveTrade, PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
 };
@@ -145,13 +148,19 @@ fn run() -> Result<(), String> {
         Duration::from_millis(defaults::RETRY_PAUSE_MS),
     );
     edge::require_bsc(rpc.chain_id()?)?;
-    let portal = bsc_mainnet_v5_27_0().portal;
+    let deployment = bsc_mainnet_v5_27_2();
+    let portal = deployment.portal;
+    let mut bound = ImplementationCheck::new(
+        portal,
+        deployment.portal_implementation,
+        deployment.portal_implementation_runtime_sha256,
+    );
     let mut t = Tally::default();
     for w in 0..windows {
         if w > 0 {
             std::thread::sleep(Duration::from_millis(pause));
         }
-        window(&rpc, portal, blocks, max_trades, &mut t)?;
+        window(&rpc, portal, &mut bound, blocks, max_trades, &mut t)?;
         if t.matched + t.mismatched + t.unsupported >= max_trades {
             break;
         }
@@ -167,12 +176,14 @@ fn run() -> Result<(), String> {
     );
     if let Some(path) = fixture_out {
         let text = format!(
-            "# Executed Flap curve trades (Portal 0x{}, v5.27.0; the node's state windows {}) against the local quote at the parent block's state\n\
+            "# Executed Flap curve trades (Portal 0x{}, {}, {}; the node's state windows {}) against the local quote at the parent block's state\n\
              # (the token's first Portal trade in its block; getTokenV8Safe, maxBuyPerOrigin, buyQuotaOf(tx origin), nftGate at the parent; bsc-dataseed, read-only; g02_flap_executed).\n\
              # BUY: input = event native amount, expect event token amount and fee; SELL: input = event token amount, expect event native amount and fee.\n\
              # The scope is the production one (PricedToken::new); outside it a trade is recorded, not compared.\n\
              # <block> <block-hash> <tx-hash> <token> <BUY|SELL> <pre-reserve> <pre-circulating> <buy-tax-bps> <sell-tax-bps> <event-amount> <event-eth> <event-fee> <cap-bps> <origin-allowance> <nft-gate> <token-version> <dex-supply-threshold> <SUPPORTED|UNSUPPORTED_*> <MATCH|MISMATCH|NOT_COMPARED>\n{}{}{}\n",
             alloy_primitives::hex::encode(portal),
+            deployment.portal_version,
+            bound.line(),
             t.windows.join(", "),
             t.skipped.join("\n"),
             if t.skipped.is_empty() { "" } else { "\n" },
@@ -191,6 +202,7 @@ fn run() -> Result<(), String> {
 fn window(
     rpc: &Endpoint,
     portal: Address,
+    bound: &mut ImplementationCheck,
     blocks: u64,
     max_trades: usize,
     t: &mut Tally,
@@ -239,6 +251,11 @@ fn window(
                     }
                     // The node's state window ends at the first pruned parent:
                     // older blocks are not compared, never guessed.
+                    match bound.check(rpc, &pin) {
+                        Ok(()) => {}
+                        Err(e) if e.contains("missing trie node") => break 'blocks,
+                        Err(e) => return Err(e),
+                    }
                     let line = match compare(rpc, portal, &pin, h, &r, side, &trade) {
                         Ok(line) => line,
                         Err(e) if e.contains("missing trie node") => break 'blocks,

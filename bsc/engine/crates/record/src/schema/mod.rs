@@ -14,6 +14,7 @@ pub mod bsc_census;
 pub mod bsc_economics;
 pub mod bsc_flap_econ;
 pub mod bsc_flap_freeze;
+pub mod bsc_flap_impl_parity;
 pub mod bsc_four_freeze;
 pub mod bsc_runtime;
 pub mod c1_qualification;
@@ -43,6 +44,7 @@ pub fn all() -> Vec<&'static Schema> {
         .chain(bsc_economics::ALL)
         .chain(bsc_flap_econ::ALL)
         .chain(bsc_flap_freeze::ALL)
+        .chain(bsc_flap_impl_parity::ALL)
         .chain(bsc_four_freeze::ALL)
         .chain(bsc_runtime::ALL)
         .chain(c1_qualification::ALL)

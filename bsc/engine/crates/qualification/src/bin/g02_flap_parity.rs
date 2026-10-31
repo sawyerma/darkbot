@@ -9,7 +9,9 @@
 //! live curve-20 native-quote tokens on the bonding curve, at a grid of BUY
 //! inputs and SELL fractions of the circulating supply, each compared
 //! exactly (no tolerance). Token state comes from `getTokenV8Safe` at the
-//! same pin. Nothing is signed or sent.
+//! same pin. Every pin's Portal implementation is the production
+//! deployment's (`bsc_mainnet_v5_27_2()`, BSC3-065/020: the evidence names
+//! the implementation it ran on). Nothing is signed or sent.
 //!
 //! The per-origin holding cap (`maxBuyPerOrigin`, `buyQuotaOf` of the
 //! call's origin, `nftGate`) is read at the same pin, and each token's
@@ -23,6 +25,7 @@ mod common;
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_sol_types::{SolCall, SolEvent, sol};
+use common::bytecode::ImplementationCheck;
 use common::chain::bloom_has;
 use common::edge::{self, CallOutcome, Endpoint, Pin};
 use common::util::{bounded, rpc_from_config};
@@ -35,7 +38,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     WITNESSED_MAINNET_TERMS, curve20, quote_native_buy, quote_native_sell,
 };
 use darkbot_bsc_trading::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
-use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
+use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2;
 use darkbot_bsc_trading::venues::flap::events::PortalEventKind;
 use std::path::Path;
 use std::process::ExitCode;
@@ -133,7 +136,13 @@ fn run() -> Result<(), String> {
     );
     edge::require_bsc(rpc.chain_id()?)?;
     let scanned = rpc.block_number()? - defaults::CONFIRMATIONS;
-    let portal = bsc_mainnet_v5_27_0().portal;
+    let deployment = bsc_mainnet_v5_27_2();
+    let portal = deployment.portal;
+    let mut bound = ImplementationCheck::new(
+        portal,
+        deployment.portal_implementation,
+        deployment.portal_implementation_runtime_sha256,
+    );
     let topic = B256::from(PortalEventKind::TokenCreated.topic0());
     // Tokens named by `--tokens` first (their launch not scanned), then the
     // newest launches, each with what its launch receipt set.
@@ -179,6 +188,7 @@ fn run() -> Result<(), String> {
         // of recent blocks only.
         let pinned = rpc.block_number()? - defaults::CONFIRMATIONS;
         let pin: Pin = edge::pin_of(pinned, &rpc.header(pinned)?)?;
+        bound.check(&rpc, &pin)?;
         let CallOutcome::Returned(raw) =
             rpc.call_at(portal, &getTokenV8SafeCall { token }.abi_encode(), &pin)?
         else {
@@ -379,13 +389,15 @@ fn run() -> Result<(), String> {
     );
     if let Some(path) = fixture_out {
         let text = format!(
-            "# Portal.quoteExactInput (eth_call, Portal 0x{}, v5.27.0) at a pinned block per token, with getTokenV8Safe at the same pin\n\
+            "# Portal.quoteExactInput (eth_call, Portal 0x{}, {}, {}) at a pinned block per token, with getTokenV8Safe at the same pin\n\
              # (curve-20 native-quote tokens on the bonding curve; bsc-dataseed, read-only; g02_flap_parity).\n\
              # maxBuyPerOrigin, buyQuotaOf(origin 0x0) and nftGate at the same pin; the launch selector and the cap / NFT gate set in the launch receipt;\n\
              # the token version and whether the production quote claims the token (SUPPORTED: version 6 without NFT gate).\n\
              # the scope is the production one (PricedToken::new); a sample outside it is quoted locally as if version 6 without a gate.\n\
              # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <dex-supply-threshold> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE|UNSUPPORTED>\n{}{}{}\n",
             alloy_primitives::hex::encode(portal),
+            deployment.portal_version,
+            bound.line(),
             skipped.join("\n"),
             if skipped.is_empty() { "" } else { "\n" },
             lines.join("\n")

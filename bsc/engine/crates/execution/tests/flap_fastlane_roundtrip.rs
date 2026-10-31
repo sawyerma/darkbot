@@ -21,7 +21,7 @@ use darkbot_bsc_geth_ipc::protocol_v2::{
 };
 use darkbot_bsc_journal::RecordKind as JournalKind;
 use darkbot_bsc_journal::storage::run::RunReader;
-use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
+use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2;
 use darkbot_bsc_trading::venues::flap::recognize::recognize;
 use darkbot_bsc_tx_encoding::rlp::{encode_bytes, encode_list, encode_u64};
 use std::fs;
@@ -45,7 +45,7 @@ fn lane(lane_id: u16, class: LaneClassV2) -> LaneConfigV2 {
 }
 
 fn launch_tx() -> (Vec<u8>, Vec<u8>) {
-    let portal = bsc_mainnet_v5_27_0().portal;
+    let portal = bsc_mainnet_v5_27_2().portal;
     let calldata = hex::decode(LAUNCH.trim()).unwrap();
     let raw = encode_list(&[
         encode_u64(7),
@@ -63,7 +63,7 @@ fn launch_tx() -> (Vec<u8>, Vec<u8>) {
 
 /// The decoder's result for the calldata inside `raw`, printed.
 fn decision(raw: &[u8], calldata_of: impl Fn(&[u8]) -> Vec<u8>) -> String {
-    let portal = bsc_mainnet_v5_27_0().portal;
+    let portal = bsc_mainnet_v5_27_2().portal;
     let calldata = calldata_of(raw);
     format!(
         "{} {:?}",
@@ -76,7 +76,7 @@ fn calldata_of(raw: &[u8]) -> Vec<u8> {
     let target = darkbot_bsc_geth_ipc::ingress::decode_tx_target(raw).unwrap();
     assert_eq!(
         target.to.map(Address::from),
-        Some(bsc_mainnet_v5_27_0().portal)
+        Some(bsc_mainnet_v5_27_2().portal)
     );
     target.data.to_vec()
 }

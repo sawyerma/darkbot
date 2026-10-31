@@ -1,6 +1,6 @@
 //! Phase G (Economics gate §16): the latency of the local deterministic
 //! quote on this machine, over the real curve states of the Portal parity
-//! set (`fixtures/flap/quote_parity_g02_v3.txt`), bound to the economics
+//! set (`fixtures/flap/quote_parity_g02_v4.txt`), bound to the economics
 //! snapshot of the tree. Offline; run from the repository root, release
 //! build (a debug build measures nothing and writes no evidence).
 //!
@@ -44,7 +44,7 @@ mod defaults {
     pub const SLIPPAGE_BPS: u16 = 100;
 }
 
-const PARITY: &str = "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt";
+const PARITY: &str = "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v4.txt";
 
 fn main() -> ExitCode {
     match run() {

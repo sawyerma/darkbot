@@ -69,6 +69,14 @@ const GET_QUOTE_TOKEN_CONFIGURATION_SELECTOR: [u8; 4] = [0x26, 0xef, 0x20, 0xd5]
 const GET_FEE_RATE_SELECTOR: [u8; 4] = [0x84, 0xe5, 0xee, 0xd0];
 /// `enableTaxOnBondingCurve()`.
 const ENABLE_TAX_ON_BONDING_CURVE_SELECTOR: [u8; 4] = [0x1d, 0x31, 0xe1, 0x53];
+/// Every Portal selector the probe calls (BSC3-065: a behaviour parity
+/// requires each in the observed dispatcher).
+pub const PROBED_SELECTORS: [[u8; 4]; 4] = [
+    VERSION_SELECTOR,
+    GET_QUOTE_TOKEN_CONFIGURATION_SELECTOR,
+    GET_FEE_RATE_SELECTOR,
+    ENABLE_TAX_ON_BONDING_CURVE_SELECTOR,
+];
 
 /// EIP-1967 implementation slot: `keccak256("eip1967.proxy.implementation") - 1`.
 const EIP1967_IMPLEMENTATION_SLOT: [u8; 32] =
@@ -77,12 +85,13 @@ const EIP1967_IMPLEMENTATION_SLOT: [u8; 32] =
 /// The Portal's storage slot of `_feeExemptedTraders`
 /// (`mapping(address => bool)`, keyed by the BUY's `msg.sender`). The
 /// Portal ABI has no getter for it. Witnessed by
-/// `bsc/native/evidence/g01/flap_econ_v5_27_20261026T115316Z/flap_econ.dbrec`
-/// (`g01_flap_econ`, schema v2): the Sourcify storage layout of the
-/// verified v5.27.0 implementation places the variable here, and on the
-/// live state (block 129892713, then v5.27.2) the node's BUY with
-/// [`fee_exemption_key`] of the buyer set to `true` pays no fee instead of
-/// the 1 % one.
+/// `bsc/native/evidence/g01/flap_econ_v5_27_20261031T122809Z/flap_econ.dbrec`
+/// (`g01_flap_econ`, schema v2, BSC3-065): the Sourcify storage layout of
+/// the verified v5.27.0 implementation places the variable here, and on the
+/// live v5.27.2 state (block 130856906, the production pin validated) the
+/// node's BUY with [`fee_exemption_key`] of the buyer set to `true` pays no
+/// fee instead of the 1 % one (as before on 129892713,
+/// `flap_econ_v5_27_20261026T115316Z`).
 /// The G0.2 archive witness saw the v5.24.0 BUY path read the same mapping
 /// (PC `0x2d09`).
 pub const FEE_EXEMPTION_MAPPING_SLOT: u64 = 177;
@@ -798,7 +807,7 @@ mod tests {
     use crate::wss::RateLimitSignal;
     use alloy_primitives::U256;
     use darkbot_bsc_trading::economics::flap::native_curve20::WITNESSED_MAINNET_TERMS;
-    use darkbot_bsc_trading::venues::flap::deployment::{DeploymentError, bsc_mainnet_v5_27_0};
+    use darkbot_bsc_trading::venues::flap::deployment::{DeploymentError, bsc_mainnet_v5_27_2};
     use serde_json::json;
     use std::io::{self, BufRead, BufReader};
     use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -856,7 +865,7 @@ mod tests {
             portal_runtime_sha256: darkbot_bsc_record::sha256(PROXY_CODE),
             portal_implementation_runtime_sha256: darkbot_bsc_record::sha256(IMPLEMENTATION_CODE),
             tax_v3_implementation_runtime_sha256: darkbot_bsc_record::sha256(TAX_CODE),
-            ..bsc_mainnet_v5_27_0()
+            ..bsc_mainnet_v5_27_2()
         }
     }
 
@@ -895,7 +904,7 @@ mod tests {
         /// The current mainnet venue with the served codes and the
         /// witnessed terms.
         fn mainnet() -> Self {
-            let d = bsc_mainnet_v5_27_0();
+            let d = bsc_mainnet_v5_27_2();
             Self {
                 chain_id: d.chain_id,
                 hashes: [HASH; 2],
@@ -916,7 +925,7 @@ mod tests {
                     (
                         d.portal,
                         VERSION_SELECTOR.to_vec(),
-                        encoded_string("v5.27.0"),
+                        encoded_string("v5.27.2"),
                     ),
                     (d.portal, quote_calldata(), words(&[1, 20, 20, 0, 0])),
                     (d.portal, GET_FEE_RATE_SELECTOR.to_vec(), words(&[100, 100])),
@@ -1187,7 +1196,7 @@ mod tests {
         let validated = deployment.validate(&observation.deployment(), 7).unwrap();
         assert_eq!(validated.codehash_generation(), 7);
         assert_eq!(observation.terms, WITNESSED_MAINNET_TERMS);
-        assert_eq!(observation.observed.portal_version, "v5.27.0");
+        assert_eq!(observation.observed.portal_version, "v5.27.2");
         assert_eq!(
             observation.observed.portal_code,
             CodeFingerprint {
@@ -1230,18 +1239,22 @@ mod tests {
     #[test]
     fn a_version_drift_is_observed_and_refused_by_validate() {
         let deployment = served_deployment();
-        let mut node = Node::mainnet();
-        node.set_call(
-            deployment.portal,
-            VERSION_SELECTOR.to_vec(),
-            encoded_string("v5.28.0"),
-        );
-        let observation = run(node, &deployment).0.unwrap();
-        assert_eq!(observation.observed.portal_version, "v5.28.0");
-        assert_eq!(
-            deployment.validate(&observation.deployment(), 1),
-            Err(DeploymentError::PortalVersion)
-        );
+        // A newer version, and the replaced v5.27.0 (BSC3-065: the old pin's
+        // version no longer passes the current one).
+        for version in ["v5.28.0", "v5.27.0"] {
+            let mut node = Node::mainnet();
+            node.set_call(
+                deployment.portal,
+                VERSION_SELECTOR.to_vec(),
+                encoded_string(version),
+            );
+            let observation = run(node, &deployment).0.unwrap();
+            assert_eq!(observation.observed.portal_version, version);
+            assert_eq!(
+                deployment.validate(&observation.deployment(), 1),
+                Err(DeploymentError::PortalVersion)
+            );
+        }
     }
 
     #[test]
@@ -1324,7 +1337,7 @@ mod tests {
 
     #[test]
     fn malformed_hex_fails_closed() {
-        let d = bsc_mainnet_v5_27_0();
+        let d = bsc_mainnet_v5_27_2();
         for (method, needle, bad, read) in [
             (
                 "eth_chainId",
@@ -1378,8 +1391,8 @@ mod tests {
 
     #[test]
     fn values_outside_their_abi_or_storage_type_fail_closed() {
-        let d = bsc_mainnet_v5_27_0();
-        let mut padded = encoded_string("v5.27.0");
+        let d = bsc_mainnet_v5_27_2();
+        let mut padded = encoded_string("v5.27.2");
         *padded.last_mut().unwrap() = 1;
         let mut high = address_word(d.portal_implementation);
         high[0] = 1;
@@ -1491,7 +1504,7 @@ mod tests {
             Err(ProbeError::Reorg { number: HEAD })
         );
 
-        let tax = bsc_mainnet_v5_27_0().tax_v3_implementation;
+        let tax = bsc_mainnet_v5_27_2().tax_v3_implementation;
         let mut node = Node::mainnet();
         node.codes.retain(|(a, _)| *a != tax);
         assert_eq!(
@@ -1502,8 +1515,8 @@ mod tests {
 
     #[test]
     fn only_the_canonical_abi_string_is_accepted() {
-        let good = encoded_string("v5.27.0");
-        assert_eq!(abi_string(&good).unwrap(), "v5.27.0");
+        let good = encoded_string("v5.27.2");
+        assert_eq!(abi_string(&good).unwrap(), "v5.27.2");
         assert_eq!(abi_string(&encoded_string("")).unwrap(), "");
         let mut offset = good.clone();
         offset[WORD - 1] = 0x40;
@@ -1702,7 +1715,7 @@ mod tests {
         // A fresh caller nobody can have exempted in advance.
         let entropy = format!("{:?}/{}", std::time::SystemTime::now(), std::process::id());
         let caller = Address::from_slice(&keccak256(entropy.as_bytes())[12..]);
-        let deployment = bsc_mainnet_v5_27_0();
+        let deployment = bsc_mainnet_v5_27_2();
         let observation = probe_flap(
             "https://bsc-dataseed.bnbchain.org",
             &limits,
@@ -1738,7 +1751,7 @@ mod tests {
             code(&o.tax_v3_implementation_code)
         );
         println!(
-            "validate(bsc_mainnet_v5_27_0): {:?}",
+            "validate(bsc_mainnet_v5_27_2): {:?}",
             deployment
                 .validate(&observation.deployment(), 1)
                 .map(|_| "OK")

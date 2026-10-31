@@ -64,7 +64,7 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     VenueBuyTerms, WITNESSED_MAINNET_TERMS,
 };
 use darkbot_bsc_trading::intent::IntentState;
-use darkbot_bsc_trading::venues::flap::deployment::{ValidatedDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{ValidatedDeployment, bsc_mainnet_v5_27_2};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -1143,7 +1143,7 @@ impl LiveRuntime {
         let spawned = thread::Builder::new()
             .name("bsc-live-probe".into())
             .spawn(move || {
-                let _ = tx.send(prober(&endpoint, &limits, &bsc_mainnet_v5_27_0(), caller));
+                let _ = tx.send(prober(&endpoint, &limits, &bsc_mainnet_v5_27_2(), caller));
             });
         match spawned {
             Ok(_) => {
@@ -1259,7 +1259,7 @@ impl LiveRuntime {
             Err(e) => return self.stop(Phase::ProbeFailed(e)),
         };
         let generation = self.codehash_generation + 1;
-        let validated = bsc_mainnet_v5_27_0().validate(&observation.deployment(), generation);
+        let validated = bsc_mainnet_v5_27_2().validate(&observation.deployment(), generation);
         let terms = observation.terms;
         let balance = observation.caller_balance_wei;
         let probed_at = observation.block_number;
@@ -6377,7 +6377,7 @@ mod tests {
         ];
         let balance = 1_000_000_000_000_000u64;
         let mut x = probed_book(&r, &facts, balance, HEAD, 0xb1);
-        x.observation = Some(funded("", &limits(), &bsc_mainnet_v5_27_0(), Address::ZERO).unwrap());
+        x.observation = Some(funded("", &limits(), &bsc_mainnet_v5_27_2(), Address::ZERO).unwrap());
         let c2 = c2_at(&r.d, b, 7);
         let (approval, sell) = x.exit_gas();
         let lot = approval + sell;

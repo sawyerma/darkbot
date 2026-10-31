@@ -19,13 +19,15 @@
 //! The fee-exemption entry the startup probe reads
 //! (`venue_probe::fee_exemption_key`, Phase D gate pass 2 LOW-A) is
 //! witnessed twice: the Sourcify storage layout of the deployment's
-//! implementation must name
-//! `_feeExemptedTraders` (`mapping(address => bool)`) at
+//! implementation (or, for an implementation without verified source, of
+//! its source-verified behaviour reference, `behaviour_reference`, BSC3-065) must
+//! name `_feeExemptedTraders` (`mapping(address => bool)`) at
 //! `FEE_EXEMPTION_MAPPING_SLOT`, and the node's qualified BUY with the
-//! buyer's entry overridden to `true` must pay a different fee than without.
+//! buyer's entry overridden to `true` must pay a different fee than without
+//! (on the live implementation).
 //!
-//! Before anything else the live deployment must validate as
-//! `bsc_mainnet_v5_27_0()`. No key is read; nothing is signed, sent or
+//! Before anything else the live deployment must validate as the
+//! production pin `bsc_mainnet_v5_27_2()`. No key is read; nothing is signed, sent or
 //! persisted; caller balances exist only in the simulations. One binary
 //! record: `bsc/native/evidence/g01/flap_econ_v5_27_<UTC>/flap_econ.dbrec`.
 //!
@@ -58,7 +60,7 @@ use darkbot_bsc_trading::venues::flap::abi::{
     LaunchParamsV6, encode_new_token_v6, encode_swap_exact_input_native,
 };
 use darkbot_bsc_trading::venues::flap::deployment::{
-    FlapDeployment, ObservedDeployment, bsc_mainnet_v5_27_0,
+    FlapDeployment, ObservedDeployment, behaviour_reference, bsc_mainnet_v5_27_2,
 };
 use darkbot_bsc_trading::venues::flap::profile::classify_launch;
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, predicted_token, recognize};
@@ -715,6 +717,15 @@ struct LayoutObs {
     layout: Option<SourcifyLayout>,
 }
 
+/// The implementation whose verified storage layout names the probe's slot:
+/// the deployment's own, or its behaviour reference's (BSC3-065), never one
+/// a caller picks.
+fn layout_implementation_of(deployment: &FlapDeployment) -> Address {
+    behaviour_reference(deployment).map_or(deployment.portal_implementation, |r| {
+        r.portal_implementation
+    })
+}
+
 fn layout_of(cfg: &Config, implementation: Address) -> LayoutObs {
     let url = edge::sourcify_layout_url(&cfg.sourcify_base, edge::BSC_CHAIN_ID, implementation);
     let limits = Limits {
@@ -839,7 +850,7 @@ fn implementation(rpc: &Endpoint, portal: Address, pin: &Pin) -> Result<Address,
 }
 
 fn run(cfg: &Config) -> Result<Outcome, String> {
-    let deployment: FlapDeployment = bsc_mainnet_v5_27_0();
+    let deployment: FlapDeployment = bsc_mainnet_v5_27_2();
     let portal = deployment.portal;
     let g = g06a(&cfg.g06a_record)?;
     let simulator = c1_common::read(&cfg.simulator)?;
@@ -853,7 +864,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     let pin = edge::pin_of(reference, &rpc.header(reference)?)?;
     eprintln!("g01_flap_econ: reference block {} {}", pin.number, pin.hash);
 
-    // The live deployment must be exactly the v5.27.0 constants.
+    // The live deployment must be exactly the production pin's constants.
     let implementation = implementation(&rpc, portal, &pin)?;
     let implementation_code = rpc.code(implementation, &pin)?;
     let version = match rpc.call_at(portal, &versionCall {}.abi_encode(), &pin)? {
@@ -874,7 +885,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     };
     let validated = deployment.validate(&observed, 1);
     let validation = match &validated {
-        Ok(_) => "VALID bsc_mainnet_v5_27_0()".to_string(),
+        Ok(_) => format!("VALID production pin {}", deployment.portal_version),
         Err(e) => format!("INVALID: {e}"),
     };
 
@@ -1002,8 +1013,11 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     // The fee-exemption entry the probe reads, witnessed on this
     // implementation (the qualified BUY, the buyer's entry written).
     // The layout of the implementation the production deployment names
-    // (what the probe's slot is claimed for); the BUY runs on live state.
-    let layout = layout_of(cfg, deployment.portal_implementation);
+    // (what the probe's slot is claimed for), or of its source-verified
+    // behaviour reference for an implementation without verified source;
+    // the BUY runs on live state, on the live implementation.
+    let layout_implementation = layout_implementation_of(&deployment);
+    let layout = layout_of(cfg, layout_implementation);
     let exemption_key = B256::from(fee_exemption_key(g.buyer));
     let live_word = rpc.storage(portal, exemption_key, &pin);
     let qualified_value = U256::from(QUALIFIED_MAINNET_INPUT_WEI);
@@ -1071,10 +1085,11 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             (
                 "RECONFIRMED",
                 format!(
-                    "on {version} ({}): token {} = predicted = committed; node and local EVM output {} = quote_native_buy; TokenBought.fee = protocol fee, tax event = bonding-curve tax; {EXEMPTION_VARIABLE} at slot {FEE_EXEMPTION_MAPPING_SLOT} (Sourcify layout) changes the node BUY's fee",
+                    "on {version} ({}): token {} = predicted = committed; node and local EVM output {} = quote_native_buy; TokenBought.fee = protocol fee, tax event = bonding-curve tax; {EXEMPTION_VARIABLE} at slot {FEE_EXEMPTION_MAPPING_SLOT} (Sourcify layout of {}) changes the node BUY's fee",
                     addr(implementation),
                     addr(token),
-                    show(c.node.buy_return)
+                    show(c.node.buy_return),
+                    addr(layout_implementation)
                 ),
             )
         }
@@ -1162,10 +1177,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
             fe::LIVE_EXEMPTION_WORD,
             live_word.as_ref().ok().map(|v| b(*v)),
         )
-        .set(
-            fe::LAYOUT_IMPLEMENTATION,
-            a(deployment.portal_implementation),
-        )
+        .set(fe::LAYOUT_IMPLEMENTATION, a(layout_implementation))
         .set(fe::LAYOUT_STATUS, layout.status.as_str())
         .set_opt(
             fe::LAYOUT_RESPONSE,
@@ -1318,7 +1330,7 @@ mod tests {
     fn the_committed_g06a_launch_and_quote_reproduce_offline() {
         let g = g06a(&repo_root().join(inputs::G06A_RECORD)).unwrap();
         assert_eq!(addr(g.token), "0xe51c4deb1038afcd95ef12d4a649cdbcf6fa7777");
-        let deployment = bsc_mainnet_v5_27_0();
+        let deployment = bsc_mainnet_v5_27_2();
         let mut launch = Vec::new();
         let params = witnessed_launch(g.salt, g.launcher);
         encode_new_token_v6(&params, &mut launch);
@@ -1370,7 +1382,7 @@ mod tests {
     /// revert is never a success.
     #[test]
     fn node_results_decode_and_a_revert_is_not_success() {
-        let portal = bsc_mainnet_v5_27_0().portal;
+        let portal = bsc_mainnet_v5_27_2().portal;
         let token = Address::repeat_byte(0x77);
         let mut ret = vec![0u8; 12];
         ret.extend_from_slice(token.as_slice());
@@ -1388,6 +1400,7 @@ mod tests {
                 data: bought.clone(),
             }],
             error: None,
+            revert_data: Vec::new(),
         };
         let e = node_execution(&[ok(1), ok(1), ok(1)], portal);
         assert_eq!(
@@ -1397,6 +1410,60 @@ mod tests {
         let reverted = node_execution(&[ok(1), ok(0), ok(1)], portal);
         assert_eq!(reverted.status, "REVERTED");
         assert_eq!(node_execution(&[ok(1)], portal).status, "INCOMPLETE");
+    }
+
+    /// BSC3-065: the newest committed v5.27.x record
+    /// (`bsc/native/evidence/g01/flap_econ_v5_27_*`) reconfirmed the
+    /// production pin, its implementation and runtime, the fee-exemption
+    /// layout read from its behaviour reference.
+    #[test]
+    fn the_committed_econ_record_reconfirms_the_production_pin() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../native/evidence/g01");
+        let newest = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("flap_econ_v5_27_"))
+            })
+            .max()
+            .expect("no committed v5.27 economics record");
+        let r = decode(
+            &fe::V2,
+            &std::fs::read(newest.join("flap_econ.dbrec")).unwrap(),
+        )
+        .unwrap();
+        let pin = bsc_mainnet_v5_27_2();
+        assert_eq!(r.text(fe::STATUS).unwrap(), "RECONFIRMED");
+        assert_eq!(r.u64(fe::CHAIN_ID).unwrap(), pin.chain_id);
+        assert_eq!(r.address(fe::PORTAL).unwrap(), pin.portal.into_array());
+        assert_eq!(r.text(fe::PORTAL_VERSION).unwrap(), pin.portal_version);
+        assert_eq!(
+            r.address(fe::IMPLEMENTATION).unwrap(),
+            pin.portal_implementation.into_array()
+        );
+        assert_eq!(
+            r.b256(fe::IMPLEMENTATION_RUNTIME_SHA256).unwrap(),
+            pin.portal_implementation_runtime_sha256
+        );
+        assert!(
+            r.text(fe::DEPLOYMENT_VALIDATION)
+                .unwrap()
+                .starts_with("VALID")
+        );
+        assert_eq!(
+            r.opt_address(fe::LAYOUT_IMPLEMENTATION).unwrap(),
+            Some(layout_implementation_of(&pin).into_array())
+        );
+    }
+
+    #[test]
+    fn the_layout_is_the_pins_or_its_behaviour_references() {
+        use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
+        let (old, new) = (bsc_mainnet_v5_27_0(), bsc_mainnet_v5_27_2());
+        assert_eq!(layout_implementation_of(&new), old.portal_implementation);
+        assert_eq!(layout_implementation_of(&old), old.portal_implementation);
     }
 
     /// The exemption witness passes only when the verified layout names the

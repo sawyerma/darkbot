@@ -50,7 +50,7 @@ pub struct Scope {
     pub rule: &'static str,
 }
 
-const FLAP_V6: &str = "Portal 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0 v5.27.0; token version 6, curve 20, native BNB quote";
+const FLAP_V6: &str = "Portal 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0 v5.27.2; token version 6, curve 20, native BNB quote";
 
 pub const SCOPES: &[Scope] = &[
     Scope {
@@ -58,14 +58,14 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "BUY",
         support: Support::Priced,
-        rule: "native_curve20::quote_native_buy: combined fee floor(input*(protocol+tax)/1e4), tax the remainder; supply(reserve+net) with the ceil virtual reserve; the origin's holding allowance refuses a partial fill and reaching dexSupplyThresh refuses a migration; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenBought parity (fixtures/flap/executed_parity_g02.txt)",
+        rule: "native_curve20::quote_native_buy: combined fee floor(input*(protocol+tax)/1e4), tax the remainder; supply(reserve+net) with the ceil virtual reserve; the origin's holding allowance refuses a partial fill and reaching dexSupplyThresh refuses a migration; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenBought parity (fixtures/flap/executed_parity_g02*.txt); on v5.27.2: quote v4 and executed v3 with the implementation checked, and its behaviour parity with the source-verified v5.27.0 (bsc/native/evidence/g01/flap_impl_parity_*); quote v3 and executed v1/v2 were taken after the upgrade at block 129871644 although their headers name v5.27.0",
     },
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
         path: "SELL",
         support: Support::Priced,
-        rule: "native_curve20::quote_native_sell: reserve ceil(k*1e18/(T+h-s))-r; protocol fee and tax each floored; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenSold parity (fixtures/flap/executed_parity_g02.txt)",
+        rule: "native_curve20::quote_native_sell: reserve ceil(k*1e18/(T+h-s))-r; protocol fee and tax each floored; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenSold parity (fixtures/flap/executed_parity_g02*.txt); on v5.27.2 as the BUY's evidence",
     },
     Scope {
         venue: "FLAP",
@@ -79,7 +79,7 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "CURVE BUY (Strategy C)",
         support: Support::Priced,
-        rule: "admit_curve_buy: a curve replayed exactly from canonical trades (strategy::book), in the PricedToken scope, witnessed venue terms, the policy's input, no holding cap (a capped or NFT-gated token is never tracked), minOutput the slippage floor; equal to the Portal's quote at the parity v3 states (curve_admission_is_the_parity_quote)",
+        rule: "admit_curve_buy: a curve replayed exactly from canonical trades (strategy::book), in the PricedToken scope, witnessed venue terms, the policy's input, no holding cap (a capped or NFT-gated token is never tracked), minOutput the slippage floor; equal to the Portal's quote at the parity v3 states, taken on v5.27.2 (curve_admission_is_the_parity_quote)",
     },
     Scope {
         venue: "FLAP",
@@ -100,18 +100,18 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "APPROVE BEFORE SELL",
         support: Support::Costed,
-        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt and fixtures/bsc/flap_gas_20261026.txt (approve(Portal) of tokens the Portal knows)",
+        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt and fixtures/bsc/flap_gas_20261031.txt (approve(Portal) of tokens the Portal knows)",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; every token version but 6 (live: 2 and 7)",
+        surface: "Portal v5.27.2; every token version but 6 (live: 2 and 7)",
         path: "BUY, SELL",
         support: Support::Unsupported,
         rule: "PricedToken::new refuses it; a live version-7 token is charged about 0.25 % more than the version-6 rule on both sides (fixtures/flap/quote_parity_g02_v3.txt); no verified rule for any",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; another curve or quote token, or a token not Tradable",
+        surface: "Portal v5.27.2; another curve or quote token, or a token not Tradable",
         path: "BUY, SELL",
         support: Support::Unsupported,
         rule: "PricedToken::new refuses it; the g02 tools record such launches as skipped with the reason",
@@ -125,35 +125,35 @@ pub const SCOPES: &[Scope] = &[
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; NFT-gated market (nftGate != 0)",
+        surface: "Portal v5.27.2; NFT-gated market (nftGate != 0)",
         path: "BUY, SELL",
         support: Support::Unsupported,
         rule: "trading needs nft.balanceOf(tx.origin) >= 1; buys capped at 2 % of the supply",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; DOGE quote token (extension)",
+        surface: "Portal v5.27.2; DOGE quote token (extension)",
         path: "BUY, SELL",
         support: Support::Unsupported,
         rule: "its oracle signature and signer role are not verifiable in Rust; the profile refuses it",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; tax-disabled or fee-exempt caller",
+        surface: "Portal v5.27.2; tax-disabled or fee-exempt caller",
         path: "BUY, SELL",
         support: Support::Unsupported,
         rule: "no witnessed execution of either branch",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; any token",
+        surface: "Portal v5.27.2; any token",
         path: "PERMIT SELL",
         support: Support::Unsupported,
         rule: "no witnessed permit path",
     },
     Scope {
         venue: "FLAP",
-        surface: "Portal v5.27.0; any token",
+        surface: "Portal v5.27.2; any token",
         path: "MIGRATION, POST-DEX EXIT",
         support: Support::Unsupported,
         rule: "graduation and the DEX venue after it are not modeled: a BUY reaching dexSupplyThresh is refused, and a position whose token graduates has no exit cost",
@@ -177,7 +177,7 @@ pub const SCOPES: &[Scope] = &[
         surface: "chain 56",
         path: "NETWORK COST",
         support: Support::Costed,
-        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price, an assumption (fixtures/bsc/receipts_20261026.txt, fixtures/bsc/flap_gas_20261026.txt with the receipts per class in its header)",
+        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price, an assumption (fixtures/bsc/receipts_20261026.txt, fixtures/bsc/flap_gas_20261031.txt with the receipts per class in its header)",
     },
 ];
 
@@ -229,14 +229,16 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/venues/flap/abi.rs",
     "bsc/engine/crates/trading/src/venues/flap/deployment.rs",
     "bsc/engine/crates/trading/src/venues/flap/profile.rs",
-    "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261026.txt",
+    "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt",
     "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02_v2.txt",
+    "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02_v3.txt",
     "bsc/engine/crates/trading/fixtures/flap/exit_calls_witnessed.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt",
+    "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v4.txt",
 ];
 
 /// The economics sources not bound, each with its reason (Phase G gate M4:

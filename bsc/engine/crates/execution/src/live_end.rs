@@ -1262,7 +1262,7 @@ pub(crate) mod tests {
     };
     use darkbot_bsc_trading::transactions::legacy::decode_signed;
     use darkbot_bsc_trading::venues::flap::abi::decode_swap_exact_input_native;
-    use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0;
+    use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2;
     use std::fs;
     use std::io::{Read, Write};
     use std::net::{Ipv4Addr, TcpListener};
@@ -1634,7 +1634,7 @@ pub(crate) mod tests {
         };
         reconnect(&mut exec);
         // C3: the bundle behind the launch.
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,
@@ -1855,7 +1855,7 @@ pub(crate) mod tests {
         let (state, d, mut exec, requests) = armed_both("live-order");
         let wait = std::time::Duration::from_secs(2);
         let silent = std::time::Duration::from_millis(300);
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,
@@ -1984,7 +1984,7 @@ pub(crate) mod tests {
     fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         use crate::live_ledger::fold;
         use crate::sources::total_usage;
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let wait = std::time::Duration::from_secs(2);
         let silent = std::time::Duration::from_millis(300);
         let (hash, raw, input) = launch(0, 7);
@@ -2097,7 +2097,7 @@ pub(crate) mod tests {
         let silent = std::time::Duration::from_millis(300);
         lease_c3(&mut exec, 0);
         let leased = crate::sources::admitted_intents(&state).unwrap();
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,
@@ -2195,7 +2195,7 @@ pub(crate) mod tests {
         let wait = std::time::Duration::from_secs(2);
         lease_c3(&mut exec, 0);
         let leased = crate::sources::admitted_intents(&state).unwrap();
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,
@@ -2234,7 +2234,7 @@ pub(crate) mod tests {
         let (state, d, mut exec, requests) = armed_both("live-dedup");
         let wait = std::time::Duration::from_secs(2);
         let silent = std::time::Duration::from_millis(300);
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,
@@ -2276,7 +2276,7 @@ pub(crate) mod tests {
     #[test]
     fn a_providers_answer_is_read_bound_and_recorded_apart_from_the_chain() {
         use crate::live_ledger::fold;
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let wait = std::time::Duration::from_secs(2);
         for (n, answer, outcome) in [
             (0, Answer::Ack, "ACK"),
@@ -2374,7 +2374,7 @@ pub(crate) mod tests {
         let ledger = state.join("live-ledger");
         fs::create_dir_all(&ledger).unwrap();
         fs::set_permissions(&ledger, fs::Permissions::from_mode(0o500)).unwrap();
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,

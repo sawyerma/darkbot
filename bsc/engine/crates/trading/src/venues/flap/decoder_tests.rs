@@ -4,7 +4,7 @@
 use alloy_primitives::{Address, U256, keccak256};
 
 use super::abi::{AbiError, TOKEN_VERSION_TAXED_V3};
-use super::deployment::bsc_mainnet_v5_27_0;
+use super::deployment::bsc_mainnet_v5_27_2;
 use super::events::{
     PortalEvent, PortalEventKind, PortalLog, ReceiptError, decode_portal_log, decode_receipt_logs,
 };
@@ -56,7 +56,7 @@ fn logs() -> Vec<Log> {
 }
 
 fn portal() -> Address {
-    bsc_mainnet_v5_27_0().portal
+    bsc_mainnet_v5_27_2().portal
 }
 
 #[test]
@@ -528,7 +528,7 @@ fn flap_decoder_latency() {
 #[test]
 fn the_predicted_token_is_the_canonical_one_and_only_for_taxed_v3() {
     use super::recognize::predicted_token;
-    let deployment = bsc_mainnet_v5_27_0();
+    let deployment = bsc_mainnet_v5_27_2();
     let input = unhex(rows(CALLS)[0][3]);
     let Recognized::LaunchV6(launch) = recognize(portal(), Some(portal()), &input, MAX) else {
         panic!("not decoded");
@@ -555,7 +555,7 @@ fn the_predicted_token_is_the_canonical_one_and_only_for_taxed_v3() {
 fn a_decode_only_deployment_admits_nothing() {
     use super::deployment::{EconomicsWitness, ObservedDeployment};
     use super::profile::{UnsupportedLaunch, classify_launch};
-    let current = bsc_mainnet_v5_27_0();
+    let current = bsc_mainnet_v5_27_2();
     assert_eq!(current.economics, EconomicsWitness::Witnessed);
     let observed = ObservedDeployment {
         chain_id: current.chain_id,

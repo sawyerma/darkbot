@@ -230,7 +230,7 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
         (d.token_manager2.into_array(), d.openfour_core.into_array())
     );
     assert_eq!(d.chain_id, crate::wss::BSC_MAINNET_CHAIN_ID);
-    let flap_pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+    let flap_pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2();
     assert_eq!(flap.contract, flap_pin.portal.into_array());
     assert_eq!(flap_pin.chain_id, crate::wss::BSC_MAINNET_CHAIN_ID);
 }

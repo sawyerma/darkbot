@@ -129,7 +129,7 @@ pub mod flap_econ {
     pub const PORTAL_VERSION: u16 = 14;
     pub const IMPLEMENTATION: u16 = 15;
     pub const IMPLEMENTATION_RUNTIME_SHA256: u16 = 16;
-    /// `bsc_mainnet_v5_27_0().validate(observed)`: `VALID` or the error.
+    /// The production pin's `validate(observed)`: `VALID ...` or the error.
     pub const DEPLOYMENT_VALIDATION: u16 = 17;
     /// The committed G0.6a record the launch inputs come from.
     pub const G06A_RECORD_PATH: u16 = 18;

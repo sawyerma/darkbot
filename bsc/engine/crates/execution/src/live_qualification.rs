@@ -28,12 +28,15 @@ use crate::sources::{LiveAdapter, LiveQualification, SourceId, VenueId};
 use darkbot_bsc_record::schema::bsc_census::verdict as gv;
 use darkbot_bsc_record::schema::bsc_economics::economics_snapshot;
 use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
+use darkbot_bsc_record::schema::bsc_flap_impl_parity::flap_impl_parity as fp;
 use darkbot_bsc_record::schema::bsc_runtime::live_qualification as lq;
 use darkbot_bsc_record::schema::{g06a, g07, g08};
 use darkbot_bsc_record::{Draft, Record, Schema, decode};
 use darkbot_bsc_trading::submission_policy::capability::CapabilityId;
 use darkbot_bsc_trading::submission_policy::qualification::{AdapterQualification, Finding};
-use darkbot_bsc_trading::venues::flap::deployment::{FlapDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{
+    FlapDeployment, behaviour_reference, bsc_mainnet_v5_27_2,
+};
 use std::fs;
 use std::path::{Component, Path};
 
@@ -65,8 +68,9 @@ pub struct Verified {
 }
 
 /// The schemas of a venue's evidence: the G0.1 freeze (v2, with its
-/// upgrade check).
-const VENUE_EVIDENCE: &[&Schema] = &[&ff::V2];
+/// upgrade check) and, for an implementation without verified source, its
+/// behaviour parity with the source-verified one (BSC3-065).
+const VENUE_EVIDENCE: &[&Schema] = &[&ff::V2, &fp::SCHEMA];
 /// A source's: the G0.4 verdict (v3, with the rated census's sources).
 const SOURCE_EVIDENCE: &[&Schema] = &[&gv::SCHEMA];
 /// The acquisition: the G0.8 result, and the G0.7 attempt it rates; an
@@ -160,6 +164,92 @@ fn freeze_binds(f: &Record, pin: &FlapDeployment) -> Result<(), String> {
         return Err(format!(
             "the freeze is not of the pinned deployment (Portal {} at {})",
             pin.portal_version, pin.portal
+        ));
+    }
+    Ok(())
+}
+
+/// BSC3-065: the executed cases a behaviour parity needs per traded path
+/// (launch, BUY, SELL, launch then C3 BUY) at the least: the parity tool
+/// may ask more of itself, a parity with fewer qualifies nothing.
+pub const PARITY_MIN_EXECUTED_PER_PATH: u64 = 30;
+
+/// The traded paths of a parity and the tags of their minimums.
+const PARITY_PATHS: [(&str, u16); 4] = [
+    ("LAUNCH", fp::MIN_LAUNCHES),
+    ("BUY", fp::MIN_BUYS),
+    ("SELL", fp::MIN_SELLS),
+    ("LAUNCH_THEN_BUY", fp::MIN_LAUNCH_BUYS),
+];
+
+/// BSC3-065: the behaviour parity of `pin`'s implementation with the
+/// source-verified `reference`: both implementations and runtimes as
+/// pinned, every case identical (up to the created contracts) as its
+/// outcomes add up, per traded path at least its minimum and the floor of
+/// cases whose traded calls succeeded under both (read from the cases, not
+/// from the receipts' classes), the production selectors in the dispatcher,
+/// every parent block on the observed version.
+fn parity_binds(
+    p: &Record,
+    pin: &FlapDeployment,
+    reference: &FlapDeployment,
+) -> Result<(), String> {
+    use fp::case as c;
+    use std::collections::BTreeMap;
+    let cases = p.nested_all(fp::CASES).map_err(re)?;
+    let mut outcomes: BTreeMap<String, u64> = BTreeMap::new();
+    let mut executed: BTreeMap<String, u64> = BTreeMap::new();
+    for case in &cases {
+        *outcomes
+            .entry(case.text(c::OUTCOME).map_err(re)?.to_string())
+            .or_default() += 1;
+        let preceding = [c::PRECEDING_SOURCE_STATUS, c::PRECEDING_OBSERVED_STATUS]
+            .iter()
+            .map(|t| case.opt_u64(*t).map(|s| s.is_none_or(|s| s == 1)))
+            .collect::<Result<Vec<bool>, _>>()
+            .map_err(re)?;
+        if case.u64(c::SOURCE_STATUS).map_err(re)? == 1
+            && case.u64(c::OBSERVED_STATUS).map_err(re)? == 1
+            && preceding.iter().all(|ok| *ok)
+        {
+            *executed
+                .entry(case.text(c::CLASS).map_err(re)?.to_string())
+                .or_default() += 1;
+        }
+    }
+    let n = |m: &BTreeMap<String, u64>, k: &str| m.get(k).copied().unwrap_or(0);
+    let (identical, created) = (
+        n(&outcomes, "IDENTICAL"),
+        n(&outcomes, "IDENTICAL_BUT_CREATED"),
+    );
+    let mut paths = true;
+    for (path, min) in PARITY_PATHS {
+        let min = p.u64(min).map_err(re)?;
+        paths &= min >= PARITY_MIN_EXECUTED_PER_PATH && n(&executed, path) >= min;
+    }
+    let bound = paths
+        && identical + created == cases.len() as u64
+        && p.u64(fp::IDENTICAL).map_err(re)? == identical
+        && p.u64(fp::IDENTICAL_BUT_CREATED).map_err(re)? == created
+        && p.u64(fp::CHAIN_ID).map_err(re)? == pin.chain_id
+        && p.address(fp::PORTAL).map_err(re)? == pin.portal.into_array()
+        && p.address(fp::OBSERVED_IMPLEMENTATION).map_err(re)?
+            == pin.portal_implementation.into_array()
+        && p.b256(fp::OBSERVED_RUNTIME_SHA256).map_err(re)?
+            == pin.portal_implementation_runtime_sha256
+        && p.text(fp::OBSERVED_VERSION).map_err(re)? == pin.portal_version
+        && p.address(fp::SOURCE_IMPLEMENTATION).map_err(re)?
+            == reference.portal_implementation.into_array()
+        && p.b256(fp::SOURCE_RUNTIME_SHA256).map_err(re)?
+            == reference.portal_implementation_runtime_sha256
+        && p.text(fp::VERDICT).map_err(re)? == "BEHAVIOUR_PARITY"
+        && p.u64(fp::DIFFERENT).map_err(re)? == 0
+        && p.bool(fp::PRODUCTION_SELECTORS_PRESENT).map_err(re)?
+        && p.bool(fp::CHAIN_VERSION_CHECKED).map_err(re)?;
+    if !bound {
+        return Err(format!(
+            "no behaviour parity of Portal {} with the source-verified {}",
+            pin.portal_version, reference.portal_version
         ));
     }
     Ok(())
@@ -322,7 +412,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         },
     };
     let e = |x: darkbot_bsc_record::RecordError| x.0;
-    let pin = bsc_mainnet_v5_27_0();
+    let pin = bsc_mainnet_v5_27_2();
     let mut view = LiveQualification::default();
     let mut acquisition_buyer = None;
     for row in r.nested_all(lq::ITEMS).map_err(e)? {
@@ -337,8 +427,31 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                 if view.venues.contains(&venue) {
                     return Err(format!("{id} is qualified twice"));
                 }
+                let (mut freezes, mut parities) = (0, 0);
+                let reference = behaviour_reference(&pin);
                 for f in verified_all(root, &row, k::EVIDENCE, Some(VENUE_EVIDENCE))? {
-                    freeze_binds(&f, &pin).map_err(|why| format!("{id}: {why}"))?;
+                    let bound = if f.schema().name == fp::SCHEMA.name {
+                        parities += 1;
+                        match &reference {
+                            Some(r) => parity_binds(&f, &pin, r),
+                            None => Err("a parity record for a source-verified pin".into()),
+                        }
+                    } else {
+                        freezes += 1;
+                        freeze_binds(&f, &pin)
+                    };
+                    bound.map_err(|why| format!("{id}: {why}"))?;
+                }
+                if freezes == 0 {
+                    return Err(format!("{id}: no G0.1 freeze of the pinned deployment"));
+                }
+                if let Some(r) = &reference
+                    && parities == 0
+                {
+                    return Err(format!(
+                        "{id}: Portal {} has no verified source: its behaviour parity with {} is evidence too",
+                        pin.portal_version, r.portal_version
+                    ));
                 }
                 view.venues.push(venue);
             }
@@ -662,7 +775,7 @@ pub(crate) mod tests {
 
     /// The G0.1 freeze of the pinned deployment.
     pub(crate) fn freeze() -> Draft {
-        let pin = bsc_mainnet_v5_27_0();
+        let pin = bsc_mainnet_v5_27_2();
         let mut upgrade = filled(&ff::upgrade_check::SCHEMA);
         upgrade
             .set(ff::upgrade_check::STATUS, "ONE_IMPLEMENTATION")
@@ -679,12 +792,89 @@ pub(crate) mod tests {
         f
     }
 
+    /// BSC3-065: the behaviour parity of the pinned implementation with its
+    /// source-verified reference: per traded path the floor of cases, each
+    /// as `case(path, i)` says (both executions' status, the preceding
+    /// launch's status of a C3 sequence, the outcome).
+    pub(crate) fn parity_of(case: impl Fn(&str, u64) -> (u64, u64, &'static str)) -> Draft {
+        let mut p = parity_head();
+        let (mut identical, mut created) = (0u64, 0u64);
+        for (path, min) in PARITY_PATHS {
+            for i in 0..PARITY_MIN_EXECUTED_PER_PATH {
+                let (status, preceding, outcome) = case(path, i);
+                match outcome {
+                    "IDENTICAL" => identical += 1,
+                    "IDENTICAL_BUT_CREATED" => created += 1,
+                    _ => {}
+                }
+                let mut c = filled(&fp::case::SCHEMA);
+                c.set(fp::case::CLASS, path)
+                    .set(fp::case::SOURCE_STATUS, status)
+                    .set(fp::case::OBSERVED_STATUS, status)
+                    .set(fp::case::OUTCOME, outcome);
+                if path == "LAUNCH_THEN_BUY" {
+                    c.set(fp::case::PRECEDING_SOURCE_STATUS, preceding)
+                        .set(fp::case::PRECEDING_OBSERVED_STATUS, preceding);
+                }
+                p.push(fp::CASES, c.into_nested());
+            }
+            p.set(min, PARITY_MIN_EXECUTED_PER_PATH);
+        }
+        p.set(fp::IDENTICAL, identical)
+            .set(fp::IDENTICAL_BUT_CREATED, created);
+        p
+    }
+
+    pub(crate) fn parity() -> Draft {
+        parity_of(|_, i| {
+            (
+                1,
+                1,
+                if i % 2 == 0 {
+                    "IDENTICAL"
+                } else {
+                    "IDENTICAL_BUT_CREATED"
+                },
+            )
+        })
+    }
+
+    fn parity_head() -> Draft {
+        let pin = bsc_mainnet_v5_27_2();
+        let reference = behaviour_reference(&pin).unwrap();
+        let mut p = filled(&fp::SCHEMA);
+        p.set(fp::CHAIN_ID, pin.chain_id)
+            .set(fp::PORTAL, Value::Address(pin.portal.into_array()))
+            .set(
+                fp::OBSERVED_IMPLEMENTATION,
+                Value::Address(pin.portal_implementation.into_array()),
+            )
+            .set(
+                fp::OBSERVED_RUNTIME_SHA256,
+                Value::B256(pin.portal_implementation_runtime_sha256),
+            )
+            .set(fp::OBSERVED_VERSION, pin.portal_version)
+            .set(
+                fp::SOURCE_IMPLEMENTATION,
+                Value::Address(reference.portal_implementation.into_array()),
+            )
+            .set(
+                fp::SOURCE_RUNTIME_SHA256,
+                Value::B256(reference.portal_implementation_runtime_sha256),
+            )
+            .set(fp::VERDICT, "BEHAVIOUR_PARITY")
+            .set(fp::DIFFERENT, 0u64)
+            .set(fp::PRODUCTION_SELECTORS_PRESENT, true)
+            .set(fp::CHAIN_VERSION_CHECKED, true);
+        p
+    }
+
     /// A G0.7 attempt of the pinned deployment by `buyer`, sent through
     /// `sent`.
     pub(crate) fn attempt(buyer: [u8; 20], sent: &[LiveAdapter]) -> Draft {
         use g06a::preflight as pf;
         use g07::evidence as a;
-        let pin = bsc_mainnet_v5_27_0();
+        let pin = bsc_mainnet_v5_27_2();
         let mut preflight = filled(&pf::SCHEMA);
         preflight
             .set(pf::CHAIN_ID, pin.chain_id)
@@ -771,7 +961,8 @@ pub(crate) mod tests {
         crate::sources::tests::grant(0).risk_scope_sha256()
     }
 
-    /// A root with typed evidence: the freeze of the pinned deployment, the
+    /// A root with typed evidence: the freeze of the pinned deployment and
+    /// its behaviour parity, the
     /// G0.4 verdict of [`g04`], an economics snapshot of BSC, a G0.7 attempt
     /// of the tests' buyer accepted by Club48 and its G0.8 result of
     /// `verdict`, and one record of no role (`measure`).
@@ -780,6 +971,7 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ev")).unwrap();
         fs::write(root.join("ev/freeze.dbrec"), freeze().encode().unwrap()).unwrap();
+        fs::write(root.join("ev/parity.dbrec"), parity().encode().unwrap()).unwrap();
         fs::write(root.join("ev/g04.dbrec"), g04(1).encode().unwrap()).unwrap();
         let mut economics = filled(&economics_snapshot::SCHEMA);
         economics.set(economics_snapshot::CHAIN_ID, 56u64);
@@ -801,7 +993,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn venue_evidence() -> Vec<String> {
-        vec!["ev/freeze.dbrec".into()]
+        vec!["ev/freeze.dbrec".into(), "ev/parity.dbrec".into()]
     }
 
     fn findings() -> Vec<Finding> {
@@ -1194,18 +1386,24 @@ pub(crate) mod tests {
     /// A qualification naming `path` as the Flap venue's evidence, with the
     /// schema name `declared`, hand-encoded (not through `build`).
     fn hand_venue(root: &Path, path: &str, declared: &str) -> Vec<u8> {
-        let bytes = fs::read(root.join(path)).unwrap();
-        let mut ev = Draft::new(&lq::evidence::SCHEMA);
-        ev.set(lq::evidence::PATH, path)
-            .set(
-                lq::evidence::SHA256,
-                Value::B256(darkbot_bsc_record::sha256(&bytes)),
-            )
-            .set(lq::evidence::SCHEMA_NAME, declared);
+        hand_venues(root, &[(path, declared)])
+    }
+
+    fn hand_venues(root: &Path, evidence: &[(&str, &str)]) -> Vec<u8> {
         let mut item = Draft::new(&lq::item::SCHEMA);
         item.set(lq::item::KIND, "VENUE")
-            .set(lq::item::ID, VenueId::Flap.name())
-            .push(lq::item::EVIDENCE, ev.into_nested());
+            .set(lq::item::ID, VenueId::Flap.name());
+        for (path, declared) in evidence {
+            let bytes = fs::read(root.join(path)).unwrap();
+            let mut ev = Draft::new(&lq::evidence::SCHEMA);
+            ev.set(lq::evidence::PATH, *path)
+                .set(
+                    lq::evidence::SHA256,
+                    Value::B256(darkbot_bsc_record::sha256(&bytes)),
+                )
+                .set(lq::evidence::SCHEMA_NAME, *declared);
+            item.push(lq::item::EVIDENCE, ev.into_nested());
+        }
         let mut d = Draft::new(&lq::SCHEMA);
         d.set(lq::PROVENANCE_TOOL, "test")
             .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
@@ -1256,6 +1454,29 @@ pub(crate) mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// BSC3-065: the newest committed behaviour parity
+    /// (`bsc/native/evidence/g01/flap_impl_parity_*`) binds the production
+    /// pin against its source-verified reference, as the qualification
+    /// reads it.
+    #[test]
+    fn the_committed_parity_binds_the_production_pin() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../native/evidence/g01");
+        let newest = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("flap_impl_parity_"))
+            })
+            .max()
+            .expect("no committed behaviour parity");
+        let bytes = std::fs::read(newest.join("flap_impl_parity.dbrec")).unwrap();
+        let record = darkbot_bsc_record::decode(&fp::SCHEMA, &bytes).unwrap();
+        let pin = bsc_mainnet_v5_27_2();
+        parity_binds(&record, &pin, &behaviour_reference(&pin).unwrap()).unwrap();
+    }
+
     /// BSC3-049: each role takes only its own records, bound to what it
     /// qualifies: a venue the freeze of the pinned deployment, the
     /// acquisition the G0.8 PASS of the G0.7 attempt it names, of that
@@ -1288,7 +1509,86 @@ pub(crate) mod tests {
             let e = verify(&root, &hand_venue(&root, "ev/measure.dbrec", declared)).unwrap_err();
             assert!(e.contains(why), "{e}");
         }
-        assert!(verify(&root, &hand_venue(&root, "ev/freeze.dbrec", ff::V2.name)).is_ok());
+        // BSC3-065: v5.27.2 has no verified source: its freeze alone does
+        // not qualify the venue, with its behaviour parity it does.
+        let e = verify(&root, &hand_venue(&root, "ev/freeze.dbrec", ff::V2.name)).unwrap_err();
+        assert!(e.contains("has no verified source"), "{e}");
+        let e = verify(
+            &root,
+            &hand_venue(&root, "ev/parity.dbrec", fp::SCHEMA.name),
+        )
+        .unwrap_err();
+        assert!(e.contains("no G0.1 freeze"), "{e}");
+        assert!(
+            verify(
+                &root,
+                &hand_venues(
+                    &root,
+                    &[
+                        ("ev/freeze.dbrec", ff::V2.name),
+                        ("ev/parity.dbrec", fp::SCHEMA.name)
+                    ]
+                )
+            )
+            .is_ok()
+        );
+        // A parity that is not BEHAVIOUR_PARITY, has a difference, is of
+        // another implementation or against another reference.
+        for p in [
+            {
+                let mut p = parity();
+                p.set(fp::VERDICT, "INSUFFICIENT");
+                p
+            },
+            {
+                let mut p = parity();
+                p.set(fp::DIFFERENT, 1u64);
+                p
+            },
+            {
+                let mut p = parity();
+                p.set(fp::OBSERVED_IMPLEMENTATION, Value::Address([9; 20]));
+                p
+            },
+            {
+                let mut p = parity();
+                p.set(fp::SOURCE_RUNTIME_SHA256, Value::B256([9; 32]));
+                p
+            },
+            // Every BUY sampled, none executed (reverted under both), or
+            // one fewer than the floor; a C3 BUY after a launch that failed.
+            parity_of(|path, _| (u64::from(path != "BUY"), 1, "IDENTICAL")),
+            parity_of(|path, i| (u64::from(path != "BUY" || i > 0), 1, "IDENTICAL")),
+            parity_of(|path, _| (1, u64::from(path != "LAUNCH_THEN_BUY"), "IDENTICAL")),
+            // A minimum below the floor; a difference the counts do not
+            // name; counts that are not the cases'.
+            {
+                let mut p = parity();
+                p.set(fp::MIN_SELLS, PARITY_MIN_EXECUTED_PER_PATH - 1);
+                p
+            },
+            parity_of(|path, i| {
+                (
+                    1,
+                    1,
+                    if path == "SELL" && i == 0 {
+                        "DIFF"
+                    } else {
+                        "IDENTICAL"
+                    },
+                )
+            }),
+            {
+                let mut p = parity();
+                p.set(fp::IDENTICAL, 0u64);
+                p
+            },
+        ] {
+            fs::write(root.join("ev/parity.dbrec"), p.encode().unwrap()).unwrap();
+            let e = build(&root, &spec(), 1).unwrap_err();
+            assert!(e.contains("no behaviour parity"), "{e}");
+        }
+        fs::write(root.join("ev/parity.dbrec"), parity().encode().unwrap()).unwrap();
         // A freeze of another version, a Portal that was upgraded, a pin
         // not read again.
         let freeze = || freeze();

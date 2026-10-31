@@ -2186,7 +2186,7 @@ pub(crate) mod tests {
     use darkbot_bsc_trading::venues::flap::abi::{
         LaunchParamsV6, decode_swap_exact_input_native, encode_new_token_v6,
     };
-    use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_0};
+    use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_2};
     use std::cell::Cell;
 
     const POLICY_GENERATION: u64 = 3;
@@ -2201,7 +2201,7 @@ pub(crate) mod tests {
 
     /// The current deployment (economics reconfirmed on it).
     pub(crate) fn validated() -> ValidatedDeployment {
-        let d = bsc_mainnet_v5_27_0();
+        let d = bsc_mainnet_v5_27_2();
         d.validate(
             &ObservedDeployment {
                 chain_id: d.chain_id,
@@ -2301,7 +2301,7 @@ pub(crate) mod tests {
                     nonce,
                     gas_price: 1_000_000_000,
                     gas_limit: 6_000_000,
-                    to: bsc_mainnet_v5_27_0().portal,
+                    to: bsc_mainnet_v5_27_2().portal,
                     value: U256::ZERO,
                     input: &input,
                 },
@@ -2385,7 +2385,7 @@ pub(crate) mod tests {
     #[test]
     fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
         let (mut exec, d) = armed("path", config(2, 2));
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let buy = exec
             .on_launch(
@@ -2439,7 +2439,7 @@ pub(crate) mod tests {
     /// cap and dedup, so a second BUY of the same token reached the sink).
     #[test]
     fn the_pool_keeps_one_session_cap_and_one_buy_per_token() {
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (mut exec, d) = armed("session", config(4, 2));
         let (h1, r1, i1) = launch(0, 1);
         let (h2, r2, i2) = launch(0, 2); // another launch of the same token
@@ -2481,7 +2481,7 @@ pub(crate) mod tests {
     #[test]
     fn refusals_are_counted_at_their_stage() {
         let (mut exec, d) = armed("refuse", config(2, 8));
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 1);
         let ctx = c2(Some(HEAD));
         let clk = clock(100, 1);
@@ -2806,7 +2806,7 @@ pub(crate) mod tests {
         let mut cfg = config(2, 2);
         cfg.strategy_lanes = 4;
         let (mut exec, d) = armed("strategy", cfg);
-        let portal = bsc_mainnet_v5_27_0().portal;
+        let portal = bsc_mainnet_v5_27_2().portal;
         let token = [0xAB; 20];
         let input = U256::from(10_000_000_000_000_000u64);
         let curve = curve_after(1_000_000_000_000_000_000);
@@ -3086,7 +3086,7 @@ pub(crate) mod tests {
     /// intent holding nonce 0 first, a C3 BUY is refused NONCE_TAKEN.
     #[test]
     fn c3_and_the_strategy_share_one_nonce_sequence() {
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let curve = curve_after(1_000_000_000_000_000_000);
         let input = U256::from(10_000_000_000_000_000u64);
         let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
@@ -3148,7 +3148,7 @@ pub(crate) mod tests {
     /// PATH_OFF and counted; it takes no lane and no nonce.
     #[test]
     fn a_path_left_out_does_not_take_the_sender() {
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let curve = curve_after(1_000_000_000_000_000_000);
         let input = U256::from(10_000_000_000_000_000u64);
         let mut cfg = config(2, 2);
@@ -3425,7 +3425,7 @@ pub(crate) mod tests {
     fn the_one_path_reaches_any_end() {
         let (mut paper, pd) = armed("end-paper", config(2, 2));
         let (mut other, od) = recording("end-other", None);
-        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (hash, raw, input) = launch(0, 7);
         let pending = PendingLaunch {
             hash,

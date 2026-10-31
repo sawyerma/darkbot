@@ -89,8 +89,8 @@ impl StrategyConfig {
             include_bytes!("../../trading/fixtures/bsc/receipts_20261026.txt"),
         ),
         (
-            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261026.txt",
-            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261026.txt"),
+            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt",
+            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031.txt"),
         ),
     ];
 

@@ -541,7 +541,7 @@ mod tests {
         // The frozen prefilter's Portal is the decoder's deployment Portal.
         assert_eq!(
             Address::from(C14_FLAP_SCOPE.addresses[0]),
-            darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0().portal
+            darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2().portal
         );
         let launch = launch_calldata();
         assert!(is_flap_launch(&legacy(PORTAL, LAUNCH), launch.len()));

@@ -595,7 +595,7 @@ mod exit_tests {
         let (portal, bytes) = call("SELL");
         assert_eq!(
             portal,
-            super::super::deployment::bsc_mainnet_v5_27_0().portal
+            super::super::deployment::bsc_mainnet_v5_27_2().portal
         );
         let swap = decode_swap_exact_input(&bytes).unwrap();
         assert!(swap.is_sell() && swap.permit.is_empty());
@@ -622,7 +622,7 @@ mod exit_tests {
         let (spender, amount) = decode_approve(&bytes).unwrap();
         assert_eq!(
             spender,
-            super::super::deployment::bsc_mainnet_v5_27_0().portal
+            super::super::deployment::bsc_mainnet_v5_27_2().portal
         );
         assert_eq!(encode_approve(spender, amount).unwrap()[..], bytes[..]);
         assert!(encode_approve(spender, U256::ZERO).is_err());

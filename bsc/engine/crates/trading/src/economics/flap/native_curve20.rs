@@ -915,8 +915,30 @@ mod parity_tests {
     /// names its reason.
     #[test]
     fn v3_parity_holds_and_the_scope_refuses_what_differs() {
+        assert_eq!(quote_parity(PARITY_V3), (215, 10, 5, 6));
+    }
+
+    const PARITY_V4: &str = include_str!("../../../fixtures/flap/quote_parity_g02_v4.txt");
+
+    /// BSC3-065: the same on the Portal implementation v5.27.2 (every pin's
+    /// EIP-1967 implementation checked, fixture header): 120 supported
+    /// samples of 12 tokens the Portal's quote to the unit; five launches
+    /// skipped by their reason.
+    #[test]
+    fn v4_parity_holds_on_v5_27_2() {
+        assert!(PARITY_V4.lines().next().unwrap().contains(
+            "v5.27.2, implementation 0x6fc1ac64c90a5a6d9e7efc0d4064452af3fc9968 runtime sha256 f658107fdb369310ebe7d25bc93f142e7d8f68e318e0acc6bad89d249b662753"
+        ));
+        assert_eq!(quote_parity(PARITY_V4), (120, 0, 0, 5));
+    }
+
+    /// Every sample of a quote-parity fixture against the local quote: the
+    /// supported ones equal to the unit, a version-7 token charged more, an
+    /// NFT-gated one refused by name; the counts of supported, version-7,
+    /// gated samples and skipped launches.
+    fn quote_parity(text: &str) -> (usize, usize, usize, usize) {
         let (mut supported, mut v7, mut gated, mut skipped) = (0, 0, 0, 0);
-        for line in PARITY_V3.lines().filter(|l| !l.trim().is_empty()) {
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
             if let Some(rest) = line.strip_prefix("# skipped ") {
                 assert!(rest.contains(": QuoteToken"), "{line}");
                 skipped += 1;
@@ -999,7 +1021,7 @@ mod parity_tests {
                 other => panic!("{other:?}: {line}"),
             }
         }
-        assert_eq!((supported, v7, gated, skipped), (215, 10, 5, 6));
+        (supported, v7, gated, skipped)
     }
 
     const EXECUTED: &str = include_str!("../../../fixtures/flap/executed_parity_g02.txt");
@@ -1025,6 +1047,20 @@ mod parity_tests {
     #[test]
     fn executed_trades_v2_equal_the_local_quote_at_their_pre_state() {
         assert_eq!(executed_parity(EXECUTED_V2), (33, 21, 1));
+    }
+
+    const EXECUTED_V3: &str = include_str!("../../../fixtures/flap/executed_parity_g02_v3.txt");
+
+    /// BSC3-065: the same at five windows on the Portal implementation
+    /// v5.27.2 (every compared trade's parent block checked, fixture
+    /// header): 67 BUYs and 48 SELLs equal to the unit, none outside the
+    /// scope.
+    #[test]
+    fn executed_trades_v3_on_v5_27_2_equal_the_local_quote() {
+        assert!(EXECUTED_V3.lines().next().unwrap().contains(
+            "v5.27.2, implementation 0x6fc1ac64c90a5a6d9e7efc0d4064452af3fc9968 runtime sha256 f658107fdb369310ebe7d25bc93f142e7d8f68e318e0acc6bad89d249b662753"
+        ));
+        assert_eq!(executed_parity(EXECUTED_V3), (67, 48, 0));
     }
 
     /// Every supported trade of an executed-parity fixture equals the

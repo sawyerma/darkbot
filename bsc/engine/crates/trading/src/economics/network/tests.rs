@@ -4,7 +4,7 @@
 use super::*;
 
 const RECEIPTS: &str = include_str!("../../../fixtures/bsc/receipts_20261026.txt");
-const FLAP_GAS: &str = include_str!("../../../fixtures/bsc/flap_gas_20261026.txt");
+const FLAP_GAS: &str = include_str!("../../../fixtures/bsc/flap_gas_20261031.txt");
 
 struct Row {
     class: PathClass,
@@ -230,10 +230,12 @@ fn the_evidence_parser_checks_every_line() {
     assert!(GasEvidence::parse(migrating).unwrap().classes().is_empty());
 }
 
-/// Gate finding M1: the real Flap gas sample (g02_gas_evidence, 2,440
-/// blocks) parses whole: 60 BUY, SELL and APPROVE receipts each and the
-/// reverts seen; no migrating BUY was taken as a cost. The largest gas used
-/// per class is the counterfactual cost.
+/// Gate finding M1, BSC3-065/020: the real Flap gas sample on the Portal
+/// implementation v5.27.2 (g02_gas_evidence, blocks 130851568..=130862047,
+/// the implementation checked, no upgrade in them) parses whole: 1000 BUY,
+/// SELL and APPROVE receipts each and the reverts seen; no migrating BUY
+/// was taken as a cost. The largest gas used per class is the
+/// counterfactual cost.
 #[test]
 fn the_flap_gas_sample_holds_every_class() {
     let e = GasEvidence::parse(FLAP_GAS).unwrap();
@@ -246,11 +248,14 @@ fn the_flap_gas_sample_holds_every_class() {
             .unwrap();
         (c.receipts, c.gas_used_max)
     };
-    assert_eq!(flap(Action::Buy), (60, 723_604));
-    assert_eq!(flap(Action::Sell), (60, 768_101));
-    assert_eq!(flap(Action::Approve), (60, 49_255));
-    assert_eq!(flap(Action::RevertedBuy), (1, 50_642));
-    assert_eq!(flap(Action::RevertedSell), (3, 833_189));
+    assert!(FLAP_GAS.lines().nth(2).unwrap().contains(
+        "v5.27.2, implementation 0x6fc1ac64c90a5a6d9e7efc0d4064452af3fc9968 runtime sha256 f658107fdb369310ebe7d25bc93f142e7d8f68e318e0acc6bad89d249b662753"
+    ));
+    assert_eq!(flap(Action::Buy), (1000, 737_900));
+    assert_eq!(flap(Action::Sell), (1000, 776_863));
+    assert_eq!(flap(Action::Approve), (1000, 49_255));
+    assert_eq!(flap(Action::RevertedBuy), (58, 870_889));
+    assert_eq!(flap(Action::RevertedSell), (15, 348_452));
     assert!(
         !FLAP_GAS
             .lines()
@@ -259,5 +264,5 @@ fn the_flap_gas_sample_holds_every_class() {
     // With the receipts fixture, as the runtime reads them both.
     let both = GasEvidence::parse(&format!("{RECEIPTS}\n{FLAP_GAS}")).unwrap();
     let total: u32 = both.classes().iter().map(|c| c.receipts).sum();
-    assert_eq!(total, 34 + 184);
+    assert_eq!(total, 34 + 3_073);
 }

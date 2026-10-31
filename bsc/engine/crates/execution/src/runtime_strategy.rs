@@ -1846,7 +1846,7 @@ mod tests {
         assert!(configured.gas(&root).is_ok());
         for bad in [
             &["bsc/config/ingress.public.env"][..],
-            &["bsc/engine/crates/trading/fixtures/bsc/../bsc/flap_gas_20261026.txt"][..],
+            &["bsc/engine/crates/trading/fixtures/bsc/../bsc/flap_gas_20261031.txt"][..],
             &[][..],
         ] {
             assert!(with(bad).gas(&root).is_err(), "{bad:?}");

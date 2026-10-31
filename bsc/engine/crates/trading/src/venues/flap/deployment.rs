@@ -240,7 +240,9 @@ pub fn bsc_mainnet_v5_24_0() -> FlapDeployment {
     }
 }
 
-/// BSC mainnet (chain 56), Portal v5.27.0: the current deployment.
+/// BSC mainnet (chain 56), Portal v5.27.0: the deployment until block
+/// 129871644, source-verified; since then the behaviour reference of
+/// v5.27.2 (BSC3-065).
 ///
 /// Witness: the G0.1 Flap refreeze at block 129849511
 /// (`bsc/native/evidence/g01/flap_freeze_20261026T062813Z/flap.dbrec`). The
@@ -265,6 +267,53 @@ pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
         economics: EconomicsWitness::Witnessed,
         ..v5_24
     }
+}
+
+/// BSC mainnet (chain 56), Portal v5.27.2: the current deployment
+/// (BSC3-065), since block 129871644.
+///
+/// Witnesses: the G0.1 Flap refreeze at block 130770609
+/// (`bsc/native/evidence/g01/flap_freeze_20261031T014028Z/flap.dbrec`):
+/// the proxy, the tax-token V3 implementation and its clone init code, the
+/// launch/BUY/SELL selectors, the canonical fixtures and the token address
+/// derivation unchanged since v5.27.0, the implementation, its fingerprint
+/// and the version new. The implementation has no verified source
+/// (Sourcify NO_MATCH); its behaviour on the traded paths is qualified
+/// against the source-verified v5.27.0 (`g01_flap_impl_parity`, blocks
+/// 130841636..=130855635: 289 cases, real launches, BUYs, SELLs and reverts
+/// spread over the range and each launch followed by the C3 BUY, executed
+/// under both on the same state with the views after them; status, return
+/// and revert data and logs equal, the launch's created contracts paired;
+/// executed LAUNCH 45, BUY 60, SELL 59, launch then BUY 37; gas its own
+/// evidence;
+/// `bsc/native/evidence/g01/flap_impl_parity_20261031T165904Z/flap_impl_parity.dbrec`).
+/// Its economics are witnessed on this implementation: the native launch
+/// and BUY by the node and a local EVM equal to `quote_native_buy` at block
+/// 130856906 (`bsc/native/evidence/g01/flap_econ_v5_27_20261031T122809Z/flap_econ.dbrec`),
+/// the production quote equal to `Portal.quoteExactInput`
+/// (`fixtures/flap/quote_parity_g02_v4.txt`) and to executed trades
+/// (`fixtures/flap/executed_parity_g02_v3.txt`), the gas sampled on it
+/// (`fixtures/bsc/flap_gas_20261031.txt`).
+pub fn bsc_mainnet_v5_27_2() -> FlapDeployment {
+    FlapDeployment {
+        portal_version: "v5.27.2",
+        portal_implementation: Address::new(alloy_primitives::hex!(
+            "6fc1ac64c90a5a6d9e7efc0d4064452af3fc9968"
+        )),
+        portal_implementation_runtime_sha256: alloy_primitives::hex!(
+            "f658107fdb369310ebe7d25bc93f142e7d8f68e318e0acc6bad89d249b662753"
+        ),
+        economics: EconomicsWitness::Witnessed,
+        ..bsc_mainnet_v5_27_0()
+    }
+}
+
+/// BSC3-065: the source-verified deployment a pin without verified source
+/// is qualified against by behaviour (`g01_flap_impl_parity`), if it needs
+/// one.
+pub fn behaviour_reference(pin: &FlapDeployment) -> Option<FlapDeployment> {
+    (pin.portal_implementation == bsc_mainnet_v5_27_2().portal_implementation)
+        .then(bsc_mainnet_v5_27_0)
 }
 
 #[cfg(test)]
@@ -392,6 +441,58 @@ mod tests {
             ..matching_observation()
         };
         assert!(current.validate(&observed, 1).is_ok());
+    }
+
+    /// BSC3-065: v5.27.2 against the refreeze at block 130770609: new
+    /// implementation, fingerprint and version, the rest as v5.27.0; the
+    /// old pin refuses a v5.27.2 observation and the new one a v5.27.0.
+    #[test]
+    fn the_v5_27_2_constants_match_the_refreeze_and_refuse_the_old_pin() {
+        let current = bsc_mainnet_v5_27_2();
+        let previous = bsc_mainnet_v5_27_0();
+        assert_eq!(current.portal_version, "v5.27.2");
+        assert_eq!(
+            current.portal_implementation,
+            address("6fc1ac64c90a5a6d9e7efc0d4064452af3fc9968")
+        );
+        assert_eq!(
+            FlapDeployment {
+                portal_version: previous.portal_version,
+                portal_implementation: previous.portal_implementation,
+                portal_implementation_runtime_sha256: previous.portal_implementation_runtime_sha256,
+                ..current
+            },
+            previous
+        );
+        let observed = |d: &FlapDeployment| ObservedDeployment {
+            portal_version: d.portal_version,
+            portal_implementation: d.portal_implementation,
+            portal_implementation_runtime_sha256: d.portal_implementation_runtime_sha256,
+            ..matching_observation()
+        };
+        assert!(current.validate(&observed(&current), 1).is_ok());
+        assert_eq!(
+            current.validate(&observed(&previous), 1),
+            Err(DeploymentError::PortalVersion)
+        );
+        assert_eq!(
+            previous.validate(&observed(&current), 1),
+            Err(DeploymentError::PortalVersion)
+        );
+        // The version alone never passes: another implementation or code.
+        let forged = ObservedDeployment {
+            portal_version: "v5.27.2",
+            ..observed(&previous)
+        };
+        assert_eq!(
+            current.validate(&forged, 1),
+            Err(DeploymentError::PortalImplementation)
+        );
+        // Qualified by behaviour against the source-verified v5.27.0; the
+        // source-verified pins need no reference.
+        assert_eq!(behaviour_reference(&current), Some(previous));
+        assert_eq!(behaviour_reference(&previous), None);
+        assert_eq!(behaviour_reference(&bsc_mainnet_v5_24_0()), None);
     }
 
     #[test]

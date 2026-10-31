@@ -13,6 +13,68 @@ pub fn eip1967_implementation_slot() -> B256 {
     B256::from(slot.to_be_bytes::<32>())
 }
 
+// ---- the implementation evidence ran on ----------------------------------------
+
+/// BSC3-065/020: evidence is bound to the implementation it ran on. At each
+/// pin the EIP-1967 slot of `proxy` must name `want`, whose runtime has the
+/// SHA-256 `want_sha256` (read once).
+pub struct ImplementationCheck {
+    proxy: Address,
+    want: Address,
+    want_sha256: [u8; 32],
+    code_checked: bool,
+    pub pins_checked: u64,
+}
+
+impl ImplementationCheck {
+    pub fn new(proxy: Address, want: Address, want_sha256: [u8; 32]) -> Self {
+        Self {
+            proxy,
+            want,
+            want_sha256,
+            code_checked: false,
+            pins_checked: 0,
+        }
+    }
+
+    pub fn check(
+        &mut self,
+        rpc: &crate::common::edge::Endpoint,
+        pin: &crate::common::edge::Pin,
+    ) -> Result<(), String> {
+        let w = rpc.storage(self.proxy, eip1967_implementation_slot(), pin)?;
+        let at = (w[..12] == [0u8; 12]).then(|| Address::from_slice(&w[12..]));
+        if at != Some(self.want) {
+            return Err(format!(
+                "block {}: the implementation slot of {} holds {w}, not the pinned {}",
+                pin.number, self.proxy, self.want
+            ));
+        }
+        if !self.code_checked {
+            let code = rpc.code(self.want, pin)?;
+            if darkbot_bsc_record::sha256(&code) != self.want_sha256 {
+                return Err(format!(
+                    "block {}: the runtime of {} is not the pinned one (SHA-256 differs)",
+                    pin.number, self.want
+                ));
+            }
+            self.code_checked = true;
+        }
+        self.pins_checked += 1;
+        Ok(())
+    }
+
+    /// The fixture line that states the binding.
+    pub fn line(&self) -> String {
+        format!(
+            "implementation {} runtime sha256 {} (EIP-1967 slot checked at {} pins)",
+            addr(self.want),
+            hex::encode(self.want_sha256),
+            self.pins_checked
+        )
+    }
+}
+
 // ---- bytecode ---------------------------------------------------------------
 
 /// Solidity's CBOR metadata trailer: its length is the last two bytes and it

@@ -135,9 +135,9 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> {const t=await stateLine().innerText();return t.includes('COHERENT')&&!t.includes('NOT_COHERENT')&&/head \d+/.test(t)&&/retained blocks [1-9]/.test(t);},'C2 owner SHADOW: coherent on real canonical blocks');
  await until(async()=> /blocks [1-9]/.test(await p.locator('.g-line',{hasText:'C2 canonical and pending effects'}).first().innerText()),'C2 effects counted');
  // C3 (PHASENPLAN §11): BSC_EXEC SHADOW probes the live Flap deployment read-only. On the witnessed
- // deployment (v5.27.0, economics reconfirmed) it waits for C2's nonce fact of the PAPER sender (every
- // 20 blocks) and arms its fenced lanes; a live Portal past it (since 26.10. v5.27.2, not source-verified)
- // fails closed as DEPLOYMENT_DRIFT with the observed version and arms nothing.
+ // deployment (v5.27.2 since BSC3-065: economics witnessed, behaviour parity with the source-verified
+ // v5.27.0) it waits for C2's nonce fact of the PAPER sender (every 20 blocks) and arms its fenced
+ // lanes; a live Portal past it fails closed as DEPLOYMENT_DRIFT with the observed version and arms nothing.
  // Plan v9 §2.3: Flap launches reach C3 and Strategy C only while the Flap venue is SHADOW (Monitoring §2);
  // Four.meme has no path to admit to, so its SHADOW is BLOCKED with that reason.
  await until(async()=> (await srcLine('BSC_VENUE_FLAP').innerText()).includes('OFF'),'Flap venue OFF initially');
@@ -163,9 +163,9 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('8')&&(await execComp().innerText()).includes('requested SHADOW'),'BSC_EXEC SHADOW pushed (generation 8)');
  let c3=null;
  for(let i=0;;i++){const t=await execLine().innerText();
-  if(t.includes('ARMED')&&t.includes('v5.27.0')&&t.includes('PAPER sender 0x')){c3='ARMED v5.27.0';break;}
+  if(t.includes('ARMED')&&t.includes('v5.27.2')&&t.includes('PAPER sender 0x')){c3='ARMED v5.27.2';break;}
   const drift=/DEPLOYMENT_DRIFT[\s\S]*Portal (v5\.\d+\.\d+) probed at block \d+/.exec(t);
-  if(drift&&drift[1]!=='v5.27.0'&&t.includes('PAPER sender 0x')){c3=`DEPLOYMENT_DRIFT live ${drift[1]}`;break;}
+  if(drift&&drift[1]!=='v5.27.2'&&t.includes('PAPER sender 0x')){c3=`DEPLOYMENT_DRIFT live ${drift[1]}`;break;}
   if(/IDENTITY_REFUSED|PROBE_FAILED|TERMS_DRIFT|ECONOMICS_UNQUALIFIED|FUNDED|ARM_FAILED/.test(t)||i>=450)throw Error('C3 PAPER path neither ARMED nor DEPLOYMENT_DRIFT: '+t);await new Promise(r=>setTimeout(r,200));}
  const sinkLine=async()=> await p.locator('.g-line',{hasText:'C3 path to the PAPER sink'}).first().innerText();
  if(c3.startsWith('ARMED'))await until(async()=> (await sinkLine()).includes('lanes 64/64'),'C3 lanes armed (64/64), nothing sent');

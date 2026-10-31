@@ -52,7 +52,7 @@ use darkbot_bsc_trading::signer::{Signer, recover_legacy_sender};
 use darkbot_bsc_trading::submission_policy::plan::ChainHead;
 use darkbot_bsc_trading::transactions::legacy::{LegacyTx, decode_signed};
 use darkbot_bsc_trading::venues::flap::abi::{LaunchParamsV6, encode_new_token_v6};
-use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{ObservedDeployment, bsc_mainnet_v5_27_2};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::fs;
@@ -168,7 +168,7 @@ fn launch_tx(launcher: &Signer, nonce: u64) -> Vec<u8> {
                 nonce,
                 gas_price: 1_000_000_000,
                 gas_limit: 6_000_000,
-                to: bsc_mainnet_v5_27_0().portal,
+                to: bsc_mainnet_v5_27_2().portal,
                 value: U256::ZERO,
                 input: &calldata,
             },
@@ -247,7 +247,7 @@ fn c3_paper_path_latency() {
     PaperIdentity::create(&key, Path::new("/nonexistent-repo")).unwrap();
     let identity = PaperIdentity::load(&key, Path::new("/nonexistent-repo"), &[]).unwrap();
     let sender = Address::from(identity.address());
-    let d = bsc_mainnet_v5_27_0();
+    let d = bsc_mainnet_v5_27_2();
     let validated = d
         .validate(
             &ObservedDeployment {

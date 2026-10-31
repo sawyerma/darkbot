@@ -659,7 +659,7 @@ fn the_same_bytes_decode_the_same_way() {
 #[test]
 fn flap_and_four_share_inputs_without_crosstalk() {
     let deployment = d();
-    let portal = flap::deployment::bsc_mainnet_v5_27_0().portal;
+    let portal = flap::deployment::bsc_mainnet_v5_27_2().portal;
     for r in rows(FLAP_CALLS) {
         let input = unhex(r[3]);
         assert_eq!(
@@ -707,7 +707,7 @@ fn four_decoder_latency() {
     const SAMPLES: usize = 2_000;
     const BATCH: u64 = 1_000;
     let deployment = d();
-    let portal = flap::deployment::bsc_mainnet_v5_27_0().portal;
+    let portal = flap::deployment::bsc_mainnet_v5_27_2().portal;
     let classic = fixture("CLASSIC", "LAUNCH");
     let open = fixture("OPENFOUR", "LAUNCH");
     let classic_buy = fixture("CLASSIC", "BUY");
