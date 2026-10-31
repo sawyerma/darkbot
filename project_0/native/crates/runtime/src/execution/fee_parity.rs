@@ -502,10 +502,59 @@ pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SavedRuns {
     /// Every saved run read (with a record or not).
-    pub runs: Vec<String>,
+    pub runs: Vec<SavedRun>,
     pub records: Vec<FeeParityStatsRecord>,
     pub crashed: Vec<String>,
     pub unreadable: Vec<String>,
+}
+
+/// A saved run as it was read: its root and id and the files of its owner journal (every
+/// segment and any recovery journal beside it, by name and length), taken before its records
+/// were read — so a run that writes after a seal (still running, or continued after a crash)
+/// differs from the seal (review M1).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedRun {
+    pub root: String,
+    pub run_id: String,
+    pub journal: Vec<(String, u64)>,
+}
+
+/// The owner journal of a run (in the run or its capture directory), if it has one.
+fn run_journal(run: &crate::run_layout::RunDir) -> Option<std::path::PathBuf> {
+    let record = crate::orchestration::until_stopped_view::SHADOW_RECORD;
+    [run.path.join(record), run.path.join("capture").join(record)]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// Every file of the journal chain at `journal` and its recovery journals — those of its
+/// directory named after its stem — by name and length, in name order.
+fn journal_files(journal: &std::path::Path) -> Vec<(String, u64)> {
+    let stem = crate::orchestration::until_stopped_view::SHADOW_RECORD.trim_end_matches(".p0j");
+    let mut files: Vec<(String, u64)> = journal
+        .parent()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with(stem)
+                .then(|| e.metadata().ok().map(|m| (name, m.len())))
+                .flatten()
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// `run` as it is now.
+fn saved_run(run: &crate::run_layout::RunDir, journal: Option<&std::path::Path>) -> SavedRun {
+    SavedRun {
+        root: run.root.into(),
+        run_id: run.run_id.clone(),
+        journal: journal.map(journal_files).unwrap_or_default(),
+    }
 }
 
 /// The saved runs of `project`: every run's owner journal (`until_stopped_view::SHADOW_RECORD` in
@@ -513,15 +562,12 @@ pub struct SavedRuns {
 /// fee-parity`), never on an owner's start. A recovery journal beside it (a primary write
 /// failed: events went there, unread here) makes the run unreadable.
 pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
-    let record = crate::orchestration::until_stopped_view::SHADOW_RECORD;
-    let stem = record.trim_end_matches(".p0j");
+    let stem = crate::orchestration::until_stopped_view::SHADOW_RECORD.trim_end_matches(".p0j");
     let mut out = SavedRuns::default();
     for run in crate::run_layout::runs(project) {
-        out.runs.push(run.run_id.clone());
-        let Some(journal) = [run.path.join(record), run.path.join("capture").join(record)]
-            .into_iter()
-            .find(|p| p.is_file())
-        else {
+        let journal = run_journal(&run);
+        out.runs.push(saved_run(&run, journal.as_deref()));
+        let Some(journal) = journal else {
             continue;
         };
         let recovered = journal
@@ -603,7 +649,7 @@ pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
         if failed > 0 {
             "LOCAL_FEE_MODEL_FAIL"
         } else {
-            "LOCAL_FEE_MODEL_OBSERVE"
+            "LOCAL_FEE_PARITY"
         },
         classes.len()
     )
@@ -615,8 +661,8 @@ pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeeParitySeal {
     pub model_version: u32,
-    /// Every saved run at the seal.
-    pub runs: Vec<String>,
+    /// Every saved run at the seal, with its journal's files.
+    pub runs: Vec<SavedRun>,
     pub crashed: Vec<String>,
     pub unreadable: Vec<String>,
     pub classes: Vec<(FeeClass, ParityCounts)>,
@@ -679,9 +725,14 @@ pub const NOT_SEALED: &str =
     "LOCAL_FEE_NOT_SEALED: no seal of the saved runs (p0ctl fee-parity --seal)";
 
 /// The classes ACTIVE may decide in by the newest seal of `project`: its qualified classes
-/// (`ClassParity::qualified`) of this model version, the seal covering every saved run but
-/// `current` (the owner's own run, whose mismatches it counts itself). `Err`: why none.
-pub fn sealed_classes(project: &std::path::Path, current: &str) -> Result<ClassSet, String> {
+/// (`ClassParity::qualified`) of this model version, the seal covering every saved run (by root
+/// and id) but the one whose journal is `own` (the owner's, whose mismatches it counts itself)
+/// exactly as it is now — a run saved after it, or one whose journal changed since (it was still
+/// running, was continued, or gained a recovery journal), makes it stale. `Err`: why none.
+pub fn sealed_classes(
+    project: &std::path::Path,
+    own: Option<&std::path::Path>,
+) -> Result<ClassSet, String> {
     let seal = newest_seal(project)?.ok_or(NOT_SEALED)?;
     if seal.model_version != FEE_MODEL_VERSION {
         return Err(format!(
@@ -689,14 +740,35 @@ pub fn sealed_classes(project: &std::path::Path, current: &str) -> Result<ClassS
             seal.model_version
         ));
     }
-    if let Some(run) = crate::run_layout::runs(project)
-        .into_iter()
-        .find(|r| r.run_id != current && !seal.runs.contains(&r.run_id))
-    {
-        return Err(format!(
-            "LOCAL_FEE_SEAL_STALE: run {} is not in the seal (p0ctl fee-parity --seal)",
-            run.run_id
-        ));
+    let own = own.map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()));
+    for run in crate::run_layout::runs(project) {
+        let journal = run_journal(&run);
+        let canonical = journal
+            .as_deref()
+            .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()));
+        if canonical.is_some() && canonical == own {
+            continue;
+        }
+        let now = saved_run(&run, journal.as_deref());
+        match seal
+            .runs
+            .iter()
+            .find(|s| s.root == now.root && s.run_id == now.run_id)
+        {
+            None => {
+                return Err(format!(
+                    "LOCAL_FEE_SEAL_STALE: run {}/{} is not in the seal (p0ctl fee-parity --seal)",
+                    now.root, now.run_id
+                ))
+            }
+            Some(sealed) if *sealed != now => {
+                return Err(format!(
+                    "LOCAL_FEE_SEAL_STALE: run {}/{} wrote after the seal (p0ctl fee-parity --seal once it ended)",
+                    now.root, now.run_id
+                ))
+            }
+            Some(_) => {}
+        }
     }
     let qualified = seal
         .classes
@@ -1017,7 +1089,7 @@ mod tests {
         assert!(of(&both).qualified());
         let line = status_line(&qualification(&both), "2 runs");
         assert!(
-            line.starts_with("LOCAL_FEE_MODEL_OBSERVE: 2 runs: 1/16 classes"),
+            line.starts_with("LOCAL_FEE_PARITY: 2 runs: 1/16 classes"),
             "{line}"
         );
         let mut failed = both.clone();
@@ -1132,11 +1204,14 @@ mod phase2_tests {
     }
 
     /// The seal: none before `write_seal`; it qualifies the classes the saved runs qualify (a
-    /// bundle class too — `FeeModel::active` decides only single ones); a run saved after it
-    /// makes it stale (the owner's own run excepted) until the next seal; a seal without a
-    /// qualified class names that.
+    /// bundle class too — `FeeModel::active` decides only single ones); a run saved after it —
+    /// in any root, a same id in another root too — or a run whose journal changed since (it was
+    /// still running and went on writing, or gained a recovery journal: review M1) makes it stale
+    /// until the next seal; the owner's own journal is never a reason; a seal without a qualified
+    /// class names that.
     #[test]
-    fn the_seal_names_the_qualified_classes_of_every_saved_run() {
+    fn the_seal_names_the_qualified_classes_of_every_saved_run_as_it_was() {
+        use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
         let project =
             std::env::temp_dir().join(format!("p0_fee_parity_seal_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&project);
@@ -1167,29 +1242,98 @@ mod phase2_tests {
             first_mismatch: None,
         };
         let err = |r: Result<ClassSet, String>| r.unwrap_err();
-        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_NOT_SEALED"));
-        run_journal(
-            &project.join("data/shadow/a"),
-            vec![at(vec![
-                (single, PARITY_MIN_MESSAGES, 0),
-                (tip, PARITY_MIN_MESSAGES, 0),
-            ])],
-        );
+        let stale = |r: Result<ClassSet, String>, what: &str| {
+            let e = err(r);
+            assert!(
+                e.starts_with("LOCAL_FEE_SEAL_STALE") && e.contains(what),
+                "{e}"
+            );
+        };
+        assert!(err(sealed_classes(&project, None)).starts_with("LOCAL_FEE_NOT_SEALED"));
+        let qualified = at(vec![
+            (single, PARITY_MIN_MESSAGES, 0),
+            (tip, PARITY_MIN_MESSAGES, 0),
+        ]);
+        write_run(&project.join("data/shadow/a"), vec![qualified.clone()]);
         let (n, seal) = write_seal(&project).unwrap();
-        assert_eq!((n, seal.runs.clone()), (1, vec!["a".to_string()]));
+        assert_eq!(n, 1);
         assert_eq!(
-            sealed_classes(&project, ""),
+            seal.runs
+                .iter()
+                .map(|r| (r.root.as_str(), r.run_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("data/shadow", "a")]
+        );
+        assert!(!seal.runs[0].journal.is_empty(), "its journal's files");
+        assert_eq!(
+            sealed_classes(&project, None),
             Ok(ClassSet::default().with(single).with(tip))
         );
-        run_journal(&project.join("data/shadow/b"), vec![at(vec![])]);
-        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_SEAL_STALE: run b"));
-        assert!(sealed_classes(&project, "b").is_ok(), "the owner's own run");
-        run_journal(
-            &project.join("data/shadow/c"),
-            vec![at(vec![(single, 1, 1), (tip, 1, 1)])],
+        // A run saved after the seal; the owner's own is not one.
+        let b = project.join("data/shadow/b");
+        write_run(&b, vec![at(vec![])]);
+        stale(
+            sealed_classes(&project, None),
+            "run data/shadow/b is not in the seal",
         );
-        assert_eq!(write_seal(&project).unwrap().0, 2);
-        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_NOT_QUALIFIED"));
+        assert!(sealed_classes(&project, Some(&b.join("opportunities.p0j"))).is_ok());
+        // A run still writing at the seal that goes on writing (a mismatch after the seal).
+        let dir = project.join("data/shadow/c");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut running, _) = OwnerEvidenceWriter::start_rolling(
+            dir.join("opportunities.p0j"),
+            dir.join("recovery.p0j"),
+            64,
+            std::time::Duration::from_millis(5),
+            1 << 20,
+            false,
+        )
+        .unwrap();
+        running
+            .emit(OwnerEvidence::FeeParityStats(Box::new(qualified.clone())))
+            .unwrap();
+        write_seal(&project).unwrap();
+        assert!(sealed_classes(&project, None).is_ok());
+        running
+            .emit(OwnerEvidence::FeeParityMismatch(Box::new(at(vec![(
+                single,
+                PARITY_MIN_MESSAGES,
+                1,
+            )]))))
+            .unwrap();
+        running.finish(None).unwrap();
+        stale(
+            sealed_classes(&project, None),
+            "run data/shadow/c wrote after the seal",
+        );
+        write_seal(&project).unwrap();
+        assert_eq!(
+            sealed_classes(&project, None),
+            Ok(ClassSet::default().with(tip)),
+            "the mismatch fails its class once sealed"
+        );
+        // A recovery journal after the seal; the same id in another root.
+        std::fs::remove_dir_all(&dir).unwrap();
+        write_seal(&project).unwrap();
+        assert!(sealed_classes(&project, None).is_ok());
+        std::fs::write(
+            project.join("data/shadow/a/opportunities.recovery-1-2.p0j"),
+            b"",
+        )
+        .unwrap();
+        stale(
+            sealed_classes(&project, None),
+            "run data/shadow/a wrote after the seal",
+        );
+        std::fs::remove_file(project.join("data/shadow/a/opportunities.recovery-1-2.p0j")).unwrap();
+        assert!(sealed_classes(&project, None).is_ok());
+        write_run(&project.join("data/econ4h/a"), vec![at(vec![])]);
+        stale(
+            sealed_classes(&project, None),
+            "run data/econ4h/a is not in the seal",
+        );
+        assert_eq!(write_seal(&project).unwrap().0, 5);
+        assert!(sealed_classes(&project, None).is_ok());
         let _ = std::fs::remove_dir_all(project);
     }
 }
@@ -1232,7 +1376,7 @@ mod tests_support {
     }
 
     /// A saved run's sealed owner journal at `dir` with `records`.
-    pub(super) fn run_journal(dir: &std::path::Path, records: Vec<FeeParityStatsRecord>) {
+    pub(super) fn write_run(dir: &std::path::Path, records: Vec<FeeParityStatsRecord>) {
         use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
         std::fs::create_dir_all(dir).unwrap();
         let (mut w, _) = OwnerEvidenceWriter::start_rolling(

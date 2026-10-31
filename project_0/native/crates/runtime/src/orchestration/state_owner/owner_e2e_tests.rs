@@ -173,7 +173,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fee_parity: Default::default(),
         fee_parity_journaled: None,
         fee_parity_mismatches: 0,
-        local_fee: super::local_fee::LocalFeeControl::start(Default::default(), None, ""),
+        local_fee: super::local_fee::LocalFeeControl::start(Default::default(), None, None),
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -9057,7 +9057,7 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
     assert_eq!((row.requested, row.effective), ("OBSERVE", "OBSERVE"));
     assert!(
         row.block_reason
-            .starts_with("LOCAL_FEE_MODEL_OBSERVE: this run: 0/16"),
+            .starts_with("LOCAL_FEE_PARITY: this run: 0/16"),
         "{}",
         row.block_reason
     );
@@ -9304,6 +9304,14 @@ fn p6_mt10_active_decides_a_sealed_class_locally_and_its_simulation_verifies_it(
     assert!(
         reason.starts_with("LOCAL_FEE_MODEL_FAIL") && reason.contains("LOCAL_FEE_CLASSES_FAILED"),
         "{reason}"
+    );
+    // The candidate's next evaluation quotes its fee by RPC again (review gap).
+    assert_eq!(count(&calls, "getFeeForMessage"), 0);
+    detect(&mut f, target);
+    assert!(
+        count(&calls, "getFeeForMessage") >= 1,
+        "{:?}",
+        calls.lock().unwrap()
     );
     cleanup(f);
 

@@ -103,7 +103,10 @@ fn p6_mt10_fee_parity_report_sums_the_saved_runs_per_class() {
     );
     // Phase 2: `--seal` seals it — the qualified class is what an owner's ACTIVE rests on.
     use darkbot_runner::execution::fee_parity::{sealed_classes, ClassSet};
-    assert!(sealed_classes(&project, "").is_err(), "nothing sealed yet");
+    assert!(
+        sealed_classes(&project, None).is_err(),
+        "nothing sealed yet"
+    );
     let out = Command::new(env!("CARGO_BIN_EXE_p0ctl"))
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -120,7 +123,7 @@ fn p6_mt10_fee_parity_report_sums_the_saved_runs_per_class() {
     );
     assert!(stdout.contains("as seal 1: 2 saved runs"), "{stdout}");
     assert_eq!(
-        sealed_classes(&project, ""),
+        sealed_classes(&project, None),
         Ok(ClassSet::default().with(plain))
     );
     let _ = std::fs::remove_dir_all(project);

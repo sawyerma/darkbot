@@ -13,8 +13,10 @@ use crate::execution::fee_parity::{self, ClassSet, FeeModel, FeeModelMode, Unver
 #[derive(Debug)]
 pub(super) struct LocalFeeControl {
     pub(super) requested: FeeModelMode,
-    /// The project the seal is read from (`None`: no project, never sealed).
+    /// The project the seal is read from (`None`: no project, never sealed) and the owner's own
+    /// journal (its run is the one the seal need not cover as it is now).
     pub(super) project: Option<std::path::PathBuf>,
+    pub(super) own_journal: Option<std::path::PathBuf>,
     /// The seal's qualified classes as last read, or why none.
     pub(super) sealed: Result<ClassSet, String>,
     /// Why ACTIVE ended for this run: a simulation verified nothing.
@@ -26,12 +28,13 @@ impl LocalFeeControl {
     pub(super) fn start(
         requested: FeeModelMode,
         project: Option<std::path::PathBuf>,
-        run_id: &str,
+        own_journal: Option<std::path::PathBuf>,
     ) -> LocalFeeControl {
-        let sealed = sealed(project.as_deref(), run_id);
+        let sealed = sealed(project.as_deref(), own_journal.as_deref());
         LocalFeeControl {
             requested,
             project,
+            own_journal,
             sealed,
             unverified: None,
         }
@@ -49,9 +52,12 @@ impl LocalFeeControl {
     }
 }
 
-fn sealed(project: Option<&std::path::Path>, run_id: &str) -> Result<ClassSet, String> {
+fn sealed(
+    project: Option<&std::path::Path>,
+    own_journal: Option<&std::path::Path>,
+) -> Result<ClassSet, String> {
     match project {
-        Some(p) => fee_parity::sealed_classes(p, run_id),
+        Some(p) => fee_parity::sealed_classes(p, own_journal),
         None => Err("LOCAL_FEE_NOT_SEALED: no project (P0_PROJECT_DIR)".into()),
     }
 }
@@ -76,7 +82,8 @@ impl ShadowOwner {
         let mode = FeeModelMode::parse(requested)
             .ok_or_else(|| format!("LOCAL_FEE_MODEL_INVALID: {requested} (OFF|OBSERVE|ACTIVE)"))?;
         self.local_fee.requested = mode;
-        self.local_fee.sealed = sealed(self.local_fee.project.as_deref(), &self.run_id);
+        let c = &mut self.local_fee;
+        c.sealed = sealed(c.project.as_deref(), c.own_journal.as_deref());
         Ok(requested.to_string())
     }
 

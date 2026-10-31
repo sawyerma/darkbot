@@ -792,6 +792,8 @@ pub(super) fn prepare(
     // (`<record>.mt0.p0j`), so runs sharing one directory never collide.
     let mt0_default = journal_path.with_extension("mt0.p0j");
     let census_journal = journal_path.clone();
+    // P6-MT.10: the owner's own journal, excluded from the seal's staleness (review M1).
+    let fee_seal_own = journal_path.clone();
     let run_dir = journal_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
@@ -1103,7 +1105,7 @@ pub(super) fn prepare(
     let local_fee = super::local_fee::LocalFeeControl::start(
         local_fee_mode,
         std::env::var_os("P0_PROJECT_DIR").map(std::path::PathBuf::from),
-        &run_id,
+        Some(fee_seal_own),
     );
     let mut owner = ShadowOwner {
         metrics: OwnerMetrics {
