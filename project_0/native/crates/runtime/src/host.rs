@@ -216,16 +216,17 @@ pub fn thermal_pressure() -> Option<u64> {
 
 pub use darkbot_common::qos::ThreadRole;
 
-/// Installs this process's QoS hook (`darkbot_common::qos`) over the kernel's call — at a
-/// binary's start, and by the first `set_thread_qos` (the first installation stays).
+/// Installs this process's QoS hook (`darkbot_common::qos`) over the kernel's call: only a
+/// production binary's composition root does, first thing in `main` (the first installation
+/// stays) — a library or a test process never changes the classes of its threads (gate
+/// 8be8474f: a test's writer under UTILITY missed its 50 ms stall budget under the gate's load).
 pub fn install_qos() {
     darkbot_common::qos::install(|role| sys::set_qos(role).is_ok());
 }
 
-/// The calling thread enters `role` (its QoS class; a refusal is counted, the thread keeps its
-/// default).
+/// The calling thread enters `role`: its QoS class through the installed hook (none: kept; a
+/// refusal is counted).
 pub fn set_thread_qos(role: ThreadRole) {
-    install_qos();
     darkbot_common::qos::enter(role);
 }
 
@@ -466,7 +467,8 @@ mod tests {
         assert!(low_power_mode().is_some() && thermal_pressure().is_some());
     }
 
-    /// A thread's role sets its QoS class (read back from the kernel).
+    /// The platform call sets a role's QoS class (read back from the kernel) — on a thread of its
+    /// own, without installing the process's hook (no other test's thread changes class).
     #[cfg(target_os = "macos")]
     #[test]
     fn a_thread_role_sets_its_qos_class() {
@@ -477,9 +479,8 @@ mod tests {
             ),
             (ThreadRole::Evidence, libc::qos_class_t::QOS_CLASS_UTILITY),
         ] {
-            let refused = qos_refusals();
             let got = std::thread::spawn(move || {
-                set_thread_qos(role);
+                sys::set_qos(role).unwrap();
                 let mut class = libc::qos_class_t::QOS_CLASS_UNSPECIFIED;
                 let mut priority = 0;
                 // SAFETY: this thread's own handle and out values it owns.
@@ -491,7 +492,6 @@ mod tests {
             .join()
             .unwrap();
             assert_eq!(got as u32, class as u32, "{role:?}");
-            assert_eq!(qos_refusals(), refused);
         }
     }
 }

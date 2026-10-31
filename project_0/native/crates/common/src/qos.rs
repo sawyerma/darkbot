@@ -1,9 +1,10 @@
 //! P6-MT.12: the QoS class of a thread by its role (PHASENPLAN: Owner/Ingress/FAST/Remote
 //! USER_INITIATED, Evidence UTILITY; no claimed P-/E-core affinity). Every thread of a role
 //! enters it at its start — in every crate, tokio workers through `on_thread_start` — and the
-//! platform hook the process installs once (`install`: the runtime's, over the kernel's QoS call)
-//! sets the class; without a hook (a tool, a test) a thread keeps its default. This crate stays
-//! without dependencies: the hook is the platform's. A refusal is counted (`refusals`).
+//! platform hook a production binary installs once, first thing in `main` (`install`: the
+//! runtime's, over the kernel's QoS call), sets the class; without a hook (a tool, a test
+//! process) a thread keeps its default. This crate stays without dependencies: the hook is the
+//! platform's. A refusal is counted (`refusals`).
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
