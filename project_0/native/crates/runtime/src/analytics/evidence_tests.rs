@@ -43,6 +43,8 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
     let worker_gate = gate.clone();
     let syncs = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let counted = syncs.clone();
+    let queued = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let taken = queued.clone();
     let worker = std::thread::spawn(move || {
         worker_gate.wait();
         run_writer(
@@ -52,7 +54,10 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
             rx,
             terminal_rx,
             std::time::Duration::from_secs(60),
-            counted,
+            WriterCounters {
+                syncs: counted,
+                queued: taken,
+            },
         )
     });
     (
@@ -64,6 +69,7 @@ fn paused(dir: &std::path::Path, read_only: bool) -> (OwnerEvidenceWriter, Arc<B
             refused: None,
             admission_error: None,
             syncs,
+            queued,
         },
         gate,
     )

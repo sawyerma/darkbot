@@ -71,6 +71,8 @@ struct State {
     queue: VecDeque<(u64, Workload)>,
     next_ticket: u64,
     active: usize,
+    /// P6-MT.13: the calls in flight per workload (`AdmissionClass` index).
+    active_by: [u64; darkbot_common::mt0::ADMISSION_CLASSES.len()],
     sockets: u64,
     subscriptions: u64,
     tokens: f64,
@@ -170,6 +172,8 @@ pub struct Budget {
 }
 pub struct Permit {
     budget: Arc<Budget>,
+    /// P6-MT.13: its workload, released from its in-flight count with it.
+    class: darkbot_common::mt0::AdmissionClass,
 }
 pub struct SocketPermit {
     budget: Arc<Budget>,
@@ -194,10 +198,13 @@ impl Drop for SocketPermit {
 impl Drop for Permit {
     fn drop(&mut self) {
         let mut s = self.budget.lock_state();
-        if let Some(n) = s.active.checked_sub(1) {
-            s.active = n;
-        } else {
-            s.failed = true;
+        let class = self.class as usize;
+        match (s.active.checked_sub(1), s.active_by[class].checked_sub(1)) {
+            (Some(n), Some(by)) => {
+                s.active = n;
+                s.active_by[class] = by;
+            }
+            _ => s.failed = true,
         }
         self.budget.changed.notify_all();
     }
@@ -262,6 +269,7 @@ impl Budget {
                 queue: VecDeque::new(),
                 next_ticket: 0,
                 active: 0,
+                active_by: [0; darkbot_common::mt0::ADMISSION_CLASSES.len()],
                 sockets: 0,
                 subscriptions: 0,
                 tokens: config.limits.rpc_burst as f64,
@@ -358,7 +366,10 @@ impl Budget {
     }
     /// Grants a permit: one token, one in-flight slot, the workload's next pacing time.
     fn grant(self: &Arc<Self>, s: &mut State, work: Workload, now: Instant) -> Permit {
+        let class = work.admission_class();
         s.active += 1;
+        s.active_by[class as usize] += 1;
+        darkbot_common::mt0::MT0.record_admission_inflight(class, s.active_by[class as usize]);
         s.requests += 1;
         s.tokens -= 1.0;
         let rate = match work {
@@ -376,6 +387,7 @@ impl Budget {
         self.changed.notify_all();
         Permit {
             budget: self.clone(),
+            class,
         }
     }
     /// V2-07: the permit without waiting — only before `deadline`, when no admission is queued
@@ -410,6 +422,21 @@ impl Budget {
         deadline: Instant,
         shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
     ) -> Result<Permit, Refusal> {
+        // P6-MT.13: every refusal of the budget, per workload (a cancellation is none).
+        self.admit_queued(work, deadline, shutdown)
+            .inspect_err(|r| {
+                if r.code != "RPC_ADMISSION_CANCELLED" {
+                    darkbot_common::mt0::MT0.record_admission_denied(work.admission_class());
+                }
+            })
+    }
+
+    fn admit_queued(
+        self: &Arc<Self>,
+        work: Workload,
+        deadline: Instant,
+        shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
+    ) -> Result<Permit, Refusal> {
         let refused = |code: &'static str| Refusal {
             code,
             deadline_bound: false,
@@ -428,6 +455,14 @@ impl Budget {
         let ticket = s.next_ticket;
         s.next_ticket += 1;
         s.queue.push_back((ticket, work));
+        // P6-MT.13: this workload's admissions queued, the new one included.
+        let class = work.admission_class();
+        let queued = s
+            .queue
+            .iter()
+            .filter(|(_, w)| w.admission_class() == class)
+            .count() as u64;
+        darkbot_common::mt0::MT0.record_admission_queue(class, queued);
         loop {
             if let Some(code) = halted(&s) {
                 s.queue.retain(|(t, _)| *t != ticket);
@@ -1200,6 +1235,49 @@ impl DeadlineRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P6-MT.13: the budget records per workload the calls in flight at each grant, its own
+    /// admissions queued at each new one and every refusal (a waiter past its deadline here).
+    #[test]
+    fn p6_mt13_the_budget_records_inflight_queue_depth_and_refusals_per_workload() {
+        use darkbot_common::mt0::{AdmissionClass, MT0};
+        let history = || {
+            MT0.mt13()
+                .admission
+                .into_iter()
+                .find(|a| a.class == AdmissionClass::History.name())
+                .unwrap()
+        };
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        (
+            c.limits.rpc_rps,
+            c.limits.rpc_burst,
+            c.limits.rpc_concurrency,
+        ) = (1_000, 10, 1);
+        c.limits.history_rps = 1_000;
+        let b = Arc::new(Budget::configured(&c));
+        let before = history();
+        let held = b
+            .acquire(Workload::History, Instant::now() + Duration::from_secs(1))
+            .unwrap();
+        // The one slot is held: a second admission queues and is refused at its deadline.
+        assert!(b
+            .acquire(
+                Workload::History,
+                Instant::now() + Duration::from_millis(30)
+            )
+            .is_err());
+        drop(held);
+        let after = history();
+        assert!(after.inflight.count > before.inflight.count, "{after:?}");
+        assert!(after.inflight.max >= Some(1));
+        assert!(
+            after.queue_depth.count > before.queue_depth.count,
+            "{after:?}"
+        );
+        assert!(after.denied > before.denied, "{after:?}");
+    }
+
     /// DEC-16: the byte and call caps bound each window of an unbounded run: an exhausted
     /// window refuses, the next one admits again; the totals stay cumulative.
     #[test]

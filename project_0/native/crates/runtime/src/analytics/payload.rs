@@ -980,6 +980,9 @@ macro_rules! typed_kinds {
                 $f::<crate::orchestration::autostart::Preview>($kind, $schema, $bytes)
             }
             k::HOST_EVIDENCE => $f::<crate::host::HostEvidence>($kind, $schema, $bytes),
+            k::MT13_TELEMETRY => {
+                $f::<crate::analytics::mt13::Mt13Telemetry>($kind, $schema, $bytes)
+            }
             k::FEE_PARITY_SEAL => {
                 $f::<crate::execution::fee_parity::FeeParitySeal>($kind, $schema, $bytes)
             }

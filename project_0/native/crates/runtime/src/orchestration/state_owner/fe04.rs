@@ -605,6 +605,11 @@ impl ShadowOwner {
         // Single flight: an attempt in the held journal blocks every admission; a journal without
         // one (an unused admission of an earlier run, an archived attempt) does not (review H1).
         if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
+            // P6-MT.13: a candidate that needs the wallet another attempt holds is a reservation
+            // conflict (the admission opened ahead of a candidate is none).
+            if target.is_some() {
+                darkbot_common::mt0::MT0.record_reservation_conflict();
+            }
             return Err((format!("FE04_ATTEMPT_HELD:{}", state.name()), true));
         }
         let Some(dir) = self.fe04_journal.clone() else {

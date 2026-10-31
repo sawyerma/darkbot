@@ -265,6 +265,8 @@ pub(super) struct ShadowOwner {
     local_fee: local_fee::LocalFeeControl,
     /// P6-MT.12/13: the host as last journaled (`None`: not yet).
     host_journaled: Option<crate::host::HostEvidence>,
+    /// P6-MT.13: the telemetry as last journaled (`None`: not yet).
+    mt13_journaled: Option<crate::analytics::mt13::Mt13Telemetry>,
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,

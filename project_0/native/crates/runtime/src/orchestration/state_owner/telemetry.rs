@@ -53,8 +53,10 @@ impl ShadowOwner {
             }
             // P6-MT.10: the local fee model's parity counts when they changed (also at shutdown).
             self.fee_parity_record(false);
-            // P6-MT.13: the host's runtime state when it changed (also at shutdown).
+            // P6-MT.13: the host's runtime state and the mandatory telemetry when they changed
+            // (also at shutdown).
             self.host_record();
+            self.mt13_record();
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,
@@ -276,6 +278,27 @@ impl ShadowOwner {
             Some(last) => last.with(crate::host::sample()),
         };
         self.host_journal(host);
+    }
+
+    /// P6-MT.13: samples the signed intents in flight (an attempt held in the FE-04 journal) and
+    /// journals the mandatory telemetry the MT0 snapshot does not carry when it changed.
+    pub(super) fn mt13_record(&mut self) {
+        let live = self
+            .fe04_held
+            .as_ref()
+            .is_some_and(|j| j.step_state().is_some());
+        darkbot_common::mt0::MT0.record_intents_live(u64::from(live));
+        let now = crate::analytics::mt13::Mt13Telemetry::now();
+        if self.mt13_journaled.as_ref() == Some(&now) {
+            return;
+        }
+        if self
+            .evidence
+            .emit(OwnerEvidence::Mt13(Box::new(now.clone())))
+            .is_ok()
+        {
+            self.mt13_journaled = Some(now);
+        }
     }
 
     /// Journals `host` unless it is the last record.

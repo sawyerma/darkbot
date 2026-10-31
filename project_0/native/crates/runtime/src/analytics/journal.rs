@@ -160,6 +160,9 @@ pub mod kind {
     /// P6-MT.12/13: the host a run executes on (`host::HostEvidence`), in the owner journal at its
     /// start and whenever its active CPUs, thermal pressure or low-power mode changed.
     pub const HOST_EVIDENCE: u16 = 601;
+    /// P6-MT.13: the mandatory telemetry the MT0 snapshot does not carry
+    /// (`mt13::Mt13Telemetry`), in the owner journal when it changed.
+    pub const MT13_TELEMETRY: u16 = 602;
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
     /// `boot_network` wire edge and never stored as JSON).
     pub const BOOT_NETWORK: u16 = 710;
@@ -279,6 +282,7 @@ pub mod kind {
         FEE_PARITY_SEAL,
         MT0_SNAPSHOT,
         HOST_EVIDENCE,
+        MT13_TELEMETRY,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,
         BOOT_FLOW,

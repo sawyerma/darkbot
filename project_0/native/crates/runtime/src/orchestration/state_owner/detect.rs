@@ -646,6 +646,21 @@ impl ShadowOwner {
         let simulation_failure = pipe.simulation_failure.take();
         self.blockhash_early = Some(pipe.blockhash_park);
         self.local_fee.after(rec.reason.as_ref());
+        // P6-MT.13: a candidate a budget refused, by its stage and lane.
+        if rec.loss == Some(crate::analytics::record::LossReason::RpcBudget) {
+            use crate::analytics::rejection::Rejection as R;
+            use darkbot_common::mt0::BudgetStage as S;
+            let stage = match &rec.reason {
+                Some(R::RpcBudgetFeeQuote(_)) => Some(S::FeeQuote),
+                Some(R::RpcBudgetSimulation(_)) => Some(S::Simulation),
+                Some(R::RpcBudgetDrain) => Some(S::Network),
+                _ => None,
+            };
+            if let Some(stage) = stage {
+                darkbot_common::mt0::MT0
+                    .record_candidate_budget_denied(stage, identity.lane.map(|l| l as u8));
+            }
+        }
         // P6-MT.1 (MT5b): a ShadowReady (built, signed and simulated; never submitted in
         // Shadow) moves the ownership EXECUTING → SIGNED; every other outcome stays EXECUTING.
         // Both are RELEASED by the owning candidate in `detect`.

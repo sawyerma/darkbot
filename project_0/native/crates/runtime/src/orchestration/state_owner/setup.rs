@@ -1273,6 +1273,7 @@ pub(super) fn prepare(
         fee_parity_mismatches: 0,
         local_fee,
         host_journaled: None,
+        mt13_journaled: None,
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,

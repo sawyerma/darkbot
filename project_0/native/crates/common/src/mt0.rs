@@ -341,6 +341,34 @@ impl AdmissionClass {
     }
 }
 
+/// P6-MT.13: the stage of a candidate a budget refused — the owner's network budget before any
+/// remote work, its fee quote, its simulation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BudgetStage {
+    Network,
+    FeeQuote,
+    Simulation,
+}
+
+pub const BUDGET_STAGES: [BudgetStage; 3] = [
+    BudgetStage::Network,
+    BudgetStage::FeeQuote,
+    BudgetStage::Simulation,
+];
+
+impl BudgetStage {
+    pub fn name(self) -> &'static str {
+        match self {
+            BudgetStage::Network => "network",
+            BudgetStage::FeeQuote => "fee_quote",
+            BudgetStage::Simulation => "simulation",
+        }
+    }
+}
+
+/// P6-MT.13: the candidate lanes L0–L2 (P6-MT.5) and a candidate of none (its index 3).
+pub const LANE_NAMES: [&str; 4] = ["L0", "L1", "L2", "none"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HealthSite {
     Sweep,
@@ -401,6 +429,8 @@ pub const SUSPECTED_RETRY_LATENCY_NS: u64 = 500_000_000;
 const HIST: Hist = Hist::new();
 #[allow(clippy::declare_interior_mutable_const)]
 const OUTCOME_ROW: [AtomicU64; REMOTE_OUTCOMES] = [ZERO; REMOTE_OUTCOMES];
+#[allow(clippy::declare_interior_mutable_const)]
+const LANE_ROW: [AtomicU64; 4] = [ZERO; 4];
 
 pub struct Registry {
     owner_ns: [AtomicU64; 6],
@@ -420,6 +450,19 @@ pub struct Registry {
     core_stage_allocations: [Hist; 5],
     /// S4-04: the wait of every RPC budget admission, per workload.
     admission_wait: [Hist; 10],
+    /// P6-MT.13: per workload, the admissions queued (its own, at each new one), its calls in
+    /// flight (at each grant) and the admissions the budget refused.
+    admission_queue_depth: [Hist; 10],
+    admission_inflight: [Hist; 10],
+    admission_denied: [AtomicU64; 10],
+    /// P6-MT.13: candidates a budget refused, per stage and lane (`LANE_NAMES`).
+    candidate_budget_denied: [[AtomicU64; 4]; 3],
+    /// P6-MT.13: candidates refused because another attempt held the wallet (single flight).
+    reservation_conflicts: AtomicU64,
+    /// P6-MT.13: the signed intents in flight, sampled on the owner's telemetry tick.
+    intents_live: Hist,
+    /// P6-MT.13: the owner evidence queue's depth at each event handed to it.
+    evidence_queue_depth: Hist,
     health_calls: [AtomicU64; HEALTH_SITES],
     counters: [AtomicU64; COUNTERS],
     pending_current: AtomicU64,
@@ -448,6 +491,13 @@ impl Registry {
             core_stage_ns: [HIST; 5],
             core_stage_allocations: [HIST; 5],
             admission_wait: [HIST; 10],
+            admission_queue_depth: [HIST; 10],
+            admission_inflight: [HIST; 10],
+            admission_denied: [ZERO; 10],
+            candidate_budget_denied: [LANE_ROW; 3],
+            reservation_conflicts: ZERO,
+            intents_live: Hist::new(),
+            evidence_queue_depth: Hist::new(),
             health_calls: [ZERO; HEALTH_SITES],
             counters: [ZERO; COUNTERS],
             pending_current: ZERO,
@@ -612,6 +662,73 @@ impl Registry {
         self.admission_wait[class as usize].snapshot()
     }
 
+    /// P6-MT.13: `depth` admissions of `class` queued, the new one included.
+    pub fn record_admission_queue(&self, class: AdmissionClass, depth: u64) {
+        self.admission_queue_depth[class as usize].record(depth);
+    }
+
+    /// P6-MT.13: `inflight` calls of `class` in flight, the one just granted included.
+    pub fn record_admission_inflight(&self, class: AdmissionClass, inflight: u64) {
+        self.admission_inflight[class as usize].record(inflight);
+    }
+
+    /// P6-MT.13: the budget refused an admission of `class` (a cancellation is none).
+    pub fn record_admission_denied(&self, class: AdmissionClass) {
+        self.admission_denied[class as usize].fetch_add(1, Relaxed);
+    }
+
+    /// P6-MT.13: a candidate of lane `lane` (0–2; `None`: of none) refused at `stage`.
+    pub fn record_candidate_budget_denied(&self, stage: BudgetStage, lane: Option<u8>) {
+        let lane = lane.map_or(3, |l| usize::from(l).min(2));
+        self.candidate_budget_denied[stage as usize][lane].fetch_add(1, Relaxed);
+    }
+
+    /// P6-MT.13: a candidate refused because another attempt held the wallet.
+    pub fn record_reservation_conflict(&self) {
+        self.reservation_conflicts.fetch_add(1, Relaxed);
+    }
+
+    /// P6-MT.13: the signed intents in flight now.
+    pub fn record_intents_live(&self, n: u64) {
+        self.intents_live.record(n);
+    }
+
+    /// P6-MT.13: the owner evidence queue's depth after an event was handed to it.
+    pub fn record_evidence_queue_depth(&self, depth: u64) {
+        self.evidence_queue_depth.record(depth);
+    }
+
+    /// P6-MT.13: what the MT0 snapshot does not carry, cumulative since the process started.
+    pub fn mt13(&self) -> Mt13Snapshot {
+        Mt13Snapshot {
+            admission: ADMISSION_CLASSES
+                .iter()
+                .map(|c| AdmissionSnapshot {
+                    class: c.name(),
+                    wait_ns: self.admission_wait[*c as usize].snapshot(),
+                    queue_depth: self.admission_queue_depth[*c as usize].snapshot(),
+                    inflight: self.admission_inflight[*c as usize].snapshot(),
+                    denied: self.admission_denied[*c as usize].load(Relaxed),
+                })
+                .collect(),
+            candidate_budget_denied: BUDGET_STAGES
+                .iter()
+                .flat_map(|stage| {
+                    LANE_NAMES.iter().enumerate().map(|(i, lane)| {
+                        (
+                            stage.name(),
+                            *lane,
+                            self.candidate_budget_denied[*stage as usize][i].load(Relaxed),
+                        )
+                    })
+                })
+                .collect(),
+            reservation_conflicts: self.reservation_conflicts.load(Relaxed),
+            intents_live: self.intents_live.snapshot(),
+            evidence_queue_depth: self.evidence_queue_depth.snapshot(),
+        }
+    }
+
     pub fn count_health(&self, site: HealthSite) {
         self.health_calls[site as usize].fetch_add(1, Relaxed);
     }
@@ -722,6 +839,27 @@ impl Registry {
     pub fn snapshot_json(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> String {
         self.snapshot(unix_s, now_ns, duty).json()
     }
+}
+
+/// P6-MT.13: one RPC budget workload's admissions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdmissionSnapshot {
+    pub class: &'static str,
+    pub wait_ns: HistSnapshot,
+    pub queue_depth: HistSnapshot,
+    pub inflight: HistSnapshot,
+    pub denied: u64,
+}
+
+/// P6-MT.13: the mandatory telemetry the MT0 snapshot does not carry (`Registry::mt13`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mt13Snapshot {
+    pub admission: Vec<AdmissionSnapshot>,
+    /// Per stage and lane: the candidates a budget refused.
+    pub candidate_budget_denied: Vec<(&'static str, &'static str, u64)>,
+    pub reservation_conflicts: u64,
+    pub intents_live: HistSnapshot,
+    pub evidence_queue_depth: HistSnapshot,
 }
 
 /// `num / den` measured exactly; `None` (JSON `null`) when the denominator is zero.
@@ -1095,6 +1233,67 @@ pub fn spawn_reporter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P6-MT.13: the registry's mandatory telemetry — per workload the admissions queued, the
+    /// calls in flight, the refusals and the waits; the candidates refused per stage and lane (a
+    /// lane beyond L2 is L2, a candidate of none its own); conflicts, intents in flight and the
+    /// evidence queue depth.
+    #[test]
+    fn the_mt13_telemetry_is_recorded_per_workload_stage_and_lane() {
+        static REG: Registry = Registry::new();
+        REG.record_admission_queue(AdmissionClass::FeeQuote, 3);
+        REG.record_admission_inflight(AdmissionClass::FeeQuote, 2);
+        REG.record_admission_denied(AdmissionClass::FeeQuote);
+        REG.record_admission_wait(AdmissionClass::FeeQuote, 7);
+        REG.record_candidate_budget_denied(BudgetStage::Simulation, Some(1));
+        REG.record_candidate_budget_denied(BudgetStage::Network, None);
+        REG.record_candidate_budget_denied(BudgetStage::Network, Some(9));
+        REG.record_reservation_conflict();
+        REG.record_intents_live(1);
+        REG.record_evidence_queue_depth(5);
+        let m = REG.mt13();
+        let fee = m.admission.iter().find(|a| a.class == "fee_quote").unwrap();
+        assert_eq!(
+            (
+                fee.queue_depth.count,
+                fee.queue_depth.max,
+                fee.inflight.max,
+                fee.denied,
+                fee.wait_ns.count
+            ),
+            (1, Some(3), Some(2), 1, 1)
+        );
+        assert!(m
+            .admission
+            .iter()
+            .filter(|a| a.class != "fee_quote")
+            .all(|a| a.denied == 0 && a.queue_depth.count == 0 && a.inflight.count == 0));
+        let denied = |stage: &str, lane: &str| {
+            m.candidate_budget_denied
+                .iter()
+                .find(|(s, l, _)| *s == stage && *l == lane)
+                .unwrap()
+                .2
+        };
+        assert_eq!(
+            (
+                denied("simulation", "L1"),
+                denied("network", "none"),
+                denied("network", "L2"),
+                denied("fee_quote", "L0")
+            ),
+            (1, 1, 1, 0)
+        );
+        assert_eq!(m.candidate_budget_denied.len(), 12);
+        assert_eq!(
+            (
+                m.reservation_conflicts,
+                m.intents_live.max,
+                m.evidence_queue_depth.max
+            ),
+            (1, Some(1), Some(5))
+        );
+    }
 
     /// Racing owner-section writers (several owners in one test process) leave the seqlock
     /// even, the booked time exact, and a reader never spins.

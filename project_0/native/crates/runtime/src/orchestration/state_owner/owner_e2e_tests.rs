@@ -175,6 +175,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fee_parity_mismatches: 0,
         local_fee: super::local_fee::LocalFeeControl::start(Default::default(), None, None),
         host_journaled: None,
+        mt13_journaled: None,
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -9394,4 +9395,91 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
     );
     assert!(records.len() >= 3, "back to the kernel's own: {records:?}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// P6-MT.13: the mandatory telemetry the MT0 snapshot does not carry, from the owner's own call
+/// sites — a candidate the owner's network budget refused counts in its stage, before any
+/// remote work; every event handed to the evidence writer records the queue's depth; a candidate
+/// that needs the wallet a sent attempt holds is a reservation conflict; the signed intents in
+/// flight are sampled; the record is journaled when it changed (`MT13_TELEMETRY`) and decodes.
+/// (MT0 is the process's: other tests count into it too, so only increases are asserted.)
+#[test]
+fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
+    use crate::analytics::mt13::Mt13Telemetry;
+    use crate::analytics::payload::{decode, Payload};
+    use darkbot_common::mt0::{Mt13Snapshot, MT0};
+    let network = |m: &Mt13Snapshot| {
+        m.candidate_budget_denied
+            .iter()
+            .filter(|(stage, _, _)| *stage == "network")
+            .map(|(_, _, n)| n)
+            .sum::<u64>()
+    };
+    // Shadow, the owner's network budget exhausted.
+    let (mut f, target, calls) = dec13b_fixture("p6_mt13_budget", false);
+    f.owner.network = crate::execution::pipeline::NetworkBudget::new(0, u64::MAX);
+    let before = MT0.mt13();
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    let after = MT0.mt13();
+    assert!(
+        network(&after) > network(&before),
+        "{:?}",
+        after.candidate_budget_denied
+    );
+    assert!(
+        !calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c == "getFeeForMessage" || c == "simulateTransaction"),
+        "no remote work"
+    );
+    assert!(after.evidence_queue_depth.count > before.evidence_queue_depth.count);
+    f.owner.mt13_record();
+    let journaled = f.owner.mt13_journaled.clone().expect("journaled");
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = Vec::new();
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == Mt13Telemetry::KIND {
+            records
+                .push(decode::<Mt13Telemetry>(frame.kind, frame.schema, &frame.payload).unwrap());
+        }
+    }
+    assert!(records.contains(&journaled), "{}", records.len());
+    assert!(records.windows(2).all(|w| w[0] != w[1]));
+    let _ = std::fs::remove_dir_all(dir);
+
+    // LIVE: the sent attempt holds the wallet; another candidate's admission is a conflict.
+    let (mut f, target, calls) = dec13b_fixture("p6_mt13_conflict", true);
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| *c == "sendTransaction")
+            .count(),
+        1
+    );
+    let before = MT0.mt13();
+    let other = Pubkey::new_unique();
+    assert!(f
+        .owner
+        .fe04_admission_facts(Some(&other))
+        .err()
+        .is_some_and(|(reason, _)| reason.starts_with("FE04_ATTEMPT_HELD")));
+    assert!(MT0.mt13().reservation_conflicts > before.reservation_conflicts);
+    f.owner.mt13_record();
+    let after = MT0.mt13().intents_live;
+    assert!(after.count > before.intents_live.count && after.max >= Some(1));
+    cleanup(f);
 }

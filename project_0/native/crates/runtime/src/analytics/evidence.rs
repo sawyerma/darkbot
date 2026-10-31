@@ -279,6 +279,8 @@ pub enum OwnerEvidence {
     FeeParityMismatch(Box<crate::execution::fee_parity::FeeParityStatsRecord>),
     /// P6-MT.12/13: the host at the run's start and after a change of its runtime state.
     Host(Box<crate::host::HostEvidence>),
+    /// P6-MT.13: the mandatory telemetry the MT0 snapshot does not carry, when it changed.
+    Mt13(Box<super::mt13::Mt13Telemetry>),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -461,6 +463,7 @@ impl OwnerEvidence {
                 Encoded::of(v.as_ref(), None, None)
             }
             Self::Host(v) => Encoded::of(v.as_ref(), None, None),
+            Self::Mt13(v) => Encoded::of(v.as_ref(), None, None),
         }
     }
 }
@@ -520,6 +523,8 @@ pub struct OwnerEvidenceWriter {
     refused: Option<OwnerEvidence>,
     admission_error: Option<&'static str>,
     syncs: Arc<AtomicU64>,
+    /// P6-MT.13: events handed to the writer and not yet taken by it (`evidence_queue_depth`).
+    queued: Arc<AtomicU64>,
 }
 impl OwnerEvidenceWriter {
     /// `sync_interval` (M2): the journal is synced at least this often, also without new events,
@@ -585,6 +590,8 @@ impl OwnerEvidenceWriter {
         let signal = failed.clone();
         let syncs = Arc::new(AtomicU64::new(0));
         let counted = syncs.clone();
+        let queued = Arc::new(AtomicU64::new(0));
+        let taken = queued.clone();
         let worker = std::thread::Builder::new()
             .name("p0-owner-evidence".into())
             .spawn(move || {
@@ -596,7 +603,10 @@ impl OwnerEvidenceWriter {
                     rx,
                     terminal_rx,
                     sync_interval,
-                    counted,
+                    WriterCounters {
+                        syncs: counted,
+                        queued: taken,
+                    },
                 )
             })?;
         Ok(Self {
@@ -607,6 +617,7 @@ impl OwnerEvidenceWriter {
             refused: None,
             admission_error: None,
             syncs,
+            queued,
         })
     }
     /// Periodic journal syncs completed so far (M2).
@@ -637,16 +648,22 @@ impl OwnerEvidenceWriter {
             self.admission_error = Some(e.0);
             return Err(e);
         }
+        // P6-MT.13: counted before the hand-off (the writer's take always follows it).
+        let depth = self.queued.fetch_add(1, Ordering::AcqRel) + 1;
         let failure = match self
             .tx
             .as_ref()
             .expect("checked open")
             .try_send(Msg::Event(event))
         {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                darkbot_common::mt0::MT0.record_evidence_queue_depth(depth);
+                return Ok(());
+            }
             Err(mpsc::TrySendError::Full(m)) => ("OWNER_EVIDENCE_OVERFLOW", m),
             Err(mpsc::TrySendError::Disconnected(m)) => ("OWNER_EVIDENCE_DISCONNECTED", m),
         };
+        self.queued.fetch_sub(1, Ordering::AcqRel);
         self.admission_error = Some(failure.0);
         self.refused = failure.1.into_event();
         Err(failure.0.into())
@@ -839,6 +856,13 @@ impl Sink {
         Ok(())
     }
 }
+/// The writer thread's counters the owner reads: its periodic syncs (M2) and the events handed
+/// to it it has not taken yet (P6-MT.13 `evidence_queue_depth`).
+struct WriterCounters {
+    syncs: Arc<AtomicU64>,
+    queued: Arc<AtomicU64>,
+}
+
 fn run_writer(
     journal: SegmentedWriter,
     recovery: PathBuf,
@@ -846,8 +870,9 @@ fn run_writer(
     rx: mpsc::Receiver<Msg>,
     terminal_rx: mpsc::Receiver<Terminal>,
     sync_interval: Duration,
-    syncs: Arc<AtomicU64>,
+    counters: WriterCounters,
 ) -> Result<(), &'static str> {
+    let WriterCounters { syncs, queued } = counters;
     let mut sink = Sink {
         journal,
         recovery,
@@ -862,6 +887,7 @@ fn run_writer(
     loop {
         match rx.recv_timeout(next_sync.saturating_duration_since(Instant::now())) {
             Ok(Msg::Event(event)) => {
+                queued.fetch_sub(1, Ordering::AcqRel);
                 let at_once = event.sync_at_once();
                 sink.write(event);
                 if at_once {
