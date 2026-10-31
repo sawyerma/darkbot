@@ -809,18 +809,44 @@ impl Journal {
     }
 }
 
-/// The hold of the open exit (reserved or UNKNOWN), for the reservation book.
-pub(super) fn exit_hold(s: &Saved) -> Option<super::ActiveHold> {
-    active(s)
-        .filter(|e| matches!(e.phase, ExitPhase::Reserved | ExitPhase::HandoffUnknown))
-        .map(|e| super::ActiveHold {
-            attempt: e.approval.approval_id.clone(),
-            target: e.intent.mint.clone(),
-            unknown_outcome: e.phase == ExitPhase::HandoffUnknown,
-            holds: e.intent.holds(),
-            signature: e.intent.signatures.first().cloned(),
-            last_valid_block_height: Some(e.intent.last_valid_block_height),
+/// The hold of the open exit (reserved or UNKNOWN), with the attempt's exit reserve, for the
+/// reservation book.
+pub(super) fn exit_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHold> {
+    let e =
+        active(s).filter(|e| matches!(e.phase, ExitPhase::Reserved | ExitPhase::HandoffUnknown))?;
+    Some(super::ActiveHold {
+        attempt: e.approval.approval_id.clone(),
+        target: e.intent.mint.clone(),
+        unknown_outcome: e.phase == ExitPhase::HandoffUnknown,
+        holds: super::held_with_exit_reserve(&e.intent.holds(), exit_reserve)?,
+        signature: e.intent.signatures.first().cloned(),
+        last_valid_block_height: Some(e.intent.last_valid_block_height),
+    })
+}
+
+/// P8-CTRL.5/P8-RES-02: the open positions of a settled attempt — the units of every open mint —
+/// and its exit reserve, held until they are exited (`None`: nothing stays open). The position
+/// is held under the attempt's id with the first open mint as its target, as an exit's (a mint
+/// is no MarginfiAccount: no candidate is ever deferred by it).
+pub(super) fn position_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHold> {
+    let units: BTreeMap<String, u64> = open_positions(s)
+        .into_iter()
+        .filter_map(|(mint, p)| {
+            u64::try_from(p.units)
+                .ok()
+                .filter(|u| *u > 0)
+                .map(|u| (mint, u))
         })
+        .collect();
+    let target = units.keys().next()?.clone();
+    Some(super::ActiveHold {
+        attempt: s.approval.approval_id.clone(),
+        target,
+        unknown_outcome: false,
+        holds: super::held_with_exit_reserve(&units, exit_reserve)?,
+        signature: None,
+        last_valid_block_height: None,
+    })
 }
 
 /// What the safety layer books for every settled exit, in its own booking day: realized net,
@@ -1342,6 +1368,12 @@ pub(crate) mod tests {
             )]
             .into()
         );
+        // P8-CTRL.5 (WP1): the settled attempt's open position is held until it is exited.
+        let position = j.active_hold().unwrap();
+        assert_eq!(
+            (position.holds, position.target.as_str()),
+            ([(mint.clone(), 1_000u64)].into(), mint.as_str())
+        );
         let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
         j.reserve_exit(ea, ei.clone(), &c).unwrap();
         let hold = j.active_hold().unwrap();
@@ -1547,6 +1579,11 @@ pub(crate) mod tests {
         );
         assert_eq!(j.open_inventory()[&mint].units, 1_000);
         assert_eq!(j.safety_replay().unwrap().exits.len(), 2);
+        // P8-CTRL.5 (WP1): after a failed and a not-landed exit the position is held again.
+        assert_eq!(
+            j.active_hold().unwrap().holds,
+            [(mint.clone(), 1_000u64)].into()
+        );
         drop(j);
         fs::remove_dir_all(path).unwrap();
     }

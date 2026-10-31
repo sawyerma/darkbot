@@ -2950,7 +2950,12 @@ fn c3_settlement_day_is_the_same_in_the_run_and_after_a_restart_across_midnight(
         // The restart at `restart`.
         let mut restarted = Safety::new(e2e_limits(), Allow::default(), false);
         let again = start(&mut restarted, restart);
-        assert!(again.unbooked.is_none() && again.book.is_empty());
+        // P8-CTRL.6: booked once; its open position stays held across the restart (no exit yet).
+        assert!(again.unbooked.is_none());
+        assert_eq!(
+            (again.book.held("MINT"), again.book.held("SOL")),
+            (1_000, 0)
+        );
         let ledger = |s: &Safety| (s.capital_in_use(), s.inventory_outstanding(), s.day());
         assert_eq!(
             ledger(&restarted),
@@ -7466,7 +7471,7 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
     };
     let methods = |calls: &Arc<Mutex<Vec<String>>>| calls.lock().unwrap().clone();
     let (mut f, target, calls) = dec13b_fixture("p8ctrl03_bound", true);
-    p8ctrl03_scoped(&mut f, &[], |_| {});
+    p8ctrl03_scoped(&mut f, &[("max_exit_cost_lamports", "123456")], |_| {});
     assert!(f.owner.live_effective());
     detect(&mut f, target);
     assert_eq!(
@@ -7479,6 +7484,12 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         methods(&calls),
         f.owner.fe04_admissions
     );
+    // P8-CTRL.5 (WP1): the attempt holds its SOL debit and, beside it, the grant's exit reserve.
+    let held = f.owner.fe04_held.as_ref().unwrap();
+    let debit = held.attempt_records().unwrap()[0]
+        .sol_debit_lamports
+        .unwrap();
+    assert_eq!(held.holds()["SOL"], debit + 123_456);
     cleanup(f);
     // What runs differs: no real signature at all.
     type Edit = Box<dyn FnOnce(&mut crate::orchestration::fe06::Running)>;

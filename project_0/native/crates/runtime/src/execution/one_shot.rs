@@ -237,6 +237,11 @@ struct Saved {
     /// reservation before any dispatch (`None`: no grant, or a frame before P8-CTRL).
     #[serde(default)]
     fe06: Option<Fe06Attempt>,
+    /// P8-CTRL.5/.6 (schema 10): the separate exit reserve the reservation holds besides the
+    /// attempt's own SOL — its grant's maximal exit cost — until no position of the attempt
+    /// stays open (`None`: a frame before schema 10, which reserved none).
+    #[serde(default)]
+    exit_reserve_lamports: Option<u64>,
 }
 
 /// P8-CTRL.5: an attempt's booking against its FE-06 grant — the grant's digest, its campaign,
@@ -405,6 +410,37 @@ pub fn fe06_attempts_report(
     out
 }
 
+/// Schema-9 layout of `Saved` (the exits' own grant booking, before the exit reserve).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV9 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    exits: Vec<exit::ExitAttempt>,
+    non_landing: Option<non_landing::NonLandingRelease>,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+    fe06: Option<Fe06Attempt>,
+}
+impl From<SavedV9> for Saved {
+    fn from(v: SavedV9) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: v.exits,
+            non_landing: v.non_landing,
+            hold: v.hold,
+            fe06: v.fe06,
+            exit_reserve_lamports: None,
+        }
+    }
+}
+
 /// Schema-8 layout of `Saved` (the attempt's grant booking, before the exits' own).
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]
@@ -431,6 +467,7 @@ impl From<SavedV8> for Saved {
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: v.fe06,
+            exit_reserve_lamports: None,
         }
     }
 }
@@ -460,6 +497,7 @@ impl From<SavedV7> for Saved {
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: None,
+            exit_reserve_lamports: None,
         }
     }
 }
@@ -506,6 +544,7 @@ impl TryFrom<SavedV2> for Saved {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         })
     }
 }
@@ -532,6 +571,7 @@ impl TryFrom<SavedV3> for Saved {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         })
     }
 }
@@ -557,6 +597,7 @@ impl From<SavedV4> for Saved {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         }
     }
 }
@@ -584,6 +625,7 @@ impl From<SavedV6> for Saved {
             non_landing: v.non_landing,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         }
     }
 }
@@ -610,6 +652,7 @@ impl From<SavedV5> for Saved {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         }
     }
 }
@@ -746,10 +789,17 @@ struct VersionV8 {
     transition: Transition,
     state: SavedV8,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV9 {
+    transition: Transition,
+    state: SavedV9,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking; 9 — each exit's own.
-    const SCHEMA: u16 = 9;
+    /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking; 9 — each exit's own; 10 — the
+    /// separate exit reserve.
+    const SCHEMA: u16 = 10;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -782,6 +832,10 @@ impl crate::analytics::payload::Payload for Version {
                 state: v.state.into(),
             })),
             8 => Some(decode_wire::<VersionV8>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            9 => Some(decode_wire::<VersionV9>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -833,9 +887,15 @@ struct LegacyImportV8 {
     legacy_sha256: String,
     state: SavedV8,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct LegacyImportV9 {
+    legacy_sha256: String,
+    state: SavedV9,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 9;
+    const SCHEMA: u16 = 10;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -868,6 +928,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 state: v.state.into(),
             })),
             8 => Some(decode_wire::<LegacyImportV8>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            9 => Some(decode_wire::<LegacyImportV9>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -1158,7 +1222,7 @@ pub(crate) fn test_unknown_attempt_held(
     a.wallet = wallet.into();
     i.wallet = wallet.into();
     let mut j = Journal::open(dir, wallet).unwrap();
-    j.reserve_held(a, i.clone(), &c, hold, None).unwrap();
+    j.reserve_held(a, i.clone(), &c, hold, None, 0).unwrap();
     j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
     i
 }
@@ -1310,7 +1374,7 @@ impl Journal {
     }
     #[cfg(test)]
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
-        self.reserve_held(approval, intent, now, None, None)
+        self.reserve_held(approval, intent, now, None, None, 0)
     }
     /// P8-CTRL.5: the held attempt's FE-06 booking (`None`: none held, or booked under none).
     pub fn attempt_booking(&self) -> Option<&Fe06Attempt> {
@@ -1342,6 +1406,7 @@ impl Journal {
         now: &Current,
         hold: Option<crate::execution::hold_b::HoldEvidence>,
         fe06: Option<Fe06Attempt>,
+        exit_reserve_lamports: u64,
     ) -> Result<(), String> {
         if self.saved.is_some() {
             return Err(err("ONE_SHOT_ALREADY_CONSUMED_OR_UNKNOWN"));
@@ -1351,7 +1416,7 @@ impl Journal {
         }
         // FE-04 archive: an approval authorizes one attempt, never a second after archiving.
         archive::single_use(&self.directory, &self.wallet, &approval.approval_id)?;
-        validate(&approval, &intent, now)?;
+        validate(&approval, &intent, exit_reserve_lamports, now)?;
         self.persist(
             Saved {
                 approval,
@@ -1363,6 +1428,7 @@ impl Journal {
                 non_landing: None,
                 hold,
                 fe06,
+                exit_reserve_lamports: Some(exit_reserve_lamports),
             },
             Transition::Reserve,
         )
@@ -1382,7 +1448,11 @@ impl Journal {
         if s.intent.signed_wire_sha256 != wire_sha256 {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
-        validate(&s.approval, &s.intent, now)?;
+        // A reservation before schema 10 reserved no exit cost: never handed off (fail closed).
+        let exit_reserve = s
+            .exit_reserve_lamports
+            .ok_or_else(|| err("FE04_EXIT_RESERVE_UNKNOWN"))?;
+        validate(&s.approval, &s.intent, exit_reserve, now)?;
         s.phase = Phase::HandoffUnknown;
         self.persist(s, Transition::Handoff)?; // durable BEFORE any possible acceptance; errors retain holds
         send()
@@ -1414,19 +1484,26 @@ impl Journal {
         s.finalized = Some(receipts);
         self.persist(s, Transition::Finalize)
     }
-    /// P8-RES-02: the attempt this journal still holds — reserved, or handed off with an UNKNOWN
-    /// outcome — or else its open exit, to rebuild the global reservation book after a restart;
-    /// `None` once finalized.
+    /// P8-RES-02/P8-CTRL.5: what this journal still holds, to rebuild the global reservation book
+    /// after a restart — the attempt (reserved, handed off with an UNKNOWN outcome, or landed and
+    /// finalized until its settlement books it) with its exit reserve; once settled, the exit in
+    /// flight (reserved or UNKNOWN), else its open positions, each with the exit reserve; `None`
+    /// once no position stays open, or for a proven non-landing (nothing landed: released at its
+    /// proof, DEC-03). A settlement releases the attempt's holds exactly once.
     pub fn active_hold(&self) -> Option<ActiveHold> {
         let s = self.saved.as_ref()?;
-        if s.phase.finalized() {
-            return exit::exit_hold(s);
+        let reserve = s.exit_reserve_lamports.unwrap_or(0);
+        if matches!(s.phase, Phase::Settled(_)) {
+            return exit::exit_hold(s, reserve).or_else(|| exit::position_hold(s, reserve));
+        }
+        if s.phase == Phase::HaltFinalized && s.non_landing.is_some() {
+            return None;
         }
         Some(ActiveHold {
             attempt: s.approval.approval_id.clone(),
             target: s.intent.target.clone(),
             unknown_outcome: s.phase == Phase::HandoffUnknown,
-            holds: s.intent.holds.clone(),
+            holds: held_with_exit_reserve(&s.intent.holds, reserve)?,
             signature: s.intent.signatures.first().cloned(),
             last_valid_block_height: s.intent.last_valid_block_height,
         })
@@ -1478,7 +1555,22 @@ fn well_formed(a: &Approval) -> bool {
         || a.max_slippage_bps > 10_000)
 }
 
-fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
+/// P8-CTRL.5: `holds` with the separate exit reserve added to their SOL (`None`: overflow).
+fn held_with_exit_reserve(
+    holds: &BTreeMap<String, u64>,
+    exit_reserve: u64,
+) -> Option<BTreeMap<String, u64>> {
+    let mut out = holds.clone();
+    if exit_reserve > 0 {
+        let sol = out.entry("SOL".to_string()).or_insert(0);
+        *sol = sol.checked_add(exit_reserve)?;
+    }
+    Some(out)
+}
+
+/// `exit_reserve`: the separate exit reserve held with the attempt's SOL (P8-CTRL.5): the free
+/// SOL must carry both.
+fn validate(a: &Approval, i: &Intent, exit_reserve: u64, c: &Current) -> Result<(), String> {
     if !well_formed(a) {
         return Err(err("INVALID_OR_UNAUTHORIZED_APPROVAL"));
     }
@@ -1550,11 +1642,13 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
             .any(|k| k != "SOL" && !key(k))
         || i.holds.get("SOL").copied().unwrap_or(0) < debit
         || i.holds.keys().any(|k| k != "SOL" && !key(k))
-        || i.holds.iter().any(|(mint, n)| {
-            c.balances.get(mint).is_none_or(|balance| {
-                let elsewhere = c.reserved_elsewhere.get(mint).copied().unwrap_or(0);
-                let reserve = c.policy_reserve.get(mint).copied().unwrap_or(0);
-                balance.saturating_sub(elsewhere.saturating_add(reserve)) < *n
+        || held_with_exit_reserve(&i.holds, exit_reserve).is_none_or(|holds| {
+            holds.iter().any(|(mint, n)| {
+                c.balances.get(mint).is_none_or(|balance| {
+                    let elsewhere = c.reserved_elsewhere.get(mint).copied().unwrap_or(0);
+                    let reserve = c.policy_reserve.get(mint).copied().unwrap_or(0);
+                    balance.saturating_sub(elsewhere.saturating_add(reserve)) < *n
+                })
             })
         })
     {
@@ -1648,6 +1742,7 @@ mod tests {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: None,
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -2055,16 +2150,27 @@ mod tests {
         for e in &mut exit_booked.exits {
             e.fe06 = exit_booked.fe06.clone();
         }
-        let version = Version {
-            transition: Transition::ExitNotLanded,
-            state: exit_booked.clone(),
+        let v9 = |s: &Saved| SavedV9 {
+            approval: s.approval.clone(),
+            intent: s.intent.clone(),
+            phase: s.phase.clone(),
+            finalized: s.finalized.clone(),
+            observations: s.observations.clone(),
+            exits: s.exits.clone(),
+            non_landing: s.non_landing.clone(),
+            hold: s.hold.clone(),
+            fe06: s.fe06.clone(),
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let version = VersionV9 {
+            transition: Transition::ExitNotLanded,
+            state: v9(&exit_booked),
+        };
+        let bytes = crate::analytics::payload::encode_wire(&version).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 9, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitNotLanded, exit_booked)
+            (Transition::ExitNotLanded, exit_booked.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -2074,6 +2180,79 @@ mod tests {
             ),
             "FE04_TRANSITION schema-9 layout changed"
         );
+        // A schema-9 legacy import reads the same state (no exit reserve).
+        let import = LegacyImportV9 {
+            legacy_sha256: "a".repeat(64),
+            state: v9(&exit_booked),
+        };
+        let bytes = crate::analytics::payload::encode_wire(&import).unwrap();
+        let back: LegacyImport =
+            crate::analytics::payload::decode(journal::kind::FE04_LEGACY_IMPORT, 9, &bytes)
+                .unwrap();
+        assert_eq!(back.state, exit_booked);
+        // Schema 10 (P8-CTRL.5/.6) is pinned with the separate exit reserve.
+        let mut reserved = exit_booked;
+        reserved.exit_reserve_lamports = Some(100_000);
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: reserved.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 10, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, reserved)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2484,
+                "3yRjJmKSNENQ2UYenEzn1341ppsW9L6eo2Qo4j2MswH5".to_string()
+            ),
+            "FE04_TRANSITION schema-10 layout changed"
+        );
+    }
+
+    /// P8-CTRL.5/.6 (WP1): the separate exit reserve is held with the attempt — its SOL hold and
+    /// the reserve must both be free at the reservation; the book holds both, across a restart;
+    /// a reservation that recorded no reserve (before schema 10) is never handed off.
+    #[test]
+    fn p8ctrl05_the_exit_reserve_is_held_with_the_attempt() {
+        let (dir, a, i, c) = setup();
+        let free = c.balances["SOL"];
+        let sol = i.holds["SOL"];
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        // One lamport too much for the hold and the reserve: refused, nothing durable.
+        assert_eq!(
+            j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol + 1)
+                .unwrap_err(),
+            err("WALLET_UNDERFUNDED_OR_HOLD_MISSING")
+        );
+        assert!(j.active_hold().is_none());
+        j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol)
+            .unwrap();
+        assert_eq!(j.holds()["SOL"], free);
+        // A reservation that recorded no reserve: never handed off, nothing changes.
+        let durable = j.saved.clone();
+        j.saved.as_mut().unwrap().exit_reserve_lamports = None;
+        assert_eq!(
+            j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap_err(),
+            err("FE04_EXIT_RESERVE_UNKNOWN")
+        );
+        assert_eq!(j.saved.as_ref().unwrap().phase, Phase::Reserved);
+        j.saved = durable;
+        drop(j);
+        let j = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(
+            crate::execution::reservation::WalletReservations::rebuild(j.active_hold())
+                .unwrap()
+                .held("SOL"),
+            free,
+            "across the restart"
+        );
+        drop(j);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// P8-CTRL.3/.5 (review M1): the free SOL is the reconciled SOL less what other attempts hold
@@ -2256,6 +2435,7 @@ mod tests {
             &c,
             None,
             Some(booking("g1", "k1", 10)),
+            0,
         )
         .unwrap();
         assert_eq!(
@@ -2322,10 +2502,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 9 since the P8-CTRL.5 exit booking; schemas 8 … 2 stay readable.
+        // Schema 10 since the P8-CTRL.5 exit reserve; schemas 9 … 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 9)
+            (journal::kind::FE04_TRANSITION, 10)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -2541,7 +2721,7 @@ mod tests {
         let mut book = crate::execution::reservation::WalletReservations::default();
         let other = [("SOL".to_string(), 81)].into_iter().collect();
         book.reserve("other", &other, &c.balances).unwrap();
-        c.reserved_elsewhere = book.held_by_others("this");
+        c.reserved_elsewhere = book.held_by_others(&["this"]);
         let mut j = Journal::open(&path, &a.wallet).unwrap();
         // 100 SOL units, 81 held elsewhere: 19 left for a hold of 20.
         assert_eq!(
@@ -2555,7 +2735,7 @@ mod tests {
             &c.balances,
         )
         .unwrap();
-        c.reserved_elsewhere = book.held_by_others("this");
+        c.reserved_elsewhere = book.held_by_others(&["this"]);
         // P8-INV-01: the policy reserve is never spent either (100 - 80 - 1 < 20).
         c.policy_reserve = [("SOL".to_string(), 1)].into_iter().collect();
         assert_eq!(
@@ -2626,7 +2806,7 @@ mod tests {
         assert!(hold.unknown_outcome);
         assert_eq!(WalletReservations::rebuild([hold]).unwrap().held("SOL"), 20);
         fs::remove_dir_all(&path).unwrap();
-        // Finalized: released, nothing to restore.
+        // Finalized: still held until its settlement books it (P8-CTRL.5), restored as it was.
         let (path, a, i, c) = setup();
         let mut j = Journal::open(&path, &a.wallet).unwrap();
         j.reserve(a.clone(), i.clone(), &c).unwrap();
@@ -2641,10 +2821,11 @@ mod tests {
         }])
         .unwrap();
         drop(j);
-        assert!(Journal::open(&path, &a.wallet)
+        let hold = Journal::open(&path, &a.wallet)
             .unwrap()
             .active_hold()
-            .is_none());
+            .unwrap();
+        assert_eq!((hold.unknown_outcome, &hold.holds), (false, &i.holds));
         fs::remove_dir_all(&path).unwrap();
     }
 
@@ -2686,8 +2867,12 @@ mod tests {
         }])
         .unwrap();
         drop(j);
-        let released = WalletReservations::refreshed(&path, &a.wallet);
-        assert_eq!((released.held("SOL"), released.is_unreadable()), (0, false));
+        // Finalized: held until the settlement books it (P8-CTRL.5: released exactly once).
+        let finalized = WalletReservations::refreshed(&path, &a.wallet);
+        assert_eq!(
+            (finalized.held("SOL"), finalized.is_unreadable()),
+            (20, false)
+        );
         fs::remove_dir_all(&path).unwrap();
     }
 
@@ -2982,7 +3167,7 @@ mod tests {
                     .simulate(&adapter, test_deadline(), test_binding())
                     .unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
-                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
+                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
                     .unwrap();
                 let clock = darkbot_common::timing::Clock::new();
                 let result =
@@ -3057,7 +3242,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
             .unwrap();
         let reserved = clock.now_ns();
         let (ack, handoff) = j
@@ -3098,7 +3283,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
             .unwrap();
         let clock = darkbot_common::timing::Clock::new();
         let past = std::time::Instant::now();
@@ -3364,7 +3549,7 @@ mod tests {
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
-            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None, None)
+            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None, None, 0)
             .is_err());
         // DEC-11: a bundle token is reserved only with current bundle evidence.
         let stale = Current {
@@ -3372,13 +3557,14 @@ mod tests {
             ..c.clone()
         };
         let refused = j
-            .reserve_payload(a.clone(), i.clone(), &stale, &original, None, None)
+            .reserve_payload(a.clone(), i.clone(), &stale, &original, None, None, 0)
             .unwrap_err();
         assert!(
             refused.contains("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"),
             "{refused}"
         );
-        j.reserve_payload(a, i, &c, &original, None, None).unwrap();
+        j.reserve_payload(a, i, &c, &original, None, None, 0)
+            .unwrap();
         let clock = darkbot_common::timing::Clock::new();
         assert!(j
             .submit_payload(&reversed, &c, &clock, test_deadline(), permit(&reversed))
@@ -3506,6 +3692,7 @@ mod tests {
             non_landing: None,
             hold: None,
             fe06: None,
+            exit_reserve_lamports: Some(0),
         }
     }
     pub(super) fn path_of(j: &Journal) -> PathBuf {
@@ -3890,7 +4077,8 @@ mod tests {
                 assert_eq!(j.holds(), i.holds);
             }
             j.reconcile(vec![complete]).unwrap();
-            assert!(j.holds().is_empty());
+            // Held until the settlement books it (P8-CTRL.5).
+            assert_eq!(j.holds(), i.holds);
             drop(j);
             let mut reopened = Journal::open(&path, &a.wallet).unwrap();
             assert!(reopened.reserve(a, i, &c).is_err());
@@ -3922,7 +4110,8 @@ mod tests {
             .is_err());
         j.reconcile(i.signatures.iter().map(receipt).collect())
             .unwrap();
-        assert!(j.holds().is_empty());
+        // Held until the settlement books it (P8-CTRL.5).
+        assert_eq!(j.holds(), i.holds);
         drop(j);
         fs::remove_dir_all(path).unwrap();
     }

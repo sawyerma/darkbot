@@ -35,11 +35,11 @@ impl WalletReservations {
         self.held_except(asset, None)
     }
 
-    /// What every attempt except `attempt` holds, per asset (FE-04 `reserved_elsewhere`).
-    pub fn held_by_others(&self, attempt: &str) -> BTreeMap<String, u64> {
+    /// What every attempt but the `own` ones holds, per asset (FE-04 `reserved_elsewhere`).
+    pub fn held_by_others(&self, own: &[&str]) -> BTreeMap<String, u64> {
         let mut out: BTreeMap<String, u64> = BTreeMap::new();
         for (id, holds) in &self.attempts {
-            if id != attempt {
+            if !own.contains(&id.as_str()) {
                 for (asset, n) in holds {
                     let total = out.entry(asset.clone()).or_default();
                     *total = total.saturating_add(*n);
@@ -249,7 +249,10 @@ mod tests {
             ),
             (Some(0), Some(0))
         );
-        assert_eq!(book.held_by_others("b"), map(&[("SOL", 60), (usdc, 700)]));
+        assert_eq!(
+            book.held_by_others(&["b"]),
+            map(&[("SOL", 60), (usdc, 700)])
+        );
         // Unknown balance, duplicate attempt, missing id.
         let other = "So11111111111111111111111111111111111111112";
         assert_eq!(

@@ -469,6 +469,13 @@ impl Fe06Authorization {
         self.scope.as_deref()
     }
 
+    /// P8-CTRL.5: the separate exit reserve an attempt under this grant holds with it — its
+    /// scope's maximal exit cost; the offline tests' stand-in (no scope, never part of a build)
+    /// reserves none.
+    pub fn exit_reserve_lamports(&self) -> u64 {
+        self.scope().map_or(0, |s| s.max_exit_cost_lamports)
+    }
+
     /// P8-CTRL.3: in force at `now_unix_s` — within its scope's validity (expired: no grant).
     pub fn in_force(&self, now_unix_s: u64) -> bool {
         (self.not_before_unix_s..self.expires_unix_s).contains(&now_unix_s)

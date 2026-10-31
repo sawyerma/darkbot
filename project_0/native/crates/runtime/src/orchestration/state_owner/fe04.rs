@@ -640,7 +640,7 @@ impl ShadowOwner {
             state_generation: self.st.recovery_generation(),
             program_data_hash: self.program_data_baseline_hash.to_string(),
             balances: self.fe04_wallet_balances(target),
-            reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
+            reserved_elsewhere: self.reservations.held_by_others(&[&approval.approval_id]),
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
             valid_until_slot,
             approval: approval.clone(),
@@ -849,7 +849,11 @@ impl ShadowOwner {
             evaluated,
             state_valid: self.st.run_state().is_tradable() && !self.program_upgrade_latched,
             balances,
-            reserved_elsewhere: self.reservations.held_by_others(&approval.approval_id),
+            // P8-CTRL.5: the exit realizes its attempt's open position — that hold (units and the
+            // exit reserve) is its own, never another's.
+            reserved_elsewhere: self
+                .reservations
+                .held_by_others(&[&approval.approval_id, &approval.attempt_approval_id]),
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
             deadline,
             clock: &self.clock,

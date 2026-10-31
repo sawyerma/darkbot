@@ -232,6 +232,7 @@ impl SimulatedPayload<'_> {
 impl Journal {
     /// Bind the reservation to the payload that actually passed simulation.
     /// Other current-state/economic gates must still come from production.
+    #[allow(clippy::too_many_arguments)]
     pub fn reserve_payload(
         &mut self,
         approval: Approval,
@@ -240,6 +241,7 @@ impl Journal {
         simulated: &SimulatedPayload<'_>,
         hold: Option<crate::execution::hold_b::HoldEvidence>,
         fe06: Option<super::Fe06Attempt>,
+        exit_reserve_lamports: u64,
     ) -> Result<(), String> {
         if simulated.payload.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
             return Err(err("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"));
@@ -247,7 +249,7 @@ impl Journal {
         if !simulated.payload.matches(&intent) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
-        self.reserve_held(approval, intent, now, hold, fe06)
+        self.reserve_held(approval, intent, now, hold, fe06, exit_reserve_lamports)
     }
 
     /// Exactly one adapter call, only after the UNKNOWN state was fsynced, bounded by the

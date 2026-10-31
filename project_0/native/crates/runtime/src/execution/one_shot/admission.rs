@@ -234,6 +234,14 @@ impl Fe04Admission {
         let Some(max_loss) = c.max_loss_usd_micro else {
             return refuse("FE04_MAX_LOSS_UNKNOWN");
         };
+        // P8-CTRL.5: the separate exit reserve of the grant the attempt runs under, held with it
+        // until no position stays open — without a computable one no new liquidation.
+        let Some(exit_reserve) = gates
+            .and_then(|g| g.fe06)
+            .map(|f| f.exit_reserve_lamports())
+        else {
+            return refuse("FE04_EXIT_RESERVE_UNKNOWN");
+        };
         let mut holds: BTreeMap<String, u64> = [("SOL".to_string(), sol_debit)].into();
         for (mint, units) in &c.plan.inventory_holds {
             let held = holds.entry(mint.to_string()).or_insert(0);
@@ -375,10 +383,15 @@ impl Fe04Admission {
             exact_signed_payload_simulated: simulated.exact_signed_payload_simulated(),
             bundle_simulated: simulated.bundle_simulated(),
         };
-        if let Err(e) =
-            self.journal
-                .reserve_payload(a.clone(), intent, &current, &simulated, c.hold, fe06)
-        {
+        if let Err(e) = self.journal.reserve_payload(
+            a.clone(),
+            intent,
+            &current,
+            &simulated,
+            c.hold,
+            fe06,
+            exit_reserve,
+        ) {
             // A failed write may still have reached the disk: never treated as nothing.
             return if e.starts_with("JOURNAL") {
                 Admission::Unknown(e)

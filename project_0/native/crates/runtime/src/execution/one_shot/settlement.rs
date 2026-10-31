@@ -899,7 +899,14 @@ mod tests {
             (s.open_inventory["MINT"], s.unrealized_inventory_usd_micro),
             (600, 600)
         );
-        assert!(j.active_hold().is_none() && j.holds().is_empty());
+        // P8-CTRL.5/P8-RES-02: the attempt's holds are released, its open position stays held
+        // (under the attempt, for its mint) until it is exited.
+        let position = j.active_hold().unwrap();
+        assert_eq!(
+            (position.target.as_str(), position.unknown_outcome),
+            ("MINT", false)
+        );
+        assert_eq!(j.holds(), [("MINT".to_string(), 600u64)].into());
         // Idempotent: the same settlement, no second booking; after a restart as well.
         assert_eq!(j.settle(&|_, _| None, BOOKED).unwrap(), s);
         drop(j);
