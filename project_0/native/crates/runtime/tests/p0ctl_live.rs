@@ -219,6 +219,36 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
             && out.contains("FE06_OPERATOR_AUTHORIZATION_UNDECIDED"),
         "{out}"
     );
+    // `live attempts`: a wallet's bookings against the previewed scope's quotas (none booked).
+    let journals = d.join("fe04");
+    let wallet = Pubkey::new_unique().to_string();
+    let attempts = |dir: &std::path::Path, extra: &[&str]| {
+        let mut args = vec![
+            "live",
+            "attempts",
+            "--journal-dir",
+            dir.to_str().unwrap(),
+            "--wallet",
+            &wallet,
+        ];
+        args.extend_from_slice(extra);
+        p0ctl(&d, &[], &args)
+    };
+    let (code, _, err) = attempts(&journals, &[]);
+    assert_eq!(code, 2);
+    assert!(err.contains("FE04_JOURNAL_DIR_MISSING"), "{err}");
+    std::fs::create_dir_all(&journals).unwrap();
+    let (code, out, err) = attempts(&journals, &["--digest", &digest]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("0 booked, 0 without a grant")
+            && out.contains("UTC_DAY day ")
+            && out.contains(&format!("GRANT {digest}: 0 of 1")),
+        "{out}"
+    );
+    let (code, _, err) = attempts(&journals, &["--digest", &"0".repeat(64)]);
+    assert_eq!(code, 2);
+    assert!(err.contains("FE06_SCOPE_UNKNOWN"), "{err}");
     shutdown.request();
     thread.join().unwrap();
     let _ = std::fs::remove_dir_all(&d);

@@ -337,6 +337,10 @@ pub struct OwnerSnapshot {
     pub approval: crate::execution::one_shot::approval_file::ApprovalStatus,
     /// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits.
     pub admission: OwnerAdmission,
+    /// P8-CTRL.6: this start's capability epoch; `None` without capability control.
+    pub capability_epoch: Option<u64>,
+    /// P8-CTRL.3/.5: the FE-06 state.
+    pub fe06: OwnerFe06,
 }
 
 /// DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits in this run.
@@ -484,6 +488,38 @@ pub struct OwnerCapability {
     pub requested: &'static str,
     pub effective: &'static str,
     pub block_reason: std::borrow::Cow<'static, str>,
+    /// P8-CTRL.1: the validated roles of a `WALLET:<pubkey>` signer (empty otherwise).
+    pub roles: Vec<&'static str>,
+}
+
+/// P8-CTRL.3/.5: the FE-06 grant in force, its scope's limits and use, and the previews of this
+/// owner epoch. An unknown count is `None`, never 0.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerFe06 {
+    pub grant_digest: Option<String>,
+    pub scope_mode: &'static str,
+    pub valid_from_unix_s: Option<u64>,
+    pub valid_until_unix_s: Option<u64>,
+    pub in_force: bool,
+    pub campaign_id: String,
+    pub max_attempts_per_utc_day: u64,
+    pub max_attempts_campaign: u64,
+    pub max_attempts_grant: u64,
+    pub attempts_today: Option<u64>,
+    pub attempts_campaign: Option<u64>,
+    pub attempts_grant: Option<u64>,
+    pub block_reason: String,
+    pub previews: Vec<OwnerFe06Preview>,
+}
+
+/// One previewed FE-06 scope of this owner epoch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerFe06Preview {
+    pub digest: String,
+    pub scope_mode: &'static str,
+    pub owner_epoch: u64,
+    pub valid_until_unix_s: u64,
+    pub terminal: String,
 }
 
 /// FE-04 wallet state from the accounting ledger and the reservation book.

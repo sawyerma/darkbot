@@ -74,6 +74,8 @@ impl ShadowOwner {
             source_config_version: self.sources.config_version,
             capability_config_version: self.sources.capabilities.config_version,
             last_capability_decision: self.sources.capabilities.last_decision.clone(),
+            capability_epoch: self.sources.capabilities.epoch,
+            fe06: self.fe06_status(),
             source_stats: crate::status_tap::OwnerSourceStats {
                 observed: self.sources.stats.observed,
                 rejected: self.sources.stats.rejected,
@@ -171,6 +173,7 @@ impl ShadowOwner {
             requested,
             effective,
             block_reason: block_reason.into(),
+            roles: Vec::new(),
         };
         let on = |b: bool| if b { "ACTIVE" } else { "OFF" };
         let jit = self.jit_funding_bank.is_some();
@@ -192,6 +195,7 @@ impl ShadowOwner {
                     requested: c.live_requested,
                     effective,
                     block_reason: block_reason.into(),
+                    roles: Vec::new(),
                 }
             },
             // DEC-04: the B hold mode, requested and effective (ACTIVE gated by N and evidence).
@@ -290,6 +294,7 @@ impl ShadowOwner {
                 requested: on,
                 effective: on,
                 block_reason: "".into(),
+                roles: Vec::new(),
             }
         }));
         all.extend(caps.wallets.iter().map(|w| {
@@ -299,9 +304,64 @@ impl ShadowOwner {
                 requested: on,
                 effective: on,
                 block_reason: "".into(),
+                roles: w.roles.clone(),
             }
         }));
         all
+    }
+
+    /// P8-CTRL.3/.5: the FE-06 grant in force with its scope's limits and the attempts booked
+    /// against them (from the FE-04 ledger view; unknown while it is unreadable), and the scopes
+    /// previewed for this owner epoch.
+    fn fe06_status(&self) -> crate::status_tap::OwnerFe06 {
+        use crate::orchestration::{capability_control as cap, fe06};
+        let c = &self.sources.capabilities;
+        let mut s = crate::status_tap::OwnerFe06::default();
+        match &c.fe06 {
+            Some(grant) => {
+                s.grant_digest = Some(grant.digest().to_string());
+                s.in_force = super::accounts::wall_unix_s().is_ok_and(|now| grant.in_force(now));
+                if let Some(scope) = grant.scope() {
+                    s.scope_mode = scope.mode.code();
+                    s.valid_from_unix_s = Some(scope.not_before_unix_s);
+                    s.valid_until_unix_s = Some(scope.expires_unix_s);
+                    s.campaign_id = scope.campaign_id.clone();
+                    s.max_attempts_per_utc_day = scope.max_attempts_per_utc_day;
+                    s.max_attempts_campaign = scope.max_attempts_campaign;
+                    s.max_attempts_grant = scope.max_attempts_grant;
+                    if let Some(Ok(view)) = &self.ledger_view {
+                        use crate::execution::one_shot::Fe06Quota;
+                        let day = super::accounts::wall_unix_s().ok().map(|n| n / 86_400);
+                        s.attempts_today = day.map(|d| Fe06Quota::UtcDay(d).used(&view.bookings));
+                        s.attempts_campaign =
+                            Some(Fe06Quota::Campaign(&scope.campaign_id).used(&view.bookings));
+                        s.attempts_grant =
+                            Some(Fe06Quota::Grant(grant.digest()).used(&view.bookings));
+                    }
+                }
+                if !s.in_force {
+                    s.block_reason = "FE06_GRANT_NOT_IN_FORCE".into();
+                }
+            }
+            None => s.block_reason = cap::FE06_AUTH_UNDECIDED.into(),
+        }
+        // The scopes previewed for this epoch: the project of the capability control's store.
+        if let (Some(dir), Some(epoch)) = (&c.dir, c.epoch) {
+            if let Some(project) = dir.parent().and_then(std::path::Path::parent) {
+                for (digest, scope) in fe06::previews(project).unwrap_or_default() {
+                    if scope.owner_epoch == epoch {
+                        s.previews.push(crate::status_tap::OwnerFe06Preview {
+                            terminal: fe06::terminal(&scope).unwrap_or_default(),
+                            digest,
+                            scope_mode: scope.mode.code(),
+                            owner_epoch: scope.owner_epoch,
+                            valid_until_unix_s: scope.expires_unix_s,
+                        });
+                    }
+                }
+            }
+        }
+        s
     }
 
     fn wallets_status(&self) -> OwnerWallets {

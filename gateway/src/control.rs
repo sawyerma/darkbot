@@ -389,6 +389,17 @@ fn valid_job_id(s: &str) -> bool {
         && !s.starts_with('-')
         && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
+/// P8-CTRL.3: an FE-06 scope digest is 64 lowercase hex characters.
+fn scope_digest_ok(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+/// P8-CTRL.1: a signer's public key as the owner names it (base58, 32 bytes: 32–44 characters);
+/// the owner checks it is one of its configured signers.
+fn base58_key_ok(s: &str) -> bool {
+    (32..=44).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() && !matches!(b, b'0' | b'O' | b'I' | b'l'))
+}
 /// DEC-07: an approval names 16 lowercase hex characters of a readiness token.
 fn token_ok(s: &str) -> bool {
     s.len() == 16
@@ -560,21 +571,39 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         }
         // DEC-13/DEC-04/DEC-11/DEC-06: the capability and its requested value, with the version
         // the view showed: LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE and THRESHOLD_TRIGGER
-        // OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF → ACTIVE).
+        // OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF → ACTIVE). P8-CTRL.1/.3:
+        // ECON_* and WALLET:<pubkey> DISABLED|ENABLED, FE06_GRANT/FE06_REVOKE a scope digest —
+        // these state the owner epoch the view showed (P8-CTRL.6); every change carries the
+        // command's request id (the same action again is the same request).
         CAPABILITY_SET if req.resource_id.is_empty() => {
             let c = CapabilityControlCommand::decode(req.params.as_ref()).ok()?;
-            let values: &[&str] = match c.capability.as_str() {
-                "LIVE" => &["OFF", "LIVE"],
-                "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" => &["OFF", "OBSERVE", "ACTIVE"],
-                _ => return None,
+            let switch = ["DISABLED", "ENABLED"].contains(&c.requested.as_str());
+            let (valid, economic) = match c.capability.as_str() {
+                "LIVE" => (["OFF", "LIVE"].contains(&c.requested.as_str()), false),
+                "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" => (
+                    ["OFF", "OBSERVE", "ACTIVE"].contains(&c.requested.as_str()),
+                    false,
+                ),
+                "ECON_SIGN" | "ECON_ARM" | "ECON_SEND" | "ECON_ATTEMPT" | "ECON_LIVE" => {
+                    (switch, true)
+                }
+                "FE06_GRANT" | "FE06_REVOKE" => (scope_digest_ok(&c.requested), true),
+                w => (
+                    w.strip_prefix("WALLET:").is_some_and(base58_key_ok) && switch,
+                    true,
+                ),
             };
-            if !values.contains(&c.requested.as_str()) {
+            if !valid || (economic && c.owner_epoch == 0) || !valid_job_id(&req.request_id) {
                 return None;
             }
             let mut args: Vec<String> = ["p0", "capability", "set", &c.capability, &c.requested]
                 .map(String::from)
                 .to_vec();
             args.extend(["--expect-version".into(), expect_version?.to_string()]);
+            if c.owner_epoch > 0 {
+                args.extend(["--expect-epoch".into(), c.owner_epoch.to_string()]);
+            }
+            args.extend(["--request-id".into(), req.request_id.clone()]);
             Some(args)
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
@@ -3693,6 +3722,15 @@ mod tests {
             crate::proto::project0::v1::CapabilityControlCommand {
                 capability: capability.into(),
                 requested: requested.into(),
+                owner_epoch: 0,
+            }
+            .encode_to_vec()
+        };
+        let in_epoch = |capability: &str, requested: &str, owner_epoch: u64| {
+            crate::proto::project0::v1::CapabilityControlCommand {
+                capability: capability.into(),
+                requested: requested.into(),
+                owner_epoch,
             }
             .encode_to_vec()
         };
@@ -3712,9 +3750,70 @@ mod tests {
                 "LIVE",
                 "LIVE",
                 "--expect-version",
-                "2"
+                "2",
+                "--request-id",
+                "12345678-1234-1234-1234-123456789abc"
             ]
         );
+        // P8-CTRL.1/.3/.6: the economic, wallet and grant changes state their epoch.
+        let digest = "ab".repeat(32);
+        for (c, v) in [
+            ("ECON_SIGN", "ENABLED"),
+            ("ECON_LIVE", "DISABLED"),
+            ("WALLET:11111111111111111111111111111112", "ENABLED"),
+            ("FE06_GRANT", digest.as_str()),
+            ("FE06_REVOKE", digest.as_str()),
+        ] {
+            assert_eq!(
+                job_args(&req(
+                    CAPABILITY_SET,
+                    "",
+                    in_epoch(c, v, 3),
+                    Some(ConfigVersion(7))
+                ))
+                .unwrap()[3..],
+                [
+                    c,
+                    v,
+                    "--expect-version",
+                    "7",
+                    "--expect-epoch",
+                    "3",
+                    "--request-id",
+                    "12345678-1234-1234-1234-123456789abc"
+                ]
+            );
+            assert_eq!(
+                job_args(&req(
+                    CAPABILITY_SET,
+                    "",
+                    in_epoch(c, v, 0),
+                    Some(ConfigVersion(7))
+                )),
+                None,
+                "{c} without its epoch"
+            );
+        }
+        for (c, v) in [
+            ("ECON_SIGN", "ON"),
+            ("ECON_FOO", "ENABLED"),
+            ("WALLET:", "ENABLED"),
+            ("WALLET:0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl", "ENABLED"),
+            ("WALLET:11111111111111111111111111111112", "ACTIVE"),
+            ("FE06_GRANT", "ABCD"),
+            ("FE06_REVOKE", &"A".repeat(64)),
+        ] {
+            assert_eq!(
+                job_args(&req(
+                    CAPABILITY_SET,
+                    "",
+                    in_epoch(c, v, 3),
+                    Some(ConfigVersion(7))
+                )),
+                None,
+                "{c} {v}"
+            );
+        }
         assert_eq!(
             job_args(&req(
                 CAPABILITY_SET,
@@ -3732,7 +3831,7 @@ mod tests {
                 capability("JITO_BUNDLE", "OBSERVE"),
                 Some(ConfigVersion(4)),
             ))
-            .unwrap()[3..],
+            .unwrap()[3..7],
             ["JITO_BUNDLE", "OBSERVE", "--expect-version", "4"]
         );
         // DEC-06: the threshold mode's hot change.
@@ -3743,7 +3842,7 @@ mod tests {
                 capability("THRESHOLD_TRIGGER", "ACTIVE"),
                 Some(ConfigVersion(5)),
             ))
-            .unwrap()[3..],
+            .unwrap()[3..7],
             ["THRESHOLD_TRIGGER", "ACTIVE", "--expect-version", "5"]
         );
         for (c, v, expected) in [

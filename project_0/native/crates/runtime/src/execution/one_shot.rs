@@ -251,6 +251,36 @@ pub struct Fe06Attempt {
     pub owner_epoch: Option<u64>,
 }
 
+/// P8-CTRL.5: one of the three quotas a new attempt is counted against — its UTC day, its
+/// grant's campaign and the grant itself. The one count of the admission's limits, the owner's
+/// status and `p0ctl live attempts`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fe06Quota<'a> {
+    UtcDay(u64),
+    Campaign(&'a str),
+    Grant(&'a str),
+}
+impl Fe06Quota<'_> {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::UtcDay(_) => "UTC_DAY",
+            Self::Campaign(_) => "CAMPAIGN",
+            Self::Grant(_) => "GRANT",
+        }
+    }
+    /// The booked attempts this quota counts (UNKNOWN or sent alike).
+    pub fn used<'b>(&self, bookings: impl IntoIterator<Item = &'b Fe06Attempt>) -> u64 {
+        bookings
+            .into_iter()
+            .filter(|b| match self {
+                Self::UtcDay(d) => b.utc_day == *d,
+                Self::Campaign(c) => b.campaign == *c,
+                Self::Grant(g) => b.grant == *g,
+            })
+            .count() as u64
+    }
+}
+
 /// Schema-7 layout of `Saved` (the DEC-04 holds, before the P8-CTRL.5 grant booking).
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]

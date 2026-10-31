@@ -38,6 +38,58 @@ message LiquidatorState {
   SourceDecision last_capability_decision = 14;
   // DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits.
   Fe04Admission admission = 15;
+  // P8-CTRL.6: this owner start's capability epoch — the epoch a capability change states
+  // (CapabilityControlCommand.owner_epoch); unset without capability control.
+  optional uint64 capability_epoch = 16;
+  // P8-CTRL.3/.5: the FE-06 grant, its scope's limits and use, and the previewed scopes.
+  Fe06State fe06 = 17;
+}
+
+// P8-CTRL.3/.5: the owner's FE-06 state. A grant is a permission, never a command; its
+// operator authentication is a separate gate (block_reason while no grant can be taken).
+message Fe06State {
+  // The digest of the grant in force; unset without one.
+  optional string grant_digest = 1;
+  // ALL | EXIT_ONLY | SIM_ONLY of the grant in force; empty without one.
+  string scope_mode = 2;
+  // The first second of the grant's validity; unset without a grant.
+  optional uint64 valid_from_unix_s = 3;
+  // The first second after the grant's validity; unset without a grant.
+  optional uint64 valid_until_unix_s = 4;
+  // In force now (its validity holds and the owner's clock is readable).
+  bool in_force = 5;
+  // The grant's campaign.
+  string campaign_id = 6;
+  // The scope's new attempts per UTC day.
+  uint64 max_attempts_per_utc_day = 7;
+  // The scope's new attempts per campaign.
+  uint64 max_attempts_campaign = 8;
+  // The scope's new attempts per grant.
+  uint64 max_attempts_grant = 9;
+  // Attempts booked this UTC day; unset while the FE-04 journals are unreadable (never 0).
+  optional uint64 attempts_today = 10;
+  // Attempts booked against the campaign; unset while the journals are unreadable.
+  optional uint64 attempts_campaign = 11;
+  // Attempts booked against the grant; unset while the journals are unreadable.
+  optional uint64 attempts_grant = 12;
+  // Why no grant is in force or can be taken (the first gate), else empty.
+  string block_reason = 13;
+  // The scopes previewed for this owner epoch (`p0ctl live scope`), each grantable by its digest.
+  repeated Fe06Preview previews = 14;
+}
+
+// One previewed FE-06 scope: its digest and exactly what a grant of it permits.
+message Fe06Preview {
+  // SHA-256 of the scope's canonical bytes (64 hex digits).
+  string digest = 1;
+  // ALL | EXIT_ONLY | SIM_ONLY.
+  string scope_mode = 2;
+  // The owner epoch the scope binds.
+  uint64 owner_epoch = 3;
+  // The first second after the scope's validity.
+  uint64 valid_until_unix_s = 4;
+  // The native full view the operator confirms (`p0ctl live scope`).
+  string terminal = 5;
 }
 
 // DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits in this run
@@ -126,10 +178,13 @@ message SourceControlCommand {
 // `p0ctl capability set CAPABILITY REQUESTED`; the running owner decides what is effective
 // (LIVE stays BLOCKED until a separate FE-06 authorization).
 message CapabilityControlCommand {
-  // LIVE.
+  // LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER, ECON_SIGN … ECON_LIVE, WALLET:<pubkey>,
+  // FE06_GRANT or FE06_REVOKE.
   string capability = 1;
-  // OFF or LIVE.
+  // One of the capability's values (a scope digest for FE06_GRANT/FE06_REVOKE).
   string requested = 2;
+  // P8-CTRL.6: the owner epoch the view showed (LiquidatorState.capability_epoch).
+  uint64 owner_epoch = 3;
 }
 
 // B01 (P8-INV-01): the owner's rebalancing plan in OBSERVE — real balances, quotes and conservative
@@ -450,6 +505,8 @@ message Capability {
   string effective = 3;
   // Why effective differs from requested (gate, missing qualification), else empty.
   string block_reason = 4;
+  // P8-CTRL.1: the validated roles of a WALLET:<pubkey> signer (LIQUIDATOR, FEE_PAYER).
+  repeated string roles = 5;
 }
 
 // FE-04 wallet state of the liquidator: STATE topic project0.wallets.state. Read from the

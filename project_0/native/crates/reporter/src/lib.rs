@@ -18,13 +18,13 @@ use proto::control::{
 };
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
-    EffectiveRecord, Fe04Admission, Fe04Approval, FinanceSummary, HoldAttempt, HoldB, HoldFlow,
-    LatencyNs, LiquidatorState, LossCount, MarketAssessment, MarketCounters, NonLanding,
-    NonLandingSource, OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline,
-    OwnerRun, OwnerSafety, OwnerThreshold, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget,
-    ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo,
-    SourceDecision, SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState,
-    WriterLane,
+    EffectiveRecord, Fe04Admission, Fe04Approval, Fe06Preview, Fe06State, FinanceSummary,
+    HoldAttempt, HoldB, HoldFlow, LatencyNs, LiquidatorState, LossCount, MarketAssessment,
+    MarketCounters, NonLanding, NonLandingSource, OperationalConfig, OperationalParameter,
+    OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerThreshold, OwnerTrigger, PhaseStatus,
+    ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade,
+    ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters, SystemStatus,
+    TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -263,6 +263,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
                 requested: c.requested.to_string(),
                 effective: c.effective.to_string(),
                 block_reason: c.block_reason.to_string(),
+                roles: c.roles.iter().map(|r| r.to_string()).collect(),
             })
             .collect(),
         rebalance: o.rebalance.as_ref().map(|r| RebalancePlan {
@@ -319,6 +320,34 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
         approval: Some(fe04_approval(&o.approval)),
         admission: Some(fe04_admission(&o.admission)),
         capability_config_version: o.capability_config_version,
+        capability_epoch: o.capability_epoch,
+        fe06: Some(Fe06State {
+            grant_digest: o.fe06.grant_digest.clone(),
+            scope_mode: o.fe06.scope_mode.into(),
+            valid_from_unix_s: o.fe06.valid_from_unix_s,
+            valid_until_unix_s: o.fe06.valid_until_unix_s,
+            in_force: o.fe06.in_force,
+            campaign_id: o.fe06.campaign_id.clone(),
+            max_attempts_per_utc_day: o.fe06.max_attempts_per_utc_day,
+            max_attempts_campaign: o.fe06.max_attempts_campaign,
+            max_attempts_grant: o.fe06.max_attempts_grant,
+            attempts_today: o.fe06.attempts_today,
+            attempts_campaign: o.fe06.attempts_campaign,
+            attempts_grant: o.fe06.attempts_grant,
+            block_reason: o.fe06.block_reason.clone(),
+            previews: o
+                .fe06
+                .previews
+                .iter()
+                .map(|p| Fe06Preview {
+                    digest: p.digest.clone(),
+                    scope_mode: p.scope_mode.into(),
+                    owner_epoch: p.owner_epoch,
+                    valid_until_unix_s: p.valid_until_unix_s,
+                    terminal: p.terminal.clone(),
+                })
+                .collect(),
+        }),
         last_capability_decision: o.last_capability_decision.as_ref().map(|d| SourceDecision {
             seq: d.seq,
             request: d.request.clone(),
@@ -1721,9 +1750,21 @@ mod contract_tests {
     }
 
     fn golden_owner() -> OwnerSnapshot {
+        use darkbot_runner::orchestration::capability_control as cap;
         use darkbot_runner::status_tap::{
             OwnerCapability, OwnerEngine as E, OwnerFinance, OwnerPipeline as P, OwnerSafety as S,
             OwnerTrigger as T, OwnerWallets,
+        };
+        // P8-CTRL.1: an economic switch as the owner projects it (effective as requested).
+        let econ = |name: &'static str, on: bool| {
+            let v = if on { cap::ENABLED } else { cap::DISABLED };
+            OwnerCapability {
+                name: name.into(),
+                requested: v,
+                effective: v,
+                block_reason: "".into(),
+                roles: vec![],
+            }
         };
         let mut day = darkbot_runner::analytics::shadow_ledger::DaySummary {
             health_checked: 40,
@@ -1845,13 +1886,15 @@ mod contract_tests {
                 day_failed_attempts: 0,
                 day_attempts: 0,
             },
-            // DEC-13: LIVE requested by the operator, still not effective without FE-06.
+            // DEC-13/P8-CTRL.2: LIVE requested by the operator, BLOCKED with the first missing
+            // gate and every other one (four economic switches, FE-06).
             capabilities: vec![
                 OwnerCapability {
                     name: "LIVE".into(),
                     requested: "LIVE",
                     effective: "BLOCKED",
-                    block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)".into(),
+                    block_reason: "ECON_LIVE DISABLED (missing too: ECON_ARM DISABLED; ECON_SEND DISABLED; ECON_ATTEMPT DISABLED; FE-06/P8-LT: LIVE is not authorized (B10))".into(),
+                    roles: vec![],
                 },
                 // DEC-04: ACTIVE requested, OBSERVE effective while N (B-8) is undecided.
                 OwnerCapability {
@@ -1859,6 +1902,7 @@ mod contract_tests {
                     requested: "ACTIVE",
                     effective: "OBSERVE",
                     block_reason: "B-8: N not decided (hold_b_min_attempts unset)".into(),
+                    roles: vec![],
                 },
                 // DEC-11: the bundle path requested ACTIVE, OBSERVE without a qualified simulator.
                 OwnerCapability {
@@ -1867,6 +1911,7 @@ mod contract_tests {
                     effective: "OBSERVE",
                     block_reason:
                         darkbot_runner::execution::bundle_path::BUNDLE_SIMULATOR_UNQUALIFIED.into(),
+                    roles: vec![],
                 },
                 // DEC-06: the threshold mode requested ACTIVE, OBSERVE while N is undecided.
                 OwnerCapability {
@@ -1875,6 +1920,21 @@ mod contract_tests {
                     effective: "OBSERVE",
                     block_reason: darkbot_runner::orchestration::threshold_mode::B8_UNDECIDED
                         .into(),
+                    roles: vec![],
+                },
+                // P8-CTRL.1: the economic switches in the owner's order (ECON_SIGN ENABLED, the
+                // others DISABLED) and the one configured signer, ENABLED, with its roles.
+                econ(cap::ECON_LIVE, false),
+                econ(cap::ECON_ARM, false),
+                econ(cap::ECON_SIGN, true),
+                econ(cap::ECON_SEND, false),
+                econ(cap::ECON_ATTEMPT, false),
+                OwnerCapability {
+                    name: "WALLET:11111111111111111111111111111112".into(),
+                    requested: "ENABLED",
+                    effective: "ENABLED",
+                    block_reason: "".into(),
+                    roles: vec!["LIQUIDATOR", "FEE_PAYER"],
                 },
             ],
             wallets: OwnerWallets {
@@ -1959,6 +2019,21 @@ mod contract_tests {
                     "requested LIVE · effective BLOCKED · FE-06/P8-LT: LIVE is not authorized (B10)"
                         .into(),
             }),
+            // P8-CTRL.6: the owner's epoch 2; P8-CTRL.3: no grant (the operator authentication
+            // is undecided) and one scope previewed for this epoch.
+            capability_epoch: Some(2),
+            fe06: darkbot_runner::status_tap::OwnerFe06 {
+                block_reason:
+                    darkbot_runner::orchestration::capability_control::FE06_AUTH_UNDECIDED.into(),
+                previews: vec![darkbot_runner::status_tap::OwnerFe06Preview {
+                    digest: "d".repeat(64),
+                    scope_mode: "ALL",
+                    owner_epoch: 2,
+                    valid_until_unix_s: 1_760_003_600,
+                    terminal: "PROJECT 0 FE-06 SCOPE digest=dddd…".into(),
+                }],
+                ..Default::default()
+            },
             approval: darkbot_runner::execution::one_shot::approval_file::ApprovalStatus {
                 state: "BINDING_MISMATCH",
                 reason: "code_sha".into(),

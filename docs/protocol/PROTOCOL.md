@@ -155,6 +155,8 @@
     - [DataSource](#darkbot-project0-v1-DataSource)
     - [Fe04Admission](#darkbot-project0-v1-Fe04Admission)
     - [Fe04Approval](#darkbot-project0-v1-Fe04Approval)
+    - [Fe06Preview](#darkbot-project0-v1-Fe06Preview)
+    - [Fe06State](#darkbot-project0-v1-Fe06State)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
     - [HoldAttempt](#darkbot-project0-v1-HoldAttempt)
     - [HoldB](#darkbot-project0-v1-HoldB)
@@ -2880,6 +2882,7 @@ One switchable capability (P0-PROD-CTRL-03).
 | requested | [string](#string) |  | What is configured: OFF | OBSERVE | ACTIVE. |
 | effective | [string](#string) |  | What runs: OFF | OBSERVE | ACTIVE | BLOCKED | NOT_AUTHORIZED | UNSUPPORTED. |
 | block_reason | [string](#string) |  | Why effective differs from requested (gate, missing qualification), else empty. |
+| roles | [string](#string) | repeated | P8-CTRL.1: the validated roles of a WALLET:&lt;pubkey&gt; signer (LIQUIDATOR, FEE_PAYER). |
 
 
 
@@ -2896,8 +2899,9 @@ DEC-13: parameters (CommandRequest.params) of project0.capability.set: the opera
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| capability | [string](#string) |  | LIVE. |
-| requested | [string](#string) |  | OFF or LIVE. |
+| capability | [string](#string) |  | LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER, ECON_SIGN … ECON_LIVE, WALLET:&lt;pubkey&gt;, FE06_GRANT or FE06_REVOKE. |
+| requested | [string](#string) |  | One of the capability&#39;s values (a scope digest for FE06_GRANT/FE06_REVOKE). |
+| owner_epoch | [uint64](#uint64) |  | P8-CTRL.6: the owner epoch the view showed (LiquidatorState.capability_epoch). |
 
 
 
@@ -2974,6 +2978,54 @@ Safety ceilings, single use checked against its FE-04 journals.
 | min_net_usd_micro | [uint64](#uint64) |  | Attempt approval: minimum conservative net, USD-micro. |
 | max_slippage_bps | [uint64](#uint64) |  | Slippage bound (both kinds). |
 | allowed_targets | [uint64](#uint64) |  | Number of allowed targets of an attempt approval. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-Fe06Preview"></a>
+
+### Fe06Preview
+One previewed FE-06 scope: its digest and exactly what a grant of it permits.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| digest | [string](#string) |  | SHA-256 of the scope&#39;s canonical bytes (64 hex digits). |
+| scope_mode | [string](#string) |  | ALL | EXIT_ONLY | SIM_ONLY. |
+| owner_epoch | [uint64](#uint64) |  | The owner epoch the scope binds. |
+| valid_until_unix_s | [uint64](#uint64) |  | The first second after the scope&#39;s validity. |
+| terminal | [string](#string) |  | The native full view the operator confirms (`p0ctl live scope`). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-Fe06State"></a>
+
+### Fe06State
+P8-CTRL.3/.5: the owner&#39;s FE-06 state. A grant is a permission, never a command; its
+operator authentication is a separate gate (block_reason while no grant can be taken).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| grant_digest | [string](#string) | optional | The digest of the grant in force; unset without one. |
+| scope_mode | [string](#string) |  | ALL | EXIT_ONLY | SIM_ONLY of the grant in force; empty without one. |
+| valid_from_unix_s | [uint64](#uint64) | optional | The first second of the grant&#39;s validity; unset without a grant. |
+| valid_until_unix_s | [uint64](#uint64) | optional | The first second after the grant&#39;s validity; unset without a grant. |
+| in_force | [bool](#bool) |  | In force now (its validity holds and the owner&#39;s clock is readable). |
+| campaign_id | [string](#string) |  | The grant&#39;s campaign. |
+| max_attempts_per_utc_day | [uint64](#uint64) |  | The scope&#39;s new attempts per UTC day. |
+| max_attempts_campaign | [uint64](#uint64) |  | The scope&#39;s new attempts per campaign. |
+| max_attempts_grant | [uint64](#uint64) |  | The scope&#39;s new attempts per grant. |
+| attempts_today | [uint64](#uint64) | optional | Attempts booked this UTC day; unset while the FE-04 journals are unreadable (never 0). |
+| attempts_campaign | [uint64](#uint64) | optional | Attempts booked against the campaign; unset while the journals are unreadable. |
+| attempts_grant | [uint64](#uint64) | optional | Attempts booked against the grant; unset while the journals are unreadable. |
+| block_reason | [string](#string) |  | Why no grant is in force or can be taken (the first gate), else empty. |
+| previews | [Fe06Preview](#darkbot-project0-v1-Fe06Preview) | repeated | The scopes previewed for this owner epoch (`p0ctl live scope`), each grantable by its digest. |
 
 
 
@@ -3122,6 +3174,8 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | capability_config_version | [uint64](#uint64) | optional | DEC-13: the capability configuration version the owner has decided up to — the ExpectedVersion.config_version a capability change states; unset without capability control. |
 | last_capability_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | DEC-13: the owner&#39;s last capability-control decision; unset before the first one. |
 | admission | [Fe04Admission](#darkbot-project0-v1-Fe04Admission) |  | DEC-13b/DEC-02: the owner&#39;s FE-04 admission of LIVE candidates and exits. |
+| capability_epoch | [uint64](#uint64) | optional | P8-CTRL.6: this owner start&#39;s capability epoch — the epoch a capability change states (CapabilityControlCommand.owner_epoch); unset without capability control. |
+| fe06 | [Fe06State](#darkbot-project0-v1-Fe06State) |  | P8-CTRL.3/.5: the FE-06 grant, its scope&#39;s limits and use, and the previewed scopes. |
 
 
 

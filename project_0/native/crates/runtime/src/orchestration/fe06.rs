@@ -473,6 +473,31 @@ pub fn put_preview(project: &Path, s: &Scope) -> Result<String, String> {
     Ok(d)
 }
 
+/// Every previewed scope of the store with its digest (each read like `preview`; an unreadable
+/// entry is left out, never shown as a scope), in digest order.
+pub fn previews(project: &Path) -> Result<Vec<(String, Scope)>, String> {
+    let dir = project.join(STORE);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("FE06_STORE_IO: {e}")),
+    };
+    let mut out: Vec<(String, Scope)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name();
+            let digest = name
+                .to_str()?
+                .strip_prefix("scope_")?
+                .strip_suffix(".p0j")?
+                .to_string();
+            preview(project, &digest).ok().map(|s| (digest, s))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
 /// The previewed scope of `digest`; its bytes must still be the ones the digest names.
 pub fn preview(project: &Path, digest: &str) -> Result<Scope, String> {
     if digest.len() != 64

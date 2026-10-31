@@ -2173,7 +2173,7 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant|revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status";
+const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant|revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status | p0ctl live attempts --journal-dir DIR --wallet PUBKEY [--digest D]";
 
 /// P8-CTRL.3/.8: the FE-06 scope, grant and revocation — a scope is previewed natively (read,
 /// validated against the registry's ceilings, stored under its digest and shown in full); a grant
@@ -2252,7 +2252,100 @@ fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             );
             Ok(true)
         }
+        [attempts, rest @ ..] if attempts == "attempts" => live_attempts(project, rest),
         _ => Err(LIVE_USAGE.into()),
+    }
+}
+
+/// P8-CTRL.5/.8 `live attempts`: the attempts of a wallet's FE-04 journal (archived and active)
+/// as they are booked against FE-06 grants — each booking, then the quotas of this UTC day, of
+/// every campaign and every grant; with `--digest` that previewed scope's three quotas against its
+/// limits (the same count the admission refuses a new attempt on). Read only.
+fn live_attempts(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::execution::one_shot::{archive, Fe06Quota};
+    use std::collections::BTreeMap;
+    let dir = value(args, "--journal-dir").ok_or(LIVE_USAGE)?;
+    let wallet = value(args, "--wallet").ok_or(LIVE_USAGE)?;
+    let scope = value(args, "--digest")
+        .map(|d| darkbot_runner::orchestration::fe06::preview(project, &d).map(|s| (d, s)))
+        .transpose()?;
+    // A mistyped directory is no journal without attempts.
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("FE04_JOURNAL_DIR_MISSING: {dir}"));
+    }
+    let records = archive::records(Path::new(&dir), &wallet)?;
+    let today = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "FE06_CLOCK_UNREADABLE")?
+        .as_secs()
+        / 86_400;
+    let booked: Vec<_> = records.iter().filter_map(|r| r.fe06.as_ref()).collect();
+    println!(
+        "FE-06 attempts of wallet {wallet}: {} booked, {} without a grant (none, or before P8-CTRL)",
+        booked.len(),
+        records.len() - booked.len()
+    );
+    for r in &records {
+        if let Some(b) = &r.fe06 {
+            println!(
+                "  approval={} state={}{} grant={} campaign={} utc_day={} owner_epoch={}",
+                r.approval_id,
+                r.state.name(),
+                if r.archived { " archived" } else { "" },
+                b.grant,
+                b.campaign,
+                b.utc_day,
+                b.owner_epoch
+                    .map_or_else(|| "unknown".to_string(), |e| e.to_string())
+            );
+        }
+    }
+    let mut campaigns = BTreeMap::new();
+    let mut grants = BTreeMap::new();
+    for b in &booked {
+        campaigns.insert(b.campaign.as_str(), ());
+        grants.insert(b.grant.as_str(), ());
+    }
+    let mut quotas = vec![Fe06Quota::UtcDay(today)];
+    quotas.extend(campaigns.keys().map(|c| Fe06Quota::Campaign(c)));
+    quotas.extend(grants.keys().map(|g| Fe06Quota::Grant(g)));
+    for q in &quotas {
+        println!(
+            "  {} {}: {} used",
+            q.name(),
+            quota_key(q),
+            q.used(booked.iter().copied())
+        );
+    }
+    if let Some((digest, s)) = &scope {
+        println!("scope {digest} ({}):", s.mode.code());
+        for (q, limit) in [
+            (Fe06Quota::UtcDay(today), s.max_attempts_per_utc_day),
+            (Fe06Quota::Campaign(&s.campaign_id), s.max_attempts_campaign),
+            (Fe06Quota::Grant(digest), s.max_attempts_grant),
+        ] {
+            let used = q.used(booked.iter().copied());
+            println!(
+                "  {} {}: {used} of {limit}{}",
+                q.name(),
+                quota_key(&q),
+                if used >= limit {
+                    " · EXHAUSTED (no new attempt)"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+    Ok(true)
+}
+
+fn quota_key(q: &darkbot_runner::execution::one_shot::Fe06Quota) -> String {
+    use darkbot_runner::execution::one_shot::Fe06Quota;
+    match q {
+        Fe06Quota::UtcDay(d) => format!("day {d} (today)"),
+        Fe06Quota::Campaign(c) => (*c).to_string(),
+        Fe06Quota::Grant(g) => (*g).to_string(),
     }
 }
 

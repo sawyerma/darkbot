@@ -338,7 +338,9 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.locator(".p0-line", { hasText: "BLOCKHASH_STALE before planning" })).toContainText("6 · 1 / 4 / 1 · 2");
   // DEC-13: LIVE requested by the operator stays effective BLOCKED (FE-06); the request goes
   // through the one controller with the capability configuration version this view showed.
-  await expect(page.locator(".p0-line", { hasText: /^LIVE/ }).first()).toContainText("BLOCKED (requested LIVE) · FE-06/P8-LT");
+  // P8-CTRL.2: with the first missing gate and every other one.
+  await expect(page.locator(".p0-line", { hasText: /^LIVE/ }).first())
+    .toContainText("BLOCKED (requested LIVE) · ECON_LIVE DISABLED (missing too: ECON_ARM DISABLED; ECON_SEND DISABLED; ECON_ATTEMPT DISABLED; FE-06/P8-LT");
   await page.getByRole("button", { name: "Withdraw LIVE request" }).click();
   await expect(page.getByTestId("p0-capability-command-receipt")).toContainText("COMPLETED");
   const capability = sent.at(-1)!;

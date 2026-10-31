@@ -65,30 +65,25 @@ pub(super) fn within_limits(
     booking: &super::Fe06Attempt,
     scope: &crate::orchestration::fe06::Scope,
 ) -> Result<(), String> {
+    use super::Fe06Quota;
     let records = journal.attempt_records()?;
-    let booked: Vec<&super::Fe06Attempt> = records.iter().filter_map(|r| r.fe06.as_ref()).collect();
-    let count =
-        |f: &dyn Fn(&super::Fe06Attempt) -> bool| booked.iter().filter(|b| f(b)).count() as u64;
-    for (what, used, limit) in [
+    let booked = || records.iter().filter_map(|r| r.fe06.as_ref());
+    for (quota, limit) in [
         (
-            "UTC_DAY",
-            count(&|b| b.utc_day == booking.utc_day),
+            Fe06Quota::UtcDay(booking.utc_day),
             scope.max_attempts_per_utc_day,
         ),
         (
-            "CAMPAIGN",
-            count(&|b| b.campaign == booking.campaign),
+            Fe06Quota::Campaign(&booking.campaign),
             scope.max_attempts_campaign,
         ),
-        (
-            "GRANT",
-            count(&|b| b.grant == booking.grant),
-            scope.max_attempts_grant,
-        ),
+        (Fe06Quota::Grant(&booking.grant), scope.max_attempts_grant),
     ] {
+        let used = quota.used(booked());
         if used >= limit {
             return Err(format!(
-                "FE06_ATTEMPT_LIMIT_{what}: {used} of {limit} attempts used"
+                "FE06_ATTEMPT_LIMIT_{}: {used} of {limit} attempts used",
+                quota.name()
             ));
         }
     }

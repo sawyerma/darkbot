@@ -7,6 +7,8 @@ use crate::execution::accounting::{Ledger, Totals, Verdict};
 pub(crate) struct LedgerView {
     pub(crate) totals: Totals,
     pub(crate) verdict: Verdict,
+    /// P8-CTRL.5: every attempt's FE-06 grant booking.
+    pub(crate) bookings: Vec<crate::execution::one_shot::Fe06Attempt>,
 }
 
 impl LedgerView {
@@ -14,6 +16,11 @@ impl LedgerView {
         Self {
             totals: ledger.totals(),
             verdict: ledger.verdict(),
+            bookings: ledger
+                .attempts
+                .iter()
+                .filter_map(|a| a.fe06.clone())
+                .collect(),
         }
     }
 
