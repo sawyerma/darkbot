@@ -57,7 +57,7 @@ impl ShadowOwner {
             self.threshold_stats_record();
         }
         // P6-MT.10: the local fee model's parity counts once at shutdown.
-        self.fee_parity_record();
+        self.fee_parity_record(true);
         // DEC-01: the blockhash parking once at shutdown (parked entries end like lane entries).
         let parking = self.blockhash_park_line();
         owner_log!(self, "{parking}");

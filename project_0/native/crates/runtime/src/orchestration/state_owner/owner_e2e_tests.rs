@@ -169,6 +169,8 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_bootstrap_batch: 64,
         threshold: dec06_control(Default::default(), None),
         fee_parity_base: None,
+        fee_parity_start: crate::execution::fee_parity::counts(),
+        fee_parity_journaled: None,
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -8980,22 +8982,31 @@ fn b01_a_book_unreadable_mid_observation_or_rounds_run_out_are_their_own_reasons
     );
 }
 
-/// P6-MT.10 in the running owner: the pipeline's RPC fee quote of a candidate is counted in its
-/// class against the local fee model, the owner journals the counts at shutdown
-/// (`FEE_PARITY_STATS`) and its status row shows the parity — the RPC quote decides.
+/// P6-MT.10 in the running owner: the pipeline's RPC fee quote of a candidate (the node charges
+/// one signature, the candidate pays no priority fee) is a distinct match in its own class — V0,
+/// no priority, a single transaction — the owner journals it at once at shutdown
+/// (`FEE_PARITY_STATS`, what it counted since its start) and its status row shows the parity: the
+/// RPC quote decides.
 #[test]
 fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
     use crate::analytics::payload::{decode, Payload};
-    use crate::execution::fee_parity::{self, FeeFormat, FeeParityStatsRecord, FeeRole};
+    use crate::execution::fee_parity::{self, FeeClass, FeeFormat, FeeParityStatsRecord, FeeRole};
     let (mut f, target, calls) = dec13b_fixture("p6_mt10_fee_parity", true);
-    let v0_single = |r: &FeeParityStatsRecord| {
+    // No priority fee: the node's quote (one signature) is what the local model gives.
+    f.owner.resources.priority_micro_lamports_per_cu = 0;
+    f.owner.fee_parity_start = fee_parity::counts();
+    let class = FeeClass {
+        format: FeeFormat::V0,
+        priority: false,
+        role: FeeRole::Single,
+    };
+    let matched = |r: &FeeParityStatsRecord| {
         r.classes
             .iter()
-            .filter(|(c, _)| c.format == FeeFormat::V0 && c.role == FeeRole::Single)
-            .map(|(_, n)| n.matched + n.mismatched + n.unsupported)
-            .sum::<u64>()
+            .find(|(c, _)| *c == class)
+            .map(|(_, n)| (n.matched, n.mismatched))
+            .unwrap()
     };
-    let before = v0_single(&fee_parity::record(None));
     let now = f.owner.clock.now_ns();
     f.owner
         .detect(Some((target, now, 100, "account_update")))
@@ -9008,9 +9019,11 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
         "{:?}",
         calls.lock().unwrap()
     );
+    let run = fee_parity::record(None, &f.owner.fee_parity_start);
+    let (hit, miss) = matched(&run);
     assert!(
-        v0_single(&fee_parity::record(None)) > before,
-        "the quote is counted"
+        hit >= 1 && miss == 0,
+        "a distinct match in its class: {run:?}"
     );
     let row = f
         .owner
@@ -9040,6 +9053,6 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
     }
     let journaled = journaled.expect("journaled at shutdown");
     assert_eq!(journaled.model_version, fee_parity::FEE_MODEL_VERSION);
-    assert!(v0_single(&journaled) >= 1);
+    assert!(matched(&journaled).0 >= 1);
     let _ = std::fs::remove_dir_all(dir);
 }

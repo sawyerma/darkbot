@@ -5383,6 +5383,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
     };
     let mut safety = open_safety();
     let mut fe04 = journal("qualified");
+    let parity_start = crate::execution::fee_parity::counts();
     let r = bundle_evaluate(
         &qualified,
         &mut safety,
@@ -5406,6 +5407,24 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         3,
         "prerequisite, receivership and tip TX"
     );
+    // P6-MT.10: each part's RPC quote is counted against the local fee model in its own role.
+    {
+        use crate::execution::fee_parity::{record, FeeRole};
+        let run = record(None, &parity_start);
+        for role in [
+            FeeRole::BundlePrerequisite,
+            FeeRole::BundleReceivership,
+            FeeRole::BundleTip,
+        ] {
+            let counted: u64 = run
+                .classes
+                .iter()
+                .filter(|(c, _)| c.role == role)
+                .map(|(_, n)| n.matched + n.repeated + n.mismatched + n.unsupported)
+                .sum();
+            assert!(counted >= 1, "{role:?} is counted: {run:?}");
+        }
+    }
     assert_eq!(r.all_signatures, intent.signatures);
     assert_eq!(
         (intent.transaction_fee_lamports, intent.tip_lamports),

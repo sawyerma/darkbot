@@ -1526,10 +1526,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             None => {
                 let fee_started = Instant::now();
                 let quote = self.submitter.fee_for_message(tx, deadline);
-                // P6-MT.10: the local fee model's parity with this RPC quote, per class (once per
-                // RPC quote; the quote decides).
+                // P6-MT.10: the local fee model's parity with this RPC quote of this message, per
+                // class (once per RPC quote; the quote decides).
                 if let Ok(q) = &quote {
-                    crate::execution::fee_parity::observe(tx, role, q.lamports);
+                    if q.message_hash == message_hash {
+                        crate::execution::fee_parity::observe(tx, role, q.lamports);
+                    }
                 }
                 record_timing(
                     &FEE_CALLS,

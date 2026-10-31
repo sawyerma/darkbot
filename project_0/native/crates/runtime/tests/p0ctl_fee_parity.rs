@@ -64,7 +64,7 @@ fn p6_mt10_fee_parity_report_sums_the_saved_runs_per_class() {
                 ParityCounts {
                     matched: PARITY_MIN_MESSAGES,
                     mismatched: 1,
-                    unsupported: 0,
+                    ..Default::default()
                 },
             ),
         ])],
@@ -86,19 +86,19 @@ fn p6_mt10_fee_parity_report_sums_the_saved_runs_per_class() {
     assert!(stdout.contains("2 saved runs with a record"), "{stdout}");
     assert!(
         stdout.contains(&format!(
-            "V0 Single priority=false matched={PARITY_MIN_MESSAGES} mismatched=0 outside_model=0 QUALIFIED"
+            "V0 Single priority=false matched={PARITY_MIN_MESSAGES} repeated=0 mismatched=0 outside_model=0 QUALIFIED"
         )),
         "{stdout}"
     );
     assert!(
         stdout.contains(&format!(
-            "V0 Single priority=true matched={} mismatched=1 outside_model=0 NOT_QUALIFIED",
+            "V0 Single priority=true matched={} repeated=0 mismatched=1 outside_model=0 FAILED",
             PARITY_MIN_MESSAGES + 3
         )),
         "one mismatch fails the class: {stdout}"
     );
     assert!(
-        stdout.contains("LOCAL_FEE_MODEL_OBSERVE: saved runs: 1/16 classes qualified"),
+        stdout.contains("LOCAL_FEE_MODEL_FAIL: saved runs: 1/16 classes qualified"),
         "{stdout}"
     );
     let _ = std::fs::remove_dir_all(project);

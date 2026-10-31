@@ -51,8 +51,8 @@ impl ShadowOwner {
             if self.threshold_indexing() {
                 self.threshold_stats_record();
             }
-            // P6-MT.10: the local fee model's parity counts (also once at shutdown).
-            self.fee_parity_record();
+            // P6-MT.10: the local fee model's parity counts when they changed (also at shutdown).
+            self.fee_parity_record(false);
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,
@@ -245,11 +245,37 @@ impl ShadowOwner {
 
 impl ShadowOwner {
     /// P6-MT.10: journals the local fee model's cumulative parity counts of this run
-    /// (`FEE_PARITY_STATS`; a continued run's earlier counts included).
-    pub(super) fn fee_parity_record(&mut self) {
-        let record = crate::execution::fee_parity::record(self.fee_parity_base.as_ref());
-        let _ = self
+    /// (`FEE_PARITY_STATS`; a continued run's earlier counts included) when they changed since
+    /// the last record, or always (`force`, the shutdown).
+    pub(super) fn fee_parity_record(&mut self, force: bool) {
+        let record = crate::execution::fee_parity::record(
+            self.fee_parity_base.as_ref(),
+            &self.fee_parity_start,
+        );
+        if !force && self.fee_parity_journaled.as_ref() == Some(&record) {
+            return;
+        }
+        if self
             .evidence
-            .emit(OwnerEvidence::FeeParityStats(Box::new(record)));
+            .emit(OwnerEvidence::FeeParityStats(Box::new(record.clone())))
+            .is_ok()
+        {
+            self.fee_parity_journaled = Some(record);
+        }
+    }
+
+    /// P6-MT.10: a mismatch is journaled at once (never only at the next telemetry tick).
+    pub(super) fn fee_parity_mismatch(&mut self) {
+        let journaled = self.fee_parity_journaled.as_ref().map_or(0, |r| {
+            r.classes.iter().map(|(_, n)| n.mismatched).sum::<u64>()
+        });
+        let base = self.fee_parity_base.as_ref().map_or(0, |r| {
+            r.classes.iter().map(|(_, n)| n.mismatched).sum::<u64>()
+        });
+        let now = crate::execution::fee_parity::counts().mismatched();
+        let since = now.saturating_sub(self.fee_parity_start.mismatched());
+        if base.saturating_add(since) > journaled {
+            self.fee_parity_record(false);
+        }
     }
 }

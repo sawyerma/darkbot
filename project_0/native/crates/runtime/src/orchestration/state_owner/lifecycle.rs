@@ -3,6 +3,8 @@ use super::*;
 
 impl ShadowOwner {
     pub(super) fn lifecycle(&mut self) -> bool {
+        // P6-MT.10: a fee parity mismatch is journaled at once.
+        self.fee_parity_mismatch();
         // P8-RES-02: the book follows the durable FE-04 journal (a settlement releases the
         // attempt, its open positions stay held until exited, UNKNOWN keeps holding, an
         // unreadable journal blocks every offer).

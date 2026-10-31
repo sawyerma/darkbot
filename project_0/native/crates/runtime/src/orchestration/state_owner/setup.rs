@@ -817,7 +817,7 @@ pub(super) fn prepare(
     // P6-MT.10: the fee parity a continued run journaled (the saved runs' sum is a report:
     // `p0ctl fee-parity`).
     let fee_parity_base = (resumed.is_some() || econ_resume)
-        .then(|| crate::execution::fee_parity::last_record(&journal_path))
+        .then(|| crate::execution::fee_parity::last_record(&journal_path).0)
         .flatten();
     let mut evidence = match segmented {
         false => OwnerEvidenceWriter::start(
@@ -1250,6 +1250,8 @@ pub(super) fn prepare(
         threshold_bootstrap_batch,
         threshold,
         fee_parity_base,
+        fee_parity_start: crate::execution::fee_parity::counts(),
+        fee_parity_journaled: None,
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,

@@ -637,7 +637,13 @@ impl ShadowOwner {
     /// fee-parity`).
     fn fee_parity_capability(&self) -> OwnerCapability {
         use crate::execution::fee_parity;
-        let run = [fee_parity::record(self.fee_parity_base.as_ref())];
+        let run = fee_parity::SavedRuns {
+            records: vec![fee_parity::record(
+                self.fee_parity_base.as_ref(),
+                &self.fee_parity_start,
+            )],
+            incomplete: 0,
+        };
         OwnerCapability {
             name: "LOCAL_FEE_MODEL".into(),
             requested: "OBSERVE",

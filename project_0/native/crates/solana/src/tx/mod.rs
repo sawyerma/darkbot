@@ -90,11 +90,58 @@ const SIGNATURE_PRECOMPILES: [Pubkey; 3] = [
     Pubkey::from_str_const("Secp256r1SigVerify1111111111111111111111111"),
 ];
 
+/// The cluster's compute budget bounds: a CU limit above 1 400 000 is charged as 1 400 000; a
+/// requested heap frame lies within 32 KiB..=256 KiB in steps of 1 KiB.
+const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
+const HEAP_FRAME_BYTES: (u32, u32, u32) = (32 * 1024, 256 * 1024, 1024);
+
+/// The compute unit limit and price a message's compute budget instructions set, as the cluster
+/// processes them: RequestHeapFrame (1), SetComputeUnitLimit (2), SetComputeUnitPrice (3) and
+/// SetLoadedAccountsDataSizeLimit (4), each at most once and exactly encoded. `None` for anything
+/// the cluster refuses — a duplicate, another discriminator, a heap size outside its bounds or
+/// steps, a data size limit of 0 — or the model cannot read.
+fn compute_budget_request(tx: &VersionedTransaction) -> Option<(Option<u32>, Option<u64>)> {
+    let program = ComputeBudgetInstruction::set_compute_unit_limit(0).program_id;
+    let keys = tx.message.static_account_keys();
+    let (mut heap, mut limit, mut price, mut data_size) = (false, None, None, false);
+    for ix in tx.message.instructions() {
+        if keys.get(usize::from(ix.program_id_index)) != Some(&program) {
+            continue;
+        }
+        let u32_arg = || -> Option<u32> {
+            (ix.data.len() == 5)
+                .then(|| u32::from_le_bytes([ix.data[1], ix.data[2], ix.data[3], ix.data[4]]))
+        };
+        match ix.data.first()? {
+            1 if !heap => {
+                let (min, max, step) = HEAP_FRAME_BYTES;
+                let bytes = u32_arg()?;
+                if bytes < min || bytes > max || bytes % step != 0 {
+                    return None;
+                }
+                heap = true;
+            }
+            2 if limit.is_none() => limit = Some(u32_arg()?),
+            3 if price.is_none() && ix.data.len() == 9 => {
+                price = Some(u64::from_le_bytes(ix.data[1..9].try_into().ok()?));
+            }
+            4 if !data_size => {
+                if u32_arg()? == 0 {
+                    return None;
+                }
+                data_size = true;
+            }
+            _ => return None,
+        }
+    }
+    Some((limit, price))
+}
+
 /// P6-MT.10: the local fee model — what `getFeeForMessage` charges a legacy or v0 message: its
-/// required signatures at `LAMPORTS_PER_SIGNATURE` and the priority fee its own compute budget
-/// instructions request (`requested_priority_lamports`). `None`, outside the model (the RPC
-/// quote decides): a signature-verify precompile, or a priority the instructions do not state
-/// exactly (a price without a CU limit, a duplicate or unreadable compute budget instruction).
+/// required signatures at `LAMPORTS_PER_SIGNATURE` and the priority fee its compute budget
+/// instructions set, ⌈min(CU limit, 1 400 000) × price / 10⁶⌉. `None`, outside the model (the RPC
+/// quote decides): a signature-verify precompile, a price without a CU limit, or a compute budget
+/// the cluster refuses (`compute_budget_request`).
 pub fn local_fee_lamports(tx: &VersionedTransaction) -> Option<u64> {
     let keys = tx.message.static_account_keys();
     if tx.message.instructions().iter().any(|ix| {
@@ -103,9 +150,17 @@ pub fn local_fee_lamports(tx: &VersionedTransaction) -> Option<u64> {
     }) {
         return None;
     }
+    let (limit, price) = compute_budget_request(tx)?;
+    let priority = match price {
+        None | Some(0) => 0,
+        Some(price) => {
+            let cu = limit?.min(MAX_COMPUTE_UNIT_LIMIT);
+            u64::try_from((u128::from(cu) * u128::from(price)).div_ceil(1_000_000)).ok()?
+        }
+    };
     u64::from(tx.message.header().num_required_signatures)
         .checked_mul(LAMPORTS_PER_SIGNATURE)?
-        .checked_add(requested_priority_lamports(tx)?)
+        .checked_add(priority)
 }
 
 /// P8-CTRL.3: the priority fee a signed transaction requests — ⌈µLamports/CU × CU limit / 1e6⌉
@@ -953,6 +1008,57 @@ mod tests {
                 .retain(|c| !(usize::from(c.program_id_index) == cb && c.data.first() == Some(&2)));
         }
         assert_eq!(local_fee_lamports(&unstated), None);
+        // A CU limit above the cluster's maximum is charged at the maximum.
+        let above = Resources {
+            compute_unit_limit: 2_000_000,
+            ..resources
+        };
+        assert_eq!(
+            local_fee_lamports(&built(vec![ix(Pubkey::new_unique())], above)),
+            Some(5_000 + 1_400_000 * 1_500 / 1_000_000)
+        );
+        // A compute budget the cluster refuses is outside the model.
+        let cb = ComputeBudgetInstruction::set_compute_unit_limit(0).program_id;
+        let raw = |data: Vec<u8>| Instruction {
+            program_id: cb,
+            accounts: vec![],
+            data,
+        };
+        for refused in [
+            vec![raw(vec![0, 1, 0, 0, 0])],
+            vec![raw(vec![5, 1, 0, 0, 0])],
+            vec![raw(vec![4, 0, 0, 0, 0])],
+            vec![raw([vec![1], 1_000u32.to_le_bytes().to_vec()].concat())],
+            vec![
+                raw([vec![1], (32u32 * 1024).to_le_bytes().to_vec()].concat()),
+                raw([vec![1], (32u32 * 1024).to_le_bytes().to_vec()].concat()),
+            ],
+            vec![raw(vec![2, 1, 0])],
+        ] {
+            let mut ixs = refused.clone();
+            ixs.push(ix(Pubkey::new_unique()));
+            let tx = VersionedTransaction {
+                signatures: vec![Signature::default()],
+                message: VersionedMessage::Legacy(solana_sdk::message::Message::new(
+                    &ixs,
+                    Some(&payer.pubkey()),
+                )),
+            };
+            assert_eq!(local_fee_lamports(&tx), None, "{:?}", refused[0].data);
+        }
+        // A valid heap frame and data size limit leave the fee as it is.
+        let fine = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::Legacy(solana_sdk::message::Message::new(
+                &[
+                    raw([vec![1], (64u32 * 1024).to_le_bytes().to_vec()].concat()),
+                    raw([vec![4], 65_536u32.to_le_bytes().to_vec()].concat()),
+                    ix(Pubkey::new_unique()),
+                ],
+                Some(&payer.pubkey()),
+            )),
+        };
+        assert_eq!(local_fee_lamports(&fine), Some(LAMPORTS_PER_SIGNATURE));
     }
 
     /// E2: the signed message must be exactly its plan. Real Legacy and V0 builds (V0 with a
