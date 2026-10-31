@@ -35,6 +35,7 @@
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
+//! p0ctl [--project DIR] fee-parity   (P6-MT.10: the local fee model's parity per class over every saved run)
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 archive --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 migrate --journal-dir DIR --wallet PUBKEY
@@ -2716,6 +2717,38 @@ fn attempt_history(
     );
 }
 
+/// P6-MT.10: the local fee model's parity per class over every saved run of the project (each
+/// run's last `FEE_PARITY_STATS` record of the current model version) and which class is
+/// qualified (≥ the plan's minimum matched, none mismatched); read only, the RPC quote decides.
+fn fee_parity_cmd(project: &Path) -> Result<bool, String> {
+    use darkbot_runner::execution::fee_parity as fp;
+    let records = fp::saved_runs(project, None);
+    let classes = fp::qualification(&records);
+    println!(
+        "fee parity · model {} · {} saved runs with a record",
+        fp::FEE_MODEL_VERSION,
+        records.len()
+    );
+    for c in &classes {
+        println!(
+            "{:?} {:?} priority={} matched={} mismatched={} outside_model={} {}",
+            c.class.format,
+            c.class.role,
+            c.class.priority,
+            c.counts.matched,
+            c.counts.mismatched,
+            c.counts.unsupported,
+            if c.qualified() {
+                "QUALIFIED"
+            } else {
+                "NOT_QUALIFIED"
+            }
+        );
+    }
+    println!("{}", fp::status_line(&classes, "saved runs"));
+    Ok(true)
+}
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let explicit = match args.iter().position(|a| a == "--project") {
@@ -2753,7 +2786,8 @@ fn main() -> ExitCode {
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04 …".into()),
+            (Some("fee-parity"), None) => fee_parity_cmd(&project),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04|fee-parity …".into()),
         }
     });
     match result {

@@ -272,6 +272,8 @@ pub enum OwnerEvidence {
     ThresholdMiss(ThresholdMiss),
     /// DEC-06: the threshold mode's cumulative counters.
     ThresholdStats(Box<ThresholdStatsRecord>),
+    /// P6-MT.10: the local fee model's cumulative parity counts per class.
+    FeeParityStats(Box<crate::execution::fee_parity::FeeParityStatsRecord>),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -445,6 +447,7 @@ impl OwnerEvidence {
             Self::ThresholdTransition(v) => Encoded::of(v, None, None),
             Self::ThresholdMiss(v) => Encoded::of(v, Some(v.slot), None),
             Self::ThresholdStats(v) => Encoded::of(v.as_ref(), None, None),
+            Self::FeeParityStats(v) => Encoded::of(v.as_ref(), None, None),
         }
     }
 }

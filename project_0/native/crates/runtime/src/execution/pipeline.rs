@@ -2,6 +2,7 @@
 
 use crate::analytics::record::{Decision, LossReason, OpportunityRecord, Signing};
 use crate::analytics::rejection::{PlanCause, PlanInvalid, PlanRejection, Rejection};
+use crate::execution::fee_parity::FeeRole;
 use crate::execution::one_shot::transport::{SignedPayload, SimulationBinding};
 use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
@@ -62,8 +63,6 @@ pub fn pipeline_timing_snapshot() -> PipelineTimingSnapshot {
     }
 }
 
-const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
-
 /// B01: the network fee of a transaction with `signatures` signers that spends its resources'
 /// compute-unit limit at their priority price (the most it can pay; no message is built yet).
 #[cfg(feature = "crate_health")]
@@ -72,61 +71,11 @@ pub fn planned_fee_lamports(signatures: u64, r: &Resources) -> Option<u64> {
         * u128::from(r.priority_micro_lamports_per_cu))
     .div_ceil(MICRO_LAMPORTS_PER_LAMPORT);
     signatures
-        .checked_mul(LAMPORTS_PER_SIGNATURE)?
+        .checked_mul(darkbot_solana::tx::LAMPORTS_PER_SIGNATURE)?
         .checked_add(u64::try_from(priority).ok()?)
 }
-const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
-const DEFAULT_CU_PER_INSTRUCTION: u64 = 200_000;
-const MAX_CU_LIMIT: u64 = 1_400_000;
+#[cfg(feature = "crate_health")]
 const MICRO_LAMPORTS_PER_LAMPORT: u128 = 1_000_000;
-
-/// [MT0] H6 measurement only (never used for a decision): local fee estimate for legacy/v0
-/// messages = signatures x 5_000 + ceil(CU limit x CU price / 10^6). `None` for other formats.
-fn local_fee_estimate_lamports(tx: &solana_sdk::transaction::VersionedTransaction) -> Option<u64> {
-    use solana_sdk::message::VersionedMessage;
-    if !matches!(
-        tx.message,
-        VersionedMessage::Legacy(_) | VersionedMessage::V0(_)
-    ) {
-        return None;
-    }
-    let keys = tx.message.static_account_keys();
-    let (mut limit, mut price, mut other_ixs) = (None, None, 0u64);
-    for ix in tx.message.instructions() {
-        let is_cb = keys
-            .get(usize::from(ix.program_id_index))
-            .is_some_and(|k| k.to_string() == COMPUTE_BUDGET_PROGRAM_ID);
-        if !is_cb {
-            other_ixs += 1;
-            continue;
-        }
-        match ix.data.first() {
-            Some(2) if ix.data.len() >= 5 => {
-                limit = Some(u64::from(u32::from_le_bytes([
-                    ix.data[1], ix.data[2], ix.data[3], ix.data[4],
-                ])));
-            }
-            Some(3) if ix.data.len() >= 9 => {
-                let mut a = [0u8; 8];
-                a.copy_from_slice(&ix.data[1..9]);
-                price = Some(u64::from_le_bytes(a));
-            }
-            _ => {}
-        }
-    }
-    let base = u64::from(tx.message.header().num_required_signatures)
-        .checked_mul(LAMPORTS_PER_SIGNATURE)?;
-    let priority = match price {
-        None | Some(0) => 0,
-        Some(p) => {
-            let cu =
-                limit.unwrap_or_else(|| (other_ixs * DEFAULT_CU_PER_INSTRUCTION).min(MAX_CU_LIMIT));
-            u64::try_from((u128::from(cu) * u128::from(p)).div_ceil(MICRO_LAMPORTS_PER_LAMPORT))
-                .ok()?
-        }
-    };
-    base.checked_add(priority)
-}
 
 /// [P1-C] Economic gate for one built plan (used by `Pipeline::evaluate`). LIVE acts only on
 /// `Known` economics above the threshold; `Unknown` (e.g. missing executable floor) can at most
@@ -956,7 +905,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 && plan.prerequisite_txs.is_empty()
                 && plan.tip == 0
             {
-                match self.quote_message(&built.tx, deadline, &mut fee_quotes) {
+                match self.quote_message(&built.tx, FeeRole::Single, deadline, &mut fee_quotes) {
                     Ok(quote) => quote,
                     Err((loss, reason)) => {
                         rec.loss = Some(loss);
@@ -1557,6 +1506,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     fn quote_message(
         &self,
         tx: &solana_sdk::transaction::VersionedTransaction,
+        role: FeeRole,
         deadline: Instant,
         fee_quotes: &mut FeeQuotes,
     ) -> Result<Option<submit::MessageFeeQuote>, (LossReason, Rejection)> {
@@ -1576,17 +1526,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             None => {
                 let fee_started = Instant::now();
                 let quote = self.submitter.fee_for_message(tx, deadline);
-                // [MT0] H6: would a local fee model have matched the RPC fee?
-                // (measurement only, once per RPC quote)
+                // P6-MT.10: the local fee model's parity with this RPC quote, per class (once per
+                // RPC quote; the quote decides).
                 if let Ok(q) = &quote {
-                    match local_fee_estimate_lamports(tx) {
-                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
-                        Some(_) => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
-                        None => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
-                    }
+                    crate::execution::fee_parity::observe(tx, role, q.lamports);
                 }
                 record_timing(
                     &FEE_CALLS,
@@ -1628,9 +1571,16 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut fee_lamports = None;
         if let Ok(p) = &parts {
             let mut sum = Some(0u64);
-            let txs = p.prerequisites.iter().map(|b| &b.tx);
-            for tx in txs.chain([&built.tx, &p.tip_tx]) {
-                match self.quote_message(tx, deadline, fee_quotes)? {
+            let txs = p
+                .prerequisites
+                .iter()
+                .map(|b| (&b.tx, FeeRole::BundlePrerequisite));
+            let rest = [
+                (&built.tx, FeeRole::BundleReceivership),
+                (&p.tip_tx, FeeRole::BundleTip),
+            ];
+            for (tx, role) in txs.chain(rest) {
+                match self.quote_message(tx, role, deadline, fee_quotes)? {
                     Some(q) => sum = sum.and_then(|s| s.checked_add(q.lamports)),
                     None => {
                         sum = None;
@@ -1806,55 +1756,5 @@ mod plan_error_tests {
         let e = PlanError::from("FEE_STATE_UNAVAILABLE:looks typed but is not");
         assert_eq!(e.kind, K::Other);
         assert_eq!((e.decision(), e.loss()), (Decision::Skip, LossReason::Plan));
-    }
-}
-
-#[cfg(test)]
-mod mt0_tests {
-    use super::*;
-    use solana_sdk::instruction::Instruction;
-    use solana_sdk::message::{Message, VersionedMessage};
-    use solana_sdk::pubkey::Pubkey;
-    use solana_sdk::signature::Signature;
-    use solana_sdk::transaction::VersionedTransaction;
-
-    fn tx_with(ixs: Vec<Instruction>) -> VersionedTransaction {
-        let payer = Pubkey::new_unique();
-        let message = VersionedMessage::Legacy(Message::new(&ixs, Some(&payer)));
-        VersionedTransaction {
-            signatures: vec![Signature::default()],
-            message,
-        }
-    }
-
-    fn cb(data: Vec<u8>) -> Instruction {
-        Instruction {
-            program_id: const { Pubkey::from_str_const(COMPUTE_BUDGET_PROGRAM_ID) },
-            accounts: vec![],
-            data,
-        }
-    }
-
-    /// [MT0/H6] The local estimator (measurement only) reproduces the FIX-129 observations:
-    /// 5_000 without priority and 7_800 = 5_000 + 1_400_000 CU x 2_000 uLamports / 10^6.
-    #[test]
-    fn local_fee_estimate_reproduces_fix129_observations() {
-        let plain = Instruction {
-            program_id: Pubkey::new_unique(),
-            accounts: vec![],
-            data: vec![1],
-        };
-        assert_eq!(
-            local_fee_estimate_lamports(&tx_with(vec![plain.clone()])),
-            Some(5_000)
-        );
-        let mut limit = vec![2u8];
-        limit.extend_from_slice(&1_400_000u32.to_le_bytes());
-        let mut price = vec![3u8];
-        price.extend_from_slice(&2_000u64.to_le_bytes());
-        assert_eq!(
-            local_fee_estimate_lamports(&tx_with(vec![cb(limit), cb(price), plain])),
-            Some(7_800)
-        );
     }
 }

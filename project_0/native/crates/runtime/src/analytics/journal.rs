@@ -44,6 +44,9 @@ pub mod kind {
     pub const THRESHOLD_MISS: u16 = 108;
     /// DEC-06: the threshold mode's cumulative counters (`ThresholdStatsRecord`).
     pub const THRESHOLD_STATS: u16 = 109;
+    /// P6-MT.10: the local fee model's cumulative parity counts per class
+    /// (`fee_parity::FeeParityStatsRecord`).
+    pub const FEE_PARITY_STATS: u16 = 110;
     /// FE-04 single-flight automaton: one full state version per durable transition.
     pub const FE04_TRANSITION: u16 = 200;
     /// FE-04 import of a pre-binary JSON wallet journal; the JSON file itself stays unchanged.
@@ -213,6 +216,7 @@ pub mod kind {
         THRESHOLD_TRANSITION,
         THRESHOLD_MISS,
         THRESHOLD_STATS,
+        FEE_PARITY_STATS,
         FE04_TRANSITION,
         FE04_LEGACY_IMPORT,
         MARKET_TRANSACTION,

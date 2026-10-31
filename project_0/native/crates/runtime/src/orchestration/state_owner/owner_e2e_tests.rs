@@ -168,6 +168,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_bootstrap_queued: HashSet::new(),
         threshold_bootstrap_batch: 64,
         threshold: dec06_control(Default::default(), None),
+        fee_parity_base: None,
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -8977,4 +8978,68 @@ fn b01_a_book_unreadable_mid_observation_or_rounds_run_out_are_their_own_reasons
         )]],
         "only the observation that ran out of rounds is recorded"
     );
+}
+
+/// P6-MT.10 in the running owner: the pipeline's RPC fee quote of a candidate is counted in its
+/// class against the local fee model, the owner journals the counts at shutdown
+/// (`FEE_PARITY_STATS`) and its status row shows the parity — the RPC quote decides.
+#[test]
+fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
+    use crate::analytics::payload::{decode, Payload};
+    use crate::execution::fee_parity::{self, FeeFormat, FeeParityStatsRecord, FeeRole};
+    let (mut f, target, calls) = dec13b_fixture("p6_mt10_fee_parity", true);
+    let v0_single = |r: &FeeParityStatsRecord| {
+        r.classes
+            .iter()
+            .filter(|(c, _)| c.format == FeeFormat::V0 && c.role == FeeRole::Single)
+            .map(|(_, n)| n.matched + n.mismatched + n.unsupported)
+            .sum::<u64>()
+    };
+    let before = v0_single(&fee_parity::record(None));
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .contains(&"getFeeForMessage".to_string()),
+        "{:?}",
+        calls.lock().unwrap()
+    );
+    assert!(
+        v0_single(&fee_parity::record(None)) > before,
+        "the quote is counted"
+    );
+    let row = f
+        .owner
+        .owner_snapshot(1)
+        .capabilities
+        .into_iter()
+        .find(|c| c.name == "LOCAL_FEE_MODEL")
+        .expect("the status row");
+    assert_eq!((row.requested, row.effective), ("OBSERVE", "OBSERVE"));
+    assert!(
+        row.block_reason
+            .starts_with("LOCAL_FEE_MODEL_OBSERVE: this run: 0/16"),
+        "{}",
+        row.block_reason
+    );
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut journaled = None;
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == FeeParityStatsRecord::KIND {
+            journaled = Some(
+                decode::<FeeParityStatsRecord>(frame.kind, frame.schema, &frame.payload).unwrap(),
+            );
+        }
+    }
+    let journaled = journaled.expect("journaled at shutdown");
+    assert_eq!(journaled.model_version, fee_parity::FEE_MODEL_VERSION);
+    assert!(v0_single(&journaled) >= 1);
+    let _ = std::fs::remove_dir_all(dir);
 }

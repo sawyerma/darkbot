@@ -945,6 +945,9 @@ macro_rules! typed_kinds {
                 $f::<super::evidence::ThresholdTransition>($kind, $schema, $bytes)
             }
             k::THRESHOLD_MISS => $f::<super::evidence::ThresholdMiss>($kind, $schema, $bytes),
+            k::FEE_PARITY_STATS => {
+                $f::<crate::execution::fee_parity::FeeParityStatsRecord>($kind, $schema, $bytes)
+            }
             k::THRESHOLD_STATS => {
                 $f::<super::evidence::ThresholdStatsRecord>($kind, $schema, $bytes)
             }

@@ -51,6 +51,8 @@ impl ShadowOwner {
             if self.threshold_indexing() {
                 self.threshold_stats_record();
             }
+            // P6-MT.10: the local fee model's parity counts (also once at shutdown).
+            self.fee_parity_record();
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,
@@ -238,5 +240,16 @@ impl ShadowOwner {
             ));
         }
         line
+    }
+}
+
+impl ShadowOwner {
+    /// P6-MT.10: journals the local fee model's cumulative parity counts of this run
+    /// (`FEE_PARITY_STATS`; a continued run's earlier counts included).
+    pub(super) fn fee_parity_record(&mut self) {
+        let record = crate::execution::fee_parity::record(self.fee_parity_base.as_ref());
+        let _ = self
+            .evidence
+            .emit(OwnerEvidence::FeeParityStats(Box::new(record)));
     }
 }

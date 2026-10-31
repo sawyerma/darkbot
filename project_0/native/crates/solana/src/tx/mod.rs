@@ -77,6 +77,37 @@ impl Resources {
     }
 }
 
+/// The fee of one signature (lamports) on Solana: what every fee quote charges a signature; the
+/// local fee model's parity proves it against the cluster's quotes (P6-MT.10).
+pub const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
+
+/// The signature-verify precompiles (secp256k1, ed25519, secp256r1): each signature their data
+/// verifies is charged like a transaction signature, so a message with one is outside the
+/// local fee model.
+const SIGNATURE_PRECOMPILES: [Pubkey; 3] = [
+    Pubkey::from_str_const("KeccakSecp256k11111111111111111111111111111"),
+    Pubkey::from_str_const("Ed25519SigVerify111111111111111111111111111"),
+    Pubkey::from_str_const("Secp256r1SigVerify1111111111111111111111111"),
+];
+
+/// P6-MT.10: the local fee model — what `getFeeForMessage` charges a legacy or v0 message: its
+/// required signatures at `LAMPORTS_PER_SIGNATURE` and the priority fee its own compute budget
+/// instructions request (`requested_priority_lamports`). `None`, outside the model (the RPC
+/// quote decides): a signature-verify precompile, or a priority the instructions do not state
+/// exactly (a price without a CU limit, a duplicate or unreadable compute budget instruction).
+pub fn local_fee_lamports(tx: &VersionedTransaction) -> Option<u64> {
+    let keys = tx.message.static_account_keys();
+    if tx.message.instructions().iter().any(|ix| {
+        keys.get(usize::from(ix.program_id_index))
+            .is_some_and(|k| SIGNATURE_PRECOMPILES.contains(k))
+    }) {
+        return None;
+    }
+    u64::from(tx.message.header().num_required_signatures)
+        .checked_mul(LAMPORTS_PER_SIGNATURE)?
+        .checked_add(requested_priority_lamports(tx)?)
+}
+
 /// P8-CTRL.3: the priority fee a signed transaction requests — ⌈µLamports/CU × CU limit / 1e6⌉
 /// from its own compute budget instructions (`resource_ixs`); no price (or 0) requests none;
 /// `None`: a price without a CU limit, or a duplicate or unreadable compute budget instruction.
@@ -837,6 +868,92 @@ pub fn payer_of(kp: &Keypair) -> Pubkey {
 mod tests {
     use super::*;
     use solana_sdk::instruction::AccountMeta;
+
+    /// P6-MT.10: the local fee model reproduces the FIX-129 Mainnet observations: 5_000 without
+    /// priority and 7_800 = 5_000 + 1_400_000 CU x 2_000 uLamports / 10^6.
+    #[test]
+    fn local_fee_model_reproduces_fix129_observations() {
+        let payer = Pubkey::new_unique();
+        let plain = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![],
+            data: vec![1],
+        };
+        let tx = |ixs: Vec<Instruction>| VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::Legacy(solana_sdk::message::Message::new(
+                &ixs,
+                Some(&payer),
+            )),
+        };
+        assert_eq!(local_fee_lamports(&tx(vec![plain.clone()])), Some(5_000));
+        assert_eq!(
+            local_fee_lamports(&tx(vec![
+                ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
+                ComputeBudgetInstruction::set_compute_unit_price(2_000),
+                plain,
+            ])),
+            Some(7_800)
+        );
+    }
+
+    /// P6-MT.10: the local fee model — the signatures at the per-signature fee and the exactly
+    /// stated priority fee of a built message; a signature-verify precompile, a price without a
+    /// CU limit or a duplicate compute budget instruction is outside it.
+    #[test]
+    fn p6_mt10_local_fee_is_signatures_and_the_stated_priority() {
+        let payer = Keypair::new();
+        let ix = |program: Pubkey| Instruction {
+            program_id: program,
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), false)],
+            data: vec![1],
+        };
+        let built = |instructions: Vec<Instruction>, resources: Resources| {
+            build(
+                &TxPlan {
+                    version: BuildVersion::V0,
+                    payer: payer.pubkey(),
+                    instructions,
+                    lookup_tables: std::sync::Arc::from(Vec::new()),
+                    resources,
+                },
+                Hash::new_unique(),
+                &TxLimits::default(),
+            )
+            .unwrap()
+            .tx
+        };
+        let resources = Resources {
+            compute_unit_limit: 200_000,
+            priority_micro_lamports_per_cu: 1_500,
+            loaded_accounts_data_size: None,
+        };
+        let tx = built(vec![ix(Pubkey::new_unique())], resources);
+        // 1 signature + ⌈200 000 × 1 500 / 10⁶⌉ = 5 000 + 300.
+        assert_eq!(local_fee_lamports(&tx), Some(5_300));
+        let free = Resources {
+            priority_micro_lamports_per_cu: 0,
+            ..resources
+        };
+        assert_eq!(
+            local_fee_lamports(&built(vec![ix(Pubkey::new_unique())], free)),
+            Some(LAMPORTS_PER_SIGNATURE)
+        );
+        let precompile = built(vec![ix(SIGNATURE_PRECOMPILES[1])], resources);
+        assert_eq!(local_fee_lamports(&precompile), None);
+        // A price without a CU limit is not stated exactly.
+        let mut unstated = tx.clone();
+        if let VersionedMessage::V0(m) = &mut unstated.message {
+            let cb = m
+                .account_keys
+                .iter()
+                .position(|k| *k == ComputeBudgetInstruction::set_compute_unit_limit(0).program_id)
+                .unwrap();
+            m.instructions
+                .retain(|c| !(usize::from(c.program_id_index) == cb && c.data.first() == Some(&2)));
+        }
+        assert_eq!(local_fee_lamports(&unstated), None);
+    }
 
     /// E2: the signed message must be exactly its plan. Real Legacy and V0 builds (V0 with a
     /// lookup-table address) match; each tampering — compute-budget data, a dropped compute-budget

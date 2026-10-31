@@ -250,6 +250,9 @@ pub(super) struct ShadowOwner {
     threshold_bootstrap_batch: usize,
     /// DEC-06: the threshold mode (requested/effective, generation, OBSERVE evidence).
     threshold: threshold::ThresholdControl,
+    /// P6-MT.10: the local fee model's parity a continued run journaled before
+    /// (`fee_parity::last_record` of its chain).
+    fee_parity_base: Option<crate::execution::fee_parity::FeeParityStatsRecord>,
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,

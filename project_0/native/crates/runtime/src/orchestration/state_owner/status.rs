@@ -280,6 +280,9 @@ impl ShadowOwner {
                 self.threshold.effective.code(),
                 self.threshold.block,
             ),
+            // P6-MT.10: the local fee model is observed against every RPC quote; this run's parity
+            // per class (the RPC quote decides in this build).
+            self.fee_parity_capability(),
         ];
         // P8-CTRL.1: the economic switches and one switch per configured signer — partial
         // permissions, effective as requested; LIVE above needs all of them.
@@ -625,5 +628,23 @@ impl ShadowOwner {
             Some(_) => "PARTIAL",
         };
         f
+    }
+}
+
+impl ShadowOwner {
+    /// P6-MT.10: the local fee model's status row — observed against every RPC quote (the RPC
+    /// quote decides in this build) with this run's parity (the saved runs' sum: `p0ctl
+    /// fee-parity`).
+    fn fee_parity_capability(&self) -> OwnerCapability {
+        use crate::execution::fee_parity;
+        let run = [fee_parity::record(self.fee_parity_base.as_ref())];
+        OwnerCapability {
+            name: "LOCAL_FEE_MODEL".into(),
+            requested: "OBSERVE",
+            effective: "OBSERVE",
+            block_reason: fee_parity::status_line(&fee_parity::qualification(&run), "this run")
+                .into(),
+            roles: Vec::new(),
+        }
     }
 }
