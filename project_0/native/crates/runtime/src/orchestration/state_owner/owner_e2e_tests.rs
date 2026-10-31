@@ -8097,3 +8097,159 @@ fn p8ctrl06_l15_a_sim_only_grant_never_hands_the_wallets_signature_to_a_sending_
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// S4-04 (PHASENPLAN S4 Performance-Baseline): the core stages of the real owner on the DEC-13b
+/// offline fixture (loopback node and Jupiter, synthetic keys, nothing reaches a network) — the
+/// liquidatable account's update through the ingress queue, its state, detection, plan,
+/// signature and handoff, `P0_S4_BASELINE_RUNS` times, a fresh owner each — per stage as count,
+/// p50/p95/p99/max, allocations (the counting build, `--features alloc-count`) and queue wait.
+/// Steady state: each owner's FE-04 admission is open before `T_rx`, as after its first LIVE
+/// evaluation; that one-time open (its journal) is measured on its own line. A local loopback
+/// baseline, no Mainnet tail. Asserts only that every run passes every stage.
+/// Run explicitly: `cargo test --release -p darkbot-runner --features crate_health,alloc-count
+/// --lib s4_04 -- --ignored --nocapture --test-threads=1`.
+#[test]
+#[ignore]
+fn s4_04_core_stage_baseline() {
+    use darkbot_common::mt0::{HistSnapshot, MT0};
+    use darkbot_common::timing::{CoreStage, CORE_STAGES};
+    let runs: usize = std::env::var("P0_S4_BASELINE_RUNS")
+        .ok()
+        .map(|v| v.parse().expect("P0_S4_BASELINE_RUNS"))
+        .unwrap_or(200);
+    let before: Vec<u64> = CORE_STAGES
+        .iter()
+        .map(|s| MT0.core_stage(*s).0.count)
+        .collect();
+    let mut admission_open = Vec::with_capacity(runs);
+    for i in 0..runs {
+        let (mut f, target, calls) = dec13b_fixture(&format!("s4_04_{i}"), true);
+        p8ctrl03_scoped(&mut f, &[], |_| {});
+        let opened = std::time::Instant::now();
+        let facts = f.owner.fe04_admission_facts(&target);
+        let admission = fe04::admission_for(
+            &mut f.owner.fe04_admission,
+            &mut f.owner.fe04_held,
+            &mut f.owner.fe04_admissions,
+            facts,
+        );
+        admission_open.push(opened.elapsed().as_nanos() as u64);
+        assert!(
+            admission.is_some(),
+            "run {i}: {:?}",
+            f.owner.fe04_admissions
+        );
+        f.owner.fe04_admission = admission;
+        let record = f
+            .owner
+            .st
+            .get(&target)
+            .expect("the fixture's liquidatable account");
+        let (owner, lamports, data) = (record.owner, record.lamports, record.data.to_vec());
+        let update = AccountUpdate {
+            pubkey: target,
+            owner,
+            lamports,
+            data,
+            slot: 101,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: f.owner.clock.now_ns(),
+        };
+        f.producer.try_push(IngressEvent::Account(update)).unwrap();
+        let mut fetch = || Err::<SnapshotData, String>("S4-04: no recovery in a run".into());
+        let sent = |calls: &Arc<Mutex<Vec<String>>>| {
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|m| *m == "sendTransaction")
+                .count()
+        };
+        // The owner loop's steps (`run_shadow`), until the update is handed off.
+        for _ in 0..64 {
+            f.owner.remote_apply().unwrap();
+            f.owner.sweep();
+            if let OwnerStep::Next(detect) = f.owner.events(&mut fetch, &f.ingress).unwrap() {
+                f.owner.detect(detect).unwrap();
+            }
+            if sent(&calls) > 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            sent(&calls),
+            1,
+            "run {i}: the update is detected and handed off once"
+        );
+        cleanup(f);
+    }
+    let row = |h: &HistSnapshot| {
+        let v = |x: Option<u64>| x.map_or("-".to_string(), |x| x.to_string());
+        format!(
+            "{} {} {} {} {}",
+            h.count,
+            v(h.p50),
+            v(h.p95),
+            v(h.p99),
+            v(h.max)
+        )
+    };
+    let counted = darkbot_common::alloc::thread_allocations().is_some();
+    let snapshot = MT0.snapshot(0, darkbot_common::mt0::mono_ns(), &HistSnapshot::default());
+    println!(
+        "S4_04_BASELINE runs={runs} allocations={}",
+        if counted {
+            "counted"
+        } else {
+            "NOT_MEASURED (a build without --features alloc-count)"
+        }
+    );
+    println!("stage | count p50 p95 p99 max (ns) | allocations count p50 p95 p99 max | queue");
+    for (stage, before) in CORE_STAGES.iter().zip(before) {
+        let (ns, allocations) = MT0.core_stage(*stage);
+        assert_eq!(
+            ns.count - before,
+            runs as u64,
+            "{}: every run",
+            stage.name()
+        );
+        let queue = match stage {
+            CoreStage::IngressToState => format!(
+                "ingress_queue_wait {}",
+                row(&snapshot.ingress_queue_wait_ns)
+            ),
+            _ => "inline (owner thread, no queue)".to_string(),
+        };
+        println!(
+            "{} | {} | {} | {queue}",
+            stage.name(),
+            row(&ns),
+            row(&allocations)
+        );
+    }
+    admission_open.sort_unstable();
+    let rank = |q: usize| admission_open[(admission_open.len() * q).div_ceil(100).max(1) - 1];
+    println!(
+        "fe04_admission_open (once per owner, before T_rx) | {} {} {} {} {}",
+        admission_open.len(),
+        rank(50),
+        rank(95),
+        rank(99),
+        admission_open[admission_open.len() - 1]
+    );
+    for (class, h) in &snapshot.queue_wait_latest_ns {
+        if h.count > 0 {
+            println!("trigger_queue_wait {class} {}", row(h));
+        }
+    }
+    // The loopback's own answers inside the stages (remote boundaries, not core work).
+    for r in snapshot.remote.iter().filter(|r| r.requests > 0) {
+        println!(
+            "remote {} requests={} {}",
+            r.class,
+            r.requests,
+            row(&r.latency_ns)
+        );
+    }
+}

@@ -369,6 +369,9 @@ pub struct Registry {
     queue_wait_latest: [Hist; 8],
     queue_wait_first: [Hist; 8],
     ingress_queue_wait: Hist,
+    /// S4-04: each core stage's duration and, in a counting build, its allocations.
+    core_stage_ns: [Hist; 5],
+    core_stage_allocations: [Hist; 5],
     health_calls: [AtomicU64; HEALTH_SITES],
     counters: [AtomicU64; COUNTERS],
     pending_current: AtomicU64,
@@ -394,6 +397,8 @@ impl Registry {
             queue_wait_latest: [HIST; 8],
             queue_wait_first: [HIST; 8],
             ingress_queue_wait: Hist::new(),
+            core_stage_ns: [HIST; 5],
+            core_stage_allocations: [HIST; 5],
             health_calls: [ZERO; HEALTH_SITES],
             counters: [ZERO; COUNTERS],
             pending_current: ZERO,
@@ -521,6 +526,31 @@ impl Registry {
 
     pub fn record_ingress_queue_wait(&self, ns: u64) {
         self.ingress_queue_wait.record(ns);
+    }
+
+    /// S4-04: the core stages of one finished evaluation, from its timeline: each stage between
+    /// two of its points, and the allocations within it where they were counted.
+    pub fn record_core_stages(&self, t: &crate::timing::Timeline) {
+        for stage in crate::timing::CORE_STAGES {
+            let (ns, allocations) = t.core_stage(stage);
+            if let Some(ns) = ns {
+                self.core_stage_ns[stage as usize].record(ns);
+            }
+            if let Some(allocations) = allocations {
+                self.core_stage_allocations[stage as usize].record(allocations);
+            }
+        }
+    }
+
+    /// S4-04: `(duration ns, allocations)` of `stage` over every evaluation recorded so far; the
+    /// allocations have no samples in a build that counts none. In-process only: the persisted
+    /// snapshot (`mt0_version` 2) does not carry them — every evaluation's points are in its
+    /// record (`OWNER_OPPORTUNITY` timing).
+    pub fn core_stage(&self, stage: crate::timing::CoreStage) -> (HistSnapshot, HistSnapshot) {
+        (
+            self.core_stage_ns[stage as usize].snapshot(),
+            self.core_stage_allocations[stage as usize].snapshot(),
+        )
     }
 
     pub fn count_health(&self, site: HealthSite) {
@@ -1231,5 +1261,24 @@ mod tests {
         assert!(reg
             .snapshot_json(0, 0, &HistSnapshot::default())
             .contains("\"pending_current\":12"));
+    }
+
+    /// S4-04: a finished evaluation's stages are recorded where both points exist; allocations
+    /// only where counted (unknown, never 0).
+    #[test]
+    fn s4_04_core_stages_are_recorded_per_stage() {
+        use crate::timing::{CoreStage, Stage, Timeline};
+        static REG: Registry = Registry::new();
+        let mut t = Timeline::new();
+        t.mark_elsewhere(Stage::Rx, 100);
+        t.mark_elsewhere(Stage::State, 160);
+        t.mark_elsewhere(Stage::Detect, 200);
+        REG.record_core_stages(&t);
+        REG.record_core_stages(&t);
+        let (ns, allocations) = REG.core_stage(CoreStage::IngressToState);
+        assert_eq!((ns.count, ns.max, ns.p50), (2, Some(60), Some(60)));
+        assert_eq!((allocations.count, allocations.p50), (0, None));
+        assert_eq!(REG.core_stage(CoreStage::StateToDetect).0.max, Some(40));
+        assert_eq!(REG.core_stage(CoreStage::DetectToReady).0.count, 0);
     }
 }

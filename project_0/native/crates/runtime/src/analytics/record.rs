@@ -285,6 +285,8 @@ impl OpportunityRecord {
     }
     pub fn with_timeline(mut self, t: &Timeline) -> Self {
         use darkbot_common::timing::Stage;
+        // S4-04: an evaluation ends here with its timeline: its core stages are measured once.
+        darkbot_common::mt0::MT0.record_core_stages(t);
         self.timing = TimingEvidence {
             t_rx_ns: t.get(Stage::Rx),
             t_state_ns: t.get(Stage::State),

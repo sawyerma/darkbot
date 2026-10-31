@@ -13,6 +13,12 @@
 //!
 //! Status: UNTESTED / VERIFY.
 
+/// S4-04: the baseline build (`--features alloc-count`) counts every thread's allocations
+/// (`darkbot_common::alloc`); every other build uses the system allocator and counts none.
+#[cfg(feature = "alloc-count")]
+#[global_allocator]
+static ALLOCATOR: darkbot_common::alloc::Counting = darkbot_common::alloc::Counting;
+
 pub mod analytics;
 /// F-16: the process console lives in `darkbot-common` (the solana crate prints through it).
 pub use darkbot_common::console;

@@ -114,25 +114,84 @@ impl Default for Clock {
     }
 }
 
+/// PHASENPLAN §6 Ableitungen: the core stages between consecutive normative points (S4-04
+/// baseline: per stage count, p50/p95/p99/max, allocations, queue wait).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CoreStage {
+    IngressToState = 0,
+    StateToDetect = 1,
+    DetectToReady = 2,
+    ReadyToSign = 3,
+    SignToHandoff = 4,
+}
+
+pub const CORE_STAGES: [CoreStage; 5] = [
+    CoreStage::IngressToState,
+    CoreStage::StateToDetect,
+    CoreStage::DetectToReady,
+    CoreStage::ReadyToSign,
+    CoreStage::SignToHandoff,
+];
+
+impl CoreStage {
+    pub const fn name(self) -> &'static str {
+        match self {
+            CoreStage::IngressToState => "ingress_to_state",
+            CoreStage::StateToDetect => "state_to_detect",
+            CoreStage::DetectToReady => "detect_to_ready",
+            CoreStage::ReadyToSign => "ready_to_sign",
+            CoreStage::SignToHandoff => "sign_to_handoff",
+        }
+    }
+
+    /// The normative points the stage lies between.
+    pub const fn bounds(self) -> (Stage, Stage) {
+        match self {
+            CoreStage::IngressToState => (Stage::Rx, Stage::State),
+            CoreStage::StateToDetect => (Stage::State, Stage::Detect),
+            CoreStage::DetectToReady => (Stage::Detect, Stage::Ready),
+            CoreStage::ReadyToSign => (Stage::Ready, Stage::Sign),
+            CoreStage::SignToHandoff => (Stage::Sign, Stage::Handoff),
+        }
+    }
+}
+
 /// Zeitleiste einer Opportunity/Transaktion. Allokationsfrei.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Timeline {
     marks: [Option<u64>; 7],
+    /// S4-04: the marking thread's allocations at each point (`crate::alloc`); `None` for a point
+    /// measured elsewhere (`mark_elsewhere`) or in a build that counts none.
+    allocations: [Option<u64>; 7],
 }
 
 impl Timeline {
     pub const fn new() -> Self {
-        Timeline { marks: [None; 7] }
+        Timeline {
+            marks: [None; 7],
+            allocations: [None; 7],
+        }
     }
 
     /// Setzt einen Messpunkt. Ein bereits gesetzter Punkt wird nicht überschrieben
     /// (Rückgabe `false`), damit Provenienz nicht stillschweigend verloren geht.
     pub fn mark(&mut self, stage: Stage, mono_ns: u64) -> bool {
+        self.mark_with(stage, mono_ns, crate::alloc::thread_allocations())
+    }
+
+    /// `mark` of a point measured on another thread (its time, e.g. the ingress `T_rx`): no
+    /// allocation count of this thread belongs to it.
+    pub fn mark_elsewhere(&mut self, stage: Stage, mono_ns: u64) -> bool {
+        self.mark_with(stage, mono_ns, None)
+    }
+
+    fn mark_with(&mut self, stage: Stage, mono_ns: u64, allocations: Option<u64>) -> bool {
         let slot = &mut self.marks[stage as usize];
         if slot.is_some() {
             return false;
         }
         *slot = Some(mono_ns);
+        self.allocations[stage as usize] = allocations;
         true
     }
 
@@ -149,6 +208,21 @@ impl Timeline {
             return None;
         }
         Some(b - a)
+    }
+
+    /// S4-04: the core stage's duration (`interval` of its bounds) and the allocations the
+    /// marking thread made within it — `None` unless both points were marked on that thread in
+    /// a counting build.
+    pub fn core_stage(&self, stage: CoreStage) -> (Option<u64>, Option<u64>) {
+        let (from, to) = stage.bounds();
+        let allocations = match (
+            self.allocations[from as usize],
+            self.allocations[to as usize],
+        ) {
+            (Some(a), Some(b)) if b >= a => Some(b - a),
+            _ => None,
+        };
+        (self.interval(from, to), allocations)
     }
 
     /// Alle Standardintervalle des Ledgers (§1) in fester Reihenfolge.
@@ -222,6 +296,52 @@ mod tests {
         t.mark(Stage::Ready, 500);
         t.mark(Stage::Sign, 400);
         assert_eq!(t.interval(Stage::Ready, Stage::Sign), None);
+    }
+
+    /// S4-04: the core stages are the §6 derivations between consecutive points; a build without
+    /// the counting allocator counts no allocations (unknown, never 0), a point measured
+    /// elsewhere never carries this thread's count.
+    #[test]
+    fn s4_04_core_stages_are_the_derivations_and_count_only_what_is_counted() {
+        let names: Vec<_> = CORE_STAGES.iter().map(|s| s.name()).collect();
+        assert_eq!(
+            names,
+            [
+                "ingress_to_state",
+                "state_to_detect",
+                "detect_to_ready",
+                "ready_to_sign",
+                "sign_to_handoff"
+            ]
+        );
+        for pair in CORE_STAGES.windows(2) {
+            assert_eq!(pair[0].bounds().1, pair[1].bounds().0, "consecutive");
+        }
+        // A build that counts none (`thread_allocations()` is `None`); a point measured elsewhere.
+        let mut t = Timeline::new();
+        t.mark_elsewhere(Stage::Rx, 100);
+        t.mark_with(Stage::State, 400, None);
+        t.mark_with(Stage::Detect, 450, None);
+        assert_eq!(t.core_stage(CoreStage::IngressToState), (Some(300), None));
+        assert_eq!(t.core_stage(CoreStage::StateToDetect), (Some(50), None));
+        assert_eq!(t.core_stage(CoreStage::DetectToReady), (None, None));
+        let mut e = Timeline::new();
+        e.mark_with(Stage::Rx, 1, Some(4));
+        e.mark_elsewhere(Stage::State, 2);
+        assert_eq!(e.core_stage(CoreStage::IngressToState), (Some(1), None));
+        // Samples as a counting build takes them.
+        let mut c = Timeline::new();
+        c.mark_with(Stage::Ready, 10, Some(7));
+        c.mark_with(Stage::Sign, 30, Some(19));
+        c.mark_with(Stage::Handoff, 35, Some(3));
+        assert_eq!(c.core_stage(CoreStage::ReadyToSign), (Some(20), Some(12)));
+        assert_eq!(
+            c.core_stage(CoreStage::SignToHandoff),
+            (Some(5), None),
+            "a count that went back is no count"
+        );
+        assert!(!c.mark_with(Stage::Ready, 11, Some(8)), "never overwritten");
+        assert_eq!(c.core_stage(CoreStage::ReadyToSign), (Some(20), Some(12)));
     }
 
     #[test]

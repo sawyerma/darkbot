@@ -12,6 +12,9 @@ txv1 = ["darkbot-solana/txv1"]
 # DEC-09: historical JSON readers (schema-1 views, legacy renders, pre-binary imports) for offline
 # tools only; the standard production binary is built without them.
 historical = ["darkbot-solana/historical"]
+# S4-04: the baseline build — the counting allocator, allocations per core stage (the production
+# build leaves it off).
+alloc-count = []
 
 # DEC-09: the A4 parity differential reads historical raw JSON sources only.
 [[bin]]

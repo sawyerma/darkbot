@@ -2,6 +2,7 @@
 //!
 //! Enthält nur chain-generische Produktionsbausteine:
 //! - `timing`: Timing Contract (T_rx … T_observed_landed) auf monotoner Uhr
+//! - `alloc`: Allokationen je Thread, nur mit dem zählenden Allocator (S4-04 Baseline-Build)
 //! - `histogram`: allokationsfreie Latenz-Histogramme (p50/p95/p99/max/count)
 //! - `channel`: bounded Channels mit explizitem Overflow (kein stiller Overwrite)
 //! - `lifecycle`: Shutdown-Signal und RunState (fail-closed HALT)
@@ -11,6 +12,7 @@
 //!
 //! Keine Chain-Abstraktion. Keine Businesslogik.
 
+pub mod alloc;
 pub mod channel;
 pub mod config;
 pub mod console;

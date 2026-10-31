@@ -482,9 +482,14 @@ impl Budget {
                 s.queue.retain(|(t, _)| *t != ticket);
                 return Ok(self.grant(&mut s, work, now));
             }
-            let wait = deadline
+            // S4-04: a waiter whose token or pacing is due at `ready` wakes then — no release
+            // notifies a pacing slot coming free, so the bounded wait alone overslept it.
+            let mut wait = deadline
                 .saturating_duration_since(now)
                 .min(Duration::from_millis(50));
+            if ready > now {
+                wait = wait.min(ready - now);
+            }
             s = match self.changed.wait_timeout(s, wait) {
                 Ok((s, _)) => s,
                 Err(p) => {
@@ -1477,6 +1482,24 @@ mod tests {
         assert!(
             waited >= Duration::from_millis(500),
             "shared pacing slot kept: {waited:?}"
+        );
+    }
+    /// S4-04 (baseline finding): a second request of a workload inside its pacing interval is
+    /// admitted when the interval ends, not up to the 50 ms re-check later (a fee quote at 1000/s
+    /// waited ~50 ms for its 1 ms slot; a fee quote at the default 2/s up to 50 ms past it).
+    #[test]
+    fn s4_04_a_paced_request_is_admitted_when_its_pacing_ends() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        (c.limits.fee_rps, c.limits.rpc_rps, c.limits.rpc_burst) = (1_000, 1_000, 100);
+        let b = Arc::new(Budget::configured(&c));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        drop(b.acquire(Workload::FeeQuote, deadline).unwrap());
+        let started = Instant::now();
+        drop(b.acquire(Workload::FeeQuote, deadline).unwrap());
+        let waited = started.elapsed();
+        assert!(
+            waited < Duration::from_millis(25),
+            "admitted {waited:?} after a 1 ms pacing interval"
         );
     }
     /// Review E3 (V2-07): the inline admission grants nothing at or after the caller's deadline

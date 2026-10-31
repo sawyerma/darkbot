@@ -594,7 +594,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                                   // V2-15: the monotonic instant of `now_unix_s` — the admission ages it to the handoff.
         let evaluated = Instant::now();
         let mut tl = Timeline::new();
-        tl.mark(Stage::Rx, t_rx_ns);
+        // T_rx is the ingress's point: no allocation of this thread belongs to it (S4-04).
+        tl.mark_elsewhere(Stage::Rx, t_rx_ns);
         let mut rec = OpportunityRecord {
             progress: Default::default(),
             market_plan_identity: None,
