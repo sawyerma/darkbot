@@ -625,6 +625,9 @@ fn run_embedded_inner(
     status_tap: Option<StatusTap>,
     rolling: Option<crate::orchestration::until_stopped::Rolling>,
 ) -> Result<(), String> {
+    // P6-MT.12: the market observer records the market (the econ run's `econ-market` thread, the
+    // capture binary's main thread); its stream has its own ingress thread.
+    crate::host::set_thread_qos(crate::host::ThreadRole::Evidence);
     let process_started = clock_unix_s(&clock);
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;

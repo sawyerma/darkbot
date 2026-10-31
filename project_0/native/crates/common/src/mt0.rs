@@ -1050,6 +1050,7 @@ pub fn spawn_reporter(
     let worker = std::thread::Builder::new()
         .name("mt0-reporter".into())
         .spawn(move || {
+            crate::qos::enter(crate::qos::ThreadRole::Evidence);
             let duty = Hist::new();
             let (mut last_busy, mut last_wait) = MT0.owner_totals_at(mono_ns());
             let mut last_write = Instant::now();

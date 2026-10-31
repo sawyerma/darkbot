@@ -273,14 +273,13 @@ impl ShadowOwner {
                 owner_log!(self, "{}", host.line());
                 host
             }
-            Some(last) => crate::host::HostEvidence {
-                active_cpus: crate::host::active_cpus(),
-                thermal_pressure: crate::host::thermal_pressure(),
-                low_power_mode: crate::host::low_power_mode(),
-                qos_refusals: crate::host::qos_refusals(),
-                ..last.clone()
-            },
+            Some(last) => last.with(crate::host::sample()),
         };
+        self.host_journal(host);
+    }
+
+    /// Journals `host` unless it is the last record.
+    pub(super) fn host_journal(&mut self, host: crate::host::HostEvidence) {
         if self.host_journaled.as_ref() == Some(&host) {
             return;
         }

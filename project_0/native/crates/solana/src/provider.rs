@@ -829,6 +829,17 @@ struct Transport {
     runtime: tokio::runtime::Runtime,
     http: reqwest::Client,
 }
+/// The transport's runtime of `workers` workers; P6-MT.12: they do the RPC I/O, so each enters
+/// the Remote role (review M1: a thread's QoS class is not inherited from the one creating it).
+fn transport_runtime(workers: usize) -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers)
+        .thread_name("p0-rpc-transport")
+        .on_thread_start(|| darkbot_common::qos::enter(darkbot_common::qos::ThreadRole::Remote))
+        .enable_all()
+        .build()
+}
+
 fn transport() -> Result<&'static Transport, &'static str> {
     static TRANSPORT: OnceLock<Result<Transport, &'static str>> = OnceLock::new();
     TRANSPORT
@@ -842,12 +853,7 @@ fn transport() -> Result<&'static Transport, &'static str> {
                 .map_err(|_| "RPC_HTTP_CLIENT")?;
             // At most `rpc_concurrency` calls are admitted at once: as many workers.
             let workers = usize::try_from(limits.rpc_concurrency).map_err(|_| "RPC_TRANSPORT")?;
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(workers)
-                .thread_name("p0-rpc-transport")
-                .enable_all()
-                .build()
-                .map_err(|_| "RPC_TRANSPORT_RUNTIME")?;
+            let runtime = transport_runtime(workers).map_err(|_| "RPC_TRANSPORT_RUNTIME")?;
             Ok(Transport { runtime, http })
         })
         .as_ref()
@@ -1986,5 +1992,63 @@ mod configuration_tests {
         b.check_configuration(&e);
         assert_eq!(b.account_bytes(1), Err("PROVIDER_BUDGET_CONFIG_DRIFT"));
         assert!(!b.lock_state().failed);
+    }
+}
+
+/// P6-MT.12: the roles the threads of this crate's runtimes entered, recorded by a test hook
+/// (installed once for this test binary; the platform's hook is the runtime crate's).
+#[cfg(test)]
+pub(crate) mod qos_recorder {
+    use darkbot_common::qos::ThreadRole;
+    static ENTERED: std::sync::Mutex<Vec<(Option<String>, ThreadRole)>> =
+        std::sync::Mutex::new(Vec::new());
+
+    fn record(role: ThreadRole) -> bool {
+        let name = std::thread::current().name().map(str::to_string);
+        ENTERED.lock().unwrap().push((name, role));
+        true
+    }
+
+    /// The roles entered so far (the recording hook installed).
+    pub(crate) fn entered() -> Vec<(Option<String>, ThreadRole)> {
+        darkbot_common::qos::install(record);
+        ENTERED.lock().unwrap().clone()
+    }
+
+    /// The roles entered once `done` holds of them, waiting for threads that start
+    /// asynchronously (tokio starts its workers after `build`), bounded.
+    pub(crate) fn entered_until(
+        done: impl Fn(&[(Option<String>, ThreadRole)]) -> bool,
+    ) -> Vec<(Option<String>, ThreadRole)> {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let e = entered();
+            if done(&e) || std::time::Instant::now() >= until {
+                return e;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+}
+
+#[cfg(test)]
+mod p6_mt12_tests {
+    use darkbot_common::qos::ThreadRole;
+
+    /// Every worker of the RPC transport's runtime enters the Remote role at its start.
+    #[test]
+    fn the_transport_workers_enter_the_remote_role() {
+        super::qos_recorder::entered();
+        let runtime = super::transport_runtime(3).unwrap();
+        let workers = |e: &[(Option<String>, ThreadRole)]| {
+            e.iter()
+                .filter(|(name, role)| {
+                    name.as_deref() == Some("p0-rpc-transport") && *role == ThreadRole::Remote
+                })
+                .count()
+        };
+        let entered = super::qos_recorder::entered_until(|e| workers(e) >= 3);
+        assert!(workers(&entered) >= 3, "{entered:?}");
+        drop(runtime);
     }
 }

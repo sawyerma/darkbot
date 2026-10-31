@@ -21,6 +21,8 @@ pub mod histogram;
 pub mod journal;
 pub mod lifecycle;
 pub mod mt0;
+/// P6-MT.12: a thread's QoS class by its role, through the process's platform hook.
+pub mod qos;
 pub mod timing;
 
 /// Version des Timing-/Telemetry-Contracts. Änderungen sind Gate-relevant.

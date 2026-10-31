@@ -503,8 +503,10 @@ impl OwnerWindows {
         };
         match std::thread::Builder::new()
             .name("p0-owner-window".into())
-            .spawn(job)
-        {
+            .spawn(move || {
+                crate::host::set_thread_qos(crate::host::ThreadRole::Evidence);
+                job()
+            }) {
             Ok(h) => {
                 self.pending = Some(Boundary::Checking(h));
                 Ok(None)

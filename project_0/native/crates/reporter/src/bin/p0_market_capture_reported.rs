@@ -13,6 +13,8 @@ fn main() -> ExitCode {
         write_result(&Err("STOP_HANDLER_FAILED"), None, None);
         return ExitCode::FAILURE;
     }
+    // P6-MT.12: this process's QoS hook, before any thread of a role starts.
+    darkbot_runner::host::install_qos();
     if let Some(spec) = std::env::var("P0_ENV_FILE")
         .ok()
         .filter(|v| !v.trim().is_empty())

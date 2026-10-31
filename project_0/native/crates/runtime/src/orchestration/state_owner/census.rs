@@ -123,6 +123,7 @@ pub(super) fn spawn(
     std::thread::Builder::new()
         .name("c0-census".into())
         .spawn(move || {
+            crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
             while !shutdown.is_requested() {
                 let Some(job) = job_rx.pop_timeout(Duration::from_millis(250)) else {
                     continue;

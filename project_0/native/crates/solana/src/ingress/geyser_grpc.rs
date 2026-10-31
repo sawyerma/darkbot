@@ -103,6 +103,10 @@ impl GrpcTransport {
         let endpoint = Endpoint::parse(endpoint)?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
+            // P6-MT.12: its worker reads the Geyser stream (review M1).
+            .on_thread_start(|| {
+                darkbot_common::qos::enter(darkbot_common::qos::ThreadRole::Ingress)
+            })
             .enable_all()
             .build()
             .map_err(|_| StreamError::Rejected("GEYSER_RUNTIME"))?;
@@ -289,6 +293,26 @@ mod tests {
     use prost::Message;
 
     use super::super::geyser_loopback::{serve, Reply};
+
+    /// P6-MT.12: the Geyser runtime's worker (it reads the stream) enters the Ingress role.
+    #[test]
+    fn the_geyser_worker_enters_the_ingress_role() {
+        use darkbot_common::qos::ThreadRole;
+        let ingress = |e: &[(Option<String>, ThreadRole)]| {
+            e.iter().filter(|(_, r)| *r == ThreadRole::Ingress).count()
+        };
+        let before = ingress(&crate::provider::qos_recorder::entered());
+        let stream = GrpcTransport::new(
+            "http://127.0.0.1:9",
+            None,
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let after = crate::provider::qos_recorder::entered_until(|e| ingress(e) > before);
+        assert!(ingress(&after) > before, "{after:?}");
+        drop(stream);
+    }
 
     fn account_frame(slot: u64) -> Vec<u8> {
         frame(&proto::SubscribeUpdate {

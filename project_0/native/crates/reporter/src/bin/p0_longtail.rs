@@ -44,6 +44,8 @@ fn attach(tap: &StatusTap) -> Option<ReporterHandle> {
 }
 
 fn main() {
+    // P6-MT.12: this process's QoS hook, before any thread of a role starts.
+    darkbot_runner::host::install_qos();
     let tap = StatusTap::new();
     let mut reporter = None;
     let result = darkbot_runner::orchestration::run_with(&mut || reporter = attach(&tap));

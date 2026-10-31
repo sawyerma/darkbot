@@ -9357,6 +9357,14 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
         assert!(!host.perf_levels.is_empty());
     }
     f.owner.host_record();
+    // A change of its runtime state is journaled again (review L5): a sample of no active CPU
+    // (never the kernel's; twice: once), then the kernel's own again.
+    let hot = host.with(crate::host::HostSample {
+        active_cpus: Some(0),
+        ..crate::host::sample()
+    });
+    f.owner.host_journal(hot.clone());
+    f.owner.host_journal(hot.clone());
     f.owner.host_record();
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
@@ -9373,5 +9381,11 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
         records.windows(2).all(|w| w[0] != w[1]),
         "a record only after a change"
     );
+    assert_eq!(
+        records.iter().filter(|r| **r == hot).count(),
+        1,
+        "the changed state once: {records:?}"
+    );
+    assert!(records.len() >= 3, "back to the kernel's own: {records:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

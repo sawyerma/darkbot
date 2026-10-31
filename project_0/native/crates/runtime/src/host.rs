@@ -1,15 +1,17 @@
 //! P6-MT.12 (Apple-M4 runtime): the host a run executes on, read at its start — the CPU
 //! topology without a fixed core count (`hw.nperflevels` and each performance level's logical
-//! CPUs, CPUs per L2 and L2 size, `hw.logicalcpu`, `hw.activecpu`, `hw.cachelinesize`), whether the
-//! process runs natively on arm64 or translated (Rosetta: `sysctl.proc_translated`), the macOS
-//! version and model, and power and thermal state (the system's low-power-mode and
-//! thermal-pressure notification states) — and the QoS class of each thread role (PHASENPLAN:
-//! Owner/Ingress/FAST/Remote USER_INITIATED, Evidence UTILITY; no claimed P-/E-core affinity; no
-//! FAST pool exists yet — route, fee and simulation run on the owner).
-//! A qualifying M4 run is native arm64 macOS, never under Rosetta (`HostEvidence::qualifying`).
-//! The sources are the kernel's sysctls and libnotify's states (libSystem, linked by every
-//! process): no new dependency, nothing on the network. On another OS a source is absent
-//! (`None`), never guessed.
+//! CPUs, CPUs per L2 and L2 size, `hw.logicalcpu`, `hw.activecpu`, `hw.cachelinesize`), the chip
+//! (`machdep.cpu.brand_string`), whether it runs in a virtual machine (`kern.hv_vmm_present`) and
+//! natively on arm64 or translated (Rosetta: `sysctl.proc_translated`), the macOS version and
+//! model, and power and thermal state (libnotify's low-power-mode and thermal-pressure states: 0
+//! is nominal or not published — libnotify answers an unpublished name with 0; the High Power
+//! setting of `pmset powermode` is not read) — and the platform hook that sets a thread's QoS
+//! class by its role (`darkbot_common::qos`; PHASENPLAN: Owner/Ingress/FAST/Remote
+//! USER_INITIATED, Evidence UTILITY; no claimed P-/E-core affinity). A qualifying M4 run is an
+//! Apple M4, not virtualized, native arm64 macOS, never under Rosetta (`HostEvidence::qualifying`;
+//! an unknown source is never a pass). The sources are the kernel's sysctls and libnotify
+//! (libSystem, linked by every process): no new dependency, nothing on the network. On another OS
+//! a source is absent (`None`), never guessed.
 use serde::{Deserialize, Serialize};
 
 /// One performance level (`hw.perflevelN.*`), in the kernel's order (0: the fastest).
@@ -31,6 +33,10 @@ pub struct HostEvidence {
     pub machine_arm64: Option<bool>,
     /// `sysctl.proc_translated`: this process runs under Rosetta.
     pub translated: Option<bool>,
+    /// `machdep.cpu.brand_string` (e.g. "Apple M4 Max").
+    pub cpu_brand: Option<String>,
+    /// `kern.hv_vmm_present`: the system runs in a virtual machine.
+    pub virtualized: Option<bool>,
     pub os: String,
     pub os_version: Option<String>,
     pub model: Option<String>,
@@ -38,10 +44,12 @@ pub struct HostEvidence {
     pub logical_cpus: Option<u32>,
     pub active_cpus: Option<u32>,
     pub cache_line_bytes: Option<u64>,
+    /// Low-power mode on (`false`: off or not published).
     pub low_power_mode: Option<bool>,
-    /// The thermal pressure level (0 nominal … 4), `com.apple.system.thermalpressurelevel`.
+    /// The thermal pressure level (0 nominal or not published … 4),
+    /// `com.apple.system.thermalpressurelevel`.
     pub thermal_pressure: Option<u64>,
-    /// Threads whose QoS class the kernel refused so far (`set_thread_qos`).
+    /// Threads whose QoS class the kernel refused so far (`darkbot_common::qos::refusals`).
     pub qos_refusals: u64,
 }
 
@@ -50,23 +58,37 @@ impl crate::analytics::payload::Payload for HostEvidence {
 }
 
 /// A run on a host that is not a native arm64 Mac qualifies nothing for M4.
-pub const NOT_M4: &str = "M4_HOST_NOT_NATIVE: a qualifying M4 run is native arm64 macOS";
+pub const NOT_NATIVE: &str = "M4_HOST_NOT_NATIVE: a qualifying M4 run is native arm64 macOS";
+/// A run on another chip (or an unknown one) qualifies nothing for M4.
+pub const NOT_M4: &str = "M4_HOST_NOT_M4: a qualifying M4 run is on an Apple M4";
+/// A run in a virtual machine (or of unknown virtualization) qualifies nothing for M4.
+pub const VIRTUAL: &str = "M4_HOST_VIRTUAL: a qualifying M4 run is not in a virtual machine";
 /// A run under Rosetta qualifies nothing (PHASENPLAN P6-MT.12).
 pub const ROSETTA: &str = "M4_HOST_ROSETTA: a qualifying M4 run is never translated (Rosetta)";
 
 impl HostEvidence {
-    /// Whether a run on this host can qualify for M4: native arm64 macOS, not translated; `Err`:
-    /// why not (an unknown source is never a pass).
+    /// Whether a run on this host can qualify for M4: an Apple M4, not virtualized, native arm64
+    /// macOS, not translated; `Err`: why not (an unknown source is never a pass).
     pub fn qualifying(&self) -> Result<(), &'static str> {
         if self.translated != Some(false) {
             return Err(if self.translated == Some(true) {
                 ROSETTA
             } else {
-                NOT_M4
+                NOT_NATIVE
             });
         }
         if self.os != "macos" || self.build_arch != "aarch64" || self.machine_arm64 != Some(true) {
+            return Err(NOT_NATIVE);
+        }
+        if !self
+            .cpu_brand
+            .as_deref()
+            .is_some_and(|b| b.starts_with("Apple M4"))
+        {
             return Err(NOT_M4);
+        }
+        if self.virtualized != Some(false) {
+            return Err(VIRTUAL);
         }
         Ok(())
     }
@@ -87,12 +109,14 @@ impl HostEvidence {
             })
             .collect();
         format!(
-            "host {} {} {} · build {} · translated {} · levels [{}] · logical {} active {} · line {}B · low power {} · thermal {} · qos refused {} · {}",
+            "host {} {} {} {} · build {} · translated {} · virtual {} · levels [{}] · logical {} active {} · line {}B · low power {} · thermal {} · qos refused {} · {}",
             self.os,
             self.os_version.as_deref().unwrap_or("?"),
             self.model.as_deref().unwrap_or("?"),
+            self.cpu_brand.as_deref().unwrap_or("?"),
             self.build_arch,
             shown(self.translated),
+            shown(self.virtualized),
             levels.join(", "),
             shown(self.logical_cpus),
             shown(self.active_cpus),
@@ -119,6 +143,8 @@ pub fn read() -> HostEvidence {
         build_arch: std::env::consts::ARCH.into(),
         machine_arm64: sys::u32("hw.optional.arm64").map(|v| v == 1),
         translated: sys::translated(),
+        cpu_brand: sys::string("machdep.cpu.brand_string"),
+        virtualized: sys::u32("kern.hv_vmm_present").map(|v| v != 0),
         os: std::env::consts::OS.into(),
         os_version: sys::string("kern.osproductversion"),
         model: sys::string("hw.model"),
@@ -140,44 +166,72 @@ pub fn read() -> HostEvidence {
     }
 }
 
+/// The runtime state of the host that changes while a process runs (P6-MT.13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostSample {
+    pub active_cpus: Option<u32>,
+    pub thermal_pressure: Option<u64>,
+    pub low_power_mode: Option<bool>,
+    pub qos_refusals: u64,
+}
+
+/// The host's runtime state now.
+pub fn sample() -> HostSample {
+    HostSample {
+        active_cpus: active_cpus(),
+        thermal_pressure: thermal_pressure(),
+        low_power_mode: low_power_mode(),
+        qos_refusals: qos_refusals(),
+    }
+}
+
+impl HostEvidence {
+    /// This host with the runtime state `s` (its topology does not change while a process runs).
+    pub fn with(&self, s: HostSample) -> HostEvidence {
+        HostEvidence {
+            active_cpus: s.active_cpus,
+            thermal_pressure: s.thermal_pressure,
+            low_power_mode: s.low_power_mode,
+            qos_refusals: s.qos_refusals,
+            ..self.clone()
+        }
+    }
+}
+
 /// `hw.activecpu` now (P6-MT.13 `active_cpu`).
 pub fn active_cpus() -> Option<u32> {
     sys::u32("hw.activecpu")
 }
 
-/// Whether low-power mode is on now.
+/// Whether low-power mode is on now (`false`: off or not published). Polled on the owner's
+/// telemetry tick: the state is read again only after its notification was posted.
 pub fn low_power_mode() -> Option<bool> {
-    sys::notify_state("com.apple.system.lowpowermode").map(|s| s != 0)
+    sys::low_power().map(|s| s != 0)
 }
 
-/// The thermal pressure level now (P6-MT.13 `thermal_state`).
+/// The thermal pressure level now (P6-MT.13 `thermal_state`; read like `low_power_mode`).
 pub fn thermal_pressure() -> Option<u64> {
-    sys::notify_state("com.apple.system.thermalpressurelevel")
+    sys::thermal()
 }
 
-/// The role of a thread for its QoS class (PHASENPLAN P6-MT.12).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThreadRole {
-    Owner,
-    Ingress,
-    Remote,
-    Evidence,
+pub use darkbot_common::qos::ThreadRole;
+
+/// Installs this process's QoS hook (`darkbot_common::qos`) over the kernel's call — at a
+/// binary's start, and by the first `set_thread_qos` (the first installation stays).
+pub fn install_qos() {
+    darkbot_common::qos::install(|role| sys::set_qos(role).is_ok());
 }
 
-/// Threads whose QoS class the kernel refused (each keeps its default), in the host record.
-static QOS_REFUSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Sets the calling thread's QoS class for `role` (macOS; elsewhere nothing to set); a refusal
-/// is counted (`qos_refusals`), the thread keeps its default.
+/// The calling thread enters `role` (its QoS class; a refusal is counted, the thread keeps its
+/// default).
 pub fn set_thread_qos(role: ThreadRole) {
-    if sys::set_qos(role).is_err() {
-        QOS_REFUSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
+    install_qos();
+    darkbot_common::qos::enter(role);
 }
 
 /// The QoS refusals of this process so far.
 pub fn qos_refusals() -> u64 {
-    QOS_REFUSED.load(std::sync::atomic::Ordering::Relaxed)
+    darkbot_common::qos::refusals()
 }
 
 #[cfg(target_os = "macos")]
@@ -245,24 +299,59 @@ mod sys {
     // libnotify (libSystem): the state of a system notification name.
     extern "C" {
         fn notify_register_check(name: *const c_char, out_token: *mut c_int) -> u32;
+        fn notify_check(token: c_int, check: *mut c_int) -> u32;
         fn notify_get_state(token: c_int, state64: *mut u64) -> u32;
-        fn notify_cancel(token: c_int) -> u32;
     }
     const NOTIFY_STATUS_OK: u32 = 0;
 
-    pub(super) fn notify_state(name: &str) -> Option<u64> {
-        let name = CString::new(name).ok()?;
-        let mut token: c_int = 0;
-        // SAFETY: a NUL-terminated name and an out token we own; the token is cancelled below.
-        if unsafe { notify_register_check(name.as_ptr(), &mut token) } != NOTIFY_STATUS_OK {
+    /// A name registered once for the process (review L3): `notify_check` is a local read; the
+    /// state is asked again (an IPC to notifyd) only after a notification was posted.
+    struct Watch {
+        token: c_int,
+        state: std::sync::atomic::AtomicU64,
+    }
+
+    fn watched(name: &str, cell: &'static std::sync::OnceLock<Option<Watch>>) -> Option<u64> {
+        use std::sync::atomic::Ordering;
+        let get = |token: c_int| {
+            let mut state = 0u64;
+            // SAFETY: a registered token and an out value we own.
+            (unsafe { notify_get_state(token, &mut state) } == NOTIFY_STATUS_OK).then_some(state)
+        };
+        let watch = cell
+            .get_or_init(|| {
+                let name = CString::new(name).ok()?;
+                let mut token: c_int = 0;
+                // SAFETY: a NUL-terminated name and an out token we own; the token lives for the
+                // process.
+                if unsafe { notify_register_check(name.as_ptr(), &mut token) } != NOTIFY_STATUS_OK {
+                    return None;
+                }
+                Some(Watch {
+                    token,
+                    state: get(token)?.into(),
+                })
+            })
+            .as_ref()?;
+        let mut posted: c_int = 0;
+        // SAFETY: a registered token and an out value we own.
+        if unsafe { notify_check(watch.token, &mut posted) } != NOTIFY_STATUS_OK {
             return None;
         }
-        let mut state = 0u64;
-        // SAFETY: a registered token and an out value we own.
-        let ok = unsafe { notify_get_state(token, &mut state) } == NOTIFY_STATUS_OK;
-        // SAFETY: the token registered above.
-        unsafe { notify_cancel(token) };
-        ok.then_some(state)
+        if posted != 0 {
+            watch.state.store(get(watch.token)?, Ordering::Relaxed);
+        }
+        Some(watch.state.load(Ordering::Relaxed))
+    }
+
+    pub(super) fn low_power() -> Option<u64> {
+        static CELL: std::sync::OnceLock<Option<Watch>> = std::sync::OnceLock::new();
+        watched("com.apple.system.lowpowermode", &CELL)
+    }
+
+    pub(super) fn thermal() -> Option<u64> {
+        static CELL: std::sync::OnceLock<Option<Watch>> = std::sync::OnceLock::new();
+        watched("com.apple.system.thermalpressurelevel", &CELL)
     }
 
     pub(super) fn set_qos(role: super::ThreadRole) -> Result<(), i32> {
@@ -293,7 +382,10 @@ mod sys {
     pub(super) fn translated() -> Option<bool> {
         None
     }
-    pub(super) fn notify_state(_name: &str) -> Option<u64> {
+    pub(super) fn low_power() -> Option<u64> {
+        None
+    }
+    pub(super) fn thermal() -> Option<u64> {
         None
     }
     pub(super) fn set_qos(_role: super::ThreadRole) -> Result<(), i32> {
@@ -310,6 +402,8 @@ mod tests {
             build_arch: "aarch64".into(),
             machine_arm64: Some(true),
             translated: Some(false),
+            cpu_brand: Some("Apple M4 Max".into()),
+            virtualized: Some(false),
             os: "macos".into(),
             os_version: Some("15.6.1".into()),
             model: Some("Mac16,6".into()),
@@ -323,9 +417,10 @@ mod tests {
         }
     }
 
-    /// Only native arm64 macOS qualifies: Rosetta never, and an unknown source is never a pass.
+    /// Only an Apple M4, not virtualized, native arm64 macOS qualifies: Rosetta, another chip
+    /// or a virtual machine never, and an unknown source is never a pass.
     #[test]
-    fn only_a_native_arm64_mac_is_a_qualifying_host() {
+    fn only_a_native_unvirtualized_m4_is_a_qualifying_host() {
         assert_eq!(native().qualifying(), Ok(()));
         let with = |f: fn(&mut HostEvidence)| {
             let mut h = native();
@@ -333,15 +428,23 @@ mod tests {
             h.qualifying()
         };
         assert_eq!(with(|h| h.translated = Some(true)), Err(ROSETTA));
-        assert_eq!(with(|h| h.translated = None), Err(NOT_M4));
-        assert_eq!(with(|h| h.os = "linux".into()), Err(NOT_M4));
-        assert_eq!(with(|h| h.build_arch = "x86_64".into()), Err(NOT_M4));
-        assert_eq!(with(|h| h.machine_arm64 = None), Err(NOT_M4));
+        assert_eq!(with(|h| h.translated = None), Err(NOT_NATIVE));
+        assert_eq!(with(|h| h.os = "linux".into()), Err(NOT_NATIVE));
+        assert_eq!(with(|h| h.build_arch = "x86_64".into()), Err(NOT_NATIVE));
+        assert_eq!(with(|h| h.machine_arm64 = None), Err(NOT_NATIVE));
+        assert_eq!(
+            with(|h| h.cpu_brand = Some("Apple M3 Max".into())),
+            Err(NOT_M4)
+        );
+        assert_eq!(with(|h| h.cpu_brand = None), Err(NOT_M4));
+        assert_eq!(with(|h| h.virtualized = Some(true)), Err(VIRTUAL));
+        assert_eq!(with(|h| h.virtualized = None), Err(VIRTUAL));
         assert!(native().line().ends_with("M4_QUALIFYING_HOST"));
     }
 
-    /// On this Mac every source is read: the levels' logical CPUs sum to `hw.logicalcpu`, the
-    /// test binary runs natively, power and thermal states are known.
+    /// On this Mac every source is read: the levels' logical CPUs sum to `hw.logicalcpu`, the chip
+    /// and virtualization are known, and the test binary runs natively (power and thermal states
+    /// are libnotify's: always answered).
     #[cfg(target_os = "macos")]
     #[test]
     fn the_host_is_read_from_the_kernel() {
@@ -354,11 +457,13 @@ mod tests {
             .iter()
             .all(|l| l.name.is_some() && l.cpus_per_l2.is_some() && l.l2_cache_bytes.is_some()));
         assert!(h.cache_line_bytes.is_some() && h.active_cpus.is_some());
-        assert!(h.os_version.is_some() && h.model.is_some());
-        assert!(h.low_power_mode.is_some() && h.thermal_pressure.is_some());
+        assert!(h.os_version.is_some() && h.model.is_some() && h.cpu_brand.is_some());
+        assert!(h.virtualized.is_some());
         if cfg!(target_arch = "aarch64") {
-            assert_eq!((h.translated, h.qualifying()), (Some(false), Ok(())));
+            assert_eq!(h.translated, Some(false));
         }
+        // A second read polls the registered names (`notify_check`).
+        assert!(low_power_mode().is_some() && thermal_pressure().is_some());
     }
 
     /// A thread's role sets its QoS class (read back from the kernel).

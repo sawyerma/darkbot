@@ -31,6 +31,7 @@ impl Console {
         std::thread::Builder::new()
             .name("p0-console".into())
             .spawn(move || {
+                crate::qos::enter(crate::qos::ThreadRole::Evidence);
                 for line in rx {
                     let _ = writeln!(out, "{line}");
                     let (count, done) = &*signal;
