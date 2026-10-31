@@ -361,7 +361,12 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P4B-01…05 | — | — | OPEN · DEFERRED_PRIORITY | after P7 |
 | P8-01 safety gates / P8-02 limits | `safety.rs`, pipeline | unit tests | PARTIAL | full P8 before multi-LIVE |
 | P8-03 staging live / P8-04 controlled mainnet | LIVE refused in code | — | NOT_AUTHORIZED | separate approvals |
-| P8-CTRL-01 owner switches | `capability_control.rs`, `state_owner/sources.rs` (WALLET/ECON, epoch, request id, receipts) | `f8a360e8` (review PASS, mutations) | OFFLINE_VERIFIED | P8-CTRL-02…06 open; operator auth = user decision |
+| P8-CTRL-01 owner switches | `capability_control.rs`, `state_owner/sources.rs` (WALLET/ECON, epoch, request id, receipts) | `f8a360e8` (review PASS, mutations) | OFFLINE_VERIFIED | — |
+| P8-CTRL-02 FE-06 scope/grant/revoke | `fe06.rs` (scope, digest, previews), `p0ctl live scope/grant/revoke/status/attempts` | `27a0c666`, `e38243dc` | PARTIAL | operator authentication + grant acceptance (evidence resolution) = user decision; every FE06_GRANT refused (`FE06_AUTH_UNDECIDED`) |
+| P8-CTRL-03 permits at the call sites | Sign-/EgressPermit, FE-04 attempt+exit bookings, scope binds what runs and every use, stop signal | `98698b71`, `ef1b1229`, `e0e3d6eb`, `e96e74cb`, `af0ffeda`, `189b6e7f`, `3eac7623`, `1ce62e00` (review PASS, 43 mutants killed) | OFFLINE_VERIFIED | 03d operator tools (p0-prewarm-atas, p0-probe-*) = user decision; Safety halt does not gate exits (post-pilot exit = decision); SIM_ONLY real signature needs a non-sending simulator (none qualified: every Shadow simulation synthetic) |
+| P8-CTRL-04 control path | `owner.proto` (epoch, FE-06 state, roles), gateway CAPABILITY_SET, reporter | `14013a7a`, `71faa7a8` (review PASS) | OFFLINE_VERIFIED | — |
+| P8-CTRL-05 GUI | Liquidator/Wallets (switches, LIVE gates, FE-06 previews/grant/revoke, signers) | `a3c3a2fd` | LOCAL_PASS (Vitest, Playwright) | — |
+| P8-CTRL-06 offline matrix L01–L16 | owner E2E on production call sites (loopback node, synthetic keys) | `eab872dc`, `189b6e7f`, `3eac7623`, `1ce62e00` | OFFLINE_VERIFIED | L04 changed evidence = with grant acceptance; L14 real pilot NOT_RUN / NOT_AUTHORIZED |
 | P8-05 reconciliation / P8-RES-01/02 | FE-04 `one_shot.rs` journal, holds, UNKNOWN | FE-04 local evidence; P8 clock fix ledger 2026-10-17 | PARTIAL_LOCAL | reconcile wall-clock `unwrap_or(0)` **fixed fail-closed** (owner HALT, submission stays pending, LOCAL_PASS); global multi-mint reservation; FE-04 typed journal (FIX-06) before any financial handoff |
 | P8-INV-01 inventory / rebalance | `execution/inventory.rs` | `2774a5e` | PARTIAL | Bänder + Reserve-Gate aktiv; Planner ohne Aufrufer (braucht Live-Bestände + Quotes) |
 | P9-01…03 | — | — | OPEN | after pilot |
