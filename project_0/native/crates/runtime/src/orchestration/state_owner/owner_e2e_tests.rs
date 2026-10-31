@@ -3979,6 +3979,7 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         .try_push(RebalanceQuoteResult {
             key: job.key,
             minimum_out: Ok(Some(400)),
+            generation: job.generation,
         })
         .ok()
         .unwrap();
@@ -3990,6 +3991,7 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         .try_push(RebalanceQuoteResult {
             key: scaled.key,
             minimum_out: Ok(None),
+            generation: scaled.generation,
         })
         .ok()
         .unwrap();
@@ -4042,6 +4044,20 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         .st
         .on_event(account(ata, token_program, 2_039_280, data));
     assert_eq!(f.owner.rebalance_balances()[&collateral.to_string()], 70);
+    // What an FE-04 attempt or its open position holds of it is never collateral.
+    f.owner.reservations = crate::execution::reservation::WalletReservations::rebuild([
+        crate::execution::one_shot::ActiveHold {
+            attempt: "P1".into(),
+            target: Pubkey::new_unique().to_string(),
+            unknown_outcome: false,
+            holds: [(collateral.to_string(), 30)].into(),
+            signature: None,
+            last_valid_block_height: None,
+        },
+    ])
+    .unwrap();
+    assert_eq!(f.owner.rebalance_balances()[&collateral.to_string()], 40);
+    f.owner.reservations = Default::default();
     // The completed observation is one typed record; its provisional plans are none.
     let slot = r.slot;
     let dir = f.dir.clone();
@@ -4192,7 +4208,257 @@ fn b01_the_controller_switches_rebalancing_hot() {
     let (jobs, _results) = f.owner.remote.detached_rebalance();
     f.owner.rebalance_observe();
     assert!(jobs.try_pop().is_none(), "OFF asks no quote");
+    // A request stands only with its durable receipt: an unrecorded OBSERVE is taken back.
+    let blocked = f.dir.join("capability-blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    f.owner.sources.capabilities.dir = Some(blocked);
+    f.owner.apply_capability_control(6, request(6, "OBSERVE"));
+    assert_eq!(
+        (f.owner.rebalance.requested, f.owner.rebalance.mode),
+        ("OFF", RebalanceMode::Off)
+    );
+    let last = f.owner.sources.capabilities.last_decision.clone().unwrap();
+    assert!(
+        !last.applied && last.detail.contains("RECEIPT_NOT_RECORDED"),
+        "{}",
+        last.detail
+    );
     cleanup(f);
+}
+
+/// B01: an owner observing two bands (SOL short of nothing, a mint below its band) on Ready
+/// canonical state — the liquidator's lamports and its validated ATA of the mint.
+fn b01_observing(tag: &str) -> (Fixture, Pubkey) {
+    use crate::execution::inventory::{RebalanceMode, Target};
+    let mut f = fixture(tag);
+    let good = snapshot(&f, false);
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    let mint = Pubkey::new_unique();
+    let band = |min, target, max| Target {
+        reserve: 0,
+        min,
+        target,
+        max,
+        dust: 5,
+    };
+    f.owner.inventory_targets = [
+        (
+            "SOL".to_string(),
+            band(1_000_000_000, 2_000_000_000, 3_000_000_000),
+        ),
+        (mint.to_string(), band(100, 200, 300)),
+    ]
+    .into();
+    let liquidator = f.owner.liquidator;
+    b01_account(
+        &mut f,
+        liquidator,
+        Pubkey::default(),
+        10_000_000_000,
+        vec![],
+    );
+    b01_ata(&mut f, &mint, 50);
+    f.owner.rebalance = super::rebalance::Observer::new(RebalanceMode::Observe, &OPERATIONAL);
+    (f, mint)
+}
+
+fn b01_account(f: &mut Fixture, pubkey: Pubkey, owner: Pubkey, lamports: u64, data: Vec<u8>) {
+    let slot = f.owner.st.highest_slot() + 1;
+    f.owner.st.on_event(IngressEvent::Account(AccountUpdate {
+        pubkey,
+        owner,
+        lamports,
+        data,
+        slot,
+        write_version: None,
+        source: SourceKind::WsRpcControl,
+        t_rx_ns: 1,
+    }));
+}
+
+/// The liquidator's Token-program ATA of `mint` holding `amount`.
+fn b01_ata(f: &mut Fixture, mint: &Pubkey, amount: u64) {
+    let (token_program, ata) = f.owner.atas.of(mint)[0];
+    let mut data = vec![0u8; 165];
+    data[..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[64..72].copy_from_slice(&amount.to_le_bytes());
+    data[108] = 1;
+    b01_account(f, ata, token_program, 2_039_280, data);
+}
+
+/// A B01 plan record: slot, number of trades, the blocked assets with their reason.
+type B01Record = (u64, usize, Vec<(String, std::borrow::Cow<'static, str>)>);
+
+/// The B01 plan records of a finished owner's journal.
+fn b01_records(f: Fixture) -> Vec<B01Record> {
+    use crate::analytics::payload::{decode, Payload};
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == RecordEvent::KIND {
+            if let RecordEvent::RebalancePlan {
+                slot,
+                trades,
+                blocked,
+                ..
+            } = decode(frame.kind, frame.schema, &frame.payload).unwrap()
+            {
+                assert_eq!(
+                    frame.provenance.slot,
+                    Some(slot),
+                    "the frame carries the plan's slot"
+                );
+                records.push((slot, trades.len(), blocked));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    records
+}
+
+/// B01 (review M1): an ask the full queue refused leaves the plan provisional and unrecorded and
+/// is asked again once there is room; a mode change starts a new generation — the worker skips
+/// an earlier one's job, its answer is dropped and the new ask stays pending until answered.
+#[test]
+fn b01_an_earlier_observations_answer_is_dropped_and_a_full_queue_records_nothing() {
+    use crate::orchestration::remote_workers::{RebalanceQuoteResult, RebalanceQuoteWork};
+    use std::sync::atomic::Ordering;
+    let (mut f, _mint) = b01_observing("b01_generation");
+    let (jobs, results) = f.owner.remote.detached_rebalance();
+    let queues = f.owner.remote.rebalance.as_ref().unwrap();
+    let stale = || RebalanceQuoteWork {
+        key: ("SOL".into(), "SOL".into(), 1),
+        sell_mint: Pubkey::new_unique(),
+        buy_mint: Pubkey::new_unique(),
+        generation: u64::MAX,
+    };
+    while queues.jobs.try_push(stale()).is_ok() {}
+    f.owner.rebalance_observe();
+    let plan = |f: &Fixture| f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(
+        plan(&f).quotes_pending,
+        1,
+        "refused by the full queue: not answered"
+    );
+    while jobs.try_pop().is_some() {}
+    f.owner.rebalance_observe();
+    let job = jobs.try_pop().expect("asked again once there is room");
+    let current = |f: &Fixture| {
+        f.owner
+            .remote
+            .rebalance
+            .as_ref()
+            .unwrap()
+            .generation
+            .load(Ordering::Acquire)
+    };
+    assert_eq!(job.generation, current(&f), "the worker quotes it");
+    // OFF and OBSERVE again: a new generation; the earlier job is skipped, its answer dropped.
+    f.owner.rebalance_request("OFF").unwrap();
+    f.owner.rebalance_request("OBSERVE").unwrap();
+    assert_ne!(
+        job.generation,
+        current(&f),
+        "the worker skips the earlier job"
+    );
+    f.owner.rebalance_observe();
+    let again = jobs.try_pop().expect("the new observation asks afresh");
+    assert_eq!(
+        (again.key.clone(), again.generation),
+        (job.key.clone(), current(&f))
+    );
+    let answer = |key, generation| RebalanceQuoteResult {
+        key,
+        minimum_out: Ok(Some(400)),
+        generation,
+    };
+    results
+        .try_push(answer(job.key, job.generation))
+        .ok()
+        .unwrap();
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none(), "the earlier answer is dropped");
+    assert_eq!(plan(&f).quotes_pending, 1, "the new ask is still pending");
+    results
+        .try_push(answer(again.key, again.generation))
+        .ok()
+        .unwrap();
+    f.owner.rebalance_observe();
+    assert_eq!(
+        jobs.try_pop()
+            .expect("the answer is taken: the scaled quote")
+            .key
+            .2,
+        3_000_000_000
+    );
+    assert!(b01_records(f).is_empty(), "no observation completed");
+}
+
+/// B01 (review M2, L2): an unreadable FE-04 book plans nothing and records nothing (never "no
+/// surplus"); a pair without a swap — WSOL against the SOL band — has no route and is never
+/// asked; the completed observation is recorded.
+#[test]
+fn b01_an_unreadable_book_or_a_swapless_pair_is_never_planned_as_a_trade() {
+    use crate::execution::inventory::Target;
+    let (mut f, mint) = b01_observing("b01_book_wsol");
+    let (jobs, _results) = f.owner.remote.detached_rebalance();
+    f.owner.reservations = crate::execution::reservation::WalletReservations::unreadable();
+    f.owner.rebalance_observe();
+    let r = f.owner.owner_snapshot(1).rebalance.unwrap();
+    // Every band, in the bands' order.
+    let mut every = vec![
+        ("SOL".to_string(), "RESERVATION_BOOK_UNREADABLE"),
+        (mint.to_string(), "RESERVATION_BOOK_UNREADABLE"),
+    ];
+    every.sort();
+    assert_eq!(r.blocked, every);
+    assert!(jobs.try_pop().is_none());
+    f.owner.reservations = Default::default();
+    // WSOL above its band, SOL below its band: an unwrap, not a swap.
+    let wsol: Pubkey = darkbot_project0::protocol::NATIVE_SOL_MINT.parse().unwrap();
+    let band = |min, target, max| Target {
+        reserve: 0,
+        min,
+        target,
+        max,
+        dust: 5,
+    };
+    f.owner.inventory_targets = [
+        (
+            "SOL".to_string(),
+            band(20_000_000_000, 30_000_000_000, 40_000_000_000),
+        ),
+        (wsol.to_string(), band(1, 2, 1_000_000_000)),
+    ]
+    .into();
+    b01_ata(&mut f, &wsol, 50_000_000_000);
+    f.owner.rebalance_request("OFF").unwrap();
+    f.owner.rebalance_request("OBSERVE").unwrap();
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none(), "WSOL -> SOL is never asked");
+    let r = f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(
+        (r.quotes_pending, r.blocked),
+        (0, vec![("SOL".to_string(), "REBALANCE_COST_UNKNOWN")])
+    );
+    let records = b01_records(f);
+    assert_eq!(records.len(), 1, "only the completed observation");
+    assert_eq!(
+        records[0].2,
+        vec![("SOL".to_string(), "REBALANCE_COST_UNKNOWN".into())]
+    );
 }
 
 /// DEC-10 (N-5): the Liquidator projection carries the status of the configured FE-04 approval

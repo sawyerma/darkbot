@@ -804,6 +804,10 @@ impl ShadowOwner {
             {
                 self.threshold_demote_unrecorded();
             }
+            // B01: a rebalancing request stands only recorded — taken back to OFF.
+            if rebalance && applied && outcome.requested != "OFF" {
+                let _ = self.rebalance_request("OFF");
+            }
             // DEC-04: an ACTIVE decision stands only recorded.
             if hold_b && self.hold_gate.mode == crate::execution::hold_b::HoldMode::Active {
                 self.hold_gate.mode = crate::execution::hold_b::HoldMode::Observe;

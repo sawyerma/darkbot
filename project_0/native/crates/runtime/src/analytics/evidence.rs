@@ -237,6 +237,7 @@ impl RecordEvent {
             }
             Self::Health { slot, t_rx_ns, .. } => (Some(*slot), Some(*t_rx_ns)),
             Self::BlockhashPark { entry, .. } => (Some(entry.slot), Some(entry.t_rx_ns)),
+            Self::RebalancePlan { slot, .. } => (Some(*slot), None),
             _ => (None, None),
         }
     }

@@ -35,6 +35,8 @@ pub struct RebalanceQuoteWork {
     pub key: crate::execution::inventory::QuoteKey,
     pub sell_mint: Pubkey,
     pub buy_mint: Pubkey,
+    /// The observation that asked (`RebalanceQueues::generation`).
+    pub generation: u64,
 }
 
 /// The quote's on-chain enforced minimum output: `Ok(None)` without a route (or a route for
@@ -43,6 +45,8 @@ pub struct RebalanceQuoteWork {
 pub struct RebalanceQuoteResult {
     pub key: crate::execution::inventory::QuoteKey,
     pub minimum_out: Result<Option<u64>, String>,
+    /// The asking observation's generation: an answer to another one is dropped.
+    pub generation: u64,
 }
 
 /// DEC-06 ACTIVE: one sweep cross-check sample — an account the threshold trigger did not wake on
@@ -121,11 +125,14 @@ pub fn crosscheck_evaluate(work: CrossCheckWork) -> CrossCheckResult {
     }
 }
 
-/// The owner's ends of the rebalance quote queues (present in OBSERVE only).
+/// The owner's ends of the rebalance quote queues (present while bands exist).
 #[cfg(feature = "crate_health")]
 pub struct RebalanceQueues {
     pub jobs: Producer<RebalanceQuoteWork>,
     pub results: Consumer<RebalanceQuoteResult>,
+    /// The owner's current observation: the worker skips a job of another one (asked before a
+    /// mode change or an earlier observation), so no provider is called for it.
+    pub generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 pub struct WinnerResult {
@@ -581,6 +588,8 @@ impl RemoteWorkers {
             &self.space,
         );
         let (shutdown, space) = (shutdown.clone(), self.space.clone());
+        let generation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let current = generation.clone();
         self.threads.push(
             std::thread::Builder::new()
                 .name("rebalance-quotes".into())
@@ -589,6 +598,9 @@ impl RemoteWorkers {
                         let Some(work) = job_rx.pop_timeout(Duration::from_millis(250)) else {
                             continue;
                         };
+                        if work.generation != current.load(std::sync::atomic::Ordering::Acquire) {
+                            continue;
+                        }
                         let deadline = std::time::Instant::now()
                             + Duration::from_millis(
                                 darkbot_solana::runtime_config::active()
@@ -612,6 +624,7 @@ impl RemoteWorkers {
                         let result = RebalanceQuoteResult {
                             key: work.key,
                             minimum_out,
+                            generation: work.generation,
                         };
                         if !push_result(&done_tx, result, &shutdown, &space) {
                             return;
@@ -619,7 +632,11 @@ impl RemoteWorkers {
                     }
                 })?,
         );
-        self.rebalance = Some(RebalanceQueues { jobs, results });
+        self.rebalance = Some(RebalanceQueues {
+            jobs,
+            results,
+            generation,
+        });
         Ok(())
     }
 
@@ -682,7 +699,11 @@ impl RemoteWorkers {
             &self.wake,
             &self.space,
         );
-        self.rebalance = Some(RebalanceQueues { jobs, results });
+        self.rebalance = Some(RebalanceQueues {
+            jobs,
+            results,
+            generation: Default::default(),
+        });
         (job_rx, done_tx)
     }
 

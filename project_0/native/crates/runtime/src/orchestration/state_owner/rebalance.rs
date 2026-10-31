@@ -27,6 +27,9 @@ pub(super) struct Observer {
     quotes: BTreeMap<QuoteKey, Option<u64>>,
     /// Asked and not answered yet.
     pending: BTreeSet<QuoteKey>,
+    /// The running observation (`RebalanceQueues::generation`): new on every mode change and
+    /// every observation start; an answer of another one is dropped.
+    generation: u64,
     /// The newest plan.
     pub(super) plan: Option<OwnerRebalance>,
     /// `rebalance_budget_usd_micro`, `rebalance_quote_rounds`, `rebalance_observe_ms`.
@@ -47,6 +50,7 @@ impl Observer {
             round: 0,
             quotes: BTreeMap::new(),
             pending: BTreeSet::new(),
+            generation: 0,
             plan: None,
             budget_usd_micro: limits.rebalance_budget_usd_micro,
             rounds: limits.rebalance_quote_rounds,
@@ -58,8 +62,9 @@ impl Observer {
 impl Observer {
     /// B01 (CTRL-03): the operator's request — OFF stops the observation (its plan with it);
     /// OBSERVE and ACTIVE observe, ACTIVE never trades (`block`); without bands nothing can be
-    /// observed (refused, the request unchanged). A change starts afresh: no quote of before.
-    pub(super) fn request(&mut self, requested: &str, banded: bool) -> Result<(), &'static str> {
+    /// observed (refused, the request unchanged). A change starts afresh: no quote of before
+    /// (`true`: the mode changed).
+    pub(super) fn request(&mut self, requested: &str, banded: bool) -> Result<bool, &'static str> {
         let value = inventory::REBALANCE_VALUES
             .into_iter()
             .find(|v| *v == requested)
@@ -71,7 +76,8 @@ impl Observer {
         } else {
             return Err(inventory::TARGETS_REQUIRED);
         };
-        if mode != self.mode {
+        let changed = mode != self.mode;
+        if changed {
             self.mode = mode;
             self.due = None;
             self.round = 0;
@@ -82,7 +88,7 @@ impl Observer {
             }
         }
         self.requested = value;
-        Ok(())
+        Ok(changed)
     }
 
     /// Why the request is not what is effective (`""`: it is).
@@ -125,10 +131,22 @@ impl ShadowOwner {
     /// observation (`Observer::request`).
     pub(super) fn rebalance_request(&mut self, requested: &str) -> Result<String, String> {
         let banded = !self.inventory_targets.is_empty();
-        self.rebalance
-            .request(requested, banded)
-            .map(|()| requested.to_string())
-            .map_err(String::from)
+        if self.rebalance.request(requested, banded)? {
+            self.rebalance_generation();
+        }
+        Ok(requested.to_string())
+    }
+
+    /// A new observation generation, shared with the quote worker: what an earlier one asked is
+    /// neither quoted any more nor taken.
+    fn rebalance_generation(&mut self) {
+        self.rebalance.generation += 1;
+        if let Some(queues) = &self.remote.rebalance {
+            queues.generation.store(
+                self.rebalance.generation,
+                std::sync::atomic::Ordering::Release,
+            );
+        }
     }
 
     /// The request, what is effective and why not as requested.
@@ -148,6 +166,9 @@ impl ShadowOwner {
         }
         if let Some(queues) = &self.remote.rebalance {
             while let Some(r) = queues.results.try_pop() {
+                if r.generation != self.rebalance.generation {
+                    continue;
+                }
                 self.rebalance.pending.remove(&r.key);
                 // An unreachable provider is an unknown quote too (never a guessed output).
                 self.rebalance
@@ -167,6 +188,26 @@ impl ShadowOwner {
             }
             // Quotes are as old as their observation: every observation asks afresh.
             self.rebalance.quotes.clear();
+            self.rebalance_generation();
+            // L2: an unreadable FE-04 book leaves no balance known — nothing is planned or
+            // recorded (never "no surplus" from a book that could not be read).
+            if self.reservations.is_unreadable() {
+                self.rebalance.plan = Some(OwnerRebalance {
+                    mode: self.rebalance.mode.name(),
+                    at_unix_ms: crate::status_tap::unix_ms_now(),
+                    slot: self.st.highest_slot(),
+                    trades: vec![],
+                    blocked: self
+                        .inventory_targets
+                        .keys()
+                        .map(|k| (k.clone(), "RESERVATION_BOOK_UNREADABLE"))
+                        .collect(),
+                    quotes_pending: 0,
+                    budget_usd_micro: self.rebalance.budget_usd_micro,
+                });
+                self.rebalance.due = Some(now + self.rebalance.interval);
+                return;
+            }
         }
         let (budget, rounds, interval) = (
             self.rebalance.budget_usd_micro,
@@ -187,18 +228,26 @@ impl ShadowOwner {
                 .get(asset)
                 .is_some_and(|a| self.asset_value_low(asset, *a).is_some())
         };
+        // A key naming no mint, or one mint on both sides (WSOL against the SOL band: an
+        // unwrap, no swap), has no route.
+        let routable = |sell: &str, buy: &str| match (mint_of(sell), mint_of(buy)) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
         let (actions, wanted) = inventory::plan_with_quotes(
             &available,
             &self.inventory_targets,
             &collateral_known,
+            &routable,
             &self.rebalance.quotes,
             &cost,
             budget,
         );
-        let mut asked = 0u64;
+        let (mut asked, mut refused) = (0u64, 0u64);
         if self.rebalance.round < rounds {
             if let Some(queues) = &self.remote.rebalance {
                 for key in wanted {
+                    // Only routable keys are wanted (`routable`).
                     let (Some(sell_mint), Some(buy_mint)) = (mint_of(&key.0), mint_of(&key.1))
                     else {
                         self.rebalance.quotes.insert(key, None);
@@ -208,10 +257,13 @@ impl ShadowOwner {
                         key: key.clone(),
                         sell_mint,
                         buy_mint,
+                        generation: self.rebalance.generation,
                     };
                     if queues.jobs.try_push(work).is_ok() {
                         self.rebalance.pending.insert(key);
                         asked += 1;
+                    } else {
+                        refused += 1;
                     }
                 }
             }
@@ -242,11 +294,15 @@ impl ShadowOwner {
             slot: self.st.highest_slot(),
             trades,
             blocked,
-            quotes_pending: asked,
+            // A quote the full queue refused is as unanswered as a pending one.
+            quotes_pending: asked + refused,
             budget_usd_micro: budget,
         });
         if asked > 0 {
             self.rebalance.round += 1;
+        } else if refused > 0 {
+            // Not completed: the next pass asks again (the queue holds only an earlier
+            // generation's jobs, which the worker skips); nothing is recorded.
         } else {
             self.rebalance.round = 0;
             self.rebalance.due = Some(now + interval);

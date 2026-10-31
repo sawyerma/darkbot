@@ -90,33 +90,38 @@ pub type QuoteKey = (String, String, u64);
 /// pass and the quote is returned as wanted. `cost` values selling `amount_in` of `sell` for
 /// `minimum_out` of `buy` conservatively. A held asset outside the bands (collateral) funds a
 /// trade only when `collateral_known` (its conservative value is known) and with the answered
-/// quote of that very trade — its realization.
+/// quote of that very trade — its realization. A pair that is not `routable` (no swap between
+/// them) has no route without asking.
 pub fn plan_with_quotes(
     available: &BTreeMap<String, u64>,
     targets: &BTreeMap<String, Target>,
     collateral_known: &dyn Fn(&str) -> bool,
+    routable: &dyn Fn(&str, &str) -> bool,
     quotes: &BTreeMap<QuoteKey, Option<u64>>,
     cost: &dyn Fn(&str, u64, &str, u64) -> Option<u64>,
     budget_usd_micro: u64,
 ) -> (Vec<Action>, Vec<QuoteKey>) {
     let wanted = std::cell::RefCell::new(Vec::new());
-    let quote = |sell: &str, buy: &str, amount_in: u64| -> RebalanceQuote {
+    let quote = |sell: &str, buy: &str, amount_in: u64| -> Option<RebalanceQuote> {
         let key = (sell.to_string(), buy.to_string(), amount_in);
-        match quotes.get(&key) {
-            Some(Some(out)) => RebalanceQuote {
-                minimum_out: Some(*out),
-                cost_usd_micro: cost(sell, amount_in, buy, *out),
-            },
-            Some(None) => RebalanceQuote {
+        if !routable(sell, buy) {
+            return Some(RebalanceQuote {
                 minimum_out: None,
                 cost_usd_micro: None,
-            },
+            });
+        }
+        match quotes.get(&key) {
+            Some(Some(out)) => Some(RebalanceQuote {
+                minimum_out: Some(*out),
+                cost_usd_micro: cost(sell, amount_in, buy, *out),
+            }),
+            Some(None) => Some(RebalanceQuote {
+                minimum_out: None,
+                cost_usd_micro: None,
+            }),
             None => {
                 wanted.borrow_mut().push(key);
-                RebalanceQuote {
-                    minimum_out: None,
-                    cost_usd_micro: None,
-                }
+                None
             }
         }
     };
@@ -197,12 +202,14 @@ pub fn reserves(targets: &BTreeMap<String, Target>) -> BTreeMap<String, u64> {
 }
 
 /// Minimal rebalancing. `available` is the book-adjusted balance (P8-RES); held assets outside
-/// `targets` are collateral and fund rebalancing only with a proven realization.
+/// `targets` are collateral and fund rebalancing only with a proven realization. `quote` is
+/// `None` while a quote is not answered yet. A collateral is sold at most for a band's shortfall —
+/// whole when its output does not exceed it (no per-collateral keep: a limit for a future ACTIVE).
 pub fn rebalance(
     available: &BTreeMap<String, u64>,
     targets: &BTreeMap<String, Target>,
     collateral_known: &dyn Fn(&str) -> bool,
-    quote: &dyn Fn(&str, &str, u64) -> RebalanceQuote,
+    quote: &dyn Fn(&str, &str, u64) -> Option<RebalanceQuote>,
     budget_usd_micro: u64,
 ) -> Vec<Action> {
     let mut out = Vec::new();
@@ -236,8 +243,9 @@ pub fn rebalance(
         if *have >= t.min || need <= t.dust {
             continue;
         }
-        // The first funding source whose trade has a known output and cost; one without (no
-        // route, or not answered yet) leaves the next source to try — never a guess.
+        // The first funding source whose trade has a known output and cost. A source answered
+        // without one (no route) leaves the next to try; one not answered yet is waited for (the
+        // next source is asked only after it) — never a guess, at most one ask per band at once.
         let mut tried = false;
         let mut found = None;
         for (i, (sell, spare)) in surplus.iter().enumerate() {
@@ -246,7 +254,9 @@ pub fn rebalance(
             }
             tried = true;
             // Sell only what the shortfall needs: scale the full ExactIn quote down to `need`.
-            let full = quote(sell, asset, *spare);
+            let Some(full) = quote(sell, asset, *spare) else {
+                break;
+            };
             let amount_in = match full.minimum_out {
                 Some(o) if o > need => {
                     (u128::from(*spare) * u128::from(need)).div_ceil(u128::from(o)) as u64
@@ -256,7 +266,10 @@ pub fn rebalance(
             let q = if amount_in == *spare {
                 full
             } else {
-                quote(sell, asset, amount_in)
+                let Some(q) = quote(sell, asset, amount_in) else {
+                    break;
+                };
+                q
             };
             if let (Some(minimum_out), Some(cost)) = (q.minimum_out, q.cost_usd_micro) {
                 found = Some((i, amount_in, minimum_out, cost));
@@ -323,9 +336,11 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let quote = |_: &str, _: &str, amount: u64| RebalanceQuote {
-            minimum_out: Some(amount / 4),
-            cost_usd_micro: Some(10),
+        let quote = |_: &str, _: &str, amount: u64| {
+            Some(RebalanceQuote {
+                minimum_out: Some(amount / 4),
+                cost_usd_micro: Some(10),
+            })
         };
         let known = |_: &str| true;
         let avail = |sol, usdc_n, liab_n| -> BTreeMap<String, u64> {
@@ -351,9 +366,11 @@ mod tests {
             [buy_liab(1_000, 250)]
         );
         // A surplus worth less than the need is sold whole.
-        let poor = |_: &str, _: &str, amount: u64| RebalanceQuote {
-            minimum_out: Some(amount / 8),
-            cost_usd_micro: Some(10),
+        let poor = |_: &str, _: &str, amount: u64| {
+            Some(RebalanceQuote {
+                minimum_out: Some(amount / 8),
+                cost_usd_micro: Some(10),
+            })
         };
         assert_eq!(
             rebalance(&avail(100, 2_200, 50), &targets, &known, &poor, 50),
@@ -377,17 +394,21 @@ mod tests {
             rebalance(&avail(100, 2_400, 50), &targets, &known, &quote, 9),
             [block("REBALANCE_COST_ABOVE_BUDGET")]
         );
-        let unknown = |_: &str, _: &str, _: u64| RebalanceQuote {
-            minimum_out: None,
-            cost_usd_micro: Some(1),
+        let unknown = |_: &str, _: &str, _: u64| {
+            Some(RebalanceQuote {
+                minimum_out: None,
+                cost_usd_micro: Some(1),
+            })
         };
         assert_eq!(
             rebalance(&avail(100, 2_400, 50), &targets, &known, &unknown, 50),
             [block("REBALANCE_COST_UNKNOWN")]
         );
-        let dust = |_: &str, _: &str, _: u64| RebalanceQuote {
-            minimum_out: Some(5),
-            cost_usd_micro: Some(1),
+        let dust = |_: &str, _: &str, _: u64| {
+            Some(RebalanceQuote {
+                minimum_out: Some(5),
+                cost_usd_micro: Some(1),
+            })
         };
         assert_eq!(
             rebalance(&avail(100, 2_400, 50), &targets, &known, &dust, 50),
@@ -498,8 +519,15 @@ mod tests {
             Some(amount_in - out)
         };
         let mut quotes = BTreeMap::new();
-        let (actions, wanted) =
-            plan_with_quotes(&available, &targets, &|_| false, &quotes, &cost, 1_000);
+        let (actions, wanted) = plan_with_quotes(
+            &available,
+            &targets,
+            &|_| false,
+            &|_, _| true,
+            &quotes,
+            &cost,
+            1_000,
+        );
         assert_eq!(wanted, vec![("B".to_string(), "A".to_string(), 800)]);
         assert_eq!(
             actions,
@@ -511,11 +539,26 @@ mod tests {
         // The full surplus quoted: 800 B for at least 400 A; the shortfall needs 150 A, so the
         // plan asks for the scaled quote (300 B) next, then trades it.
         quotes.insert(("B".to_string(), "A".to_string(), 800), Some(400));
-        let (_, wanted) = plan_with_quotes(&available, &targets, &|_| false, &quotes, &cost, 1_000);
+        let (_, wanted) = plan_with_quotes(
+            &available,
+            &targets,
+            &|_| false,
+            &|_, _| true,
+            &quotes,
+            &cost,
+            1_000,
+        );
         assert_eq!(wanted, vec![("B".to_string(), "A".to_string(), 300)]);
         quotes.insert(("B".to_string(), "A".to_string(), 300), Some(150));
-        let (actions, wanted) =
-            plan_with_quotes(&available, &targets, &|_| false, &quotes, &cost, 1_000);
+        let (actions, wanted) = plan_with_quotes(
+            &available,
+            &targets,
+            &|_| false,
+            &|_, _| true,
+            &quotes,
+            &cost,
+            1_000,
+        );
         assert!(wanted.is_empty());
         assert_eq!(
             actions,
@@ -529,8 +572,15 @@ mod tests {
         );
         // No route for the scaled amount: unknown, never traded.
         quotes.insert(("B".to_string(), "A".to_string(), 300), None);
-        let (actions, wanted) =
-            plan_with_quotes(&available, &targets, &|_| false, &quotes, &cost, 1_000);
+        let (actions, wanted) = plan_with_quotes(
+            &available,
+            &targets,
+            &|_| false,
+            &|_, _| true,
+            &quotes,
+            &cost,
+            1_000,
+        );
         assert!(wanted.is_empty());
         assert!(matches!(
             actions[..],
@@ -542,8 +592,9 @@ mod tests {
     }
 
     /// B01: collateral of a known value funds first, with the answered quote of its trade (its
-    /// realization); without a route the next source (a band's surplus) funds instead; with no
-    /// source answered the asset stays cost unknown; an unvalued collateral never funds.
+    /// realization); a source is asked only after the one before it answered without a route (one
+    /// ask per band at once, never a fan-out); then the next source (a band's surplus) funds; with
+    /// no source left the asset stays cost unknown; an unvalued collateral never funds.
     #[test]
     fn collateral_funds_with_its_realization_else_the_next_source_does() {
         let targets = BTreeMap::from([
@@ -558,17 +609,6 @@ mod tests {
         let cost = |_: &str, amount_in: u64, _: &str, out: u64| Some(amount_in - out);
         let valued = |asset: &str| asset == "C";
         let key = |s: &str, n| (s.to_string(), "A".to_string(), n);
-        let mut quotes = BTreeMap::new();
-        let (_, wanted) = plan_with_quotes(&available, &targets, &valued, &quotes, &cost, 1_000);
-        assert_eq!(
-            wanted,
-            vec![key("C", 600), key("B", 800)],
-            "every source is asked"
-        );
-        quotes.insert(key("C", 600), Some(300));
-        quotes.insert(key("C", 300), Some(150));
-        quotes.insert(key("B", 800), Some(400));
-        quotes.insert(key("B", 300), Some(150));
         let trade = |sell: &str, amount_in| Action::Rebalance {
             sell: sell.into(),
             buy: "A".into(),
@@ -576,28 +616,59 @@ mod tests {
             minimum_out: 150,
             cost_usd_micro: amount_in - 150,
         };
-        let (actions, _) = plan_with_quotes(&available, &targets, &valued, &quotes, &cost, 1_000);
-        assert_eq!(actions, vec![trade("C", 300)], "the collateral first");
-        quotes.insert(key("C", 300), None);
-        let (actions, wanted) =
-            plan_with_quotes(&available, &targets, &valued, &quotes, &cost, 1_000);
-        assert!(wanted.is_empty());
+        let unknown_a = || {
+            vec![Action::Blocked {
+                asset: "A".into(),
+                reason: "REBALANCE_COST_UNKNOWN",
+            }]
+        };
+        let unknown = unknown_a();
+        let mut quotes = BTreeMap::new();
+        let plan = |quotes: &BTreeMap<QuoteKey, Option<u64>>| {
+            plan_with_quotes(
+                &available,
+                &targets,
+                &valued,
+                &|_, _| true,
+                quotes,
+                &cost,
+                1_000,
+            )
+        };
         assert_eq!(
-            actions,
-            vec![trade("B", 300)],
+            plan(&quotes),
+            (unknown.clone(), vec![key("C", 600)]),
+            "one source at a time"
+        );
+        quotes.insert(key("C", 600), Some(300));
+        assert_eq!(plan(&quotes), (unknown.clone(), vec![key("C", 300)]));
+        quotes.insert(key("C", 300), Some(150));
+        assert_eq!(
+            plan(&quotes),
+            (vec![trade("C", 300)], vec![]),
+            "the collateral first"
+        );
+        // No route for the collateral: the next source is asked, then funds.
+        quotes.insert(key("C", 300), None);
+        assert_eq!(plan(&quotes), (unknown.clone(), vec![key("B", 800)]));
+        quotes.insert(key("B", 800), Some(400));
+        quotes.insert(key("B", 300), Some(150));
+        assert_eq!(
+            plan(&quotes),
+            (vec![trade("B", 300)], vec![]),
             "no route: the surplus funds"
         );
         quotes.insert(key("B", 300), None);
-        let (actions, _) = plan_with_quotes(&available, &targets, &valued, &quotes, &cost, 1_000);
-        assert!(matches!(
-            actions[..],
-            [Action::Blocked {
-                reason: "REBALANCE_COST_UNKNOWN",
-                ..
-            }]
-        ));
-        let (actions, _) =
-            plan_with_quotes(&available, &targets, &|_| false, &quotes, &cost, 1_000);
+        assert_eq!(plan(&quotes), (unknown, vec![]), "no source left");
+        let (actions, _) = plan_with_quotes(
+            &available,
+            &targets,
+            &|_| false,
+            &|_, _| true,
+            &quotes,
+            &cost,
+            1_000,
+        );
         assert_eq!(
             actions[0],
             Action::Blocked {
@@ -605,5 +676,16 @@ mod tests {
                 reason: "COLLATERAL_REALIZATION_UNKNOWN"
             }
         );
+        // A pair without a swap (one mint on both sides) has no route unasked: the next source.
+        let (actions, wanted) = plan_with_quotes(
+            &available,
+            &targets,
+            &valued,
+            &|sell, _| sell != "C",
+            &BTreeMap::new(),
+            &cost,
+            1_000,
+        );
+        assert_eq!((actions, wanted), (unknown_a(), vec![key("B", 800)]));
     }
 }

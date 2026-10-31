@@ -177,10 +177,10 @@ export function autostartGrantCommand(digest: string): { params: Uint8Array } | 
   return { params: toBinary(AutostartGrantCommandSchema, message(AutostartGrantCommandSchema, { confirmDigest: digest })) };
 }
 
-/** S1-02: a data source's mode (`p0ctl source set`); the running owner applies or refuses it. */
 /** The capabilities of mode OFF|OBSERVE|ACTIVE (`capabilityCommand`). */
 export type ModeCapability = "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" | "INVENTORY_REBALANCING";
 
+/** S1-02: a data source's mode (`p0ctl source set`); the running owner applies or refuses it. */
 export function sourceCommand(unit: string, mode: "off" | "observe" | "active"): { params: Uint8Array } | { problem: string } {
   if (!/^(?:wss|geyser:[a-z0-9-]{1,32})$/.test(unit)) return { problem: "Unknown source unit." };
   return { params: toBinary(SourceControlCommandSchema, message(SourceControlCommandSchema, { unit, mode })) };
