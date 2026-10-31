@@ -185,6 +185,7 @@ parameters! {
     analytics_jobs_listed = 8, "jobs", "P0_ANALYTICS_JOBS_LISTED";
     rebalance_observe_ms = 60000, "ms", "P0_REBALANCE_OBSERVE_MS";
     rebalance_budget_usd_micro = 5000000, "USD-micro", "P0_REBALANCE_BUDGET_USD_MICRO";
+    // B01: also bounds how many funding sources a band tries (one or two rounds each).
     rebalance_quote_rounds = 3, "rounds", "P0_REBALANCE_QUOTE_ROUNDS";
     // DEC-05: the state owner's parameters, each a default at its call site before (revision 11).
     max_total_capital = 0, "USD-micro", "P0_MAX_TOTAL_CAPITAL";

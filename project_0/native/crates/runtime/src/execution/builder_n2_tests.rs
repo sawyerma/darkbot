@@ -1194,3 +1194,64 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
     assert!(journal.open_exit_id().is_none(), "deadline: nothing durable");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// B01 (review L5): the rebalance quote worker quotes only a job of the owner's current
+/// generation — an earlier observation's job reaches no provider and has no answer; the current
+/// one is asked (here a refusing loopback Jupiter: an unknown quote) and answered with its
+/// generation.
+#[cfg(feature = "crate_health")]
+#[test]
+fn b01_the_quote_worker_skips_an_earlier_generations_job() {
+    use crate::orchestration::remote_workers::{RebalanceQuoteWork, RemoteWorkers};
+    use std::sync::atomic::Ordering;
+    let jupiter = Endpoint::start(|_, _| Answer::Status(503));
+    let rpc = Endpoint::start(|_, _| Answer::Status(500));
+    let shutdown = darkbot_common::lifecycle::Shutdown::new();
+    let wake = darkbot_common::channel::Wakeup::default();
+    let mut remote =
+        RemoteWorkers::start(rpc.url.clone(), Pubkey::new_unique(), &shutdown, 4, &wake).unwrap();
+    let routes = crate::execution::route::JupiterV2RouteProvider::new(
+        Pubkey::new_unique(),
+        None,
+        50,
+        64,
+        false,
+    )
+    .unwrap()
+    .with_base_url(jupiter.url.clone());
+    remote.start_rebalance_quoter(routes, &shutdown).unwrap();
+    let queues = remote.rebalance.as_ref().unwrap();
+    queues.generation.store(2, Ordering::Release);
+    let work = |generation, amount| RebalanceQuoteWork {
+        key: ("SOL".into(), "B".into(), amount),
+        sell_mint: Pubkey::new_unique(),
+        buy_mint: Pubkey::new_unique(),
+        generation,
+    };
+    assert!(queues.jobs.try_push(work(1, 10)).is_ok());
+    assert!(queues.jobs.try_push(work(2, 20)).is_ok());
+    let answer = queues
+        .results
+        .pop_timeout(std::time::Duration::from_secs(30))
+        .expect("the current job is answered");
+    assert_eq!((answer.key.2, answer.generation), (20, 2));
+    assert!(answer.minimum_out.is_err(), "a refusing provider: unknown");
+    assert!(queues
+        .results
+        .pop_timeout(std::time::Duration::from_millis(300))
+        .is_none());
+    // Only the current job reached the provider (a GET records its path and query).
+    let queries: Vec<String> = jupiter
+        .arrivals
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, _, body)| body.to_string())
+        .collect();
+    assert!(queries.iter().any(|q| q.contains("amount=20")), "{queries:?}");
+    assert!(!queries.iter().any(|q| q.contains("amount=10")), "{queries:?}");
+    shutdown.request();
+    remote
+        .wait_stopped(std::time::Duration::from_secs(5))
+        .unwrap();
+}

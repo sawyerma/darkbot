@@ -189,8 +189,11 @@ impl ShadowOwner {
             // Quotes are as old as their observation: every observation asks afresh.
             self.rebalance.quotes.clear();
             self.rebalance_generation();
+        }
+        {
             // L2: an unreadable FE-04 book leaves no balance known — nothing is planned or
-            // recorded (never "no surplus" from a book that could not be read).
+            // recorded (never "no surplus" from a book that could not be read); the running
+            // observation ends.
             if self.reservations.is_unreadable() {
                 self.rebalance.plan = Some(OwnerRebalance {
                     mode: self.rebalance.mode.name(),
@@ -205,6 +208,7 @@ impl ShadowOwner {
                     quotes_pending: 0,
                     budget_usd_micro: self.rebalance.budget_usd_micro,
                 });
+                self.rebalance.round = 0;
                 self.rebalance.due = Some(now + self.rebalance.interval);
                 return;
             }
@@ -244,6 +248,13 @@ impl ShadowOwner {
             budget,
         );
         let (mut asked, mut refused) = (0u64, 0u64);
+        // The assets still waiting for a quote when no round is left (`rebalance_quote_rounds`
+        // bounds how many funding sources a band tries: one or two rounds each).
+        let exhausted: BTreeSet<String> = if self.rebalance.round < rounds {
+            BTreeSet::new()
+        } else {
+            wanted.iter().map(|k| k.1.clone()).collect()
+        };
         if self.rebalance.round < rounds {
             if let Some(queues) = &self.remote.rebalance {
                 for key in wanted {
@@ -285,6 +296,12 @@ impl ShadowOwner {
                     minimum_out,
                     cost_usd_micro,
                 }),
+                Action::Blocked {
+                    asset,
+                    reason: "REBALANCE_COST_UNKNOWN",
+                } if exhausted.contains(&asset) => {
+                    blocked.push((asset, "REBALANCE_QUOTE_ROUNDS_EXHAUSTED"))
+                }
                 Action::Blocked { asset, reason } => blocked.push((asset, reason)),
             }
         }
@@ -298,11 +315,11 @@ impl ShadowOwner {
             quotes_pending: asked + refused,
             budget_usd_micro: budget,
         });
-        if asked > 0 {
+        if asked > 0 || refused > 0 {
+            // A pass whose asks the full queue refused is a round too: the next pass asks again
+            // (the queue holds only an earlier generation's jobs, which the worker skips), at
+            // most `rebalance_quote_rounds` times; nothing is recorded meanwhile.
             self.rebalance.round += 1;
-        } else if refused > 0 {
-            // Not completed: the next pass asks again (the queue holds only an earlier
-            // generation's jobs, which the worker skips); nothing is recorded.
         } else {
             self.rebalance.round = 0;
             self.rebalance.due = Some(now + interval);

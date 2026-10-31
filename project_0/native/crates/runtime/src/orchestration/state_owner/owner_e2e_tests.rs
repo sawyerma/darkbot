@@ -8718,3 +8718,72 @@ fn s4_04_core_stage_baseline() {
         );
     }
 }
+
+/// B01 (re-check L2, case 1/2): a book that turns unreadable in a running observation ends it
+/// unrecorded; a queue that stays full costs one round per pass, and the band still waiting when
+/// no round is left is recorded with its own reason (never a spin, never "cost unknown").
+#[test]
+fn b01_a_book_unreadable_mid_observation_or_rounds_run_out_are_their_own_reasons() {
+    use crate::orchestration::remote_workers::{RebalanceQuoteResult, RebalanceQuoteWork};
+    let (mut f, mint) = b01_observing("b01_rounds");
+    let (jobs, results) = f.owner.remote.detached_rebalance();
+    f.owner.rebalance_observe();
+    let job = jobs.try_pop().expect("the first quote is asked");
+    results
+        .try_push(RebalanceQuoteResult {
+            key: job.key,
+            minimum_out: Ok(Some(400)),
+            generation: job.generation,
+        })
+        .ok()
+        .unwrap();
+    f.owner.reservations = crate::execution::reservation::WalletReservations::unreadable();
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none(), "nothing more is asked");
+    let r = f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert!(r
+        .blocked
+        .iter()
+        .all(|(_, reason)| *reason == "RESERVATION_BOOK_UNREADABLE"));
+    f.owner.reservations = Default::default();
+    f.owner.rebalance_request("OFF").unwrap();
+    f.owner.rebalance_request("OBSERVE").unwrap();
+    // A queue that stays full: one round per pass, then the waiting band's own reason.
+    let queues = f.owner.remote.rebalance.as_ref().unwrap();
+    while queues
+        .jobs
+        .try_push(RebalanceQuoteWork {
+            key: ("SOL".into(), "SOL".into(), 1),
+            sell_mint: Pubkey::new_unique(),
+            buy_mint: Pubkey::new_unique(),
+            generation: u64::MAX,
+        })
+        .is_ok()
+    {}
+    for _ in 0..OPERATIONAL.rebalance_quote_rounds {
+        f.owner.rebalance_observe();
+        assert_eq!(
+            f.owner.owner_snapshot(1).rebalance.unwrap().quotes_pending,
+            1
+        );
+    }
+    f.owner.rebalance_observe();
+    let r = f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(
+        (r.quotes_pending, r.blocked),
+        (
+            0,
+            vec![(mint.to_string(), "REBALANCE_QUOTE_ROUNDS_EXHAUSTED")]
+        )
+    );
+    drop(jobs);
+    let records = b01_records(f);
+    assert_eq!(
+        records.iter().map(|r| r.2.clone()).collect::<Vec<_>>(),
+        vec![vec![(
+            mint.to_string(),
+            "REBALANCE_QUOTE_ROUNDS_EXHAUSTED".into()
+        )]],
+        "only the observation that ran out of rounds is recorded"
+    );
+}
