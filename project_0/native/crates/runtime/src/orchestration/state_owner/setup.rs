@@ -610,22 +610,7 @@ pub(super) fn prepare(
     allow.execution_classes.insert("longtail");
     let mut safety = Safety::new(limits, allow, false);
     // [FIX-25] Semantische Kategorien getrennt; die globale Top-Level-Allowlist prüft die Pipeline separat.
-    let mut allowlist = Allowlist::default();
-    for s in [
-        protocol::JUP_SWAP_PROGRAM_ID,
-        protocol::TITAN_SWAP_PROGRAM_ID,
-    ] {
-        allowlist.swap_programs.insert(Pubkey::from_str(s)?);
-    }
-    for s in [
-        protocol::KAMINO_PROGRAM_ID,
-        protocol::DRIFT_PROGRAM_ID,
-        protocol::JUPLEND_PROGRAM_ID,
-    ] {
-        let p = Pubkey::from_str(s)?;
-        allowlist.integration_programs.insert(p);
-        allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
-    }
+    let allowlist = protocol::receivership_allowlist();
     // E2: init_liquidation_record is its own planner step (only before Start), not a refresh.
     #[cfg(feature = "crate_health")]
     let instruction_table = darkbot_project0::receivership::builders::instruction_table(&program)?;

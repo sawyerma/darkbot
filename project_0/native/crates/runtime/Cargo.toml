@@ -24,6 +24,11 @@ required-features = ["historical"]
 name = "dec08_index_parity"
 required-features = ["historical"]
 
+# S4-03: TX parity of the real Mainnet winners (receivership builders, v1 compile).
+[[test]]
+name = "s4_tx_parity"
+required-features = ["crate_health", "txv1"]
+
 [dependencies]
 darkbot-common = { path = "../common" }
 darkbot-solana = { path = "../solana" }

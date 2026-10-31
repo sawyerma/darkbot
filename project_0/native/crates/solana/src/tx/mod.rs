@@ -546,11 +546,99 @@ pub fn measure_v1(
     })
 }
 
-/// H0-01: the exact wire length of a decoded v1 transaction — its SIMD-0385 message as the
-/// official v1 serializer writes it, then `signatures` signatures; `None` for an incomplete
-/// decoded message (header, blockhash or configuration missing).
+/// H0-01/S4-03: the exact bytes the signers of a decoded transaction signed — its message rebuilt
+/// with the official serializers (legacy and v0: `VersionedMessage`, v1: the SIMD-0385 message
+/// with its version prefix). `None` for a missing header or blockhash, an incomplete v1
+/// configuration or a version this build cannot serialize (v1 without `txv1`). Its signatures
+/// verify against exactly these bytes.
+pub fn chain_message_bytes(
+    m: &crate::chain::ChainMessage,
+    version: crate::chain::TxWireVersion,
+) -> Option<Vec<u8>> {
+    match version {
+        crate::chain::TxWireVersion::Number(1) => chain_v1_message_bytes(m),
+        _ => chain_versioned_message(m, version).map(|msg| msg.serialize()),
+    }
+}
+
+/// H0-01/S4-03: the exact wire of a decoded transaction — legacy and v0 the official
+/// `VersionedTransaction` (signature count, signatures, message), v1 its message followed by its
+/// signatures without a count (SIMD-0385); `None` as for `chain_message_bytes` or for a signature
+/// that does not decode.
+pub fn chain_wire(tx: &crate::chain::ChainTx) -> Option<Vec<u8>> {
+    let signatures = tx
+        .signatures
+        .iter()
+        .map(|s| s.parse().ok())
+        .collect::<Option<Vec<Signature>>>()?;
+    let version = tx.version?;
+    if version == crate::chain::TxWireVersion::Number(1) {
+        let mut wire = chain_v1_message_bytes(&tx.message)?;
+        for s in &signatures {
+            wire.extend_from_slice(s.as_ref());
+        }
+        return Some(wire);
+    }
+    let message = chain_versioned_message(&tx.message, version)?;
+    crate::submit::serialize_tx(&VersionedTransaction {
+        signatures,
+        message,
+    })
+    .ok()
+}
+
+fn chain_versioned_message(
+    m: &crate::chain::ChainMessage,
+    version: crate::chain::TxWireVersion,
+) -> Option<VersionedMessage> {
+    use solana_sdk::message::{compiled_instruction::CompiledInstruction, MessageHeader};
+    let (required, readonly_signed, readonly_unsigned) = m.header?;
+    let header = MessageHeader {
+        num_required_signatures: required,
+        num_readonly_signed_accounts: readonly_signed,
+        num_readonly_unsigned_accounts: readonly_unsigned,
+    };
+    let recent_blockhash = m.recent_blockhash.as_deref()?.parse().ok()?;
+    let instructions: Vec<CompiledInstruction> = m
+        .instructions
+        .iter()
+        .map(|ix| CompiledInstruction {
+            program_id_index: ix.program_id_index,
+            accounts: ix.accounts.clone(),
+            data: ix.data.clone(),
+        })
+        .collect();
+    match version {
+        crate::chain::TxWireVersion::Legacy => {
+            Some(VersionedMessage::Legacy(solana_sdk::message::Message {
+                header,
+                account_keys: m.account_keys.clone(),
+                recent_blockhash,
+                instructions,
+            }))
+        }
+        crate::chain::TxWireVersion::Number(0) => Some(VersionedMessage::V0(v0::Message {
+            header,
+            account_keys: m.account_keys.clone(),
+            recent_blockhash,
+            instructions,
+            address_table_lookups: m
+                .address_table_lookups
+                .iter()
+                .flatten()
+                .map(|l| v0::MessageAddressTableLookup {
+                    account_key: l.account_key,
+                    writable_indexes: l.writable_indexes.clone(),
+                    readonly_indexes: l.readonly_indexes.clone(),
+                })
+                .collect(),
+        })),
+        crate::chain::TxWireVersion::Number(_) => None,
+    }
+}
+
 #[cfg(feature = "txv1")]
-pub fn v1_wire_len(m: &crate::chain::ChainMessage, signatures: usize) -> Option<usize> {
+fn chain_v1_message_bytes(m: &crate::chain::ChainMessage) -> Option<Vec<u8>> {
     use solana_message_v1::{compiled_instruction::CompiledInstruction, v1, MessageHeader};
     let (required, readonly_signed, readonly_unsigned) = m.header?;
     let c = m.transaction_config?;
@@ -583,13 +671,23 @@ pub fn v1_wire_len(m: &crate::chain::ChainMessage, signatures: usize) -> Option<
             })
             .collect(),
     };
-    Some(msg.serialize().len() + signatures * 64)
+    Some(msg.serialize())
 }
 
-/// Without `txv1` no v1 message can be serialized: its length is unknown.
+/// Without `txv1` no v1 message can be serialized.
 #[cfg(not(feature = "txv1"))]
-pub fn v1_wire_len(_m: &crate::chain::ChainMessage, _signatures: usize) -> Option<usize> {
+fn chain_v1_message_bytes(_m: &crate::chain::ChainMessage) -> Option<Vec<u8>> {
     None
+}
+
+/// S4-03: the exact v1 message bytes `plan` compiles to — what its signers sign.
+#[cfg(feature = "txv1")]
+pub fn v1_message_bytes(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+) -> Result<Vec<u8>, BuildError> {
+    compile_v1_message(plan, blockhash, limits).map(|m| m.serialize())
 }
 
 /// Canonical SIMD-0385 wire, currently used only by the explicit no-send probe.
@@ -974,11 +1072,11 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// H0-01: a decoded v1 transaction's wire length is the signed wire's exact length; an
-    /// incomplete decoded message is unknown.
+    /// H0-01/S4-03: a decoded v1 transaction's rebuilt wire is the signed wire, its rebuilt
+    /// message the bytes its signature verifies; an incomplete decoded message is unknown.
     #[cfg(feature = "txv1")]
     #[test]
-    fn h0_v1_wire_len_is_the_signed_wire_length() {
+    fn h0_v1_chain_wire_is_the_signed_wire() {
         let payer = Keypair::new();
         let plan = TxPlan {
             version: BuildVersion::V1,
@@ -1028,13 +1126,29 @@ mod tests {
                 priority_fee: msg.config.priority_fee,
             }),
         };
-        assert_eq!(v1_wire_len(&decoded, 1), Some(wire.len()));
-        let mut no_config = decoded.clone();
-        no_config.transaction_config = None;
-        assert_eq!(v1_wire_len(&no_config, 1), None);
-        let mut no_hash = decoded;
-        no_hash.recent_blockhash = None;
-        assert_eq!(v1_wire_len(&no_hash, 1), None);
+        let signature = Signature::try_from(&wire[wire.len() - 64..]).unwrap();
+        let tx = crate::chain::ChainTx {
+            slot: 1,
+            block_time: None,
+            transaction_index: None,
+            version: Some(crate::chain::TxWireVersion::Number(1)),
+            signatures: vec![signature.to_string()],
+            message: decoded,
+            meta: None,
+        };
+        assert_eq!(chain_wire(&tx), Some(wire.clone()));
+        let message = chain_message_bytes(&tx.message, crate::chain::TxWireVersion::Number(1));
+        assert_eq!(message.as_deref(), Some(&wire[..wire.len() - 64]));
+        assert!(signature.verify(payer.pubkey().as_ref(), &message.unwrap()));
+        let mut no_config = tx.clone();
+        no_config.message.transaction_config = None;
+        assert_eq!(chain_wire(&no_config), None);
+        let mut no_hash = tx.clone();
+        no_hash.message.recent_blockhash = None;
+        assert_eq!(chain_wire(&no_hash), None);
+        let mut bad_signature = tx;
+        bad_signature.signatures = vec!["not-a-signature".into()];
+        assert_eq!(chain_wire(&bad_signature), None);
     }
 
     #[cfg(feature = "txv1")]

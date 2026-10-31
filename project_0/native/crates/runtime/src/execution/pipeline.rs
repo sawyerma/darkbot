@@ -67,7 +67,7 @@ const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
 /// B01: the network fee of a transaction with `signatures` signers that spends its resources'
 /// compute-unit limit at their priority price (the most it can pay; no message is built yet).
 #[cfg(feature = "crate_health")]
-pub(crate) fn planned_fee_lamports(signatures: u64, r: &Resources) -> Option<u64> {
+pub fn planned_fee_lamports(signatures: u64, r: &Resources) -> Option<u64> {
     let priority = (u128::from(r.compute_unit_limit)
         * u128::from(r.priority_micro_lamports_per_cu))
     .div_ceil(MICRO_LAMPORTS_PER_LAMPORT);

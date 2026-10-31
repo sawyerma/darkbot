@@ -47,6 +47,23 @@ pub fn receivership_allowed_programs() -> Vec<Pubkey> {
     .collect()
 }
 
+/// [FIX-25] The plan gate's allowlist of the receivership TX (`planner::validate_receivership`):
+/// the pinned swap programs, and the pinned integration programs as integration withdraws and as
+/// the only pre-Start refreshes (liquidate_start.rs). The global top-level allowlist
+/// (`receivership_allowed_programs`) is checked separately.
+pub fn receivership_allowlist() -> crate::planner::Allowlist {
+    let key = |s: &str| Pubkey::from_str(s).expect("static");
+    let mut allowlist = crate::planner::Allowlist::default();
+    allowlist
+        .swap_programs
+        .extend([JUP_SWAP_PROGRAM_ID, TITAN_SWAP_PROGRAM_ID].map(key));
+    for p in [KAMINO_PROGRAM_ID, DRIFT_PROGRAM_ID, JUPLEND_PROGRAM_ID].map(key) {
+        allowlist.integration_programs.insert(p);
+        allowlist.refresh_programs.insert(p);
+    }
+    allowlist
+}
+
 // ---- Instruction-Discriminators (type-crate constants::ix_discriminators, BELEGT) ----
 pub mod ix {
     pub const INIT_LIQUIDATION_RECORD: [u8; 8] = [236, 213, 238, 126, 147, 251, 164, 8];

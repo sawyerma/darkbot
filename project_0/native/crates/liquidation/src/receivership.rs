@@ -496,6 +496,41 @@ pub mod builders {
         }
     }
 
+    /// [FIX-107] The bank-only order of a receivership's banks: descending by raw pubkey bytes,
+    /// exactly as pinned p0-cli `load_observation_bank_only_metas()` orders them.
+    pub fn bank_only_layout(mut banks: Vec<Pubkey>) -> Vec<Pubkey> {
+        banks.sort_by(|x, y| y.cmp(x));
+        banks
+    }
+
+    /// The receivership's StartLiquidation observation and EndLiquidation banks, from the
+    /// account's health observation and its active banks (`bank_only_layout`): Start observes
+    /// every observation account, each active bank writable (Start locks its liquidation price
+    /// cache), the rest read-only; End takes the active banks only, all writable (End clears that
+    /// lock), without the liability bank `repay_all` closes — Start and Repay still observe that
+    /// bank and its oracle (pinned receivership tests).
+    pub fn liquidation_layout(
+        observation: &[Pubkey],
+        mut active_banks: Vec<Pubkey>,
+        liability_bank: &Pubkey,
+        repay_all: bool,
+    ) -> (Vec<AccountMeta>, Vec<Pubkey>) {
+        let start = observation
+            .iter()
+            .map(|k| {
+                if active_banks.contains(k) {
+                    AccountMeta::new(*k, false)
+                } else {
+                    AccountMeta::new_readonly(*k, false)
+                }
+            })
+            .collect();
+        if repay_all {
+            active_banks.retain(|k| k != liability_bank);
+        }
+        (start, active_banks)
+    }
+
     pub fn build_receivership(p: ReceivershipParams<'_>) -> Vec<Instruction> {
         let mut v = Vec::with_capacity(
             4 + p.pre_refreshes.len() + p.withdraws.len() + p.swaps.len() + p.repays.len(),
@@ -534,6 +569,37 @@ pub mod builders {
         use super::*;
         fn p() -> Pubkey {
             Pubkey::new_unique()
+        }
+
+        /// The end layout keeps every active bank but the liability bank `repay_all` closes;
+        /// Start still observes it writable, every other observation account read-only.
+        #[test]
+        fn repay_all_removes_closed_bank_only_from_end_layout() {
+            let (a, liability, b, oracle) = (p(), p(), p(), p());
+            let banks = vec![a, liability, b];
+            let observation = [a, liability, oracle, b];
+            let (start, end) = liquidation_layout(&observation, banks.clone(), &liability, false);
+            assert_eq!(end, banks);
+            let flags: Vec<_> = start.iter().map(|m| (m.pubkey, m.is_writable)).collect();
+            assert_eq!(
+                flags,
+                vec![(a, true), (liability, true), (oracle, false), (b, true)]
+            );
+            assert!(start.iter().all(|m| !m.is_signer));
+            let (closed, end) = liquidation_layout(&observation, banks, &liability, true);
+            assert_eq!(end, vec![a, b]);
+            assert_eq!(closed, start);
+        }
+
+        /// [FIX-107] the bank-only order is descending by raw pubkey bytes.
+        #[test]
+        fn bank_only_layout_is_descending_by_raw_bytes() {
+            let (low, high) = (
+                Pubkey::new_from_array([1; 32]),
+                Pubkey::new_from_array([2; 32]),
+            );
+            assert_eq!(bank_only_layout(vec![low, high]), vec![high, low]);
+            assert_eq!(bank_only_layout(vec![high, low]), vec![high, low]);
         }
 
         /// E2: the steps of a TX built by these builders, derived through the pinned

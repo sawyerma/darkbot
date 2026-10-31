@@ -703,74 +703,12 @@ pub fn attributes(tx: &ChainTx) -> TxAttributes {
     }
 }
 
-/// The exact wire length of a transaction rebuilt from its decoded message (the signatures and
-/// the message as the official serializers write them: `VersionedTransaction` for legacy and v0,
-/// the SIMD-0385 v1 message with its signatures after it); `None` for a missing header or
-/// blockhash, a signature that does not decode, an incomplete v1 configuration or a version this
-/// build cannot serialize.
+/// The exact wire length of a transaction rebuilt from its decoded message
+/// (`darkbot_solana::tx::chain_wire`: the signatures and the message as the official serializers
+/// write them); `None` for a missing header or blockhash, a signature that does not decode, an
+/// incomplete v1 configuration or a version this build cannot serialize.
 pub fn wire_len(tx: &ChainTx) -> Option<u64> {
-    use darkbot_solana::chain::TxWireVersion;
-    use solana_sdk::message::{v0, Message as LegacyMessage, MessageHeader, VersionedMessage};
-    let (required, readonly_signed, readonly_unsigned) = tx.message.header?;
-    if tx.version? == TxWireVersion::Number(1) {
-        return darkbot_solana::tx::v1_wire_len(&tx.message, tx.signatures.len()).map(|n| n as u64);
-    }
-    let header = MessageHeader {
-        num_required_signatures: required,
-        num_readonly_signed_accounts: readonly_signed,
-        num_readonly_unsigned_accounts: readonly_unsigned,
-    };
-    let recent_blockhash = tx.message.recent_blockhash.as_deref()?.parse().ok()?;
-    let instructions: Vec<solana_sdk::message::compiled_instruction::CompiledInstruction> = tx
-        .message
-        .instructions
-        .iter()
-        .map(
-            |ix| solana_sdk::message::compiled_instruction::CompiledInstruction {
-                program_id_index: ix.program_id_index,
-                accounts: ix.accounts.clone(),
-                data: ix.data.clone(),
-            },
-        )
-        .collect();
-    let message = match tx.version? {
-        TxWireVersion::Legacy => VersionedMessage::Legacy(LegacyMessage {
-            header,
-            account_keys: tx.message.account_keys.clone(),
-            recent_blockhash,
-            instructions,
-        }),
-        TxWireVersion::Number(0) => VersionedMessage::V0(v0::Message {
-            header,
-            account_keys: tx.message.account_keys.clone(),
-            recent_blockhash,
-            instructions,
-            address_table_lookups: tx
-                .message
-                .address_table_lookups
-                .iter()
-                .flatten()
-                .map(|l| v0::MessageAddressTableLookup {
-                    account_key: l.account_key,
-                    writable_indexes: l.writable_indexes.clone(),
-                    readonly_indexes: l.readonly_indexes.clone(),
-                })
-                .collect(),
-        }),
-        TxWireVersion::Number(_) => return None,
-    };
-    let signatures = tx
-        .signatures
-        .iter()
-        .map(|s| s.parse().ok())
-        .collect::<Option<Vec<solana_sdk::signature::Signature>>>()?;
-    let wire =
-        darkbot_solana::submit::serialize_tx(&solana_sdk::transaction::VersionedTransaction {
-            signatures,
-            message,
-        })
-        .ok()?;
-    Some(wire.len() as u64)
+    darkbot_solana::tx::chain_wire(tx).map(|w| w.len() as u64)
 }
 
 /// The `q`-th percentile (nearest rank, `q` in percent) of sorted `v`.

@@ -30,7 +30,7 @@ pub mod p0 {
     use marginfi_type_crate::types::Bank;
     use solana_message::AddressLookupTableAccount; /* [FIX-13] */
     use solana_sdk::hash::Hash;
-    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use solana_sdk::instruction::Instruction;
     use solana_sdk::pubkey::Pubkey;
     use spl_associated_token_account::get_associated_token_address_with_program_id;
     use std::time::Instant;
@@ -857,17 +857,6 @@ pub mod p0 {
         pub limits: TxLimits,
     }
 
-    fn end_banks_after_repay(
-        mut active_banks: Vec<Pubkey>,
-        liability_bank: Pubkey,
-        repay_all: bool,
-    ) -> Vec<Pubkey> {
-        if repay_all {
-            active_banks.retain(|k| *k != liability_bank);
-        }
-        active_banks
-    }
-
     /// [P5] The EndLiquidation fee receiver comes only from a successfully read FeeState; a
     /// default key would build a transaction with an invalid fee recipient.
     fn required_fee_wallet(fee: &Result<Pubkey, String>) -> Result<&Pubkey, PlanError> {
@@ -936,15 +925,14 @@ pub mod p0 {
         // B2: strict pinned layout, never a prefix decode.
         let a =
             darkbot_project0::protocol::decode_marginfi_account(data).map_err(|e| e.to_string())?;
-        let mut banks: Vec<Pubkey> = a
-            .lending_account
-            .balances
-            .iter()
-            .filter(|bal| bal.is_active())
-            .map(|bal| bal.bank_pk)
-            .collect();
-        banks.sort_by(|x, y| y.cmp(x));
-        Ok(banks)
+        Ok(builders::bank_only_layout(
+            a.lending_account
+                .balances
+                .iter()
+                .filter(|bal| bal.is_active())
+                .map(|bal| bal.bank_pk)
+                .collect(),
+        ))
     }
 
     /// P2-06: the account-dependent template of `account`'s receivership plans, read only
@@ -1331,19 +1319,8 @@ pub mod p0 {
             );
             // P2-06: the prepared template; its errors surface here, where they always did.
             let (active_banks_before, pre_refreshes) = prep.banks_and_refreshes.clone()?;
-            let start_observation: Vec<AccountMeta> = obs
-                .iter()
-                .map(|k| {
-                    if active_banks_before.contains(k) {
-                        AccountMeta::new(*k, false)
-                    } else {
-                        AccountMeta::new_readonly(*k, false)
-                    }
-                })
-                .collect();
-            // Pinned receivership tests exclude a bank closed by repay_all from EndLiquidation's
-            // bank-only layout. Start/Repay still observe the pre-close bank and its oracle.
-            let end_banks = end_banks_after_repay(active_banks_before, sz.liab_bank, sz.repay_all);
+            let (start_observation, end_banks) =
+                builders::liquidation_layout(obs, active_banks_before, &sz.liab_bank, sz.repay_all);
 
             let init_record = prep.init_record.clone()?;
             let ixs = builders::build_receivership(ReceivershipParams {
@@ -2009,6 +1986,7 @@ pub mod p0 {
     #[cfg(test)]
     mod fix100_tests {
         use super::*;
+        use solana_sdk::instruction::AccountMeta;
 
         #[test]
         fn p5_unreadable_fee_state_blocks_instead_of_default_receiver() {
@@ -4216,19 +4194,6 @@ pub mod p0 {
             let again = f.plans_with(&state, &price, &market, true, None, Some(&cache));
             assert_eq!(market.calls.take(), 1, "the hint survived the error");
             assert_eq!(zp(&again), zp(&uncached));
-        }
-
-        #[test]
-        fn repay_all_removes_closed_bank_only_from_end_layout() {
-            let a = Pubkey::new_unique();
-            let liability = Pubkey::new_unique();
-            let b = Pubkey::new_unique();
-            let banks = vec![a, liability, b];
-            assert_eq!(
-                end_banks_after_repay(banks.clone(), liability, false),
-                banks
-            );
-            assert_eq!(end_banks_after_repay(banks, liability, true), vec![a, b]);
         }
 
         #[test]
