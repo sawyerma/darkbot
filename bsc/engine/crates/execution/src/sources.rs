@@ -271,6 +271,14 @@ pub const LIVE_RISK_OUTSIDE_GRANT: &str = "LIVE_RISK_OUTSIDE_GRANT";
 /// BSC3-012: the verified LIVE qualification on file is another record than
 /// the one the armed path rests on.
 pub const LIVE_QUALIFICATION_CHANGED: &str = "LIVE_QUALIFICATION_CHANGED";
+/// BSC3-030 review: the position's exit steps reverted as often as
+/// `BSC_EXEC_LIVE_EXIT_REVERTS_MAX` allows: its exits wait for the operator.
+pub const LIVE_EXIT_REVERTS_EXHAUSTED: &str = "LIVE_EXIT_REVERTS_EXHAUSTED";
+/// BSC3-030 review: the position's last reverted exit step used all its gas.
+pub const LIVE_EXIT_OUT_OF_GAS: &str = "LIVE_EXIT_OUT_OF_GAS";
+/// BSC3-012: the running `bsc_runtime` is not the build the LIVE
+/// qualification names (or it names none, or this one is unreadable).
+pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";
 /// A BUY would leave the grant less than the exits of the open positions
 /// and of its own may still cost (BSC3-057): it is refused, the exits are
 /// not.

@@ -1129,6 +1129,7 @@ pub(crate) mod tests {
     pub(crate) fn verified() -> Verified {
         let findings = club48_findings();
         Verified {
+            runtime_sha256: crate::live_qualification::running_build().ok(),
             view: qualified(),
             adapters: vec![
                 AdapterQualification::from_findings(CapabilityId::Club48BuilderV1, &findings)

@@ -185,6 +185,7 @@ fn strategy_paper_path_latency() {
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
             live_max_head_age_ms: 86_400_000,
+            live_exit_reverts_max: 2,
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::StrategyC,
         },
         Arming {

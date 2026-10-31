@@ -418,6 +418,7 @@ impl RuntimeConfig {
                             1_000,
                             600_000,
                         )?,
+                        live_exit_reverts_max: take("BSC_EXEC_LIVE_EXIT_REVERTS_MAX", 1, 16)?,
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,

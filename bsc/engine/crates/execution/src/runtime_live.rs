@@ -302,6 +302,8 @@ pub struct LiveRuntime {
     /// when: kept across passes for at most [`connecting_hold`] (a closed
     /// gate or a stop drops it at once, its key with it).
     connecting: Option<(LiveEnd, Instant)>,
+    /// BSC3-012: the SHA-256 of this process's build, read at the start.
+    build: Result<[u8; 32], String>,
     codehash_generation: u64,
     arms: u64,
     last_probe: Option<Instant>,
@@ -312,6 +314,9 @@ pub struct LiveRuntime {
     next_nonce: Option<u64>,
     /// Launches first seen by a source the grant does not name.
     source_refused: u64,
+    /// BSC3-030 review: strategy exits refused because the position's exits
+    /// stopped for the operator, per reason.
+    exits_stopped: Vec<(&'static str, u64)>,
     prober: Prober,
     /// The owner's boot session (tests: a fixed one) and wall clock.
     boot: Option<String>,
@@ -414,10 +419,12 @@ impl LiveRuntime {
             last_probe: None,
             last_attempt: None,
             connecting: None,
+            build: live_qualification::running_build(),
             probes: 0,
             disarm_errors: 0,
             next_nonce: None,
             source_refused: 0,
+            exits_stopped: Vec::new(),
             prober,
             boot: None,
             wall: wall_ms,
@@ -825,7 +832,7 @@ impl LiveRuntime {
                     && t.released.intent != LiveIntentKind::Buy
                     && t.state == FactKind::Included
             });
-            if !own && self.position_open(&f.token) {
+            if !own && self.position_open(&f.token) && self.exit_stopped(&f.token).is_none() {
                 let approval = f.intent == LiveIntentKind::Approve;
                 if let Some(x) = self.executor.as_mut() {
                     x.reopen_exit(f.token, approval);
@@ -833,6 +840,47 @@ impl LiveRuntime {
                 if !self.exits_wanted.contains(&f.token) {
                     self.exits_wanted.push(f.token);
                 }
+            }
+        }
+        // BSC3-030: an exit step of our own that reverted took its nonce
+        // and did nothing: the exit of its still open position is open
+        // again (a reverted approval approved nothing), a new decision at a
+        // later nonce through its own owner admission, never the reverted
+        // bytes again; not after a later exit step of the position was
+        // included, and never past `exit_stopped` (review MEDIUM-1).
+        for f in facts
+            .iter()
+            .filter(|f| f.kind == FactKind::Reverted && f.intent != LiveIntentKind::Buy)
+        {
+            if !self.position_open(&f.token) {
+                continue;
+            }
+            let lot = self.book.lot_of(&f.tx_hash).map(|p| p.lot);
+            let later = self.book.txs.iter().any(|t| {
+                t.lot.is_some()
+                    && t.lot == lot
+                    && t.released.intent != LiveIntentKind::Buy
+                    && matches!(
+                        t.state,
+                        FactKind::Included | FactKind::Released | FactKind::Unknown
+                    )
+                    && t.released.nonce > f.nonce
+            });
+            if later {
+                continue;
+            }
+            if self.exit_stopped(&f.token).is_some() {
+                self.exits_wanted.retain(|t| *t != f.token);
+                continue;
+            }
+            // Review LOW-3: an approval the chain included stays.
+            let approval = f.intent == LiveIntentKind::Approve
+                && !self.book.open_lot(&f.token).is_some_and(|p| p.approved);
+            if let Some(x) = self.executor.as_mut() {
+                x.reopen_exit(f.token, approval);
+            }
+            if !self.exits_wanted.contains(&f.token) {
+                self.exits_wanted.push(f.token);
             }
         }
         self.fail_closed_on_ledger();
@@ -1286,6 +1334,12 @@ impl LiveRuntime {
         if matches!(self.phase, Phase::ConnectFailed(_)) && !self.retry_due() {
             return;
         }
+        // BSC3-012: the LIVE path arms only in the build its qualification
+        // names (before any key is read).
+        if let Some(why) = live_qualification::build_refusal(&self.build, verified) {
+            self.phase = Phase::Blocked(why);
+            return;
+        }
         // BSC3-069: the executor signs within the execution risk the grant
         // names (a grant without it is not clear at all).
         if let Some(why) = risk_refusal(live_now.grant(), &self.exec.exec) {
@@ -1593,6 +1647,19 @@ impl LiveRuntime {
         owner: Option<&StateOwner>,
         next: Option<u64>,
     ) -> Option<Refusal> {
+        // BSC3-030 review: while an open position's exits wait for the
+        // operator, no new BUY (an exit failing for good would strand
+        // every new position too).
+        let stopped = self
+            .book
+            .positions
+            .iter()
+            .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
+            .find_map(|p| self.exit_stopped(&p.token));
+        if let Some(why) = stopped {
+            self.count_stopped(why);
+            return Some(Refusal::ExitStopped);
+        }
         let exit_out = self
             .book
             .unresolved()
@@ -1671,6 +1738,13 @@ impl LiveRuntime {
                 return Some((Vec::new(), Some(refusal)));
             }
         }
+        // BSC3-030 review: a stopped exit waits for the operator.
+        if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action
+            && let Some(why) = self.exit_stopped(&token)
+        {
+            self.count_stopped(why);
+            return Some((Vec::new(), Some(Refusal::ExitStopped)));
+        }
         let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
         let handed = strategy_to(
             self.executor.as_mut()?,
@@ -1700,6 +1774,57 @@ impl LiveRuntime {
         }
     }
 
+    /// Counts one refusal because of a stopped exit, by its reason.
+    fn count_stopped(&mut self, why: &'static str) {
+        match self.exits_stopped.iter_mut().find(|(w, _)| *w == why) {
+            Some((_, n)) => *n += 1,
+            None => self.exits_stopped.push((why, 1)),
+        }
+    }
+
+    /// BSC3-030 review: why the exits of `token`'s open position wait for
+    /// the operator, if they do: its exit steps reverted
+    /// `BSC_EXEC_LIVE_EXIT_REVERTS_MAX` times (counted in the ledger, so a
+    /// restart counts them too), or the last of them used all its gas (the
+    /// same limit fails again). Never an automatic repetition past it.
+    fn exit_stopped(&self, token: &[u8; 20]) -> Option<&'static str> {
+        let lot = self.book.open_lot(token)?.lot;
+        let reverted: Vec<&crate::live_ledger::Tx> = self
+            .book
+            .txs
+            .iter()
+            .filter(|t| {
+                t.lot == Some(lot)
+                    && t.released.intent != LiveIntentKind::Buy
+                    && t.state == FactKind::Reverted
+            })
+            .collect();
+        // Out of gas stops only while the step would go with no more gas
+        // than it had (review LOW: a raised limit lets it go on).
+        let exec = &self.exec.exec;
+        let out_of_gas = reverted
+            .iter()
+            .max_by_key(|t| t.released.nonce)
+            .is_some_and(|t| {
+                let used = t.inclusion.as_ref().and_then(|f| f.gas_wei);
+                let most = t
+                    .released
+                    .max_wei
+                    .map(|m| m.saturating_sub(t.released.input_wei.unwrap_or_default()));
+                let limit = match t.released.intent {
+                    LiveIntentKind::Approve => exec.approve_gas_limit,
+                    _ => exec.sell_gas_limit,
+                };
+                let now = U256::from(exec.gas_price_wei) * U256::from(limit);
+                matches!((used, most), (Some(used), Some(most)) if used >= most && now <= most)
+            });
+        if out_of_gas {
+            return Some(crate::sources::LIVE_EXIT_OUT_OF_GAS);
+        }
+        (reverted.len() as u64 >= self.exec.exec.live_exit_reverts_max)
+            .then_some(crate::sources::LIVE_EXIT_REVERTS_EXHAUSTED)
+    }
+
     /// The wanted exits that may go on now (BSC3-055): armed, and the
     /// strategy's next nonce is the buyer's canonical next nonce (C2). The
     /// strategy's exit again, for each.
@@ -1713,7 +1838,7 @@ impl LiveRuntime {
         self.exits_wanted
             .iter()
             .copied()
-            .filter(|t| !x.exited(t))
+            .filter(|t| !x.exited(t) && self.exit_stopped(t).is_none())
             .collect()
     }
 
@@ -1811,6 +1936,9 @@ impl LiveRuntime {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
             }
+        }
+        for (why, n) in &self.exits_stopped {
+            d.push(l::REFUSALS, format!("{why}={n}").as_str());
         }
         for (r, n) in x.into_iter().flat_map(|x| {
             x.counters()
@@ -1992,6 +2120,70 @@ mod tests {
         }
     }
 
+    /// BSC3-012: the LIVE path arms only in the build its qualification
+    /// names: another build's qualification (or one naming none) keeps it
+    /// BLOCKED with LIVE_BUILD_UNQUALIFIED before any key is read (with no
+    /// key file it says so, not KEY_REFUSED); qualified for this build, it
+    /// arms.
+    #[test]
+    fn the_live_path_arms_only_in_the_qualified_build() {
+        let r = Rig::new("live-build", LiveStrategies::C3);
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let spec = |runtime| Spec {
+            runtime_sha256: runtime,
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: acquisition(),
+            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+        };
+        let write = |runtime: [u8; 32]| {
+            fs::write(
+                r.root.join(LIVE_QUALIFICATION_PATH),
+                build(&r.root, &spec(Some(runtime)), 1).unwrap(),
+            )
+            .unwrap();
+        };
+        assert!(
+            build(&r.root, &spec(None), 1).is_err(),
+            "a qualification without its build"
+        );
+        write([0x77; 32]);
+        let mut x = LiveRuntime::with_prober(
+            LiveSetup {
+                key_path: r.d.join("no-key-here"),
+                ..r.live.clone()
+            },
+            r.exec.clone(),
+            &r.root,
+            r.state.clone(),
+            r.d.join("fences"),
+            None,
+            funded,
+        )
+        .in_session("boot-1", fixed);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        let (state_now, why) = reason(&x);
+        assert_eq!(state_now, "BLOCKED");
+        let why = why.unwrap_or_default();
+        assert!(
+            why.starts_with(crate::sources::LIVE_BUILD_UNQUALIFIED),
+            "{why}"
+        );
+        assert!(
+            why.contains(&alloy_primitives::hex::encode([0x77; 32])),
+            "{why}"
+        );
+        assert!(!x.armed());
+        // This build qualified: it arms.
+        write(crate::live_qualification::running_build().unwrap());
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        x.shutdown();
+    }
+
     /// BSC3-025: arming over the builders never waits for their TLS
     /// connection on the decision loop (it did, up to Q5A's 5 s connect
     /// and 5 s handshake): the pass begins it and returns CONNECTING; the
@@ -2024,6 +2216,7 @@ mod tests {
         let root = fixture("live-rt-025", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
@@ -2221,6 +2414,7 @@ mod tests {
         let root = fixture("live-rt", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
@@ -2416,6 +2610,7 @@ mod tests {
         let root = fixture("live-rt-cap", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
@@ -2564,6 +2759,7 @@ mod tests {
         let root = fixture("live-pos", "PASS");
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let spec = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
@@ -2844,6 +3040,488 @@ mod tests {
         fs::remove_dir_all(state).unwrap();
     }
 
+    /// BSC3-030: an exit step of the arm that reverted (included: its
+    /// nonce taken, its gas paid, nothing done) leaves the position open
+    /// and its exit open again: a reverted approval approved nothing, so
+    /// the exit approves again; a reverted SELL sold nothing, so it sells
+    /// again; each a new decision at the next nonce through its own owner
+    /// admission, never the reverted bytes. Before, the arm took the token
+    /// as exited for good (its tokens held, no exit until a restart) and
+    /// sold after a reverted approval without one.
+    #[test]
+    fn a_reverted_exit_step_goes_on_at_the_next_nonce() {
+        reverted_exit_steps("live-rev-go", 3, false);
+    }
+
+    /// BSC3-030 review MEDIUM-1: an exit whose steps keep reverting is no
+    /// automatic repetition: after `BSC_EXEC_LIVE_EXIT_REVERTS_MAX` reverted
+    /// steps of the position (here an APPROVE and a SELL, limit 2) its exits
+    /// stop for the operator: none continues, the strategy's exit is
+    /// refused EXIT_STOPPED with the reason in the status, also after a
+    /// restart (counted in the ledger).
+    #[test]
+    fn an_exit_that_keeps_reverting_stops_for_the_operator() {
+        reverted_exit_steps("live-rev-stop", 2, false);
+    }
+
+    /// BSC3-030 review MEDIUM-1: a SELL that reverted using all its gas
+    /// stops the position's exits at once (the same limit fails again),
+    /// below the revert limit too.
+    #[test]
+    fn an_exit_step_out_of_gas_stops_the_exits_at_once() {
+        reverted_exit_steps("live-rev-oog", 3, true);
+    }
+
+    /// An open Strategy C position whose exit's APPROVE reverts, then its
+    /// SELL (all its gas: `sell_out_of_gas`), under a revert limit of
+    /// `reverts_max`; what follows is the case's.
+    fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
+        use crate::chain_follower::{CanonicalTrade, TxCost};
+        use crate::live_ledger::PositionState;
+        use crate::paper_exec::{IntentKind, StrategyCurve};
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+            quote_native_sell,
+        };
+        let (state, _store, _) = live_ready_granting(tag, |now| LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        });
+        let root = fixture(tag, "PASS");
+        let ev = || vec!["ev/measure.dbrec".to_string()];
+        let spec = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, ev())],
+            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
+            acquisition: acquisition(),
+            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
+        };
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(
+            root.join(LIVE_QUALIFICATION_PATH),
+            build(&root, &spec, 1).unwrap(),
+        )
+        .unwrap();
+        let d = std::env::temp_dir().join(format!("bsc-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let (key, buyer) = key_file(&d);
+        let (port, requests) = stand_in();
+        let live_setup = LiveSetup {
+            key_path: key,
+            buyer,
+            route: LiveRouteConfig::Loopback { port },
+            connect_timeout: Duration::from_secs(2),
+        };
+        let mut exec = setup(d.join("unused.key"), Duration::from_secs(3_600));
+        exec.exec.live_exit_reverts_max = reverts_max;
+        let runtime = |boot: &str| {
+            LiveRuntime::with_prober(
+                live_setup.clone(),
+                exec.clone(),
+                &root,
+                state.clone(),
+                d.join("fences"),
+                None,
+                funded,
+            )
+            .in_session(boot, fixed)
+        };
+        let mut x = runtime("boot-1");
+        let mut c2 = owner(&d, buyer);
+        let block = |n: u64, h: u8, parent: u8, txs| CanonicalEvent::Block {
+            number: n,
+            hash: [h; 32],
+            parent_hash: [parent; 32],
+            timestamp_s: 1_793_000_000 + (n - HEAD),
+            timestamp_ms: 1_793_000_000_000 + (n - HEAD) * 1_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs,
+        };
+        c2.canonical(&block(HEAD, 0xb1, 0xb0, Vec::new()));
+        c2.canonical(&CanonicalEvent::NonceFact {
+            sender: buyer,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        let _ = c2.take_evidence();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", record(&x).opt_text(l::REASON));
+        let reconnect = |x: &mut LiveRuntime| {
+            let failed = x
+                .executor
+                .as_mut()
+                .unwrap()
+                .end_mut()
+                .connect(Duration::from_secs(2));
+            assert!(failed.is_empty());
+        };
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let fresh = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let curve = StrategyCurve {
+            terms,
+            reserve: fresh.reserve_after,
+            circulating: fresh.supply_after,
+        };
+        let buy = StrategyAction::Buy {
+            token,
+            curve,
+            input_wei: input,
+            decided_ns: 0,
+        };
+        let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
+        assert_eq!((intents.len(), refused), (1, None));
+        let buy_tx = intents[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(x.book().unresolved().count(), 1);
+        // Its receipt: included with its gas and the Portal's trade.
+        let bought = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: curve.reserve,
+            circulating_before: curve.circulating,
+            input_amount: input,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let tokens = bought.output_amount;
+        let tx = |hash, nonce, gas: u64| CanonicalTx {
+            hash,
+            index: 0,
+            sender: buyer,
+            nonce,
+            succeeded: true,
+            cost: Some(TxCost {
+                gas_used: gas,
+                effective_gas_price: 50_000_000,
+            }),
+        };
+        let trade = |hash, n: u64, h: u8, sell, amount: U256, eth: U256| {
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: n,
+                block_hash: [h; 32],
+                tx_index: 0,
+                tx_hash: hash,
+                log_index: 0,
+                origin: buyer,
+                sell,
+                token,
+                trader: buyer,
+                amount: amount.to_be_bytes(),
+                eth: eth.to_be_bytes(),
+                fee: [0; 32],
+                post_price: [0; 32],
+            })
+        };
+        // As the runtime applies a canonical event: C2 first, its evidence
+        // to the LIVE path, then the follower's facts.
+        let apply = |x: &mut LiveRuntime, c2: &mut StateOwner, events: Vec<CanonicalEvent>| {
+            let mut changes = Vec::new();
+            for e in &events {
+                c2.canonical(e);
+                let evidence = c2.take_evidence();
+                let _ = x.apply_evidence(&evidence);
+                changes.extend(x.on_canonical(e));
+            }
+            changes
+        };
+        let complete = |n: u64, h: u8| CanonicalEvent::BlockComplete {
+            number: n,
+            hash: [h; 32],
+        };
+        let opened = PositionChange::Opened {
+            token,
+            tokens,
+            spent_wei: input + U256::from(200_000u64 * 50_000_000),
+            filled_ms: 1_793_000_001_000,
+        };
+        let changes = apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 1, 0xc2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
+                trade(buy_tx, HEAD + 1, 0xc2, false, tokens, input),
+                complete(HEAD + 1, 0xc2),
+            ],
+        );
+        assert_eq!(changes, vec![opened]);
+        // The exit: approval, then (on a ready connection) the SELL of the
+        // real tokens, both signed by the buyer key.
+        let held = StrategyCurve {
+            reserve: bought.reserve_after,
+            circulating: bought.supply_after,
+            ..curve
+        };
+        let exit = StrategyAction::Exit {
+            token,
+            tokens,
+            curve: held,
+            decided_ns: 0,
+        };
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        // BSC3-055: the SELL waits for the approval to be canonical.
+        assert_eq!(refused, None);
+        let approve_tx = out[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let reverted = |hash, nonce, gas| CanonicalTx {
+            succeeded: false,
+            ..tx(hash, nonce, gas)
+        };
+        // The approval reverts: approved nothing; the exit approves again.
+        apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 2, 0xc3, 0xc2, vec![reverted(approve_tx, 1, 50_000)]),
+                complete(HEAD + 2, 0xc3),
+            ],
+        );
+        assert!(!x.book().positions[0].approved);
+        assert_eq!(x.exits_to_continue(&c2), vec![token]);
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        let approve_again = out[0].handoff.tx_hash;
+        assert_ne!(approve_again, approve_tx);
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 3, 0xc4, 0xc3, vec![tx(approve_again, 2, 50_000)]),
+                complete(HEAD + 3, 0xc4),
+            ],
+        );
+        assert_eq!(x.exits_to_continue(&c2), vec![token]);
+        reconnect(&mut x);
+        let spent = |x: &LiveRuntime| x.executor.as_ref().unwrap().strategy_lanes().3;
+        let before_sell = spent(&x);
+        let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let sell_tx = out[0].handoff.tx_hash;
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let at_handoff = spent(&x);
+        // The SELL's gas in, the position's input out of the exposure.
+        let sell_gas = at_handoff + input - before_sell;
+        // The SELL reverts: sold nothing; the position stays open.
+        let reverted_sell = match sell_out_of_gas {
+            false => reverted(sell_tx, 3, 150_000),
+            true => CanonicalTx {
+                succeeded: false,
+                cost: Some(TxCost {
+                    gas_used: x.exec.exec.sell_gas_limit,
+                    effective_gas_price: x.exec.exec.gas_price_wei,
+                }),
+                ..tx(sell_tx, 3, 0)
+            },
+        };
+        let changes = apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 4, 0xc5, 0xc4, vec![reverted_sell]),
+                complete(HEAD + 4, 0xc5),
+            ],
+        );
+        assert_eq!(changes, Vec::new());
+        let p = &x.book().positions[0];
+        // Open again: no SELL of it is on its way any more.
+        assert_eq!(p.state, PositionState::Open);
+        assert!(p.approved);
+        assert_eq!(p.pnl_wei, None);
+        let stop = match (reverts_max, sell_out_of_gas) {
+            (_, true) => Some(crate::sources::LIVE_EXIT_OUT_OF_GAS),
+            (2, false) => Some(crate::sources::LIVE_EXIT_REVERTS_EXHAUSTED),
+            _ => None,
+        };
+        if let Some(why) = stop {
+            // Stopped for the operator: nothing continues, the strategy's
+            // exit is refused, and so after a restart.
+            assert!(x.executor.as_ref().unwrap().exited(&token), "not reopened");
+            assert!(!x.exits_wanted.contains(&token), "not wanted");
+            assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+            // Even wanted and reopened (another way in), it does not go on.
+            x.exits_wanted.push(token);
+            x.executor.as_mut().unwrap().reopen_exit(token, false);
+            assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+            x.exits_wanted.retain(|t| *t != token);
+            reconnect(&mut x);
+            let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+            assert_eq!((out.len(), refused), (0, Some(Refusal::ExitStopped)));
+            assert!(
+                record(&x)
+                    .texts(l::REFUSALS)
+                    .unwrap()
+                    .contains(&format!("{why}=1").as_str()),
+                "{:?}",
+                record(&x).texts(l::REFUSALS)
+            );
+            assert!(requests.try_recv().is_err(), "nothing left");
+            // Review MEDIUM: no new BUY while its exits wait for the operator.
+            let other = StrategyAction::Buy {
+                token: [0xCD; 20],
+                curve,
+                input_wei: input,
+                decided_ns: 0,
+            };
+            let (out, refused) = x.on_strategy(&other, &c2, &clock, now_ms).unwrap();
+            assert_eq!((out.len(), refused), (0, Some(Refusal::ExitStopped)));
+            assert!(requests.try_recv().is_err(), "no BUY left");
+            x.shutdown();
+            // A new runtime (a new process of the same boot session: a new
+            // boot first needs the operator again) reads the same ledger.
+            let mut again = runtime("boot-1");
+            settle(&mut again, &c2);
+            assert!(again.armed(), "{:?}", reason(&again));
+            assert_eq!(again.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+            let (out, refused) = again.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+            assert_eq!((out.len(), refused), (0, Some(Refusal::ExitStopped)));
+            again.shutdown();
+            if sell_out_of_gas {
+                // A raised SELL gas limit lets the exit go on (review LOW).
+                let mut raised = exec.clone();
+                raised.exec.sell_gas_limit += 1;
+                let mut lifted = LiveRuntime::with_prober(
+                    live_setup.clone(),
+                    raised,
+                    &root,
+                    state.clone(),
+                    d.join("fences"),
+                    None,
+                    funded,
+                )
+                .in_session("boot-1", fixed);
+                settle(&mut lifted, &c2);
+                assert!(lifted.armed(), "{:?}", reason(&lifted));
+                reconnect(&mut lifted);
+                let (out, refused) = lifted.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+                assert_eq!((out.len(), refused), (1, None));
+                assert_eq!(out[0].kind, IntentKind::Sell);
+                lifted.shutdown();
+            }
+            fs::remove_dir_all(d).unwrap();
+            fs::remove_dir_all(root).unwrap();
+            fs::remove_dir_all(state).unwrap();
+            return;
+        }
+        // Its exit goes on with a new SELL at the next nonce, quoted on the
+        // curve as it is now: other holders sold meanwhile (a crash).
+        assert_eq!(x.exits_to_continue(&c2), vec![token]);
+        let dump = quote_native_sell(
+            &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
+                token: terms,
+                reserve_before: held.reserve,
+                circulating_before: held.circulating,
+                input_amount: tokens,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+            },
+        )
+        .unwrap();
+        let crashed = StrategyCurve {
+            reserve: dump.reserve_after,
+            circulating: dump.supply_after,
+            ..held
+        };
+        let exit_again = StrategyAction::Exit {
+            token,
+            tokens,
+            curve: crashed,
+            decided_ns: 0,
+        };
+        // Review LOW: open again, its input is exposure again.
+        let reopened = spent(&x);
+        assert_eq!(reopened, at_handoff + input);
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&exit_again, &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let sell_again = out[0].handoff.tx_hash;
+        assert_ne!(sell_again, sell_tx);
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        // The position's input leaves the exposure once more, its gas adds.
+        assert_eq!(spent(&x), reopened + sell_gas - input);
+        let proceeds = quote_native_sell(
+            &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
+                token: terms,
+                reserve_before: crashed.reserve,
+                circulating_before: crashed.circulating,
+                input_amount: tokens,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+            },
+        )
+        .unwrap()
+        .output_amount;
+        assert!(
+            proceeds < dump.output_amount,
+            "the crash lowered the proceeds"
+        );
+        let changes = apply(
+            &mut x,
+            &mut c2,
+            vec![
+                block(HEAD + 5, 0xc6, 0xc5, vec![tx(sell_again, 4, 150_000)]),
+                trade(sell_again, HEAD + 5, 0xc6, true, tokens, proceeds),
+                complete(HEAD + 5, 0xc6),
+            ],
+        );
+        assert_eq!(changes, vec![PositionChange::Ended { token }]);
+        // Every step's gas counts, the reverted ones too.
+        let gas = U256::from((200_000u64 + 2 * 50_000 + 2 * 150_000) * 50_000_000);
+        let p = &x.book().positions[0];
+        assert_eq!(p.state, PositionState::Closed);
+        assert_eq!(p.gas_wei, gas);
+        let pnl = i128::try_from(proceeds).unwrap()
+            - i128::try_from(input).unwrap()
+            - i128::try_from(gas).unwrap();
+        assert_eq!(p.pnl_wei, Some(pnl));
+        assert_eq!(x.exits_to_continue(&c2), Vec::<[u8; 20]>::new());
+        // After a restart the ledger gives the same book.
+        let restarted =
+            crate::live_ledger::fold(&crate::live_ledger::Ledger::open(&state).facts().unwrap());
+        assert_eq!(&restarted, x.book());
+        x.shutdown();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
     /// A C3 LIVE scope on the loopback stand-in: the owner's state, the
     /// qualification's repository, the run directory, the setup and what
     /// the stand-in receives.
@@ -2870,6 +3548,7 @@ mod tests {
             let root = fixture(tag, "PASS");
             let ev = || vec!["ev/measure.dbrec".to_string()];
             let spec = Spec {
+                runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
                 venues: vec![(VenueId::Flap, venue_evidence())],
                 sources: vec![(SourceId::PublicNode, ev())],
                 adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
@@ -5649,6 +6328,7 @@ mod tests {
         assert!(x.armed(), "{:?}", reason(&x));
         let ev = || vec!["ev/measure.dbrec".to_string()];
         let other = Spec {
+            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],

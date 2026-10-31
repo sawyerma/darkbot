@@ -169,6 +169,9 @@ pub struct ExecConfig {
     /// clock) a LIVE release plans on, BUY or exit: older, the canonical
     /// source is stalled (or cut off) and nothing leaves.
     pub live_max_head_age_ms: u64,
+    /// BSC3-030: reverted exit steps of one position before its exits
+    /// stop for the operator (`BSC_EXEC_LIVE_EXIT_REVERTS_MAX`).
+    pub live_exit_reverts_max: u64,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -226,6 +229,9 @@ impl ExecConfig {
         }
         if self.live_max_head_age_ms == 0 {
             return Err("BSC_EXEC_LIVE_MAX_HEAD_AGE_MS must be positive".into());
+        }
+        if self.live_exit_reverts_max == 0 {
+            return Err("BSC_EXEC_LIVE_EXIT_REVERTS_MAX must be at least 1".into());
         }
         Ok(())
     }
@@ -314,6 +320,9 @@ pub enum Refusal {
     /// BSC3-027: the sender's balance does not hold a BUY with its exit
     /// and the exits of what is open; the exits go, no BUY.
     Unfunded,
+    /// BSC3-030: the position's exit steps reverted as often as allowed,
+    /// or the last one used all its gas: its exits wait for the operator.
+    ExitStopped,
 }
 
 impl Refusal {
@@ -342,6 +351,7 @@ impl Refusal {
             Self::SenderNonce => "SENDER_NONCE",
             Self::ExitFirst => "EXIT_FIRST",
             Self::Unfunded => "UNFUNDED",
+            Self::ExitStopped => "EXIT_STOPPED",
         }
     }
 }
@@ -387,6 +397,9 @@ struct Held {
     token: [u8; 20],
     min_tokens: U256,
     input_wei: U256,
+    /// Its input left the open exposure with its SELL's hand-over; an
+    /// exit reopened (its SELL reverted or replaced) counts it again.
+    released: bool,
 }
 
 /// The C2 facts of a Strategy C intent: the canonical snapshot under
@@ -1546,6 +1559,13 @@ impl<E: End> Executor<E> {
     /// A replaced approval approved nothing.
     pub fn reopen_exit(&mut self, token: [u8; 20], approval: bool) {
         self.exited.retain(|t| *t != token);
+        // Open again: its input is open exposure again (BSC3-030 review).
+        if let Some(h) = self.strategy_bought.iter_mut().find(|h| h.token == token)
+            && h.released
+        {
+            self.strategy_spent_wei = self.strategy_spent_wei.saturating_add(h.input_wei);
+            h.released = false;
+        }
         if approval {
             self.approved.retain(|(t, _)| *t != token);
         }
@@ -1745,6 +1765,7 @@ impl<E: End> Executor<E> {
             }
         };
         self.strategy_bought.push(Held {
+            released: false,
             token,
             min_tokens: admitted.min_output_amount(),
             input_wei,
@@ -1976,8 +1997,14 @@ impl<E: End> Executor<E> {
         }
         self.exited.push(token);
         // The position is closed: its input leaves the open exposure, the
-        // gas spent stays (gate L1).
-        self.strategy_spent_wei = self.strategy_spent_wei.saturating_sub(held.input_wei);
+        // gas spent stays (gate L1); once (a SELL again after a reverted or
+        // replaced one releases nothing more, BSC3-030 review).
+        if let Some(h) = self.strategy_bought.iter_mut().find(|h| h.token == token)
+            && !h.released
+        {
+            self.strategy_spent_wei = self.strategy_spent_wei.saturating_sub(h.input_wei);
+            h.released = true;
+        }
         Ok(())
     }
 
@@ -2056,6 +2083,7 @@ impl<E: End> Executor<E> {
         match self.strategy_bought.iter_mut().find(|h| h.token == token) {
             Some(h) => h.min_tokens = tokens,
             None => self.strategy_bought.push(Held {
+                released: false,
                 token,
                 min_tokens: tokens,
                 input_wei: U256::ZERO,
@@ -2200,6 +2228,7 @@ pub(crate) mod tests {
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
             live_max_head_age_ms: 86_400_000,
+            live_exit_reverts_max: 2,
             sender_paths: SenderPaths::Both,
         }
     }

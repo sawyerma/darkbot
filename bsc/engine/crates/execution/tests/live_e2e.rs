@@ -272,6 +272,18 @@ fn qualify(root: &Path) {
     qualify_in(root, "ev");
 }
 
+/// BSC3-012: the build a qualification names: the browser E2E's runtime
+/// (`DARKBOT_LIVE_E2E_RUNTIME`), else this test's process, which arms.
+fn qualified_build() -> String {
+    std::env::var("DARKBOT_LIVE_E2E_RUNTIME").unwrap_or_else(|_| {
+        std::env::current_exe()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    })
+}
+
 fn qualify_in(root: &Path, ev: &str) {
     let measure = format!("{ev}/measure.dbrec");
     let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{measure}");
@@ -284,6 +296,8 @@ fn qualify_in(root: &Path, ev: &str) {
         "qualify",
         "--root",
         root_s,
+        "--runtime-binary",
+        &qualified_build(),
         "--venue",
         &venue,
         "--source",
@@ -471,6 +485,7 @@ fn exec_setup() -> ExecSetup {
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
             live_max_head_age_ms: 86_400_000,
+            live_exit_reverts_max: 2,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),
@@ -1075,6 +1090,8 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         "qualify",
         "--root",
         adapt.to_str().unwrap(),
+        "--runtime-binary",
+        &qualified_build(),
         "--adapter",
         &adapter,
         "--acquisition",

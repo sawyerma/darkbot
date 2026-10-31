@@ -206,6 +206,11 @@ fn qualify_args(
             .collect::<Result<_, _>>()?;
         spec.adapters.push((adapter, findings, evidence));
     }
+    // BSC3-012: the release binary of `bsc_runtime` this qualification
+    // qualifies; the LIVE path arms only in it.
+    let runtime = flag(rest, "--runtime-binary")?;
+    let bytes = std::fs::read(runtime).map_err(|e| format!("--runtime-binary {runtime}: {e}"))?;
+    spec.runtime_sha256 = Some(darkbot_bsc_record::sha256(&bytes));
     spec.acquisition = match flags(rest, "--acquisition").first() {
         None => None,
         Some(v) => {
@@ -250,8 +255,9 @@ fn print_qualification(rest: &[String]) -> darkbot_bsc_execution::sources::LiveQ
             println!("qualification=NONE path={LIVE_QUALIFICATION_PATH}")
         }
         None => println!(
-            "qualification=VERIFIED sha256={} venues={} sources={} adapters={} acquisition={} risk_decision={}",
+            "qualification=VERIFIED sha256={} runtime={} venues={} sources={} adapters={} acquisition={} risk_decision={}",
             hex(&v.sha256),
+            v.runtime_sha256.map_or("NONE".to_string(), |b| hex(&b)),
             v.view
                 .venues
                 .iter()
@@ -787,7 +793,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
@@ -811,6 +817,8 @@ fn stop_on_signals(stop: std::path::PathBuf) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    // BSC3-012 review: this process's build, read before anything else.
+    let _ = darkbot_bsc_execution::live_qualification::running_build();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
         Ok(true) => ExitCode::SUCCESS,

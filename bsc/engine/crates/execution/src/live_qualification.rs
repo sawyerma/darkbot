@@ -49,6 +49,9 @@ pub struct Verified {
     pub sha256: [u8; 32],
     /// The buyer of the proven acquisition: the LIVE key must be it.
     pub acquisition_buyer: Option<[u8; 20]>,
+    /// BSC3-012: the SHA-256 of the `bsc_runtime` build qualified (none
+    /// before v3: no build is).
+    pub runtime_sha256: Option<[u8; 32]>,
 }
 
 /// The schemas of a venue's evidence: the G0.1 freeze (v2, with its
@@ -225,10 +228,21 @@ fn acquisition_binds(
 
 /// Verifies the qualification record `bytes` against the evidence in `root`.
 pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
-    // A v1 record names no G0.7 attempt: its acquisition verifies nothing.
-    let (r, v1) = match decode(&lq::SCHEMA, bytes) {
-        Ok(r) => (r, false),
-        Err(e2) => (decode(&lq::V1, bytes).map_err(|_| e2.to_string())?, true),
+    // A v1 record names no G0.7 attempt: its acquisition verifies nothing;
+    // a v1 or v2 record names no runtime build: it qualifies none.
+    let (r, v1, runtime_sha256) = match decode(&lq::SCHEMA, bytes) {
+        Ok(r) => {
+            let build = r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?;
+            (r, false, Some(build))
+        }
+        Err(e3) => match decode(&lq::V2, bytes) {
+            Ok(r) => (r, false, None),
+            Err(_) => (
+                decode(&lq::V1, bytes).map_err(|_| e3.to_string())?,
+                true,
+                None,
+            ),
+        },
     };
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let pin = bsc_mainnet_v5_27_0();
@@ -316,7 +330,41 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         adapters,
         sha256: darkbot_bsc_record::sha256(bytes),
         acquisition_buyer,
+        runtime_sha256,
     })
+}
+
+/// BSC3-012: the SHA-256 of this process's executable, read once (at the
+/// first call, the runtime's start): the build a LIVE qualification must
+/// name. A binary replaced on disk later is not what runs.
+pub fn running_build() -> Result<[u8; 32], String> {
+    static BUILD: std::sync::OnceLock<Result<[u8; 32], String>> = std::sync::OnceLock::new();
+    BUILD
+        .get_or_init(|| {
+            let exe = std::env::current_exe().map_err(|e| format!("executable: {e}"))?;
+            let bytes = fs::read(&exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+            Ok(darkbot_bsc_record::sha256(&bytes))
+        })
+        .clone()
+}
+
+/// BSC3-012: why the LIVE path may not arm in build `own` under `q`, if
+/// it may not.
+pub fn build_refusal(own: &Result<[u8; 32], String>, q: &Verified) -> Option<String> {
+    use crate::sources::LIVE_BUILD_UNQUALIFIED as WHY;
+    use alloy_primitives::hex::encode;
+    match (own, q.runtime_sha256) {
+        (Ok(own), Some(qualified)) if *own == qualified => None,
+        (Ok(own), Some(qualified)) => Some(format!(
+            "{WHY}: this build {} is not the qualified {}",
+            encode(own),
+            encode(qualified)
+        )),
+        (Ok(_), None) => Some(format!(
+            "{WHY}: the qualification names no runtime build: qualify again"
+        )),
+        (Err(e), _) => Some(format!("{WHY}: this build cannot be read: {e}")),
+    }
 }
 
 /// The LIVE qualification on file in `root`: `None` when there is none.
@@ -336,6 +384,7 @@ pub fn view(root: &Path) -> (Verified, Option<String>) {
         adapters: Vec::new(),
         sha256: [0; 32],
         acquisition_buyer: None,
+        runtime_sha256: None,
     };
     match load(root) {
         Ok(Some(v)) => (v, None),
@@ -354,6 +403,8 @@ pub struct Spec {
     pub acquisition: Option<(String, String)>,
     /// Who decided, when, what, and the evidence it rests on.
     pub risk: Option<(String, u64, String, Vec<String>)>,
+    /// BSC3-012: the SHA-256 of the `bsc_runtime` build it qualifies.
+    pub runtime_sha256: Option<[u8; 32]>,
 }
 
 /// The qualification record of `spec`: each evidence path is read in
@@ -377,9 +428,13 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
             .set(lq::evidence::SCHEMA_NAME, schema.name);
         Ok(d.into_nested())
     };
+    let runtime = spec
+        .runtime_sha256
+        .ok_or("a LIVE qualification names the runtime build it qualifies")?;
     let mut d = Draft::new(&lq::SCHEMA);
     d.set(lq::PROVENANCE_TOOL, "bsc_runtime")
-        .set(lq::PROVENANCE_OBSERVED_UNIX_MS, now_ms);
+        .set(lq::PROVENANCE_OBSERVED_UNIX_MS, now_ms)
+        .set(lq::RUNTIME_SHA256, darkbot_bsc_record::Value::B256(runtime));
     let items = spec
         .venues
         .iter()
@@ -611,6 +666,7 @@ pub(crate) mod tests {
     fn spec() -> Spec {
         let ev = || vec!["ev/measure.dbrec".to_string()];
         Spec {
+            runtime_sha256: Some(running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
             sources: vec![(SourceId::PublicNode, ev())],
             adapters: vec![(LiveAdapter::Club48BuilderV1, findings(), ev())],
@@ -738,8 +794,51 @@ pub(crate) mod tests {
         let mut d = Draft::new(&lq::SCHEMA);
         d.set(lq::PROVENANCE_TOOL, "test")
             .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(lq::RUNTIME_SHA256, Value::B256([0x12; 32]))
             .push(lq::ITEMS, item.into_nested());
         d.encode().unwrap()
+    }
+
+    /// BSC3-012: a qualification names the runtime build it qualifies (v3):
+    /// none is built without it; a v2 record verifies naming none; the
+    /// refusal holds for another build, none named, and an unreadable own
+    /// build, and never for the named one.
+    #[test]
+    fn a_qualification_names_the_runtime_build_it_qualifies() {
+        let root = fixture("lq-build", "PASS");
+        let bytes = build(&root, &spec(), 1).unwrap();
+        let v = verify(&root, &bytes).unwrap();
+        let own = running_build().unwrap();
+        assert_eq!(v.runtime_sha256, Some(own));
+        assert_eq!(build_refusal(&Ok(own), &v), None);
+        let other = build_refusal(&Ok([0x55; 32]), &v).unwrap();
+        assert!(
+            other.starts_with(crate::sources::LIVE_BUILD_UNQUALIFIED),
+            "{other}"
+        );
+        let unreadable = build_refusal(&Err("gone".into()), &v).unwrap();
+        assert!(unreadable.contains("cannot be read"), "{unreadable}");
+        assert!(
+            build(
+                &root,
+                &Spec {
+                    runtime_sha256: None,
+                    ..spec()
+                },
+                1
+            )
+            .unwrap_err()
+            .contains("runtime build")
+        );
+        // A v2 record (before the build was named) qualifies no build.
+        let mut d = Draft::new(&lq::V2);
+        d.set(lq::PROVENANCE_TOOL, "test")
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+        let v2 = verify(&root, &d.encode().unwrap()).unwrap();
+        assert_eq!(v2.runtime_sha256, None);
+        let none = build_refusal(&Ok(own), &v2).unwrap();
+        assert!(none.contains("names no runtime build"), "{none}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// BSC3-049: each role takes only its own records, bound to what it

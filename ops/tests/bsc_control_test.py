@@ -58,7 +58,7 @@ try:
     # LIVE tab can reach an effective LIVE through the GUI. This runtime has no LIVE path (no BSC_LIVE_*
     # keys, no buyer key): nothing can be signed or sent.
     assert 'BSC_LIVE_' not in ingress
-    subprocess.run(['cargo','test','-q','-p','darkbot-bsc-execution','--features','runtime','--test','live_e2e','--','--ignored','--exact','write_synthetic_qualification_for_the_browser_e2e'],cwd=h.ROOT/'bsc/engine',env={**os.environ,'DARKBOT_LIVE_E2E_ROOT':str(source)},check=True,timeout=600)
+    subprocess.run(['cargo','test','-q','-p','darkbot-bsc-execution','--features','runtime','--test','live_e2e','--','--ignored','--exact','write_synthetic_qualification_for_the_browser_e2e'],cwd=h.ROOT/'bsc/engine',env={**os.environ,'DARKBOT_LIVE_E2E_ROOT':str(source),'DARKBOT_LIVE_E2E_RUNTIME':str(release/'bsc_runtime')},check=True,timeout=600)
     assert (source/'bsc/config/live_qualification.dbrec').is_file()
     (h.WORK/'app/bsc-source').symlink_to(source,target_is_directory=True)
     (release/'bsc-root').symlink_to(source,target_is_directory=True)
