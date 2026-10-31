@@ -249,6 +249,30 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
     let (code, _, err) = attempts(&journals, &["--digest", &"0".repeat(64)]);
     assert_eq!(code, 2);
     assert!(err.contains("FE06_SCOPE_UNKNOWN"), "{err}");
+    // Strictly typed (review L2): a flag twice, an unknown flag, a wallet that is no key.
+    for extra in [
+        &["--wallet", wallet.as_str()][..],
+        &["--from", "x"][..],
+        &["--digest"][..],
+    ] {
+        let (code, _, err) = attempts(&journals, extra);
+        assert_eq!(code, 2, "{extra:?}");
+        assert!(err.contains("usage: p0ctl live"), "{extra:?}: {err}");
+    }
+    let (code, _, err) = p0ctl(
+        &d,
+        &[],
+        &[
+            "live",
+            "attempts",
+            "--journal-dir",
+            journals.to_str().unwrap(),
+            "--wallet",
+            "not-a-key",
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("FE06_WALLET_INVALID"), "{err}");
     shutdown.request();
     thread.join().unwrap();
     let _ = std::fs::remove_dir_all(&d);

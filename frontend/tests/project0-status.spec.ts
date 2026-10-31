@@ -415,7 +415,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const capability = sent.at(-1)!;
   expect(capability.action).toBe("project0.capability.set");
   const c = fromBinary(CapabilityControlCommandSchema, capability.params);
-  expect([c.capability, c.requested]).toEqual(["LIVE", "OFF"]);
+  expect([c.capability, c.requested, c.ownerEpoch]).toEqual(["LIVE", "OFF", 2n]);
   expect(capability.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // DEC-04: the B hold mode is requested through the same controller; the row shows ACTIVE
   // requested and OBSERVE effective while N (B-8) is undecided.
@@ -426,7 +426,8 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const hold = sent.at(-1)!;
   expect(hold.action).toBe("project0.capability.set");
   const hb = fromBinary(CapabilityControlCommandSchema, hold.params);
-  expect([hb.capability, hb.requested]).toEqual(["HOLD_B", "ACTIVE"]);
+  // Review M2: with the owner epoch the view showed (the gateway needs it for all but OFF).
+  expect([hb.capability, hb.requested, hb.ownerEpoch]).toEqual(["HOLD_B", "ACTIVE", 2n]);
   expect(hold.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // DEC-11: the bundle path likewise; ACTIVE requested stays OBSERVE without a qualified
   // bundle simulator, and OFF is requested through the same controller.

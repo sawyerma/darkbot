@@ -579,6 +579,11 @@ pub fn exit_decision(g: &LiveGates) -> (&'static str, String) {
     decision(g, &ECON_EXIT)
 }
 
+/// P8-CTRL.3: the one reason of a grant outside its validity (LIVE, the status, `p0ctl`).
+pub fn grant_not_in_force(digest: &str) -> String {
+    format!("FE-06 grant {digest} not in force (expired, not yet valid or no readable clock)")
+}
+
 fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
     let mut missing: Vec<String> = switches
         .iter()
@@ -596,10 +601,9 @@ fn decision(g: &LiveGates, switches: &[&str]) -> (&'static str, String) {
     );
     match g.fe06 {
         None => missing.push(LIVE_BLOCK_REASON.into()),
-        Some(a) if !g.now_unix_s.is_some_and(|now| a.in_force(now)) => missing.push(format!(
-            "FE-06 grant {} not in force (expired, not yet valid or no readable clock)",
-            a.digest()
-        )),
+        Some(a) if !g.now_unix_s.is_some_and(|now| a.in_force(now)) => {
+            missing.push(grant_not_in_force(a.digest()))
+        }
         Some(_) => {}
     }
     match missing.split_first() {

@@ -149,7 +149,8 @@ function ModeRequest({ owner, live, capability, label, action, active }: {
   const mode = chosen ?? requested;
   const version = owner.capabilityConfigVersion;
   const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
-    : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";
+    : version == null ? "Capability configuration version unknown (no capability control in this runtime)"
+      : mode !== "OFF" && owner.capabilityEpoch == null ? "Owner epoch unknown (a request other than OFF states it)" : "";
   if (!row) return null;
   return <>
     <div className="p0-formgrid">
@@ -158,7 +159,7 @@ function ModeRequest({ owner, live, capability, label, action, active }: {
     </div>
     <div className="p0-actions">
       <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
-        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand(capability, mode).params, configVersion: version ?? undefined })}>
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand(capability, mode, owner.capabilityEpoch).params, configVersion: version ?? undefined })}>
         {action}
       </button>
     </div>
@@ -175,15 +176,16 @@ function LiveRequest({ owner, live }: { owner: LiquidatorView; live: boolean }) 
   const { busy, receipt } = useAnalyticsControl();
   const requested = owner.capabilities.find((c) => c.name === "LIVE")?.requested ?? null;
   const version = owner.capabilityConfigVersion;
-  const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
-    : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";
   const next = requested === "LIVE" ? "OFF" : "LIVE";
+  const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
+    : version == null ? "Capability configuration version unknown (no capability control in this runtime)"
+      : next === "LIVE" && owner.capabilityEpoch == null ? "Owner epoch unknown (a LIVE request states it)" : "";
   const d = owner.lastCapabilityDecision;
   return <>
     {d ? <DetailRow title={`Capability decision · #${d.seq}`} value={`${d.applied ? "APPLIED" : "REFUSED"} · ${d.request} · ${d.detail}`}/> : null}
     <div className="p0-actions">
       <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
-        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand("LIVE", next).params, configVersion: version ?? undefined })}>
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand("LIVE", next, owner.capabilityEpoch).params, configVersion: version ?? undefined })}>
         {next === "LIVE" ? "Request LIVE (stays BLOCKED until FE-06)" : "Withdraw LIVE request"}
       </button>
     </div>

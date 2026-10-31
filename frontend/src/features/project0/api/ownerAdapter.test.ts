@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import liquidatorHex from "../../../../../protocol/golden/project0/liquidator_state.hex?raw";
+import liquidatorGrantHex from "../../../../../protocol/golden/project0/liquidator_state_fe06_grant.hex?raw";
 import walletsHex from "../../../../../protocol/golden/project0/wallets_state.hex?raw";
 import walletsNonLandingHex from "../../../../../protocol/golden/project0/wallets_state_non_landing.hex?raw";
 import financeHex from "../../../../../protocol/golden/project0/finance_summary.hex?raw";
@@ -169,6 +170,16 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
       "Signers:met", "FE-06 grant:missing", "FE-04 approval:missing", "Program pin:missing", "Safety:met",
     ]);
     expect(liveGates({ ...liquidator, capabilities: [], fe06: null }).find((g) => g.gate === "Signers")).toEqual({ gate: "Signers", met: false, detail: "no configured signer" });
+  });
+
+  it("P8-CTRL.3/.5: a grant in force reaches the view with its limits and usage; an unknown count stays null", () => {
+    const granted = toLiquidatorView(decodeLiquidatorState(bytes(liquidatorGrantHex)));
+    expect(granted.fe06).toEqual({
+      grantDigest: "e".repeat(64), scopeMode: "EXIT_ONLY", validFromUnixS: 1_760_000_000n, validUntilUnixS: 1_760_003_600n, inForce: true,
+      campaignId: "first-profit", maxAttemptsPerUtcDay: 1n, maxAttemptsCampaign: 2n, maxAttemptsGrant: 3n,
+      attemptsToday: 1n, attemptsCampaign: 2n, attemptsGrant: null, blockReason: "", previews: [],
+    });
+    expect(liveGates(granted).find((g) => g.gate === "FE-06 grant")).toEqual({ gate: "FE-06 grant", met: true, detail: "e".repeat(64) });
   });
 
   it("P8-CTRL.8: an economic request is never sent from a state that is not current or without its version and epoch", () => {

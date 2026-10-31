@@ -314,7 +314,7 @@ impl ShadowOwner {
     /// against them (from the FE-04 ledger view; unknown while it is unreadable), and the scopes
     /// previewed for this owner epoch.
     fn fe06_status(&self) -> crate::status_tap::OwnerFe06 {
-        use crate::orchestration::{capability_control as cap, fe06};
+        use crate::orchestration::capability_control as cap;
         let c = &self.sources.capabilities;
         let mut s = crate::status_tap::OwnerFe06::default();
         match &c.fe06 {
@@ -340,27 +340,13 @@ impl ShadowOwner {
                     }
                 }
                 if !s.in_force {
-                    s.block_reason = "FE06_GRANT_NOT_IN_FORCE".into();
+                    s.block_reason = cap::grant_not_in_force(grant.digest());
                 }
             }
             None => s.block_reason = cap::FE06_AUTH_UNDECIDED.into(),
         }
-        // The scopes previewed for this epoch: the project of the capability control's store.
-        if let (Some(dir), Some(epoch)) = (&c.dir, c.epoch) {
-            if let Some(project) = dir.parent().and_then(std::path::Path::parent) {
-                for (digest, scope) in fe06::previews(project).unwrap_or_default() {
-                    if scope.owner_epoch == epoch {
-                        s.previews.push(crate::status_tap::OwnerFe06Preview {
-                            terminal: fe06::terminal(&scope).unwrap_or_default(),
-                            digest,
-                            scope_mode: scope.mode.code(),
-                            owner_epoch: scope.owner_epoch,
-                            valid_until_unix_s: scope.expires_unix_s,
-                        });
-                    }
-                }
-            }
-        }
+        // The scopes previewed for this epoch, as the lifecycle's refresh cached them.
+        s.previews = c.previews.current();
         s
     }
 

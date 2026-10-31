@@ -7222,3 +7222,151 @@ fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlem
     assert!(fe04_job(&f).is_some(), "the settlement reads it");
     cleanup(f);
 }
+
+/// P8-CTRL.3/.5 (review M3): the status names the grant in force — its scope's mode, validity,
+/// campaign and limits and the attempts booked against them (today, the campaign, the grant; one
+/// of an earlier day or another campaign or grant counts only where it belongs; an unreadable
+/// journal leaves them unknown, never 0) — and only this epoch's previews, read at the refresh
+/// cadence (a new store entry appears at the next refresh, not before); a grant outside its
+/// validity is not in force, with LIVE's reason.
+#[test]
+fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
+    use crate::execution::one_shot::Fe06Attempt;
+    use crate::orchestration::{capability_control as cap, fe06};
+    let mut f = fixture_with("p8ctrl04_status", None);
+    let signer = f.owner.liquidator;
+    let now = super::accounts::wall_unix_s().unwrap();
+    let scope = |epoch: u64, campaign: &str, from: u64, until: u64| {
+        fe06::parse(
+            fe06::tests::text(
+                &signer,
+                &[
+                    ("owner_epoch", &epoch.to_string()),
+                    ("campaign_id", campaign),
+                    ("not_before_unix_s", &from.to_string()),
+                    ("expires_unix_s", &until.to_string()),
+                    ("max_attempts_per_utc_day", "2"),
+                    ("max_attempts_campaign", "3"),
+                    ("max_attempts_grant", "4"),
+                ],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap()
+    };
+    let granted = scope(3, "first-profit", now - 60, now + 3_000);
+    let digest = fe06::digest(&granted).unwrap();
+    fe06::put_preview(&f.dir, &granted).unwrap();
+    fe06::put_preview(&f.dir, &scope(2, "first-profit", now - 60, now + 3_000)).unwrap();
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(cap::request_dir(&f.dir)), Some(0), Some(3));
+        c.fe06 = Some(cap::Fe06Authorization::offline_test_of(granted.clone()));
+    }
+    let today = now / 86_400;
+    let booking = |grant: &str, campaign: &str, utc_day| Fe06Attempt {
+        grant: grant.into(),
+        campaign: campaign.into(),
+        utc_day,
+        owner_epoch: Some(3),
+    };
+    f.owner.ledger_view = Some(Ok(super::status_view::LedgerView {
+        totals: Default::default(),
+        verdict: crate::execution::accounting::Verdict::NoTrade,
+        bookings: vec![
+            booking(&digest, "first-profit", today),
+            booking(&digest, "first-profit", today - 1),
+            booking("another-grant", "first-profit", today),
+            booking("another-grant", "another-campaign", today),
+        ],
+    }));
+    f.owner
+        .sources
+        .capabilities
+        .refresh_previews(Duration::ZERO);
+    let s = f.owner.owner_snapshot(1).fe06;
+    assert_eq!(
+        (
+            s.grant_digest.as_deref(),
+            s.scope_mode,
+            s.valid_from_unix_s,
+            s.valid_until_unix_s,
+            s.in_force,
+            s.campaign_id.as_str(),
+            s.block_reason.as_str()
+        ),
+        (
+            Some(digest.as_str()),
+            "ALL",
+            Some(now - 60),
+            Some(now + 3_000),
+            true,
+            "first-profit",
+            ""
+        )
+    );
+    assert_eq!(
+        (
+            s.max_attempts_per_utc_day,
+            s.max_attempts_campaign,
+            s.max_attempts_grant
+        ),
+        (2, 3, 4)
+    );
+    assert_eq!(
+        (s.attempts_today, s.attempts_campaign, s.attempts_grant),
+        (Some(3), Some(3), Some(2))
+    );
+    // Only this epoch's preview (the granted scope), with the owner's terminal text.
+    assert_eq!(
+        s.previews
+            .iter()
+            .map(|p| (p.digest.as_str(), p.owner_epoch))
+            .collect::<Vec<_>>(),
+        [(digest.as_str(), 3)]
+    );
+    assert!(s.previews[0]
+        .terminal
+        .starts_with(&format!("PROJECT 0 FE-06 SCOPE digest={digest}")));
+    // A scope previewed after the refresh appears only at the next one.
+    let later = scope(3, "second", now - 60, now + 3_000);
+    let later_digest = fe06::put_preview(&f.dir, &later).unwrap();
+    f.owner
+        .sources
+        .capabilities
+        .refresh_previews(Duration::from_secs(3_600));
+    assert_eq!(f.owner.owner_snapshot(2).fe06.previews.len(), 1);
+    f.owner.sources.capabilities.previews = Default::default();
+    f.owner
+        .sources
+        .capabilities
+        .refresh_previews(Duration::from_secs(3_600));
+    let shown: Vec<_> = f
+        .owner
+        .owner_snapshot(3)
+        .fe06
+        .previews
+        .into_iter()
+        .map(|p| p.digest)
+        .collect();
+    assert!(
+        shown.contains(&later_digest) && shown.len() == 2,
+        "{shown:?}"
+    );
+    // An unreadable journal: the usage is unknown, never 0.
+    f.owner.ledger_view = Some(Err("JOURNAL_CORRUPT".into()));
+    let s = f.owner.owner_snapshot(4).fe06;
+    assert_eq!(
+        (s.attempts_today, s.attempts_campaign, s.attempts_grant),
+        (None, None, None)
+    );
+    // A grant outside its validity is not in force, with LIVE's reason.
+    let expired = scope(3, "first-profit", now - 3_000, now - 60);
+    let expired_digest = fe06::digest(&expired).unwrap();
+    f.owner.sources.capabilities.fe06 = Some(cap::Fe06Authorization::offline_test_of(expired));
+    let s = f.owner.owner_snapshot(5).fe06;
+    assert!(!s.in_force);
+    assert_eq!(s.block_reason, cap::grant_not_in_force(&expired_digest));
+    cleanup(f);
+}

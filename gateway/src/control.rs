@@ -573,8 +573,10 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         // the view showed: LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE and THRESHOLD_TRIGGER
         // OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF → ACTIVE). P8-CTRL.1/.3:
         // ECON_* and WALLET:<pubkey> DISABLED|ENABLED, FE06_GRANT/FE06_REVOKE a scope digest —
-        // these state the owner epoch the view showed (P8-CTRL.6); every change carries the
-        // command's request id (the same action again is the same request).
+        // these state the owner epoch the view showed (P8-CTRL.6), and so does every other
+        // request but a move to OFF (review M2: a view from before an owner restart never
+        // re-arms LIVE or a mode in the new epoch); every change carries the command's request
+        // id (the same action again is the same request).
         CAPABILITY_SET if req.resource_id.is_empty() => {
             let c = CapabilityControlCommand::decode(req.params.as_ref()).ok()?;
             let switch = ["DISABLED", "ENABLED"].contains(&c.requested.as_str());
@@ -593,7 +595,8 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                     true,
                 ),
             };
-            if !valid || (economic && c.owner_epoch == 0) || !valid_job_id(&req.request_id) {
+            let needs_epoch = economic || c.requested != "OFF";
+            if !valid || (needs_epoch && c.owner_epoch == 0) || !valid_job_id(&req.request_id) {
                 return None;
             }
             let mut args: Vec<String> = ["p0", "capability", "set", &c.capability, &c.requested]
@@ -1285,7 +1288,7 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         if req.action == CAPABILITY_SET {
-                            "Capability request invalid (LIVE OFF|LIVE, HOLD_B or JITO_BUNDLE OFF|OBSERVE|ACTIVE, and the configuration version)"
+                            "Capability request invalid (LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE or THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE, ECON_* or WALLET:<pubkey> ENABLED|DISABLED, FE06_GRANT|FE06_REVOKE <digest>; the configuration version, and the owner epoch for all but a move to OFF)"
                         } else if BOOT_ACTIONS.contains(&req.action.as_str()) || req.action == START
                         {
                             "Boot request invalid (mode econ4h|shadow|market, flow id, 16-character token, genesis pin, provider evidence id, capture source, duration, chain verify off)"
@@ -3717,7 +3720,8 @@ mod tests {
             None
         );
         // DEC-13/DEC-04/DEC-11: a capability request carries its version; only LIVE OFF|LIVE
-        // and HOLD_B/JITO_BUNDLE OFF|OBSERVE|ACTIVE pass.
+        // and HOLD_B/JITO_BUNDLE/THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE pass (P8-CTRL: and the
+        // economic switches, the signers and FE-06).
         let capability = |capability: &str, requested: &str| {
             crate::proto::project0::v1::CapabilityControlCommand {
                 capability: capability.into(),
@@ -3737,7 +3741,7 @@ mod tests {
         let live = job_args(&req(
             CAPABILITY_SET,
             "",
-            capability("LIVE", "LIVE"),
+            in_epoch("LIVE", "LIVE", 3),
             Some(ConfigVersion(2)),
         ))
         .unwrap();
@@ -3751,10 +3755,45 @@ mod tests {
                 "LIVE",
                 "--expect-version",
                 "2",
+                "--expect-epoch",
+                "3",
                 "--request-id",
                 "12345678-1234-1234-1234-123456789abc"
             ]
         );
+        // Review M2: every request but a move to OFF states the owner epoch — a view from
+        // before an owner restart never re-arms LIVE or a mode in the new epoch.
+        for (c, v) in [
+            ("LIVE", "LIVE"),
+            ("HOLD_B", "ACTIVE"),
+            ("HOLD_B", "OBSERVE"),
+            ("JITO_BUNDLE", "OBSERVE"),
+            ("THRESHOLD_TRIGGER", "ACTIVE"),
+        ] {
+            assert_eq!(
+                job_args(&req(
+                    CAPABILITY_SET,
+                    "",
+                    capability(c, v),
+                    Some(ConfigVersion(2))
+                )),
+                None,
+                "{c} {v} without its epoch"
+            );
+        }
+        for c in ["LIVE", "HOLD_B", "JITO_BUNDLE", "THRESHOLD_TRIGGER"] {
+            assert_eq!(
+                job_args(&req(
+                    CAPABILITY_SET,
+                    "",
+                    capability(c, "OFF"),
+                    Some(ConfigVersion(2))
+                ))
+                .unwrap()[3..7],
+                [c, "OFF", "--expect-version", "2"],
+                "{c} OFF needs no epoch"
+            );
+        }
         // P8-CTRL.1/.3/.6: the economic, wallet and grant changes state their epoch.
         let digest = "ab".repeat(32);
         for (c, v) in [
@@ -3818,7 +3857,7 @@ mod tests {
             job_args(&req(
                 CAPABILITY_SET,
                 "",
-                capability("HOLD_B", "ACTIVE"),
+                in_epoch("HOLD_B", "ACTIVE", 3),
                 Some(ConfigVersion(3)),
             ))
             .unwrap()[3..5],
@@ -3828,7 +3867,7 @@ mod tests {
             job_args(&req(
                 CAPABILITY_SET,
                 "",
-                capability("JITO_BUNDLE", "OBSERVE"),
+                in_epoch("JITO_BUNDLE", "OBSERVE", 3),
                 Some(ConfigVersion(4)),
             ))
             .unwrap()[3..7],
@@ -3839,7 +3878,7 @@ mod tests {
             job_args(&req(
                 CAPABILITY_SET,
                 "",
-                capability("THRESHOLD_TRIGGER", "ACTIVE"),
+                in_epoch("THRESHOLD_TRIGGER", "ACTIVE", 3),
                 Some(ConfigVersion(5)),
             ))
             .unwrap()[3..7],

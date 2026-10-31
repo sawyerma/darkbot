@@ -426,9 +426,10 @@ _gateway_down() {
 # ---------------------------------------------------------------- project 0 controller
 # B03/U-9, S1-02, DEC-13, DEC-07: the GUI's analytics jobs, source modes, capability requests and
 # boot flow run the deployed p0ctl (the same `p0ctl job|source|capability|boot` a terminal runs)
-# on the app's data home; a started job's or boot step's worker outlives this call.
+# on the app's data home; a started job's or boot step's worker outlives this call. P8-CTRL.8:
+# `p0 live` previews, grants, revokes and counts FE-06 scopes on that same data home.
 cmd_p0() {
-  case "${1:-}" in job|source|capability|boot|horizon|autostart) ;; *) die "p0 job start|cancel|status … | p0 source set UNIT MODE [--expect-version N] | p0 source status | p0 capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0 capability status | p0 boot offline|network|start|evidence import|cancel|status … | p0 horizon qualify|status … | p0 autostart preview|grant|revoke|status|start …" ;; esac
+  case "${1:-}" in job|source|capability|boot|horizon|autostart|live) ;; *) die "p0 job start|cancel|status … | p0 source set UNIT MODE [--expect-version N] | p0 source status | p0 capability set LIVE OFF|LIVE | HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE|WALLET:<pubkey> ENABLED|DISABLED | FE06_GRANT|FE06_REVOKE <digest> [--expect-version N --expect-epoch E --request-id ID] | p0 capability status | p0 live scope|grant|revoke|status|attempts … | p0 boot offline|network|start|evidence import|cancel|status … | p0 horizon qualify|status … | p0 autostart preview|grant|revoke|status|start …" ;; esac
   [ -x "$P0CTL_BIN" ] || die "p0ctl nicht deployed: darkbotctl build && darkbotctl deploy"
   if [ "$1" = boot ] || [ "$1" = horizon ] || [ "$1" = autostart ]; then
     # DEC-07: a raw-capture flow audits exactly the environment the capture runs with (its

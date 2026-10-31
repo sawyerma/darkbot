@@ -99,6 +99,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::str::FromStr;
 use std::time::Duration;
 
 fn project_dir(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
@@ -2237,17 +2238,27 @@ fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     d.capability, d.requested, d.effective, d.seq, d.request_id
                 );
             }
-            let in_force = decided
-                .iter()
-                .max_by_key(|d| d.seq)
-                .map(|d| d.effective.as_str());
+            // Review L4: the last decided grant is in force only within its scope's validity.
+            let last = decided.iter().max_by_key(|d| d.seq);
+            let state = match last {
+                Some(d) if d.effective == "IN_FORCE" => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|t| t.as_secs())
+                        .ok();
+                    match (fe06::preview(project, &d.requested), now) {
+                        (Ok(s), Some(now))
+                            if (s.not_before_unix_s..s.expires_unix_s).contains(&now) =>
+                        {
+                            format!("yes ({})", d.requested)
+                        }
+                        _ => capability_control::grant_not_in_force(&d.requested),
+                    }
+                }
+                _ => "none".to_string(),
+            };
             println!(
-                "grant in force: {} · {}",
-                if in_force == Some("IN_FORCE") {
-                    "yes"
-                } else {
-                    "none"
-                },
+                "grant in force: {state} · {}",
                 capability_control::FE06_AUTH_UNDECIDED
             );
             Ok(true)
@@ -2262,12 +2273,32 @@ fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 /// every campaign and every grant; with `--digest` that previewed scope's three quotas against its
 /// limits (the same count the admission refuses a new attempt on). Read only.
 fn live_attempts(project: &Path, args: &[String]) -> Result<bool, String> {
-    use darkbot_runner::execution::one_shot::{archive, Fe06Quota};
+    use darkbot_runner::execution::one_shot::{archive, fe06_attempts_report};
     use std::collections::BTreeMap;
-    let dir = value(args, "--journal-dir").ok_or(LIVE_USAGE)?;
-    let wallet = value(args, "--wallet").ok_or(LIVE_USAGE)?;
-    let scope = value(args, "--digest")
-        .map(|d| darkbot_runner::orchestration::fe06::preview(project, &d).map(|s| (d, s)))
+    // Strictly typed (review L2): each flag once with its value, nothing else; the wallet a
+    // canonical public key (a mistyped one is no wallet without bookings).
+    let mut flags: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let known = ["--journal-dir", "--wallet", "--digest"].contains(&flag.as_str());
+        let value = rest.next().ok_or(LIVE_USAGE)?;
+        if !known || flags.insert(flag, value).is_some() {
+            return Err(LIVE_USAGE.into());
+        }
+    }
+    let dir = flags.get("--journal-dir").ok_or(LIVE_USAGE)?.to_string();
+    let wallet = flags.get("--wallet").ok_or(LIVE_USAGE)?.to_string();
+    if solana_sdk::pubkey::Pubkey::from_str(&wallet)
+        .map(|k| k.to_string() != wallet)
+        .unwrap_or(true)
+    {
+        return Err(format!("FE06_WALLET_INVALID: {wallet} is no public key"));
+    }
+    let scope = flags
+        .get("--digest")
+        .map(|d| {
+            darkbot_runner::orchestration::fe06::preview(project, d).map(|s| (d.to_string(), s))
+        })
         .transpose()?;
     // A mistyped directory is no journal without attempts.
     if !Path::new(&dir).is_dir() {
@@ -2279,74 +2310,11 @@ fn live_attempts(project: &Path, args: &[String]) -> Result<bool, String> {
         .map_err(|_| "FE06_CLOCK_UNREADABLE")?
         .as_secs()
         / 86_400;
-    let booked: Vec<_> = records.iter().filter_map(|r| r.fe06.as_ref()).collect();
-    println!(
-        "FE-06 attempts of wallet {wallet}: {} booked, {} without a grant (none, or before P8-CTRL)",
-        booked.len(),
-        records.len() - booked.len()
-    );
-    for r in &records {
-        if let Some(b) = &r.fe06 {
-            println!(
-                "  approval={} state={}{} grant={} campaign={} utc_day={} owner_epoch={}",
-                r.approval_id,
-                r.state.name(),
-                if r.archived { " archived" } else { "" },
-                b.grant,
-                b.campaign,
-                b.utc_day,
-                b.owner_epoch
-                    .map_or_else(|| "unknown".to_string(), |e| e.to_string())
-            );
-        }
-    }
-    let mut campaigns = BTreeMap::new();
-    let mut grants = BTreeMap::new();
-    for b in &booked {
-        campaigns.insert(b.campaign.as_str(), ());
-        grants.insert(b.grant.as_str(), ());
-    }
-    let mut quotas = vec![Fe06Quota::UtcDay(today)];
-    quotas.extend(campaigns.keys().map(|c| Fe06Quota::Campaign(c)));
-    quotas.extend(grants.keys().map(|g| Fe06Quota::Grant(g)));
-    for q in &quotas {
-        println!(
-            "  {} {}: {} used",
-            q.name(),
-            quota_key(q),
-            q.used(booked.iter().copied())
-        );
-    }
-    if let Some((digest, s)) = &scope {
-        println!("scope {digest} ({}):", s.mode.code());
-        for (q, limit) in [
-            (Fe06Quota::UtcDay(today), s.max_attempts_per_utc_day),
-            (Fe06Quota::Campaign(&s.campaign_id), s.max_attempts_campaign),
-            (Fe06Quota::Grant(digest), s.max_attempts_grant),
-        ] {
-            let used = q.used(booked.iter().copied());
-            println!(
-                "  {} {}: {used} of {limit}{}",
-                q.name(),
-                quota_key(&q),
-                if used >= limit {
-                    " · EXHAUSTED (no new attempt)"
-                } else {
-                    ""
-                }
-            );
-        }
+    let shown = scope.as_ref().map(|(d, s)| (d.as_str(), s));
+    for line in fe06_attempts_report(&records, &wallet, today, shown) {
+        println!("{line}");
     }
     Ok(true)
-}
-
-fn quota_key(q: &darkbot_runner::execution::one_shot::Fe06Quota) -> String {
-    use darkbot_runner::execution::one_shot::Fe06Quota;
-    match q {
-        Fe06Quota::UtcDay(d) => format!("day {d} (today)"),
-        Fe06Quota::Campaign(c) => (*c).to_string(),
-        Fe06Quota::Grant(g) => (*g).to_string(),
-    }
 }
 
 fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {

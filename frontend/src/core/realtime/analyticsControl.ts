@@ -188,10 +188,13 @@ export function sourceCommand(unit: string, mode: "off" | "observe" | "active"):
  * (LIVE stays BLOCKED until a separate FE-06 authorization, HOLD_B ACTIVE needs the user's N and
  * the evidence, JITO_BUNDLE ACTIVE a qualified bundle simulator, THRESHOLD_TRIGGER ACTIVE comes
  * only from OBSERVE with N comparable ticks without a miss). */
-export function capabilityCommand(capability: "LIVE", requested: "OFF" | "LIVE"): { params: Uint8Array };
-export function capabilityCommand(capability: "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER", requested: "OFF" | "OBSERVE" | "ACTIVE"): { params: Uint8Array };
-export function capabilityCommand(capability: string, requested: string): { params: Uint8Array } {
-  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested })) };
+/** P8-CTRL.6 (review M2): stated with the owner epoch this view showed (0: unknown) — the gateway
+ * takes every request but a move to OFF only with it, so a view from before an owner restart
+ * never re-arms LIVE or a mode. */
+export function capabilityCommand(capability: "LIVE", requested: "OFF" | "LIVE", ownerEpoch: bigint | null): { params: Uint8Array };
+export function capabilityCommand(capability: "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER", requested: "OFF" | "OBSERVE" | "ACTIVE", ownerEpoch: bigint | null): { params: Uint8Array };
+export function capabilityCommand(capability: string, requested: string, ownerEpoch: bigint | null): { params: Uint8Array } {
+  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested, ownerEpoch: ownerEpoch ?? 0n })) };
 }
 
 /** P8-CTRL.1: the economic switches, in the order the owner names a missing one. */

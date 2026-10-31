@@ -281,6 +281,80 @@ impl Fe06Quota<'_> {
     }
 }
 
+/// P8-CTRL.5/.8 (`p0ctl live attempts`): a wallet's attempts as they are booked against FE-06
+/// grants — each booking, the quotas of the UTC day `today`, of every campaign and every grant,
+/// and with `scope` that scope's three quotas against its limits (the count the admission refuses
+/// a new attempt on: `Fe06Quota`).
+pub fn fe06_attempts_report(
+    records: &[crate::execution::accounting::AttemptRecord],
+    wallet: &str,
+    today: u64,
+    scope: Option<(&str, &crate::orchestration::fe06::Scope)>,
+) -> Vec<String> {
+    let booked: Vec<&Fe06Attempt> = records.iter().filter_map(|r| r.fe06.as_ref()).collect();
+    let key = |q: &Fe06Quota| match q {
+        Fe06Quota::UtcDay(d) => format!("day {d} (today)"),
+        Fe06Quota::Campaign(c) => (*c).to_string(),
+        Fe06Quota::Grant(g) => (*g).to_string(),
+    };
+    let mut out = vec![format!(
+        "FE-06 attempts of wallet {wallet}: {} booked, {} without a grant (none, or before P8-CTRL)",
+        booked.len(),
+        records.len() - booked.len()
+    )];
+    for r in records {
+        if let Some(b) = &r.fe06 {
+            out.push(format!(
+                "  approval={} state={}{} grant={} campaign={} utc_day={} owner_epoch={}",
+                r.approval_id,
+                r.state.name(),
+                if r.archived { " archived" } else { "" },
+                b.grant,
+                b.campaign,
+                b.utc_day,
+                b.owner_epoch
+                    .map_or_else(|| "unknown".to_string(), |e| e.to_string())
+            ));
+        }
+    }
+    let campaigns: std::collections::BTreeSet<&str> =
+        booked.iter().map(|b| b.campaign.as_str()).collect();
+    let grants: std::collections::BTreeSet<&str> =
+        booked.iter().map(|b| b.grant.as_str()).collect();
+    let mut quotas = vec![Fe06Quota::UtcDay(today)];
+    quotas.extend(campaigns.into_iter().map(Fe06Quota::Campaign));
+    quotas.extend(grants.into_iter().map(Fe06Quota::Grant));
+    for q in &quotas {
+        out.push(format!(
+            "  {} {}: {} used",
+            q.name(),
+            key(q),
+            q.used(booked.iter().copied())
+        ));
+    }
+    if let Some((digest, s)) = scope {
+        out.push(format!("scope {digest} ({}):", s.mode.code()));
+        for (q, limit) in [
+            (Fe06Quota::UtcDay(today), s.max_attempts_per_utc_day),
+            (Fe06Quota::Campaign(&s.campaign_id), s.max_attempts_campaign),
+            (Fe06Quota::Grant(digest), s.max_attempts_grant),
+        ] {
+            let used = q.used(booked.iter().copied());
+            out.push(format!(
+                "  {} {}: {used} of {limit}{}",
+                q.name(),
+                key(&q),
+                if used >= limit {
+                    " · EXHAUSTED (no new attempt)"
+                } else {
+                    ""
+                }
+            ));
+        }
+    }
+    out
+}
+
 /// Schema-7 layout of `Saved` (the DEC-04 holds, before the P8-CTRL.5 grant booking).
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]
@@ -1821,6 +1895,79 @@ mod tests {
             ),
             "FE04_TRANSITION schema-8 layout changed"
         );
+    }
+
+    /// P8-CTRL.5/.8 (review M3): `live attempts` counts each booking where it belongs — the
+    /// UTC day, its campaign, its grant — names an exhausted quota, and counts an attempt
+    /// without a grant apart.
+    #[test]
+    fn p8ctrl04_the_attempts_report_counts_each_booking_where_it_belongs() {
+        use crate::execution::accounting::{AttemptRecord, StepState};
+        use crate::orchestration::fe06;
+        let record = |id: &str, fe06: Option<Fe06Attempt>| AttemptRecord {
+            approval_id: id.into(),
+            target: "t".into(),
+            funding_class: "ZERO_PREFUND_SAME_TX".into(),
+            archived: id != "a4",
+            state: StepState::Settled,
+            settlement: None,
+            exits: vec![],
+            open_positions: Default::default(),
+            hold: None,
+            fe06,
+        };
+        let booking = |grant: &str, campaign: &str, utc_day| {
+            Some(Fe06Attempt {
+                grant: grant.into(),
+                campaign: campaign.into(),
+                utc_day,
+                owner_epoch: Some(3),
+            })
+        };
+        let scope = fe06::parse(
+            fe06::tests::text(
+                &solana_sdk::pubkey::Pubkey::new_unique(),
+                &[
+                    ("campaign_id", "k1"),
+                    ("max_attempts_per_utc_day", "2"),
+                    ("max_attempts_campaign", "5"),
+                    ("max_attempts_grant", "2"),
+                ],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        let g = "g".repeat(64);
+        let records = [
+            record("a1", booking(&g, "k1", 10)),
+            record("a2", booking(&g, "k1", 9)),
+            record("a3", booking("h", "k2", 10)),
+            record("a4", None),
+        ];
+        let lines = fe06_attempts_report(&records, "W", 10, Some((&g, &scope)));
+        assert_eq!(
+            lines[0],
+            "FE-06 attempts of wallet W: 3 booked, 1 without a grant (none, or before P8-CTRL)"
+        );
+        let expected: Vec<String> = vec![
+            format!("  approval=a1 state=SETTLED archived grant={g} campaign=k1 utc_day=10 owner_epoch=3"),
+            "  UTC_DAY day 10 (today): 2 used".into(),
+            "  CAMPAIGN k1: 2 used".into(),
+            "  CAMPAIGN k2: 1 used".into(),
+            format!("  GRANT {g}: 2 used"),
+            "  GRANT h: 1 used".into(),
+            "  UTC_DAY day 10 (today): 2 of 2 · EXHAUSTED (no new attempt)".into(),
+            "  CAMPAIGN k1: 2 of 5".into(),
+            format!("  GRANT {g}: 2 of 2 · EXHAUSTED (no new attempt)"),
+        ];
+        for e in &expected {
+            assert!(lines.contains(e), "{e}\n{lines:#?}");
+        }
+        // The next day's quota is new; the campaign's and the grant's are not.
+        let tomorrow = fe06_attempts_report(&records, "W", 11, Some((&g, &scope)));
+        assert!(tomorrow.contains(&"  UTC_DAY day 11 (today): 0 of 2".to_string()));
+        assert!(tomorrow.contains(&format!("  GRANT {g}: 2 of 2 · EXHAUSTED (no new attempt)")));
     }
 
     /// P8-CTRL.5: the attempts booked against FE-06 grants in the wallet's journals bound the

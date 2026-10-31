@@ -2192,6 +2192,29 @@ mod contract_tests {
             &liquidator_state(owner).encode_to_vec(),
         );
         check_golden("wallets_state.hex", &wallets_state(owner).encode_to_vec());
+        // P8-CTRL.3/.5 (review M3): an EXIT_ONLY grant in force with its limits and the attempts
+        // booked against them; the grant's count unknown (unset, never 0).
+        let mut granted = owner.clone();
+        granted.fe06 = darkbot_runner::status_tap::OwnerFe06 {
+            grant_digest: Some("e".repeat(64)),
+            scope_mode: "EXIT_ONLY",
+            valid_from_unix_s: Some(1_760_000_000),
+            valid_until_unix_s: Some(1_760_003_600),
+            in_force: true,
+            campaign_id: "first-profit".into(),
+            max_attempts_per_utc_day: 1,
+            max_attempts_campaign: 2,
+            max_attempts_grant: 3,
+            attempts_today: Some(1),
+            attempts_campaign: Some(2),
+            attempts_grant: None,
+            block_reason: "".into(),
+            previews: vec![],
+        };
+        check_golden(
+            "liquidator_state_fe06_grant.hex",
+            &liquidator_state(&granted).encode_to_vec(),
+        );
         // DEC-03: an UNKNOWN attempt with an open non-landing contradiction (N-2).
         let mut held = owner.clone();
         held.wallets.held_attempt = "UNKNOWN";

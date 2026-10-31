@@ -55,6 +55,13 @@ impl ShadowOwner {
             }
         }
         self.refresh_hold_gate(false);
+        // P8-CTRL.3 (review M1): the FE-06 previews at the journal refresh cadence, for the tap.
+        #[cfg(feature = "crate_health")]
+        if crate::status_tap::installed().is_some() {
+            self.sources
+                .capabilities
+                .refresh_previews(self.fe04_refresh);
+        }
         #[cfg(feature = "crate_health")]
         self.rebalance_observe();
         #[cfg(feature = "crate_health")]

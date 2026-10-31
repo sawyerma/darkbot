@@ -103,9 +103,72 @@ pub(super) struct OwnerCapabilities {
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
     pub(super) applied: u64,
     pub(super) refused: u64,
+    /// P8-CTRL.3 (review M1): the scopes previewed for this epoch, read at the journal refresh
+    /// cadence — never by the status projection.
+    pub(super) previews: Fe06Previews,
+}
+
+/// P8-CTRL.3: the cache of the FE-06 preview store. Each entry is decoded once (a store entry is
+/// content-addressed: its bytes never change); one of another epoch is remembered as such, an
+/// unreadable one is read again at the next refresh.
+#[derive(Debug, Default)]
+pub(super) struct Fe06Previews {
+    seen: std::collections::BTreeMap<String, Option<crate::status_tap::OwnerFe06Preview>>,
+    refreshed: Option<std::time::Instant>,
+}
+
+impl Fe06Previews {
+    /// Reads the store entries not seen yet (`project`: the capability control's project), at
+    /// most once per `every`.
+    pub(super) fn refresh(
+        &mut self,
+        project: &std::path::Path,
+        epoch: u64,
+        every: std::time::Duration,
+    ) {
+        use crate::orchestration::fe06;
+        if self.refreshed.is_some_and(|t| t.elapsed() < every) {
+            return;
+        }
+        self.refreshed = Some(std::time::Instant::now());
+        let Ok(digests) = fe06::preview_digests(project) else {
+            return;
+        };
+        for digest in digests {
+            if self.seen.contains_key(&digest) {
+                continue;
+            }
+            if let Ok(scope) = fe06::preview(project, &digest) {
+                let shown =
+                    (scope.owner_epoch == epoch).then(|| crate::status_tap::OwnerFe06Preview {
+                        terminal: fe06::terminal(&scope).unwrap_or_default(),
+                        digest: digest.clone(),
+                        scope_mode: scope.mode.code(),
+                        owner_epoch: scope.owner_epoch,
+                        valid_until_unix_s: scope.expires_unix_s,
+                    });
+                self.seen.insert(digest, shown);
+            }
+        }
+    }
+
+    /// The previews of this epoch, in digest order.
+    pub(super) fn current(&self) -> Vec<crate::status_tap::OwnerFe06Preview> {
+        self.seen.values().flatten().cloned().collect()
+    }
 }
 
 impl OwnerCapabilities {
+    /// P8-CTRL.3: refreshes the preview cache at most once per `every` (no capability control:
+    /// nothing to read).
+    pub(super) fn refresh_previews(&mut self, every: std::time::Duration) {
+        if let (Some(dir), Some(epoch)) = (&self.dir, self.epoch) {
+            if let Some(project) = dir.parent().and_then(std::path::Path::parent) {
+                self.previews.refresh(project, epoch, every);
+            }
+        }
+    }
+
     /// P8-CTRL.2: what LIVE's effective value rests on now.
     pub(super) fn live_gates(&self) -> crate::orchestration::capability_control::LiveGates<'_> {
         crate::orchestration::capability_control::LiveGates {
@@ -170,6 +233,7 @@ impl Default for OwnerCapabilities {
             last_decision: None,
             applied: 0,
             refused: 0,
+            previews: Fe06Previews::default(),
         }
     }
 }
