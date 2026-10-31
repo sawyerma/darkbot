@@ -64,6 +64,7 @@ use std::time::{Duration, Instant};
 use crate::wss::endpoint::{Endpoint, connect_tls, tls_config};
 use crate::wss::{DisconnectReason, RateLimitSignal, RejectReason, UrlError, WssLimits};
 
+mod confirm;
 mod follow;
 pub(crate) mod http;
 pub(crate) mod jsonrpc;
@@ -132,6 +133,14 @@ pub struct FollowerLimits {
     /// The largest launch calldata the venue decoder accepts (the C1 scope
     /// of a canonical launch; larger is refused as oversized).
     pub max_launch_calldata: usize,
+    /// BSC3-036: consecutive failed steps on one endpoint after which the
+    /// next configured endpoint is asked ([`CanonicalEvent::Failover`]);
+    /// with one endpoint the follower only waits its backoff.
+    pub failover_after: u32,
+    /// BSC3-036: a reported head that has not advanced for this long is a
+    /// failed step ([`FollowerFault::Stalled`]): a provider that answers
+    /// but no longer follows the chain.
+    pub stall_after: Duration,
 }
 
 /// The verifier refuses this transaction for a property of its own (a type
@@ -180,6 +189,12 @@ impl FollowerLimits {
         if self.backoff_initial > self.backoff_max {
             return Err(LimitsError::BackoffInitialAboveMax);
         }
+        if self.failover_after == 0 {
+            return Err(LimitsError::Zero("failover_after"));
+        }
+        if self.stall_after <= self.poll {
+            return Err(LimitsError::StallNotAbovePoll);
+        }
         Ok(())
     }
 }
@@ -190,6 +205,8 @@ pub enum LimitsError {
     ZeroDuration(&'static str),
     Zero(&'static str),
     BackoffInitialAboveMax,
+    /// A stall must outlast one poll (the head is read once per poll).
+    StallNotAbovePoll,
 }
 
 /// A configuration the follower refuses before connecting.
@@ -203,6 +220,8 @@ pub enum FollowerConfigError {
     Limits(LimitsError),
     /// The rustls client configuration could not be built.
     Tls,
+    /// No endpoint was given.
+    NoEndpoint,
 }
 
 /// One transaction of a canonical block: the block object's hash, sender
@@ -321,6 +340,16 @@ pub enum CanonicalEvent {
     },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
+    /// BSC3-036: after `failed_steps` consecutive failed steps on endpoint
+    /// `from` (the index in the configured order, 0 the primary) the
+    /// follower asks endpoint `to` from now on. The kept window carries
+    /// over: the next endpoint's blocks are proven canonical against it
+    /// (parent hashes, reorg resolution) like any other.
+    Failover {
+        from: usize,
+        to: usize,
+        failed_steps: u32,
+    },
     /// Phase I: every event of the block just reported (its launches,
     /// reverted launches and Portal events) has been sent; a consumer that
     /// acts on the block's complete state acts now.
@@ -436,6 +465,9 @@ pub enum FollowerFault {
     /// During a reorg walk the parent link of the new chain broke at this
     /// height: the chain moved again; the step is retried.
     ChainMoved(u64),
+    /// BSC3-036: the reported head has not advanced beyond `head` for
+    /// `for_ms` (at least [`FollowerLimits::stall_after`]).
+    Stalled { head: u64, for_ms: u64 },
 }
 
 /// The request a fault belongs to.
@@ -451,6 +483,9 @@ pub enum Call {
         sender: [u8; 20],
         block_hash: [u8; 32],
     },
+    /// BSC3-056: `eth_getBlockByNumber(n, false)`, the header only (the
+    /// second source's confirmation).
+    Header(u64),
 }
 
 /// Why one request failed.
@@ -536,9 +571,11 @@ pub enum Field {
     TxBinding,
 }
 
-/// Follows the canonical chain at `endpoint` (`https://host[:port][/path]`;
-/// the caller supplies it, no endpoint is compiled in) until `stop` is
-/// set. Every event goes to `sink` on the calling thread.
+/// Follows the canonical chain at `endpoints` (each `https://host[:port][/path]`;
+/// the caller supplies them, no endpoint is compiled in; the first is the
+/// primary, the others are asked in order after
+/// [`FollowerLimits::failover_after`] failed steps, BSC3-036) until `stop`
+/// is set. Every event goes to `sink` on the calling thread.
 ///
 /// `resume` is the window of blocks (number, hash; ascending, consecutive)
 /// the caller had applied last, or empty to start at the head. Ending at
@@ -552,34 +589,106 @@ pub enum Field {
 ///
 /// Returns `Err` only for a configuration refused before any connect.
 pub fn run_follower(
-    endpoint: &str,
+    endpoints: &[String],
     limits: &FollowerLimits,
     resume: &[(u64, [u8; 32])],
     watch: &NonceWatch,
     stop: &AtomicBool,
     sink: &mut dyn FnMut(CanonicalEvent),
 ) -> Result<(), FollowerConfigError> {
+    let targets = endpoints
+        .iter()
+        .map(|e| https_endpoint(e))
+        .collect::<Result<Vec<_>, _>>()?;
+    if targets.is_empty() {
+        return Err(FollowerConfigError::NoEndpoint);
+    }
+    limits.validate().map_err(FollowerConfigError::Limits)?;
+    let tls = tls_config().map_err(|_| FollowerConfigError::Tls)?;
+    let bounds = connect_bounds(limits);
+    // One client per endpoint, all of one type (one closure expression).
+    let mut rpcs: Vec<_> = targets
+        .iter()
+        .map(|target| {
+            let (authority, path) = authority_and_path(target.url());
+            let (tls, bounds) = (&tls, &bounds);
+            let connect =
+                move |stop: &AtomicBool| connect_tls(target, tls, bounds, stop, Instant::now());
+            follow::Rpc::new(http::Client::new(connect, authority, path, limits))
+        })
+        .collect();
+    follow::run(&mut rpcs, limits, resume, watch, stop, sink);
+    Ok(())
+}
+
+/// BSC3-056: what the second source (headers only) reported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmEvent {
+    /// A header of the second source's chain, in height order (a lower or
+    /// equal height after a higher one: that source reorganized).
+    Header {
+        number: u64,
+        hash: [u8; 32],
+        parent_hash: [u8; 32],
+        /// The header's millisecond timestamp.
+        block_ms: u64,
+    },
+    /// A step failed; the confirmer waits its backoff.
+    Fault(FollowerFault),
+}
+
+/// BSC3-056: follows the headers of `endpoint`, an independent second
+/// source, until `stop` (`eth_blockNumber`, then every new height's header
+/// up to it, at most `max_catch_up` back), with the follower's bounds and
+/// backoff. Every header goes to `sink`; the caller compares them with the
+/// followed chain.
+pub fn run_confirmer(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    stop: &AtomicBool,
+    sink: &mut dyn FnMut(ConfirmEvent),
+) -> Result<(), FollowerConfigError> {
+    let target = https_endpoint(endpoint)?;
+    limits.validate().map_err(FollowerConfigError::Limits)?;
+    let tls = tls_config().map_err(|_| FollowerConfigError::Tls)?;
+    let bounds = connect_bounds(limits);
+    let (authority, path) = authority_and_path(target.url());
+    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
+    let mut rpc = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
+    confirm::run(&mut rpc, limits, stop, sink);
+    Ok(())
+}
+
+/// `endpoint` as the follower connects it: `https://` and `wss://` share
+/// the authority and path rules and the default port 443, the WSS
+/// endpoint checks and connects both.
+pub(crate) fn https_endpoint(endpoint: &str) -> Result<Endpoint, FollowerConfigError> {
     let rest = endpoint
         .strip_prefix("https://")
         .ok_or(FollowerConfigError::NotHttps)?;
-    // `https://` and `wss://` share the authority and path rules and the
-    // default port 443: the WSS endpoint checks and connects both.
-    let target = Endpoint::parse(&format!("wss://{rest}")).map_err(FollowerConfigError::Url)?;
-    limits.validate().map_err(FollowerConfigError::Limits)?;
-    let tls = tls_config().map_err(|_| FollowerConfigError::Tls)?;
+    Endpoint::parse(&format!("wss://{rest}")).map_err(FollowerConfigError::Url)
+}
+
+/// The host (authority) of an endpoint the follower accepts, never its
+/// path or query: what the status may show of it.
+pub(crate) fn endpoint_host(endpoint: &str) -> Result<String, FollowerConfigError> {
+    let target = https_endpoint(endpoint)?;
+    Ok(authority_and_path(target.url()).0)
+}
+
+/// An endpoint as one place: its host in lower case without the default
+/// port, and its path without a trailing slash (BSC3-036/056: what makes
+/// two endpoints the same, or a second source not independent).
+pub(crate) fn endpoint_key(endpoint: &str) -> Result<(String, String), FollowerConfigError> {
+    let target = https_endpoint(endpoint)?;
     let (authority, path) = authority_and_path(target.url());
-    let bounds = connect_bounds(limits);
-    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
-    let client = http::Client::new(connect, authority, path, limits);
-    follow::run(
-        &mut follow::Rpc::new(client),
-        limits,
-        resume,
-        watch,
-        stop,
-        sink,
-    );
-    Ok(())
+    let host = authority.to_ascii_lowercase();
+    let host = host
+        .strip_suffix(":443")
+        .map_or(host.clone(), str::to_string);
+    let path = path.trim_end_matches('/');
+    let path = if path.is_empty() { "/" } else { path };
+    Ok((host, path.to_string()))
 }
 
 /// `wss://authority/path` (as [`Endpoint::url`] normalizes it) split into

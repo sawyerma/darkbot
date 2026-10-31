@@ -12,6 +12,10 @@
 //! launch counters and the C3/C2 launch paths stay the Flap C1 scope.
 //!
 //! Memory is bounded: the oldest hashes are forgotten first (`capacity`).
+//! BSC3-062: what it forgot is not "never seen": an 8-byte prefix of every
+//! forgotten hash and its first sighting's wall clock are kept for as many
+//! again, so a join that finds no sighting tells a forgotten one (or one
+//! that may have been, once even that record dropped it) from a miss.
 //! Times are the caller's monotonic readings; this module reads no clock.
 
 use crate::canonical_join::Venue;
@@ -24,6 +28,13 @@ use darkbot_bsc_trading::venues::fourmeme::deployment::{
 };
 use darkbot_bsc_trading::venues::fourmeme::recognize as four;
 use std::collections::{HashMap, VecDeque};
+
+/// The first eight bytes of `hash`, the key a forgotten hash keeps.
+fn prefix(hash: &[u8; 32]) -> u64 {
+    u64::from_be_bytes([
+        hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7],
+    ])
+}
 
 /// What one source delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +139,14 @@ pub struct IngressCore {
     capacity: usize,
     order: VecDeque<[u8; 32]>,
     seen: HashMap<[u8; 32], Seen>,
+    /// BSC3-062: the forgotten hashes (8-byte prefixes, oldest first, at
+    /// most `capacity`) with their first sighting's wall clock (µs).
+    forgotten: VecDeque<(u64, Option<u64>)>,
+    forgotten_set: HashMap<u64, u32>,
+    /// The newest first-sighting wall clock among the hashes dropped from
+    /// `forgotten` too (gone for good), and whether one had none.
+    gone_until_us: Option<u64>,
+    gone_unclocked: bool,
     stats: [SourceStats; 5],
     launches: u64,
     /// The largest launch calldata the venue decoder accepts.
@@ -244,6 +263,10 @@ impl IngressCore {
             capacity,
             order: VecDeque::with_capacity(capacity),
             seen: HashMap::with_capacity(capacity),
+            forgotten: VecDeque::with_capacity(capacity),
+            forgotten_set: HashMap::with_capacity(capacity),
+            gone_until_us: None,
+            gone_unclocked: false,
             stats: [SourceStats::default(); 5],
             launches: 0,
             max_launch_calldata,
@@ -291,11 +314,42 @@ impl IngressCore {
     fn remember(&mut self, hash: [u8; 32], seen: Seen) {
         if self.order.len() == self.capacity
             && let Some(old) = self.order.pop_front()
+            && let Some(was) = self.seen.remove(&old)
         {
-            self.seen.remove(&old);
+            self.forget(prefix(&old), was.first_any.2);
         }
         self.order.push_back(hash);
         self.seen.insert(hash, seen);
+    }
+
+    /// BSC3-062: `key` forgotten by the window, first seen at `wall_us`.
+    fn forget(&mut self, key: u64, wall_us: Option<u64>) {
+        if self.forgotten.len() == self.capacity
+            && let Some((gone, at)) = self.forgotten.pop_front()
+        {
+            if let Some(n) = self.forgotten_set.get_mut(&gone) {
+                *n -= 1;
+                if *n == 0 {
+                    self.forgotten_set.remove(&gone);
+                }
+            }
+            match at {
+                Some(t) => self.gone_until_us = self.gone_until_us.max(Some(t)),
+                None => self.gone_unclocked = true,
+            }
+        }
+        self.forgotten.push_back((key, wall_us));
+        *self.forgotten_set.entry(key).or_insert(0) += 1;
+    }
+
+    /// BSC3-062: whether a sighting of `hash` may have been forgotten
+    /// before this call: its prefix is in the forgotten record, or a hash
+    /// first seen at or after `since_us` (the earliest a sighting of it can
+    /// be) is gone for good. Not remembered and neither: never seen.
+    pub fn maybe_forgotten(&self, hash: &[u8; 32], since_us: u64) -> bool {
+        self.forgotten_set.contains_key(&prefix(hash))
+            || self.gone_unclocked
+            || self.gone_until_us.is_some_and(|t| t >= since_us)
     }
 
     /// One observation of `source` at monotonic `now_ns`, `wall_us` being
@@ -793,6 +847,43 @@ mod tests {
             })
         );
         assert_eq!(core.sighting(&[1; 32]), None);
+    }
+
+    /// BSC3-062: a hash the bounded window forgot is not "never seen": its
+    /// prefix is kept for as many again; once that record drops it too, a
+    /// later join cannot rule out a forgotten sighting since its first
+    /// sighting's time. A hash never seen and nothing gone since: never seen.
+    #[test]
+    fn a_forgotten_sighting_is_never_taken_for_none() {
+        let mut core = IngressCore::new(2, MAX_CALLDATA);
+        let seen = |core: &mut IngressCore, n: u8, wall_us: u64| {
+            core.observe(
+                SourceId::Drpc,
+                Observation::HashOnly { hash: [n; 32] },
+                u64::from(n),
+                Some(wall_us),
+            );
+        };
+        // A early, then two more: A leaves the window.
+        seen(&mut core, 0xA0, 1_000);
+        seen(&mut core, 1, 2_000);
+        seen(&mut core, 2, 3_000);
+        assert!(core.sighting(&[0xA0; 32]).is_none());
+        assert!(core.maybe_forgotten(&[0xA0; 32], 0));
+        // Never seen, nothing gone for good: never seen.
+        assert!(!core.maybe_forgotten(&[0xB0; 32], 0));
+        // Two more forgotten: A's prefix is dropped too, gone for good since
+        // its first sighting (1000 µs).
+        seen(&mut core, 3, 4_000);
+        seen(&mut core, 4, 5_000);
+        assert!(core.sighting(&[0xA0; 32]).is_none());
+        assert!(core.maybe_forgotten(&[0xA0; 32], 1_000));
+        assert!(core.maybe_forgotten(&[0xB0; 32], 1_000));
+        // A launch whose sighting could only be after what is gone.
+        assert!(!core.maybe_forgotten(&[0xB0; 32], 1_001));
+        // Memory stays bounded.
+        assert_eq!((core.seen.len(), core.forgotten.len()), (2, 2));
+        assert!(core.forgotten_set.len() <= 2);
     }
 
     #[test]

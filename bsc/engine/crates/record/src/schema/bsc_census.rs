@@ -237,8 +237,96 @@ pub mod census {
     /// they stay in the external buys and the placement (a real competitor
     /// at N+1).
     pub const CREATOR_BUYS_AFTER: u16 = 69;
+    /// v13 (BSC3-062): Flap and Four launches whose sighting the bounded
+    /// window may have forgotten before their join (`EVICTED`, class 6):
+    /// not evaluable, in no other class and never a miss.
+    pub const EVICTED: u16 = 70;
+    pub const FOUR_EVICTED: u16 = 71;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-census.v1",
+        record_type: 41,
+        schema_version: 13,
+        fields: &[
+            Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(COVERED_MS, "covered_ms", U64),
+            Field::req(FLAP_LAUNCHES, "flap_launches", U64),
+            Field::req(FOUR_LAUNCHES, "four_launches", U64),
+            Field::req(ORPHANED_LAUNCHES, "orphaned_launches", U64),
+            Field::req(OUTAGE_LAUNCHES, "outage_launches", U64),
+            Field::req(FULL_BEFORE, "full_before", U64),
+            Field::req(HASH_ONLY_BEFORE, "hash_only_before", U64),
+            Field::req(AFTER, "after", U64),
+            Field::req(MISSED, "missed", U64),
+            Field::opt(LEAD_P50_US, "lead_p50_us", U64),
+            Field::opt(LEAD_P95_US, "lead_p95_us", U64),
+            Field::opt(LEAD_P99_US, "lead_p99_us", U64),
+            Field::opt(LEAD_MAX_US, "lead_max_us", U64),
+            Field::req(CONTESTED_LAUNCHES, "contested_launches", U64),
+            Field::req(EXTERNAL_BUYS, "external_buys", U64),
+            Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
+            Field::req(CRITERIA, "criteria", Text),
+            Field::req(BUYS_UNKNOWN, "buys_unknown", U64),
+            Field::req(CLOCK_UNKNOWN, "clock_unknown", U64),
+            Field::req(C1_SCOPE_LAUNCHES, "c1_scope_launches", U64),
+            Field::req(C1_SCOPE_FULL_BEFORE, "c1_scope_full_before", U64),
+            Field::req(UNJOINED, "unjoined", U64),
+            Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
+            Field::opt(FETCH_LAG_MS_MIN, "fetch_lag_ms_min", I64),
+            Field::opt(FETCH_LAG_MS_P50, "fetch_lag_ms_p50", I64),
+            Field::opt(FETCH_LAG_MS_MAX, "fetch_lag_ms_max", I64),
+            Field::req(CLOCK_SUSPECT, "clock_suspect", Bool),
+            Field::req(TX_UNVERIFIABLE, "tx_unverifiable", U64),
+            Field::req(BLOCKS_BETWEEN_WINDOWS, "blocks_between_windows", U64),
+            Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
+            Field::req(TX_ANSWER_REFUSED, "tx_answer_refused", U64),
+            Field::req(FOUR_DERIVED, "four_derived", U64),
+            Field::req(FOUR_NO_DERIVATION, "four_no_derivation", U64),
+            Field::req(FOUR_MISMATCH, "four_mismatch", U64),
+            Field::req(FOUR_NOT_RECOGNIZED, "four_not_recognized", U64),
+            Field::req(FOUR_VERDICT_UNRECORDED, "four_verdict_unrecorded", U64),
+            Field::req(FOUR_FULL_BEFORE, "four_full_before", U64),
+            Field::req(FOUR_HASH_ONLY_BEFORE, "four_hash_only_before", U64),
+            Field::req(FOUR_AFTER, "four_after", U64),
+            Field::req(FOUR_MISSED, "four_missed", U64),
+            Field::req(FOUR_CLOCK_UNKNOWN, "four_clock_unknown", U64),
+            Field::req(LATER_SIGHTINGS, "later_sightings", U64),
+            Field::opt(LATER_LAG_P50_US, "later_lag_p50_us", U64),
+            Field::opt(LATER_LAG_P95_US, "later_lag_p95_us", U64),
+            Field::opt(LATER_LAG_MAX_US, "later_lag_max_us", U64),
+            Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
+            Field::req(CLASSIC_LAUNCHES, "classic_launches", U64),
+            Field::req(OPENFOUR_LAUNCHES, "openfour_launches", U64),
+            Field::req(FOUR_ACTIONABLE, "four_actionable", U64),
+            Field::req(CLASSIC_ACTIONABLE, "classic_actionable", U64),
+            Field::req(OPENFOUR_ACTIONABLE, "openfour_actionable", U64),
+            Field::req(FOUR_OUTAGE_LAUNCHES, "four_outage_launches", U64),
+            Field::opt(FOUR_LEAD_P50_US, "four_lead_p50_us", U64),
+            Field::opt(FOUR_LEAD_MAX_US, "four_lead_max_us", U64),
+            Field::req(REVERTED_FLAP, "reverted_flap", U64),
+            Field::req(REVERTED_CLASSIC, "reverted_classic", U64),
+            Field::req(REVERTED_OPENFOUR, "reverted_openfour", U64),
+            Field::req(LAUNCHES_NOT_INCLUDED, "launches_not_included", U64),
+            Field::req(FOUR_CANDIDATE, "four_candidate", U64),
+            Field::req(ADJACENT_BUY_LAUNCHES, "adjacent_buy_launches", U64),
+            Field::req(LATER_BUY_LAUNCHES, "later_buy_launches", U64),
+            Field::req(ADJACENT_BUY_FULL_BEFORE, "adjacent_buy_full_before", U64),
+            Field::req(PLACEMENT_UNKNOWN, "placement_unknown", U64),
+            Field::req(OBSERVABLE_MS, "observable_ms", U64),
+            Field::req(CREATOR_BUYS_AFTER, "creator_buys_after", U64),
+            Field::req(EVICTED, "evicted", U64),
+            Field::req(FOUR_EVICTED, "four_evicted", U64),
+        ],
+    };
+
+    /// v12 (BSC3-037), kept decodable: before the forgotten sightings.
+    pub const V12: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
         schema_version: 12,
@@ -632,6 +720,7 @@ pub mod census {
     /// campaign, v8).
     pub fn decode_census(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
         crate::decode(&SCHEMA, bytes)
+            .or_else(|_| crate::decode(&V12, bytes))
             .or_else(|_| crate::decode(&V11, bytes))
             .or_else(|_| crate::decode(&V10, bytes))
             .or_else(|_| crate::decode(&V9, bytes))
@@ -696,11 +785,16 @@ pub mod verdict {
         pub const MIN_LAUNCHES: u16 = 7;
         pub const VERDICT: u16 = 8;
         pub const REASONS: u16 = 9;
+        /// v2 (BSC3-032): of the actionable, those whose lead reaches the
+        /// criteria's sendable lead, and their share of the scope (ppm):
+        /// reported, deciding nothing.
+        pub const SENDABLE: u16 = 10;
+        pub const SENDABLE_PPM: u16 = 11;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.g04-verdict.venue",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(VENUE, "venue", Text),
                 Field::req(CONNECTED, "connected", U64),
@@ -711,6 +805,8 @@ pub mod verdict {
                 Field::req(MIN_LAUNCHES, "min_launches", U64),
                 Field::req(VERDICT, "verdict", Text),
                 Field::rep(REASONS, "reasons", Text),
+                Field::opt(SENDABLE, "sendable", U64),
+                Field::opt(SENDABLE_PPM, "sendable_ppm", U64),
             ],
         };
     }
@@ -733,6 +829,9 @@ pub mod verdict {
     pub const PRECOMMIT_UNIX_MS: u16 = 13;
     /// The rated census's per-source rows (v3).
     pub const SOURCES: u16 = 14;
+    /// v4 (BSC3-032): the criteria's sendable lead (µs) the venues' sendable
+    /// counts are taken at.
+    pub const SENDABLE_LEAD_US: u16 = 15;
 
     /// The confirmed criteria state, and the verdict (of the campaign and of
     /// a venue) to go on (`g04_criteria` decides them; a LIVE source
@@ -743,6 +842,39 @@ pub mod verdict {
     pub const RATED_VENUES: [&str; 3] = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-verdict.v1",
+        record_type: 63,
+        schema_version: 4,
+        fields: &[
+            Field::req(CRITERIA_SHA256, "criteria_sha256", B256),
+            Field::req(CRITERIA_STATE, "criteria_state", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(CAMPAIGN_MS, "campaign_ms", U64),
+            Field::req(COVERED_MS, "covered_ms", U64),
+            Field::opt(COVERED_PPM, "covered_ppm", U64),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::opt(PRECOMMIT_SHA256, "precommit_sha256", B256),
+            Field::opt(PRECOMMIT_DECIDED_BY, "precommit_decided_by", Text),
+            Field::opt(PRECOMMIT_UNIX_MS, "precommit_unix_ms", U64),
+            Field::nested(
+                SOURCES,
+                "sources",
+                Presence::Repeated,
+                &census::source::SCHEMA,
+            ),
+            Field::req(SENDABLE_LEAD_US, "sendable_lead_us", U64),
+        ],
+    };
+
+    /// v3 (before the sendable counts), kept readable.
+    pub const V3: Schema = Schema {
         name: "darkbot.bsc.g04-verdict.v1",
         record_type: 63,
         schema_version: 3,
@@ -822,9 +954,10 @@ pub mod verdict {
         ],
     };
 
-    /// A verdict of any kept version (v3, v2, v1).
+    /// A verdict of any kept version (v4, v3, v2, v1).
     pub fn decode_verdict(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
         crate::decode(&SCHEMA, bytes)
+            .or_else(|_| crate::decode(&V3, bytes))
             .or_else(|_| crate::decode(&V2, bytes))
             .or_else(|_| crate::decode(&V1, bytes))
     }
@@ -832,12 +965,14 @@ pub mod verdict {
 
 pub const ALL: &[&Schema] = &[
     &census::SCHEMA,
+    &census::V12,
     &census::V11,
     &census::V10,
     &census::V9,
     &census::V8,
     &precommit::SCHEMA,
     &verdict::SCHEMA,
+    &verdict::V3,
     &verdict::V2,
     &verdict::V1,
 ];

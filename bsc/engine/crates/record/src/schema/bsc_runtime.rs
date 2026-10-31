@@ -1112,11 +1112,30 @@ pub mod runtime_status {
         /// one reported (no head to join them): journaled as received and
         /// never joined, counted here.
         pub const LAUNCH_HEAD_MISSING: u16 = 40;
+        /// v12 (BSC3-062): launches without a remembered sighting whose
+        /// sighting the bounded ingress window may have forgotten before
+        /// the join (not evaluable, never a miss), Flap and Four.meme.
+        pub const EVICTED: u16 = 41;
+        pub const FOUR_EVICTED: u16 = 42;
+        /// v13 (BSC3-036): the host the follower follows now (the primary
+        /// or a fallback; never a path or query), how often it failed over
+        /// and the steps whose head stood still too long.
+        pub const ENDPOINT: u16 = 43;
+        pub const FAILOVERS: u16 = 44;
+        pub const STALLS: u16 = 45;
+        /// v14 (BSC3-056): the independent second source (its host), its
+        /// newest header, whether it confirms the followed chain now
+        /// (`AGREED`, `STALE`, `BEHIND`, `DISAGREES`, `NO_COMMON_HEIGHT`),
+        /// absent without a second source, and its failed steps (0 then).
+        pub const CONFIRM_ENDPOINT: u16 = 46;
+        pub const CONFIRM_HEAD: u16 = 47;
+        pub const CONFIRM_STATE: u16 = 48;
+        pub const CONFIRM_FAULTS: u16 = 49;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 11,
+            schema_version: 14,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -1162,6 +1181,15 @@ pub mod runtime_status {
                 Field::req(FOUR_MISSED, "four_missed", U64),
                 Field::req(FOUR_CLOCK_UNKNOWN, "four_clock_unknown", U64),
                 Field::req(LAUNCH_HEAD_MISSING, "launch_head_missing", U64),
+                Field::req(EVICTED, "evicted", U64),
+                Field::req(FOUR_EVICTED, "four_evicted", U64),
+                Field::req(ENDPOINT, "endpoint", Text),
+                Field::req(FAILOVERS, "failovers", U64),
+                Field::req(STALLS, "stalls", U64),
+                Field::opt(CONFIRM_ENDPOINT, "confirm_endpoint", Text),
+                Field::opt(CONFIRM_HEAD, "confirm_head", U64),
+                Field::opt(CONFIRM_STATE, "confirm_state", Text),
+                Field::req(CONFIRM_FAULTS, "confirm_faults", U64),
             ],
         };
     }
@@ -1706,8 +1734,11 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        // v24 (BSC3-078): `live.lease_attempt`.
-        schema_version: 24,
+        // v24 (BSC3-078): `live.lease_attempt`. v25 (BSC3-062):
+        // `canonical.evicted`, `canonical.four_evicted`. v26 (BSC3-036):
+        // `canonical.endpoint`, `canonical.failovers`, `canonical.stalls`.
+        // v27 (BSC3-056): `canonical.confirm_*`.
+        schema_version: 27,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

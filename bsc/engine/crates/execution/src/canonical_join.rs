@@ -40,6 +40,9 @@ pub enum Visibility {
     Missed,
     /// A deciding sighting has no wall-clock estimate.
     ClockUnknown { source: SourceId },
+    /// BSC3-062: no sighting remembered, but one may have been forgotten
+    /// by the bounded window before the join: not evaluable, never a miss.
+    Evicted,
 }
 
 impl Visibility {
@@ -51,6 +54,7 @@ impl Visibility {
             Visibility::After { .. } => 3,
             Visibility::Missed => 4,
             Visibility::ClockUnknown { .. } => 5,
+            Visibility::Evicted => 6,
         }
     }
 
@@ -61,7 +65,7 @@ impl Visibility {
             | Visibility::HashOnlyBefore { source, lead_us } => Some((source, lead_us)),
             Visibility::After { source, lag_us } => Some((source, lag_us)),
             Visibility::ClockUnknown { source } => Some((source, 0)),
-            Visibility::Missed => None,
+            Visibility::Missed | Visibility::Evicted => None,
         }
     }
 }
@@ -190,6 +194,9 @@ pub struct JoinCounters {
     pub seen_after: u64,
     pub missed: u64,
     pub clock_unknown: u64,
+    /// BSC3-062: launches whose sighting may have been forgotten before
+    /// their join (not evaluable).
+    pub evicted: u64,
     /// Launches (any venue) whose transaction type/form is not rebuilt, and
     /// those whose provider answers were refused every time.
     pub tx_unverifiable: u64,
@@ -203,6 +210,7 @@ pub struct JoinCounters {
     pub four_seen_after: u64,
     pub four_missed: u64,
     pub four_clock_unknown: u64,
+    pub four_evicted: u64,
     /// Sum over the Flap launches whose buys are known.
     pub external_buys: u64,
     /// Flap launches whose external buys are unknown (never counted as 0).
@@ -243,6 +251,7 @@ impl JoinCounters {
                 Visibility::After { .. } => step(&mut self.four_seen_after),
                 Visibility::Missed => step(&mut self.four_missed),
                 Visibility::ClockUnknown { .. } => step(&mut self.four_clock_unknown),
+                Visibility::Evicted => step(&mut self.four_evicted),
             }
             return;
         }
@@ -253,6 +262,7 @@ impl JoinCounters {
             Visibility::After { .. } => step(&mut self.seen_after),
             Visibility::Missed => step(&mut self.missed),
             Visibility::ClockUnknown { .. } => step(&mut self.clock_unknown),
+            Visibility::Evicted => step(&mut self.evicted),
         }
         if j.launch.c1_scope {
             step(&mut self.c1_scope_launches);
@@ -308,12 +318,15 @@ impl Ledger {
     }
 
     /// Joins every launch whose delay passed at `now_ns`; returns them in
-    /// block order. `head` bounds the window a reorg can still reach.
+    /// block order. `head` bounds the window a reorg can still reach. A
+    /// launch without a sighting is `Evicted` when `forgotten(hash,
+    /// block_ms)` says one may have been forgotten (BSC3-062), else missed.
     pub fn join_due(
         &mut self,
         now_ns: u64,
         head: u64,
         sighting: impl Fn(&[u8; 32]) -> Option<Sighting>,
+        forgotten: impl Fn(&[u8; 32], u64) -> bool,
     ) -> Vec<Joined> {
         let mut out = Vec::new();
         while let Some(l) = self.waiting.front() {
@@ -323,10 +336,11 @@ impl Ledger {
             let Some(launch) = self.waiting.pop_front() else {
                 break;
             };
-            let joined = Joined {
-                launch,
-                visibility: classify(sighting(&launch.tx_hash), launch.block_ms),
+            let visibility = match sighting(&launch.tx_hash) {
+                None if forgotten(&launch.tx_hash, launch.block_ms) => Visibility::Evicted,
+                seen => classify(seen, launch.block_ms),
             };
+            let joined = Joined { launch, visibility };
             self.counters.apply(&joined, true);
             self.recent.push_back(joined);
             out.push(joined);
@@ -528,9 +542,9 @@ mod tests {
             ),
             _ => None,
         };
-        assert!(ledger.join_due(120, 11, sighting).is_empty());
+        assert!(ledger.join_due(120, 11, sighting, |_, _| false).is_empty());
         assert_eq!(ledger.waiting(), 4);
-        let first = ledger.join_due(160, 11, sighting);
+        let first = ledger.join_due(160, 11, sighting, |_, _| false);
         assert_eq!(first.len(), 3);
         assert_eq!(
             first[0].visibility,
@@ -539,7 +553,7 @@ mod tests {
                 lead_us: 40
             }
         );
-        let second = ledger.join_due(260, 11, sighting);
+        let second = ledger.join_due(260, 11, sighting, |_, _| false);
         assert_eq!(
             second[0].visibility,
             Visibility::After {
@@ -578,8 +592,54 @@ mod tests {
         // A waiting launch of an orphaned block never joins.
         ledger.push(launch(Venue::Flap, 12, 0xC, 4, 300, None));
         assert_eq!(ledger.orphan(&[[0xC; 32]]).len(), 1);
-        assert!(ledger.join_due(10_000, 12, sighting).is_empty());
+        assert!(
+            ledger
+                .join_due(10_000, 12, sighting, |_, _| false)
+                .is_empty()
+        );
         assert_eq!(ledger.counters().orphaned_launches, 2);
+    }
+
+    /// BSC3-062 (the register's negative test): a launch seen early whose
+    /// sighting the bounded window forgot before its delayed join is
+    /// EVICTED, never MISSED (before: missed despite the early sighting);
+    /// one never seen with nothing forgotten stays missed.
+    #[test]
+    fn a_sighting_forgotten_before_the_join_is_never_a_miss() {
+        use crate::ingress::{IngressCore, Observation};
+        let mut core = IngressCore::new(2, 16_384);
+        let early = (BLOCK_MS - 500) * 1_000;
+        core.observe(
+            SourceId::Drpc,
+            Observation::HashOnly { hash: [0xA; 32] },
+            1,
+            Some(early),
+        );
+        for n in 1..=2u8 {
+            core.observe(
+                SourceId::Drpc,
+                Observation::HashOnly { hash: [n; 32] },
+                2,
+                Some(early + 1),
+            );
+        }
+        let mut ledger = Ledger::new(100, 2);
+        ledger.push(launch(Venue::Flap, 10, 0xA, 0xA, 0, Some(0)));
+        ledger.push(launch(Venue::Flap, 10, 0xA, 0xB, 0, Some(0)));
+        let horizon_us = 60_000_000;
+        let joined = ledger.join_due(
+            1_000,
+            10,
+            |h| core.sighting(h),
+            |h, ms| core.maybe_forgotten(h, (ms * 1_000).saturating_sub(horizon_us)),
+        );
+        assert_eq!(
+            joined.iter().map(|j| j.visibility).collect::<Vec<_>>(),
+            [Visibility::Evicted, Visibility::Missed]
+        );
+        assert_eq!(Visibility::Evicted.code(), 6);
+        let c = ledger.counters();
+        assert_eq!((c.evicted, c.missed, c.flap_launches), (1, 1, 2));
     }
 
     #[test]
@@ -587,7 +647,7 @@ mod tests {
         let mut ledger = Ledger::new(0, 2);
         for b in 0..10u64 {
             ledger.push(launch(Venue::Flap, b, b as u8, b as u8, b, Some(0)));
-            ledger.join_due(b, b, |_| None);
+            ledger.join_due(b, b, |_| None, |_, _| false);
         }
         assert!(ledger.recent.len() <= 3);
         assert!(ledger.orphan(&[[0; 32]]).is_empty());

@@ -498,6 +498,8 @@ fn limits() -> FollowerLimits {
         backoff_max: Duration::from_secs(5),
         tx_attempts: 3,
         max_launch_calldata: 16_384,
+        failover_after: 2,
+        stall_after: Duration::from_secs(60),
     }
 }
 
@@ -545,7 +547,7 @@ fn limits_and_endpoint_are_refused_before_any_connect() {
     for (url, expected) in refused {
         assert_eq!(
             run_follower(
-                url,
+                &[url.to_string()],
                 &limits(),
                 &[],
                 &NonceWatch::default(),
@@ -558,7 +560,7 @@ fn limits_and_endpoint_are_refused_before_any_connect() {
     }
     assert_eq!(
         run_follower(
-            "https://node.example",
+            &["https://node.example".to_string()],
             &zero_poll,
             &[],
             &NonceWatch::default(),

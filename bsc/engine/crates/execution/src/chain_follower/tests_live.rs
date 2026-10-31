@@ -25,6 +25,8 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         backoff_max: Duration::from_secs(5),
         tx_attempts: 3,
         max_launch_calldata: 16_384,
+        failover_after: 2,
+        stall_after: std::time::Duration::from_secs(60),
     };
     let run_for = Duration::from_secs(30);
     let stop = Arc::new(AtomicBool::new(false));
@@ -124,11 +126,12 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         | CanonicalEvent::FlapTerm(_)
         | CanonicalEvent::FlapMigrated { .. }
         | CanonicalEvent::FlapTradeUndecodable { .. }
-        | CanonicalEvent::BlockComplete { .. } => {}
+        | CanonicalEvent::BlockComplete { .. }
+        | CanonicalEvent::Failover { .. } => {}
         CanonicalEvent::Fault(fault) => faults.push(fault),
     };
     run_follower(
-        "https://bsc-dataseed.bnbchain.org",
+        &["https://bsc-dataseed.bnbchain.org".to_string()],
         &limits,
         &[],
         &NonceWatch {

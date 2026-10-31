@@ -36,6 +36,8 @@ enum Req {
     Block(u64),
     Receipts(u64),
     Nonce([u8; 20], [u8; 32]),
+    /// BSC3-056: `eth_getBlockByNumber(n, false)`.
+    Header(u64),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -125,6 +127,18 @@ impl State {
                 .blocks
                 .get(&n)
                 .map_or(Value::Null, |b| b.block.clone()),
+            // A header-only client ends a phase at its head's header.
+            Req::Header(n) => {
+                let header = self
+                    .current()
+                    .blocks
+                    .get(&n)
+                    .map_or(Value::Null, |b| b.block.clone());
+                if n == self.current().head && !header.is_null() {
+                    self.head_done = true;
+                }
+                header
+            }
             Req::Receipts(n) => {
                 let receipts = self
                     .current()
@@ -157,6 +171,9 @@ impl State {
             let number = |v: &Value| u64::from_str_radix(&v.as_str().unwrap()[2..], 16).unwrap();
             let req = match request["method"].as_str().unwrap() {
                 "eth_blockNumber" => Req::BlockNumber,
+                "eth_getBlockByNumber" if request["params"][1] == false => {
+                    Req::Header(number(&request["params"][0]))
+                }
                 "eth_getBlockByNumber" => {
                     assert_eq!(request["params"][1], true);
                     Req::Block(number(&request["params"][0]))
@@ -381,6 +398,8 @@ fn limits() -> FollowerLimits {
         backoff_max: Duration::from_millis(40),
         tx_attempts: 2,
         max_launch_calldata: 16_384,
+        failover_after: 2,
+        stall_after: std::time::Duration::from_secs(60),
     }
 }
 
@@ -454,7 +473,7 @@ fn follow_watching(
         other => events.push((other, Instant::now())),
     };
     run(
-        &mut Rpc::new(client),
+        &mut [Rpc::new(client)],
         &limits,
         resume,
         watch,
@@ -797,6 +816,11 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
         CanonicalEvent::FlapMigrated { block_number, .. } => format!("migrated {block_number}"),
         CanonicalEvent::BlockComplete { hash, .. } => format!("complete {}", name(hash)),
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
+        CanonicalEvent::Failover {
+            from,
+            to,
+            failed_steps,
+        } => format!("failover {from} -> {to} after {failed_steps}"),
     }
 }
 
@@ -1575,4 +1599,346 @@ fn assert_real_block_trades(events: &[CanonicalEvent]) {
         last = Some(at);
     }
     assert!(trades > 0 && version && threshold, "{events:?}");
+}
+
+/// BSC3-036: the production follower loop over one local server per
+/// endpoint (in order, the first the primary), until a script sets `stop`
+/// or `stop_after` passes; the events described.
+fn follow_endpoints(
+    scripts: Vec<Script>,
+    limits: FollowerLimits,
+    stop_after: Duration,
+    names: &BTreeMap<[u8; 32], String>,
+) -> Vec<String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let servers: Vec<Server> = scripts
+        .into_iter()
+        .map(|s| serve(s, Arc::clone(&stop)))
+        .collect();
+    let stopper = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let start = Instant::now();
+            while !stop.load(Ordering::Acquire) && start.elapsed() < stop_after {
+                thread::sleep(Duration::from_millis(5));
+            }
+            stop.store(true, Ordering::Release);
+        })
+    };
+    let mut rpcs: Vec<_> = servers
+        .iter()
+        .map(|s| {
+            Rpc::new(Client::new(
+                connector(s.addr, limits),
+                s.addr.to_string(),
+                "/rpc".to_owned(),
+                &limits,
+            ))
+        })
+        .collect();
+    let mut events = Vec::new();
+    let mut sink = |event: CanonicalEvent| {
+        if !matches!(event, CanonicalEvent::BlockComplete { .. }) {
+            events.push(describe(&event, names));
+        }
+    };
+    run(
+        &mut rpcs,
+        &limits,
+        &[],
+        &NonceWatch::default(),
+        &stop,
+        &mut sink,
+    );
+    for s in servers {
+        s.done.store(true, Ordering::Release);
+        s.handle.join().unwrap();
+    }
+    stopper.join().unwrap();
+    events
+}
+
+fn names_of(labels: &[&str]) -> BTreeMap<[u8; 32], String> {
+    labels.iter().map(|l| (named(l), l.to_string())).collect()
+}
+
+/// BSC3-036: three failed steps on the primary, then the next endpoint is
+/// asked at once and follows the chain on from the kept window: no gap, no
+/// block twice, no reorg; the primary is not asked again while the next
+/// one answers.
+#[test]
+fn a_failing_primary_hands_the_chain_to_the_next_endpoint() {
+    let (a, b, c) = (
+        block("10a", 10, "9", vec![]),
+        block("11b", 11, "10a", vec![]),
+        block("12c", 12, "11b", vec![]),
+    );
+    let failing = (1..=3)
+        .map(|n| (Req::BlockNumber, n, Reply::RpcError(-32000)))
+        .collect();
+    let primary = Script {
+        phases: vec![phase(10, &[&a])],
+        inject: failing,
+        chunk: 1 << 20,
+    };
+    let fallback = Script {
+        phases: vec![phase(12, &[&a, &b, &c])],
+        inject: Vec::new(),
+        chunk: 1 << 20,
+    };
+    let limits = FollowerLimits {
+        failover_after: 3,
+        ..limits()
+    };
+    let events = follow_endpoints(
+        vec![primary, fallback],
+        limits,
+        Duration::from_secs(20),
+        &names_of(&["9", "10a", "11b", "12c"]),
+    );
+    let faults = events.iter().filter(|e| e.starts_with("fault")).count();
+    let rest: Vec<&String> = events.iter().filter(|e| !e.starts_with("fault")).collect();
+    assert_eq!(faults, 3, "{events:#?}");
+    assert_eq!(
+        rest,
+        [
+            "block 10a <- 9 txs 0",
+            "failover 0 -> 1 after 3",
+            "block 11b <- 10a txs 0",
+            "block 12c <- 11b txs 0",
+        ],
+        "{events:#?}"
+    );
+}
+
+/// BSC3-036: an endpoint that answers but whose head stands still for
+/// `stall_after` fails a step (Stalled); with `failover_after` 1 the next
+/// endpoint follows on. One endpoint alone never fails over.
+#[test]
+fn a_stalled_head_fails_over_and_one_endpoint_never_does() {
+    let (a, b) = (
+        block("10a", 10, "9", vec![]),
+        block("11b", 11, "10a", vec![]),
+    );
+    let standing = || {
+        (1..=400)
+            .map(|n| (Req::BlockNumber, n, Reply::Head(10)))
+            .collect::<Vec<_>>()
+    };
+    let limits = FollowerLimits {
+        failover_after: 1,
+        stall_after: Duration::from_millis(120),
+        ..limits()
+    };
+    let names = names_of(&["9", "10a", "11b"]);
+    let events = follow_endpoints(
+        vec![
+            Script {
+                phases: vec![phase(10, &[&a])],
+                inject: standing(),
+                chunk: 1 << 20,
+            },
+            Script {
+                phases: vec![phase(11, &[&a, &b])],
+                inject: Vec::new(),
+                chunk: 1 << 20,
+            },
+        ],
+        limits,
+        Duration::from_secs(20),
+        &names,
+    );
+    assert_eq!(events.len(), 4, "{events:#?}");
+    assert_eq!(events[0], "block 10a <- 9 txs 0");
+    assert!(
+        events[1].starts_with("fault Stalled { head: 10, for_ms: "),
+        "{events:#?}"
+    );
+    assert_eq!(
+        events[2..],
+        ["failover 0 -> 1 after 1", "block 11b <- 10a txs 0"]
+    );
+    // Alone, the stalled endpoint reports its stalls and stays the one.
+    let alone = follow_endpoints(
+        vec![Script {
+            phases: vec![phase(10, &[&a])],
+            inject: standing(),
+            chunk: 1 << 20,
+        }],
+        limits,
+        Duration::from_millis(600),
+        &names,
+    );
+    assert!(
+        alone.iter().any(|e| e.starts_with("fault Stalled")),
+        "{alone:#?}"
+    );
+    assert!(
+        !alone.iter().any(|e| e.starts_with("failover")),
+        "{alone:#?}"
+    );
+}
+
+/// BSC3-056: the second source's headers, every new height in order with
+/// its parent, a failed request reported and asked again.
+#[test]
+fn the_second_source_reports_its_headers_in_order() {
+    let (a, b, c, d) = (
+        block("10a", 10, "9", vec![]),
+        block("11b", 11, "10a", vec![]),
+        block("12c", 12, "11b", vec![]),
+        block("13d", 13, "12c", vec![]),
+    );
+    let script = Script {
+        phases: vec![phase(11, &[&a, &b]), phase(13, &[&a, &b, &c, &d])],
+        inject: vec![(Req::Header(12), 0, Reply::RpcError(-32000))],
+        chunk: 1 << 20,
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = serve(script, Arc::clone(&stop));
+    let limits = limits();
+    let mut rpc = Rpc::new(Client::new(
+        connector(server.addr, limits),
+        server.addr.to_string(),
+        "/rpc".to_owned(),
+        &limits,
+    ));
+    let mut events = Vec::new();
+    let mut sink = |e: ConfirmEvent| events.push(e);
+    super::confirm::run(&mut rpc, &limits, &stop, &mut sink);
+    server.done.store(true, Ordering::Release);
+    server.handle.join().unwrap();
+    let names = names_of(&["9", "10a", "11b", "12c", "13d"]);
+    let seen: Vec<String> = events
+        .iter()
+        .map(|e| match e {
+            ConfirmEvent::Header {
+                number,
+                hash,
+                parent_hash,
+                block_ms,
+            } => {
+                assert_eq!(*block_ms, (1_760_000_000 + number) * 1000 + number % 1000);
+                format!("header {} <- {}", names[hash], names[parent_hash])
+            }
+            ConfirmEvent::Fault(f) => format!("fault {f:?}"),
+        })
+        .collect();
+    assert_eq!(seen.len(), 4, "{seen:#?}");
+    assert_eq!(seen[0], "header 11b <- 10a");
+    assert!(
+        seen[1].starts_with("fault Request { call: Header(12)"),
+        "{seen:#?}"
+    );
+    assert_eq!(seen[2..], ["header 12c <- 11b", "header 13d <- 12c"]);
+}
+
+/// BSC3-036 (review LOW-1): only consecutive failed steps fail over — a
+/// completed step between them starts the count again.
+#[test]
+fn a_completed_step_between_failures_starts_the_count_again() {
+    let (a, b) = (
+        block("10a", 10, "9", vec![]),
+        block("11b", 11, "10a", vec![]),
+    );
+    let primary = Script {
+        phases: vec![phase(10, &[&a]), phase(11, &[&a, &b])],
+        inject: [1, 2, 4, 5]
+            .into_iter()
+            .map(|n| (Req::BlockNumber, n, Reply::RpcError(-32000)))
+            .collect(),
+        chunk: 1 << 20,
+    };
+    let unused = Script {
+        phases: vec![phase(10, &[&a])],
+        inject: Vec::new(),
+        chunk: 1 << 20,
+    };
+    let limits = FollowerLimits {
+        failover_after: 3,
+        ..limits()
+    };
+    let events = follow_endpoints(
+        vec![primary, unused],
+        limits,
+        Duration::from_secs(20),
+        &names_of(&["9", "10a", "11b"]),
+    );
+    assert!(
+        !events.iter().any(|e| e.starts_with("failover")),
+        "{events:#?}"
+    );
+    let blocks: Vec<&String> = events.iter().filter(|e| e.starts_with("block")).collect();
+    assert_eq!(blocks, ["block 10a <- 9 txs 0", "block 11b <- 10a txs 0"]);
+    assert_eq!(events.iter().filter(|e| e.starts_with("fault")).count(), 4);
+}
+
+/// BSC3-036 (review LOW-1): the next endpoint gets its own stall time — one
+/// that reports the same head for a while is no stall at once — and one
+/// endpoint alone asks a stalled head again after a poll, not the backoff.
+#[test]
+fn the_next_endpoint_gets_its_own_stall_time_and_a_stall_waits_one_poll() {
+    let (a, b) = (
+        block("10a", 10, "9", vec![]),
+        block("11b", 11, "10a", vec![]),
+    );
+    let limits = FollowerLimits {
+        failover_after: 1,
+        stall_after: Duration::from_millis(200),
+        // A backoff far above the stall checks: a stall must not wait it.
+        backoff_initial: Duration::from_millis(400),
+        backoff_max: Duration::from_millis(400),
+        ..limits()
+    };
+    let standing = |from: usize, to: usize| {
+        (from..=to)
+            .map(|n| (Req::BlockNumber, n, Reply::Head(10)))
+            .collect::<Vec<_>>()
+    };
+    let names = names_of(&["9", "10a", "11b"]);
+    let events = follow_endpoints(
+        vec![
+            Script {
+                phases: vec![phase(10, &[&a])],
+                inject: standing(1, 400),
+                chunk: 1 << 20,
+            },
+            Script {
+                // Head 10 for four polls (80 ms, below the stall time), then 11.
+                phases: vec![phase(11, &[&a, &b])],
+                inject: standing(0, 3),
+                chunk: 1 << 20,
+            },
+        ],
+        limits,
+        Duration::from_secs(20),
+        &names,
+    );
+    assert_eq!(
+        events.iter().filter(|e| e.starts_with("failover")).count(),
+        1,
+        "{events:#?}"
+    );
+    assert_eq!(
+        events.last().unwrap(),
+        "block 11b <- 10a txs 0",
+        "{events:#?}"
+    );
+    // Alone: in 1.5 s a stalled head is asked again every poll (more than
+    // the three a doubling 400 ms backoff would allow).
+    let alone = follow_endpoints(
+        vec![Script {
+            phases: vec![phase(10, &[&a])],
+            inject: standing(1, 400),
+            chunk: 1 << 20,
+        }],
+        limits,
+        Duration::from_millis(1_500),
+        &names,
+    );
+    let stalls = alone
+        .iter()
+        .filter(|e| e.starts_with("fault Stalled"))
+        .count();
+    assert!(stalls > 10, "{stalls}: {alone:#?}");
 }

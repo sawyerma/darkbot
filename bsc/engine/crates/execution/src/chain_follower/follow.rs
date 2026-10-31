@@ -41,7 +41,7 @@ where
             .map_err(|error| FollowerFault::Request { call, error })
     }
 
-    fn block_number(&mut self, stop: &AtomicBool) -> Result<u64, FollowerFault> {
+    pub(super) fn block_number(&mut self, stop: &AtomicBool) -> Result<u64, FollowerFault> {
         let call = Call::BlockNumber;
         let (answer, id) = self.post(call, stop)?;
         jsonrpc::parse_quantity(&answer, id).map_err(|error| FollowerFault::Request { call, error })
@@ -62,6 +62,19 @@ where
         let call = Call::Block(number);
         let (answer, id) = self.post(call, stop)?;
         jsonrpc::parse_block(&answer, id, number)
+            .map_err(|error| FollowerFault::Request { call, error })?
+            .ok_or(FollowerFault::Unavailable(call))
+    }
+
+    /// BSC3-056: the header of block `number` (no transactions).
+    pub(super) fn header(
+        &mut self,
+        number: u64,
+        stop: &AtomicBool,
+    ) -> Result<jsonrpc::Header, FollowerFault> {
+        let call = Call::Header(number);
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_header(&answer, id, number)
             .map_err(|error| FollowerFault::Request { call, error })?
             .ok_or(FollowerFault::Unavailable(call))
     }
@@ -98,8 +111,11 @@ impl FirstHeld {
 /// Runs steps until `stop`: after a completed step wait `poll`, after a
 /// fault report it and wait the backoff (doubling from `backoff_initial`
 /// to `backoff_max`; `backoff_max` at once after a rate-limit signal).
+/// BSC3-036: `rpcs` are the configured endpoints in order; after
+/// `failover_after` consecutive failed steps on one the next is asked
+/// (round robin), announced as [`CanonicalEvent::Failover`], at once.
 pub(super) fn run<S, C>(
-    rpc: &mut Rpc<S, C>,
+    rpcs: &mut [Rpc<S, C>],
     limits: &FollowerLimits,
     resume: &[(u64, [u8; 32])],
     watch: &NonceWatch,
@@ -111,9 +127,14 @@ pub(super) fn run<S, C>(
 {
     let mut follower = Follower::new(limits, resume, watch);
     let mut next_wait = limits.backoff_initial;
+    let (mut active, mut failed) = (0usize, 0u32);
     while !stopped(stop) {
+        let Some(rpc) = rpcs.get_mut(active) else {
+            return;
+        };
         let wait = match follower.step(rpc, stop, sink) {
             Ok(()) => {
+                failed = 0;
                 next_wait = limits.backoff_initial;
                 limits.poll
             }
@@ -129,14 +150,36 @@ pub(super) fn run<S, C>(
                         ..
                     }
                 );
+                // A stalled head answered: asked again after a poll, the
+                // backoff untouched (it is no failed request).
+                let stalled = matches!(fault, FollowerFault::Stalled { .. });
                 let wait = if rate_limited {
                     limits.backoff_max
+                } else if stalled {
+                    limits.poll
                 } else {
                     next_wait
                 };
-                next_wait = wait.saturating_mul(2).min(limits.backoff_max);
+                if !stalled {
+                    next_wait = wait.saturating_mul(2).min(limits.backoff_max);
+                }
                 sink(CanonicalEvent::Fault(fault));
-                wait
+                failed = failed.saturating_add(1);
+                if rpcs.len() > 1 && failed >= limits.failover_after {
+                    let to = (active + 1) % rpcs.len();
+                    sink(CanonicalEvent::Failover {
+                        from: active,
+                        to,
+                        failed_steps: failed,
+                    });
+                    (active, failed) = (to, 0);
+                    // The next endpoint gets its own stall time.
+                    follower.head_since = None;
+                    next_wait = limits.backoff_initial;
+                    limits.backoff_initial
+                } else {
+                    wait
+                }
             }
         };
         if !wait_unless_stopped(wait, limits.read_tick, stop) {
@@ -146,7 +189,7 @@ pub(super) fn run<S, C>(
 }
 
 /// Sleeps `wait` in slices of at most `tick`; `false` when `stop` was set.
-fn wait_unless_stopped(wait: Duration, tick: Duration, stop: &AtomicBool) -> bool {
+pub(super) fn wait_unless_stopped(wait: Duration, tick: Duration, stop: &AtomicBool) -> bool {
     let start = Instant::now();
     loop {
         if stopped(stop) {
@@ -181,6 +224,10 @@ pub(super) struct Follower {
     watch: NonceWatch,
     /// The next followed block carries nonce facts regardless of its number.
     facts_due: bool,
+    /// BSC3-036: the highest head reported and when it was first reported
+    /// (by the endpoint asked now), and how long it may stand still.
+    head_since: Option<(u64, Instant)>,
+    stall_after: Duration,
 }
 
 impl Follower {
@@ -217,6 +264,29 @@ impl Follower {
             refusals: Vec::new(),
             watch: watch.clone(),
             facts_due: true,
+            head_since: None,
+            stall_after: limits.stall_after,
+        }
+    }
+
+    /// BSC3-036: `head` as the endpoint reported it now: a stall once the
+    /// highest head has stood for `stall_after`.
+    fn note_head(&mut self, head: u64, now: Instant) -> Result<(), FollowerFault> {
+        match self.head_since {
+            Some((highest, since)) if head <= highest => {
+                let stood = now.saturating_duration_since(since);
+                if stood >= self.stall_after {
+                    return Err(FollowerFault::Stalled {
+                        head: highest,
+                        for_ms: u64::try_from(stood.as_millis()).unwrap_or(u64::MAX),
+                    });
+                }
+                Ok(())
+            }
+            _ => {
+                self.head_since = Some((head, now));
+                Ok(())
+            }
         }
     }
 
@@ -232,6 +302,7 @@ impl Follower {
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
         let head = rpc.block_number(stop)?;
+        self.note_head(head, Instant::now())?;
         let Some(last) = self.kept.back().map(|(number, _)| *number) else {
             return self.restart(rpc, head, stop, sink);
         };

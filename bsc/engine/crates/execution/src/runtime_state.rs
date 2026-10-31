@@ -348,7 +348,10 @@ impl StateOwner {
             | CanonicalEvent::FlapMigrated { .. }
             | CanonicalEvent::FlapTradeUndecodable { .. }
             | CanonicalEvent::BlockComplete { .. }
-            | CanonicalEvent::Fault(_) => return,
+            | CanonicalEvent::Fault(_)
+            // BSC3-036: the next endpoint's blocks are proven against the
+            // follower's window; the owner sees them as any others.
+            | CanonicalEvent::Failover { .. } => return,
         };
         self.apply(&input);
     }

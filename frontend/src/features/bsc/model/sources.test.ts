@@ -118,6 +118,9 @@ describe("BSC source control", () => {
       { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" },
       ...(canonical ? [{ name: "canonical[0].state", value: "FOLLOWING", kind: 7, unit: "" }, { name: "canonical[0].head", value: "100", kind: 2, unit: "" },
         { name: "canonical[0].flap_launches", value: "3", kind: 2, unit: "" }, { name: "canonical[0].seen_full_before", value: "2", kind: 2, unit: "" },
+        { name: "canonical[0].evicted", value: "1", kind: 2, unit: "" }, { name: "canonical[0].four_evicted", value: "4", kind: 2, unit: "" },
+        { name: "canonical[0].endpoint", value: "bsc-dataseed1.defibit.io", kind: 7, unit: "" }, { name: "canonical[0].failovers", value: "2", kind: 2, unit: "" }, { name: "canonical[0].stalls", value: "1", kind: 2, unit: "" },
+        { name: "canonical[0].confirm_endpoint", value: "bsc-rpc.publicnode.com", kind: 7, unit: "" }, { name: "canonical[0].confirm_state", value: "AGREED", kind: 7, unit: "" }, { name: "canonical[0].confirm_head", value: "100", kind: 2, unit: "" }, { name: "canonical[0].confirm_faults", value: "0", kind: 2, unit: "" },
         { name: "canonical[0].four_deployment", value: "MATCH at block 129994638", kind: 7, unit: "" }] : [])] });
     expect(runtimeView([status(10_000, false)], 11_000).view.canonical).toBeUndefined();
     const c = runtimeView([status(10_000, true)], 11_000).view.canonical;
@@ -126,6 +129,12 @@ describe("BSC source control", () => {
     // Phase E review L3: the Four drift guard's verdict.
     expect(c?.launches).toContain("Four deployment MATCH at block 129994638");
     expect(c?.join).toContain("full before block time 2");
+    // BSC3-062: a forgotten sighting is its own class, never a miss.
+    expect(c?.join).toContain("evicted (sighting forgotten, not evaluable) 1 · Four evicted 4");
+    // BSC3-036: the endpoint followed now and how often it failed over.
+    expect(c?.chain).toContain("endpoint bsc-dataseed1.defibit.io (failovers 2, stalled steps 1)");
+    // BSC3-056: the second source and whether it confirms the chain.
+    expect(c?.chain).toContain("second source bsc-rpc.publicnode.com AGREED (head 100, failed steps 0)");
     expect(runtimeView([status(10_000, true)], 20_000).view.canonical?.state).toBe("STALE");
   });
 

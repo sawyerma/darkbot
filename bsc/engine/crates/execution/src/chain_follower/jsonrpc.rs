@@ -97,6 +97,9 @@ pub(super) fn request(id: u64, call: Call) -> String {
         Call::Receipts(n) => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockReceipts","params":["0x{n:x}"]}}"#
         ),
+        Call::Header(n) => format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockByNumber","params":["0x{n:x}",false]}}"#
+        ),
         Call::TransactionCount { sender, block_hash } => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionCount","params":["0x{}",{{"blockHash":"0x{}"}}]}}"#,
             alloy_primitives::hex::encode(sender),
@@ -113,6 +116,42 @@ pub(crate) fn parse_quantity(body: &[u8], id: u64) -> Result<u64, RequestError> 
     }
 }
 
+/// BSC3-056: the answer to `eth_getBlockByNumber(number, false)`, its
+/// header; `None` for `null`. The transactions are not read.
+pub(super) fn parse_header(
+    body: &[u8],
+    id: u64,
+    number: u64,
+) -> Result<Option<Header>, RequestError> {
+    let block = match envelope(body, id)? {
+        Value::Null => return Ok(None),
+        Value::Object(block) => block,
+        _ => return Err(RequestError::Shape(Field::Result)),
+    };
+    let header = header_of(&block)?;
+    if header.number != number {
+        return Err(RequestError::Shape(Field::Number));
+    }
+    Ok(Some(header))
+}
+
+/// The header fields of a block object.
+fn header_of(block: &Map<String, Value>) -> Result<Header, RequestError> {
+    let timestamp_s = quantity(block, "timestamp", Field::Timestamp)?;
+    let ms = mix_hash_ms(fixed(block, "mixHash", Field::MixHash)?)
+        .ok_or(RequestError::Shape(Field::MixHash))?;
+    Ok(Header {
+        number: quantity(block, "number", Field::Number)?,
+        hash: fixed(block, "hash", Field::Hash)?,
+        parent_hash: fixed(block, "parentHash", Field::ParentHash)?,
+        timestamp_s,
+        block_ms: timestamp_s
+            .checked_mul(MS_PER_S)
+            .and_then(|t| t.checked_add(ms))
+            .ok_or(RequestError::Shape(Field::Timestamp))?,
+    })
+}
+
 /// The answer to `eth_getBlockByNumber(number, true)`; `None` for `null`.
 /// Every transaction must be a full object bound to this block at its
 /// position.
@@ -126,19 +165,7 @@ pub(super) fn parse_block(
         Value::Object(block) => block,
         _ => return Err(RequestError::Shape(Field::Result)),
     };
-    let timestamp_s = quantity(&block, "timestamp", Field::Timestamp)?;
-    let ms = mix_hash_ms(fixed(&block, "mixHash", Field::MixHash)?)
-        .ok_or(RequestError::Shape(Field::MixHash))?;
-    let header = Header {
-        number: quantity(&block, "number", Field::Number)?,
-        hash: fixed(&block, "hash", Field::Hash)?,
-        parent_hash: fixed(&block, "parentHash", Field::ParentHash)?,
-        timestamp_s,
-        block_ms: timestamp_s
-            .checked_mul(MS_PER_S)
-            .and_then(|t| t.checked_add(ms))
-            .ok_or(RequestError::Shape(Field::Timestamp))?,
-    };
+    let header = header_of(&block)?;
     if header.number != number {
         return Err(RequestError::Shape(Field::Number));
     }

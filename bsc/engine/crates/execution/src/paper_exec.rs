@@ -336,6 +336,10 @@ pub enum Refusal {
     /// 31.10. order: a BUY beyond the grant's positions, losses or BUY
     /// interval (exits go on).
     GrantLimit,
+    /// BSC3-056: the independent second source does not confirm the
+    /// followed chain now (stale, behind, another hash, no common height):
+    /// no BUY on it (exits go on).
+    Unconfirmed,
 }
 
 impl Refusal {
@@ -366,6 +370,7 @@ impl Refusal {
             Self::Unfunded => "UNFUNDED",
             Self::ExitStopped => "EXIT_STOPPED",
             Self::GrantLimit => "GRANT_LIMIT",
+            Self::Unconfirmed => "UNCONFIRMED",
         }
     }
 }

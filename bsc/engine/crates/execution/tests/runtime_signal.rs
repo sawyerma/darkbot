@@ -70,8 +70,10 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
         .unwrap();
     let status = base.join("bsc-runtime/status.dbrec");
     let started = Instant::now();
+    // What is asserted is the clean stop, not how fast a debug build starts:
+    // under a parallel gate its first status took over 10 s once.
     while !status.exists() {
-        assert!(started.elapsed() < Duration::from_secs(10), "no status");
+        assert!(started.elapsed() < Duration::from_secs(60), "no status");
         std::thread::sleep(Duration::from_millis(20));
     }
     let kill = Command::new("/bin/kill")

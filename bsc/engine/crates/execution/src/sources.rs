@@ -4945,6 +4945,53 @@ pub(crate) mod tests {
         (dir, s)
     }
 
+    /// Messplan §3b C02–C07 and the sub-combination: the isolated SIGN guard
+    /// over LAUNCHER, BUYER and SIGN passes for exactly one of the eight
+    /// settings and names every switch that is off; from all three ENABLED,
+    /// any one disabled again refuses it.
+    #[test]
+    fn the_sign_guard_holds_for_exactly_one_of_eight_settings() {
+        let ids = [
+            SwitchId::WalletLauncher,
+            SwitchId::WalletBuyer,
+            SwitchId::Sign,
+        ];
+        let named = |e: &str, id: SwitchId| e.contains(&format!("{} DISABLED", id.name()));
+        for bits in 0u8..8 {
+            let (dir, s) = session(&format!("lbs-{bits}"), "boot-1");
+            let mut generation = 0;
+            for (i, id) in ids.iter().enumerate() {
+                if bits & (1 << i) != 0 {
+                    s.request(&format!("on-{i}"), *id, Mode::Enabled, generation, 1)
+                        .unwrap();
+                    generation += 1;
+                }
+            }
+            match require_enabled(&dir, "boot-1", &ids) {
+                Ok(_) => assert_eq!(bits, 7),
+                Err(e) => {
+                    assert_ne!(bits, 7, "{e}");
+                    for (i, id) in ids.iter().enumerate() {
+                        assert_eq!(named(&e, *id), bits & (1 << i) == 0, "{bits:03b}: {e}");
+                    }
+                }
+            }
+            if bits == 7 {
+                for (i, id) in ids.iter().enumerate() {
+                    s.request(&format!("off-{i}"), *id, Mode::Disabled, generation, 1)
+                        .unwrap();
+                    let e = require_enabled(&dir, "boot-1", &ids).unwrap_err();
+                    assert!(named(&e, *id), "{e}");
+                    s.request(&format!("again-{i}"), *id, Mode::Enabled, generation + 1, 1)
+                        .unwrap();
+                    generation += 2;
+                    assert!(require_enabled(&dir, "boot-1", &ids).is_ok());
+                }
+            }
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     /// Plan 27.10.: LAUNCHER and BUYER are independent switches, DISABLED
     /// initially, taking only DISABLED or ENABLED; each records the request
     /// that set it.
@@ -5742,6 +5789,34 @@ pub(crate) mod tests {
             assert_eq!(
                 off.effective_live_now(ComponentId::ExecC3.into(), &ctx),
                 Effective::Blocked(reason)
+            );
+        }
+        // Messplan §3b C: the eight ARM/SEND/ATTEMPT settings, every other
+        // condition held: LIVE only with all three, else each one off named.
+        for bits in 0u8..8 {
+            let mut m = g.clone();
+            let mut want = Vec::new();
+            for (i, (id, reason)) in [
+                (SwitchId::Arm, ECON_ARM_DISABLED),
+                (SwitchId::Send, ECON_SEND_DISABLED),
+                (SwitchId::Attempt, ECON_ATTEMPT_DISABLED),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if bits & (1 << i) == 0 {
+                    m.set(id.into(), Mode::Disabled, by.clone());
+                    want.push(reason);
+                }
+            }
+            let mut got = m.live_blockers(&ctx);
+            got.sort_unstable();
+            want.sort_unstable();
+            assert_eq!(got, want, "{bits:03b}");
+            assert_eq!(
+                m.effective_live_now(ComponentId::ExecC3.into(), &ctx) == Effective::Live,
+                bits == 7,
+                "{bits:03b}"
             );
         }
         // The runtime not asked for LIVE, no grant.

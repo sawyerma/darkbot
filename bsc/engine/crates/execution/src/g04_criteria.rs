@@ -41,6 +41,9 @@ pub struct Criteria {
     pub continue_actionable_ppm: u64,
     pub continue_lead_p50_us: u64,
     pub stop_actionable_ppm: u64,
+    /// BSC3-032: the lead (µs) an actionable launch needs to count as
+    /// sendable before its block (reported per venue, deciding nothing).
+    pub sendable_lead_us: u64,
     /// SHA-256 of the file's bytes.
     pub sha256: [u8; 32],
 }
@@ -95,6 +98,7 @@ impl Criteria {
             continue_actionable_ppm: take("BSC_G04_CONTINUE_ACTIONABLE_PPM", 1, 1_000_000)?,
             continue_lead_p50_us: take("BSC_G04_CONTINUE_LEAD_P50_US", 0, 60_000_000)?,
             stop_actionable_ppm: take("BSC_G04_STOP_ACTIONABLE_PPM", 0, 1_000_000)?,
+            sendable_lead_us: take("BSC_G04_SENDABLE_LEAD_US", 0, 60_000_000)?,
             sha256: darkbot_bsc_record::sha256(bytes),
         };
         if let Some(k) = values.keys().next() {
@@ -216,6 +220,10 @@ pub struct VenueVerdict {
     pub min_launches: u64,
     pub verdict: &'static str,
     pub reasons: Vec<&'static str>,
+    /// BSC3-032: the actionable launches whose lead reaches the criteria's
+    /// sendable lead, and their share of the scope (ppm).
+    pub sendable: Option<u64>,
+    pub sendable_ppm: Option<u64>,
 }
 
 /// The campaign's verdict.
@@ -234,6 +242,8 @@ pub struct Evaluation {
     /// BSC3-049: the actionable launches each source of the rated census
     /// delivered first (the census's rows, rated with it).
     pub sources: Vec<(SourceId, u64)>,
+    /// BSC3-032: the sendable lead the venues are counted at.
+    pub sendable_lead_us: u64,
 }
 
 pub fn evaluate(
@@ -254,6 +264,7 @@ pub fn evaluate(
         venues: Vec::new(),
         precommit: precommit.cloned(),
         sources: census.first_full_before.clone(),
+        sendable_lead_us: criteria.sendable_lead_us,
     };
     if !criteria.confirmed {
         e.reasons.push("CRITERIA_PROPOSED");
@@ -324,6 +335,8 @@ pub fn evaluate(
             min_launches: criteria.min_launches[i],
             verdict: NOT_EVALUABLE,
             reasons: Vec::new(),
+            sendable: None,
+            sendable_ppm: None,
         };
         if !valid {
             row.reasons.push("CAMPAIGN_NOT_EVALUABLE");
@@ -334,6 +347,14 @@ pub fn evaluate(
             let lead = percentile(&v.leads_us, 500);
             row.share_ppm = Some(share);
             row.lead_p50_us = lead;
+            // BSC3-032: a separate quota, never relabelling the actionable.
+            let sendable = v
+                .leads_us
+                .iter()
+                .filter(|l| **l >= criteria.sendable_lead_us)
+                .count() as u64;
+            row.sendable = Some(sendable);
+            row.sendable_ppm = Some(sendable * 1_000_000 / v.scope);
             row.verdict = if share < criteria.stop_actionable_ppm {
                 row.reasons.push("ACTIONABLE_SHARE_BELOW_STOP");
                 STOP
@@ -385,7 +406,8 @@ impl Evaluation {
             .set(gv::PROVENANCE_OBSERVED_UNIX_MS, observed_unix_ms)
             .set(gv::VERDICT, self.verdict)
             .set(gv::CAMPAIGN_MS, self.campaign_ms)
-            .set(gv::COVERED_MS, self.covered_ms);
+            .set(gv::COVERED_MS, self.covered_ms)
+            .set(gv::SENDABLE_LEAD_US, self.sendable_lead_us);
         for r in &self.reasons {
             d.push(gv::REASONS, *r);
         }
@@ -419,6 +441,9 @@ impl Evaluation {
             if let Some(l) = v.lead_p50_us {
                 row.set(k::LEAD_P50_US, l);
             }
+            if let (Some(n), Some(ppm)) = (v.sendable, v.sendable_ppm) {
+                row.set(k::SENDABLE, n).set(k::SENDABLE_PPM, ppm);
+            }
             for r in &v.reasons {
                 row.push(k::REASONS, *r);
             }
@@ -451,7 +476,7 @@ impl Evaluation {
         }
         for v in &self.venues {
             s.push_str(&format!(
-                "  {} {}: connected {} scope {} actionable {} share_ppm {:?} lead_p50_us {:?} (min {}) [{}]\n",
+                "  {} {}: connected {} scope {} actionable {} share_ppm {:?} lead_p50_us {:?} (min {}) sendable at {} us {:?} ppm {:?} [{}]\n",
                 v.venue,
                 v.verdict,
                 v.connected,
@@ -460,6 +485,9 @@ impl Evaluation {
                 v.share_ppm,
                 v.lead_p50_us,
                 v.min_launches,
+                self.sendable_lead_us,
+                v.sendable,
+                v.sendable_ppm,
                 v.reasons.join(",")
             ));
         }
@@ -476,7 +504,7 @@ mod tests {
         BSC_G04_MIN_COVERED_PPM=800000\nBSC_G04_MIN_LAUNCHES_FLAP=1000\n\
         BSC_G04_MIN_LAUNCHES_CLASSIC=1000\nBSC_G04_MIN_LAUNCHES_OPENFOUR=100\n\
         BSC_G04_CONTINUE_ACTIONABLE_PPM=300000\nBSC_G04_CONTINUE_LEAD_P50_US=100000\n\
-        BSC_G04_STOP_ACTIONABLE_PPM=50000\n";
+        BSC_G04_STOP_ACTIONABLE_PPM=50000\nBSC_G04_SENDABLE_LEAD_US=1000\n";
 
     /// The campaign's first journal started at START; NOW is after its
     /// seven days.
@@ -515,6 +543,58 @@ mod tests {
             actionable,
             leads_us: vec![lead_us; actionable as usize],
         }
+    }
+
+    /// BSC3-032: the sendable quota is the actionable launches whose lead
+    /// reaches the criteria's sendable lead (at 0 every actionable one, at
+    /// 1 µs one with a lead of 0 is not, at 100 ms only those beyond),
+    /// reported beside the actionable share, which it never changes; the
+    /// verdict records the lead it was counted at.
+    #[test]
+    fn the_sendable_quota_is_separate_and_takes_its_own_lead() {
+        let leads = [0, 1, 999, 1_000, 99_999, 100_000, 250_000];
+        let flap = VenueInputs {
+            connected: 1_000,
+            scope: 1_000,
+            actionable: leads.len() as u64,
+            leads_us: leads.to_vec(),
+        };
+        for (lead, sendable) in [(0, 7), (1, 6), (1_000, 4), (100_000, 2), (60_000_000, 0)] {
+            let c = Criteria {
+                sendable_lead_us: lead,
+                ..confirmed()
+            };
+            let e = rate(
+                &c,
+                &census(
+                    7 * DAY_MS,
+                    [flap.clone(), inputs(1_000, 0, 0), inputs(100, 0, 0)],
+                ),
+            );
+            let row = &e.venues[0];
+            assert_eq!(
+                (row.sendable, row.share_ppm),
+                (Some(sendable), Some(7_000)),
+                "{lead}"
+            );
+            assert_eq!(row.sendable_ppm, Some(sendable * 1_000), "{lead}");
+            assert_eq!(e.sendable_lead_us, lead);
+            let r = darkbot_bsc_record::schema::bsc_census::verdict::decode_verdict(
+                &e.encode(1).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(r.u64(gv::SENDABLE_LEAD_US).unwrap(), lead);
+        }
+        // Missing in a criteria file: refused.
+        let without = PROPOSED.replace("BSC_G04_SENDABLE_LEAD_US=1000\n", "");
+        assert!(
+            Criteria::parse(without.as_bytes())
+                .unwrap_err()
+                .contains("BSC_G04_SENDABLE_LEAD_US")
+        );
+        // The repository's proposal parses.
+        let file = include_bytes!("../../../../config/g04_criteria.env");
+        assert_eq!(Criteria::parse(file).unwrap().sendable_lead_us, 1_000);
     }
 
     fn census(covered_ms: u64, venues: [VenueInputs; 3]) -> Census {

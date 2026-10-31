@@ -78,6 +78,9 @@ pub mod wss;
 /// The one owner of first sightings across the sources (C1, plan §5a.3).
 #[cfg(feature = "runtime")]
 pub mod ingress;
+/// BSC3-056: the followed chain against an independent second source.
+#[cfg(feature = "runtime")]
+pub mod canonical_confirm;
 /// Canonical launches joined with the pending sightings (G0.4 denominator).
 #[cfg(feature = "runtime")]
 pub mod canonical_join;

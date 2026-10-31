@@ -742,6 +742,8 @@ pub(crate) mod tests {
             backoff_max: Duration::from_millis(1_000),
             tx_attempts: 1,
             max_launch_calldata: 16_384,
+            failover_after: 2,
+            stall_after: Duration::from_secs(60),
         }
     }
 

@@ -119,6 +119,9 @@ pub struct Census {
     pub after: u64,
     pub missed: u64,
     pub clock_unknown: u64,
+    /// BSC3-062: the sighting may have been forgotten before the join (not
+    /// evaluable, never a miss).
+    pub evicted: u64,
     /// Launches (any venue) whose transaction type/form is not rebuilt, and
     /// those whose provider answers were refused every time.
     pub tx_unverifiable: u64,
@@ -140,6 +143,7 @@ pub struct Census {
     pub four_after: u64,
     pub four_missed: u64,
     pub four_clock_unknown: u64,
+    pub four_evicted: u64,
     /// Later sightings of a launch by another source (Phase F §7, the
     /// first-seen spread across sources) and their lag behind the first.
     pub later_sightings: u64,
@@ -292,7 +296,7 @@ pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     }
     let buys_known = flag(p[103])?;
     let class = p[108];
-    if !(1..=5).contains(&class) {
+    if !(1..=6).contains(&class) {
         return None;
     }
     let source = match p[109] {
@@ -976,7 +980,10 @@ fn census_of(
             }
             out.tx_unverifiable += u64::from(l.tx_unverifiable);
             out.tx_answer_refused += u64::from(l.tx_answer_refused);
-            if r.connectivity.any_connected_at(l.seen_ns) {
+            // BSC3-062: a launch whose sighting may have been forgotten
+            // before its join (class 6) is not evaluable: in no criteria
+            // input, neither the share's numerator nor its denominator.
+            if r.connectivity.any_connected_at(l.seen_ns) && l.class != 6 {
                 let (i, scope, token) = match l.venue {
                     Venue::Flap => (0, l.c1_scope, true),
                     venue => (
@@ -1036,7 +1043,8 @@ fn census_of(
                     2 => &mut out.four_hash_only_before,
                     3 => &mut out.four_after,
                     4 => &mut out.four_missed,
-                    _ => &mut out.four_clock_unknown,
+                    5 => &mut out.four_clock_unknown,
+                    _ => &mut out.four_evicted,
                 } += 1;
                 continue;
             }
@@ -1064,7 +1072,8 @@ fn census_of(
                 2 => out.hash_only_before += 1,
                 3 => out.after += 1,
                 4 => out.missed += 1,
-                _ => out.clock_unknown += 1,
+                5 => out.clock_unknown += 1,
+                _ => out.evicted += 1,
             }
             match l.external_buys {
                 Some(n) => {
@@ -1170,6 +1179,8 @@ impl Census {
             .set(cs::COVERED_MS, self.covered_ms)
             .set(cs::OBSERVABLE_MS, self.observable_ms)
             .set(cs::CREATOR_BUYS_AFTER, self.creator_buys_after)
+            .set(cs::EVICTED, self.evicted)
+            .set(cs::FOUR_EVICTED, self.four_evicted)
             .set(cs::FLAP_LAUNCHES, self.flap_launches)
             .set(cs::FOUR_LAUNCHES, self.four_launches)
             .set(cs::FOUR_DERIVED, self.four_derived)
@@ -1260,9 +1271,9 @@ impl Census {
         let mut s = format!(
             "covered_ms={} windows={} flap_launches={} c1_scope={} tx_unverifiable={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={} between_windows={} unparsed={}\n\
              four pre-execution token: derived={} candidate={} no_derivation={} mismatch={} not_recognized={} unrecorded={}\n\
-             four before the block time: full={} hash_only={} after={} missed={} clock_unknown={}\n\
+             four before the block time: full={} hash_only={} after={} missed={} clock_unknown={} evicted={}\n\
              later sightings={} lag_us p50={} p95={} max={}\n\
-             before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
+             before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={} evicted={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
              contested={} external_buys={} (creator later {}) buys_unknown={} criteria={}\n\
@@ -1290,6 +1301,7 @@ impl Census {
             self.four_after,
             self.four_missed,
             self.four_clock_unknown,
+            self.four_evicted,
             self.later_sightings,
             opt(self.later_lag_p50_us),
             opt(self.later_lag_p95_us),
@@ -1300,6 +1312,7 @@ impl Census {
             self.after,
             self.missed,
             self.clock_unknown,
+            self.evicted,
             opt(self.lead_p50_us),
             opt(self.lead_p95_us),
             opt(self.lead_p99_us),
@@ -2777,6 +2790,15 @@ mod tests {
                 Visibility::Missed,
                 100,
             ),
+            // BSC3-062: in the scope, its sighting maybe forgotten before
+            // the join: not evaluable, in no criteria input, never missed.
+            joined(
+                Venue::Flap,
+                5,
+                FourToken::NotApplicable,
+                Visibility::Evicted,
+                100,
+            ),
             // Four Classic: only a candidate token, never actionable.
             joined(Venue::Four, 6, FourToken::Candidate, full(6_000), 100),
             // OpenFour: derived (actionable) and not recognized (no scope).
@@ -2823,7 +2845,8 @@ mod tests {
                 (2, 1, 1, vec![7_000]),
             ]
         );
-        assert_eq!((c.flap_launches, c.outage_launches), (4, 1));
+        assert_eq!((c.flap_launches, c.outage_launches), (5, 1));
+        assert_eq!((c.evicted, c.missed), (1, 2));
         fs::remove_dir_all(&dir).unwrap();
     }
 

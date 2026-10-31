@@ -190,17 +190,58 @@ pub struct RuntimeConfig {
 /// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalConfig {
-    /// `https://` without credentials.
+    /// `https://` without credentials: the primary.
     pub endpoint: String,
+    /// BSC3-056: the independent second source whose headers confirm the
+    /// followed chain before a LIVE BUY (`BSC_CANONICAL_CONFIRM_*`).
+    pub confirm: Option<ConfirmConfig>,
+    /// BSC3-036: the endpoints asked in this order after the primary's
+    /// `BSC_CANONICAL_FAILOVER_AFTER` failed steps
+    /// (`BSC_CANONICAL_RPC_FALLBACK`, comma-separated, may be empty).
+    pub fallbacks: Vec<String>,
     pub limits: FollowerLimits,
     /// A launch is joined this long after its block was seen, so sightings
     /// still queued behind the block count.
     pub join_delay_ms: u64,
+    /// BSC3-062: how long before its block a launch's first sighting can
+    /// be (`BSC_CANONICAL_JOIN_HORIZON_MS`): a launch without a remembered
+    /// sighting is `Evicted`, not missed, while a hash first seen within it
+    /// was forgotten for good.
+    pub join_horizon_ms: u64,
     /// The C2 chain-state owner's bounds (it needs the follower).
     pub state: StateConfig,
     /// Phase E review L3: how often the Four.meme drift guard reads the
     /// live deployment against the freeze (`BSC_CANONICAL_FOUR_PROBE_MS`).
     pub four_probe_ms: u64,
+}
+
+/// BSC3-056: the second source and how close it must be.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfirmConfig {
+    /// `https://`, of a host none of the followed endpoints has.
+    pub endpoint: String,
+    /// Its newest header at most this old (wall clock, ms).
+    pub max_age_ms: u64,
+    /// Its newest header at most this many blocks below the followed head.
+    pub max_lag_blocks: u64,
+}
+
+impl CanonicalConfig {
+    /// The primary and the fallbacks, in the order the follower asks them.
+    pub fn endpoints(&self) -> Vec<String> {
+        std::iter::once(self.endpoint.clone())
+            .chain(self.fallbacks.iter().cloned())
+            .collect()
+    }
+
+    /// The endpoint at `index` in that order (the follower's active one),
+    /// the primary for any other index.
+    pub fn endpoint_at(&self, index: usize) -> &str {
+        index
+            .checked_sub(1)
+            .and_then(|i| self.fallbacks.get(i))
+            .map_or(self.endpoint.as_str(), String::as_str)
+    }
 }
 
 fn bounded(name: &str, value: &str, min: u64, max: u64) -> Result<u64, String> {
@@ -239,6 +280,8 @@ impl RuntimeConfig {
             }
         }
         let canonical_rpc = values.remove("BSC_CANONICAL_RPC");
+        let canonical_fallback = values.remove("BSC_CANONICAL_RPC_FALLBACK");
+        let canonical_confirm = values.remove("BSC_CANONICAL_CONFIRM_RPC");
         let watched = values.remove("BSC_STATE_WATCHED");
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
@@ -300,6 +343,55 @@ impl RuntimeConfig {
                     backoff_max: ms(take("BSC_CANONICAL_BACKOFF_MAX_MS", 1_000, 3_600_000)?),
                     tx_attempts: take("BSC_CANONICAL_TX_ATTEMPTS", 1, 100)? as u32,
                     max_launch_calldata,
+                    failover_after: take("BSC_CANONICAL_FAILOVER_AFTER", 1, 100)? as u32,
+                    stall_after: ms(take("BSC_CANONICAL_STALL_MS", 1_000, 600_000)?),
+                };
+                // BSC3-036: each fallback by the follower's own rule, none
+                // the primary or repeated.
+                // Never a path in an error (it may hold a provider's key).
+                let key_of = |e: &str| crate::chain_follower::endpoint_key(e);
+                let mut fallbacks: Vec<String> = Vec::new();
+                let mut keys =
+                    vec![key_of(url).map_err(|e| format!("BSC_CANONICAL_RPC is refused: {e:?}"))?];
+                for (i, f) in canonical_fallback
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|f| !f.is_empty())
+                    .enumerate()
+                {
+                    let key = key_of(f).map_err(|e| {
+                        format!(
+                            "BSC_CANONICAL_RPC_FALLBACK entry {} is refused: {e:?}",
+                            i + 1
+                        )
+                    })?;
+                    if keys.contains(&key) {
+                        return Err(format!("BSC_CANONICAL_RPC_FALLBACK names {} twice", key.0));
+                    }
+                    keys.push(key);
+                    fallbacks.push(f.to_string());
+                }
+                // BSC3-056: independent of every followed endpoint (another
+                // host), or none.
+                let max_age_ms = take("BSC_CANONICAL_CONFIRM_MAX_AGE_MS", 100, 600_000)?;
+                let max_lag_blocks = take("BSC_CANONICAL_CONFIRM_MAX_LAG_BLOCKS", 0, 64)?;
+                let confirm = match canonical_confirm.map(str::trim).filter(|c| !c.is_empty()) {
+                    None => None,
+                    Some(c) => {
+                        let (host, _) = key_of(c)
+                            .map_err(|e| format!("BSC_CANONICAL_CONFIRM_RPC is refused: {e:?}"))?;
+                        if keys.iter().any(|(h, _)| *h == host) {
+                            return Err(format!(
+                                "BSC_CANONICAL_CONFIRM_RPC {host} is a followed endpoint's host: no independent second source"
+                            ));
+                        }
+                        Some(ConfirmConfig {
+                            endpoint: c.to_string(),
+                            max_age_ms,
+                            max_lag_blocks,
+                        })
+                    }
                 };
                 limits
                     .validate()
@@ -328,8 +420,11 @@ impl RuntimeConfig {
                 state.validate()?;
                 Some(CanonicalConfig {
                     endpoint: url.to_string(),
+                    confirm,
+                    fallbacks,
                     limits,
                     join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
+                    join_horizon_ms: take("BSC_CANONICAL_JOIN_HORIZON_MS", 1_000, 86_400_000)?,
                     four_probe_ms: take("BSC_CANONICAL_FOUR_PROBE_MS", 60_000, 86_400_000)?,
                     state,
                 })
@@ -459,6 +554,11 @@ impl RuntimeConfig {
                     .is_some_and(|c| c.state.watched.contains(&buyer))
                 {
                     return Err("BSC_LIVE_BUYER must be one of BSC_STATE_WATCHED (C2)".into());
+                }
+                // BSC3-056: no LIVE path without an independent second
+                // source (its BUY gate is never silently off).
+                if canonical.as_ref().is_none_or(|c| c.confirm.is_none()) {
+                    return Err("BSC_LIVE_* needs BSC_CANONICAL_CONFIRM_RPC, an independent second source (BSC3-056)".into());
                 }
                 let token = live_token.map(ExecSetup::expand_home).transpose()?;
                 Some(live::LiveSetup {
@@ -819,6 +919,9 @@ fn apply_canonical(
         }
     }
     c.event(at, event, journal);
+    // BSC3-056: the verdict including this event (a block's header), before
+    // a BUY is planned on it.
+    c.refresh_confirmation(live, wall_or_expired(observed_now()));
     if let Some(block) = complete {
         strategy_to_paper(c, exec, live, owner, clock, journal, block);
     }
@@ -1007,7 +1110,7 @@ fn spawn_follower(
                 every_blocks: config.state.nonce_fact_blocks,
             };
             if let Err(e) = run_follower(
-                &config.endpoint,
+                &config.endpoints(),
                 &config.limits,
                 &resume,
                 &watch,
@@ -1018,6 +1121,67 @@ fn spawn_follower(
             }
         })
         .map_err(|e| format!("spawn canonical follower: {e}"))?;
+    Ok(Follower { stop, handle })
+}
+
+/// Which paths the effective modes let run (plan v9 §2.3/§2.5, Phase H;
+/// the §3b B cases).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Gates {
+    /// Flap launches reach the C3 PAPER path and Strategy C only while the
+    /// Flap venue is effective SHADOW (or LIVE).
+    pub flap_admitted: bool,
+    /// BSC_STRATEGY_C runs (SHADOW or LIVE) under a runtime mode of SHADOW,
+    /// PAPER or LIVE; switched off, its ledger ends.
+    pub strategy_on: bool,
+    /// The C3 PAPER path: runtime mode PAPER and BSC_EXEC SHADOW (its own
+    /// effective mode, as the owner stores it).
+    pub c3_wanted: bool,
+    /// The C2 chain-state owner.
+    pub c2_on: bool,
+}
+
+/// [`Gates`] of the effective modes `eff` and BSC_EXEC's stored effective
+/// mode `exec`.
+pub(crate) fn gates(eff: impl Fn(crate::sources::Entity) -> Effective, exec: Effective) -> Gates {
+    let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
+    let flap_admitted = running(eff(VenueId::Flap.into()));
+    let runtime_mode = eff(crate::sources::Entity::Runtime);
+    Gates {
+        flap_admitted,
+        strategy_on: flap_admitted
+            && matches!(
+                runtime_mode,
+                Effective::Shadow | Effective::Paper | Effective::Live
+            )
+            && running(eff(ComponentId::StrategyC.into())),
+        c3_wanted: flap_admitted && runtime_mode == Effective::Paper && exec == Effective::Shadow,
+        c2_on: running(eff(ComponentId::StateC2.into())),
+    }
+}
+
+/// BSC3-056: the second source's header thread (its events to `tx`).
+fn spawn_confirmer(
+    config: &CanonicalConfig,
+    confirm: &ConfirmConfig,
+    tx: SyncSender<crate::chain_follower::ConfirmEvent>,
+) -> Result<Follower, String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let (endpoint, limits) = (confirm.endpoint.clone(), config.limits);
+    let handle = thread::Builder::new()
+        .name("bsc-confirm".into())
+        .spawn(move || {
+            let mut sink = |event| {
+                let _ = tx.send(event);
+            };
+            if let Err(e) =
+                crate::chain_follower::run_confirmer(&endpoint, &limits, &flag, &mut sink)
+            {
+                eprintln!("second source refused its configuration: {e:?}");
+            }
+        })
+        .map_err(|e| format!("spawn second source: {e}"))?;
     Ok(Follower { stop, handle })
 }
 
@@ -1072,7 +1236,23 @@ struct Canonical {
     resyncs: u64,
     rpc_errors: u64,
     rate_limited: u64,
+    /// BSC3-036: the hosts of the configured endpoints (never a path),
+    /// the one followed now, the failovers and the stalled steps.
+    hosts: Vec<String>,
+    active: usize,
+    failovers: u64,
+    stalls: u64,
+    /// BSC3-056: the followed chain's and the second source's recent
+    /// headers, the second source's host and bounds, its failed steps.
+    ours: crate::canonical_confirm::Ring,
+    second: crate::canonical_confirm::Ring,
+    confirm: Option<(String, ConfirmConfig)>,
+    confirm_faults: u64,
+    /// The second source's thread's events (set when it runs).
+    confirm_rx: Option<std::sync::mpsc::Receiver<crate::chain_follower::ConfirmEvent>>,
     ledger: Ledger,
+    /// BSC3-062: [`CanonicalConfig::join_horizon_ms`] in µs.
+    join_horizon_us: u64,
 }
 
 impl Canonical {
@@ -1105,10 +1285,33 @@ impl Canonical {
             resyncs: 0,
             rpc_errors: 0,
             rate_limited: 0,
+            hosts: config
+                .endpoints()
+                .iter()
+                .map(|e| crate::chain_follower::endpoint_host(e).unwrap_or_default())
+                .collect(),
+            active: 0,
+            failovers: 0,
+            stalls: 0,
+            ours: crate::canonical_confirm::Ring::new(
+                usize::try_from(config.limits.reorg_depth.saturating_add(1)).unwrap_or(usize::MAX),
+            ),
+            second: crate::canonical_confirm::Ring::new(
+                usize::try_from(config.limits.reorg_depth.saturating_add(1)).unwrap_or(usize::MAX),
+            ),
+            confirm: config.confirm.as_ref().map(|c| {
+                (
+                    crate::chain_follower::endpoint_host(&c.endpoint).unwrap_or_default(),
+                    c.clone(),
+                )
+            }),
+            confirm_faults: 0,
+            confirm_rx: None,
             ledger: Ledger::new(
                 config.join_delay_ms.saturating_mul(1_000_000),
                 config.limits.reorg_depth,
             ),
+            join_horizon_us: config.join_horizon_ms.saturating_mul(1_000),
         }
     }
 
@@ -1146,7 +1349,64 @@ impl Canonical {
         }
     }
 
+    /// BSC3-056: a header or fault of the second source.
+    fn confirm_event(&mut self, event: crate::chain_follower::ConfirmEvent) {
+        match event {
+            crate::chain_follower::ConfirmEvent::Header {
+                number,
+                hash,
+                parent_hash,
+                block_ms,
+            } => self.second.push(number, hash, parent_hash, block_ms),
+            crate::chain_follower::ConfirmEvent::Fault(_) => self.confirm_faults += 1,
+        }
+    }
+
+    /// BSC3-056: whether the second source confirms the followed chain at
+    /// `now_ms`, with the lag it is judged under; `None` without a second
+    /// source.
+    fn confirmation(&self, now_ms: u64) -> Option<crate::canonical_confirm::Confirmation> {
+        self.confirm
+            .as_ref()
+            .map(|(_, c)| crate::canonical_confirm::Confirmation {
+                verdict: crate::canonical_confirm::verdict(
+                    &self.ours,
+                    &self.second,
+                    now_ms,
+                    c.max_age_ms,
+                    c.max_lag_blocks,
+                ),
+                max_lag_blocks: c.max_lag_blocks,
+            })
+    }
+
+    /// BSC3-056: the second source's queued headers, then the verdict at
+    /// `now_ms` handed to the LIVE path: before a block's BUY is planned
+    /// (each canonical event) and every pass.
+    fn refresh_confirmation(&mut self, live: &mut Option<LiveRuntime>, now_ms: u64) {
+        while let Some(event) = self.confirm_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.confirm_event(event);
+        }
+        if let Some(l) = live.as_mut() {
+            l.set_confirmation(self.confirmation(now_ms));
+        }
+    }
+
     fn event(&mut self, at: u64, event: CanonicalEvent, journal: &mut RuntimeJournal) {
+        // BSC3-056: the followed chain's recent headers, before the window
+        // too (a LIVE BUY compares at the head).
+        match &event {
+            CanonicalEvent::Block {
+                number,
+                hash,
+                parent_hash,
+                timestamp_ms,
+                ..
+            } => self.ours.push(*number, *hash, *parent_hash, *timestamp_ms),
+            CanonicalEvent::Reorg { orphaned, .. }
+            | CanonicalEvent::ReorgTooDeep { orphaned, .. } => self.ours.orphan(orphaned),
+            _ => {}
+        }
         match event {
             CanonicalEvent::Block {
                 number,
@@ -1369,6 +1629,14 @@ impl Canonical {
             CanonicalEvent::NonceFact { .. } => {}
             // Phase I: the runtime acts on the complete block (strategy).
             CanonicalEvent::BlockComplete { .. } => {}
+            CanonicalEvent::Failover { to, .. } => {
+                self.active = to;
+                self.failovers += 1;
+            }
+            CanonicalEvent::Fault(FollowerFault::Stalled { .. }) => {
+                self.stalls += 1;
+                self.state = "STALLED";
+            }
             CanonicalEvent::Fault(fault) => {
                 self.rpc_errors += 1;
                 let limited = matches!(
@@ -1387,7 +1655,14 @@ impl Canonical {
     /// Joins the launches due at `now` (all of them with `u64::MAX`).
     fn join(&mut self, now: u64, core: &IngressCore, journal: &mut RuntimeJournal) {
         let head = self.head.map_or(0, |(n, _)| n);
-        for j in self.ledger.join_due(now, head, |h| core.sighting(h)) {
+        let horizon_us = self.join_horizon_us;
+        let forgotten = |h: &[u8; 32], block_ms: u64| {
+            core.maybe_forgotten(h, block_ms.saturating_mul(1_000).saturating_sub(horizon_us))
+        };
+        for j in self
+            .ledger
+            .join_due(now, head, |h| core.sighting(h), forgotten)
+        {
             journal.record(
                 RecordKind::Canonical,
                 j.launch.block_seen_ns,
@@ -1406,6 +1681,26 @@ impl Canonical {
             .set(e::RESYNCS, self.resyncs)
             .set(e::RPC_ERRORS, self.rpc_errors)
             .set(e::RATE_LIMITED, self.rate_limited)
+            .set(
+                e::ENDPOINT,
+                self.hosts.get(self.active).cloned().unwrap_or_default(),
+            )
+            .set(e::FAILOVERS, self.failovers)
+            .set(e::STALLS, self.stalls)
+            .set_opt(
+                e::CONFIRM_ENDPOINT,
+                self.confirm.as_ref().map(|(host, _)| host.clone()),
+            )
+            .set_opt(
+                e::CONFIRM_HEAD,
+                self.confirm.as_ref().and(self.second.head()),
+            )
+            .set_opt(
+                e::CONFIRM_STATE,
+                self.confirmation(wall_or_expired(observed_now()))
+                    .map(|c| c.verdict.name()),
+            )
+            .set(e::CONFIRM_FAULTS, self.confirm_faults)
             .set(e::FLAP_LAUNCHES, c.flap_launches)
             .set(e::FOUR_LAUNCHES, c.four_launches)
             .set(e::FOUR_PENDING_DECODED, c.four_pending_decoded)
@@ -1416,6 +1711,7 @@ impl Canonical {
             .set(e::FOUR_SEEN_HASH_ONLY_BEFORE, c.four_seen_hash_only_before)
             .set(e::FOUR_SEEN_AFTER, c.four_seen_after)
             .set(e::FOUR_MISSED, c.four_missed)
+            .set(e::FOUR_EVICTED, c.four_evicted)
             .set(e::FOUR_CLOCK_UNKNOWN, c.four_clock_unknown)
             .set(e::LAUNCH_HEAD_MISSING, self.launch_head_missing)
             .set(e::FOUR_ACTIONABLE, c.four_actionable)
@@ -1425,6 +1721,7 @@ impl Canonical {
             .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
             .set(e::SEEN_AFTER, c.seen_after)
             .set(e::MISSED, c.missed)
+            .set(e::EVICTED, c.evicted)
             .set(e::EXTERNAL_BUYS, c.external_buys)
             .set(e::BUYS_UNKNOWN, c.buys_unknown)
             .set(e::CLOCK_UNKNOWN, c.clock_unknown)
@@ -2034,6 +2331,22 @@ pub fn run(
             None
         }
     };
+    // BSC3-056: the second source's headers, on their own thread.
+    let (confirm_tx, confirm_rx) =
+        sync_channel::<crate::chain_follower::ConfirmEvent>(config.queue_events);
+    let mut confirmer = match canonical_config
+        .as_ref()
+        .and_then(|c| c.confirm.as_ref().map(|k| (c, k)))
+    {
+        Some((c, k)) => Some(spawn_confirmer(c, k, confirm_tx)?),
+        None => {
+            drop(confirm_tx);
+            None
+        }
+    };
+    if let Some(c) = canonical.as_mut() {
+        c.confirm_rx = Some(confirm_rx);
+    }
     let mut next_checkpoint = Instant::now()
         + Duration::from_millis(
             canonical_config
@@ -2090,23 +2403,12 @@ pub fn run(
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
                 let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
                 let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
-                // Plan v9 §2.3: Flap launches reach the C3 PAPER path and
-                // Strategy C only while the Flap venue is effective SHADOW
-                // (or LIVE).
-                let flap_admitted = running(eff(VenueId::Flap.into()));
-                // Plan v9 §2.5: the global runtime mode bounds the components:
-                // SHADOW lets the strategy ledger run, PAPER also the C3 path,
-                // LIVE the LIVE path.
-                let runtime_mode = eff(crate::sources::Entity::Runtime);
-                // Phase H: BSC_STRATEGY_C runs (SHADOW or LIVE) or not;
-                // switched off, its ledger ends.
-                let strategy_on = flap_admitted
-                    && matches!(
-                        runtime_mode,
-                        Effective::Shadow | Effective::Paper | Effective::Live
-                    )
-                    && running(eff(ComponentId::StrategyC.into()));
-                let c2_on = running(eff(ComponentId::StateC2.into()));
+                let Gates {
+                    flap_admitted: _,
+                    strategy_on,
+                    c3_wanted,
+                    c2_on,
+                } = gates(eff, generation.component(ComponentId::ExecC3).effective);
                 for source in SourceId::ALL {
                     source_on[index(source)] = running(eff(source.into()));
                 }
@@ -2154,19 +2456,20 @@ pub fn run(
                         w.write_now(p, b, replace)
                     })?;
                 }
+                let active_endpoint = canonical.as_ref().map_or(0, |c| c.active);
                 if let Some(x) = exec.as_mut() {
-                    let wanted = flap_admitted
-                        && runtime_mode == Effective::Paper
-                        && generation.component(ComponentId::ExecC3).effective == Effective::Shadow;
+                    let wanted = c3_wanted;
                     let follower = canonical_config
                         .as_ref()
-                        .map(|c| (c.endpoint.as_str(), &c.limits));
+                        // BSC3-036: the endpoint the follower follows now.
+                        .map(|c| (c.endpoint_at(active_endpoint), &c.limits));
                     x.tick(wanted, owner.as_ref(), follower, started_ms);
                 }
                 if let Some(l) = live.as_mut() {
                     let follower = canonical_config
                         .as_ref()
-                        .map(|c| (c.endpoint.as_str(), &c.limits));
+                        // BSC3-036: the endpoint the follower follows now.
+                        .map(|c| (c.endpoint_at(active_endpoint), &c.limits));
                     // BSC3-051: the providers' answers first; a connection
                     // the maintenance would give up may hold one.
                     l.poll_responses(&FnClock {
@@ -2430,6 +2733,14 @@ pub fn run(
                     event,
                 );
             }
+            // BSC3-056: the second source's headers, then whether it
+            // confirms the followed chain now (the LIVE BUY gate; also
+            // before each block's BUY, apply_canonical).
+            c.refresh_confirmation(&mut live, wall_or_expired(observed_now()));
+            if stopping && let Some(f) = confirmer.take() {
+                f.stop.store(true, Ordering::Release);
+                let _ = f.handle.join();
+            }
             let now = if stopping { u64::MAX } else { clock.now_ns() };
             c.join(now, &core, &mut journal);
             if stopping && c.state != "STOPPED" {
@@ -2589,7 +2900,7 @@ pub fn run(
                 );
             }
             if four_job.is_none() && Instant::now() >= next_four && !stopping {
-                let (endpoint, limits) = (cc.endpoint.clone(), cc.limits);
+                let (endpoint, limits) = (cc.endpoint_at(c.active).to_string(), cc.limits);
                 four_job = std::thread::Builder::new()
                     .name("bsc-four-probe".into())
                     .spawn(move || {
@@ -2831,6 +3142,252 @@ mod tests {
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
+        // BSC3-056: a LIVE path without an independent second source.
+        let no_confirm = format!("{watched}{}", keys("BUILDERS")).replace(
+            "BSC_CANONICAL_CONFIRM_RPC=https://bsc-rpc.publicnode.com\n",
+            "BSC_CANONICAL_CONFIRM_RPC=\n",
+        );
+        let e = RuntimeConfig::parse(&no_confirm).unwrap_err();
+        assert!(e.contains("BSC_CANONICAL_CONFIRM_RPC"), "{e}");
+    }
+
+    /// Messplan §3b B (offline, at the reconcile's gate): which paths the
+    /// effective modes let run. Not named components and venues are OFF; a
+    /// LIVE request without a grant is BLOCKED.
+    #[test]
+    fn the_runtime_mode_bounds_the_components_as_the_plan_says() {
+        use crate::sources::Entity;
+        use Effective::{Blocked, Live, Off, Paper, Shadow};
+        #[derive(Clone, Copy)]
+        struct Modes {
+            runtime: Effective,
+            flap: Effective,
+            c2: Effective,
+            exec: Effective,
+            strategy: Effective,
+        }
+        let off = Modes {
+            runtime: Off,
+            flap: Off,
+            c2: Off,
+            exec: Off,
+            strategy: Off,
+        };
+        let run = |m: Modes| {
+            gates(
+                |e| match e {
+                    Entity::Runtime => m.runtime,
+                    Entity::Venue(VenueId::Flap) => m.flap,
+                    Entity::Component(ComponentId::StateC2) => m.c2,
+                    Entity::Component(ComponentId::StrategyC) => m.strategy,
+                    Entity::Component(ComponentId::ExecC3) => m.exec,
+                    _ => Off,
+                },
+                m.exec,
+            )
+        };
+        // (flap admitted, strategy, C3, C2)
+        let g = |m: Modes| {
+            let g = run(m);
+            (g.flap_admitted, g.strategy_on, g.c3_wanted, g.c2_on)
+        };
+        let blocked = Blocked("ECONOMIC_LIVE_DISABLED");
+        let cases = [
+            // B01: everything OFF.
+            ("B01", off, (false, false, false, false)),
+            // B02: runtime OFF, C2 SHADOW (PublicNode SHADOW: a source).
+            (
+                "B02",
+                Modes { c2: Shadow, ..off },
+                (false, false, false, true),
+            ),
+            // B03: runtime SHADOW, Flap SHADOW, Strategy SHADOW: the ledger.
+            (
+                "B03",
+                Modes {
+                    runtime: Shadow,
+                    flap: Shadow,
+                    strategy: Shadow,
+                    ..off
+                },
+                (true, true, false, false),
+            ),
+            // B04: runtime SHADOW, Flap, EXEC, C2 SHADOW: no C3 hand-off.
+            (
+                "B04",
+                Modes {
+                    runtime: Shadow,
+                    flap: Shadow,
+                    exec: Shadow,
+                    c2: Shadow,
+                    ..off
+                },
+                (true, false, false, true),
+            ),
+            // B05: runtime PAPER, Flap, EXEC, C2 SHADOW, Strategy OFF: C3.
+            (
+                "B05",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    exec: Shadow,
+                    c2: Shadow,
+                    ..off
+                },
+                (true, false, true, true),
+            ),
+            // B06: runtime PAPER, Flap, Strategy SHADOW, EXEC OFF.
+            (
+                "B06",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    strategy: Shadow,
+                    ..off
+                },
+                (true, true, false, false),
+            ),
+            // B07: runtime PAPER, Flap, C2, EXEC, Strategy SHADOW: both.
+            (
+                "B07",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    c2: Shadow,
+                    exec: Shadow,
+                    strategy: Shadow,
+                },
+                (true, true, true, true),
+            ),
+            // B08: as B07, Flap OFF: no Flap candidate reaches either.
+            (
+                "B08",
+                Modes {
+                    runtime: Paper,
+                    c2: Shadow,
+                    exec: Shadow,
+                    strategy: Shadow,
+                    ..off
+                },
+                (false, false, false, true),
+            ),
+            // B09: as B05, C2 OFF: C3 is wanted, it refuses without a C2
+            // snapshot (WAITING_C2, runtime_exec).
+            (
+                "B09",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    exec: Shadow,
+                    ..off
+                },
+                (true, false, true, false),
+            ),
+            // B10: as B05, EXEC OFF: no C3.
+            (
+                "B10",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    c2: Shadow,
+                    ..off
+                },
+                (true, false, false, true),
+            ),
+            // B14/B15: a LIVE request without a grant is BLOCKED: nothing
+            // of it runs.
+            (
+                "B14 runtime",
+                Modes {
+                    runtime: blocked,
+                    flap: Shadow,
+                    c2: Shadow,
+                    exec: Shadow,
+                    strategy: Shadow,
+                },
+                (true, false, false, true),
+            ),
+            (
+                "B14 flap",
+                Modes {
+                    runtime: Paper,
+                    flap: blocked,
+                    c2: Shadow,
+                    exec: Shadow,
+                    strategy: Shadow,
+                },
+                (false, false, false, true),
+            ),
+            (
+                "B14 exec",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    c2: Shadow,
+                    exec: blocked,
+                    strategy: Shadow,
+                },
+                (true, true, false, true),
+            ),
+            (
+                "B14 c2",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    c2: blocked,
+                    exec: Shadow,
+                    strategy: Shadow,
+                },
+                (true, true, true, false),
+            ),
+            (
+                "B14 strategy",
+                Modes {
+                    runtime: Paper,
+                    flap: Shadow,
+                    c2: Shadow,
+                    exec: Shadow,
+                    strategy: blocked,
+                },
+                (true, false, true, true),
+            ),
+            // Under a verified grant the LIVE path's modes run (plan 28.10.).
+            (
+                "LIVE",
+                Modes {
+                    runtime: Live,
+                    flap: Live,
+                    c2: Live,
+                    exec: Off,
+                    strategy: Live,
+                },
+                (true, true, false, true),
+            ),
+        ];
+        for (id, m, want) in cases {
+            assert_eq!(g(m), want, "{id}");
+        }
+        // The eight C2/EXEC/STRATEGY_C combinations under PAPER and Flap
+        // SHADOW (Messplan §3b B, full sub-combination).
+        for (c2, exec, strategy, want) in [
+            (Off, Off, Off, (true, false, false, false)),
+            (Off, Off, Shadow, (true, true, false, false)),
+            (Off, Shadow, Off, (true, false, true, false)),
+            (Off, Shadow, Shadow, (true, true, true, false)),
+            (Shadow, Off, Off, (true, false, false, true)),
+            (Shadow, Off, Shadow, (true, true, false, true)),
+            (Shadow, Shadow, Off, (true, false, true, true)),
+            (Shadow, Shadow, Shadow, (true, true, true, true)),
+        ] {
+            let m = Modes {
+                runtime: Paper,
+                flap: Shadow,
+                c2,
+                exec,
+                strategy,
+            };
+            assert_eq!(g(m), want, "{c2:?} {exec:?} {strategy:?}");
+        }
     }
 
     #[test]
@@ -2851,6 +3408,76 @@ mod tests {
         assert_eq!(c.stop_bound_ms(), 10_700);
         let canonical = c.canonical.as_ref().unwrap();
         assert_eq!(canonical.endpoint, "https://bsc-dataseed.bnbchain.org");
+        // BSC3-036: the fallbacks in order, then the primary for any other index.
+        assert_eq!(
+            canonical.endpoints(),
+            [
+                "https://bsc-dataseed.bnbchain.org",
+                "https://bsc-dataseed1.defibit.io",
+                "https://bsc-dataseed1.ninicoin.io"
+            ]
+        );
+        assert_eq!(
+            canonical.endpoint_at(2),
+            "https://bsc-dataseed1.ninicoin.io"
+        );
+        assert_eq!(
+            canonical.endpoint_at(9),
+            "https://bsc-dataseed.bnbchain.org"
+        );
+        assert_eq!(
+            (
+                canonical.limits.failover_after,
+                canonical.limits.stall_after
+            ),
+            (3, Duration::from_millis(5_000))
+        );
+        let fallback = |list: &str| {
+            RuntimeConfig::parse(&CONFIG.replace(
+                "BSC_CANONICAL_RPC_FALLBACK=https://bsc-dataseed1.defibit.io,https://bsc-dataseed1.ninicoin.io\n",
+                &format!("BSC_CANONICAL_RPC_FALLBACK={list}\n"),
+            ))
+            .map(|c| c.canonical.unwrap().fallbacks)
+        };
+        assert_eq!(fallback(""), Ok(Vec::new()));
+        // BSC3-056: the second source, of a host none of the followed has.
+        assert_eq!(
+            canonical.confirm,
+            Some(ConfirmConfig {
+                endpoint: "https://bsc-rpc.publicnode.com".into(),
+                max_age_ms: 3_000,
+                max_lag_blocks: 2,
+            })
+        );
+        let confirm = |rpc: &str| {
+            RuntimeConfig::parse(&CONFIG.replace(
+                "BSC_CANONICAL_CONFIRM_RPC=https://bsc-rpc.publicnode.com\n",
+                &format!("BSC_CANONICAL_CONFIRM_RPC={rpc}\n"),
+            ))
+            .map(|c| c.canonical.unwrap().confirm)
+        };
+        assert_eq!(confirm(""), Ok(None));
+        for bad in [
+            "https://bsc-dataseed1.ninicoin.io",
+            "https://bsc-dataseed.bnbchain.org/other",
+            "http://bsc-rpc.publicnode.com",
+            // The same host in other spellings (review LOW-3).
+            "https://BSC-DATASEED1.NINICOIN.IO",
+            "https://bsc-dataseed1.defibit.io:443/",
+        ] {
+            assert!(confirm(bad).is_err(), "{bad}");
+        }
+        for bad in [
+            "http://bsc-dataseed1.defibit.io",
+            "https://bsc-dataseed.bnbchain.org",
+            "https://a.example,https://a.example",
+            "https://a.example,https://A.EXAMPLE:443/",
+        ] {
+            assert!(fallback(bad).is_err(), "{bad}");
+        }
+        // An error names no path (it may hold a provider's key).
+        let e = fallback("http://a.example/secret-key").unwrap_err();
+        assert!(!e.contains("secret-key"), "{e}");
         assert_eq!(canonical.limits.reorg_depth, 64);
         // The C2 window is the follower's; no own account in READ_ONLY.
         assert_eq!(canonical.state.limits.reorg_window, 64);
@@ -3199,6 +3826,261 @@ mod tests {
         journal.finish().unwrap();
         let census = census(&base, journal_max_payload(&config), None).unwrap();
         assert_eq!(census.unjoined, 1);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    /// BSC3-036: a failover makes the next endpoint the one the status
+    /// names and is counted; a stalled step is counted apart from the RPC
+    /// errors and shows as STALLED.
+    #[test]
+    fn a_failover_and_a_stall_reach_the_status() {
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-failover-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let cc = config.canonical.clone().unwrap();
+        let mut c = Canonical::new(&cc, 0);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let status = |c: &Canonical| {
+            let bytes = status_bytes(
+                &Generation::initial(),
+                &[],
+                Clock(Instant::now()),
+                1,
+                1,
+                0,
+                "j",
+                0,
+                0,
+                None,
+                Some(c),
+                None,
+                None,
+                None,
+                config.status_ms,
+                &CensusRefresh::default(),
+            )
+            .unwrap();
+            let r = darkbot_bsc_record::decode(&rs::SCHEMA, &bytes).unwrap();
+            let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
+            (
+                k.text(rs::canonical::ENDPOINT).unwrap().to_string(),
+                k.u64(rs::canonical::FAILOVERS).unwrap(),
+                k.u64(rs::canonical::STALLS).unwrap(),
+                k.u64(rs::canonical::RPC_ERRORS).unwrap(),
+                k.text(rs::canonical::STATE).unwrap().to_string(),
+            )
+        };
+        assert_eq!(
+            status(&c),
+            (
+                "bsc-dataseed.bnbchain.org".into(),
+                0,
+                0,
+                0,
+                "CONNECTING".into()
+            )
+        );
+        c.event(
+            1,
+            CanonicalEvent::Fault(FollowerFault::Stalled {
+                head: 10,
+                for_ms: 5_000,
+            }),
+            &mut journal,
+        );
+        c.event(
+            2,
+            CanonicalEvent::Failover {
+                from: 0,
+                to: 1,
+                failed_steps: 3,
+            },
+            &mut journal,
+        );
+        assert_eq!(
+            status(&c),
+            ("bsc-dataseed1.defibit.io".into(), 1, 1, 0, "STALLED".into())
+        );
+        // BSC3-056: the second source: STALE before its first header, AGREED
+        // once it holds the followed head's hash, DISAGREES on another.
+        let confirm = |c: &Canonical| {
+            let bytes = status_bytes(
+                &Generation::initial(),
+                &[],
+                Clock(Instant::now()),
+                1,
+                1,
+                0,
+                "j",
+                0,
+                0,
+                None,
+                Some(c),
+                None,
+                None,
+                None,
+                config.status_ms,
+                &CensusRefresh::default(),
+            )
+            .unwrap();
+            let r = darkbot_bsc_record::decode(&rs::SCHEMA, &bytes).unwrap();
+            let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
+            (
+                k.opt_text(rs::canonical::CONFIRM_ENDPOINT)
+                    .unwrap()
+                    .map(str::to_string),
+                k.opt_u64(rs::canonical::CONFIRM_HEAD).unwrap(),
+                k.opt_text(rs::canonical::CONFIRM_STATE)
+                    .unwrap()
+                    .map(str::to_string),
+            )
+        };
+        let host = Some("bsc-rpc.publicnode.com".to_string());
+        assert_eq!(confirm(&c), (host.clone(), None, Some("STALE".into())));
+        let now = observed_now().unwrap();
+        c.event(
+            3,
+            CanonicalEvent::Block {
+                number: 10,
+                hash: [10; 32],
+                parent_hash: [9; 32],
+                timestamp_s: now / 1_000,
+                timestamp_ms: now,
+                txs: Vec::new(),
+                observed: Instant::now(),
+                observed_unix_ms: Some(now),
+            },
+            &mut journal,
+        );
+        let header = |hash: [u8; 32]| crate::chain_follower::ConfirmEvent::Header {
+            number: 10,
+            hash,
+            parent_hash: [9; 32],
+            block_ms: now,
+        };
+        c.confirm_event(header([10; 32]));
+        assert_eq!(confirm(&c), (host.clone(), Some(10), Some("AGREED".into())));
+        c.confirm_event(header([0xee; 32]));
+        assert_eq!(confirm(&c), (host, Some(10), Some("DISAGREES".into())));
+        // Without a second source: none of it.
+        let mut none = cc.clone();
+        none.confirm = None;
+        assert_eq!(confirm(&Canonical::new(&none, 0)), (None, None, None));
+        journal.finish().unwrap();
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    /// BSC3-062: a launch whose sighting the bounded ingress window forgot
+    /// before its join is EVICTED (not evaluable) in the counters and the
+    /// status, never MISSED; a launch never seen, with nothing forgotten
+    /// that could have been it, stays MISSED.
+    #[test]
+    fn a_forgotten_sighting_is_evicted_not_missed() {
+        use crate::chain_follower::{CanonicalLaunch, Venue};
+        const BLOCK_MS: u64 = 1_792_000_000_000;
+        let base = std::env::temp_dir().join(format!("bsc-runtime-evict-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let cc = config.canonical.clone().unwrap();
+        assert!(cc.join_horizon_ms > 0);
+        let mut c = Canonical::new(&cc, BLOCK_MS);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        // A window of two sightings: launch 1's hash, seen 50 ms before its
+        // block, leaves it before the join.
+        let mut core = IngressCore::new(2, config.max_launch_calldata);
+        for (n, hash) in [[1u8; 32], [7; 32], [8; 32]].into_iter().enumerate() {
+            core.observe(
+                SourceId::PublicNode,
+                Observation::HashOnly { hash },
+                n as u64,
+                Some((BLOCK_MS - 50) * 1_000),
+            );
+        }
+        assert_eq!(core.sighting(&[1; 32]), None);
+        let clock = Clock(Instant::now());
+        c.event(
+            1,
+            CanonicalEvent::Block {
+                number: 10,
+                hash: [10; 32],
+                parent_hash: [9; 32],
+                timestamp_s: BLOCK_MS / 1_000,
+                timestamp_ms: BLOCK_MS,
+                txs: Vec::new(),
+                observed: clock.0,
+                observed_unix_ms: Some(BLOCK_MS + 300),
+            },
+            &mut journal,
+        );
+        for tx in [1u8, 2] {
+            c.event(
+                1,
+                CanonicalEvent::Launch(CanonicalLaunch {
+                    venue: Venue::Flap,
+                    block_number: 10,
+                    block_hash: [10; 32],
+                    tx_index: u64::from(tx),
+                    tx_hash: [tx; 32],
+                    token: Some([tx; 20]),
+                    creator: None,
+                    external_buys_after: Some(0),
+                    first_external_buy_index: None,
+                    sender: Some([tx; 20]),
+                    nonce: Some(u64::from(tx)),
+                    c1_scope: true,
+                    venue_target: true,
+                    four_token: crate::chain_follower::FourToken::NotApplicable,
+                    unverifiable: None,
+                }),
+                &mut journal,
+            );
+        }
+        c.join(u64::MAX, &core, &mut journal);
+        let k = c.ledger.counters();
+        assert_eq!((k.flap_launches, k.evicted, k.missed), (2, 1, 1));
+        let status = status_bytes(
+            &Generation::initial(),
+            &[],
+            clock,
+            1,
+            1,
+            0,
+            "j",
+            0,
+            0,
+            None,
+            Some(&c),
+            None,
+            None,
+            None,
+            config.status_ms,
+            &CensusRefresh::default(),
+        )
+        .unwrap();
+        let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        let k = r.opt_nested(rs::CANONICAL).unwrap().unwrap();
+        assert_eq!(
+            (
+                k.u64(rs::canonical::EVICTED).unwrap(),
+                k.u64(rs::canonical::MISSED).unwrap(),
+                k.u64(rs::canonical::FOUR_EVICTED).unwrap()
+            ),
+            (1, 1, 0)
+        );
+        journal.finish().unwrap();
         fs::remove_dir_all(base).unwrap();
     }
 

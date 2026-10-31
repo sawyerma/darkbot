@@ -1141,6 +1141,8 @@ mod tests {
             backoff_max: Duration::from_millis(40),
             tx_attempts: 2,
             max_launch_calldata: 16_384,
+            failover_after: 2,
+            stall_after: Duration::from_secs(60),
         }
     }
 
@@ -1711,6 +1713,8 @@ mod tests {
             backoff_max: Duration::from_secs(5),
             tx_attempts: 3,
             max_launch_calldata: 16_384,
+            failover_after: 2,
+            stall_after: Duration::from_secs(60),
         };
         // A fresh caller nobody can have exempted in advance.
         let entropy = format!("{:?}/{}", std::time::SystemTime::now(), std::process::id());

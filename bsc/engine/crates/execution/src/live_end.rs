@@ -226,6 +226,9 @@ pub struct LiveEnd {
     chain_id: u64,
     /// BSC3-076: the next C3 BUY the owner admitted before its launch.
     lease: Option<Lease>,
+    /// BSC3-056: whether the second source confirms the followed chain
+    /// (the runtime's verdict of its last pass); `None` without one.
+    confirmation: Option<crate::canonical_confirm::Confirmation>,
 }
 
 /// BSC3-076: the owner's admission of the next C3 BUY taken before its
@@ -417,7 +420,14 @@ impl LiveEnd {
             answered: Vec::new(),
             chain_id,
             lease: None,
+            confirmation: None,
         })
+    }
+
+    /// BSC3-056: the runtime's verdict of the second source (`None`: no
+    /// second source is configured).
+    pub fn set_confirmation(&mut self, verdict: Option<crate::canonical_confirm::Confirmation>) {
+        self.confirmation = verdict;
     }
 
     /// BSC3-076: the lease held.
@@ -869,6 +879,16 @@ impl End for LiveEnd {
         if age_ms > config.live_max_head_age_ms {
             let why = format!("the canonical head {} is {age_ms} ms old", head.number);
             return self.refuse(Refusal::StaleHead, why);
+        }
+        // BSC3-056: a BUY only on a chain the second source confirms (before
+        // the owner's admission: no attempt, no spend; exits go on).
+        // The verdict must cover the head the BUY is planned on (at most
+        // its lag below it).
+        if kind == LiveIntentKind::Buy
+            && let Some(c) = self.confirmation
+            && let Err(why) = c.confirms(head.number)
+        {
+            return self.refuse(Refusal::Unconfirmed, why);
         }
         // BSC3-051: a provider refused one of this end's BUYs: no further
         // BUY through it (before the owner's admission; exits go on).

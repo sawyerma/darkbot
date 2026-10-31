@@ -318,6 +318,9 @@ pub struct LiveRuntime {
     /// When an arming last failed in a way a later pass may get past.
     last_attempt: Option<Instant>,
     probes: u64,
+    /// BSC3-056: the runtime's last verdict of the second source, handed to
+    /// every end armed (`None`: no second source).
+    confirmation: Option<crate::canonical_confirm::Confirmation>,
     disarm_errors: u64,
     next_nonce: Option<u64>,
     /// Launches first seen by a source the grant does not name.
@@ -451,6 +454,7 @@ impl LiveRuntime {
             connecting: None,
             build: live_qualification::running_build(),
             probes: 0,
+            confirmation: None,
             disarm_errors: 0,
             next_nonce: None,
             source_refused: 0,
@@ -1317,6 +1321,18 @@ impl LiveRuntime {
             .is_none_or(|at| at.elapsed() >= self.exec.reprobe)
     }
 
+    /// BSC3-056: the runtime's verdict of the second source this pass, for
+    /// the armed end and every end armed later.
+    pub fn set_confirmation(&mut self, verdict: Option<crate::canonical_confirm::Confirmation>) {
+        self.confirmation = verdict;
+        if let Some(x) = self.executor.as_mut() {
+            x.end_mut().set_confirmation(verdict);
+        }
+        if let Some((end, _)) = self.connecting.as_mut() {
+            end.set_confirmation(verdict);
+        }
+    }
+
     /// One reconcile step at `now_ms` (unix): `session` names this
     /// process's fences. Verifies the LIVE qualification itself.
     pub fn tick(
@@ -1638,6 +1654,7 @@ impl LiveRuntime {
                     Ok(e) => e,
                     Err(e) => return self.stop(Phase::ArmFailed(e)),
                 };
+                end.set_confirmation(self.confirmation);
                 let failed = end.begin_connect(self.setup.connect_timeout);
                 if !failed.is_empty() {
                     return self.connect_failed(end, failed);
@@ -3397,6 +3414,12 @@ mod tests {
             curve: held,
             decided_ns: 0,
         };
+        // BSC3-056: a second source that does not confirm the chain holds
+        // no exit back.
+        x.set_confirmation(Some(crate::canonical_confirm::Confirmation {
+            verdict: crate::canonical_confirm::Verdict::Disagrees { height: HEAD + 1 },
+            max_lag_blocks: 2,
+        }));
         reconnect(&mut x);
         let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
         assert_eq!(out.len(), 1);
@@ -7765,6 +7788,57 @@ mod tests {
         r.clean();
     }
 
+    /// BSC3-056 (review LOW-6): the C3 BUY on a launch takes the same gate:
+    /// while the second source does not confirm the chain nothing is sent;
+    /// once it does, the next launch's BUY goes.
+    #[test]
+    fn a_c3_launch_waits_for_the_second_source_too() {
+        use crate::canonical_confirm::{Confirmation, Verdict};
+        let r = limited("live-confirm-c3", crate::sources::tests::TEST_LIMITS);
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        x.set_confirmation(Some(Confirmation {
+            verdict: Verdict::Disagrees { height: HEAD },
+            max_lag_blocks: 2,
+        }));
+        settle(&mut x, &c2);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(
+            refused_for(&x, "UNCONFIRMED"),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.set_confirmation(Some(Confirmation {
+            verdict: Verdict::Agreed { height: HEAD },
+            max_lag_blocks: 2,
+        }));
+        let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash_b, launcher_b, 4, 0, 20);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock)
+                .is_some(),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        x.shutdown();
+        r.clean();
+    }
+
     /// 31.10. order: the realized net loss of the grant's positions, and of
     /// the positions that closed on this UTC day (any grant's), each at its
     /// bound refuses a new BUY; a loss of another day counts for the grant
@@ -7951,6 +8025,161 @@ mod tests {
         assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
         x.shutdown();
         r.clean();
+    }
+
+    /// BSC3-056: with a second source a BUY goes only while it confirms the
+    /// followed chain, else it is refused UNCONFIRMED before the owner (no
+    /// attempt); the end armed takes the verdict set before it.
+    #[test]
+    fn a_buy_waits_for_the_second_source_to_confirm_the_chain() {
+        use crate::canonical_confirm::{Confirmation, Verdict};
+        let lagging = |verdict| {
+            Some(Confirmation {
+                verdict,
+                max_lag_blocks: 2,
+            })
+        };
+        let r = limited("live-confirm", crate::sources::tests::TEST_LIMITS);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        x.set_confirmation(lagging(Verdict::Stale { age_ms: None }));
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let unconfirmed = [
+            Verdict::Stale { age_ms: None },
+            Verdict::Stale {
+                age_ms: Some(9_000),
+            },
+            Verdict::Behind { by: 3 },
+            Verdict::Disagrees { height: 9 },
+            Verdict::NoCommonHeight,
+            // Agreed, but below the head the BUY plans on by more than the
+            // lag (review M-1).
+            Verdict::Agreed { height: HEAD - 3 },
+        ];
+        for (i, v) in unconfirmed.into_iter().enumerate() {
+            if i > 0 {
+                x.set_confirmation(lagging(v));
+            }
+            let (out, refusal) = x
+                .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+                .unwrap();
+            assert_eq!(
+                (out.len(), refusal),
+                (0, Some(Refusal::Unconfirmed)),
+                "{v:?}"
+            );
+        }
+        assert!(
+            record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .contains(&"UNCONFIRMED=6")
+        );
+        x.set_confirmation(lagging(Verdict::Agreed { height: HEAD - 2 }));
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!(
+            (out.len(), refusal),
+            (1, None),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-056 (review M-3): the runtime hands the second source's verdict
+    /// to the LIVE path with every canonical event, before a block's BUY
+    /// is planned: a head the second source has not confirmed refuses the
+    /// BUY, its header lets the BUY go.
+    #[test]
+    fn the_runtime_hands_the_verdict_to_the_live_path_before_a_blocks_buy() {
+        use crate::chain_follower::ConfirmEvent;
+        use crate::runtime::{
+            Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload,
+        };
+        use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), 0);
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-hand-journal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let r = limited("live-hand", crate::sources::tests::TEST_LIMITS);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut live = Some(r.runtime("boot-1"));
+        settle(live.as_mut().unwrap(), &c2);
+        let now = darkbot_bsc_record::observed_now().unwrap();
+        let mut apply = |c: &mut Canonical, live: &mut Option<LiveRuntime>, event| {
+            apply_canonical(
+                c,
+                &mut None,
+                &mut None,
+                live,
+                &mut journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            )
+        };
+        apply(
+            &mut c,
+            &mut live,
+            CanonicalEvent::Block {
+                number: HEAD,
+                hash: [0xb1; 32],
+                parent_hash: [0xb0; 32],
+                timestamp_s: now / 1_000,
+                timestamp_ms: now,
+                txs: Vec::new(),
+                observed: Instant::now(),
+                observed_unix_ms: Some(now),
+            },
+        );
+        let clock = a_clock();
+        let x = live.as_mut().unwrap();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::Unconfirmed)));
+        c.confirm_event(ConfirmEvent::Header {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            block_ms: now,
+        });
+        apply(
+            &mut c,
+            &mut live,
+            CanonicalEvent::BlockComplete {
+                number: HEAD,
+                hash: [0xb1; 32],
+            },
+        );
+        let x = live.as_mut().unwrap();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!(
+            (out.len(), refusal),
+            (1, None),
+            "{:?}",
+            record(x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+        journal.finish().unwrap();
+        fs::remove_dir_all(base).unwrap();
     }
 
     /// Review of the limits (MEDIUM): a BUY whose bundle was lost (its

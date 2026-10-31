@@ -84,6 +84,8 @@ fn counter_mismatches(canonical: &Record, c: &Census) -> Vec<String> {
         ),
         (k::SEEN_AFTER, "seen_after", c.after),
         (k::MISSED, "missed", c.missed),
+        (k::EVICTED, "evicted", c.evicted),
+        (k::FOUR_EVICTED, "four_evicted", c.four_evicted),
         (k::CLOCK_UNKNOWN, "clock_unknown", c.clock_unknown),
         (
             k::C1_SCOPE_LAUNCHES,
@@ -906,6 +908,39 @@ mod tests {
     /// A runtime counter the replay does not reproduce, a sealed segment
     /// replaced by another valid one (frames and sequence intact) and a
     /// missing manifest each fail.
+    /// BSC3-062: the runtime's evicted launches (Flap and Four.meme) are
+    /// held against the census like every visibility class.
+    #[test]
+    fn the_evicted_counters_are_held_against_the_census() {
+        use darkbot_bsc_record::{Kind, Presence};
+        let mut d = Draft::new(&rs::canonical::SCHEMA);
+        for f in rs::canonical::SCHEMA
+            .fields
+            .iter()
+            .filter(|f| f.presence == Presence::Required)
+        {
+            match f.kind {
+                Kind::U64 => d.set(f.tag, 0u64),
+                Kind::Text => d.set(f.tag, "FOLLOWING"),
+                _ => unreachable!("{}", f.name),
+            };
+        }
+        let record = decode(&rs::canonical::SCHEMA, &d.encode().unwrap()).unwrap();
+        assert!(counter_mismatches(&record, &Census::default()).is_empty());
+        let census = Census {
+            evicted: 1,
+            four_evicted: 2,
+            ..Census::default()
+        };
+        assert_eq!(
+            counter_mismatches(&record, &census),
+            [
+                "runtime evicted 0 != replayed 1",
+                "runtime four_evicted 0 != replayed 2"
+            ]
+        );
+    }
+
     #[test]
     fn a_counter_or_segment_that_does_not_replay_fails() {
         let base = std::env::temp_dir().join(format!("bsc-replay-proof-f-{}", std::process::id()));
