@@ -10,8 +10,12 @@
 //! (`FEE_PARITY_STATS`: at its start, when the counts changed, at shutdown, and synced at once
 //! after a new mismatch — so a mismatch survives a crash once one owner pass and one sync passed),
 //! summed across the saved runs of a project by `saved_runs`/`qualification` (an on-demand report,
-//! never an owner's start; a crashed or still running run counts with its last record — its
-//! matches a lower bound, its mismatches durable — and is named). Every owner runs on the
+//! never an owner's start). A crashed or still running run counts with its last record and is
+//! named: its matches are a lower bound; a mismatch it journaled is durable, but one quoted in the
+//! owner pass it crashed in (bounded by that pass's candidate network deadlines, the evidence
+//! queued before it and one sync) can be lost — phase 2 re-checks every landed fee. A run whose
+//! journal cannot be read (an error, a cut chain, an undecodable record, a recovery journal from a
+//! failed write) qualifies nothing until it is resolved. Every owner runs on the
 //! Mainnet cluster only (BOOT-12 genesis pin), so every record is Mainnet's. No v1 transaction is
 //! built yet (S3-02): v1 has no class until it is.
 use serde::{Deserialize, Serialize};
@@ -265,13 +269,22 @@ pub fn record(base: Option<&FeeParityStatsRecord>, start: &Counts) -> FeeParityS
     }
 }
 
-/// The last `FEE_PARITY_STATS` record of the owner journal (chain) `journal`, and whether the
-/// chain is clean — read to its sealed, complete end with no torn tail (`false`: what it lost or
-/// still writes is unknown).
-pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, bool) {
+/// How a run's owner journal read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunRead {
+    /// Sealed, complete, nothing torn.
+    Clean,
+    /// Its last segment unsealed or torn, or continued after a crash: it crashed (or still runs).
+    Crashed,
+    /// An unreadable frame or record, a cut chain, or a journal that does not open.
+    Unreadable,
+}
+
+/// The last `FEE_PARITY_STATS` record of the owner journal (chain) `journal` and how it read.
+pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, RunRead) {
     use crate::analytics::payload::Payload;
     let Ok(mut reader) = crate::storage::segments::ChainReader::open(journal) else {
-        return (None, false);
+        return (None, RunRead::Unreadable);
     };
     let mut last = None;
     loop {
@@ -279,37 +292,37 @@ pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, 
             Ok(Some(frame)) if frame.kind == FeeParityStatsRecord::KIND => {
                 match frame.typed::<FeeParityStatsRecord>() {
                     Ok(r) => last = Some(r),
-                    Err(_) => return (last, false),
+                    Err(_) => return (last, RunRead::Unreadable),
                 }
             }
             Ok(Some(_)) => {}
-            // Clean only sealed, complete and without a torn tail (a crash's lost frames could
-            // have held a mismatch).
-            Ok(None) => {
-                return (
-                    last,
-                    reader.sealed && reader.complete && reader.torn_bytes == 0,
-                )
+            Ok(None) if reader.successor_missing() => return (last, RunRead::Unreadable),
+            Ok(None) if reader.sealed && reader.complete && reader.torn_bytes == 0 => {
+                return (last, RunRead::Clean)
             }
-            Err(_) => return (last, false),
+            Ok(None) => return (last, RunRead::Crashed),
+            Err(_) => return (last, RunRead::Unreadable),
         }
     }
 }
 
-/// The saved runs' parity: each run's last record, and the runs (by id) whose journal holds a
-/// record of the current model version but is not sealed, complete and untorn — a crashed or still
-/// running run: its matches are a lower bound, its mismatches were synced as they came.
+/// The saved runs' parity: each run's last record of the current model version, the runs (by id)
+/// that crashed or still run (counted with their last record) and those that cannot be read
+/// (nothing qualifies while one is).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SavedRuns {
     pub records: Vec<FeeParityStatsRecord>,
-    pub incomplete: Vec<String>,
+    pub crashed: Vec<String>,
+    pub unreadable: Vec<String>,
 }
 
 /// The saved runs of `project`: every run's owner journal (`until_stopped_view::SHADOW_RECORD` in
 /// the run or its capture directory) read to its end — an on-demand report (`p0ctl
-/// fee-parity`), never on an owner's start.
+/// fee-parity`), never on an owner's start. A recovery journal beside it (a primary write
+/// failed: events went there, unread here) makes the run unreadable.
 pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
     let record = crate::orchestration::until_stopped_view::SHADOW_RECORD;
+    let stem = record.trim_end_matches(".p0j");
     let mut out = SavedRuns::default();
     for run in crate::run_layout::runs(project) {
         let Some(journal) = [run.path.join(record), run.path.join("capture").join(record)]
@@ -318,12 +331,26 @@ pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
         else {
             continue;
         };
-        let (last, complete) = last_record(&journal);
+        let recovered = journal
+            .parent()
+            .and_then(|d| std::fs::read_dir(d).ok())
+            .is_some_and(|d| {
+                d.flatten().any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{stem}.recovery-"))
+                })
+            });
+        let (last, read) = last_record(&journal);
+        if read == RunRead::Unreadable || recovered {
+            out.unreadable.push(run.run_id.clone());
+            continue;
+        }
         let Some(last) = last.filter(|r| r.model_version == FEE_MODEL_VERSION) else {
             continue;
         };
-        if !complete {
-            out.incomplete.push(run.run_id.clone());
+        if read == RunRead::Crashed {
+            out.crashed.push(run.run_id.clone());
         }
         out.records.push(last);
     }
@@ -335,12 +362,16 @@ pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
 pub struct ClassParity {
     pub class: FeeClass,
     pub counts: ParityCounts,
+    /// Saved runs that cannot be read: nothing qualifies while one is.
+    pub unreadable_runs: usize,
 }
 
 impl ClassParity {
-    /// At least `PARITY_MIN_MESSAGES` distinct matched and none mismatched.
+    /// At least `PARITY_MIN_MESSAGES` distinct matched, none mismatched, every run readable.
     pub fn qualified(&self) -> bool {
-        self.counts.matched >= PARITY_MIN_MESSAGES && self.counts.mismatched == 0
+        self.counts.matched >= PARITY_MIN_MESSAGES
+            && self.counts.mismatched == 0
+            && self.unreadable_runs == 0
     }
 
     /// A mismatch failed the class (under this model version, for good).
@@ -361,6 +392,7 @@ pub fn qualification(runs: &SavedRuns) -> Vec<ClassParity> {
                 .filter(|r| r.model_version == FEE_MODEL_VERSION)
                 .flat_map(|r| r.classes.iter().filter(|(c, _)| *c == class))
                 .fold(ParityCounts::default(), |sum, (_, n)| sum.add(*n)),
+            unreadable_runs: runs.unreadable.len(),
         })
         .collect()
 }
@@ -507,9 +539,10 @@ mod tests {
 
     /// The saved runs' parity: the last record of each run's owner journal (in the run or its
     /// capture directory); a run without a record of this model version adds nothing; a torn run
-    /// (a crash) counts with its last record and is named.
+    /// (a crash) counts with its last record and is named; a journal that cannot be read, or one
+    /// with a recovery journal beside it, is named unreadable and nothing qualifies.
     #[test]
-    fn saved_runs_read_each_runs_last_record_and_name_an_incomplete_one() {
+    fn saved_runs_name_crashed_and_unreadable_runs_and_an_unreadable_one_qualifies_nothing() {
         use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
         let project =
             std::env::temp_dir().join(format!("p0_fee_parity_runs_{}", std::process::id()));
@@ -561,7 +594,7 @@ mod tests {
         let mut matched: Vec<u64> = runs.records.iter().map(|r| of(r, class).matched).collect();
         matched.sort();
         assert_eq!(
-            (matched, runs.incomplete.len()),
+            (matched, runs.crashed.len() + runs.unreadable.len()),
             (vec![4, PARITY_MIN_MESSAGES], 0)
         );
         let row = |runs: &SavedRuns| {
@@ -577,12 +610,33 @@ mod tests {
         bytes.truncate(bytes.len() - 7);
         std::fs::write(&torn, bytes).unwrap();
         let runs = saved_runs(&project);
-        assert_eq!(runs.incomplete, vec!["torn".to_string()]);
+        assert_eq!(runs.crashed, vec!["torn".to_string()]);
         assert_eq!(
             row(&runs).counts.matched,
             4 + PARITY_MIN_MESSAGES + 2,
             "its last record"
         );
+        assert!(row(&runs).qualified(), "a crashed run is a lower bound");
+        // A journal that cannot be read blocks every class until it is resolved.
+        let broken = project.join("data/shadow/broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("opportunities.p0j"), b"not a journal").unwrap();
+        let runs = saved_runs(&project);
+        assert_eq!(runs.unreadable, vec!["broken".to_string()]);
+        assert!(
+            !row(&runs).qualified(),
+            "an unreadable run qualifies nothing"
+        );
+        std::fs::remove_dir_all(&broken).unwrap();
+        // So does a recovery journal beside a run's journal (a primary write failed).
+        std::fs::write(
+            project.join("data/shadow/a/opportunities.recovery-1-2.p0j"),
+            b"",
+        )
+        .unwrap();
+        let runs = saved_runs(&project);
+        assert_eq!(runs.unreadable, vec!["a".to_string()]);
+        assert!(!row(&runs).qualified());
         let _ = std::fs::remove_dir_all(project);
     }
 
@@ -651,7 +705,8 @@ mod tests {
         };
         let saved = |records: Vec<FeeParityStatsRecord>| SavedRuns {
             records,
-            incomplete: Vec::new(),
+            crashed: Vec::new(),
+            unreadable: Vec::new(),
         };
         let of = |runs: &SavedRuns| {
             qualification(runs)

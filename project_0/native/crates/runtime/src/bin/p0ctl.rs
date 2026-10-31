@@ -2722,17 +2722,21 @@ fn attempt_history(
 /// qualified (≥ the plan's minimum matched, none mismatched); read only, the RPC quote decides.
 fn fee_parity_cmd(project: &Path) -> Result<bool, String> {
     use darkbot_runner::execution::fee_parity as fp;
+    let listed = |ids: &[String]| {
+        if ids.is_empty() {
+            "none".to_string()
+        } else {
+            ids.join(", ")
+        }
+    };
     let runs = fp::saved_runs(project);
     let classes = fp::qualification(&runs);
     println!(
-        "fee parity · model {} · {} saved runs with a record · incomplete (crashed or running, counted with their last record): {}",
+        "fee parity · model {} · {} saved runs with a record · crashed or running (counted with their last record; a mismatch of the pass a run crashed in can be lost): {} · unreadable (nothing qualifies until resolved): {}",
         fp::FEE_MODEL_VERSION,
         runs.records.len(),
-        if runs.incomplete.is_empty() {
-            "none".to_string()
-        } else {
-            runs.incomplete.join(", ")
-        }
+        listed(&runs.crashed),
+        listed(&runs.unreadable)
     );
     for c in &classes {
         println!(

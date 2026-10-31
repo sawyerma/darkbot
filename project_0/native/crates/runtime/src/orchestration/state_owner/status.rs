@@ -642,7 +642,8 @@ impl ShadowOwner {
                 self.fee_parity_base.as_ref(),
                 &self.fee_parity_start,
             )],
-            incomplete: Vec::new(),
+            crashed: Vec::new(),
+            unreadable: Vec::new(),
         };
         OwnerCapability {
             name: "LOCAL_FEE_MODEL".into(),

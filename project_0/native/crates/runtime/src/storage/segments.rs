@@ -455,6 +455,11 @@ impl ChainReader {
     pub fn tail_truncated(&self) -> bool {
         self.reader.tail_truncated
     }
+    /// A sealed segment announced a successor that is not there: the chain is cut, not crashed
+    /// (meaningful after `next_frame` returned `None`).
+    pub fn successor_missing(&self) -> bool {
+        self.announced_missing
+    }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         if self.ended {
             return Ok(None);
