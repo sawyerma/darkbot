@@ -14,6 +14,9 @@ impl ShadowOwner {
         if self.fe04_admission.is_some() && !self.live_effective() {
             self.fe04_admission = None;
         }
+        // S4-04: while LIVE is, the admission is opened ahead of the first candidate.
+        #[cfg(feature = "crate_health")]
+        self.fe04_prewarm();
         if let Some(dir) = &self.fe04_journal {
             if self.fe04_refreshed.elapsed() >= self.fe04_refresh {
                 let wallet = self.liquidator.to_string();

@@ -583,7 +583,7 @@ impl ShadowOwner {
         };
         Some(crate::execution::one_shot::admission::UseFacts {
             sol_free_lamports: free_sol(
-                &self.fe04_wallet_balances(target),
+                &self.fe04_wallet_balances(Some(target)),
                 &elsewhere,
                 &crate::execution::inventory::reserves(&self.inventory_targets),
             ),
@@ -594,10 +594,12 @@ impl ShadowOwner {
     /// DEC-13b: what the FE-04 admission of a LIVE candidate for `target` is opened or refreshed
     /// with — the configured attempt approval (VALID: unexpired, bound, unspent) and the current
     /// wallet facts — or why there is none (`true`: an open admission is closed too, its wallet
-    /// lock released). Single flight: none while an attempt holds the wallet.
+    /// lock released). Single flight: none while an attempt holds the wallet. Without a target
+    /// (S4-04: the admission opened ahead of a candidate) the target's own checks and banks are
+    /// left to the candidate, which refreshes every fact.
     pub(super) fn fe04_admission_facts(
         &self,
-        target: &Pubkey,
+        target: Option<&Pubkey>,
     ) -> Result<Fe04AdmissionFacts, (String, bool)> {
         use crate::execution::one_shot::approval_file::ApprovalFile;
         // Single flight: an attempt in the held journal blocks every admission; a journal without
@@ -626,7 +628,7 @@ impl ShadowOwner {
         else {
             return Err(("FE04_APPROVAL_NOT_AN_ATTEMPT".into(), true));
         };
-        if !approval.allowed_targets.contains(&target.to_string()) {
+        if target.is_some_and(|t| !approval.allowed_targets.contains(&t.to_string())) {
             return Err(("FE04_TARGET_NOT_APPROVED".into(), false));
         }
         if self.program_upgrade_latched {
@@ -673,20 +675,19 @@ impl ShadowOwner {
 
     /// DEC-13b: the reconciled wallet balances an admission for `target` checks its holds
     /// against: the liquidator's lamports (`SOL`) and the validated ATA amount of each mint of the
-    /// target's active banks and of the JIT funding bank. A balance not in canonical state is
-    /// absent (unknown): a hold of it is refused.
+    /// target's active banks (none without a target) and of the JIT funding bank. A balance not in
+    /// canonical state is absent (unknown): a hold of it is refused.
     pub(super) fn fe04_wallet_balances(
         &self,
-        target: &Pubkey,
+        target: Option<&Pubkey>,
     ) -> std::collections::BTreeMap<String, u64> {
         let view = StateView(&self.st);
         let mut balances = std::collections::BTreeMap::new();
         if let Some(r) = self.st.get(&self.liquidator) {
             balances.insert("SOL".to_string(), r.lamports);
         }
-        let banks = self
-            .st
-            .get(target)
+        let banks = target
+            .and_then(|t| self.st.get(t))
             .and_then(|r| accounts::active_banks_in_group_account(&r.data, &self.group))
             .unwrap_or_default();
         for bank in banks.iter().chain(self.jit_funding_bank.iter()) {
@@ -700,6 +701,33 @@ impl ShadowOwner {
             }
         }
         balances
+    }
+
+    /// S4-04 (baseline finding 4): while LIVE is effective the admission — its wallet journal
+    /// opened and locked — is opened ahead of the first candidate, outside its hot path (the
+    /// candidate refreshes every fact). An admission that cannot be opened now is tried again
+    /// after the FE-04 refresh interval; the candidate's own admission reports why.
+    pub(super) fn fe04_prewarm(&mut self) {
+        if self.fe04_admission.is_some()
+            || !self.live_effective()
+            || self
+                .fe04_prewarm_after
+                .is_some_and(|t| std::time::Instant::now() < t)
+        {
+            return;
+        }
+        let mut quiet = Fe04AdmissionStats::default();
+        let facts = self.fe04_admission_facts(None);
+        self.fe04_admission = admission_for(
+            &mut self.fe04_admission,
+            &mut self.fe04_held,
+            &mut quiet,
+            facts,
+        );
+        self.fe04_prewarm_after = self
+            .fe04_admission
+            .is_none()
+            .then(|| std::time::Instant::now() + self.fe04_refresh);
     }
 
     /// DEC-13b: the admission after its candidate. A handed-off attempt (submitted, or UNKNOWN

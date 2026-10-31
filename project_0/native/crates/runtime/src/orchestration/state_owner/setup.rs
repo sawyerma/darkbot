@@ -1197,6 +1197,7 @@ pub(super) fn prepare(
         fe04_unbooked,
         fe04_non_landing: Default::default(),
         fe04_admission: None,
+        fe04_prewarm_after: None,
         fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate {
             n: darkbot_solana::runtime_config::active().hold_b_min_attempts,

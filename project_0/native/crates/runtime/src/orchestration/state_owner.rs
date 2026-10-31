@@ -179,6 +179,9 @@ pub(super) struct ShadowOwner {
     /// wallet facts); `None` while LIVE is not effective, no VALID attempt approval exists or an
     /// attempt holds the wallet. Handed to the pipeline per detection and taken back.
     fe04_admission: Option<crate::execution::one_shot::admission::Fe04Admission>,
+    /// S4-04: when the admission may be opened ahead of a candidate again after it could not be
+    /// (`None`: at once).
+    fe04_prewarm_after: Option<std::time::Instant>,
     /// DEC-13b/DEC-02: this run's admission counters (the Liquidator tab).
     fe04_admissions: fe04::Fe04AdmissionStats,
     /// DEC-04: the hold mode the pipeline evaluates with (effective mode, the user's N, the

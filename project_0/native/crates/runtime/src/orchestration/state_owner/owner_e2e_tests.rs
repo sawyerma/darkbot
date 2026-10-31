@@ -121,6 +121,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_unbooked: None,
         fe04_non_landing: Default::default(),
         fe04_admission: None,
+        fe04_prewarm_after: None,
         fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate::OBSERVE,
         inventory_targets: Default::default(),
@@ -6860,7 +6861,7 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
     let (mut f, target, calls) = dec13b_fixture("dec13b_live", true);
     assert_eq!(f.owner.approval_status().state, "VALID");
     // The admission checks its holds against the lamports and every target bank's ATA amount.
-    let balances = f.owner.fe04_wallet_balances(&target);
+    let balances = f.owner.fe04_wallet_balances(Some(&target));
     assert_eq!(balances["SOL"], 10_000_000_000);
     assert_eq!(
         balances
@@ -7047,11 +7048,11 @@ fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
 #[test]
 fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_refused", true);
-    let reason = |f: &ShadowOwner| f.fe04_admission_facts(&target).err().map(|(r, _)| r);
+    let reason = |f: &ShadowOwner| f.fe04_admission_facts(Some(&target)).err().map(|(r, _)| r);
     assert_eq!(reason(&f.owner), None);
     let other = Pubkey::new_unique();
     assert_eq!(
-        f.owner.fe04_admission_facts(&other).err(),
+        f.owner.fe04_admission_facts(Some(&other)).err(),
         Some(("FE04_TARGET_NOT_APPROVED".into(), false))
     );
     f.owner.program_upgrade_latched = true;
@@ -7071,7 +7072,7 @@ fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     f.owner.blockhash.set(bh);
     let journal = f.owner.fe04_journal.take();
     assert_eq!(
-        f.owner.fe04_admission_facts(&target).err(),
+        f.owner.fe04_admission_facts(Some(&target)).err(),
         Some(("FE04_JOURNAL_NOT_CONFIGURED".into(), true))
     );
     f.owner.fe04_journal = journal;
@@ -7625,7 +7626,7 @@ fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_noth
         .is_some_and(|j| j.step_state().is_none()));
     f.owner.fe04_held = start.held;
     set_approval(&mut f, &approval);
-    assert_eq!(f.owner.fe04_admission_facts(&target).err(), None);
+    assert_eq!(f.owner.fe04_admission_facts(Some(&target)).err(), None);
     detect(&mut f, 101);
     assert_eq!(
         f.owner.fe04_admissions.submitted, 1,
@@ -8779,7 +8780,7 @@ fn s4_04_core_stage_baseline() {
         let (mut f, target, calls) = dec13b_fixture(&format!("s4_04_{i}"), true);
         p8ctrl03_scoped(&mut f, &[], |_| {});
         let opened = std::time::Instant::now();
-        let facts = f.owner.fe04_admission_facts(&target);
+        let facts = f.owner.fe04_admission_facts(Some(&target));
         let admission = fe04::admission_for(
             &mut f.owner.fe04_admission,
             &mut f.owner.fe04_held,
@@ -9055,4 +9056,59 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
     assert_eq!(journaled.model_version, fee_parity::FEE_MODEL_VERSION);
     assert!(matched(&journaled).0 >= 1);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// S4-04 (baseline finding 4): while LIVE is effective the owner opens the FE-04 admission — its
+/// wallet journal and lock — in its pass, ahead of the first candidate, which finds it open and
+/// is admitted and sent once as before; LIVE ending closes it; an admission that cannot be opened
+/// is tried again only after the FE-04 refresh interval.
+#[test]
+fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
+    let (mut f, target, calls) = dec13b_fixture("s4_04_prewarm", true);
+    assert!(f.owner.fe04_admission.is_none());
+    f.owner.lifecycle();
+    assert!(
+        f.owner.fe04_admission.is_some(),
+        "opened ahead of a candidate"
+    );
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| *c == "sendTransaction")
+            .count(),
+        1,
+        "{:?} {:?}",
+        calls.lock().unwrap(),
+        f.owner.fe04_admissions
+    );
+    cleanup(f);
+    // LIVE ending closes it; one that cannot be opened waits for the refresh interval.
+    let (mut f, _, _) = dec13b_fixture("s4_04_prewarm_off", true);
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_some());
+    f.owner.sources.capabilities.live_requested =
+        crate::orchestration::capability_control::LIVE_OFF;
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_none(), "closed with LIVE");
+    f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
+    let approval = f.owner.fe04_approval.take();
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_none());
+    assert!(f.owner.fe04_prewarm_after.is_some(), "tried again later");
+    f.owner.fe04_approval = approval;
+    f.owner.lifecycle();
+    assert!(
+        f.owner.fe04_admission.is_none(),
+        "not before the refresh interval"
+    );
+    f.owner.fe04_prewarm_after = Some(std::time::Instant::now());
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_some(), "after it");
+    cleanup(f);
 }
