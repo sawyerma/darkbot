@@ -31,7 +31,7 @@
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|index|strict|crosscheck [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
-//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
+//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
@@ -2007,7 +2007,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
 
 /// DEC-13/P8-CTRL: the operator's capability request (`set`), the same controller path as
 /// `source`: written only for a running owner of this project, under a one-time request id (the

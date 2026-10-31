@@ -668,10 +668,15 @@ pub(super) fn prepare(
 
     // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
     let remote_worker_capacity = usize::try_from(operational.worker_queue)?;
-    // B01: OFF or OBSERVE (ACTIVE needs LIVE and is refused); OBSERVE quotes on its own worker.
+    // B01: the start value OFF or OBSERVE (ACTIVE is never effective, refused at the start); the
+    // quotes of an observation come from its own worker, started whenever there are bands (the
+    // mode is the controller's at run time).
     #[cfg(feature = "crate_health")]
     let rebalance_mode = crate::execution::inventory::parse_mode(
         &std::env::var("P0_REBALANCE_MODE").unwrap_or_default(),
+    )?;
+    let inventory_targets = crate::execution::inventory::parse_targets(
+        &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
     let remote = {
         #[cfg_attr(not(feature = "crate_health"), allow(unused_mut))]
@@ -683,7 +688,7 @@ pub(super) fn prepare(
             &wake,
         )?;
         #[cfg(feature = "crate_health")]
-        if rebalance_mode == crate::execution::inventory::RebalanceMode::Observe {
+        if !inventory_targets.is_empty() {
             remote.start_rebalance_quoter(routes.clone(), &shutdown)?;
         }
         // DEC-06: ACTIVE's sweep cross-check runs off the owner.
@@ -1075,9 +1080,6 @@ pub(super) fn prepare(
             &mut safety,
             wall_unix_s().map_err(|e| format!("CLOCK_UNAVAILABLE: {e}"))?,
         )?;
-    let inventory_targets = crate::execution::inventory::parse_targets(
-        &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
-    )?;
     let jit_funding_bank = crate::execution::inventory::parse_funding_bank(
         &std::env::var("P0_JIT_FUNDING_BANK").unwrap_or_default(),
     )?;
@@ -1085,9 +1087,7 @@ pub(super) fn prepare(
     if rebalance_mode != crate::execution::inventory::RebalanceMode::Off
         && inventory_targets.is_empty()
     {
-        return Err(
-            "REBALANCE_TARGETS_REQUIRED: OBSERVE plans against P0_INVENTORY_TARGETS".into(),
-        );
+        return Err(crate::execution::inventory::TARGETS_REQUIRED.into());
     }
     let mut owner = ShadowOwner {
         metrics: OwnerMetrics {

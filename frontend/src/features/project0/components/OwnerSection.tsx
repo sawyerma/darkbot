@@ -7,7 +7,7 @@ import { EconomicControl } from "./EconomicControl";
 import { usdMicroDisplay } from "../model/format";
 import { orDash, parameterText } from "../model/statusFormat";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
-import { analyticsCommand, capabilityCommand, useAnalyticsControl } from "@/core/realtime/analyticsControl";
+import { analyticsCommand, capabilityCommand, useAnalyticsControl, type ModeCapability } from "@/core/realtime/analyticsControl";
 
 const ms = (ns: bigint | null) => {
   const v = nsToMs(ns);
@@ -100,6 +100,8 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
       active="Active (needs a qualified bundle simulator)"/>
     <ModeRequest owner={owner} live={live} capability="THRESHOLD_TRIGGER" label="Threshold trigger" action="Request threshold mode"
       active="Active (from Observe; needs N and the evidence)"/>
+    <ModeRequest owner={owner} live={live} capability="INVENTORY_REBALANCING" label="Inventory rebalancing" action="Request rebalancing mode"
+      active="Active (never effective: a trade needs its own authorization)"/>
     {params}
   </Section>;
 }
@@ -132,14 +134,15 @@ function ThresholdRows({ th }: { th: OwnerThresholdView }) {
 }
 
 /**
- * DEC-04/DEC-11 (N-5): a capability mode through the same controller (`p0ctl capability set
- * HOLD_B|JITO_BUNDLE …`, CAS on the capability configuration version). ACTIVE is only requested
- * here: the owner decides what is effective — the B hold with the user's N (B-8) and N finalized
- * attempts without an underestimation, the bundle path never without a qualified bundle
- * simulator — and the capability row shows the reason.
+ * DEC-04/DEC-11/DEC-06/B01 (N-5): a capability mode through the same controller (`p0ctl capability
+ * set HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|INVENTORY_REBALANCING …`, CAS on the capability
+ * configuration version). ACTIVE is only requested here: the owner decides what is effective — the
+ * B hold with the user's N (B-8) and N finalized attempts without an underestimation, the bundle
+ * path never without a qualified bundle simulator, rebalancing never (OBSERVE plans, never trades)
+ * — and the capability row shows the reason.
  */
 function ModeRequest({ owner, live, capability, label, action, active }: {
-  owner: LiquidatorView; live: boolean; capability: "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER"; label: string; action: string; active: string;
+  owner: LiquidatorView; live: boolean; capability: ModeCapability; label: string; action: string; active: string;
 }) {
   const { busy } = useAnalyticsControl();
   const row = owner.capabilities.find((c) => c.name === capability) ?? null;

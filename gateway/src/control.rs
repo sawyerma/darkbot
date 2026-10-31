@@ -569,9 +569,10 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             args.extend(["--expect-version".into(), expect_version?.to_string()]);
             Some(args)
         }
-        // DEC-13/DEC-04/DEC-11/DEC-06: the capability and its requested value, with the version
-        // the view showed: LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE and THRESHOLD_TRIGGER
-        // OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF → ACTIVE). P8-CTRL.1/.3:
+        // DEC-13/DEC-04/DEC-11/DEC-06/B01: the capability and its requested value, with the
+        // version the view showed: LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER and
+        // INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE (the owner refuses THRESHOLD_TRIGGER OFF →
+        // ACTIVE; INVENTORY_REBALANCING ACTIVE is never effective). P8-CTRL.1/.3:
         // ECON_* and WALLET:<pubkey> DISABLED|ENABLED, FE06_GRANT/FE06_REVOKE a scope digest —
         // these state the owner epoch the view showed (P8-CTRL.6), and so does every other
         // request but a move to OFF (review M2: a view from before an owner restart never
@@ -582,7 +583,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             let switch = ["DISABLED", "ENABLED"].contains(&c.requested.as_str());
             let (valid, economic) = match c.capability.as_str() {
                 "LIVE" => (["OFF", "LIVE"].contains(&c.requested.as_str()), false),
-                "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" => (
+                "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" | "INVENTORY_REBALANCING" => (
                     ["OFF", "OBSERVE", "ACTIVE"].contains(&c.requested.as_str()),
                     false,
                 ),
@@ -1288,7 +1289,7 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         if req.action == CAPABILITY_SET {
-                            "Capability request invalid (LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE or THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE, ECON_* or WALLET:<pubkey> ENABLED|DISABLED, FE06_GRANT|FE06_REVOKE <digest>; the configuration version, and the owner epoch for all but a move to OFF)"
+                            "Capability request invalid (LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER or INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE, ECON_* or WALLET:<pubkey> ENABLED|DISABLED, FE06_GRANT|FE06_REVOKE <digest>; the configuration version, and the owner epoch for all but a move to OFF)"
                         } else if BOOT_ACTIONS.contains(&req.action.as_str()) || req.action == START
                         {
                             "Boot request invalid (mode econ4h|shadow|market, flow id, 16-character token, genesis pin, provider evidence id, capture source, duration, chain verify off)"
@@ -3719,9 +3720,9 @@ mod tests {
             job_args(&req(SOURCE_SET, "", source, Some(ProfileVersion(4)))),
             None
         );
-        // DEC-13/DEC-04/DEC-11: a capability request carries its version; only LIVE OFF|LIVE
-        // and HOLD_B/JITO_BUNDLE/THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE pass (P8-CTRL: and the
-        // economic switches, the signers and FE-06).
+        // DEC-13/DEC-04/DEC-11/B01: a capability request carries its version; only LIVE
+        // OFF|LIVE and HOLD_B/JITO_BUNDLE/THRESHOLD_TRIGGER/INVENTORY_REBALANCING
+        // OFF|OBSERVE|ACTIVE pass (P8-CTRL: and the economic switches, the signers and FE-06).
         let capability = |capability: &str, requested: &str| {
             crate::proto::project0::v1::CapabilityControlCommand {
                 capability: capability.into(),
@@ -3769,6 +3770,7 @@ mod tests {
             ("HOLD_B", "OBSERVE"),
             ("JITO_BUNDLE", "OBSERVE"),
             ("THRESHOLD_TRIGGER", "ACTIVE"),
+            ("INVENTORY_REBALANCING", "OBSERVE"),
         ] {
             assert_eq!(
                 job_args(&req(
@@ -3781,7 +3783,13 @@ mod tests {
                 "{c} {v} without its epoch"
             );
         }
-        for c in ["LIVE", "HOLD_B", "JITO_BUNDLE", "THRESHOLD_TRIGGER"] {
+        for c in [
+            "LIVE",
+            "HOLD_B",
+            "JITO_BUNDLE",
+            "THRESHOLD_TRIGGER",
+            "INVENTORY_REBALANCING",
+        ] {
             assert_eq!(
                 job_args(&req(
                     CAPABILITY_SET,
@@ -3884,6 +3892,17 @@ mod tests {
             .unwrap()[3..7],
             ["THRESHOLD_TRIGGER", "ACTIVE", "--expect-version", "5"]
         );
+        // B01: inventory rebalancing's hot change.
+        assert_eq!(
+            job_args(&req(
+                CAPABILITY_SET,
+                "",
+                in_epoch("INVENTORY_REBALANCING", "OBSERVE", 3),
+                Some(ConfigVersion(6)),
+            ))
+            .unwrap()[3..7],
+            ["INVENTORY_REBALANCING", "OBSERVE", "--expect-version", "6"]
+        );
         for (c, v, expected) in [
             ("LIVE", "LIVE", None),
             ("JITO", "LIVE", Some(ConfigVersion(2))),
@@ -3894,6 +3913,8 @@ mod tests {
             ("JITO_BUNDLE", "OBSERVE", None),
             ("THRESHOLD_TRIGGER", "SWEEP", Some(ConfigVersion(2))),
             ("THRESHOLD_TRIGGER", "OBSERVE", None),
+            ("INVENTORY_REBALANCING", "ON", Some(ConfigVersion(2))),
+            ("INVENTORY_REBALANCING", "OBSERVE", None),
         ] {
             assert_eq!(
                 job_args(&req(CAPABILITY_SET, "", capability(c, v), expected)),

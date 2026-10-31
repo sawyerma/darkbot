@@ -113,9 +113,9 @@ fn regular(path: &Path) -> Result<(), String> {
 }
 
 /// The controllable capabilities of fixed names and their values: LIVE (DEC-13), the B hold mode
-/// (DEC-04), the bundle path (DEC-11), the threshold mode (DEC-06). The economic switches
-/// (`ECON`) and the wallets (`WALLET:<pubkey>`) take `SWITCH_VALUES`.
-pub const CAPABILITIES: [(&str, &[&str]); 4] = [
+/// (DEC-04), the bundle path (DEC-11), the threshold mode (DEC-06), inventory rebalancing (B01).
+/// The economic switches (`ECON`) and the wallets (`WALLET:<pubkey>`) take `SWITCH_VALUES`.
+pub const CAPABILITIES: [(&str, &[&str]); 5] = [
     (LIVE, &LIVE_VALUES),
     (
         crate::execution::hold_b::HOLD_B,
@@ -128,6 +128,10 @@ pub const CAPABILITIES: [(&str, &[&str]); 4] = [
     (
         super::threshold_mode::THRESHOLD_TRIGGER,
         &super::threshold_mode::VALUES,
+    ),
+    (
+        crate::execution::inventory::INVENTORY_REBALANCING,
+        &crate::execution::inventory::REBALANCE_VALUES,
     ),
 ];
 
@@ -168,7 +172,7 @@ pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
             Some((_, values)) => values,
             None => {
                 return Err(format!(
-                    "CAPABILITY_UNKNOWN: {} (LIVE|HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE|WALLET:<pubkey>|FE06_GRANT|FE06_REVOKE)",
+                    "CAPABILITY_UNKNOWN: {} (LIVE|HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|INVENTORY_REBALANCING|ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE|WALLET:<pubkey>|FE06_GRANT|FE06_REVOKE)",
                     shown(capability, "")
                 ))
             }

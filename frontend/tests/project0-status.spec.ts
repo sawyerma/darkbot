@@ -457,6 +457,18 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const th = fromBinary(CapabilityControlCommandSchema, thr.params);
   expect([th.capability, th.requested]).toEqual(["THRESHOLD_TRIGGER", "OBSERVE"]);
   expect(thr.expected?.version).toEqual({ case: "configVersion", value: 1n });
+  // B01: inventory rebalancing through the same controller; ACTIVE requested stays OBSERVE (a
+  // rebalance trade has no authorization of its own), OFF is requested with the view's version.
+  await expect(page.locator(".p0-line", { hasText: /^INVENTORY_REBALANCING/ }).first())
+    .toContainText("OBSERVE (requested ACTIVE) · REBALANCE_ACTIVE_UNAUTHORIZED");
+  await page.getByRole("combobox", { name: "Inventory rebalancing" }).selectOption("OFF");
+  await page.getByRole("button", { name: "Request rebalancing mode" }).click();
+  await expect.poll(() => sent.length).toBe(5);
+  const reb = sent.at(-1)!;
+  expect(reb.action).toBe("project0.capability.set");
+  const rb = fromBinary(CapabilityControlCommandSchema, reb.params);
+  expect([rb.capability, rb.requested]).toEqual(["INVENTORY_REBALANCING", "OFF"]);
+  expect(reb.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   // H0: the newest completed report's headline and a start over every saved run (typed budget).
@@ -493,7 +505,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.h0.start", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual([...Array(5).fill("project0.capability.set"), "project0.analytics.h0.start", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });
 

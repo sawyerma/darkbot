@@ -1924,6 +1924,14 @@ mod contract_tests {
                         .into(),
                     roles: vec![],
                 },
+                // B01: rebalancing requested ACTIVE, OBSERVE (a trade has no authorization).
+                OwnerCapability {
+                    name: darkbot_runner::execution::inventory::INVENTORY_REBALANCING.into(),
+                    requested: "ACTIVE",
+                    effective: "OBSERVE",
+                    block_reason: darkbot_runner::execution::inventory::ACTIVE_UNAUTHORIZED.into(),
+                    roles: vec![],
+                },
                 // P8-CTRL.1: the economic switches in the owner's order (ECON_SIGN ENABLED, the
                 // others DISABLED) and the one configured signer, ENABLED, with its roles.
                 econ(cap::ECON_LIVE, false),

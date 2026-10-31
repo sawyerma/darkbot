@@ -183,6 +183,26 @@ pub enum RecordEvent {
         a_checks: Vec<crate::execution::hold_b::FlowCheck>,
         b_checks: Vec<crate::execution::hold_b::FlowCheck>,
     },
+    /// B01 (OBSERVE): one completed rebalancing observation — the plan from the wallet's real
+    /// balances, real quotes and conservative costs at `slot`, never traded: its trades, the
+    /// assets it does not rebalance with the stable reason, its budget.
+    RebalancePlan {
+        slot: u64,
+        at_unix_ms: Option<u64>,
+        trades: Vec<RebalanceTradeRecord>,
+        blocked: Vec<(String, Cow<'static, str>)>,
+        budget_usd_micro: u64,
+    },
+}
+/// B01: one planned rebalance trade (`RecordEvent::RebalancePlan`): `amount_in` of `sell` for at
+/// least `minimum_out` of `buy` at the conservative cost `cost_usd_micro`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RebalanceTradeRecord {
+    pub sell: String,
+    pub buy: String,
+    pub amount_in: u64,
+    pub minimum_out: u64,
+    pub cost_usd_micro: u64,
 }
 /// DEC-01: what happened to a parked candidate (`RecordEvent::BlockhashPark`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

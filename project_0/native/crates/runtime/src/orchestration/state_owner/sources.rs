@@ -625,11 +625,18 @@ impl ShadowOwner {
             &request_capability,
             Some(c) if c == crate::orchestration::threshold_mode::THRESHOLD_TRIGGER
         );
+        // B01: inventory rebalancing, applied by the owner's observation (OFF|OBSERVE; ACTIVE is
+        // requested, never effective).
+        let rebalance = matches!(
+            &request_capability,
+            Some(c) if c == crate::execution::inventory::INVENTORY_REBALANCING
+        );
         let valid = match valid {
             Ok(requested) if threshold => self
                 .threshold_request(&requested, seq)
                 .map(|()| requested)
                 .map_err(String::from),
+            Ok(requested) if rebalance => self.rebalance_request(&requested),
             other => other,
         };
         let c = &mut self.sources.capabilities;
@@ -661,8 +668,8 @@ impl ShadowOwner {
             } else if hold_b {
                 c.hold_b_requested =
                     crate::execution::hold_b::HoldMode::parse(requested).unwrap_or_default();
-            } else if threshold {
-                // Applied by `threshold_request` (the owner's threshold mode).
+            } else if threshold || rebalance {
+                // Applied by `threshold_request` / `rebalance_request` (the owner's own modes).
             } else {
                 c.live_requested = cap::LIVE_VALUES
                     .into_iter()
@@ -718,6 +725,8 @@ impl ShadowOwner {
             } else if threshold {
                 let t = &self.threshold;
                 (t.requested.code(), t.effective.code(), t.block.into())
+            } else if rebalance {
+                self.rebalance_state()
             } else {
                 let c = &self.sources.capabilities;
                 let (effective, block_reason) = cap::live_decision(&c.live_gates());
@@ -975,3 +984,20 @@ impl ShadowOwner {
         Ok(())
     }
 }
+
+/// B01: a build without the protocol crate has no rebalancing observation: every request is
+/// refused, nothing is effective.
+#[cfg(not(feature = "crate_health"))]
+impl ShadowOwner {
+    pub(super) fn rebalance_request(&mut self, _requested: &str) -> Result<String, String> {
+        Err(REBALANCE_UNAVAILABLE.into())
+    }
+
+    pub(super) fn rebalance_state(&self) -> (&'static str, &'static str, String) {
+        ("OFF", "OFF", REBALANCE_UNAVAILABLE.into())
+    }
+}
+
+#[cfg(not(feature = "crate_health"))]
+const REBALANCE_UNAVAILABLE: &str =
+    "REBALANCE_UNAVAILABLE: inventory rebalancing needs the crate_health build";

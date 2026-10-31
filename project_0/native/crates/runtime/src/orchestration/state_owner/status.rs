@@ -258,20 +258,19 @@ impl ShadowOwner {
                     ""
                 },
             ),
-            // B01: OBSERVE plans with real balances, quotes and costs; trading needs LIVE (B10).
+            // B01: the operator's request (INVENTORY_REBALANCING); OBSERVE plans with real
+            // balances, quotes and costs; a trade needs its own authorization (never effective).
             cap(
-                "INVENTORY_REBALANCING",
-                self.rebalance.mode.name(),
+                crate::execution::inventory::INVENTORY_REBALANCING,
+                self.rebalance.requested,
                 match (rebalancing, observing) {
                     (true, true) => "OBSERVE",
                     _ => "OFF",
                 },
-                if observing {
-                    "Shadow: rebalancing is planned, never traded (ACTIVE needs LIVE, B10)"
-                } else if rebalancing {
-                    "bands reserve inventory; rebalancing OFF (P0_REBALANCE_MODE)"
-                } else {
-                    ""
+                match self.rebalance.block() {
+                    "" if observing => "Shadow: rebalancing is planned, never traded",
+                    "" if rebalancing => "bands reserve inventory; rebalancing OFF",
+                    block => block,
                 },
             ),
             // DEC-06: requested OFF|OBSERVE|ACTIVE, effective OFF|SWEEP|OBSERVE|ACTIVE.

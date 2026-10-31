@@ -5,8 +5,9 @@
 //! at the low price, plus the transaction's planned network fee), inside
 //! `rebalance_budget_usd_micro`. Quotes are asked off the owner (the rebalance quote worker) in at
 //! most `rebalance_quote_rounds` rounds; a quote not answered is never guessed. Nothing is ever
-//! traded: ACTIVE needs the LIVE gate (B10) and is refused at the start. The plan reaches the
-//! Liquidator tab with the status projection.
+//! traded: the mode is the controller's capability `INVENTORY_REBALANCING` (start value
+//! `P0_REBALANCE_MODE`), ACTIVE is recorded as requested and never effective. The plan reaches
+//! the Liquidator tab with the status projection and each completed observation the journal.
 use super::*;
 use crate::execution::inventory::{self, Action, QuoteKey, RebalanceMode};
 use crate::status_tap::{OwnerRebalance, RebalanceTrade};
@@ -14,6 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// The owner's rebalancing observation.
 pub(super) struct Observer {
+    /// The operator's request (`INVENTORY_REBALANCING`): OFF, OBSERVE or ACTIVE.
+    pub(super) requested: &'static str,
+    /// What is effective: ACTIVE is never (`inventory::ACTIVE_UNAUTHORIZED`).
     pub(super) mode: RebalanceMode,
     /// When the next observation starts (`None`: at once).
     due: Option<std::time::Instant>,
@@ -37,6 +41,7 @@ impl Observer {
         limits: &darkbot_solana::runtime_config::Limits,
     ) -> Self {
         Self {
+            requested: mode.name(),
             mode,
             due: None,
             round: 0,
@@ -51,6 +56,44 @@ impl Observer {
 }
 
 impl Observer {
+    /// B01 (CTRL-03): the operator's request — OFF stops the observation (its plan with it);
+    /// OBSERVE and ACTIVE observe, ACTIVE never trades (`block`); without bands nothing can be
+    /// observed (refused, the request unchanged). A change starts afresh: no quote of before.
+    pub(super) fn request(&mut self, requested: &str, banded: bool) -> Result<(), &'static str> {
+        let value = inventory::REBALANCE_VALUES
+            .into_iter()
+            .find(|v| *v == requested)
+            .ok_or("CAPABILITY_VALUE_INVALID: INVENTORY_REBALANCING (OFF|OBSERVE|ACTIVE)")?;
+        let mode = if value == "OFF" {
+            RebalanceMode::Off
+        } else if banded {
+            RebalanceMode::Observe
+        } else {
+            return Err(inventory::TARGETS_REQUIRED);
+        };
+        if mode != self.mode {
+            self.mode = mode;
+            self.due = None;
+            self.round = 0;
+            self.quotes.clear();
+            self.pending.clear();
+            if mode == RebalanceMode::Off {
+                self.plan = None;
+            }
+        }
+        self.requested = value;
+        Ok(())
+    }
+
+    /// Why the request is not what is effective (`""`: it is).
+    pub(super) fn block(&self) -> &'static str {
+        if self.requested == "ACTIVE" {
+            inventory::ACTIVE_UNAUTHORIZED
+        } else {
+            ""
+        }
+    }
+
     /// The projection: the newest plan, or before the first one an empty plan of the mode
     /// (no time: nothing planned yet); `None` while OFF.
     pub(super) fn projection(&self, slot: u64) -> Option<OwnerRebalance> {
@@ -78,6 +121,25 @@ fn mint_of(key: &str) -> Option<Pubkey> {
 }
 
 impl ShadowOwner {
+    /// B01 (CTRL-03): the operator's `INVENTORY_REBALANCING` request, decided by the owner's
+    /// observation (`Observer::request`).
+    pub(super) fn rebalance_request(&mut self, requested: &str) -> Result<String, String> {
+        let banded = !self.inventory_targets.is_empty();
+        self.rebalance
+            .request(requested, banded)
+            .map(|()| requested.to_string())
+            .map_err(String::from)
+    }
+
+    /// The request, what is effective and why not as requested.
+    pub(super) fn rebalance_state(&self) -> (&'static str, &'static str, String) {
+        (
+            self.rebalance.requested,
+            self.rebalance.mode.name(),
+            self.rebalance.block().into(),
+        )
+    }
+
     /// One owner pass of the observation: take answered quotes, plan when due and no quote is
     /// pending, ask the quotes the plan lacks (next round) or schedule the next observation.
     pub(super) fn rebalance_observe(&mut self) {
@@ -119,9 +181,16 @@ impl ShadowOwner {
             let fee = self.asset_value_high("SOL", fee_lamports?)?;
             paid.saturating_sub(got).checked_add(fee)
         };
+        // Collateral funds only at a known conservative value (and its trade's answered quote).
+        let collateral_known = |asset: &str| {
+            available
+                .get(asset)
+                .is_some_and(|a| self.asset_value_low(asset, *a).is_some())
+        };
         let (actions, wanted) = inventory::plan_with_quotes(
             &available,
             &self.inventory_targets,
+            &collateral_known,
             &self.rebalance.quotes,
             &cost,
             budget,
@@ -181,17 +250,66 @@ impl ShadowOwner {
         } else {
             self.rebalance.round = 0;
             self.rebalance.due = Some(now + interval);
+            self.rebalance_record();
         }
     }
 
-    /// The book-adjusted balance of every band's asset: the validated ATA amount of a mint or
-    /// the liquidator's lamports for SOL, minus what FE-04 attempts hold (an unreadable book:
-    /// nothing); an asset whose balance is not in canonical state is absent (unknown).
-    fn rebalance_balances(&self) -> BTreeMap<String, u64> {
+    /// B01: a completed observation's plan as its typed record (a provisional plan, still
+    /// waiting for quotes, has none).
+    fn rebalance_record(&mut self) {
+        use crate::analytics::evidence::{OwnerEvidence, RebalanceTradeRecord, RecordEvent};
+        let Some(plan) = &self.rebalance.plan else {
+            return;
+        };
+        let record = RecordEvent::RebalancePlan {
+            slot: plan.slot,
+            at_unix_ms: plan.at_unix_ms,
+            trades: plan
+                .trades
+                .iter()
+                .map(|t| RebalanceTradeRecord {
+                    sell: t.sell.clone(),
+                    buy: t.buy.clone(),
+                    amount_in: t.amount_in,
+                    minimum_out: t.minimum_out,
+                    cost_usd_micro: t.cost_usd_micro,
+                })
+                .collect(),
+            blocked: plan
+                .blocked
+                .iter()
+                .map(|(asset, reason)| (asset.clone(), (*reason).into()))
+                .collect(),
+            budget_usd_micro: plan.budget_usd_micro,
+        };
+        if let Err(e) = self.evidence.emit(OwnerEvidence::Record(record)) {
+            owner_log!(self, "rebalance: plan record not written {e}");
+        }
+    }
+
+    /// The book-adjusted balance of every band's asset and of the wallet's other tokens of the
+    /// group's bank mints (collateral): the validated ATA amount of a mint or the liquidator's
+    /// lamports for SOL, minus what FE-04 attempts and their open positions hold (an unreadable
+    /// book: nothing); an asset whose balance is not in canonical state is absent (unknown), a
+    /// collateral without tokens too. A band's mint without its ATA is absent as well, so no plan
+    /// buys into an account it would have to create (rent): ATAs are prewarmed outside
+    /// (`p0-prewarm-atas`), as for liquidations.
+    pub(super) fn rebalance_balances(&self) -> BTreeMap<String, u64> {
         let view = StateView(&self.st);
+        let collateral: BTreeSet<String> = self
+            .required_dependency_keys
+            .iter()
+            .filter_map(|k| {
+                let r = self.st.get(k)?;
+                let bank = darkbot_project0::protocol::decode_bank(&r.data).ok()?;
+                (r.owner == self.program && bank.group == self.group).then(|| bank.mint.to_string())
+            })
+            .filter(|mint| !self.inventory_targets.contains_key(mint))
+            .collect();
         let raw: BTreeMap<String, u64> = self
             .inventory_targets
             .keys()
+            .chain(&collateral)
             .filter_map(|key| {
                 let amount = if key == "SOL" {
                     self.st.get(&self.liquidator).map(|r| r.lamports)
@@ -205,6 +323,7 @@ impl ShadowOwner {
             .collect();
         raw.keys()
             .filter_map(|k| self.reservations.available(&raw, k).map(|a| (k.clone(), a)))
+            .filter(|(k, a)| *a > 0 || !collateral.contains(k))
             .collect()
     }
 }

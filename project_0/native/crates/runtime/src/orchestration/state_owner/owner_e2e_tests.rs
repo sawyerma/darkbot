@@ -3869,9 +3869,11 @@ fn d07_fe04_replay_without_a_wall_clock_is_refused() {
 /// (the liquidator's lamports, a validated ATA). The owner asks the full ExactIn quote off its
 /// thread; the answer leads to the quote of exactly the shortfall's amount; without a route that
 /// asset stays blocked with an unknown cost (never traded, never guessed). The plan and the
-/// OBSERVE capability reach the projection; the next observation waits for its interval.
+/// OBSERVE capability reach the projection; the next observation waits for its interval; the
+/// completed observation is one typed record.
 #[test]
 fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading() {
+    use crate::analytics::payload::{decode, Payload};
     use crate::execution::inventory::{RebalanceMode, Target};
     use crate::orchestration::remote_workers::RebalanceQuoteResult;
     let mut f = fixture("b01_rebalance");
@@ -4013,6 +4015,183 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
     // The next observation waits for its interval.
     f.owner.rebalance_observe();
     assert!(jobs.try_pop().is_none());
+    // The wallet's other tokens of a group bank's mint are collateral, book-adjusted.
+    let (collateral, bank_key) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let mut bank = <marginfi_type_crate::types::Bank as bytemuck::Zeroable>::zeroed();
+    (bank.group, bank.mint) = (f.owner.group, collateral);
+    f.owner.st.on_event(account(
+        bank_key,
+        f.owner.program,
+        1,
+        [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&bank)].concat(),
+    ));
+    f.owner.required_dependency_keys.push(bank_key);
+    assert!(
+        !f.owner
+            .rebalance_balances()
+            .contains_key(&collateral.to_string()),
+        "no tokens: no collateral"
+    );
+    let (token_program, ata) = f.owner.atas.of(&collateral)[0];
+    let mut data = vec![0u8; 165];
+    data[..32].copy_from_slice(collateral.as_ref());
+    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[64..72].copy_from_slice(&70u64.to_le_bytes());
+    data[108] = 1;
+    f.owner
+        .st
+        .on_event(account(ata, token_program, 2_039_280, data));
+    assert_eq!(f.owner.rebalance_balances()[&collateral.to_string()], 70);
+    // The completed observation is one typed record; its provisional plans are none.
+    let slot = r.slot;
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == RecordEvent::KIND {
+            if let RecordEvent::RebalancePlan {
+                slot,
+                trades,
+                blocked,
+                budget_usd_micro,
+                ..
+            } = decode(frame.kind, frame.schema, &frame.payload).unwrap()
+            {
+                records.push((slot, trades, blocked, budget_usd_micro));
+            }
+        }
+    }
+    assert_eq!(
+        records,
+        vec![(
+            slot,
+            vec![],
+            vec![(mint.to_string(), "REBALANCE_COST_UNKNOWN".into())],
+            OPERATIONAL.rebalance_budget_usd_micro
+        )]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// B01 (CTRL-03): inventory rebalancing through the one controller, hot at the owner — without
+/// bands every request but OFF is refused (nothing to observe); OBSERVE starts the observation;
+/// ACTIVE is recorded as requested and stays OBSERVE (a trade has no authorization of its own);
+/// an invalid value is refused; OFF ends the observation and its projection. Every decision is a
+/// durable receipt and the status row shows request, effect and reason.
+#[test]
+fn b01_the_controller_switches_rebalancing_hot() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::execution::inventory::{self, RebalanceMode, Target};
+    use crate::orchestration::capability_control;
+    let mut f = fixture_with("b01_controller", None);
+    let dir = f.dir.join("capability-control");
+    f.owner.sources.capabilities.dir = Some(dir.clone());
+    f.owner.sources.capabilities.config_version = Some(0);
+    let request = |seq, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: inventory::INVENTORY_REBALANCING.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+            request_id: format!("r-{seq}"),
+            owner_epoch: 0,
+        })
+    };
+    let decided = |f: &Fixture| {
+        let o = capability_control::latest_outcome(&dir).unwrap().unwrap();
+        let row = f
+            .owner
+            .owner_snapshot(1)
+            .capabilities
+            .into_iter()
+            .find(|c| c.name == inventory::INVENTORY_REBALANCING)
+            .unwrap();
+        (
+            (o.seq, o.applied, o.requested, o.effective, o.detail),
+            (row.requested, row.effective, row.block_reason.into_owned()),
+            f.owner.rebalance.mode,
+        )
+    };
+    assert_eq!(f.owner.rebalance.mode, RebalanceMode::Off);
+    f.owner.apply_capability_control(1, request(1, "OBSERVE"));
+    let ((seq, applied, _, _, detail), row, mode) = decided(&f);
+    assert_eq!(
+        (seq, applied, detail.as_str()),
+        (1, false, inventory::TARGETS_REQUIRED)
+    );
+    assert_eq!((row.0, row.1, mode), ("OFF", "OFF", RebalanceMode::Off));
+    f.owner.inventory_targets = [(
+        "SOL".to_string(),
+        Target {
+            reserve: 0,
+            min: 1,
+            target: 2,
+            max: 3,
+            dust: 0,
+        },
+    )]
+    .into();
+    f.owner.apply_capability_control(2, request(2, "OBSERVE"));
+    let ((seq, applied, requested, effective, _), row, mode) = decided(&f);
+    assert_eq!(
+        (seq, applied, requested.as_str(), effective.as_str()),
+        (2, true, "OBSERVE", "OBSERVE")
+    );
+    assert_eq!(
+        row,
+        (
+            "OBSERVE",
+            "OBSERVE",
+            "Shadow: rebalancing is planned, never traded".into()
+        )
+    );
+    assert_eq!(mode, RebalanceMode::Observe);
+    assert_eq!(
+        f.owner.owner_snapshot(1).rebalance.unwrap().at_unix_ms,
+        None,
+        "the observation starts afresh"
+    );
+    f.owner.apply_capability_control(3, request(3, "ACTIVE"));
+    let ((seq, applied, requested, effective, detail), row, mode) = decided(&f);
+    assert_eq!(
+        (seq, applied, requested.as_str(), effective.as_str()),
+        (3, true, "ACTIVE", "OBSERVE")
+    );
+    assert!(detail.contains(inventory::ACTIVE_UNAUTHORIZED));
+    assert_eq!(
+        row,
+        ("ACTIVE", "OBSERVE", inventory::ACTIVE_UNAUTHORIZED.into())
+    );
+    assert_eq!(mode, RebalanceMode::Observe, "ACTIVE never trades");
+    f.owner.apply_capability_control(4, request(4, "SOMETIMES"));
+    let ((seq, applied, ..), row, _) = decided(&f);
+    assert_eq!((seq, applied), (4, false));
+    assert_eq!(
+        (row.0, row.1),
+        ("ACTIVE", "OBSERVE"),
+        "a refusal changes nothing"
+    );
+    f.owner.apply_capability_control(5, request(5, "OFF"));
+    let ((seq, applied, requested, effective, _), row, mode) = decided(&f);
+    assert_eq!(
+        (seq, applied, requested.as_str(), effective.as_str()),
+        (5, true, "OFF", "OFF")
+    );
+    assert_eq!(
+        row,
+        (
+            "OFF",
+            "OFF",
+            "bands reserve inventory; rebalancing OFF".into()
+        )
+    );
+    assert_eq!(mode, RebalanceMode::Off);
+    assert!(f.owner.owner_snapshot(1).rebalance.is_none());
+    let (jobs, _results) = f.owner.remote.detached_rebalance();
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none(), "OFF asks no quote");
     cleanup(f);
 }
 

@@ -178,21 +178,25 @@ export function autostartGrantCommand(digest: string): { params: Uint8Array } | 
 }
 
 /** S1-02: a data source's mode (`p0ctl source set`); the running owner applies or refuses it. */
+/** The capabilities of mode OFF|OBSERVE|ACTIVE (`capabilityCommand`). */
+export type ModeCapability = "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER" | "INVENTORY_REBALANCING";
+
 export function sourceCommand(unit: string, mode: "off" | "observe" | "active"): { params: Uint8Array } | { problem: string } {
   if (!/^(?:wss|geyser:[a-z0-9-]{1,32})$/.test(unit)) return { problem: "Unknown source unit." };
   return { params: toBinary(SourceControlCommandSchema, message(SourceControlCommandSchema, { unit, mode })) };
 }
 
-/** DEC-13/DEC-04/DEC-11/DEC-06: the operands of `p0ctl capability set LIVE OFF|LIVE` or `…
- * HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE`; the owner decides what is effective
- * (LIVE stays BLOCKED until a separate FE-06 authorization, HOLD_B ACTIVE needs the user's N and
- * the evidence, JITO_BUNDLE ACTIVE a qualified bundle simulator, THRESHOLD_TRIGGER ACTIVE comes
- * only from OBSERVE with N comparable ticks without a miss). */
+/** DEC-13/DEC-04/DEC-11/DEC-06/B01: the operands of `p0ctl capability set LIVE OFF|LIVE` or `…
+ * HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE`; the owner decides
+ * what is effective (LIVE stays BLOCKED until a separate FE-06 authorization, HOLD_B ACTIVE needs
+ * the user's N and the evidence, JITO_BUNDLE ACTIVE a qualified bundle simulator, THRESHOLD_TRIGGER
+ * ACTIVE comes only from OBSERVE with N comparable ticks without a miss, INVENTORY_REBALANCING
+ * ACTIVE is never effective — a rebalance trade has no authorization of its own). */
 /** P8-CTRL.6 (review M2): stated with the owner epoch this view showed (0: unknown) — the gateway
  * takes every request but a move to OFF only with it, so a view from before an owner restart
  * never re-arms LIVE or a mode. */
 export function capabilityCommand(capability: "LIVE", requested: "OFF" | "LIVE", ownerEpoch: bigint | null): { params: Uint8Array };
-export function capabilityCommand(capability: "HOLD_B" | "JITO_BUNDLE" | "THRESHOLD_TRIGGER", requested: "OFF" | "OBSERVE" | "ACTIVE", ownerEpoch: bigint | null): { params: Uint8Array };
+export function capabilityCommand(capability: ModeCapability, requested: "OFF" | "OBSERVE" | "ACTIVE", ownerEpoch: bigint | null): { params: Uint8Array };
 export function capabilityCommand(capability: string, requested: string, ownerEpoch: bigint | null): { params: Uint8Array } {
   return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested, ownerEpoch: ownerEpoch ?? 0n })) };
 }

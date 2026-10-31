@@ -43,6 +43,7 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.trigger?.threshold?.thresholdDetect.p50).toBe(60_000n);
     expect(liquidator.trigger?.threshold?.observeOwner).toEqual({ count: 0n, p50: null, p95: null, p99: null, max: null });
     expect(liquidator.capabilities.find((c) => c.name === "THRESHOLD_TRIGGER")).toMatchObject({ requested: "ACTIVE", effective: "OBSERVE", blockReason: "B8_UNDECIDED" });
+    expect(liquidator.capabilities.find((c) => c.name === "INVENTORY_REBALANCING")).toMatchObject({ requested: "ACTIVE", effective: "OBSERVE" });
     expect(liquidator.pipeline?.losses).toEqual([{ reason: "ROUTING", count: 2n }]);
     expect(liquidator.pipeline?.simulationP95Ns).toBeNull();
     expect(liquidator.safety?.maxTotalCapitalUsdMicro).toBe("100000000");
