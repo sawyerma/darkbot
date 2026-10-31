@@ -77,6 +77,41 @@ impl Resources {
     }
 }
 
+/// P8-CTRL.3: the priority fee a signed transaction requests — ⌈µLamports/CU × CU limit / 1e6⌉
+/// from its own compute budget instructions (`resource_ixs`); no price (or 0) requests none;
+/// `None`: a price without a CU limit, or a duplicate or unreadable compute budget instruction.
+pub fn requested_priority_lamports(tx: &VersionedTransaction) -> Option<u64> {
+    let program = ComputeBudgetInstruction::set_compute_unit_limit(0).program_id;
+    let keys = tx.message.static_account_keys();
+    let (mut limit, mut price) = (None::<u32>, None::<u64>);
+    for ix in tx.message.instructions() {
+        if keys.get(usize::from(ix.program_id_index)) != Some(&program) {
+            continue;
+        }
+        match ix.data.first()? {
+            2 if limit.is_none() => {
+                limit = Some(u32::from_le_bytes(ix.data.get(1..5)?.try_into().ok()?));
+            }
+            3 if price.is_none() => {
+                price = Some(u64::from_le_bytes(ix.data.get(1..9)?.try_into().ok()?));
+            }
+            2 | 3 => return None,
+            _ => {}
+        }
+    }
+    match price {
+        None | Some(0) => Some(0),
+        Some(price) => Some(
+            Resources {
+                compute_unit_limit: limit?,
+                priority_micro_lamports_per_cu: price,
+                loaded_accounts_data_size: None,
+            }
+            .priority_total_lamports(),
+        ),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TxPlan {
     pub version: BuildVersion,
@@ -1059,6 +1094,45 @@ mod tests {
             Instruction::new_with_bytes(prog, &[], vec![AccountMeta::new_readonly(a, false)]),
         ];
         assert_eq!(locked_account_count(&payer, &ixs), 3);
+    }
+
+    /// P8-CTRL.3: the priority fee is read from the signed payload's own compute budget — what
+    /// the build requested (legacy and v0), none without a price, unknown with a second price.
+    #[test]
+    fn p8ctrl03_the_payload_names_the_priority_fee_it_requests() {
+        let payer = Keypair::new();
+        let plan = |version, price| TxPlan {
+            version,
+            payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(
+                &payer.pubkey(),
+                &payer.pubkey(),
+                0,
+            )],
+            lookup_tables: vec![].into(),
+            resources: Resources {
+                compute_unit_limit: 1_400_000,
+                priority_micro_lamports_per_cu: price,
+                loaded_accounts_data_size: None,
+            },
+        };
+        for version in [BuildVersion::Legacy, BuildVersion::V0] {
+            let built = build(
+                &plan(version, 2_000),
+                Hash::new_unique(),
+                &TxLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(requested_priority_lamports(&built.tx), Some(2_800));
+            let free = build(&plan(version, 0), Hash::new_unique(), &TxLimits::default()).unwrap();
+            assert_eq!(requested_priority_lamports(&free.tx), Some(0));
+        }
+        let mut twice = plan(BuildVersion::Legacy, 2_000);
+        twice
+            .instructions
+            .insert(0, ComputeBudgetInstruction::set_compute_unit_price(1));
+        let built = build(&twice, Hash::new_unique(), &TxLimits::default()).unwrap();
+        assert_eq!(requested_priority_lamports(&built.tx), None);
     }
 
     #[test]

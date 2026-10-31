@@ -236,7 +236,9 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
             super::capability_control::ROLE_LIQUIDATOR,
             super::capability_control::ROLE_FEE_PAYER,
         ];
-        if roles.is_empty() || roles.iter().any(|r| !known.contains(r)) {
+        // Each role once, in the canonical order (what the owner runs names them so).
+        let mut order = known.iter();
+        if roles.is_empty() || !roles.iter().all(|r| order.any(|k| k == r)) {
             return Err(invalid("signers"));
         }
         fee_payer_role |=
@@ -266,6 +268,9 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
         .any(|a| !ADAPTERS.contains(&a.as_str()))
     {
         return Err(invalid("submission_adapters"));
+    }
+    if !ROUTES.contains(&s.route.as_str()) {
+        return Err(invalid("route"));
     }
     for d in &s.data_sources {
         super::source_control::parse_unit(d).map_err(|_| invalid("data_sources"))?;
@@ -382,6 +387,239 @@ pub struct Running {
     /// The configured signers as `<pubkey>:<ROLE>+<ROLE>`.
     pub signers: BTreeSet<String>,
     pub owner_epoch: u64,
+}
+
+/// P8-CTRL.3: the route classes in their order (`planner::RouteKind`); a scope's `route` is the
+/// highest class it allows (PAID only after P7, as the planner requires).
+pub const ROUTES: [&str; 4] = ["NO_SWAP", "LOCAL_PRECOMPUTED", "FREE_PUBLIC", "PAID"];
+
+/// The class of a plan's route.
+pub fn route_class(r: darkbot_project0::planner::RouteKind) -> &'static str {
+    use darkbot_project0::planner::RouteKind;
+    match r {
+        RouteKind::NoSwap => ROUTES[0],
+        RouteKind::LocalPrecomputedAllowed => ROUTES[1],
+        RouteKind::FreePublicAllowed => ROUTES[2],
+        RouteKind::PaidAllowed => ROUTES[3],
+    }
+}
+
+/// P8-CTRL.3/.5: what one new attempt does, as its grant's scope bounds it — the exact payload's
+/// facts at the handoff (`None`: unknown, never within a bound).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttemptUse {
+    /// The plan's liquidation type (`RECEIVERSHIP`; `None`: a plan without its market identity).
+    pub execution_class: Option<String>,
+    pub funding_class: String,
+    pub fee_payer: String,
+    /// The plan's asset and liability bank (`None`: a plan without its market identity).
+    pub banks: Option<[String; 2]>,
+    pub mints: Vec<String>,
+    pub input_usd_micro: u64,
+    pub exposure_usd_micro: u64,
+    pub max_loss_usd_micro: u64,
+    /// The exact message's network fee (base and priority).
+    pub fee_lamports: u64,
+    /// The priority fee the signed payload requests (`tx::requested_priority_lamports`).
+    pub priority_fee_lamports: Option<u64>,
+    pub tip_lamports: u64,
+    pub rent_lamports: u64,
+    pub protocol_fee_lamports: u64,
+    /// Every lamport the attempt debits (fee, tip, protocol fee, rent).
+    pub spend_lamports: u64,
+    /// The wallet's reconciled SOL before the attempt.
+    pub sol_balance_lamports: Option<u64>,
+    pub slippage_bps: u64,
+    pub route: &'static str,
+    /// The canonical data source the state comes from (`None`: none canonical).
+    pub data_source: Option<darkbot_solana::ingress::sources::SourceUnit>,
+}
+
+/// P8-CTRL.3/.5: what one exit does, as its grant's scope bounds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExitUse {
+    /// `<attempt approval id>:<mint>` of the open position.
+    pub position: String,
+    pub mint: String,
+    pub fee_payer: String,
+    pub fee_lamports: u64,
+    pub priority_fee_lamports: Option<u64>,
+    pub slippage_bps: u64,
+    pub route: &'static str,
+    pub data_source: Option<darkbot_solana::ingress::sources::SourceUnit>,
+    /// The position belongs to an attempt booked against this grant.
+    pub booked_under_grant: bool,
+}
+
+/// What an egress does, for its scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Use {
+    Attempt(AttemptUse),
+    Exit(ExitUse),
+}
+
+fn outside(what: &str, value: impl std::fmt::Display, bound: impl std::fmt::Display) -> String {
+    format!("FE06_SCOPE_USE: {what} {value} outside the grant's scope ({bound})")
+}
+
+fn unknown(what: &str) -> String {
+    format!("FE06_SCOPE_USE_UNKNOWN: {what} unknown — never within a bound")
+}
+
+fn at_most(what: &str, value: u64, bound: u64) -> Result<(), String> {
+    if value > bound {
+        return Err(outside(what, value, format!("≤ {bound}")));
+    }
+    Ok(())
+}
+
+fn route_within(route: &str, s: &Scope) -> Result<(), String> {
+    let rank = |r: &str| ROUTES.iter().position(|x| *x == r);
+    match (rank(route), rank(&s.route)) {
+        (Some(r), Some(max)) if r <= max => Ok(()),
+        _ => Err(outside("route", route, format!("≤ {}", s.route))),
+    }
+}
+
+fn slippage_within(slippage_bps: u64, s: &Scope) -> Result<(), String> {
+    at_most("slippage_bps", slippage_bps, s.max_slippage_bps)?;
+    // The least output a swap of this slippage accepts, in bps of its quote.
+    let min_out = 10_000u64.saturating_sub(slippage_bps);
+    if min_out < s.min_out_bps {
+        return Err(outside(
+            "min_out_bps",
+            min_out,
+            format!("≥ {}", s.min_out_bps),
+        ));
+    }
+    Ok(())
+}
+
+fn source_within(
+    source: &Option<darkbot_solana::ingress::sources::SourceUnit>,
+    s: &Scope,
+) -> Result<(), String> {
+    let Some(unit) = source else {
+        return Err(unknown("data_source"));
+    };
+    let bound = s
+        .data_sources
+        .iter()
+        .any(|d| super::source_control::parse_unit(d).as_ref() == Ok(unit));
+    if !bound {
+        return Err(outside("data_source", format!("{unit:?}"), "data_sources"));
+    }
+    Ok(())
+}
+
+/// P8-CTRL.3/.5: the egress stays within its grant's scope — every class, identity, bank, mint,
+/// cost, reserve, slippage, route and source the scope bounds; an unknown fact is never within.
+pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
+    let member = |what: &str, value: &str, set: &BTreeSet<String>| {
+        if set.contains(value) {
+            Ok(())
+        } else {
+            Err(outside(what, value, what))
+        }
+    };
+    match u {
+        Use::Attempt(a) => {
+            let class = a
+                .execution_class
+                .as_deref()
+                .ok_or_else(|| unknown("execution_class"))?;
+            member("execution_classes", class, &s.execution_classes)?;
+            member("funding_classes", &a.funding_class, &s.funding_classes)?;
+            if a.fee_payer != s.fee_payer {
+                return Err(outside("fee_payer", &a.fee_payer, &s.fee_payer));
+            }
+            let Some(banks) = &a.banks else {
+                return Err(unknown("banks"));
+            };
+            for b in banks {
+                member("banks", b, &s.banks)?;
+            }
+            for m in &a.mints {
+                member("mints", m, &s.mints)?;
+            }
+            at_most(
+                "input_usd_micro",
+                a.input_usd_micro,
+                s.max_input_per_attempt_usd_micro,
+            )?;
+            at_most(
+                "exposure_usd_micro",
+                a.exposure_usd_micro,
+                s.max_exposure_usd_micro,
+            )?;
+            at_most(
+                "max_loss_usd_micro",
+                a.max_loss_usd_micro,
+                s.max_loss_usd_micro,
+            )?;
+            at_most("fee_lamports", a.fee_lamports, s.max_fee_lamports)?;
+            let priority = a
+                .priority_fee_lamports
+                .ok_or_else(|| unknown("priority_fee_lamports"))?;
+            at_most(
+                "priority_fee_lamports",
+                priority,
+                s.max_priority_fee_lamports,
+            )?;
+            at_most("tip_lamports", a.tip_lamports, s.max_tip_lamports)?;
+            at_most("rent_lamports", a.rent_lamports, s.max_rent_lamports)?;
+            at_most(
+                "protocol_fee_lamports",
+                a.protocol_fee_lamports,
+                s.max_protocol_fee_lamports,
+            )?;
+            at_most("spend_lamports", a.spend_lamports, s.max_spend_lamports)?;
+            // The reserve stays in the wallet after the attempt's whole debit.
+            let balance = a
+                .sol_balance_lamports
+                .ok_or_else(|| unknown("sol_balance_lamports"))?;
+            let left = balance.checked_sub(a.spend_lamports);
+            if left.is_none_or(|l| l < s.reserve_lamports) {
+                return Err(outside(
+                    "sol_after_spend_lamports",
+                    left.map_or_else(|| "below 0".to_string(), |l| l.to_string()),
+                    format!("≥ reserve {}", s.reserve_lamports),
+                ));
+            }
+            slippage_within(a.slippage_bps, s)?;
+            route_within(a.route, s)?;
+            source_within(&a.data_source, s)
+        }
+        Use::Exit(e) => {
+            // EXIT_ONLY: exactly the scope's open positions; ALL: those and the positions of
+            // attempts booked against this grant.
+            let named = s.exit_positions.contains(&e.position);
+            if !(named || (s.mode == Mode::All && e.booked_under_grant)) {
+                return Err(outside("exit_position", &e.position, "exit_positions"));
+            }
+            member("mints", &e.mint, &s.mints)?;
+            if e.fee_payer != s.fee_payer {
+                return Err(outside("fee_payer", &e.fee_payer, &s.fee_payer));
+            }
+            at_most("fee_lamports", e.fee_lamports, s.max_fee_lamports)?;
+            let priority = e
+                .priority_fee_lamports
+                .ok_or_else(|| unknown("priority_fee_lamports"))?;
+            at_most(
+                "priority_fee_lamports",
+                priority,
+                s.max_priority_fee_lamports,
+            )?;
+            at_most(
+                "exit_cost_lamports",
+                e.fee_lamports,
+                s.max_exit_cost_lamports,
+            )?;
+            slippage_within(e.slippage_bps, s)?;
+            route_within(e.route, s)?;
+            source_within(&e.data_source, s)
+        }
+    }
 }
 
 /// P8-CTRL.3: the scope binds exactly what runs now — the first difference refuses it.
@@ -549,6 +787,59 @@ pub(crate) mod tests {
         }
     }
 
+    /// What the default test scope of `signer` binds as the running identity.
+    pub(crate) fn running(signer: &Pubkey) -> Running {
+        Running {
+            genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+            program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            program_data_hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
+            code_sha: Some("c0de".into()),
+            binary_sha256: Some("b".repeat(64)),
+            runtime_config_sha256: "c".repeat(64),
+            signers: [format!("{signer}:LIQUIDATOR+FEE_PAYER")].into(),
+            owner_epoch: 3,
+        }
+    }
+
+    /// An attempt within the default test scope of `signer`.
+    pub(crate) fn attempt_use(signer: &Pubkey) -> AttemptUse {
+        AttemptUse {
+            execution_class: Some("RECEIVERSHIP".into()),
+            funding_class: "ZERO_PREFUND_SAME_TX".into(),
+            fee_payer: signer.to_string(),
+            banks: Some([KEY.into(), KEY.into()]),
+            mints: vec![KEY.into()],
+            input_usd_micro: 10_000_000,
+            exposure_usd_micro: 10_000_000,
+            max_loss_usd_micro: 1_000_000,
+            fee_lamports: 100_000,
+            priority_fee_lamports: Some(50_000),
+            tip_lamports: 10_000,
+            rent_lamports: 3_000_000,
+            protocol_fee_lamports: 10_000,
+            spend_lamports: 3_120_000,
+            sol_balance_lamports: Some(13_120_000),
+            slippage_bps: 50,
+            route: "FREE_PUBLIC",
+            data_source: Some(darkbot_solana::ingress::sources::SourceUnit::WsRpcControl),
+        }
+    }
+
+    /// An exit within the default test scope of `signer` (a position of the grant's attempt).
+    pub(crate) fn exit_use(signer: &Pubkey) -> ExitUse {
+        ExitUse {
+            position: format!("attempt-1:{KEY}"),
+            mint: KEY.into(),
+            fee_payer: signer.to_string(),
+            fee_lamports: 100_000,
+            priority_fee_lamports: Some(0),
+            slippage_bps: 50,
+            route: "FREE_PUBLIC",
+            data_source: Some(darkbot_solana::ingress::sources::SourceUnit::WsRpcControl),
+            booked_under_grant: true,
+        }
+    }
+
     pub(crate) fn text(signer: &Pubkey, overrides: &[(&str, &str)]) -> String {
         let signer = signer.to_string();
         let fields = [
@@ -597,7 +888,7 @@ pub(crate) mod tests {
             ("reserve_lamports", "10000000".into()),
             ("max_slippage_bps", "50".into()),
             ("min_out_bps", "9950".into()),
-            ("route", "jupiter_v2".into()),
+            ("route", "FREE_PUBLIC".into()),
             ("campaign_id", "first-profit".into()),
             ("max_attempts_per_utc_day", "1".into()),
             ("max_attempts_campaign", "1".into()),
@@ -856,5 +1147,126 @@ pub(crate) mod tests {
             .unwrap_err()
             .starts_with("FE06_STORE_UNSAFE"));
         let _ = std::fs::remove_dir_all(project);
+    }
+
+    /// P8-CTRL.3/.5: an egress stays within its grant's scope — every fact the scope bounds; one
+    /// outside or unknown refuses with its name (never a default, never a zero).
+    #[test]
+    fn p8ctrl03_a_scope_bounds_every_fact_of_an_attempt_and_an_exit() {
+        use super::{check_use, AttemptUse, ExitUse, Use};
+        use darkbot_solana::ingress::sources::SourceUnit;
+        let signer = Pubkey::new_unique();
+        let scope_of =
+            |o: &[(&str, &str)]| parse(text(&signer, o).as_bytes(), &ceilings()).unwrap();
+        let s = scope_of(&[]);
+        let attempt = attempt_use(&signer);
+        assert_eq!(check_use(&s, &Use::Attempt(attempt.clone())), Ok(()));
+        let with = |f: &dyn Fn(&mut AttemptUse)| {
+            let mut a = attempt.clone();
+            f(&mut a);
+            check_use(&s, &Use::Attempt(a))
+        };
+        assert_eq!(
+            with(&|a| a.route = "NO_SWAP"),
+            Ok(()),
+            "a lower route class"
+        );
+        let other = Pubkey::new_unique().to_string();
+        type Change<'a> = (&'a str, &'a dyn Fn(&mut AttemptUse));
+        let outside: [Change; 18] = [
+            ("execution_classes", &|a| {
+                a.execution_class = Some("CLASSIC".into())
+            }),
+            ("funding_classes", &|a| a.funding_class = "INVENTORY".into()),
+            ("fee_payer", &|a| a.fee_payer = other.clone()),
+            ("banks", &|a| a.banks = Some([KEY.into(), other.clone()])),
+            ("mints", &|a| a.mints.push(other.clone())),
+            ("input_usd_micro", &|a| a.input_usd_micro += 1),
+            ("exposure_usd_micro", &|a| a.exposure_usd_micro += 1),
+            ("max_loss_usd_micro", &|a| a.max_loss_usd_micro += 1),
+            ("fee_lamports", &|a| a.fee_lamports += 1),
+            ("priority_fee_lamports", &|a| {
+                a.priority_fee_lamports = Some(50_001)
+            }),
+            ("tip_lamports", &|a| a.tip_lamports += 1),
+            ("rent_lamports", &|a| a.rent_lamports += 1),
+            ("protocol_fee_lamports", &|a| a.protocol_fee_lamports += 1),
+            ("spend_lamports", &|a| a.spend_lamports = 50_000_001),
+            ("sol_after_spend_lamports", &|a| {
+                a.sol_balance_lamports = Some(13_119_999)
+            }),
+            ("slippage_bps", &|a| a.slippage_bps = 51),
+            ("route", &|a| a.route = "PAID"),
+            ("data_source", &|a| {
+                a.data_source = Some(SourceUnit::BinaryGeyser {
+                    provider: "other".into(),
+                })
+            }),
+        ];
+        for (what, f) in outside {
+            let e = with(f).unwrap_err();
+            assert!(
+                e.starts_with(&format!("FE06_SCOPE_USE: {what} ")),
+                "{what}: {e}"
+            );
+        }
+        let unknown: [Change; 5] = [
+            ("execution_class", &|a| a.execution_class = None),
+            ("banks", &|a| a.banks = None),
+            ("priority_fee_lamports", &|a| a.priority_fee_lamports = None),
+            ("sol_balance_lamports", &|a| a.sol_balance_lamports = None),
+            ("data_source", &|a| a.data_source = None),
+        ];
+        for (what, f) in unknown {
+            let e = with(f).unwrap_err();
+            assert!(
+                e.starts_with(&format!("FE06_SCOPE_USE_UNKNOWN: {what} ")),
+                "{what}: {e}"
+            );
+        }
+        // The least output a swap of this slippage accepts against the scope's minimum.
+        let strict = scope_of(&[("min_out_bps", "9960")]);
+        let e = check_use(&strict, &Use::Attempt(attempt.clone())).unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_USE: min_out_bps 9950 "), "{e}");
+        // Exits: ALL takes the positions of the grant's own attempts, EXIT_ONLY exactly the
+        // named ones; both bound the exit's cost, mint, payer, slippage, route and source.
+        let position = format!("attempt-1:{KEY}");
+        let exit = exit_use(&signer);
+        assert_eq!(check_use(&s, &Use::Exit(exit.clone())), Ok(()));
+        let foreign = ExitUse {
+            booked_under_grant: false,
+            ..exit.clone()
+        };
+        let e = check_use(&s, &Use::Exit(foreign.clone())).unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_USE: exit_position "), "{e}");
+        let only = scope_of(&[
+            ("mode", "EXIT_ONLY"),
+            ("exit_positions", &position),
+            ("max_attempts_per_utc_day", "0"),
+            ("max_attempts_campaign", "0"),
+            ("max_attempts_grant", "0"),
+        ]);
+        assert_eq!(check_use(&only, &Use::Exit(foreign)), Ok(()));
+        let unnamed = ExitUse {
+            position: format!("pilot-2:{KEY}"),
+            ..exit.clone()
+        };
+        let e = check_use(&only, &Use::Exit(unnamed)).unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_USE: exit_position "), "{e}");
+        let cheap = scope_of(&[("max_exit_cost_lamports", "90000")]);
+        let e = check_use(&cheap, &Use::Exit(exit.clone())).unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_USE: exit_cost_lamports "), "{e}");
+        let e = check_use(
+            &s,
+            &Use::Exit(ExitUse {
+                priority_fee_lamports: None,
+                ..exit
+            }),
+        )
+        .unwrap_err();
+        assert!(
+            e.starts_with("FE06_SCOPE_USE_UNKNOWN: priority_fee_lamports "),
+            "{e}"
+        );
     }
 }

@@ -83,7 +83,7 @@ fn scope(signer: &Pubkey) -> String {
         "reserve_lamports = 10000000".into(),
         "max_slippage_bps = 50".into(),
         "min_out_bps = 9950".into(),
-        "route = jupiter_v2".into(),
+        "route = FREE_PUBLIC".into(),
         "campaign_id = first-profit".into(),
         "max_attempts_per_utc_day = 1".into(),
         "max_attempts_campaign = 1".into(),

@@ -173,6 +173,10 @@ impl Fe04Admission {
             let held = holds.entry(mint.to_string()).or_insert(0);
             *held = held.saturating_add(*units);
         }
+        // P8-CTRL.3: the priority fee the signed payload itself requests (every transaction).
+        let priority = c.txs.iter().try_fold(0u64, |sum, tx| {
+            sum.checked_add(darkbot_solana::tx::requested_priority_lamports(tx)?)
+        });
         let payload = match SignedPayload::new(c.txs, c.path, c.payer) {
             Ok(p) => p,
             Err(e) => return Admission::Refused(e),
@@ -221,11 +225,34 @@ impl Fe04Admission {
         if std::time::Instant::now() >= c.deadline {
             return refuse("FE04_HANDOFF_DEADLINE");
         }
-        // P8-CTRL.7: the egress permit of exactly this payload, before anything is reserved.
+        // P8-CTRL.7: the egress permit of exactly this payload, before anything is reserved —
+        // P8-CTRL.3/.5: within its grant's scope with every fact of the attempt.
         let permit = match gates.map(|g| {
+            use crate::orchestration::fe06;
+            let market = c.plan.market_identity.as_ref();
+            let use_ = fe06::Use::Attempt(fe06::AttemptUse {
+                execution_class: market.map(|m| m.liquidation_type.clone()),
+                funding_class: a.funding_class.clone(),
+                fee_payer: c.payer.to_string(),
+                banks: market.map(|m| [m.asset_bank.clone(), m.liability_bank.clone()]),
+                mints: c.plan.assets.iter().map(ToString::to_string).collect(),
+                input_usd_micro: c.plan.input.required_capital_usd_micro,
+                exposure_usd_micro: c.plan.exposure,
+                max_loss_usd_micro: max_loss,
+                fee_lamports: fee,
+                priority_fee_lamports: priority,
+                tip_lamports: c.plan.tip,
+                rent_lamports: rent,
+                protocol_fee_lamports: c.plan.sol_costs.flat_fee_lamports,
+                spend_lamports: sol_debit,
+                sol_balance_lamports: self.balances.get("SOL").copied(),
+                slippage_bps: c.plan.slippage_bps,
+                route: fe06::route_class(c.plan.route),
+                data_source: g.source.cloned(),
+            });
             crate::orchestration::capability_control::EgressPermit::issue(
                 g,
-                crate::orchestration::capability_control::Purpose::NewAttempt,
+                &use_,
                 simulated.signatures(),
                 simulated.path(),
                 c.deadline,

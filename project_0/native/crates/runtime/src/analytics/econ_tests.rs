@@ -4988,6 +4988,8 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
         fe06: None,
         now_unix_s: Some(0),
         epoch: None,
+        running: None,
+        source: None,
     };
     assert_eq!(
         capability_control::live_decision(&gates).1,

@@ -1207,6 +1207,10 @@ impl Journal {
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
         self.reserve_held(approval, intent, now, None, None)
     }
+    /// P8-CTRL.5: the held attempt's FE-06 booking (`None`: none held, or booked under none).
+    pub fn attempt_booking(&self) -> Option<&Fe06Attempt> {
+        self.saved.as_ref().and_then(|s| s.fe06.as_ref())
+    }
     /// P8-CTRL.5: every own attempt of this wallet (archived and active) — what the FE-06 limits
     /// count.
     pub fn attempt_records(
@@ -2738,10 +2742,13 @@ mod tests {
         simulated: &transport::SimulatedPayload<'_>,
     ) -> crate::orchestration::capability_control::EgressPermit {
         use crate::orchestration::capability_control as cap;
-        let gates = cap::OfflineGates::enabled(solana_sdk::pubkey::Pubkey::new_unique());
+        let signer = solana_sdk::pubkey::Pubkey::new_unique();
+        let gates = cap::OfflineGates::enabled(signer);
         cap::EgressPermit::issue(
             &gates.gates(),
-            cap::Purpose::NewAttempt,
+            &crate::orchestration::fe06::Use::Attempt(
+                crate::orchestration::fe06::tests::attempt_use(&signer),
+            ),
             simulated.signatures(),
             simulated.path(),
             test_deadline(),

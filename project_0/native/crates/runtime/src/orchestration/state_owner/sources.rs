@@ -106,6 +106,8 @@ pub(super) struct OwnerCapabilities {
     /// P8-CTRL.3 (review M1): the scopes previewed for this epoch, read at the journal refresh
     /// cadence — never by the status projection.
     pub(super) previews: Fe06Previews,
+    /// P8-CTRL.3: what this owner runs, fixed at its start (`None`: no capability control).
+    pub(super) running: Option<crate::orchestration::fe06::Running>,
 }
 
 /// P8-CTRL.3: the cache of the FE-06 preview store. Each entry is decoded once (a store entry is
@@ -134,6 +136,8 @@ impl Fe06Previews {
         let Ok(digests) = fe06::preview_digests(project) else {
             return;
         };
+        // Review NEW-L1: an entry no longer in the store is no preview any more.
+        self.seen.retain(|d, _| digests.contains(d));
         for digest in digests {
             if self.seen.contains_key(&digest) {
                 continue;
@@ -178,6 +182,8 @@ impl OwnerCapabilities {
             fe06: self.fe06.as_ref(),
             now_unix_s: super::accounts::wall_unix_s().ok(),
             epoch: self.epoch,
+            running: self.running.as_ref(),
+            source: None,
         }
     }
 
@@ -234,11 +240,21 @@ impl Default for OwnerCapabilities {
             applied: 0,
             refused: 0,
             previews: Fe06Previews::default(),
+            running: None,
         }
     }
 }
 
 impl OwnerSources {
+    /// P8-CTRL.2/.3: the gates with the canonical source of the owner's state — what every
+    /// permit and every LIVE decision of the owner rests on.
+    pub(super) fn live_gates(&self) -> crate::orchestration::capability_control::LiveGates<'_> {
+        crate::orchestration::capability_control::LiveGates {
+            source: self.arbiter.canonical(),
+            ..self.capabilities.live_gates()
+        }
+    }
+
     /// `observe` queue capacity; its pushes ring the owner doorbell `wake`.
     pub(super) fn new(
         arbiter: SourceArbiter,

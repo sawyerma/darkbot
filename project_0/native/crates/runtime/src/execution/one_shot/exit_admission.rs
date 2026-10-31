@@ -97,6 +97,7 @@ pub fn admit_exit(
     let Ok(fee) = adapter.fee_for_message(&built.tx, c.deadline) else {
         return refuse("EXIT_FEE_UNKNOWN");
     };
+    let priority = tx::requested_priority_lamports(&built.tx);
     let payload = match SignedPayload::new(vec![built.tx], adapter.path(), payer) {
         Ok(p) => p,
         Err(e) => return Admission::Refused(e),
@@ -148,11 +149,26 @@ pub fn admit_exit(
     if std::time::Instant::now() >= c.deadline {
         return Admission::Refused("FE04_HANDOFF_DEADLINE".into());
     }
-    // P8-CTRL.7: the exit's egress permit, before anything is reserved.
+    // P8-CTRL.7: the exit's egress permit, before anything is reserved — P8-CTRL.3/.5: within
+    // its grant's scope with every fact of the exit.
+    let booked = journal.attempt_booking().map(|b| b.grant.clone());
     let permit = match gates.map(|g| {
+        use crate::orchestration::fe06;
+        let use_ = fe06::Use::Exit(fe06::ExitUse {
+            position: format!("{}:{}", approval.attempt_approval_id, approval.mint),
+            mint: approval.mint.clone(),
+            fee_payer: payer.to_string(),
+            fee_lamports: fee.lamports,
+            priority_fee_lamports: priority,
+            slippage_bps: u64::from(terms.slippage_bps),
+            // A router's route: the class the builder gives a plan with one.
+            route: fe06::route_class(darkbot_project0::planner::RouteKind::FreePublicAllowed),
+            data_source: g.source.cloned(),
+            booked_under_grant: booked.is_some() && booked.as_deref() == g.fe06.map(|a| a.digest()),
+        });
         crate::orchestration::capability_control::EgressPermit::issue(
             g,
-            crate::orchestration::capability_control::Purpose::Exit,
+            &use_,
             simulated.signatures(),
             simulated.path(),
             c.deadline,

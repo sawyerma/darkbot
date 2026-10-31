@@ -15,6 +15,8 @@ struct Fixture {
     dir: std::path::PathBuf,
     /// A23-01/FE-04: detached result queues the test drives as the workers.
     results: Option<crate::orchestration::remote_workers::Detached>,
+    /// The identities a fixture builder names for its tests (P8-CTRL.3: banks, mints).
+    marks: std::collections::BTreeMap<&'static str, Pubkey>,
 }
 
 /// The built-in operational limits the fixture's owner runs with.
@@ -286,6 +288,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         program_data_account,
         dir,
         results,
+        marks: Default::default(),
     }
 }
 
@@ -4474,7 +4477,7 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
         (1, "LIVE", "BLOCKED", true)
     );
     assert_eq!(
-        capability_control::pipeline_mode(&f.owner.sources.capabilities.live_gates()),
+        capability_control::pipeline_mode(&f.owner.sources.live_gates()),
         crate::execution::pipeline::Mode::Shadow
     );
     f.owner
@@ -6163,6 +6166,13 @@ fn dec13b_fixture_with(
     keys.sort_unstable_by(|a, b| b.cmp(a));
     let (asset_bank, liab_bank, target) = (keys[0], keys[1], Pubkey::new_unique());
     f.owner.sol_bank = Pubkey::new_unique();
+    f.marks.extend([
+        ("asset_bank", asset_bank),
+        ("liab_bank", liab_bank),
+        ("asset_mint", asset_mint),
+        ("liab_mint", liab_mint),
+        ("sol_mint", sol_mint),
+    ]);
     let mut a = MarginfiAccount::zeroed();
     a.group = group;
     // A linked liquidation record: the plan pays no record rent.
@@ -6496,24 +6506,9 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
 /// without the RPC adapter permits no send: the candidate is refused before anything durable.
 #[test]
 fn p8ctrl03_a_grant_whose_scope_lacks_the_adapter_permits_no_send() {
-    use crate::orchestration::{capability_control as cap, fe06};
     let (mut f, target, calls) = dec13b_fixture("p8ctrl03_adapter", true);
-    let now = super::accounts::wall_unix_s().unwrap();
-    let (from, until) = ((now - 60).to_string(), (now + 3_000).to_string());
-    let scope = fe06::parse(
-        fe06::tests::text(
-            &f.owner.liquidator,
-            &[
-                ("submission_adapters", "jito_single"),
-                ("not_before_unix_s", &from),
-                ("expires_unix_s", &until),
-            ],
-        )
-        .as_bytes(),
-        &fe06::tests::ceilings(),
-    )
-    .unwrap();
-    f.owner.sources.capabilities.fe06 = Some(cap::Fe06Authorization::offline_test_of(scope));
+    // A scope that binds what runs, without the RPC adapter.
+    p8ctrl03_scoped(&mut f, &[("submission_adapters", "jito_single")], |_| {});
     assert!(f.owner.live_effective());
     f.owner
         .detect(Some((
@@ -7369,4 +7364,177 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
     assert!(!s.in_force);
     assert_eq!(s.block_reason, cap::grant_not_in_force(&expired_digest));
     cleanup(f);
+}
+
+/// P8-CTRL.3: the running identity of a DEC-13b fixture owner and a scope that binds exactly it —
+/// the fixture's program, deployment, signer, banks and mints; generous bounds within the test
+/// ceilings — of owner epoch 3; `edit` changes the scope's text, the identity after it.
+fn p8ctrl03_scoped(
+    f: &mut Fixture,
+    overrides: &[(&str, &str)],
+    edit: impl FnOnce(&mut crate::orchestration::fe06::Running),
+) {
+    use crate::orchestration::{capability_control as cap, fe06};
+    let now = super::accounts::wall_unix_s().unwrap();
+    let mark = |k: &str| f.marks[k].to_string();
+    let (from, until) = ((now - 60).to_string(), (now + 3_000).to_string());
+    let banks = format!("{},{}", mark("asset_bank"), mark("liab_bank"));
+    let mints = format!(
+        "{},{},{}",
+        mark("asset_mint"),
+        mark("liab_mint"),
+        mark("sol_mint")
+    );
+    let program = f.owner.program.to_string();
+    let deployment = f.owner.program_data_baseline_hash.to_string();
+    let mut fields: Vec<(&str, &str)> = vec![
+        ("programs", &program),
+        ("program_data_hash", &deployment),
+        ("banks", &banks),
+        ("mints", &mints),
+        ("max_input_per_attempt_usd_micro", "100000000"),
+        ("max_exposure_usd_micro", "100000000"),
+        ("max_loss_usd_micro", "50000000"),
+        ("max_rent_lamports", "50000000"),
+        ("max_spend_lamports", "50000000"),
+        ("max_protocol_fee_lamports", "50000000"),
+        ("not_before_unix_s", &from),
+        ("expires_unix_s", &until),
+    ];
+    for (k, v) in overrides {
+        fields.retain(|(f, _)| f != k);
+        fields.push((k, v));
+    }
+    let scope = fe06::parse(
+        fe06::tests::text(&f.owner.liquidator, &fields).as_bytes(),
+        &fe06::tests::ceilings(),
+    )
+    .unwrap();
+    let mut running = fe06::Running {
+        genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+        program: program.clone(),
+        program_data_hash: deployment.clone(),
+        code_sha: Some(scope.code_sha.clone()),
+        binary_sha256: Some(scope.binary_sha256.clone()),
+        runtime_config_sha256: scope.runtime_config_sha256.clone(),
+        signers: [format!("{}:LIQUIDATOR+FEE_PAYER", f.owner.liquidator)].into(),
+        owner_epoch: scope.owner_epoch,
+    };
+    edit(&mut running);
+    let c = &mut f.owner.sources.capabilities;
+    c.fe06 = Some(cap::Fe06Authorization::offline_test_of(scope));
+    c.running = Some(running);
+}
+
+/// P8-CTRL.3/.5 (L03/L04/L14): a grant whose scope binds exactly what runs sends the candidate
+/// once; one differing identity — the signers, the binary, an unknown identity — refuses its
+/// real signature (nothing signed, simulated or sent), and one fact of the attempt outside the
+/// scope — its fee, its banks, its data source — refuses its egress before anything durable.
+#[test]
+fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
+    let detect = |f: &mut Fixture, target: Pubkey| {
+        f.owner
+            .detect(Some((
+                target,
+                f.owner.clock.now_ns(),
+                100,
+                "account_update",
+            )))
+            .unwrap();
+    };
+    let methods = |calls: &Arc<Mutex<Vec<String>>>| calls.lock().unwrap().clone();
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl03_bound", true);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
+    assert!(f.owner.live_effective());
+    detect(&mut f, target);
+    assert_eq!(
+        methods(&calls)
+            .iter()
+            .filter(|m| *m == "sendTransaction")
+            .count(),
+        1,
+        "{:?} {:?}",
+        methods(&calls),
+        f.owner.fe04_admissions
+    );
+    cleanup(f);
+    // What runs differs: no real signature at all.
+    type Edit = Box<dyn FnOnce(&mut crate::orchestration::fe06::Running)>;
+    let identities: [(&str, Option<Edit>, &str); 3] = [
+        (
+            "signers",
+            Some(Box::new(|r| {
+                r.signers = [format!("{}:LIQUIDATOR", Pubkey::new_unique())].into()
+            })),
+            "FE06_SCOPE_BINDING: signers differs",
+        ),
+        (
+            "binary",
+            Some(Box::new(|r| r.binary_sha256 = Some("a".repeat(64)))),
+            "FE06_SCOPE_BINDING: binary_sha256 differs",
+        ),
+        ("unknown", None, "what the owner runs is unknown"),
+    ];
+    for (tag, edit, reason) in identities {
+        let (mut f, target, calls) = dec13b_fixture(&format!("p8ctrl03_runs_{tag}"), true);
+        p8ctrl03_scoped(&mut f, &[], |r| {
+            if let Some(edit) = edit {
+                edit(r)
+            }
+        });
+        if tag == "unknown" {
+            f.owner.sources.capabilities.running = None;
+        }
+        detect(&mut f, target);
+        let m = methods(&calls);
+        assert!(
+            !m.iter()
+                .any(|m| m == "sendTransaction" || m == "simulateTransaction"),
+            "{tag}: {m:?}"
+        );
+        assert!(f.owner.fe04_held.is_none(), "{tag}");
+        // The candidate's record names the refused signature.
+        let dir = f.dir.clone();
+        f.owner.finish().unwrap();
+        let journal = std::fs::read(dir.join("opportunities.p0j")).unwrap();
+        assert!(
+            journal
+                .windows(reason.len())
+                .any(|w| w == reason.as_bytes()),
+            "{tag}: {reason}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    // One fact of the attempt outside the scope: refused at its egress permit, nothing durable.
+    let facts: [(&str, (&str, &str), &str); 3] = [
+        (
+            "fee",
+            ("max_fee_lamports", "4999"),
+            "FE06_SCOPE_USE: fee_lamports 5000 ",
+        ),
+        (
+            "source",
+            ("data_sources", "geyser:other"),
+            "FE06_SCOPE_USE: data_source ",
+        ),
+        (
+            "tip",
+            ("max_spend_lamports", "1"),
+            "FE06_SCOPE_USE: spend_lamports ",
+        ),
+    ];
+    for (tag, field, reason) in facts {
+        let (mut f, target, calls) = dec13b_fixture(&format!("p8ctrl03_use_{tag}"), true);
+        p8ctrl03_scoped(&mut f, &[field], |_| {});
+        detect(&mut f, target);
+        let m = methods(&calls);
+        assert!(!m.iter().any(|m| m == "sendTransaction"), "{tag}: {m:?}");
+        assert!(f.owner.fe04_held.is_none(), "{tag}: nothing durable");
+        assert!(
+            f.owner.fe04_admissions.last_refusal.starts_with(reason),
+            "{tag}: {:?}",
+            f.owner.fe04_admissions
+        );
+        cleanup(f);
+    }
 }

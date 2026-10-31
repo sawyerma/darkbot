@@ -550,9 +550,8 @@ impl ShadowOwner {
         // DEC-13: the mode is the controller gate's — LIVE only while LIVE is effective, which
         // without an FE-06 authorization it never is. DEC-13b: a LIVE candidate is handed the
         // owner's FE-04 admission (none: the pipeline stops at its send boundary).
-        let mode = crate::orchestration::capability_control::pipeline_mode(
-            &self.sources.capabilities.live_gates(),
-        );
+        let mode =
+            crate::orchestration::capability_control::pipeline_mode(&self.sources.live_gates());
         let mut admission = match mode {
             crate::execution::pipeline::Mode::Live => {
                 let facts = self.fe04_admission_facts(&acct);
@@ -604,7 +603,7 @@ impl ShadowOwner {
             },
             fe04: admission.as_mut(),
             hold: &self.hold_gate,
-            egress: Some(self.sources.capabilities.live_gates()),
+            egress: Some(self.sources.live_gates()),
             synthetic: &self.synthetic_signer,
         };
         #[cfg(feature = "crate_health")]

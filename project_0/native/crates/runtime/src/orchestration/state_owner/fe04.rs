@@ -544,17 +544,14 @@ impl ShadowOwner {
     /// P8-CTRL.5: the exit of an open position may run — LIVE effective for exits (every gate
     /// but ECON_ATTEMPT, which governs new liquidations only).
     pub(super) fn exit_live_effective(&self) -> bool {
-        crate::orchestration::capability_control::exit_decision(
-            &self.sources.capabilities.live_gates(),
-        )
-        .0 == crate::orchestration::capability_control::LIVE
+        crate::orchestration::capability_control::exit_decision(&self.sources.live_gates()).0
+            == crate::orchestration::capability_control::LIVE
     }
 
     /// DEC-13: LIVE is effective (the controller's request with an FE-06 authorization).
     pub(super) fn live_effective(&self) -> bool {
-        crate::orchestration::capability_control::pipeline_mode(
-            &self.sources.capabilities.live_gates(),
-        ) == crate::execution::pipeline::Mode::Live
+        crate::orchestration::capability_control::pipeline_mode(&self.sources.live_gates())
+            == crate::execution::pipeline::Mode::Live
     }
 
     /// DEC-13b: what the FE-04 admission of a LIVE candidate for `target` is opened or refreshed
@@ -829,7 +826,7 @@ impl ShadowOwner {
             approval,
             candidate,
             &self.submitter,
-            Some(&self.sources.capabilities.live_gates()),
+            Some(&self.sources.live_gates()),
         );
         self.fe04_held = Some(journal);
         let s = &mut self.fe04_admissions;

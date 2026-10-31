@@ -418,6 +418,31 @@ pub(super) fn prepare(
             ],
         ),
     ];
+    // P8-CTRL.3: what this owner runs, fixed once at its start — a grant's scope must bind
+    // exactly it (genesis pin, program, the observed ProgramData, the clean source, these
+    // binaries, the operational config, the signers with their roles, this epoch).
+    if let Some(epoch) = sources.capabilities.epoch {
+        use crate::orchestration::boot_audit;
+        sources.capabilities.running = Some(crate::orchestration::fe06::Running {
+            genesis_hash: genesis.to_string(),
+            program: program.to_string(),
+            program_data_hash: program_data_baseline_hash.to_string(),
+            code_sha: std::env::var("P0_PROJECT_DIR")
+                .ok()
+                .and_then(|p| boot_audit::clean_source_head(std::path::Path::new(&p))),
+            binary_sha256: boot_audit::runtime_binary_identity().ok(),
+            runtime_config_sha256: boot_audit::runtime_config_sha256(
+                darkbot_solana::runtime_config::active(),
+            )?,
+            signers: sources
+                .capabilities
+                .wallets
+                .iter()
+                .map(crate::orchestration::capability_control::WalletSwitch::scope_entry)
+                .collect(),
+            owner_epoch: epoch,
+        });
+    }
     let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone(), 1)?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).

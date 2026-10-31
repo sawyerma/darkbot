@@ -536,9 +536,8 @@ impl ShadowOwner {
     fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
         let a = &self.fe04_admissions;
         let (state, block_reason) = if !self.live_effective() {
-            let (_, reason) = crate::orchestration::capability_control::live_decision(
-                &self.sources.capabilities.live_gates(),
-            );
+            let (_, reason) =
+                crate::orchestration::capability_control::live_decision(&self.sources.live_gates());
             ("OFF", reason)
         } else if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
             // Single flight: the held attempt blocks every admission.

@@ -196,6 +196,15 @@ impl SafetyFlags {
     }
 }
 
+/// The digest of an operational config — the audit's and the running identity's (P8-CTRL.3).
+pub fn runtime_config_sha256(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> Result<String, String> {
+    bincode::serialize(config)
+        .map(|b| sha(&b))
+        .map_err(|e| format!("RUNTIME_CONFIG_DIGEST: {e}"))
+}
+
 /// Identities of this project and process now.
 pub fn identity(project: &Path, flags: SafetyFlags) -> Result<AuditedIdentity, String> {
     identity_with(project, flags, darkbot_solana::runtime_config::active())
@@ -207,12 +216,12 @@ pub fn identity_with(
     flags: SafetyFlags,
     config: &darkbot_solana::runtime_config::RuntimeConfig,
 ) -> Result<AuditedIdentity, String> {
-    let config = bincode::serialize(config).map_err(|e| format!("RUNTIME_CONFIG_DIGEST: {e}"))?;
+    let runtime_config_sha256 = runtime_config_sha256(config)?;
     Ok(AuditedIdentity {
         source_head: git(project, &["rev-parse", "HEAD"])
             .map(|b| String::from_utf8_lossy(&b).trim().to_string()),
         source_dirty_sha256: git(project, &["status", "--porcelain", "--", "."]).map(|b| sha(&b)),
-        runtime_config_sha256: sha(&config),
+        runtime_config_sha256,
         journal_version: journal::VERSION,
         discriminator_table_sha256: sha(&discriminator_table()),
         live_enabled: flags.live_enabled,

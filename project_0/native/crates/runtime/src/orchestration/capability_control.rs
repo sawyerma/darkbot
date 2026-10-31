@@ -549,6 +549,11 @@ impl WalletSwitch {
     pub fn capability(&self) -> String {
         format!("{WALLET_PREFIX}{}", self.pubkey)
     }
+
+    /// P8-CTRL.3: how a scope names it (`<pubkey>:<ROLE>+<ROLE>`, its roles in their order).
+    pub fn scope_entry(&self) -> String {
+        format!("{}:{}", self.pubkey, self.roles.join("+"))
+    }
 }
 
 /// P8-CTRL.2: what LIVE's effective value rests on at one instant.
@@ -563,6 +568,22 @@ pub struct LiveGates<'a> {
     pub now_unix_s: Option<u64>,
     /// P8-CTRL.7: the owner epoch an egress permit binds (`None`: no capability control).
     pub epoch: Option<u64>,
+    /// P8-CTRL.3: what the owner runs — a grant's scope binds exactly it (`None`: unknown, so
+    /// no grant's scope is ever within it).
+    pub running: Option<&'a super::fe06::Running>,
+    /// P8-CTRL.3: the canonical data source the owner's state comes from (`None`: none).
+    pub source: Option<&'a darkbot_solana::ingress::sources::SourceUnit>,
+}
+
+/// P8-CTRL.3: a grant's scope against what runs now (no identity or no clock: refused).
+fn scope_runs(g: &LiveGates, scope: &super::fe06::Scope, refusal: &str) -> Result<(), String> {
+    let running = g
+        .running
+        .ok_or_else(|| format!("{refusal}: what the owner runs is unknown"))?;
+    let now = g
+        .now_unix_s
+        .ok_or_else(|| format!("{refusal}: no readable clock"))?;
+    super::fe06::check_running(scope, running, now)
 }
 
 /// P8-CTRL.2: LIVE's effective value for a new liquidation — BLOCKED while any gate is missing
@@ -643,14 +664,19 @@ pub struct EgressPermit {
 
 impl EgressPermit {
     /// The permit of a payload (its signatures and path) under the gates now: LIVE effective for
-    /// `purpose` with a grant in force whose scope takes this purpose and this adapter.
+    /// its use (a new attempt or an exit) with a grant in force whose scope takes this purpose
+    /// and this adapter, binds exactly what runs and bounds the use (P8-CTRL.3/.5).
     pub fn issue(
         g: &LiveGates,
-        purpose: Purpose,
+        use_: &super::fe06::Use,
         signatures: &[String],
         path: darkbot_solana::submit::SubmissionPath,
         deadline: std::time::Instant,
     ) -> Result<Self, String> {
+        let purpose = match use_ {
+            super::fe06::Use::Attempt(_) => Purpose::NewAttempt,
+            super::fe06::Use::Exit(_) => Purpose::Exit,
+        };
         let (effective, reason) = match purpose {
             Purpose::NewAttempt => live_decision(g),
             Purpose::Exit => exit_decision(g),
@@ -686,6 +712,8 @@ impl EgressPermit {
                     "EGRESS_ADAPTER_NOT_IN_SCOPE: {adapter} is no adapter of the grant's scope"
                 ));
             }
+            scope_runs(g, scope, "EGRESS_SCOPE_BINDING")?;
+            super::fe06::check_use(scope, use_)?;
             expires = scope.expires_unix_s;
         }
         if signatures.is_empty() {
@@ -799,6 +827,10 @@ impl SignPermit {
                 }
             }
         }
+        // P8-CTRL.3: never a real signature under a scope that does not bind what runs.
+        if let Some(scope) = g.fe06.and_then(|a| a.scope()) {
+            scope_runs(g, scope, "SIGN_SCOPE_BINDING")?;
+        }
         for s in signers {
             if !g.wallets.iter().any(|w| w.pubkey == *s && w.enabled) {
                 return Err(format!("SIGN_NOT_PERMITTED: {WALLET_PREFIX}{s} DISABLED"));
@@ -844,6 +876,9 @@ pub(crate) struct OfflineGates {
     pub econ: EconSwitches,
     pub wallets: Vec<WalletSwitch>,
     pub fe06: Fe06Authorization,
+    /// P8-CTRL.3: what the default test scope (`fe06::tests::text`) of `signer` binds.
+    pub running: super::fe06::Running,
+    pub source: darkbot_solana::ingress::sources::SourceUnit,
 }
 
 #[cfg(test)]
@@ -859,6 +894,8 @@ impl OfflineGates {
             econ,
             wallets: vec![w],
             fe06: Fe06Authorization::offline_test(),
+            running: super::fe06::tests::running(&signer),
+            source: darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
         }
     }
 
@@ -870,6 +907,8 @@ impl OfflineGates {
             fe06: Some(&self.fe06),
             now_unix_s: Some(0),
             epoch: None,
+            running: Some(&self.running),
+            source: Some(&self.source),
         }
     }
 }
@@ -993,6 +1032,8 @@ mod tests {
                 fe06: None,
                 now_unix_s: Some(0),
                 epoch: None,
+                running: None,
+                source: None,
             };
             let (effective, reason) = live_decision(&g);
             assert_eq!(effective, "BLOCKED");
@@ -1060,6 +1101,8 @@ mod tests {
                 fe06,
                 now_unix_s: Some(0),
                 epoch: None,
+                running: None,
+                source: None,
             })
         };
         // Every gate: the requested value.
@@ -1113,6 +1156,8 @@ mod tests {
                 fe06: Some(&fe06),
                 now_unix_s: Some(0),
                 epoch: None,
+                running: None,
+                source: None,
             }),
             crate::execution::pipeline::Mode::Live
         );
@@ -1280,6 +1325,8 @@ mod tests {
                 fe06,
                 now_unix_s: Some(0),
                 epoch: None,
+                running: None,
+                source: None,
             }
         }
         let gates = |econ| at(econ, &wallets, Some(&fe06));
@@ -1457,6 +1504,8 @@ mod tests {
                 fe06: Some(&grant),
                 now_unix_s,
                 epoch: None,
+                running: None,
+                source: None,
             })
         };
         assert_eq!(at(Some(scope.not_before_unix_s)).0, LIVE);
@@ -1494,8 +1543,14 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let sigs = vec!["sig-1".to_string()];
         let offline = OfflineGates::enabled(signer);
-        let issue =
-            |g: &LiveGates, purpose, path| EgressPermit::issue(g, purpose, &sigs, path, deadline);
+        // P8-CTRL.3: a use within the default test scope of each purpose.
+        let use_of = |p: Purpose| match p {
+            Purpose::NewAttempt => fe06::Use::Attempt(fe06::tests::attempt_use(&signer)),
+            Purpose::Exit => fe06::Use::Exit(fe06::tests::exit_use(&signer)),
+        };
+        let issue = |g: &LiveGates, purpose, path| {
+            EgressPermit::issue(g, &use_of(purpose), &sigs, path, deadline)
+        };
         // Every gate: the permit of this payload.
         let p = issue(&offline.gates(), Purpose::NewAttempt, SubmissionPath::Rpc).unwrap();
         assert_eq!((p.grant(), p.epoch()), ("offline-test", None));
@@ -1633,7 +1688,7 @@ mod tests {
         );
         let past = EgressPermit::issue(
             &with(&offline, &all, 1000),
-            Purpose::NewAttempt,
+            &use_of(Purpose::NewAttempt),
             &sigs,
             SubmissionPath::Rpc,
             std::time::Instant::now(),
@@ -1646,7 +1701,7 @@ mod tests {
         assert!(issue(&offline.gates(), Purpose::NewAttempt, SubmissionPath::Rpc).is_ok());
         assert!(EgressPermit::issue(
             &offline.gates(),
-            Purpose::NewAttempt,
+            &use_of(Purpose::NewAttempt),
             &[],
             SubmissionPath::Rpc,
             deadline
