@@ -96,7 +96,9 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         "{out}"
     );
     match next() {
-        ControlMessage::Capability { seq: 1, request } => {
+        ControlMessage::Capability {
+            seq: 1, request, ..
+        } => {
             let r = request.unwrap();
             assert_eq!(
                 (r.capability.as_str(), r.requested.as_str(), r.owner_epoch),
@@ -161,7 +163,9 @@ fn dec13_p0ctl_capability_set_reaches_the_runtime_owner_queue() {
         "{out}"
     );
     match next() {
-        ControlMessage::Capability { seq: 2, request } => {
+        ControlMessage::Capability {
+            seq: 2, request, ..
+        } => {
             let r = request.unwrap();
             assert_eq!(
                 (

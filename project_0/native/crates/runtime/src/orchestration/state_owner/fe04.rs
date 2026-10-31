@@ -554,15 +554,12 @@ impl ShadowOwner {
             == crate::execution::pipeline::Mode::Live
     }
 
-    /// DEC-13b: what the FE-04 admission of a LIVE candidate for `target` is opened or refreshed
-    /// with — the configured attempt approval (VALID: unexpired, bound, unspent) and the current
-    /// wallet facts — or why there is none (`true`: an open admission is closed too, its wallet
-    /// lock released). Single flight: none while an attempt holds the wallet.
     /// P8-CTRL.4 (review N1): under a SIM_ONLY grant in force a Shadow candidate's real signature
     /// is bound by the same facts as a LIVE attempt's — the wallet's free SOL (its balances less
     /// every attempt's SOL hold and the policy reserve) and what the grant has booked in the FE-04
     /// journals (unreadable or none configured: unknown, so the simulation is signed
-    /// synthetically). `None` without a SIM_ONLY grant.
+    /// synthetically). `None` without a SIM_ONLY grant. Asked only where the simulation can never
+    /// send (`SubmissionAdapter::simulates_without_sending`).
     pub(super) fn sim_only_use_facts(
         &self,
         target: &Pubkey,
@@ -591,6 +588,10 @@ impl ShadowOwner {
         })
     }
 
+    /// DEC-13b: what the FE-04 admission of a LIVE candidate for `target` is opened or refreshed
+    /// with — the configured attempt approval (VALID: unexpired, bound, unspent) and the current
+    /// wallet facts — or why there is none (`true`: an open admission is closed too, its wallet
+    /// lock released). Single flight: none while an attempt holds the wallet.
     pub(super) fn fe04_admission_facts(
         &self,
         target: &Pubkey,

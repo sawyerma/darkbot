@@ -384,6 +384,13 @@ pub trait SubmissionAdapter {
         tx: &VersionedTransaction,
         deadline: std::time::Instant,
     ) -> Result<MessageFeeQuote, FeeQuoteError>;
+    /// P8-CTRL.4: whether this adapter's simulation can never send what it is given — what the
+    /// simulation of a real (SIM_ONLY) signature requires ("never handed to a send-capable
+    /// adapter"). A remote RPC endpoint can always broadcast a signed transaction: none of the
+    /// production adapters does, so every Shadow simulation is signed synthetically.
+    fn simulates_without_sending(&self) -> bool {
+        false
+    }
     /// [FIX-14] Fähigkeit, nicht Pfad: nur Adapter mit `true` dürfen Prerequisite-/Tip-Bundles senden.
     fn supports_bundle(&self) -> bool {
         false

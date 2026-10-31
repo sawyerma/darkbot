@@ -201,7 +201,9 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
         std::thread::sleep(Duration::from_millis(5));
     };
     match message {
-        ControlMessage::Capability { seq: 1, request } => {
+        ControlMessage::Capability {
+            seq: 1, request, ..
+        } => {
             let r = request.unwrap();
             assert_eq!(
                 (

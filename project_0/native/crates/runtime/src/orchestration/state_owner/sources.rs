@@ -398,8 +398,13 @@ impl ShadowOwner {
                     );
                     self.record_source_decision(seq, request, false, reason);
                 }
-                ControlMessage::Capability { seq, request } => {
-                    self.apply_capability_control(seq, request)
+                ControlMessage::Capability { seq, request, stop } => {
+                    self.apply_capability_control(seq, request);
+                    // P8-CTRL.7 (review M5/L-b): a counted stop is decided (applied or refused)
+                    // — it waits no more.
+                    if stop {
+                        self.sources.capabilities.stop.decide();
+                    }
                 }
             }
         }
@@ -546,22 +551,6 @@ impl ShadowOwner {
     /// one is decided by `capability_control::live_effective` alone (BLOCKED without FE-06).
     /// Recorded like a source decision (`outcome_<seq>.p0j`, the projection's last decision).
     pub(super) fn apply_capability_control(
-        &mut self,
-        seq: u64,
-        request: Result<crate::analytics::payload::CapabilityControlRequest, String>,
-    ) {
-        use crate::orchestration::capability_control as cap;
-        let stop = request
-            .as_ref()
-            .is_ok_and(|r| cap::is_stop(&r.capability, &r.requested));
-        self.decide_capability_control(seq, request);
-        // P8-CTRL.7 (review M5): the stop is decided (applied or refused) — it waits no more.
-        if stop {
-            self.sources.capabilities.stop.decide();
-        }
-    }
-
-    fn decide_capability_control(
         &mut self,
         seq: u64,
         request: Result<crate::analytics::payload::CapabilityControlRequest, String>,

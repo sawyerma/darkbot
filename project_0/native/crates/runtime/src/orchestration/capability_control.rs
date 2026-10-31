@@ -1697,6 +1697,14 @@ mod tests {
             EgressPermit::issue(&g, &use_, &sigs, rpc, deadline).unwrap_err(),
             STOP_PENDING
         );
+        // Review N2: no real signature either while it waits.
+        let message = solana_sdk::message::VersionedMessage::Legacy(
+            solana_sdk::message::Message::new(&[], Some(&signer)),
+        );
+        assert_eq!(
+            SignPermit::issue(&g, SignPurpose::NewAttempt, &[signer], &message, None).unwrap_err(),
+            STOP_PENDING
+        );
         assert_eq!(
             permit.admit(Purpose::NewAttempt, &sigs, rpc, 0),
             Err(STOP_PENDING.into())

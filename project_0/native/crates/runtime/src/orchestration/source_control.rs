@@ -220,6 +220,9 @@ pub enum ControlMessage {
     Capability {
         seq: u64,
         request: Result<CapabilityControlRequest, String>,
+        /// P8-CTRL.7: counted as a waiting stop by the control thread — the owner decides it
+        /// once applied (review L-b: only a counted stop is decided, the counts never drift).
+        stop: bool,
     },
 }
 
@@ -335,8 +338,10 @@ pub fn spawn(
     install_signal()?;
     let mut handed = baseline;
     let mut capabilities = capabilities;
-    // The newest capability request counted as a stop (none before this start's head).
-    let mut counted = capabilities.as_ref().map_or(0, |(_, head, _)| *head);
+    // The newest capability request read (none before this start's head) and the counted stops
+    // not handed over yet.
+    let mut seen = capabilities.as_ref().map_or(0, |(_, head, _)| *head);
+    let mut counted = std::collections::BTreeSet::new();
     std::thread::Builder::new()
         .name("p0-source-control".into())
         .spawn(move || {
@@ -354,8 +359,14 @@ pub fn spawn(
                         || capabilities_behind
                         || super::capability_control::head(dir).is_ok_and(|h| h > *handed)
                     {
-                        capabilities_behind =
-                            hand_over_capabilities(dir, handed, &mut counted, &owner, stop);
+                        capabilities_behind = hand_over_capabilities(
+                            dir,
+                            handed,
+                            &mut seen,
+                            &mut counted,
+                            &owner,
+                            stop,
+                        );
                     }
                 }
             }
@@ -365,32 +376,47 @@ pub fn spawn(
 
 /// DEC-13: hands every capability request after `handed` to the owner in sequence order, like
 /// `hand_over` (a full queue delays the rest, nothing is skipped or dropped). P8-CTRL.7 (review
-/// M5/N3): a stop is counted in `stop` once, when it is first read (`counted`: the newest
-/// sequence counted) — from then on no real signature and no egress starts until the owner has
-/// decided it, also while a full queue delays its hand-over.
+/// M5/N3/L-b): every request not yet seen is read and, if it is a stop — or unreadable, so
+/// possibly one — counted in `stop` once, before anything is handed over: from then on no real
+/// signature and no egress starts until the owner has decided it, also while a full queue or
+/// another request ahead of it delays its hand-over. `counted` holds the stops not handed yet,
+/// `seen` the newest request read.
 fn hand_over_capabilities(
     dir: &Path,
     handed: &mut u64,
-    counted: &mut u64,
+    seen: &mut u64,
+    counted: &mut std::collections::BTreeSet<u64>,
     owner: &Producer<ControlMessage>,
     stop: &super::capability_control::StopSignal,
 ) -> bool {
     let Ok(seqs) = super::capability_control::requests_after(dir, *handed) else {
         return true;
     };
+    let from = *seen;
+    for &seq in seqs.iter().filter(|s| **s > from) {
+        *seen = seq;
+        let possibly_stop = super::capability_control::request_at(dir, seq)
+            .as_ref()
+            .map_or(true, |r| {
+                super::capability_control::is_stop(&r.capability, &r.requested)
+            });
+        if possibly_stop {
+            stop.queue();
+            counted.insert(seq);
+        }
+    }
     for seq in seqs {
         let request = super::capability_control::request_at(dir, seq);
-        if seq > *counted {
-            *counted = seq;
-            if request
-                .as_ref()
-                .is_ok_and(|r| super::capability_control::is_stop(&r.capability, &r.requested))
-            {
-                stop.queue();
+        let is_counted = counted.contains(&seq);
+        match owner.try_push(ControlMessage::Capability {
+            seq,
+            request,
+            stop: is_counted,
+        }) {
+            Ok(()) => {
+                *handed = seq;
+                counted.remove(&seq);
             }
-        }
-        match owner.try_push(ControlMessage::Capability { seq, request }) {
-            Ok(()) => *handed = seq,
             Err(ChannelError::Full(_)) => return true,
             Err(ChannelError::Disconnected(_)) => return false,
         }
@@ -511,6 +537,72 @@ mod tests {
     /// P5 S1-02: with a full owner queue the hand-over stops at that request and resumes there:
     /// every request reaches the owner exactly once, in sequence order (none skipped by a newer
     /// one, none dropped); an unreadable request is handed over as a refusal of its own seq.
+    /// P8-CTRL.7 (review N3/L-b): a stop is counted once when the control thread first reads it
+    /// — behind a full queue and behind another request alike; an unreadable request counts as a
+    /// possible stop; each message says whether it was counted (the owner decides only those).
+    #[test]
+    fn p8ctrl06_stops_are_counted_before_any_hand_over() {
+        use super::super::capability_control as cap;
+        let d = dir("stops");
+        let write = |capability: &str, requested: &str, id: &str| {
+            cap::write_request(
+                &d,
+                &cap::NewRequest {
+                    capability,
+                    requested,
+                    request_id: id,
+                    owner_epoch: 1,
+                    expected: None,
+                    now_unix_s: 1,
+                },
+            )
+            .unwrap()
+        };
+        write(cap::ECON_SIGN, cap::ENABLED, "enable");
+        write(cap::ECON_SEND, cap::DISABLED, "stop");
+        std::fs::write(d.join("request_00000003.p0j"), b"torn").unwrap();
+        let stop = cap::StopSignal::default();
+        let (tx, rx) = bounded::<ControlMessage>("p8ctrl06-stops", 1);
+        let fill = ControlMessage::Refused {
+            seq: 0,
+            request: "fill".into(),
+            reason: "full".into(),
+        };
+        tx.try_push(fill.clone()).unwrap();
+        let (mut handed, mut seen) = (0, 0);
+        let mut counted = std::collections::BTreeSet::new();
+        // Nothing handed (the queue is full), yet the stop and the torn request are counted.
+        for _ in 0..3 {
+            assert!(hand_over_capabilities(
+                &d,
+                &mut handed,
+                &mut seen,
+                &mut counted,
+                &tx,
+                &stop
+            ));
+        }
+        assert_eq!((handed, seen), (0, 3));
+        assert_eq!(counted, [2, 3].into(), "counted once, not per attempt");
+        let mut flags = vec![];
+        for _ in 0..4 {
+            if let Some(ControlMessage::Capability { seq, stop, .. }) = rx.try_pop() {
+                flags.push((seq, stop));
+            }
+            hand_over_capabilities(&d, &mut handed, &mut seen, &mut counted, &tx, &stop);
+        }
+        if let Some(ControlMessage::Capability { seq, stop, .. }) = rx.try_pop() {
+            flags.push((seq, stop));
+        }
+        assert_eq!(flags, [(1, false), (2, true), (3, true)]);
+        // The owner decides the two counted ones: nothing waits any more.
+        stop.decide();
+        assert!(stop.pending());
+        stop.decide();
+        assert!(!stop.pending());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn hand_over_never_skips_or_drops_a_request() {
         let d = dir("handover");

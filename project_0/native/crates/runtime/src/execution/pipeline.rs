@@ -508,9 +508,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             Mode::Shadow => SignPurpose::Simulation,
         };
         let payer = tx::payer_of(self.payer);
+        // P8-CTRL.4 (review): a simulation's real signature only where the simulation can never
+        // send it — else no SIM_ONLY permit is even asked for (a synthetic signature).
+        let sends =
+            purpose == SignPurpose::Simulation && !self.submitter.simulates_without_sending();
         let permit = self
             .egress
             .as_ref()
+            .filter(|_| !sends)
             .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message, bound));
         match (permit, self.mode) {
             (Some(Ok(p)), _) => p

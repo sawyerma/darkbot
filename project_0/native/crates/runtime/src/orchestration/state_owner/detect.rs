@@ -564,10 +564,19 @@ impl ShadowOwner {
             }
             crate::execution::pipeline::Mode::Shadow => None,
         };
-        // P8-CTRL.4 (review N1): a SIM_ONLY simulation's real signature binds the owner's facts.
-        let use_facts = match mode {
-            crate::execution::pipeline::Mode::Shadow => self.sim_only_use_facts(&acct),
-            crate::execution::pipeline::Mode::Live => None,
+        // P8-CTRL.4 (review N1): a SIM_ONLY simulation's real signature binds the owner's facts —
+        // only where it may exist at all, a simulation that can never send (review L-c: no
+        // journal read otherwise).
+        let use_facts = {
+            use darkbot_solana::submit::SubmissionAdapter;
+            match mode {
+                crate::execution::pipeline::Mode::Shadow
+                    if self.submitter.simulates_without_sending() =>
+                {
+                    self.sim_only_use_facts(&acct)
+                }
+                _ => None,
+            }
         };
         let mut pipe = Pipeline {
             mode,

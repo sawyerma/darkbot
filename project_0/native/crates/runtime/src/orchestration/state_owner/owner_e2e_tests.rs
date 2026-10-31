@@ -7659,7 +7659,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
     // During (review M5): a DISABLE durably requested while the candidate is being simulated —
     // p0ctl's request log, the real control thread — waits as a counted stop before the owner's
     // next step: the egress permit is refused, nothing durable, nothing sent.
-    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 1_500);
+    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 800);
     p8ctrl03_scoped(&mut f, &[], |_| {});
     let control = cap::request_dir(&f.dir);
     {
@@ -7686,10 +7686,28 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
         )),
     )
     .unwrap();
+    // The operator's DISABLE while the candidate's simulation runs: p0ctl's request, its
+    // doorbell, the control thread counting it — before the simulation answers.
     let writer = {
-        let control = control.clone();
+        let (control, calls, stop) = (
+            control.clone(),
+            calls.clone(),
+            f.owner.sources.capabilities.stop.clone(),
+        );
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
+            let t = std::time::Instant::now();
+            while !calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|m| m == "simulateTransaction")
+            {
+                assert!(
+                    t.elapsed() < Duration::from_secs(10),
+                    "the simulation starts"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
             cap::write_request(
                 &control,
                 &cap::NewRequest {
@@ -7702,6 +7720,14 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
                 },
             )
             .unwrap();
+            // SAFETY: SIGUSR1 to this process: the control thread's doorbell (as p0ctl rings it).
+            unsafe {
+                libc::kill(std::process::id() as i32, libc::SIGUSR1);
+            }
+            while !stop.pending() {
+                assert!(t.elapsed() < Duration::from_secs(10), "the stop is counted");
+                std::thread::sleep(Duration::from_millis(1));
+            }
         })
     };
     f.owner
@@ -8014,18 +8040,17 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
     cleanup(f);
 }
 
-/// P8-CTRL.4/.10 (L15, review N1): under a SIM_ONLY grant in force — LIVE BLOCKED for it, so the
-/// candidate is a Shadow one — with ECON_SIGN and the signer ENABLED, the simulation is signed
-/// with the wallet's own key, bound by the same facts as a LIVE attempt (the owner's free SOL
-/// and the grant's totals), and never sent; without the grant it is signed synthetically.
+/// P8-CTRL.4/.10 (L15, review N1 and its follow-up): a SIM_ONLY grant in force — LIVE BLOCKED for
+/// it, so the candidate is a Shadow one — with ECON_SIGN and the signer ENABLED binds a real
+/// simulation signature only where the simulation can never send it; the owner's RPC adapter
+/// can always broadcast what it simulates (`simulates_without_sending` is false), so the wallet's
+/// key never reaches it: the simulation is signed synthetically and never sent, with the grant
+/// as without it.
 #[test]
-fn p8ctrl06_l15_a_sim_only_grant_signs_the_shadow_simulation_with_the_wallet_never_sends() {
+fn p8ctrl06_l15_a_sim_only_grant_never_hands_the_wallets_signature_to_a_sending_simulator() {
     use crate::analytics::payload::{decode, Payload};
     use crate::analytics::record::{OpportunityRecord, Signing};
-    for (tag, sim_only, expected) in [
-        ("wallet", true, Signing::Wallet),
-        ("synthetic", false, Signing::Synthetic),
-    ] {
+    for (tag, sim_only) in [("sim_only", true), ("no_grant", false)] {
         let (mut f, target, calls) = dec13b_fixture(&format!("p8ctrl06_l15_{tag}"), true);
         if sim_only {
             p8ctrl03_scoped(
@@ -8039,6 +8064,8 @@ fn p8ctrl06_l15_a_sim_only_grant_signs_the_shadow_simulation_with_the_wallet_nev
                 ],
                 |_| {},
             );
+            // The binding facts exist; only the sending simulator rules the real signature out.
+            assert!(f.owner.sim_only_use_facts(&target).is_some(), "{tag}");
         } else {
             f.owner.sources.capabilities.fe06 = None;
         }
@@ -8066,7 +8093,7 @@ fn p8ctrl06_l15_a_sim_only_grant_signs_the_shadow_simulation_with_the_wallet_nev
                 signings.extend(r.signing);
             }
         }
-        assert_eq!(signings, [expected], "{tag}");
+        assert_eq!(signings, [Signing::Synthetic], "{tag}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
