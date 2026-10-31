@@ -119,6 +119,9 @@ pub enum Venue {
 pub enum Action {
     Launch,
     Buy,
+    /// BSC3-079: a BUY of a token launched earlier in the same block (the
+    /// C3 path's shape: the token's first trades, its storage cold).
+    BuyInLaunchBlock,
     Sell,
     /// `approve` of the venue as spender (the sell path's prerequisite).
     Approve,
@@ -202,6 +205,7 @@ impl GasEvidence {
             let (action, reverted) = match f[1] {
                 "LAUNCH" => (Action::Launch, false),
                 "BUY" => (Action::Buy, false),
+                "BUY_IN_LAUNCH_BLOCK" => (Action::BuyInLaunchBlock, false),
                 "SELL" => (Action::Sell, false),
                 "APPROVE" => (Action::Approve, false),
                 "REVERTED_LAUNCH" => (Action::RevertedLaunch, true),

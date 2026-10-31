@@ -83,7 +83,7 @@ impl StrategyConfig {
     /// The frozen gas evidence the strategy may read, compiled in: each
     /// file the economics snapshot binds, as this build's tree holds it
     /// (the snapshot guard keeps the tree equal to the frozen snapshot).
-    pub const FROZEN_GAS_EVIDENCE: [(&'static str, &'static [u8]); 2] = [
+    pub const FROZEN_GAS_EVIDENCE: [(&'static str, &'static [u8]); 4] = [
         (
             "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
             include_bytes!("../../trading/fixtures/bsc/receipts_20261026.txt"),
@@ -91,6 +91,16 @@ impl StrategyConfig {
         (
             "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt",
             include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031.txt"),
+        ),
+        // BSC3-079: older windows of the v5.27.2 era (the largest gas of a
+        // class depends on the window), with the launch-block BUY class.
+        (
+            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130100000.txt",
+            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031_w130100000.txt"),
+        ),
+        (
+            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130500000.txt",
+            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031_w130500000.txt"),
         ),
     ];
 
@@ -129,6 +139,70 @@ impl StrategyConfig {
         }
         darkbot_bsc_trading::economics::network::GasEvidence::parse(&text)
     }
+
+    /// BSC3-079: all the frozen gas evidence of this build, from its
+    /// compiled-in bytes (no file is read, none configured is needed).
+    pub fn frozen_gas() -> Result<darkbot_bsc_trading::economics::network::GasEvidence, String> {
+        let mut text = String::new();
+        for (p, bytes) in Self::FROZEN_GAS_EVIDENCE {
+            text.push_str(std::str::from_utf8(bytes).map_err(|e| format!("{p}: {e}"))?);
+            text.push('\n');
+        }
+        darkbot_bsc_trading::economics::network::GasEvidence::parse(&text)
+    }
+}
+
+/// BSC3-079: an executor's gas limits cover the frozen evidence of this
+/// build, whatever Strategy C's configured files (and whether they load).
+pub fn exec_gas_covered(config: &RuntimeConfig) -> Result<(), String> {
+    match config.exec.as_ref() {
+        Some(x) => gas_limits_cover(&x.exec, &StrategyConfig::frozen_gas()?),
+        None => Ok(()),
+    }
+}
+
+/// BSC3-079: each configured gas limit at least the largest gas used of
+/// its class in `gas`: the BUY's of a BUY (any, and one in its token's
+/// launch block, the C3 path's shape), the SELL's and the APPROVE's.
+pub fn gas_limits_cover(
+    exec: &crate::paper_exec::ExecConfig,
+    gas: &darkbot_bsc_trading::economics::network::GasEvidence,
+) -> Result<(), String> {
+    use darkbot_bsc_trading::economics::network::{Action, PathClass, Venue};
+    let largest = |action| {
+        gas.class(PathClass {
+            venue: Venue::Flap,
+            action,
+        })
+        .map_or(0, |c| c.gas_used_max)
+    };
+    for (name, limit, actions) in [
+        (
+            "BSC_EXEC_GAS_LIMIT",
+            exec.gas_limit,
+            &[Action::Buy, Action::BuyInLaunchBlock][..],
+        ),
+        (
+            "BSC_EXEC_SELL_GAS_LIMIT",
+            exec.sell_gas_limit,
+            &[Action::Sell][..],
+        ),
+        (
+            "BSC_EXEC_APPROVE_GAS_LIMIT",
+            exec.approve_gas_limit,
+            &[Action::Approve][..],
+        ),
+    ] {
+        for action in actions {
+            let most = largest(*action);
+            if limit < most {
+                return Err(format!(
+                    "{name} {limit} is below the largest {action:?} gas {most} of the frozen evidence"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
@@ -2266,6 +2340,9 @@ pub fn run(
     // Strategy C's frozen gas evidence; refused, the strategy cannot run
     // (its status says why).
     let strategy_gas = config.strategy.gas(repo_root);
+    // BSC3-079: no configured gas limit below the largest gas the frozen
+    // evidence holds for its class (a transaction would run out of gas).
+    exec_gas_covered(config)?;
     let (canonical_tx, canonical_rx) = sync_channel::<(u64, CanonicalEvent)>(config.queue_events);
     let canonical_rx = Some(canonical_rx);
     // The C3 PAPER path: its identity is loaded at start, and C2 watches its
@@ -3388,6 +3465,57 @@ mod tests {
             };
             assert_eq!(g(m), want, "{c2:?} {exec:?} {strategy:?}");
         }
+    }
+
+    /// BSC3-079: the configured gas limits cover the frozen evidence the
+    /// configuration names; one below a class's largest gas (a BUY in its
+    /// token's launch block included) refuses the start.
+    #[test]
+    fn the_gas_limits_cover_the_frozen_evidence() {
+        use darkbot_bsc_trading::economics::network::{Action, GasEvidence, PathClass, Venue};
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let gas = config.strategy.gas(&repo).unwrap();
+        let exec = config.exec.as_ref().unwrap().exec.clone();
+        gas_limits_cover(&exec, &gas).unwrap();
+        for (action, limit) in [
+            (Action::Buy, exec.gas_limit),
+            (Action::BuyInLaunchBlock, exec.gas_limit),
+            (Action::Sell, exec.sell_gas_limit),
+            (Action::Approve, exec.approve_gas_limit),
+        ] {
+            let mut over = GasEvidence::default();
+            over.add(
+                PathClass {
+                    venue: Venue::Flap,
+                    action,
+                },
+                limit + 1,
+            )
+            .unwrap();
+            let e = gas_limits_cover(&exec, &over).unwrap_err();
+            assert!(e.contains(&format!("{action:?} gas {}", limit + 1)), "{e}");
+        }
+    }
+
+    /// BSC3-079 review: the start's check reads the build's frozen evidence,
+    /// not the configured files: a configuration whose Strategy C evidence
+    /// does not load still has its executor's gas limits checked.
+    #[test]
+    fn the_start_checks_the_gas_limits_whatever_the_strategy_evidence() {
+        let mut config = RuntimeConfig::parse(CONFIG).unwrap();
+        exec_gas_covered(&config).unwrap();
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let configured = config.strategy.gas(&repo).unwrap();
+        assert_eq!(configured, StrategyConfig::frozen_gas().unwrap());
+        config.strategy.gas_evidence.clear();
+        assert!(config.strategy.gas(&repo).is_err());
+        exec_gas_covered(&config).unwrap();
+        config.exec.as_mut().unwrap().exec.sell_gas_limit = 700_000;
+        let e = exec_gas_covered(&config).unwrap_err();
+        assert!(e.starts_with("BSC_EXEC_SELL_GAS_LIMIT 700000"), "{e}");
+        config.exec = None;
+        exec_gas_covered(&config).unwrap();
     }
 
     #[test]

@@ -100,7 +100,7 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "APPROVE BEFORE SELL",
         support: Support::Costed,
-        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt and fixtures/bsc/flap_gas_20261031.txt (approve(Portal) of tokens the Portal knows)",
+        rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt and fixtures/bsc/flap_gas_20261031*.txt (approve(Portal) of tokens the Portal knows)",
     },
     Scope {
         venue: "FLAP",
@@ -177,7 +177,7 @@ pub const SCOPES: &[Scope] = &[
         surface: "chain 56",
         path: "NETWORK COST",
         support: Support::Costed,
-        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price, an assumption (fixtures/bsc/receipts_20261026.txt, fixtures/bsc/flap_gas_20261031.txt with the receipts per class in its header)",
+        rule: "network: realized gas_used*effective_gas_price for a success and an included revert; one inclusion per nonce lifecycle, a non-included attempt free; the counterfactual the class's largest observed gas_used at the replay block's price, an assumption (fixtures/bsc/receipts_20261026.txt, fixtures/bsc/flap_gas_20261031*.txt: three windows of the v5.27.2 era, BSC3-079, the receipts per class in each header; a BUY in its token's launch block its own class)",
     },
 ];
 
@@ -230,6 +230,8 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/venues/flap/deployment.rs",
     "bsc/engine/crates/trading/src/venues/flap/profile.rs",
     "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt",
+    "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130100000.txt",
+    "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130500000.txt",
     "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02_v2.txt",

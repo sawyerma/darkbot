@@ -2,10 +2,14 @@
 //! the Flap paths use, read-only, as frozen evidence of the counterfactual
 //! cost (the largest observed gas used of each class).
 //!
-//! From the newest blocks backwards, every included transaction sent
+//! From the newest blocks backwards (or from `--before-block`, an older
+//! window of the implementation's era: the largest gas of a class depends
+//! on the window, BSC3-079), every included transaction sent
 //! directly to the Portal with `swapExactInput` is classed by its receipt:
 //! a `TokenBought` is a BUY (one that also graduated the token,
-//! `LaunchedToDEX`, is BUY_MIGRATING, the refused migration path), a
+//! `LaunchedToDEX`, is BUY_MIGRATING, the refused migration path; one of a
+//! token launched earlier in the same block is BUY_IN_LAUNCH_BLOCK, the C3
+//! path's shape, its own class, BSC3-079), a
 //! `TokenSold` a SELL; a reverted one by the
 //! direction it attempted (input token native: REVERTED_BUY, else
 //! REVERTED_SELL). Every successful `approve(Portal, …)` of a token the
@@ -14,8 +18,8 @@
 //! effective gas price and type, in the receipts fixture's line format.
 //! The sample is of the production deployment's Portal implementation
 //! (`bsc_mainnet_v5_27_2()`, BSC3-065/020): its EIP-1967 slot is checked at
-//! the newest block and at the oldest sampled one (`--archive`, an archive
-//! node: a public node keeps recent state only), and the scan stops at the
+//! the window's newest block and at its oldest sampled one (`--archive`, an
+//! archive node: a public node keeps recent state only), and the scan stops at the
 //! newest block whose receipts hold an `Upgraded(address)` of the Portal
 //! (older blocks ran another implementation). Nothing is signed or sent.
 #![forbid(unsafe_code)]
@@ -32,8 +36,10 @@ use darkbot_bsc_execution::rpc_wire::Limits;
 use darkbot_bsc_qualification::c1_common::Args;
 use darkbot_bsc_trading::venues::flap::abi::SWAP_EXACT_INPUT_SELECTOR;
 use darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_2;
-use darkbot_bsc_trading::venues::flap::events::PortalEventKind;
-use std::collections::BTreeMap;
+use darkbot_bsc_trading::venues::flap::events::{
+    PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -72,6 +78,51 @@ fn main() -> ExitCode {
     }
 }
 
+/// A BUY of `token`: in its launch block (a token `launched` earlier in
+/// the block) or any other.
+fn buy_class(token: Option<Address>, launched: &BTreeSet<Address>) -> &'static str {
+    if token.is_some_and(|t| launched.contains(&t)) {
+        "BUY_IN_LAUNCH_BLOCK"
+    } else {
+        "BUY"
+    }
+}
+
+/// What a Portal log says of a token, as the production decoder reads it.
+enum Decoded {
+    Created(Address),
+    Bought(Address),
+}
+
+fn portal_event(portal: Address, l: &edge::Log) -> Option<Decoded> {
+    let topics: Vec<[u8; 32]> = l.topics.iter().map(|t| t.0).collect();
+    match decode_portal_log(portal, l.address, &topics, &l.data) {
+        PortalLog::Event(PortalEvent::TokenCreated { token, .. }) => Some(Decoded::Created(token)),
+        PortalLog::Event(PortalEvent::TokenBought(t)) => Some(Decoded::Bought(t.token)),
+        _ => None,
+    }
+}
+
+/// BSC3-079: for each receipt of a block, in order, the tokens the Portal
+/// created in the block's earlier successful receipts (a receipt's own
+/// creation is not earlier than itself).
+fn launched_before(portal: Address, receipts: &[edge::Receipt]) -> Vec<BTreeSet<Address>> {
+    let mut launched = BTreeSet::new();
+    receipts
+        .iter()
+        .map(|r| {
+            let before = launched.clone();
+            if r.status == 1 {
+                launched.extend(r.logs.iter().filter_map(|l| match portal_event(portal, l) {
+                    Some(Decoded::Created(t)) => Some(t),
+                    _ => None,
+                }));
+            }
+            before
+        })
+        .collect()
+}
+
 fn word_address(data: &[u8], word: usize) -> Option<Address> {
     let w = data.get(word * 32..word * 32 + 32)?;
     w[..12]
@@ -90,6 +141,7 @@ fn run() -> Result<(), String> {
         "block-batch",
         "min-rare",
         "fixture-out",
+        "before-block",
     ])?;
     let fixture_out = args.opt("fixture-out")?.map(std::path::PathBuf::from);
     let rpc_url = match args.opt("rpc")? {
@@ -133,11 +185,31 @@ fn run() -> Result<(), String> {
     let bought = B256::from(PortalEventKind::TokenBought.topic0());
     let sold = B256::from(PortalEventKind::TokenSold.topic0());
     let migrated = B256::from(PortalEventKind::LaunchedToDex.topic0());
-    let head = rpc.block_number()? - defaults::CONFIRMATIONS;
-    bound.check(&rpc, &edge::pin_of(head, &rpc.header(head)?)?)?;
+    // BSC3-079: an older window of the implementation's era is scanned
+    // back from `--before-block` (exclusive); the implementation is read
+    // at its newest and oldest block on the archive either way.
+    let newest = rpc.block_number()? - defaults::CONFIRMATIONS;
+    let head = match args.opt("before-block")? {
+        None => newest,
+        Some(b) => {
+            let b: u64 = b.parse().map_err(|e| format!("--before-block: {e}"))?;
+            if b == 0 || b > newest {
+                return Err(format!("--before-block {b} is not at or below {newest}"));
+            }
+            b - 1
+        }
+    };
+    let head_pin = edge::pin_of(head, &archive.header(head)?)?;
+    if rpc.header(head)?.hash != head_pin.hash {
+        return Err(format!(
+            "block {head}: the endpoints answer different hashes"
+        ));
+    }
+    bound.check(&archive, &head_pin)?;
     let mut upgrade_at: Option<u64> = None;
     let classes = [
         "BUY",
+        "BUY_IN_LAUNCH_BLOCK",
         "SELL",
         "APPROVE",
         "REVERTED_BUY",
@@ -152,7 +224,7 @@ fn run() -> Result<(), String> {
         ["BUY", "SELL", "APPROVE"]
             .iter()
             .all(|c| m.get(c).is_some_and(|v| v.len() >= per_class))
-            && ["REVERTED_BUY", "REVERTED_SELL"]
+            && ["REVERTED_BUY", "REVERTED_SELL", "BUY_IN_LAUNCH_BLOCK"]
                 .iter()
                 .all(|c| m.get(c).is_some_and(|v| v.len() >= min_rare.min(per_class)))
     };
@@ -176,7 +248,10 @@ fn run() -> Result<(), String> {
                 upgrade_at = Some(b.number);
                 break;
             }
-            for (tx, r) in b.transactions.iter().zip(&receipts) {
+            // BSC3-079: the tokens launched earlier in this block (a BUY of
+            // one is the C3 path's shape: the first trades of a token).
+            let launched = launched_before(portal, &receipts);
+            for ((tx, r), launched) in b.transactions.iter().zip(&receipts).zip(&launched) {
                 if tx.hash != r.transaction_hash {
                     return Err(format!("block {}: receipts out of order", b.number));
                 }
@@ -193,7 +268,14 @@ fn run() -> Result<(), String> {
                                 // A BUY that graduated the token is the
                                 // migration path, refused by the quote.
                                 (true, false, true) => "BUY_MIGRATING",
-                                (true, false, false) => "BUY",
+                                (true, false, false) => {
+                                    let token =
+                                        r.logs.iter().find_map(|l| match portal_event(portal, l) {
+                                            Some(Decoded::Bought(t)) => Some(t),
+                                            _ => None,
+                                        });
+                                    buy_class(token, launched)
+                                }
                                 (false, true, _) => "SELL",
                                 _ => continue,
                             }
@@ -305,4 +387,115 @@ fn run() -> Result<(), String> {
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word(a: Address) -> Vec<u8> {
+        let mut w = vec![0u8; 12];
+        w.extend_from_slice(a.as_slice());
+        w
+    }
+
+    /// BSC3-079: a BUY of a token launched earlier in its block is its own
+    /// class, read from the Portal's own logs by the production decoder.
+    #[test]
+    fn a_buy_in_its_tokens_launch_block_is_its_own_class() {
+        let portal = bsc_mainnet_v5_27_2().portal;
+        let token = Address::repeat_byte(0x77);
+        let launched: BTreeSet<Address> = [token].into_iter().collect();
+        assert_eq!(buy_class(Some(token), &launched), "BUY_IN_LAUNCH_BLOCK");
+        assert_eq!(
+            buy_class(Some(Address::repeat_byte(0x78)), &launched),
+            "BUY"
+        );
+        assert_eq!(buy_class(None, &launched), "BUY");
+        // TokenBought(ts, token, buyer, amount, eth, fee, postPrice).
+        let mut data = vec![0u8; 32];
+        data.extend(word(token));
+        data.extend(word(Address::repeat_byte(0xb0)));
+        data.extend(vec![0u8; 4 * 32]);
+        let log = |address, data: Vec<u8>| edge::Log {
+            log_index: 0,
+            address,
+            topics: vec![B256::from(PortalEventKind::TokenBought.topic0())],
+            data,
+        };
+        assert!(matches!(
+            portal_event(portal, &log(portal, data.clone())),
+            Some(Decoded::Bought(t)) if t == token
+        ));
+        // Another contract's log of the same shape is no Portal event.
+        assert!(portal_event(portal, &log(Address::repeat_byte(1), data)).is_none());
+    }
+
+    sol! {
+        event TokenCreated(uint256 ts, address creator, uint256 nonce, address token, string name, string symbol, string meta);
+    }
+
+    /// BSC3-079 review: a token counts as launched for the receipts after
+    /// the successful one whose Portal log created it — not for its own,
+    /// not from a failed one or another contract's log of the same shape.
+    #[test]
+    fn a_token_is_launched_for_the_later_receipts_of_its_block() {
+        use alloy_sol_types::SolEvent;
+        let portal = bsc_mainnet_v5_27_2().portal;
+        let created = |address, token| edge::Log {
+            log_index: 0,
+            address,
+            topics: vec![B256::from(PortalEventKind::TokenCreated.topic0())],
+            data: TokenCreated {
+                ts: Default::default(),
+                creator: Address::repeat_byte(0xc0),
+                nonce: Default::default(),
+                token,
+                name: "N".into(),
+                symbol: "S".into(),
+                meta: "M".into(),
+            }
+            .encode_data(),
+        };
+        let receipt = |status, logs| edge::Receipt {
+            block_number: 1,
+            block_hash: B256::ZERO,
+            transaction_index: 0,
+            transaction_hash: B256::ZERO,
+            from: Address::ZERO,
+            to: Some(portal),
+            contract_address: None,
+            status,
+            logs,
+            gas_used: None,
+            effective_gas_price: None,
+        };
+        let [a, b, c, d] = [0x71, 0x72, 0x73, 0x74].map(Address::repeat_byte);
+        assert!(matches!(
+            portal_event(portal, &created(portal, a)),
+            Some(Decoded::Created(t)) if t == a
+        ));
+        let receipts = [
+            receipt(1, vec![created(portal, a)]),
+            receipt(1, vec![created(portal, b)]),
+            receipt(0, vec![created(portal, c)]),
+            receipt(1, vec![created(Address::repeat_byte(1), d)]),
+            receipt(1, vec![]),
+        ];
+        let set = |t: &[Address]| t.iter().copied().collect::<BTreeSet<_>>();
+        assert_eq!(
+            launched_before(portal, &receipts),
+            [
+                set(&[]),
+                set(&[a]),
+                set(&[a, b]),
+                set(&[a, b]),
+                set(&[a, b])
+            ]
+        );
+        assert_eq!(
+            buy_class(Some(b), &launched_before(portal, &receipts)[1]),
+            "BUY"
+        );
+    }
 }

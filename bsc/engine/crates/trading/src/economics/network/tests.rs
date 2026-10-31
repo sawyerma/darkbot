@@ -5,6 +5,10 @@ use super::*;
 
 const RECEIPTS: &str = include_str!("../../../fixtures/bsc/receipts_20261026.txt");
 const FLAP_GAS: &str = include_str!("../../../fixtures/bsc/flap_gas_20261031.txt");
+const FLAP_GAS_W130100000: &str =
+    include_str!("../../../fixtures/bsc/flap_gas_20261031_w130100000.txt");
+const FLAP_GAS_W130500000: &str =
+    include_str!("../../../fixtures/bsc/flap_gas_20261031_w130500000.txt");
 
 struct Row {
     class: PathClass,
@@ -265,4 +269,38 @@ fn the_flap_gas_sample_holds_every_class() {
     let both = GasEvidence::parse(&format!("{RECEIPTS}\n{FLAP_GAS}")).unwrap();
     let total: u32 = both.classes().iter().map(|c| c.receipts).sum();
     assert_eq!(total, 34 + 3_073);
+}
+
+/// BSC3-079: two older windows of the v5.27.2 era, each with the BUY in its
+/// token's launch block as its own class and the implementation checked at
+/// its newest and oldest block; over every window the largest gas of a
+/// class is what the counterfactual takes (the head window alone held a
+/// BUY maximum of 737900).
+#[test]
+fn the_gas_evidence_covers_the_era_in_three_windows() {
+    let flap = |e: &GasEvidence, action| {
+        e.class(PathClass {
+            venue: Venue::Flap,
+            action,
+        })
+        .map(|c| (c.receipts, c.gas_used_max))
+    };
+    for (text, launch_block, buy) in [
+        (FLAP_GAS_W130100000, (32, 788_083), (1000, 974_673)),
+        (FLAP_GAS_W130500000, (21, 624_515), (1000, 697_642)),
+    ] {
+        assert!(text.lines().nth(2).unwrap().contains("checked at 2 pins"));
+        assert!(text.lines().nth(2).unwrap().contains("v5.27.2"));
+        let e = GasEvidence::parse(text).unwrap();
+        assert_eq!(flap(&e, Action::BuyInLaunchBlock), Some(launch_block));
+        assert_eq!(flap(&e, Action::Buy), Some(buy));
+        assert_eq!(flap(&e, Action::Approve), Some((1000, 49_255)));
+    }
+    let all = GasEvidence::parse(&format!(
+        "{RECEIPTS}\n{FLAP_GAS}\n{FLAP_GAS_W130100000}\n{FLAP_GAS_W130500000}"
+    ))
+    .unwrap();
+    assert_eq!(flap(&all, Action::Buy).unwrap().1, 974_673);
+    assert_eq!(flap(&all, Action::BuyInLaunchBlock).unwrap().1, 788_083);
+    assert_eq!(flap(&all, Action::Sell).unwrap().1, 784_359);
 }
