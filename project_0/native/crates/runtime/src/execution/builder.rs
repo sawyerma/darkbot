@@ -747,14 +747,22 @@ pub mod p0 {
             if !budget.take() {
                 break;
             }
-            let route = routes.quote_bundle_exact_in_with_budget(
+            let route = match routes.quote_bundle_exact_in_with_budget(
                 funding_mint,
                 liab_mint,
                 input,
                 prewarmed_atas,
                 cap,
                 deadline,
-            )?;
+            ) {
+                Ok(route) => route,
+                // A request that fails after a fitted buy was found ends the search with it.
+                Err(e) if best.is_some() => {
+                    route_diagnostic(format!("jit_route_refine_ended: {e}"));
+                    break;
+                }
+                Err(e) => return Err(e),
+            };
             let floor = route.as_ref().and_then(|r| r.minimum_executable_out);
             let next = match (route, floor) {
                 (Some(r), Some(f)) if f >= amount_out => match compile(&r) {
@@ -765,6 +773,11 @@ pub mod p0 {
                     Err(error) => {
                         let footprint = route_footprint(&r);
                         let Some(next_cap) = shrunk_cap(cap, footprint, &error) else {
+                            // A refinement no cap can mend keeps the fitted buy already found.
+                            if best.is_some() {
+                                route_diagnostic(format!("jit_route_refine_ended: {error}"));
+                                break;
+                            }
                             return Err(format!("jit buy compilation: {error}"));
                         };
                         route_diagnostic(format!("jit_route_budget: max_accounts={cap} route_accounts={footprint} alts={} rejected={error}",
@@ -4214,6 +4227,8 @@ pub mod p0 {
         #[derive(Default)]
         struct CappedMarket {
             requests: std::cell::RefCell<Vec<(bool, u64, u8)>>,
+            /// The provider fails every request after this many.
+            fails_after: Option<usize>,
         }
         impl RouteProvider for CappedMarket {
             fn quote_exact_in(
@@ -4236,6 +4251,12 @@ pub mod p0 {
                 _: Instant,
             ) -> Result<Option<Route>, String> {
                 let reverse = *from == Pubkey::default();
+                if self
+                    .fails_after
+                    .is_some_and(|n| self.requests.borrow().len() >= n)
+                {
+                    return Err("provider unreachable".into());
+                }
                 self.requests.borrow_mut().push((reverse, amount_in, cap));
                 let out = if reverse {
                     amount_in * 2 / 3
@@ -4323,6 +4344,31 @@ pub mod p0 {
             .unwrap_err();
             assert!(e.contains("bad account layout"), "{e}");
             assert_eq!(other.requests.borrow().len(), 3, "reverse, short, covering");
+            // A provider failing during refinement keeps the fitted buy found before; failing
+            // before any is the error.
+            let roomy = TxLimits {
+                max_bytes_v0: 5_000,
+                ..TxLimits::default()
+            };
+            let failing = |n| CappedMarket {
+                fails_after: Some(n),
+                ..Default::default()
+            };
+            let refine = |m: &CappedMarket| {
+                fitted_shortfall_exact_in(
+                    m,
+                    &request,
+                    &RouteAttempts::new(attempts()),
+                    later,
+                    |r| compile_route(r, roomy),
+                )
+            };
+            let kept = failing(3);
+            let (route, _) = refine(&kept).unwrap().expect("the fitted buy found before");
+            assert_eq!(route.amount_in, kept.requests.borrow()[2].1);
+            assert!(refine(&failing(2))
+                .unwrap_err()
+                .contains("provider unreachable"));
         }
 
         #[test]
