@@ -404,6 +404,22 @@ pub(crate) fn exit_route_terms(
     mint: &Pubkey,
 ) -> Result<SwapTerms, String> {
     let wsol = Pubkey::from_str(WSOL_MINT).map_err(|e| e.to_string())?;
+    let (create, close) = wsol_account(taker)?;
+    let rest = match instructions.first() {
+        Some(ix) if *ix == create => &instructions[1..],
+        _ => instructions,
+    };
+    match rest {
+        [swap, unwrap] if *unwrap == close => swap_terms(swap, taker, mint, &wsol),
+        [_] | [_, _] => Err("EXIT_ROUTE_UNWRAP_MISSING".into()),
+        _ => Err("EXIT_ROUTE_SHAPE: create? swap close".into()),
+    }
+}
+
+/// The idempotent creation of `taker`'s own WSOL ATA and the SPL Token `CloseAccount` of it to
+/// `taker` (the unwrap of every unit it holds into native lamports).
+fn wsol_account(taker: &Pubkey) -> Result<(Instruction, Instruction), String> {
+    let wsol = Pubkey::from_str(WSOL_MINT).map_err(|e| e.to_string())?;
     let token = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID)
         .map_err(|e| e.to_string())?;
     let wsol_ata = get_associated_token_address_with_program_id(taker, &wsol, &token);
@@ -418,14 +434,38 @@ pub(crate) fn exit_route_terms(
         // SPL Token `CloseAccount`.
         data: vec![9],
     };
-    let rest = match instructions.first() {
-        Some(ix) if *ix == create => &instructions[1..],
-        _ => instructions,
-    };
-    match rest {
-        [swap, unwrap] if *unwrap == close => swap_terms(swap, taker, mint, &wsol),
-        [_] | [_, _] => Err("EXIT_ROUTE_UNWRAP_MISSING".into()),
-        _ => Err("EXIT_ROUTE_SHAPE: create? swap close".into()),
+    Ok((create, close))
+}
+
+/// FE-04 exit of a WSOL position: its unwrap, no router and no swap — the SPL Token close of
+/// `taker`'s own WSOL ATA to `taker` (every unit becomes a lamport, one to one) and the idempotent
+/// re-creation of that ATA in the same transaction (its rent returns and is paid again: the
+/// prewarmed account stays, the proceeds are the units). The units are the whole position the
+/// exit admission requires the account to hold — nothing else.
+pub(crate) fn unwrap_exit_route(taker: &Pubkey, units: u64) -> Result<Route, String> {
+    let (create, close) = wsol_account(taker)?;
+    Ok(Route {
+        instructions: vec![close, create],
+        lookup_tables: vec![],
+        swap_program: Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID)
+            .map_err(|e| e.to_string())?,
+        amount_in: units,
+        quoted_out: units,
+        minimum_executable_out: Some(units),
+        enforced_slippage_bps: Some(0),
+    })
+}
+
+/// The instructions of a WSOL position's exit, exactly: the close of `taker`'s WSOL ATA to
+/// `taker`, then its idempotent re-creation; anything else is refused.
+pub(crate) fn unwrap_route_shape(
+    instructions: &[Instruction],
+    taker: &Pubkey,
+) -> Result<(), String> {
+    let (create, close) = wsol_account(taker)?;
+    match instructions {
+        [c, r] if *c == close && *r == create => Ok(()),
+        _ => Err("EXIT_UNWRAP_SHAPE: close create".into()),
     }
 }
 
@@ -764,6 +804,51 @@ fn jupiter_error(status: reqwest::StatusCode, body: &[u8]) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    /// Exit of a WSOL position: the unwrap route is exactly the close of the taker's WSOL ATA to
+    /// the taker and its idempotent re-creation, one to one, no slippage, the SPL Token program
+    /// its route program; another order, another destination, an extra or a missing instruction
+    /// is refused, and the sale's check never takes it (no swap).
+    #[test]
+    fn a_wsol_positions_exit_is_exactly_its_unwrap() {
+        let taker = Pubkey::new_unique();
+        let r = super::unwrap_exit_route(&taker, 1_000).unwrap();
+        assert_eq!(
+            (
+                r.amount_in,
+                r.quoted_out,
+                r.minimum_executable_out,
+                r.enforced_slippage_bps
+            ),
+            (1_000, 1_000, Some(1_000), Some(0))
+        );
+        assert_eq!(
+            r.swap_program.to_string(),
+            darkbot_project0::protocol::TOKEN_PROGRAM_ID
+        );
+        assert!(r.lookup_tables.is_empty());
+        assert_eq!(super::unwrap_route_shape(&r.instructions, &taker), Ok(()));
+        let [close, create] = [r.instructions[0].clone(), r.instructions[1].clone()];
+        let wsol = Pubkey::from_str(WSOL_MINT).unwrap();
+        let token = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID).unwrap();
+        let ata = get_associated_token_address_with_program_id(&taker, &wsol, &token);
+        assert_eq!(close.program_id, token);
+        assert_eq!(close.data, vec![9], "SPL Token CloseAccount");
+        assert_eq!(close.accounts[0].pubkey, ata);
+        assert_eq!(close.accounts[1].pubkey, taker, "unwrapped to the taker");
+        let mut foreign = close.clone();
+        foreign.accounts[1].pubkey = Pubkey::new_unique();
+        for bad in [
+            vec![create.clone(), close.clone()],
+            vec![close.clone()],
+            vec![close.clone(), create.clone(), create.clone()],
+            vec![foreign, create.clone()],
+        ] {
+            assert!(super::unwrap_route_shape(&bad, &taker).is_err());
+        }
+        assert!(super::unwrap_route_shape(&r.instructions, &Pubkey::new_unique()).is_err());
+        assert!(super::exit_route_terms(&r.instructions, &taker, &wsol).is_err());
+    }
     use super::*;
     #[test]
     fn jupiter_error_keeps_only_status_or_allowlisted_code() {

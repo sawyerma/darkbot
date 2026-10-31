@@ -1,7 +1,9 @@
 //! FE-04 exit admission: the one durable admission of an exit of the open inventory. The exit
 //! route (`JupiterV2RouteProvider::exit_to_sol`) is re-validated against the approval's mint and
 //! the payer (`exit_route_terms`), must sell exactly the open position and close an empty WSOL
-//! account (anything already in it would be paid out as proceeds); the transaction is built from
+//! account (anything already in it would be paid out as proceeds); a WSOL position's exit is its
+//! unwrap (`route::unwrap_exit_route`: the close of a WSOL account holding exactly the position
+//! and its re-creation, no swap); the transaction is built from
 //! exactly those instructions, signed, quoted for its exact message fee and simulated through the
 //! production adapter; the exit is reserved durably against the approval and the current wallet
 //! and the adapter is called exactly once, after its UNKNOWN handoff is durable. Nothing here
@@ -11,7 +13,7 @@ use super::exit::{ExitApproval, ExitIntent};
 use super::transport::SignedPayload;
 use super::{Current, Journal};
 use crate::execution::builder::p0::Route;
-use crate::execution::route::{exit_route_terms, WSOL_MINT};
+use crate::execution::route::{exit_route_terms, unwrap_route_shape, SwapTerms, WSOL_MINT};
 use darkbot_solana::submit::SubmissionAdapter;
 use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
 use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer};
@@ -95,8 +97,13 @@ fn exit_use(
             super::fe06_grant_totals(&records, g)
         }),
         slippage_bps,
-        // A router's route: the class the builder gives a plan with one.
-        route: fe06::route_class(darkbot_project0::planner::RouteKind::FreePublicAllowed),
+        // A router's route: the class the builder gives a plan with one; a WSOL position's
+        // unwrap swaps nothing.
+        route: fe06::route_class(if approval.mint == WSOL_MINT {
+            darkbot_project0::planner::RouteKind::NoSwap
+        } else {
+            darkbot_project0::planner::RouteKind::FreePublicAllowed
+        }),
         data_source: g.source.cloned(),
         booked_under_grant: booked_grant.is_some() && booked_grant == grant,
     })
@@ -116,7 +123,19 @@ pub fn admit_exit(
     let Ok(mint) = approval.mint.parse() else {
         return refuse("INVALID_OR_UNAUTHORIZED_EXIT_APPROVAL");
     };
-    let terms = match exit_route_terms(&r.instructions, &payer, &mint) {
+    // A WSOL position is unwrapped (one to one, no slippage); every other mint is sold.
+    let unwrap = approval.mint == WSOL_MINT;
+    let terms = if unwrap {
+        unwrap_route_shape(&r.instructions, &payer).map(|()| SwapTerms {
+            in_amount: r.amount_in,
+            quoted_out: r.amount_in,
+            slippage_bps: 0,
+            minimum_out: r.amount_in,
+        })
+    } else {
+        exit_route_terms(&r.instructions, &payer, &mint)
+    };
+    let terms = match terms {
         Ok(t) => t,
         Err(e) => return Admission::Refused(e),
     };
@@ -126,7 +145,13 @@ pub fn admit_exit(
     {
         return refuse("EXIT_ROUTE_NOT_BOUND");
     }
-    if c.balances.get(WSOL_MINT) != Some(&0) {
+    // The close pays out every WSOL unit the account holds: a sale's account must be empty, an
+    // unwrap's must hold exactly the position (nothing foreign is ever paid out).
+    if unwrap {
+        if c.balances.get(WSOL_MINT) != Some(&r.amount_in) {
+            return refuse("EXIT_WSOL_ACCOUNT_NOT_THE_POSITION_OR_UNKNOWN");
+        }
+    } else if c.balances.get(WSOL_MINT) != Some(&0) {
         return refuse("EXIT_WSOL_ACCOUNT_NOT_EMPTY_OR_UNKNOWN");
     }
     let plan = TxPlan {

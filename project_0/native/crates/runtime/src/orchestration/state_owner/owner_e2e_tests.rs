@@ -7193,6 +7193,21 @@ fn dec13b_exit_fixture(
     Arc<Mutex<Vec<String>>>,
     crate::execution::one_shot::exit::ExitApproval,
 ) {
+    dec13b_exit_fixture_of(tag, send_ok, None)
+}
+
+/// The exit fixture; with `wsol_units` the open position is WSOL (from a SOL bank), its route
+/// program the SPL Token program and its WSOL ATA holding `wsol_units`; the router then answers
+/// nothing (an unwrap asks none).
+fn dec13b_exit_fixture_of(
+    tag: &str,
+    send_ok: bool,
+    wsol_units: Option<u64>,
+) -> (
+    Fixture,
+    Arc<Mutex<Vec<String>>>,
+    crate::execution::one_shot::exit::ExitApproval,
+) {
     use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, EXIT_SCHEMA};
     use solana_sdk::signer::Signer;
     let mut f = fixture_with(tag, None);
@@ -7202,11 +7217,29 @@ fn dec13b_exit_fixture(
     f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
     let (dir, wallet) = (f.dir.join("fe04"), liquidator.to_string());
     let now_s = wall_unix_s().unwrap();
-    let mint_s =
-        crate::execution::one_shot::exit::tests::settled_with_position(&dir, &wallet, now_s);
+    let mint_s = match wsol_units {
+        None => {
+            crate::execution::one_shot::exit::tests::settled_with_position(&dir, &wallet, now_s)
+        }
+        Some(_) => {
+            let wsol = crate::execution::route::WSOL_MINT.to_string();
+            crate::execution::one_shot::exit::tests::settled_with_position_of(
+                &dir, &wallet, now_s, &wsol,
+            );
+            wsol
+        }
+    };
     let mint: Pubkey = mint_s.parse().unwrap();
-    let jup = protocol::JUP_SWAP_PROGRAM_ID;
-    let e = crate::execution::one_shot::exit::tests::exit_approval(&wallet, &mint_s, jup);
+    let jup = if wsol_units.is_some() {
+        protocol::TOKEN_PROGRAM_ID
+    } else {
+        protocol::JUP_SWAP_PROGRAM_ID
+    };
+    let mut e = crate::execution::one_shot::exit::tests::exit_approval(&wallet, &mint_s, jup);
+    if wsol_units.is_some() {
+        // An unwrap pays the position one to one: its floor is the position's units.
+        e.min_out_lamports = 1_000;
+    }
     let file = f.dir.join("exit.conf");
     std::fs::write(
         &file,
@@ -7283,7 +7316,7 @@ fn dec13b_exit_fixture(
             t_rx_ns: 0,
         },
         ata(&mint, 1_000),
-        ata(&wsol, 0),
+        ata(&wsol, wsol_units.unwrap_or(0)),
     ];
     f.owner.st.install_snapshot(100, state.clone());
     f.owner.st.reconcile(100, &state);
@@ -7300,9 +7333,60 @@ fn dec13b_exit_fixture(
     f.owner.network = NetworkBudget::new(4, 5_000_000_000);
     f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
         .unwrap()
-        .with_base_url(dec13b_exit_jupiter(liquidator, mint));
+        .with_base_url(match wsol_units {
+            None => dec13b_exit_jupiter(liquidator, mint),
+            // Nothing listens: a router asked would fail the exit.
+            Some(_) => "http://127.0.0.1:9".into(),
+        });
     let calls = dec13b_live_node(&mut f, send_ok, 0);
     (f, calls, e)
+}
+
+/// FE-04 exit of a WSOL position (SOL-bank collateral): its unwrap — no router asked, the
+/// signed transaction exactly the close of the wallet's WSOL ATA holding the position and its
+/// re-creation, through the same FE-06/P8-CTRL permit, reservation, UNKNOWN handoff and one
+/// send as every exit; a WSOL account holding anything but the position is refused before
+/// anything is sent (the close would pay it out).
+#[test]
+fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
+    use solana_sdk::signer::Signer;
+    for (units, sent) in [(1_000u64, true), (1_500, false)] {
+        let (mut f, calls, e) =
+            dec13b_exit_fixture_of(&format!("wsol_exit_{units}"), true, Some(units));
+        let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+        f.owner
+            .fe04_approval
+            .as_mut()
+            .unwrap()
+            .refresh(Some(&dir), &wallet);
+        assert_eq!(f.owner.approval_status().state, "VALID");
+        dec13b_live(&mut f, true);
+        f.owner.fe04_exit_admission();
+        let a = &f.owner.fe04_admissions;
+        if sent {
+            assert_eq!(
+                calls.lock().unwrap().clone(),
+                ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
+                "{a:?}"
+            );
+            assert_eq!(a.exits_submitted, 1);
+            let held = f.owner.fe04_held.as_ref().unwrap();
+            assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
+            let taker = f.owner.payer.pubkey();
+            let unwrap = crate::execution::route::unwrap_exit_route(&taker, units).unwrap();
+            assert_eq!(
+                crate::execution::route::unwrap_route_shape(&unwrap.instructions, &taker),
+                Ok(())
+            );
+        } else {
+            assert!(calls.lock().unwrap().is_empty(), "nothing sent");
+            assert_eq!(
+                (a.exits_submitted, a.last_exit_refusal.as_str()),
+                (0, "EXIT_WSOL_ACCOUNT_NOT_THE_POSITION_OR_UNKNOWN")
+            );
+        }
+        cleanup(f);
+    }
 }
 
 #[test]

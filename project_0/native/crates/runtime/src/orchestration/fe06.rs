@@ -534,18 +534,15 @@ fn total(what: &str, booked: u64, this: u64, bound: u64) -> Result<(), String> {
 }
 
 /// P8-CTRL.5: the separate exit reserve of an attempt under `scope` — one exit's ceiling for
-/// every mint the attempt can leave open (its plan's mints but native SOL, at least one);
+/// every mint the attempt can leave open (each of its plan's mints, WSOL too — a WSOL position is
+/// unwrapped by its own exit — at least one);
 /// `None`: a scope without a positive exit ceiling (no safe reserve: no new liquidation) or an
 /// overflow. The one reserve the FE-06 check keeps free and the FE-04 reservation holds.
 pub fn exit_reserve(scope: &Scope, mints: &[String]) -> Option<u64> {
     if scope.max_exit_cost_lamports == 0 {
         return None;
     }
-    let open: BTreeSet<&str> = mints
-        .iter()
-        .map(String::as_str)
-        .filter(|m| *m != crate::execution::one_shot::exit::WSOL_MINT)
-        .collect();
+    let open: BTreeSet<&str> = mints.iter().map(String::as_str).collect();
     scope
         .max_exit_cost_lamports
         .checked_mul(u64::try_from(open.len().max(1)).ok()?)
@@ -1312,14 +1309,11 @@ pub(crate) mod tests {
                 &s,
                 &[KEY.into(), other.clone(), WSOL_MINT.into(), KEY.into()]
             ),
-            Some(2_000),
-            "each distinct mint but native SOL"
+            Some(3_000),
+            "each distinct mint, WSOL too (a WSOL position is unwrapped by its own exit)"
         );
-        assert_eq!(
-            exit_reserve(&s, &[WSOL_MINT.into()]),
-            Some(1_000),
-            "at least one exit"
-        );
+        assert_eq!(exit_reserve(&s, &[WSOL_MINT.into()]), Some(1_000));
+        assert_eq!(exit_reserve(&s, &[]), Some(1_000), "at least one exit");
         // No positive exit ceiling: refused at the preview, and (a scope from elsewhere) no safe
         // reserve, no new liquidation.
         let refused = parse(

@@ -1,7 +1,8 @@
 //! FE-04/P8-INV exit: the controlled realization of a settled attempt's open inventory, in the same
 //! wallet journal (the one financial record). An exit is its own explicitly approved one-shot
 //! action bound to the settled attempt: it sells the whole open position of one mint ExactIn for
-//! native SOL with a floor enforced by the signed swap, is durably reserved before its single
+//! native SOL with a floor enforced by the signed swap (a WSOL position is unwrapped one to one,
+//! the SPL Token program its route program), is durably reserved before its single
 //! handoff and UNKNOWN until finalized receipts or a proving DEC-03 non-landing read settle it.
 //!
 //! Only a settled successful exit realizes: its SOL proceeds become realized net and the
@@ -1066,7 +1067,19 @@ pub(crate) mod tests {
         wallet: &str,
         booked: u64,
     ) -> String {
-        settled_in(dir, wallet, booked).2
+        let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        settled_in(dir, wallet, booked, &mint).2
+    }
+
+    /// Test seam: the same with the open position of `mint` (e.g. WSOL from a SOL bank).
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn settled_with_position_of(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+        mint: &str,
+    ) {
+        settled_in(dir, wallet, booked, mint);
     }
 
     /// Test seam: `wallet`'s journal in `dir` with a settled attempt that left nothing (only its
@@ -1113,11 +1126,16 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "crate_health")]
-    fn settled_in(dir: &std::path::Path, wallet: &str, booked: u64) -> (Journal, Approval, String) {
+    fn settled_in(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+        mint: &str,
+    ) -> (Journal, Approval, String) {
         let (_, mut a, mut i, c) = setup();
         a.wallet = wallet.into();
         i.wallet = wallet.into();
-        let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        let mint = mint.to_string();
         let mut j = Journal::open(dir, wallet).unwrap();
         j.reserve(a.clone(), i.clone(), &c).unwrap();
         j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
@@ -1139,7 +1157,8 @@ pub(crate) mod tests {
         wallet: &str,
         booked: u64,
     ) -> (Journal, ExitIntent, String) {
-        let (mut j, a, mint) = settled_in(dir, wallet, booked);
+        let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        let (mut j, a, mint) = settled_in(dir, wallet, booked, &mint);
         let ei = handed_off_exit(&mut j, &a, &mint, "exit-1");
         (j, ei, mint)
     }
@@ -1243,7 +1262,13 @@ pub(crate) mod tests {
                 solana_sdk::pubkey::Pubkey::new_unique()
             ));
             let j = if open_position {
-                settled_in(&dir, &wallet, 1_000).0
+                settled_in(
+                    &dir,
+                    &wallet,
+                    1_000,
+                    &solana_sdk::pubkey::Pubkey::new_unique().to_string(),
+                )
+                .0
             } else {
                 open_exit(&dir, &wallet, 1_000).0
             };
@@ -1727,6 +1752,47 @@ pub(crate) mod tests {
     /// (also WSOL the unwrap paid out), proceeds below the signed floor, a failure that sold, or an
     /// observation with unknown reasons never finalizes — the exit stays UNKNOWN with every hold,
     /// nothing is booked.
+    /// A WSOL position's exit (its unwrap, floor = units, no slippage) settles like every exit:
+    /// the WSOL account's whole position leaves, the lamports gain the units net of the fee (the
+    /// closed account's rent returns and is paid again), the position is released; an unwrap that
+    /// paid out more WSOL than the position (foreign units in the account) stays UNKNOWN with
+    /// every hold.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn a_wsol_positions_unwrap_settles_as_its_exit() {
+        for (paid_out, settles) in [(-1_000i128, true), (-1_500, false)] {
+            let (path, a0, _, _) = setup();
+            let (mut j, a, mint) = settled_in(&path, &a0.wallet, 1_000, WSOL_MINT);
+            assert_eq!(j.open_inventory()[WSOL_MINT].units, 1_000);
+            let (mut ea, mut ei, c) = exit_for(&a, &mint, 1_000, "exit-wsol");
+            (ea.min_out_lamports, ea.max_slippage_bps) = (1_000, 0);
+            (ei.minimum_out_lamports, ei.slippage_bps) = (1_000, 0);
+            j.reserve_exit(ea, ei.clone(), &c).unwrap();
+            j.handoff_exit(&ei.signed_wire_sha256, &c, || Ok(()))
+                .unwrap();
+            let sig = &ei.signatures[0];
+            let fee = i128::from(ei.transaction_fee_lamports);
+            let o = observation(sig, true, -paid_out - fee, &[(&mint, paid_out)]);
+            let step = j
+                .apply_exit_evidence(evidence(sig, o), &value, 2_000)
+                .unwrap();
+            if settles {
+                let ExitStep::Settled(x) = step else {
+                    panic!("settled: {step:?}");
+                };
+                assert_eq!((x.landed_success, x.sold_units), (true, 1_000));
+                assert!(j.open_inventory().is_empty() && j.active_hold().is_none());
+            } else {
+                assert!(matches!(step, ExitStep::Unknown(_)), "{step:?}");
+                let hold = j.active_hold().unwrap();
+                assert!(hold.unknown_outcome && hold.holds == ei.holds());
+                assert_eq!(j.open_inventory()[WSOL_MINT].units, 1_000);
+            }
+            drop(j);
+            fs::remove_dir_all(path).unwrap();
+        }
+    }
+
     #[test]
     fn inconsistent_exit_receipts_stay_unknown_with_every_hold() {
         let other = solana_sdk::pubkey::Pubkey::new_unique().to_string();

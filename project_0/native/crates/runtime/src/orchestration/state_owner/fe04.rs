@@ -819,7 +819,14 @@ impl ShadowOwner {
         else {
             return refuse(self, "EXIT_NETWORK_DEADLINE_UNBOUNDED".into());
         };
-        let route = match self.routes.exit_to_sol(&mint, units, deadline) {
+        // A WSOL position is unwrapped locally (no router); every other mint is sold to SOL.
+        let route = if mint == wsol {
+            use solana_sdk::signer::Signer;
+            crate::execution::route::unwrap_exit_route(&self.payer.pubkey(), units)
+        } else {
+            self.routes.exit_to_sol(&mint, units, deadline)
+        };
+        let route = match route {
             Ok(r) => r,
             Err(e) => {
                 self.fe04_admissions.exits_refused =
