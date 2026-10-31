@@ -660,7 +660,10 @@ impl OwnerEvidenceWriter {
                 darkbot_common::mt0::MT0.record_evidence_queue_depth(depth);
                 return Ok(());
             }
-            Err(mpsc::TrySendError::Full(m)) => ("OWNER_EVIDENCE_OVERFLOW", m),
+            Err(mpsc::TrySendError::Full(m)) => {
+                darkbot_common::mt0::MT0.record_evidence_overflow();
+                ("OWNER_EVIDENCE_OVERFLOW", m)
+            }
             Err(mpsc::TrySendError::Disconnected(m)) => ("OWNER_EVIDENCE_DISCONNECTED", m),
         };
         self.queued.fetch_sub(1, Ordering::AcqRel);

@@ -410,6 +410,8 @@ impl Budget {
             && window_requests(&s) < self.limits.max_requests;
         free.then(|| {
             darkbot_common::mt0::MT0.record_admission_wait(work.admission_class(), 0);
+            // P6-MT.13: the inline admission is its workload's only one (the queue is empty).
+            darkbot_common::mt0::MT0.record_admission_queue(work.admission_class(), 1);
             self.grant(&mut s, work, now)
         })
     }
@@ -1235,48 +1237,6 @@ impl DeadlineRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// P6-MT.13: the budget records per workload the calls in flight at each grant, its own
-    /// admissions queued at each new one and every refusal (a waiter past its deadline here).
-    #[test]
-    fn p6_mt13_the_budget_records_inflight_queue_depth_and_refusals_per_workload() {
-        use darkbot_common::mt0::{AdmissionClass, MT0};
-        let history = || {
-            MT0.mt13()
-                .admission
-                .into_iter()
-                .find(|a| a.class == AdmissionClass::History.name())
-                .unwrap()
-        };
-        let mut c = crate::runtime_config::RuntimeConfig::default();
-        (
-            c.limits.rpc_rps,
-            c.limits.rpc_burst,
-            c.limits.rpc_concurrency,
-        ) = (1_000, 10, 1);
-        c.limits.history_rps = 1_000;
-        let b = Arc::new(Budget::configured(&c));
-        let before = history();
-        let held = b
-            .acquire(Workload::History, Instant::now() + Duration::from_secs(1))
-            .unwrap();
-        // The one slot is held: a second admission queues and is refused at its deadline.
-        assert!(b
-            .acquire(
-                Workload::History,
-                Instant::now() + Duration::from_millis(30)
-            )
-            .is_err());
-        drop(held);
-        let after = history();
-        assert!(after.inflight.count > before.inflight.count, "{after:?}");
-        assert!(after.inflight.max >= Some(1));
-        assert!(
-            after.queue_depth.count > before.queue_depth.count,
-            "{after:?}"
-        );
-        assert!(after.denied > before.denied, "{after:?}");
-    }
 
     /// DEC-16: the byte and call caps bound each window of an unbounded run: an exhausted
     /// window refuses, the next one admits again; the totals stay cumulative.

@@ -484,6 +484,43 @@ pub(super) struct Fe04AdmissionFacts {
 /// reason; the pipeline then stops at its send boundary (`LIVE_SEND_REQUIRES_FE04`). A journal
 /// holding an attempt is never admitted over: it is closed again (review M3). The admission
 /// comes back through `fe04_admission_back`.
+/// Single flight: another attempt holds the wallet — in the owner's held journal, or in the
+/// wallet's journal on disk.
+pub(super) const ATTEMPT_HELD: &str = "FE04_ATTEMPT_HELD";
+pub(super) const JOURNAL_HAS_ATTEMPT: &str = "FE04_JOURNAL_HAS_ATTEMPT";
+
+/// Whether the admission's last refusal `reason` was single flight's.
+pub(super) fn single_flight(reason: &str) -> bool {
+    reason.starts_with(ATTEMPT_HELD) || reason.starts_with(JOURNAL_HAS_ATTEMPT)
+}
+
+/// P6-MT.13 `reservation_conflicts` (P6-MT.11: competing candidates never both executable for an
+/// exclusive resource): an evaluation that would have been actionable was refused because another
+/// attempt held one — the concurrent positions or outstanding attempts (Safety, at its plans or
+/// its send boundary) or the wallet (FE-04 single flight, at its send boundary; `block_reason`:
+/// the admission's last refusal). An absolute limit (capital, inventory) is no conflict.
+pub(super) fn reservation_conflict(
+    reason: Option<&crate::analytics::rejection::Rejection>,
+    loss: Option<crate::analytics::record::LossReason>,
+    block_reason: &str,
+) -> bool {
+    use crate::analytics::rejection::{PlanCause, Rejection as R};
+    use darkbot_project0::safety::Deny as D;
+    let held = |d: &D| matches!(d, D::ConcurrentPositions | D::Outstanding);
+    match reason {
+        Some(R::LiveSendRequiresFe04 { .. }) => single_flight(block_reason),
+        Some(R::Safety(d)) => held(d),
+        Some(R::PlansRejected(plans))
+            if loss == Some(crate::analytics::record::LossReason::Safety) =>
+        {
+            plans
+                .iter()
+                .any(|p| matches!(&p.cause, PlanCause::Safety(d) if held(d)))
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn admission_for(
     open: &mut Option<crate::execution::one_shot::admission::Fe04Admission>,
     held: &mut Option<crate::execution::one_shot::Journal>,
@@ -516,7 +553,7 @@ pub(super) fn admission_for(
                 }
             };
             if let Some(state) = journal.step_state() {
-                stats.block_reason = format!("FE04_JOURNAL_HAS_ATTEMPT:{}", state.name());
+                stats.block_reason = format!("{JOURNAL_HAS_ATTEMPT}:{}", state.name());
                 return None;
             }
             crate::execution::one_shot::admission::Fe04Admission {
@@ -605,12 +642,7 @@ impl ShadowOwner {
         // Single flight: an attempt in the held journal blocks every admission; a journal without
         // one (an unused admission of an earlier run, an archived attempt) does not (review H1).
         if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
-            // P6-MT.13: a candidate that needs the wallet another attempt holds is a reservation
-            // conflict (the admission opened ahead of a candidate is none).
-            if target.is_some() {
-                darkbot_common::mt0::MT0.record_reservation_conflict();
-            }
-            return Err((format!("FE04_ATTEMPT_HELD:{}", state.name()), true));
+            return Err((format!("{ATTEMPT_HELD}:{}", state.name()), true));
         }
         let Some(dir) = self.fe04_journal.clone() else {
             return Err(("FE04_JOURNAL_NOT_CONFIGURED".into(), true));

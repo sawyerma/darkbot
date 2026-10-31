@@ -56,7 +56,7 @@ impl ShadowOwner {
             // P6-MT.13: the host's runtime state and the mandatory telemetry when they changed
             // (also at shutdown).
             self.host_record();
-            self.mt13_record();
+            self.mt13_record(false);
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,
@@ -280,24 +280,35 @@ impl ShadowOwner {
         self.host_journal(host);
     }
 
-    /// P6-MT.13: samples the signed intents in flight (an attempt held in the FE-04 journal) and
-    /// journals the mandatory telemetry the MT0 snapshot does not carry when it changed.
-    pub(super) fn mt13_record(&mut self) {
+    /// P6-MT.13: sets the signed intents in flight (an attempt held in the FE-04 journal) and
+    /// journals the mandatory telemetry the MT0 snapshot does not carry every
+    /// `mt0_interval_seconds`, or now (`force`: the shutdown).
+    pub(super) fn mt13_record(&mut self, force: bool) {
         let live = self
             .fe04_held
             .as_ref()
             .is_some_and(|j| j.step_state().is_some());
-        darkbot_common::mt0::MT0.record_intents_live(u64::from(live));
-        let now = crate::analytics::mt13::Mt13Telemetry::now();
-        if self.mt13_journaled.as_ref() == Some(&now) {
+        darkbot_common::mt0::MT0.set_intents_live(u64::from(live));
+        let interval = std::time::Duration::from_secs(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .mt0_interval_seconds,
+        );
+        if !force
+            && self
+                .mt13_journaled
+                .as_ref()
+                .is_some_and(|(at, _)| at.elapsed() < interval)
+        {
             return;
         }
+        let now = crate::analytics::mt13::Mt13Telemetry::now();
         if self
             .evidence
             .emit(OwnerEvidence::Mt13(Box::new(now.clone())))
             .is_ok()
         {
-            self.mt13_journaled = Some(now);
+            self.mt13_journaled = Some((std::time::Instant::now(), now));
         }
     }
 

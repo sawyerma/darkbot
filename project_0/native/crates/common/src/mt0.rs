@@ -430,7 +430,10 @@ const HIST: Hist = Hist::new();
 #[allow(clippy::declare_interior_mutable_const)]
 const OUTCOME_ROW: [AtomicU64; REMOTE_OUTCOMES] = [ZERO; REMOTE_OUTCOMES];
 #[allow(clippy::declare_interior_mutable_const)]
-const LANE_ROW: [AtomicU64; 4] = [ZERO; 4];
+const LANE_ROW: [AtomicU64; LANE_N] = [ZERO; LANE_N];
+const ADMISSION_N: usize = ADMISSION_CLASSES.len();
+const STAGE_N: usize = BUDGET_STAGES.len();
+const LANE_N: usize = LANE_NAMES.len();
 
 pub struct Registry {
     owner_ns: [AtomicU64; 6],
@@ -449,20 +452,27 @@ pub struct Registry {
     core_stage_ns: [Hist; 5],
     core_stage_allocations: [Hist; 5],
     /// S4-04: the wait of every RPC budget admission, per workload.
-    admission_wait: [Hist; 10],
-    /// P6-MT.13: per workload, the admissions queued (its own, at each new one), its calls in
-    /// flight (at each grant) and the admissions the budget refused.
-    admission_queue_depth: [Hist; 10],
-    admission_inflight: [Hist; 10],
-    admission_denied: [AtomicU64; 10],
+    admission_wait: [Hist; ADMISSION_N],
+    /// P6-MT.13: per workload, the admissions queued (its own, at each new one, itself
+    /// included: 1 on the inline path), its calls in flight (at each grant) and the admissions
+    /// the budget refused.
+    admission_queue_depth: [Hist; ADMISSION_N],
+    admission_inflight: [Hist; ADMISSION_N],
+    admission_denied: [AtomicU64; ADMISSION_N],
     /// P6-MT.13: candidates a budget refused, per stage and lane (`LANE_NAMES`).
-    candidate_budget_denied: [[AtomicU64; 4]; 3],
-    /// P6-MT.13: candidates refused because another attempt held the wallet (single flight).
+    candidate_budget_denied: [[AtomicU64; LANE_N]; STAGE_N],
+    /// P6-MT.13: candidates that reached their send boundary while another attempt held the
+    /// wallet (single flight).
     reservation_conflicts: AtomicU64,
-    /// P6-MT.13: the signed intents in flight, sampled on the owner's telemetry tick.
-    intents_live: Hist,
-    /// P6-MT.13: the owner evidence queue's depth at each event handed to it.
+    /// P6-MT.13: the signed intents in flight now and at most (a gauge).
+    intents_live: AtomicU64,
+    intents_live_max: AtomicU64,
+    /// P6-MT.13: the owner evidence queue's depth at each event handed to it, and the events it
+    /// refused full (`OWNER_EVIDENCE_OVERFLOW`, a fail-closed end).
     evidence_queue_depth: Hist,
+    evidence_overflow: AtomicU64,
+    /// P6-MT.13 `staterace_by_queue_age`: the queue age of each candidate stale before planning.
+    staterace_queue_age: Hist,
     health_calls: [AtomicU64; HEALTH_SITES],
     counters: [AtomicU64; COUNTERS],
     pending_current: AtomicU64,
@@ -490,14 +500,17 @@ impl Registry {
             ingress_queue_wait: Hist::new(),
             core_stage_ns: [HIST; 5],
             core_stage_allocations: [HIST; 5],
-            admission_wait: [HIST; 10],
-            admission_queue_depth: [HIST; 10],
-            admission_inflight: [HIST; 10],
-            admission_denied: [ZERO; 10],
-            candidate_budget_denied: [LANE_ROW; 3],
+            admission_wait: [HIST; ADMISSION_N],
+            admission_queue_depth: [HIST; ADMISSION_N],
+            admission_inflight: [HIST; ADMISSION_N],
+            admission_denied: [ZERO; ADMISSION_N],
+            candidate_budget_denied: [LANE_ROW; STAGE_N],
             reservation_conflicts: ZERO,
-            intents_live: Hist::new(),
+            intents_live: ZERO,
+            intents_live_max: ZERO,
             evidence_queue_depth: Hist::new(),
+            evidence_overflow: ZERO,
+            staterace_queue_age: Hist::new(),
             health_calls: [ZERO; HEALTH_SITES],
             counters: [ZERO; COUNTERS],
             pending_current: ZERO,
@@ -679,23 +692,34 @@ impl Registry {
 
     /// P6-MT.13: a candidate of lane `lane` (0–2; `None`: of none) refused at `stage`.
     pub fn record_candidate_budget_denied(&self, stage: BudgetStage, lane: Option<u8>) {
-        let lane = lane.map_or(3, |l| usize::from(l).min(2));
+        let lane = lane.map_or(LANE_N - 1, |l| usize::from(l).min(LANE_N - 2));
         self.candidate_budget_denied[stage as usize][lane].fetch_add(1, Relaxed);
     }
 
-    /// P6-MT.13: a candidate refused because another attempt held the wallet.
+    /// P6-MT.13: a candidate reached its send boundary while another attempt held the wallet.
     pub fn record_reservation_conflict(&self) {
         self.reservation_conflicts.fetch_add(1, Relaxed);
     }
 
     /// P6-MT.13: the signed intents in flight now.
-    pub fn record_intents_live(&self, n: u64) {
-        self.intents_live.record(n);
+    pub fn set_intents_live(&self, n: u64) {
+        self.intents_live.store(n, Relaxed);
+        self.intents_live_max.fetch_max(n, Relaxed);
     }
 
     /// P6-MT.13: the owner evidence queue's depth after an event was handed to it.
     pub fn record_evidence_queue_depth(&self, depth: u64) {
         self.evidence_queue_depth.record(depth);
+    }
+
+    /// P6-MT.13: the owner evidence queue refused an event full.
+    pub fn record_evidence_overflow(&self) {
+        self.evidence_overflow.fetch_add(1, Relaxed);
+    }
+
+    /// P6-MT.13: a candidate stale before planning after `age_ns` in the queue.
+    pub fn record_staterace_queue_age(&self, age_ns: u64) {
+        self.staterace_queue_age.record(age_ns);
     }
 
     /// P6-MT.13: what the MT0 snapshot does not carry, cumulative since the process started.
@@ -724,8 +748,11 @@ impl Registry {
                 })
                 .collect(),
             reservation_conflicts: self.reservation_conflicts.load(Relaxed),
-            intents_live: self.intents_live.snapshot(),
+            intents_live: self.intents_live.load(Relaxed),
+            intents_live_max: self.intents_live_max.load(Relaxed),
             evidence_queue_depth: self.evidence_queue_depth.snapshot(),
+            evidence_overflow: self.evidence_overflow.load(Relaxed),
+            staterace_queue_age_ns: self.staterace_queue_age.snapshot(),
         }
     }
 
@@ -858,8 +885,11 @@ pub struct Mt13Snapshot {
     /// Per stage and lane: the candidates a budget refused.
     pub candidate_budget_denied: Vec<(&'static str, &'static str, u64)>,
     pub reservation_conflicts: u64,
-    pub intents_live: HistSnapshot,
+    pub intents_live: u64,
+    pub intents_live_max: u64,
     pub evidence_queue_depth: HistSnapshot,
+    pub evidence_overflow: u64,
+    pub staterace_queue_age_ns: HistSnapshot,
 }
 
 /// `num / den` measured exactly; `None` (JSON `null`) when the denominator is zero.
@@ -1249,8 +1279,11 @@ mod tests {
         REG.record_candidate_budget_denied(BudgetStage::Network, None);
         REG.record_candidate_budget_denied(BudgetStage::Network, Some(9));
         REG.record_reservation_conflict();
-        REG.record_intents_live(1);
+        REG.set_intents_live(1);
+        REG.set_intents_live(0);
         REG.record_evidence_queue_depth(5);
+        REG.record_evidence_overflow();
+        REG.record_staterace_queue_age(9);
         let m = REG.mt13();
         let fee = m.admission.iter().find(|a| a.class == "fee_quote").unwrap();
         assert_eq!(
@@ -1288,10 +1321,12 @@ mod tests {
         assert_eq!(
             (
                 m.reservation_conflicts,
-                m.intents_live.max,
-                m.evidence_queue_depth.max
+                (m.intents_live, m.intents_live_max),
+                m.evidence_queue_depth.max,
+                m.evidence_overflow,
+                m.staterace_queue_age_ns.max
             ),
-            (1, Some(1), Some(5))
+            (1, (0, 1), Some(5), 1, Some(9))
         );
     }
 

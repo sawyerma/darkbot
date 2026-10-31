@@ -9398,16 +9398,19 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
 }
 
 /// P6-MT.13: the mandatory telemetry the MT0 snapshot does not carry, from the owner's own call
-/// sites — a candidate the owner's network budget refused counts in its stage, before any
-/// remote work; every event handed to the evidence writer records the queue's depth; a candidate
-/// that needs the wallet a sent attempt holds is a reservation conflict; the signed intents in
-/// flight are sampled; the record is journaled when it changed (`MT13_TELEMETRY`) and decodes.
-/// (MT0 is the process's: other tests count into it too, so only increases are asserted.)
+/// sites — a candidate stale before planning records its queue age; a candidate the owner's
+/// network budget refused counts in its stage, before any remote work; every event handed to the
+/// evidence writer records the queue's depth; the record is journaled forced and at shutdown,
+/// never twice within `mt0_interval_seconds`; a second liquidatable candidate that reaches its
+/// send boundary while a sent attempt holds the wallet is a reservation conflict (no second
+/// send); the signed intents in flight are a gauge. (MT0 is the process's: other tests count into
+/// it too, so increases are asserted.)
 #[test]
 fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
     use crate::analytics::mt13::Mt13Telemetry;
     use crate::analytics::payload::{decode, Payload};
     use darkbot_common::mt0::{Mt13Snapshot, MT0};
+    use marginfi_type_crate::types::MarginfiAccount;
     let network = |m: &Mt13Snapshot| {
         m.candidate_budget_denied
             .iter()
@@ -9415,6 +9418,25 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
             .map(|(_, _, n)| n)
             .sum::<u64>()
     };
+    let count = |calls: &Arc<Mutex<Vec<String>>>, method: &str| {
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| *c == method)
+            .count()
+    };
+    // A candidate older than the opportunity age (here: any age) is stale before planning.
+    let (mut f, target, _) = dec13b_fixture("p6_mt13_stale", false);
+    f.owner.freshness.max_opportunity_age_ns = 0;
+    let before = MT0.mt13();
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    assert!(MT0.mt13().staterace_queue_age_ns.count > before.staterace_queue_age_ns.count);
+    cleanup(f);
+
     // Shadow, the owner's network budget exhausted.
     let (mut f, target, calls) = dec13b_fixture("p6_mt13_budget", false);
     f.owner.network = crate::execution::pipeline::NetworkBudget::new(0, u64::MAX);
@@ -9429,17 +9451,16 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
         "{:?}",
         after.candidate_budget_denied
     );
-    assert!(
-        !calls
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|c| c == "getFeeForMessage" || c == "simulateTransaction"),
+    assert_eq!(
+        count(&calls, "getFeeForMessage") + count(&calls, "simulateTransaction"),
+        0,
         "no remote work"
     );
     assert!(after.evidence_queue_depth.count > before.evidence_queue_depth.count);
-    f.owner.mt13_record();
-    let journaled = f.owner.mt13_journaled.clone().expect("journaled");
+    f.owner.mt13_record(true);
+    let (_, journaled) = f.owner.mt13_journaled.clone().expect("journaled");
+    f.owner.mt13_record(false);
+    f.owner.mt13_record(false);
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
     let mut reader =
@@ -9451,35 +9472,96 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
                 .push(decode::<Mt13Telemetry>(frame.kind, frame.schema, &frame.payload).unwrap());
         }
     }
-    assert!(records.contains(&journaled), "{}", records.len());
-    assert!(records.windows(2).all(|w| w[0] != w[1]));
+    assert_eq!(records.first(), Some(&journaled));
+    assert_eq!(records.len(), 2, "the forced one and the shutdown's");
     let _ = std::fs::remove_dir_all(dir);
 
-    // LIVE: the sent attempt holds the wallet; another candidate's admission is a conflict.
+    // LIVE: the sent attempt holds a position; a second liquidatable account, actionable by its
+    // economics, is refused by the concurrent-positions limit — a reservation conflict, no second
+    // send.
     let (mut f, target, calls) = dec13b_fixture("p6_mt13_conflict", true);
     let now = f.owner.clock.now_ns();
     f.owner
         .detect(Some((target, now, 100, "account_update")))
         .unwrap();
-    assert_eq!(
-        calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|c| *c == "sendTransaction")
-            .count(),
-        1
+    assert_eq!(count(&calls, "sendTransaction"), 1);
+    let record = f.owner.st.get(&target).unwrap().clone();
+    let mut account: MarginfiAccount =
+        bytemuck::pod_read_unaligned(&record.data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
+    let other = Pubkey::new_unique();
+    account.liquidation_record = protocol::liquidation_record_pda(&f.owner.program, &other);
+    let program = f.owner.program;
+    b01_account(
+        &mut f,
+        other,
+        program,
+        record.lamports,
+        [
+            protocol::DISC_MARGINFI_ACCOUNT.as_slice(),
+            bytemuck::bytes_of(&account),
+        ]
+        .concat(),
     );
     let before = MT0.mt13();
-    let other = Pubkey::new_unique();
-    assert!(f
-        .owner
-        .fe04_admission_facts(Some(&other))
-        .err()
-        .is_some_and(|(reason, _)| reason.starts_with("FE04_ATTEMPT_HELD")));
-    assert!(MT0.mt13().reservation_conflicts > before.reservation_conflicts);
-    f.owner.mt13_record();
-    let after = MT0.mt13().intents_live;
-    assert!(after.count > before.intents_live.count && after.max >= Some(1));
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((other, now, 100, "account_update")))
+        .unwrap();
+    assert!(
+        MT0.mt13().reservation_conflicts > before.reservation_conflicts,
+        "{:?}",
+        calls.lock().unwrap()
+    );
+    assert_eq!(count(&calls, "sendTransaction"), 1, "no second send");
+    f.owner.mt13_record(true);
+    assert!(MT0.mt13().intents_live_max >= 1);
     cleanup(f);
+}
+
+/// P6-MT.13: a reservation conflict is an otherwise actionable evaluation refused because another
+/// attempt held an exclusive resource — Safety's concurrent positions or outstanding attempts (at
+/// the plans, with the Safety loss, or at the send boundary) or the wallet (single flight at the
+/// send boundary); an absolute limit, another refusal or a send boundary refused for another
+/// reason is none.
+#[test]
+fn p6_mt13_a_reservation_conflict_is_a_resource_another_attempt_holds() {
+    use super::fe04::reservation_conflict as conflict;
+    use crate::analytics::record::LossReason;
+    use crate::analytics::rejection::{PlanCause, PlanRejection, Rejection as R};
+    use darkbot_project0::safety::Deny as D;
+    let plans = |d: D| {
+        R::PlansRejected(vec![PlanRejection {
+            funding: darkbot_project0::funding::FundingClass::ZeroPrefundSameTx,
+            cause: PlanCause::Safety(d),
+        }])
+    };
+    let safety = Some(LossReason::Safety);
+    assert!(conflict(Some(&plans(D::ConcurrentPositions)), safety, ""));
+    assert!(conflict(Some(&plans(D::Outstanding)), safety, ""));
+    assert!(!conflict(Some(&plans(D::TotalCapital)), safety, ""));
+    assert!(!conflict(
+        Some(&plans(D::ConcurrentPositions)),
+        Some(LossReason::EconomicSkip),
+        ""
+    ));
+    assert!(conflict(
+        Some(&R::Safety(D::ConcurrentPositions)),
+        safety,
+        ""
+    ));
+    assert!(!conflict(Some(&R::Safety(D::DailyLoss)), safety, ""));
+    let send = R::LiveSendRequiresFe04 { bundle: false };
+    assert!(conflict(Some(&send), None, "FE04_ATTEMPT_HELD:SUBMITTED"));
+    assert!(conflict(
+        Some(&send),
+        None,
+        "FE04_JOURNAL_HAS_ATTEMPT:SUBMITTED"
+    ));
+    assert!(!conflict(Some(&send), None, "FE04_TARGET_NOT_APPROVED"));
+    assert!(!conflict(
+        Some(&R::NotLiquidatable),
+        None,
+        "FE04_ATTEMPT_HELD:SUBMITTED"
+    ));
+    assert!(!conflict(None, None, "FE04_ATTEMPT_HELD:SUBMITTED"));
 }

@@ -646,6 +646,19 @@ impl ShadowOwner {
         let simulation_failure = pipe.simulation_failure.take();
         self.blockhash_early = Some(pipe.blockhash_park);
         self.local_fee.after(rec.reason.as_ref());
+        // P6-MT.13: a candidate refused because another attempt held an exclusive resource.
+        if fe04::reservation_conflict(
+            rec.reason.as_ref(),
+            rec.loss,
+            &self.fe04_admissions.block_reason,
+        ) {
+            darkbot_common::mt0::MT0.record_reservation_conflict();
+        }
+        // P6-MT.13 `staterace_by_queue_age`: a candidate stale before planning, by its age.
+        if rec.loss == Some(crate::analytics::record::LossReason::StateRace) {
+            darkbot_common::mt0::MT0
+                .record_staterace_queue_age(self.clock.now_ns().saturating_sub(t_rx));
+        }
         // P6-MT.13: a candidate a budget refused, by its stage and lane.
         if rec.loss == Some(crate::analytics::record::LossReason::RpcBudget) {
             use crate::analytics::rejection::Rejection as R;
