@@ -138,6 +138,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             64,
             darkbot_solana::runtime_config::Limits::default().route_attempts_max,
         )),
+        route_attempts: darkbot_solana::runtime_config::Limits::default().route_attempts_max,
         program_generation: 0,
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),

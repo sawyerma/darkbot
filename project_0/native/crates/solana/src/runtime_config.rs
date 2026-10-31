@@ -48,7 +48,7 @@ pub mod defaults {
     /// the plan still lacks).
     pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;
     /// The most route requests one funding class may be granted: a fit shrinks the router's
-    /// account cap (1..=64) by at least one per request and a solve halves its input interval,
+    /// account cap (1..=64) by at least two per request and a solve halves its input interval,
     /// so 64 bounds either search.
     pub const ROUTE_ATTEMPTS_MAX: u64 = 64;
     /// A slippage bound in basis points is a fraction of the whole (10 000 bps).
@@ -244,11 +244,11 @@ parameters! {
     h0_recurring_min_wins = 2, "wins", "P0_H0_RECURRING_MIN_WINS";
     // P8-CTRL.3: the longest validity of one FE-06 scope (revision 17).
     fe06_grant_max_lifetime_seconds = 86400, "s", "P0_FE06_GRANT_MAX_LIFETIME_SECS";
-    // P4A-JIT-01: the remote route requests one funding class of a candidate may make — a swap's
-    // route fit, or a JIT buy's shortfall solve and the fit of its transaction together (a cold
-    // solve takes up to 6, a warm re-solve at a smaller cap 1–2); the route-cap hint re-probes
-    // after as many hits (revision 18).
-    route_attempts_max = 8, "requests", "P0_ROUTE_ATTEMPTS_MAX";
+    // P4A-JIT-01: the remote route requests one funding class may make for one sizing pair — a
+    // swap's route fit, or a JIT buy's shortfall solve with the fit of its transaction (each
+    // covering route compiled at once, a smaller cap asked only when it does not fit); the
+    // route-cap hint re-probes after as many hits (revision 18; the bound both had before).
+    route_attempts_max = 6, "requests", "P0_ROUTE_ATTEMPTS_MAX";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -378,6 +378,8 @@ impl Parameter {
             "recovery_root_catchup_seconds" | "recovery_root_hard_max_seconds" => 30,
             "recovery_root_stall_seconds" => 5,
             "boot_token_ttl_seconds" => defaults::BOOT_TOKEN_TTL_MIN_SECONDS,
+            // A JIT solve needs its reverse quote and one forward quote.
+            "route_attempts_max" => 2,
             _ => 1,
         }
     }

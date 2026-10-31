@@ -618,16 +618,18 @@ fn n2_route_fit_requotes_stop_at_the_deadline() {
     let started = std::time::Instant::now();
     let deadline = started + std::time::Duration::from_millis(250);
     let mut quote_starts = Vec::new();
+    let attempts = darkbot_solana::runtime_config::Limits::default().route_attempts_max;
     let result = quote_fitting_route(
         64,
-        &RouteAttempts::new(darkbot_solana::runtime_config::Limits::default().route_attempts_max),
+        &RouteAttempts::new(attempts),
         deadline,
         |cap| {
             quote_starts.push(std::time::Instant::now());
             std::thread::sleep(std::time::Duration::from_millis(100));
             Ok(Some(route_for_budget(cap, 0, cap as usize)))
         },
-        // Always one byte too large: the cap shrinks by 2 per attempt, six attempts available.
+        // Always one byte too large: the cap shrinks by 2 per attempt, the budget's attempts
+        // available.
         |_| {
             Err::<(), _>(BuildError::TooLarge {
                 bytes: 1_233,
@@ -636,7 +638,10 @@ fn n2_route_fit_requotes_stop_at_the_deadline() {
         },
     );
     assert!(result.unwrap_err().contains("ROUTE_FIT_DEADLINE"));
-    assert!(quote_starts.len() < 6, "bounded by the deadline, not the attempt count");
+    assert!(
+        (quote_starts.len() as u64) < attempts,
+        "bounded by the deadline, not the attempt count"
+    );
     assert!(quote_starts.iter().all(|t| *t < deadline));
     assert!(started.elapsed() <= std::time::Duration::from_millis(250) + N2_SLACK);
 }

@@ -1210,6 +1210,7 @@ pub(super) fn prepare(
             crate::execution::builder::p0::RouteProvider::max_accounts(&routes),
             operational.route_attempts_max,
         )),
+        route_attempts: operational.route_attempts_max,
         program_generation: 0,
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),

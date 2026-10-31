@@ -554,26 +554,6 @@ impl RouteProvider for JupiterV2RouteProvider {
         )
     }
 
-    /// DEC-11: the JIT buy is a bundle's prerequisite TX: `forJitoBundle`.
-    fn quote_bundle_exact_in(
-        &self,
-        from_mint: &Pubkey,
-        to_mint: &Pubkey,
-        amount_in: u64,
-        prewarmed_atas: &[PrewarmedAta],
-        deadline: Instant,
-    ) -> Result<Option<Route>, String> {
-        self.exact_in(
-            from_mint,
-            to_mint,
-            amount_in,
-            prewarmed_atas,
-            self.max_accounts,
-            true,
-            deadline,
-        )
-    }
-
     fn max_accounts(&self) -> u8 {
         self.max_accounts
     }
@@ -598,7 +578,8 @@ impl RouteProvider for JupiterV2RouteProvider {
         )
     }
 
-    /// P4A-JIT-01: the JIT buy's route fit — `forJitoBundle` under the account cap.
+    /// DEC-11/P4A-JIT-01: the JIT buy is a bundle's prerequisite TX — `forJitoBundle`, under the
+    /// account cap of its route fit.
     fn quote_bundle_exact_in_with_budget(
         &self,
         from_mint: &Pubkey,
@@ -1170,7 +1151,7 @@ pub(crate) mod tests {
             .with_base_url(url);
         let deadline = Instant::now() + Duration::from_secs(5);
         let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline);
-        let _ = provider.quote_bundle_exact_in(&from, &to, 500, &[], deadline);
+        let _ = provider.quote_bundle_exact_in_with_budget(&from, &to, 500, &[], 64, deadline);
         // P4A-JIT-01: the JIT buy's fit asks the bundle route under the smaller cap.
         let _ = provider.quote_bundle_exact_in_with_budget(&from, &to, 500, &[], 23, deadline);
         let lines = requests.lock().unwrap().clone();

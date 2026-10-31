@@ -593,37 +593,35 @@ pub mod p0 {
         ) -> Result<Option<Route>, String> {
             self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
         }
-        /// DEC-11: ExactIn for a bundle's prerequisite TX (the JIT buy) — a router that
-        /// distinguishes it leaves out venues a Jito bundle cannot carry; otherwise the ExactIn
-        /// quote.
-        fn quote_bundle_exact_in(
-            &self,
-            from_mint: &Pubkey,
-            to_mint: &Pubkey,
-            amount_in: u64,
-            prewarmed_atas: &[PrewarmedAta],
-            deadline: Instant,
-        ) -> Result<Option<Route>, String> {
-            self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
-        }
-        /// P4A-JIT-01: the bundle ExactIn under an account cap (the route fit of the JIT buy);
-        /// a provider without caps answers the uncapped bundle quote under the same deadline.
+        /// DEC-11/P4A-JIT-01: ExactIn for a bundle's prerequisite TX (the JIT buy) under an
+        /// account cap (its route fit) — a router that distinguishes it leaves out venues a Jito
+        /// bundle cannot carry; otherwise the capped ExactIn quote.
         fn quote_bundle_exact_in_with_budget(
             &self,
             from_mint: &Pubkey,
             to_mint: &Pubkey,
             amount_in: u64,
             prewarmed_atas: &[PrewarmedAta],
-            _max_accounts: u8,
+            max_accounts: u8,
             deadline: Instant,
         ) -> Result<Option<Route>, String> {
-            self.quote_bundle_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
+            self.quote_exact_in_with_budget(
+                from_mint,
+                to_mint,
+                amount_in,
+                prewarmed_atas,
+                max_accounts,
+                deadline,
+            )
         }
     }
 
-    /// P4A-JIT-01: the remote route requests one funding class of one candidate may still make
-    /// (`route_attempts_max`) — a swap's route fit, or the JIT buy's shortfall solve and the fit
-    /// of its transaction together: one budget for the whole class, never one bound per step.
+    /// P4A-JIT-01: the remote route requests one funding class may still make for one sizing
+    /// pair of a candidate (`route_attempts_max`) — a swap's route fit, or the JIT buy's
+    /// shortfall solve and the fit of its transaction together: one budget for the whole class,
+    /// never one bound per step. Each class has its own budget, never one shared across classes:
+    /// a first-come budget would make the classes' order a ranking (P4A: "Enum-Reihenfolge ist
+    /// kein Ranking"); the candidate's work is bounded by its classes, pairs and deadline.
     pub(crate) struct RouteAttempts(std::cell::Cell<u64>);
 
     impl RouteAttempts {
@@ -682,37 +680,6 @@ pub mod p0 {
         u64::try_from(spent).ok().map(|s| s.max(shortfall_value))
     }
 
-    /// P4A-JIT-01: bounded ExactIn shortfall solver. Jupiter V2 `/build` documents no ExactOut, so
-    /// the JIT buy is the smallest ExactIn input whose on-chain enforced minimum output
-    /// (`minimum_executable_out`) covers `amount_out`: one reverse quote (the shortfall sold back)
-    /// gives the scale, then proportional steps from the observed floor and bisection — every
-    /// remote request at the account cap `cap` taken from `budget`, none after the candidate
-    /// deadline. An unknown floor never covers; only a quoted covering route at or below
-    /// `max_input` (the funding inventory) is returned. (The production path fits the buy too:
-    /// `fitted_shortfall_exact_in`.)
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn shortfall_exact_in<R: RouteProvider + ?Sized>(
-        routes: &R,
-        funding_mint: &Pubkey,
-        liab_mint: &Pubkey,
-        amount_out: u64,
-        max_input: u64,
-        prewarmed_atas: &[PrewarmedAta],
-        cap: u8,
-        budget: &RouteAttempts,
-        deadline: Instant,
-    ) -> Result<Option<Route>, String> {
-        let buy = ShortfallBuy {
-            funding_mint,
-            liab_mint,
-            amount_out,
-            max_input,
-            prewarmed_atas,
-        };
-        Ok(solve_shortfall(routes, &buy, cap, budget, deadline, None)?.map(|(route, _)| route))
-    }
-
     /// What a JIT shortfall solve asks: at least `amount_out` of `liab_mint` for at most
     /// `max_input` of `funding_mint`.
     pub(crate) struct ShortfallBuy<'a> {
@@ -723,18 +690,25 @@ pub mod p0 {
         pub prewarmed_atas: &'a [PrewarmedAta],
     }
 
-    /// The shortfall solve; with `warm` = (largest input known not to cover, covering input) of
-    /// an earlier solve it starts from there instead of a reverse quote (a re-solve at a smaller
-    /// cap: a route under fewer accounts covers no more, so the bound still holds). Returns the
-    /// covering route and the largest input known not to cover.
-    fn solve_shortfall<R: RouteProvider + ?Sized>(
+    /// P4A-JIT-01: the bounded ExactIn shortfall solve with the route fit of its buy, one
+    /// budget. Jupiter V2 `/build` documents no ExactOut, so the JIT buy is the smallest ExactIn
+    /// input whose on-chain enforced minimum output (`minimum_executable_out`) covers
+    /// `amount_out`: one reverse quote (the shortfall sold back) gives the scale, then
+    /// proportional steps from the observed floor and bisection. Every covering route is
+    /// compiled at once (`compile`: the buy transaction as the bundle builds it — local, no
+    /// request); one that does not fit is quoted again at the same input under a smaller account
+    /// cap (from its footprint, the route fit's rule), so the search only refines at a cap that
+    /// fits. Every remote request is taken from `budget`, none after the candidate deadline; the
+    /// smallest fitted covering route found within them is the buy. An unknown floor never
+    /// covers; nothing above `max_input` (the funding inventory) is quoted. Router caps are
+    /// hints; only the compiled transaction proves fit.
+    pub(crate) fn fitted_shortfall_exact_in<R: RouteProvider + ?Sized, T>(
         routes: &R,
         buy: &ShortfallBuy<'_>,
-        cap: u8,
         budget: &RouteAttempts,
         deadline: Instant,
-        warm: Option<(u64, u64)>,
-    ) -> Result<Option<(Route, u64)>, String> {
+        mut compile: impl FnMut(&Route) -> Result<T, BuildError>,
+    ) -> Result<Option<(Route, T)>, String> {
         let ShortfallBuy {
             funding_mint,
             liab_mint,
@@ -742,35 +716,37 @@ pub mod p0 {
             max_input,
             prewarmed_atas,
         } = *buy;
-        if amount_out == 0 || max_input == 0 || Instant::now() >= deadline {
+        if amount_out == 0 || max_input == 0 || Instant::now() >= deadline || !budget.take() {
             return Ok(None);
         }
-        // Largest input known not to cover, the input to quote next.
-        let (mut lo, mut input) = match warm {
-            Some((lo, input)) => (lo, input.clamp(1, max_input)),
-            None => {
-                if !budget.take() {
-                    return Ok(None);
-                }
-                // DEC-11: the buy is the bundle's prerequisite TX; its sizing quote asks the same
-                // venues.
-                let Some(reverse) = routes.quote_bundle_exact_in_with_budget(
-                    liab_mint,
-                    funding_mint,
-                    amount_out,
-                    prewarmed_atas,
-                    cap,
-                    deadline,
-                )?
-                else {
-                    return Ok(None);
-                };
-                (0, reverse.quoted_out.clamp(1, max_input))
-            }
+        let mut cap = routes.max_accounts().clamp(1, 64);
+        // DEC-11: the buy is the bundle's prerequisite TX; its sizing quote asks the same venues.
+        let Some(reverse) = routes.quote_bundle_exact_in_with_budget(
+            liab_mint,
+            funding_mint,
+            amount_out,
+            prewarmed_atas,
+            cap,
+            deadline,
+        )?
+        else {
+            return Ok(None);
         };
-        // The smallest covering input and its route.
-        let mut best: Option<(u64, Route)> = None;
-        while Instant::now() < deadline && budget.take() {
+        let mut input = reverse.quoted_out.clamp(1, max_input);
+        // Largest input known not to cover (at the current or a larger cap); the smallest
+        // fitted covering input, its route and its compiled transaction.
+        let mut lo = 0u64;
+        let mut best: Option<(u64, Route, T)> = None;
+        let mut rejected = Vec::new();
+        let mut late = false;
+        loop {
+            if Instant::now() >= deadline {
+                late = true;
+                break;
+            }
+            if !budget.take() {
+                break;
+            }
             let route = routes.quote_bundle_exact_in_with_budget(
                 funding_mint,
                 liab_mint,
@@ -781,14 +757,31 @@ pub mod p0 {
             )?;
             let floor = route.as_ref().and_then(|r| r.minimum_executable_out);
             let next = match (route, floor) {
-                (Some(r), Some(f)) if f >= amount_out => {
-                    best = Some((input, r));
-                    lo + (input - lo) / 2
-                }
+                (Some(r), Some(f)) if f >= amount_out => match compile(&r) {
+                    Ok(compiled) => {
+                        best = Some((input, r, compiled));
+                        lo + (input - lo) / 2
+                    }
+                    Err(error) => {
+                        let footprint = route_footprint(&r);
+                        let Some(next_cap) = shrunk_cap(cap, footprint, &error) else {
+                            return Err(format!("jit buy compilation: {error}"));
+                        };
+                        route_diagnostic(format!("jit_route_budget: max_accounts={cap} route_accounts={footprint} alts={} rejected={error}",
+                            r.lookup_tables.len()));
+                        rejected.push(format!("maxAccounts={cap}: {error}"));
+                        if cap == 1 {
+                            break;
+                        }
+                        // The same input again under fewer accounts.
+                        cap = next_cap;
+                        continue;
+                    }
+                },
                 _ => {
                     lo = input;
                     match &best {
-                        Some((hi, _)) => lo + (hi - lo) / 2,
+                        Some((hi, ..)) => lo + (hi - lo) / 2,
                         None if input >= max_input => break,
                         // Proportional to the observed floor (+1/64), else double.
                         None => {
@@ -806,71 +799,37 @@ pub mod p0 {
                     }
                 }
             };
-            if next <= lo || best.as_ref().is_some_and(|(hi, _)| next >= *hi) {
+            if next <= lo || best.as_ref().is_some_and(|(hi, ..)| next >= *hi) {
                 break;
             }
             input = next;
         }
-        Ok(best.map(|(_, r)| (r, lo)))
+        match best {
+            Some((_, route, compiled)) => Ok(Some((route, compiled))),
+            // A covering route was found but none fitted: the reason, never a silent nothing.
+            None if !rejected.is_empty() => Err(format!(
+                "{}: {}",
+                if late {
+                    "JIT_ROUTE_FIT_DEADLINE"
+                } else {
+                    "JIT_TX_BUDGET_EXHAUSTED"
+                },
+                rejected.join(" | ")
+            )),
+            None => Ok(None),
+        }
     }
 
-    /// P4A-JIT-01: the JIT buy within one route-attempt budget — the bounded shortfall solve at
-    /// the router's cap, then the buy transaction compiled as the bundle builds it (`compile`);
-    /// a buy that does not fit is solved again at a smaller cap (from its footprint, as a route
-    /// fit), warm from the bracket the solve before it found (no second reverse quote), every
-    /// quote of every solve taken from the same `budget`. Router caps are hints; only the
-    /// compiled transaction proves fit.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn fitted_shortfall_exact_in<R: RouteProvider + ?Sized, T>(
+    /// The solve alone (its buy always fits) at the router's cap — the tests' view of the
+    /// search without a transaction.
+    #[cfg(test)]
+    pub(crate) fn shortfall_exact_in<R: RouteProvider + ?Sized>(
         routes: &R,
-        funding_mint: &Pubkey,
-        liab_mint: &Pubkey,
-        amount_out: u64,
-        max_input: u64,
-        prewarmed_atas: &[PrewarmedAta],
+        buy: &ShortfallBuy<'_>,
         budget: &RouteAttempts,
         deadline: Instant,
-        mut compile: impl FnMut(&Route) -> Result<T, BuildError>,
-    ) -> Result<Option<(Route, T)>, String> {
-        let buy = ShortfallBuy {
-            funding_mint,
-            liab_mint,
-            amount_out,
-            max_input,
-            prewarmed_atas,
-        };
-        let mut cap = routes.max_accounts().clamp(1, 64);
-        let mut rejected = Vec::new();
-        let mut warm = None;
-        let exhausted =
-            |rejected: &[String]| format!("JIT_TX_BUDGET_EXHAUSTED: {}", rejected.join(" | "));
-        loop {
-            let Some((route, lo)) = solve_shortfall(routes, &buy, cap, budget, deadline, warm)?
-            else {
-                return if rejected.is_empty() {
-                    Ok(None)
-                } else {
-                    Err(exhausted(&rejected))
-                };
-            };
-            match compile(&route) {
-                Ok(compiled) => return Ok(Some((route, compiled))),
-                Err(error) => {
-                    let footprint = route_footprint(&route);
-                    let Some(next) = shrunk_cap(cap, footprint, &error) else {
-                        return Err(format!("jit buy compilation: {error}"));
-                    };
-                    route_diagnostic(format!("jit_route_budget: max_accounts={cap} route_accounts={footprint} alts={} rejected={error}",
-                        route.lookup_tables.len()));
-                    rejected.push(format!("maxAccounts={cap}: {error}"));
-                    if cap == 1 {
-                        return Err(exhausted(&rejected));
-                    }
-                    // The re-solve starts at this buy's input above what is known not to cover.
-                    (cap, warm) = (next, Some((lo, route.amount_in)));
-                }
-            }
-        }
+    ) -> Result<Option<Route>, String> {
+        Ok(fitted_shortfall_exact_in(routes, buy, budget, deadline, |_| Ok(()))?.map(|(r, ())| r))
     }
 
     /// The distinct accounts a route's instructions name (programs included).
@@ -1785,27 +1744,29 @@ pub mod p0 {
                             // fit of the buy TX, one budget; compiled exactly as the bundle builds
                             // it (payer, resources, the plan's merged LUTs).
                             let budget = RouteAttempts::new(self.route_attempts);
+                            let request = ShortfallBuy {
+                                funding_mint: &funding_mint,
+                                liab_mint: &liab_mint,
+                                amount_out: shortfall,
+                                max_input: (self.inventory)(&fb),
+                                prewarmed_atas: &prewarmed_atas,
+                            };
                             let buy = match fitted_shortfall_exact_in(
                                 self.routes,
-                                &funding_mint,
-                                &liab_mint,
-                                shortfall,
-                                (self.inventory)(&fb),
-                                &prewarmed_atas,
+                                &request,
                                 &budget,
                                 deadline,
                                 |buy| {
                                     tx::build(
-                                        &TxPlan {
-                                            version: BuildVersion::V0,
-                                            payer: self.liquidator,
-                                            instructions: buy.instructions.clone(),
-                                            lookup_tables: crate::execution::lookup_tables::merge(
+                                        &crate::execution::pipeline::prerequisite_tx_plan(
+                                            self.liquidator,
+                                            buy.instructions.clone(),
+                                            crate::execution::lookup_tables::merge(
                                                 &protocol_luts,
                                                 &buy.lookup_tables,
                                             ),
-                                            resources: self.resources,
-                                        },
+                                            self.resources,
+                                        ),
                                         Hash::default(),
                                         &self.limits,
                                     )
@@ -2328,6 +2289,22 @@ pub mod p0 {
             darkbot_solana::runtime_config::Limits::default().route_attempts_max
         }
 
+        /// A shortfall solve's request (no prewarmed ATAs).
+        fn buy<'a>(
+            funding: &'a Pubkey,
+            liab: &'a Pubkey,
+            amount_out: u64,
+            max_input: u64,
+        ) -> ShortfallBuy<'a> {
+            ShortfallBuy {
+                funding_mint: funding,
+                liab_mint: liab,
+                amount_out,
+                max_input,
+                prewarmed_atas: &[],
+            }
+        }
+
         /// The ExactIn route a router would return (or none).
         /// A deterministic market: `out = input * num / den`, the on-chain floor 1 % below the
         /// quote (`None` when `floor_known` is false); counts every request.
@@ -2402,12 +2379,7 @@ pub mod p0 {
             let (liab, funding) = (Pubkey::default(), Pubkey::new_unique());
             assert!(shortfall_exact_in(
                 &m,
-                &funding,
-                &liab,
-                1 << 62,
-                u64::MAX,
-                &[],
-                64,
+                &buy(&funding, &liab, 1 << 62, u64::MAX),
                 &RouteAttempts::new(attempts()),
                 later
             )
@@ -2433,12 +2405,7 @@ pub mod p0 {
             let need = 1_000_000;
             let r = shortfall_exact_in(
                 &m,
-                &funding,
-                &liab,
-                need,
-                u64::MAX,
-                &[],
-                64,
+                &buy(&funding, &liab, need, u64::MAX),
                 &RouteAttempts::new(attempts()),
                 later,
             )
@@ -2458,12 +2425,7 @@ pub mod p0 {
             let unknown = market(false);
             assert!(shortfall_exact_in(
                 &unknown,
-                &funding,
-                &liab,
-                need,
-                u64::MAX,
-                &[],
-                64,
+                &buy(&funding, &liab, need, u64::MAX),
                 &RouteAttempts::new(attempts()),
                 later
             )
@@ -2473,12 +2435,7 @@ pub mod p0 {
             // The funding inventory cannot cover: no buy above it.
             assert!(shortfall_exact_in(
                 &market(true),
-                &funding,
-                &liab,
-                need,
-                minimal - 1,
-                &[],
-                64,
+                &buy(&funding, &liab, need, minimal - 1),
                 &RouteAttempts::new(attempts()),
                 later
             )
@@ -2489,12 +2446,7 @@ pub mod p0 {
             let past = Instant::now() - std::time::Duration::from_millis(1);
             assert!(shortfall_exact_in(
                 &none,
-                &funding,
-                &liab,
-                need,
-                u64::MAX,
-                &[],
-                64,
+                &buy(&funding, &liab, need, u64::MAX),
                 &RouteAttempts::new(attempts()),
                 past
             )
@@ -2502,12 +2454,7 @@ pub mod p0 {
             .is_none());
             assert!(shortfall_exact_in(
                 &none,
-                &funding,
-                &liab,
-                0,
-                u64::MAX,
-                &[],
-                64,
+                &buy(&funding, &liab, 0, u64::MAX),
                 &RouteAttempts::new(attempts()),
                 later
             )
@@ -4263,10 +4210,10 @@ pub mod p0 {
 
         /// A market whose JIT buy route grows with the account cap (`cap * 20` bytes of route
         /// data; liability → funding is the reverse direction), the on-chain floor 1 % below
-        /// `input * 3 / 2`; records the cap of every request.
+        /// `input * 3 / 2`; records every request as (reverse, input, cap).
         #[derive(Default)]
         struct CappedMarket {
-            caps: std::cell::RefCell<Vec<u8>>,
+            requests: std::cell::RefCell<Vec<(bool, u64, u8)>>,
         }
         impl RouteProvider for CappedMarket {
             fn quote_exact_in(
@@ -4288,8 +4235,9 @@ pub mod p0 {
                 cap: u8,
                 _: Instant,
             ) -> Result<Option<Route>, String> {
-                self.caps.borrow_mut().push(cap);
-                let out = if *from == Pubkey::default() {
+                let reverse = *from == Pubkey::default();
+                self.requests.borrow_mut().push((reverse, amount_in, cap));
+                let out = if reverse {
                     amount_in * 2 / 3
                 } else {
                     amount_in * 3 / 2
@@ -4304,10 +4252,12 @@ pub mod p0 {
             }
         }
 
-        /// P4A-JIT-01: the JIT buy is solved and fitted within one route attempt budget — a buy
-        /// too large at the router's cap is solved afresh at a smaller cap until its transaction
-        /// fits; every request (the solves and the fit) from the same budget, caps only
-        /// decreasing; a compile error no smaller cap can mend ends the search.
+        /// P4A-JIT-01: the solve and the route fit of the JIT buy share one budget — the reverse
+        /// quote once, every covering route compiled at once, one that does not fit asked again
+        /// at the same input under a smaller cap, so the search refines only at a cap that fits:
+        /// with real amounts (10⁶ base units) the configured default budget ends in a fitted
+        /// covering buy. A covering route that never fits within the budget is its own reason;
+        /// any other compile error ends at once; two requests that cover nothing are nothing.
         #[test]
         fn jit_buy_is_solved_and_fitted_within_one_route_attempt_budget() {
             let (liab, funding) = (Pubkey::default(), Pubkey::new_unique());
@@ -4317,75 +4267,62 @@ pub mod p0 {
                 ..TxLimits::default()
             };
             let need = 1_000_000;
+            let request = buy(&funding, &liab, need, u64::MAX);
             let solve = |m: &CappedMarket, budget: u64| {
-                fitted_shortfall_exact_in(
-                    m,
-                    &funding,
-                    &liab,
-                    need,
-                    u64::MAX,
-                    &[],
-                    &RouteAttempts::new(budget),
-                    later,
-                    |r| compile_route(r, limits),
-                )
+                fitted_shortfall_exact_in(m, &request, &RouteAttempts::new(budget), later, |r| {
+                    compile_route(r, limits)
+                })
             };
             let m = CappedMarket::default();
-            let (route, built) = solve(&m, 64).unwrap().expect("a fitted buy");
+            let (route, built) = solve(&m, attempts()).unwrap().expect("a fitted buy");
             assert!(built.serialized_len <= 700);
             assert!(
                 route.minimum_executable_out.unwrap() >= need,
                 "covers on chain"
             );
-            let caps = m.caps.borrow().clone();
-            assert_eq!(caps[0], 64, "from the router's cap");
-            assert!(caps.windows(2).all(|w| w[1] <= w[0]), "{caps:?}");
-            assert!(caps.last().unwrap() < &64, "solved afresh at a smaller cap");
-            // The budget bounds the solve and the fit together: two requests are all there are.
+            let requests = m.requests.borrow().clone();
+            assert!(requests.len() as u64 <= attempts(), "{requests:?}");
+            assert_eq!(
+                requests.iter().filter(|(reverse, ..)| *reverse).count(),
+                1,
+                "the reverse quote once"
+            );
+            assert_eq!(requests[0].2, 64, "from the router's cap");
+            assert!(
+                requests.windows(2).all(|w| w[1].2 <= w[0].2),
+                "{requests:?}"
+            );
+            // The oversized covering buy is asked again at the same input under a smaller cap.
+            let shrink = requests
+                .windows(2)
+                .find(|w| w[1].2 < w[0].2)
+                .expect("a smaller cap");
+            assert_eq!(shrink[0].1, shrink[1].1, "the same input: {requests:?}");
+            // A budget that ends right after the first covering route at the router's cap.
+            let tight = CappedMarket::default();
+            let e = solve(&tight, 3).unwrap_err();
+            assert!(e.starts_with("JIT_TX_BUDGET_EXHAUSTED"), "{e}");
+            assert_eq!(tight.requests.borrow().len(), 3);
+            // One more request fits it at the smaller cap.
+            let enough = CappedMarket::default();
+            assert!(solve(&enough, 4).unwrap().is_some());
+            assert_eq!(enough.requests.borrow().len(), 4);
+            // Two requests cover nothing: nothing, never beyond the budget.
             let short = CappedMarket::default();
             assert!(solve(&short, 2).unwrap().is_none());
-            assert_eq!(short.caps.borrow().len(), 2, "never beyond the one budget");
-            // A budget the first solve uses up leaves no re-solve: the oversized buy is refused.
-            let tight = CappedMarket::default();
-            let first_solve = {
-                let probe = CappedMarket::default();
-                let _ = shortfall_exact_in(
-                    &probe,
-                    &funding,
-                    &liab,
-                    need,
-                    u64::MAX,
-                    &[],
-                    64,
-                    &RouteAttempts::new(64),
-                    later,
-                );
-                let n = probe.caps.borrow().len() as u64;
-                n
-            };
-            let e = solve(&tight, first_solve).unwrap_err();
-            assert!(e.starts_with("JIT_TX_BUDGET_EXHAUSTED"), "{e}");
-            assert_eq!(tight.caps.borrow().len() as u64, first_solve);
-            // Any other compile error ends at once.
+            assert_eq!(short.requests.borrow().len(), 2);
+            // Any other compile error ends at the first covering route.
             let other = CappedMarket::default();
             let e = fitted_shortfall_exact_in(
                 &other,
-                &funding,
-                &liab,
-                need,
-                u64::MAX,
-                &[],
-                &RouteAttempts::new(64),
+                &request,
+                &RouteAttempts::new(attempts()),
                 later,
                 |_| Err::<(), _>(BuildError::Compile("bad account layout".into())),
             )
             .unwrap_err();
             assert!(e.contains("bad account layout"), "{e}");
-            assert_eq!(
-                other.caps.borrow().len() as u64,
-                first_solve,
-                "one solve only"
-            );
+            assert_eq!(other.requests.borrow().len(), 3, "reverse, short, covering");
         }
 
         #[test]

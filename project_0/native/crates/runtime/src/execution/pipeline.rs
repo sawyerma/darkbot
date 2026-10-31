@@ -1660,13 +1660,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         };
         let mut prerequisites = Vec::with_capacity(plan.prerequisite_txs.len());
         for pre in &plan.prerequisite_txs {
-            let pre_plan = TxPlan {
-                version: BuildVersion::V0,
-                payer: tx::payer_of(self.payer),
-                instructions: pre.clone(),
-                lookup_tables: plan.lookup_tables.clone(),
-                resources: self.resources,
-            };
+            let pre_plan = prerequisite_tx_plan(
+                tx::payer_of(self.payer),
+                pre.clone(),
+                plan.lookup_tables.clone(),
+                self.resources,
+            );
             let b = tx::build(&pre_plan, blockhash, &self.limits)
                 .map_err(|e| (LossReason::Build, Rejection::PrerequisiteBuild(e)))?;
             tx::message_matches_plan(&b.tx.message, &pre_plan)
@@ -1682,6 +1681,23 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             prerequisites,
             tip_tx,
         })
+    }
+}
+
+/// DEC-11/P4A-JIT-01: the plan of a bundle's prerequisite TX (the JIT buy) — the one
+/// construction the builder's route fit compiles and the bundle builds (`bundle_parts`).
+pub(crate) fn prerequisite_tx_plan(
+    payer: solana_sdk::pubkey::Pubkey,
+    instructions: Vec<Instruction>,
+    lookup_tables: std::sync::Arc<[solana_message::AddressLookupTableAccount]>,
+    resources: darkbot_solana::tx::Resources,
+) -> TxPlan {
+    TxPlan {
+        version: BuildVersion::V0,
+        payer,
+        instructions,
+        lookup_tables,
+        resources,
     }
 }
 

@@ -25,7 +25,7 @@ const OWNER_PARAMETERS = [
   "rebalance_observe_ms", "rebalance_budget_usd_micro", "rebalance_quote_rounds",
   "max_total_capital", "max_outstanding_inventory", "max_concurrent_positions", "max_exposure_per_attempt",
   "max_daily_loss", "max_failed_attempts_per_day", "max_tip", "max_slippage_bps", "max_outstanding_attempts",
-  "min_profit_usd_micro", "jupiter_max_accounts", "compute_unit_limit", "priority_micro_lamports_per_cu",
+  "min_profit_usd_micro", "jupiter_max_accounts", "route_attempts_max", "compute_unit_limit", "priority_micro_lamports_per_cu",
   "loaded_accounts_data_size", "max_opportunity_age_ns", "execution_deadline_ns", "integration_probe_limit_per_kind",
   "threshold_bootstrap_batch", "candidate_recheck_slots", "candidate_error_recheck_slots", "candidate_repeat_soft_cap",
   "rpc_candidates_per_drain", "candidate_network_deadline_ms", "mt0_interval_seconds",
