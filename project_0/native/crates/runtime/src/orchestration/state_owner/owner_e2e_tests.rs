@@ -7387,22 +7387,21 @@ fn p8ctrl03_scoped(
 ) {
     use crate::orchestration::{capability_control as cap, fe06};
     let now = super::accounts::wall_unix_s().unwrap();
-    let mark = |k: &str| f.marks[k].to_string();
+    let mark = |k: &str| f.marks.get(k).map(ToString::to_string);
     let (from, until) = ((now - 60).to_string(), (now + 3_000).to_string());
-    let banks = format!("{},{}", mark("asset_bank"), mark("liab_bank"));
-    let mints = format!(
-        "{},{},{}",
-        mark("asset_mint"),
-        mark("liab_mint"),
-        mark("sol_mint")
-    );
+    // The fixture's banks and mints where its builder names them (else the scope's own).
+    let banks = mark("asset_bank")
+        .zip(mark("liab_bank"))
+        .map(|(a, l)| format!("{a},{l}"));
+    let mints = mark("asset_mint")
+        .zip(mark("liab_mint"))
+        .zip(mark("sol_mint"))
+        .map(|((a, l), s)| format!("{a},{l},{s}"));
     let program = f.owner.program.to_string();
     let deployment = f.owner.program_data_baseline_hash.to_string();
     let mut fields: Vec<(&str, &str)> = vec![
         ("programs", &program),
         ("program_data_hash", &deployment),
-        ("banks", &banks),
-        ("mints", &mints),
         ("max_input_per_attempt_usd_micro", "100000000"),
         ("max_exposure_usd_micro", "100000000"),
         ("max_loss_usd_micro", "50000000"),
@@ -7412,6 +7411,12 @@ fn p8ctrl03_scoped(
         ("not_before_unix_s", &from),
         ("expires_unix_s", &until),
     ];
+    if let Some(banks) = &banks {
+        fields.push(("banks", banks));
+    }
+    if let Some(mints) = &mints {
+        fields.push(("mints", mints));
+    }
     for (k, v) in overrides {
         fields.retain(|(f, _)| f != k);
         fields.push((k, v));
@@ -7548,4 +7553,286 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         );
         cleanup(f);
     }
+}
+
+/// P8-CTRL.7/.10 (L07): a DISABLE is linearized against the egress by the one owner — one that
+/// arrives through the owner's control queue while the candidate is being simulated and sent is
+/// applied only after that step: the payload already handed off stays held (SUBMITTED, UNKNOWN
+/// until its settlement, never released by the DISABLE), and from then on LIVE is BLOCKED by it.
+/// A switch DISABLED before the candidate signs, simulates and sends nothing.
+#[test]
+fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::capability_control as cap;
+    use crate::orchestration::source_control::ControlMessage;
+    // Before: ECON_SIGN DISABLED — LIVE is BLOCKED by it; the candidate is a Shadow one,
+    // signed synthetically (P8-CTRL.4), never sent.
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl06_l07_before", true);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
+    f.owner.sources.capabilities.econ.set(cap::ECON_SIGN, false);
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(!f.owner.live_effective());
+    assert!(!calls.lock().unwrap().iter().any(|m| m == "sendTransaction"));
+    assert!(f.owner.fe04_held.is_none());
+    cleanup(f);
+    // During: the DISABLE arrives while the candidate's simulation runs.
+    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 300);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
+    let (tx, rx) = darkbot_common::channel::bounded::<ControlMessage>("p8ctrl06-l07", 8);
+    let capabilities = std::mem::take(&mut f.owner.sources.capabilities);
+    f.owner.sources = sources::OwnerSources::new(
+        darkbot_solana::ingress::sources::SourceArbiter::new(&[
+            crate::orchestration::source_control::control_of(
+                darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
+                darkbot_solana::ingress::sources::OperatingMode::Active,
+            )
+            .unwrap(),
+        ])
+        .unwrap(),
+        None,
+        Box::new(|_, _, _, _, _, _, _| Err("P8CTRL06_NO_SOURCE".to_string())),
+        64,
+        &f.owner.wake.clone(),
+        Some(rx),
+    );
+    f.owner.sources.capabilities = capabilities;
+    let disable = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        tx.try_push(ControlMessage::Capability {
+            seq: 1,
+            request: Ok(CapabilityControlRequest {
+                seq: 1,
+                capability: cap::ECON_SEND.into(),
+                requested: cap::DISABLED.into(),
+                requested_unix_s: 1,
+                request_id: "l07-disable".into(),
+                owner_epoch: 3,
+            }),
+        })
+        .unwrap();
+        tx
+    });
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let _tx = disable.join().unwrap();
+    // The DISABLE waited for the step: the one payload was handed off and stays held.
+    let sent = |calls: &Arc<Mutex<Vec<String>>>| {
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| *m == "sendTransaction")
+            .count()
+    };
+    assert_eq!(sent(&calls), 1);
+    assert!(f.owner.live_effective(), "not applied inside the step");
+    f.owner.sources_step(&f.ingress).unwrap();
+    assert!(!f.owner.live_effective());
+    let (effective, reason) = cap::live_decision(&f.owner.sources.live_gates());
+    assert_eq!(effective, "BLOCKED");
+    assert!(reason.starts_with("ECON_SEND DISABLED"), "{reason}");
+    assert!(
+        f.owner.fe04_held.is_some() && f.owner.fe04_unbooked.is_some(),
+        "the handed-off attempt keeps every hold"
+    );
+    // Nothing is sent again after it.
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            101,
+            "account_update",
+        )))
+        .unwrap();
+    assert_eq!(sent(&calls), 1);
+    cleanup(f);
+}
+
+/// P8-CTRL.5/.10 (L11): EXIT_ONLY exits exactly its named open positions — the named one exits
+/// once, booked against the grant; another position is refused at its egress permit; a global
+/// stop (ECON_LIVE DISABLED) blocks every new exit (no stop bypass).
+#[test]
+fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
+    use crate::orchestration::capability_control as cap;
+    for (tag, named, live) in [
+        ("named", true, true),
+        ("other", false, true),
+        ("stopped", true, false),
+    ] {
+        let (mut f, calls, e) = dec13b_exit_fixture(&format!("p8ctrl06_l11_{tag}"), true);
+        let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+        f.owner
+            .fe04_approval
+            .as_mut()
+            .unwrap()
+            .refresh(Some(&dir), &wallet);
+        dec13b_live(&mut f, true);
+        let position = if named {
+            format!("{}:{}", e.attempt_approval_id, e.mint)
+        } else {
+            format!("another-attempt:{}", e.mint)
+        };
+        p8ctrl03_scoped(
+            &mut f,
+            &[
+                ("mode", "EXIT_ONLY"),
+                ("exit_positions", position.as_str()),
+                ("mints", e.mint.as_str()),
+                ("max_attempts_per_utc_day", "0"),
+                ("max_attempts_campaign", "0"),
+                ("max_attempts_grant", "0"),
+            ],
+            |_| {},
+        );
+        let digest = f
+            .owner
+            .sources
+            .capabilities
+            .fe06
+            .as_ref()
+            .unwrap()
+            .digest()
+            .to_string();
+        if !live {
+            f.owner.sources.capabilities.econ.set(cap::ECON_LIVE, false);
+        }
+        f.owner.fe04_refreshed = std::time::Instant::now()
+            .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+            .unwrap();
+        f.owner.lifecycle();
+        let sends = calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| *m == "sendTransaction")
+            .count();
+        match tag {
+            "named" => {
+                assert_eq!(sends, 1, "{:?}", f.owner.fe04_admissions);
+                let records = f
+                    .owner
+                    .fe04_held
+                    .as_ref()
+                    .unwrap()
+                    .attempt_records()
+                    .unwrap();
+                let booked: Vec<_> = records
+                    .iter()
+                    .flat_map(|r| r.exits.iter())
+                    .filter_map(|x| x.fe06.as_ref())
+                    .map(|b| b.grant.clone())
+                    .collect();
+                assert_eq!(booked, [digest], "the exit is booked against its grant");
+            }
+            "other" => {
+                assert_eq!(sends, 0);
+                assert!(
+                    f.owner
+                        .fe04_admissions
+                        .last_exit_refusal
+                        .starts_with("FE06_SCOPE_USE: exit_position "),
+                    "{:?}",
+                    f.owner.fe04_admissions
+                );
+            }
+            _ => {
+                assert_eq!(sends, 0, "a stop blocks every new exit");
+                assert!(!f.owner.exit_live_effective());
+            }
+        }
+        cleanup(f);
+    }
+}
+
+/// P8-CTRL.6/.10 (L16): a restart with an UNKNOWN attempt resets every switch and the grant,
+/// while the attempt, its holds and its FE-06 booking survive in the FE-04 journal and are
+/// replayed by the owner's start (`reservation_book`); a request of the old epoch is stale.
+#[test]
+fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking() {
+    use crate::orchestration::capability_control as cap;
+    let (mut f, target, calls) = dec13b_fixture("p8ctrl06_l16", true);
+    p8ctrl03_scoped(&mut f, &[], |_| {});
+    let digest = f
+        .owner
+        .sources
+        .capabilities
+        .fe06
+        .as_ref()
+        .unwrap()
+        .digest()
+        .to_string();
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    assert!(calls.lock().unwrap().iter().any(|m| m == "sendTransaction"));
+    // The restart: the owner's state is gone; the journal is replayed as at every start.
+    f.owner.fe04_held = None;
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let dir_s = f.dir.join("fe04").display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut safety, wall_unix_s().unwrap())
+    .unwrap();
+    assert!(
+        !start.book.is_empty(),
+        "the UNKNOWN attempt keeps its holds"
+    );
+    // Held for the run, settled at once, its capital reserved until that booking.
+    let unbooked = start
+        .unbooked
+        .expect("the UNKNOWN attempt waits for its booking");
+    assert!(start.held.is_some() && start.settle_due.is_some());
+    assert_eq!(
+        Some(safety.capital_in_use()),
+        unbooked.reserved_capital,
+        "the replay reserves the attempt's capital"
+    );
+    let records = crate::execution::one_shot::archive::records(
+        &f.dir.join("fe04"),
+        &f.owner.liquidator.to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        records
+            .iter()
+            .filter_map(|r| r.fe06.as_ref())
+            .map(|b| b.grant.as_str())
+            .collect::<Vec<_>>(),
+        [digest.as_str()],
+        "the attempt stays booked against its grant"
+    );
+    // Every switch DISABLED, LIVE OFF, no grant: what a new owner starts with.
+    let fresh = sources::OwnerCapabilities::default();
+    assert_eq!(fresh.live_requested, cap::LIVE_OFF);
+    assert!(cap::ECON.iter().all(|e| fresh.econ.get(e) != Some(true)));
+    assert!(fresh.fe06.is_none());
+    let (effective, _) = cap::live_decision(&fresh.live_gates());
+    assert_ne!(effective, cap::LIVE);
+    // A fresh epoch at every start: the old one's requests are stale.
+    let control = cap::request_dir(&f.dir);
+    let first = cap::open_epoch(&control, std::process::id(), None).unwrap();
+    let second = cap::open_epoch(&control, std::process::id(), None).unwrap();
+    assert!(second > first);
+    cleanup(f);
 }
