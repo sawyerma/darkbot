@@ -9111,4 +9111,32 @@ fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
     f.owner.lifecycle();
     assert!(f.owner.fe04_admission.is_some(), "after it");
     cleanup(f);
+    // Opened without a target, it still refuses a candidate its approval does not name (review
+    // L2): unsent, the reason projected, the admission kept open.
+    let (mut f, target, calls) = dec13b_fixture("s4_04_prewarm_target", true);
+    f.owner.lifecycle();
+    assert!(f.owner.fe04_admission.is_some());
+    let file = f.dir.join("approval.conf");
+    let text = std::fs::read_to_string(&file).unwrap().replace(
+        &format!("allowed_targets = {target}"),
+        &format!("allowed_targets = {}", Pubkey::new_unique()),
+    );
+    std::fs::write(&file, text).unwrap();
+    let (journal, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&journal), &wallet);
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    assert!(!calls.lock().unwrap().iter().any(|c| c == "sendTransaction"));
+    assert_eq!(
+        f.owner.fe04_admissions.block_reason,
+        "FE04_TARGET_NOT_APPROVED"
+    );
+    assert!(f.owner.fe04_admission.is_some(), "kept open");
+    cleanup(f);
 }

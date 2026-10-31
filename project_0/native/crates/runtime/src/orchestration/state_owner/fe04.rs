@@ -708,11 +708,14 @@ impl ShadowOwner {
     /// candidate refreshes every fact). An admission that cannot be opened now is tried again
     /// after the FE-04 refresh interval; the candidate's own admission reports why.
     pub(super) fn fe04_prewarm(&mut self) {
+        // The cheap conditions first (review L1): a Shadow pass never computes the LIVE decision.
         if self.fe04_admission.is_some()
-            || !self.live_effective()
+            || self.sources.capabilities.live_requested
+                != crate::orchestration::capability_control::LIVE
             || self
                 .fe04_prewarm_after
                 .is_some_and(|t| std::time::Instant::now() < t)
+            || !self.live_effective()
         {
             return;
         }

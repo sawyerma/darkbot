@@ -537,7 +537,8 @@ impl ShadowOwner {
     /// FE-04 journal its single use is unchecked: never VALID then.
     /// DEC-13b/DEC-02: the admission state — OFF without an effective LIVE (its block reason);
     /// BLOCKED by a held attempt, a Safety halt or the last LIVE candidate's refusal; READY with
-    /// an open admission; WAITING before the first LIVE candidate — and this run's counters.
+    /// an open admission (S4-04: opened ahead of the first LIVE candidate); WAITING while none is
+    /// open yet (the candidate's own admission reports why it cannot be) — and this run's counters.
     fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
         let a = &self.fe04_admissions;
         let (state, block_reason) = if !self.live_effective() {
