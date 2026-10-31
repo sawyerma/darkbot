@@ -27,7 +27,13 @@
 //! leaves one receipt, `receipts/<request_id>.dbrec`; the same request again
 //! gets the same receipt, another payload under its ID is refused. A crash
 //! between the new generation and its receipt is recovered from the
-//! generation, which names the request it applied.
+//! generation, which names the request it applied. A receipt is kept as
+//! long as the generation it names and the one its request expected
+//! (BSC3-008), and goes at the next applied request after both left the
+//! kept ones: no request applies twice without it, its expected
+//! generation is stale then; the same request again reads UNRESOLVED or
+//! REJECTED_STALE (BSC3-006). An ID whose receipt went names a new request
+//! again (the generation it expects is the check, not the ID).
 
 use alloy_primitives::U256;
 use darkbot_bsc_record::schema::bsc_runtime::{source_mode_receipt as rc, source_modes as sm};
@@ -4013,11 +4019,26 @@ impl Store {
         Ok(receipt)
     }
 
-    /// Removes generations older than `keep` before `current` (best effort).
+    /// Removes generations older than `keep` before `current`, and the
+    /// receipts whose generation and expected generation are both older
+    /// (BSC3-008; best effort): a request that expected a later generation
+    /// keeps its refusal until that generation is past.
     fn prune(&self, current: u64) {
         let Some(below) = current.checked_sub(self.keep) else {
             return;
         };
+        if let Ok(entries) = fs::read_dir(self.dir.join("receipts")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if read_private(&path, self.owner)
+                    .ok()
+                    .and_then(|bytes| Receipt::decode(&bytes).ok())
+                    .is_some_and(|r| r.generation.max(r.expected_generation) < below)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
         if let Ok(entries) = fs::read_dir(self.dir.join("generations")) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
@@ -5791,6 +5812,90 @@ pub(crate) mod tests {
         });
         assert_eq!(ok, 3);
         assert_eq!(total_usage(&dir).unwrap().used, 3);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-008: a receipt goes with the generations its request names
+    /// (they grew by one per request for ever); its request never applies a
+    /// second time: the same request again reads UNRESOLVED (its expected
+    /// generation stale, the generation it wrote gone) or REJECTED_STALE,
+    /// the generation stays; a request still kept gets its receipt; one
+    /// that expected a later generation keeps its refusal until that
+    /// generation is past (review M: else it would apply when the state
+    /// reached it). An ID whose receipt went may name a new request.
+    #[test]
+    fn receipts_go_with_their_generations_and_never_apply_again() {
+        let (dir, s) = session("receipt-prune", "boot-1");
+        let receipts = || fs::read_dir(dir.join("receipts")).unwrap().count() as u64;
+        let mode = |n: u64| {
+            if n.is_multiple_of(2) {
+                Mode::Enabled
+            } else {
+                Mode::Disabled
+            }
+        };
+        for n in 0..40u64 {
+            let r = s
+                .request(&format!("r{n}"), SwitchId::Send, mode(n), n, n + 1)
+                .unwrap();
+            assert_eq!((r.outcome, r.generation), ("APPLIED", n + 1));
+        }
+        // Another request meeting a kept generation another one wrote.
+        let stale = s
+            .request("late", SwitchId::Arm, Mode::Enabled, 35, 50)
+            .unwrap();
+        assert_eq!(stale.outcome, "REJECTED_STALE");
+        // Generations 32..=40 kept (8 besides the current), their nine
+        // requests' receipts and the stale one's.
+        assert_eq!(receipts(), 10);
+        let again = s
+            .request("r0", SwitchId::Send, Mode::Enabled, 0, 60)
+            .unwrap();
+        assert_eq!(again.outcome, "UNRESOLVED");
+        assert!(!again.applied());
+        assert_eq!(s.current().unwrap().generation, 40);
+        let kept = s.request("r39", SwitchId::Send, mode(39), 39, 61).unwrap();
+        assert_eq!((kept.outcome, kept.generation), ("APPLIED", 40));
+        // A refused request whose generation went: refused again.
+        for n in 40..50u64 {
+            s.request(&format!("r{n}"), SwitchId::Send, mode(n), n, 70 + n)
+                .unwrap();
+        }
+        let late = s
+            .request("late", SwitchId::Arm, Mode::Enabled, 35, 120)
+            .unwrap();
+        assert!(!late.applied(), "{}", late.outcome);
+        // A request expecting a far later generation (a mistyped one).
+        let ahead = s
+            .request("ahead", SwitchId::Arm, Mode::Enabled, 70, 121)
+            .unwrap();
+        assert_eq!(ahead.outcome, "REJECTED_STALE");
+        for n in 50..70u64 {
+            s.request(&format!("r{n}"), SwitchId::Send, mode(n), n, 80 + n)
+                .unwrap();
+        }
+        assert_eq!(s.current().unwrap().generation, 70);
+        // At generation 70 the same request again: still its refusal, never
+        // applied, also after the generations passed 70 by more than kept.
+        assert_eq!(
+            s.request("ahead", SwitchId::Arm, Mode::Enabled, 70, 160)
+                .unwrap(),
+            ahead
+        );
+        for n in 70..90u64 {
+            s.request(&format!("r{n}"), SwitchId::Send, mode(n), n, 100 + n)
+                .unwrap();
+        }
+        let again = s
+            .request("ahead", SwitchId::Arm, Mode::Enabled, 70, 200)
+            .unwrap();
+        assert!(!again.applied(), "{}", again.outcome);
+        assert_eq!(s.current().unwrap().generation, 90);
+        // An ID whose receipt went names a new request, at its own CAS.
+        let reused = s
+            .request("r0", SwitchId::Arm, Mode::Enabled, 90, 201)
+            .unwrap();
+        assert_eq!((reused.outcome, reused.generation), ("APPLIED", 91));
         fs::remove_dir_all(dir).unwrap();
     }
 
