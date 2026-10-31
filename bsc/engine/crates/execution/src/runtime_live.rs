@@ -314,6 +314,11 @@ pub struct LiveRuntime {
     next_nonce: Option<u64>,
     /// Launches first seen by a source the grant does not name.
     source_refused: u64,
+    /// BSC3-075: those launches, until a granted source sees them (at most
+    /// as many as the ingress remembers, `BSC_RUNTIME_DEDUP_HASHES`: a later
+    /// sighting comes only of a launch it still holds; the oldest first out).
+    awaiting_granted: std::collections::VecDeque<[u8; 32]>,
+    awaiting_bound: usize,
     /// BSC3-030 review: strategy exits refused because the position's exits
     /// stopped for the operator, per reason.
     exits_stopped: Vec<(&'static str, u64)>,
@@ -424,6 +429,8 @@ impl LiveRuntime {
             disarm_errors: 0,
             next_nonce: None,
             source_refused: 0,
+            awaiting_granted: std::collections::VecDeque::new(),
+            awaiting_bound: 0,
             exits_stopped: Vec::new(),
             prober,
             boot: None,
@@ -1357,9 +1364,34 @@ impl LiveRuntime {
                 (end, since)
             }
             _ => {
-                let refused: Vec<[u8; 20]> = self.paper_sender.into_iter().collect();
+                let mut refused: Vec<[u8; 20]> = self.paper_sender.into_iter().collect();
+                // BSC3-026: the stand-in never runs on the account's owner
+                // state and signs only with its state's test identity
+                // (checked before any key file is read), never a
+                // production account.
+                if let LiveRouteConfig::Loopback { .. } = &self.setup.route {
+                    if let Some(why) =
+                        loopback_refused(store.dir(), crate::sources::canonical_state_dir())
+                    {
+                        return self.stop(Phase::ArmFailed(why));
+                    }
+                    if let Some(why) =
+                        crate::live_key::loopback_key_refused(&self.setup.key_path, store.dir())
+                    {
+                        return self.stop(Phase::KeyRefused(why));
+                    }
+                    refused.extend_from_slice(&self.exec.refused_accounts);
+                }
+                // BSC3-026 review: on the stand-in route the identity's own
+                // name is loaded (a link there is refused by the load).
+                let key_path = match &self.setup.route {
+                    LiveRouteConfig::Loopback { .. } => {
+                        crate::live_key::loopback_identity(store.dir())
+                    }
+                    LiveRouteConfig::Builders { .. } => self.setup.key_path.clone(),
+                };
                 let key = match LiveKey::load(
-                    &self.setup.key_path,
+                    &key_path,
                     &self.repo_root,
                     self.setup.buyer,
                     &refused,
@@ -1369,14 +1401,7 @@ impl LiveRuntime {
                     Err(e) => return self.stop(Phase::KeyRefused(e)),
                 };
                 let route = match &self.setup.route {
-                    LiveRouteConfig::Loopback { port } => {
-                        if let Some(why) =
-                            loopback_refused(store.dir(), crate::sources::canonical_state_dir())
-                        {
-                            return self.stop(Phase::ArmFailed(why));
-                        }
-                        LiveRoute::Loopback { port: *port }
-                    }
+                    LiveRouteConfig::Loopback { port } => LiveRoute::Loopback { port: *port },
                     LiveRouteConfig::Builders { blockrazor_token } => {
                         let setup = match TlsSetup::web_pki_roots() {
                             Ok(s) => s,
@@ -1483,6 +1508,8 @@ impl LiveRuntime {
     fn close(&mut self, why: String) {
         self.probe = None;
         self.connecting = None;
+        // BSC3-075 review: a launch waits for a granted source of this arm.
+        self.awaiting_granted.clear();
         if self.executor.is_some() {
             self.stop(Phase::Ended(why));
         } else {
@@ -1514,6 +1541,61 @@ impl LiveRuntime {
         }
     }
 
+    /// BSC3-075: as many launches as the ingress remembers wait for a
+    /// granted source after a source the grant does not name saw them first
+    /// (the runtime's `BSC_RUNTIME_DEDUP_HASHES`).
+    pub fn with_ingress_hashes(mut self, hashes: usize) -> Self {
+        self.awaiting_bound = hashes;
+        self
+    }
+
+    /// The armed LIVE path's verified full sighting of a Flap launch: its
+    /// first (`first`) or a later one from another source.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_sighting(
+        &mut self,
+        source: SourceId,
+        hash: [u8; 32],
+        first: bool,
+        raw: &[u8],
+        ingress_ns: u64,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+    ) -> Option<ExecBuy<LiveHandoff>> {
+        match first {
+            true => self.on_launch(source, hash, raw, ingress_ns, owner, clock),
+            false => self.on_later(source, hash, raw, ingress_ns, owner, clock),
+        }
+    }
+
+    /// BSC3-075: a later verified full sighting of a launch whose first
+    /// sighting came from a source the grant does not name: the first such
+    /// sighting from a granted source triggers its BUY, once.
+    pub fn on_later(
+        &mut self,
+        source: SourceId,
+        hash: [u8; 32],
+        raw: &[u8],
+        ingress_ns: u64,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+    ) -> Option<ExecBuy<LiveHandoff>> {
+        let granted = self
+            .executor
+            .as_ref()?
+            .end()
+            .armed()
+            .grant()
+            .sources
+            .contains(&source);
+        let at = self.awaiting_granted.iter().position(|h| *h == hash);
+        let (true, Some(at)) = (granted, at) else {
+            return None;
+        };
+        self.awaiting_granted.remove(at);
+        self.on_launch(source, hash, raw, ingress_ns, owner, clock)
+    }
+
     /// A verified full pending C1-scope launch first seen by `source`,
     /// when armed: only a source the grant names triggers a LIVE BUY.
     pub fn on_launch(
@@ -1534,7 +1616,15 @@ impl LiveRuntime {
             .sources
             .contains(&source)
         {
+            // BSC3-075: neither its BUY nor a block for the granted
+            // sources: the first of them that sees it still triggers.
             self.source_refused += 1;
+            if !self.awaiting_granted.contains(&hash) {
+                if self.awaiting_granted.len() >= self.awaiting_bound.max(1) {
+                    self.awaiting_granted.pop_front();
+                }
+                self.awaiting_granted.push_back(hash);
+            }
             return None;
         }
         self.poll_responses(clock);
@@ -1994,6 +2084,26 @@ mod tests {
     }
     use crate::chain_follower::{CanonicalEvent, CanonicalTx};
     use crate::live_end::tests::{club48_findings, key_file, stand_in};
+
+    /// BSC3-026: the stand-in's test identity in the test's owner state
+    /// `state` (the synthetic buyer's key), and its address.
+    fn loopback_key(state: &Path) -> (PathBuf, [u8; 20]) {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = crate::live_key::loopback_identity(state);
+        let secret = crate::live_qualification::tests::BUYER_SECRET;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut f| f.write_all(&secret))
+            .unwrap();
+        let buyer = darkbot_bsc_trading::signer::Signer::from_secret_bytes(&secret)
+            .unwrap()
+            .address();
+        (path, buyer.into_array())
+    }
     use crate::live_qualification::tests::{acquisition, fixture, venue_evidence};
     use crate::live_qualification::{LIVE_QUALIFICATION_PATH, RiskSpec, Spec, build};
     use crate::paper_exec::FnClock;
@@ -2405,7 +2515,8 @@ mod tests {
         .unwrap();
         let d = std::env::temp_dir().join(format!("bsc-live-rt-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
-        let (key, buyer) = key_file(&d);
+        fs::create_dir_all(&d).unwrap();
+        let (key, buyer) = loopback_key(&state);
         let (port, requests) = stand_in();
         let live_setup = LiveSetup {
             key_path: key,
@@ -2593,7 +2704,8 @@ mod tests {
         .unwrap();
         let d = std::env::temp_dir().join(format!("bsc-live-rt-cap-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
-        let (key, buyer) = key_file(&d);
+        fs::create_dir_all(&d).unwrap();
+        let (key, buyer) = loopback_key(&state);
         let (port, requests) = stand_in();
         let live_setup = LiveSetup {
             key_path: key,
@@ -2734,7 +2846,8 @@ mod tests {
         .unwrap();
         let d = std::env::temp_dir().join(format!("bsc-live-pos-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
-        let (key, buyer) = key_file(&d);
+        fs::create_dir_all(&d).unwrap();
+        let (key, buyer) = loopback_key(&state);
         let (port, requests) = stand_in();
         let mut x = LiveRuntime::with_prober(
             LiveSetup {
@@ -3060,7 +3173,8 @@ mod tests {
         .unwrap();
         let d = std::env::temp_dir().join(format!("bsc-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
-        let (key, buyer) = key_file(&d);
+        fs::create_dir_all(&d).unwrap();
+        let (key, buyer) = loopback_key(&state);
         let (port, requests) = stand_in();
         let live_setup = LiveSetup {
             key_path: key,
@@ -3545,7 +3659,8 @@ mod tests {
             .unwrap();
             let d = std::env::temp_dir().join(format!("bsc-{tag}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&d);
-            let (key, buyer) = key_file(&d);
+            fs::create_dir_all(&d).unwrap();
+            let (key, buyer) = loopback_key(&state);
             let (port, requests) = stand_in();
             Rig {
                 exec: setup(d.join("unused.key"), Duration::from_secs(3_600)),
@@ -6271,11 +6386,13 @@ mod tests {
         let q = crate::live_qualification::view(&r.root).0.view;
         assert!(s.live_now(&[ComponentId::ExecC3], &q, NOW).is_ok());
         let c2 = c2_at(&r.d, r.buyer, 5);
-        // Without the buyer's key file: no arm.
-        let mut keyless = r.live.clone();
-        keyless.key_path = r.d.join("absent.key");
+        // Without the buyer's key file (on the stand-in route its test
+        // identity, BSC3-026): no arm.
+        let identity = crate::live_key::loopback_identity(&r.state);
+        let aside = r.d.join("identity.aside");
+        fs::rename(&identity, &aside).unwrap();
         let mut x = LiveRuntime::with_prober(
-            keyless,
+            r.live.clone(),
             r.exec.clone(),
             &r.root,
             r.state.clone(),
@@ -6287,6 +6404,8 @@ mod tests {
         settle(&mut x, &c2);
         assert!(!x.armed());
         assert_eq!(reason(&x).0, "KEY_REFUSED", "{:?}", reason(&x));
+        x.shutdown();
+        fs::rename(&aside, &identity).unwrap();
         // Without a verified qualification: no arm.
         let record = r.root.join(LIVE_QUALIFICATION_PATH);
         let aside = r.root.join("qualification.aside");
@@ -6318,6 +6437,145 @@ mod tests {
         settle(&mut z, &c2);
         assert!(!z.armed(), "{:?}", reason(&z));
         z.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-026: the stand-in signs only with its owner state's test
+    /// identity. A key file anywhere else (even one of the same key) is
+    /// refused before it is read; the identity is never a production
+    /// account; with it the path arms.
+    #[test]
+    fn the_stand_in_signs_only_with_its_test_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = Rig::new("live-test-identity", LiveStrategies::C3);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let refused = |live: LiveSetup, exec: ExecSetup| {
+            let mut x = LiveRuntime::with_prober(
+                live,
+                exec,
+                &r.root,
+                r.state.clone(),
+                r.d.join("fences"),
+                None,
+                funded,
+            )
+            .in_session("boot-1", fixed);
+            settle(&mut x, &c2);
+            assert!(!x.armed());
+            let (state, why) = reason(&x);
+            x.shutdown();
+            assert_eq!(state, "KEY_REFUSED", "{why:?}");
+            why.unwrap_or_default()
+        };
+        // The same key in a private file outside the state: refused.
+        let (elsewhere, buyer) = crate::live_end::tests::key_file(&r.d);
+        assert_eq!(buyer, r.buyer);
+        let other = LiveSetup {
+            key_path: elsewhere.clone(),
+            ..r.live.clone()
+        };
+        let why = refused(other.clone(), r.exec.clone());
+        assert!(why.starts_with("LOOPBACK_KEY_NOT_TEST_IDENTITY"), "{why}");
+        // Refused before it is read: an unreadable file says the same.
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o000)).unwrap();
+        let why = refused(other, r.exec.clone());
+        assert!(why.starts_with("LOOPBACK_KEY_NOT_TEST_IDENTITY"), "{why}");
+        // BSC3-026 review: a link at the identity's name to another key file
+        // (named as the key, or the identity's name itself): refused.
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o600)).unwrap();
+        let identity = crate::live_key::loopback_identity(&r.state);
+        let aside = r.d.join("identity.aside");
+        fs::rename(&identity, &aside).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &identity).unwrap();
+        for key_path in [elsewhere.clone(), identity.clone()] {
+            let linked = LiveSetup {
+                key_path,
+                ..r.live.clone()
+            };
+            let why = refused(linked, r.exec.clone());
+            assert!(why.starts_with("LOOPBACK_KEY_NOT_TEST_IDENTITY"), "{why}");
+        }
+        fs::remove_file(&identity).unwrap();
+        fs::rename(&aside, &identity).unwrap();
+        // The test identity of a production account: refused.
+        let mut production = r.exec.clone();
+        production.refused_accounts = vec![[0x3e; 20], r.buyer];
+        let why = refused(r.live.clone(), production);
+        assert!(why.contains("refused account"), "{why}");
+        // The state's test identity: it arms.
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-075: a source the grant does not name that sees a launch first
+    /// neither takes nor blocks its BUY: the first granted source that sees
+    /// it after triggers it, once (the production ingress core decides
+    /// first and later, the runtime's rule which may trigger).
+    #[test]
+    fn a_source_outside_the_grant_seen_first_never_blocks_the_buy() {
+        use crate::ingress::{IngressCore, Observation};
+        let r = Rig::new("live-ungranted-first", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let mut core = IngressCore::new(64, 16_384);
+        // As the run loop hands an armed LIVE path a sighting.
+        let mut sighted = |source: SourceId, x: &mut LiveRuntime, at: u64| {
+            let decided = core.observe(source, Observation::Full { hash, raw: &raw }, at, None);
+            let (by, h, first) = crate::runtime::live_sighting(decided)?;
+            x.on_sighting(by, h, first, &raw, at, &c2, &clock)
+        };
+        let ungranted = |x: &LiveRuntime| {
+            let r = record(x);
+            r.texts(l::REFUSALS)
+                .unwrap()
+                .iter()
+                .find_map(|t| t.strip_prefix("SOURCE_NOT_GRANTED=").map(str::to_string))
+        };
+        // dRPC (not granted) first: refused, nothing sent.
+        assert!(sighted(SourceId::Drpc, &mut x, 10).is_none());
+        assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
+        assert_eq!(ungranted(&x).as_deref(), Some("1"));
+        // BlockReq (not granted either) later: nothing, and no refusal of
+        // its own (it never triggers).
+        assert!(sighted(SourceId::BlockReq, &mut x, 11).is_none());
+        assert_eq!(ungranted(&x).as_deref(), Some("1"));
+        // PublicNode (granted) later: the BUY goes.
+        let buy = sighted(SourceId::PublicNode, &mut x, 12).expect("the BUY");
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert_eq!(buy.launch_hash, hash);
+        // PublicNode again (a resubscription): no second BUY, no refusal.
+        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let refusals = |x: &LiveRuntime| {
+            let r = record(x);
+            let texts: Vec<String> = r
+                .texts(l::REFUSALS)
+                .unwrap()
+                .iter()
+                .map(|t| t.to_string())
+                .collect();
+            texts
+        };
+        let before = refusals(&x);
+        assert!(sighted(SourceId::PublicNode, &mut x, 13).is_none());
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert_eq!(refusals(&x), before);
+        assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
+        x.shutdown();
         r.clean();
     }
 

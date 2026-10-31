@@ -1847,6 +1847,28 @@ pub fn stop_file(rundir: &Path) -> PathBuf {
     rundir.join("bsc.runtime.stop")
 }
 
+/// The sighting of a Flap launch that may trigger the armed LIVE path: the
+/// first verified full one (`true`), or a later one from another source
+/// (`false`, BSC3-075: it triggers when the first came from a source the
+/// grant does not name).
+fn live_sighting(decided: Option<Launch>) -> Option<(SourceId, [u8; 32], bool)> {
+    match decided {
+        Some(Launch::First {
+            hash,
+            source,
+            venue: Venue::Flap,
+            ..
+        }) => Some((source, hash, true)),
+        Some(Launch::Later {
+            hash,
+            source,
+            venue: Venue::Flap,
+            ..
+        }) => Some((source, hash, false)),
+        _ => None,
+    }
+}
+
 /// Runs until `rundir/bsc.runtime.stop` exists.
 pub fn run(
     config: &RuntimeConfig,
@@ -1949,6 +1971,7 @@ pub fn run(
                 dir.join("live"),
                 exec.as_ref().and_then(ExecRuntime::sender),
             )
+            .with_ingress_hashes(config.dedup_hashes)
         });
     let mut canonical_config = config.canonical.clone();
     if let (Some(c), Some(sender)) = (
@@ -2255,31 +2278,20 @@ pub fn run(
             }
             // Plan 28.10.: on the LIVE path when it is armed, the first
             // verified full sighting from a granted source (never a
-            // hash-only one: it carries no transaction).
-            if let (
-                Some(l),
-                Some(o),
-                Some(Launch::First {
-                    hash,
-                    source: first,
-                    venue: Venue::Flap,
-                    ..
-                }),
-                Event::Full { raw, .. },
-            ) = (live.as_mut(), owner.as_ref(), decided, &event)
-                && l.armed()
+            // hash-only one: it carries no transaction); BSC3-075: also
+            // when a source the grant does not name saw it first.
+            if let (Some(l), Some(o), Some((by, hash, first)), Event::Full { raw, .. }) = (
+                live.as_mut(),
+                owner.as_ref(),
+                live_sighting(decided),
+                &event,
+            ) && l.armed()
             {
-                if let Some(buy) = l.on_launch(
-                    first,
-                    hash,
-                    raw,
-                    at,
-                    o,
-                    &FnClock {
-                        id: CLOCK_ID_MONOTONIC,
-                        now: || clock.now_ns(),
-                    },
-                ) {
+                let now = FnClock {
+                    id: CLOCK_ID_MONOTONIC,
+                    now: || clock.now_ns(),
+                };
+                if let Some(buy) = l.on_sighting(by, hash, first, raw, at, o, &now) {
                     journal.record(
                         RecordKind::Runtime,
                         buy.times.sink_ns,

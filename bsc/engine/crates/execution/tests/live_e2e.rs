@@ -198,15 +198,10 @@ fn evidence_root(tag: &str, verdict: &str) -> PathBuf {
     root
 }
 
-/// The synthetic buyer key, a private file outside every root.
-fn buyer_key(home: &Path) -> (PathBuf, [u8; 20]) {
-    let keys = home.join("keys");
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .recursive(true)
-        .create(&keys)
-        .unwrap();
-    let path = keys.join("buyer.key");
+/// The synthetic buyer key as the stand-in's test identity of the owner
+/// state `state` (BSC3-026: the loopback route signs with no other key).
+fn buyer_key(state: &Path) -> (PathBuf, [u8; 20]) {
+    let path = darkbot_bsc_execution::live_key::loopback_identity(state);
     let secret = BUYER_SECRET;
     fs::OpenOptions::new()
         .write(true)
@@ -740,10 +735,59 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     let root = evidence_root("root", "PASS");
     qualify(&root);
     let home = scratch("home");
-    let (key, buyer) = buyer_key(&home);
     let (port, requests) = stand_in();
     let state = home.join("owner");
     activate(&state, &[], now_ms() + 3_600_000);
+    let (key, buyer) = buyer_key(&state);
+    // BSC3-026: the CLI shows the state's test identity; it draws one
+    // only in a state that has none.
+    let (code, out) = cli(&[
+        "live",
+        "loopback-identity",
+        "show",
+        "--state",
+        state.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("loopback_identity=0x{}", hex::encode(buyer))),
+        "{out}"
+    );
+    let (code, out) = cli(&[
+        "live",
+        "loopback-identity",
+        "init",
+        "--state",
+        state.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+    ]);
+    assert!(code != 0 && out.contains("loopback-identity.key"), "{out}");
+    // Under a HOME that is not the account's the account's state is
+    // unknown: nothing is drawn.
+    let fresh = home.join("fresh-state");
+    fs::DirBuilder::new().mode(0o700).create(&fresh).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_bsc_runtime"))
+        .args([
+            "live",
+            "loopback-identity",
+            "init",
+            "--state",
+            fresh.to_str().unwrap(),
+            "--root",
+            root.to_str().unwrap(),
+        ])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && text.contains("LOOPBACK_STATE_UNVERIFIED"),
+        "{text}"
+    );
+    assert!(!darkbot_bsc_execution::live_key::loopback_identity(&fresh).exists());
     // The CLI says the gate is clear for this scope.
     let (code, out) = cli(&[
         "live",

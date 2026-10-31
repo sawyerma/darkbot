@@ -370,6 +370,32 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("written={} sha256={}", out.display(), hex(&darkbot_bsc_record::sha256(&bytes)));
             Ok(true)
         }
+        // BSC3-026: the loopback stand-in's own test identity, drawn in a
+        // test's owner state (never the account's), outside `--root`.
+        // Prints its address only.
+        [area, cmd, sub, rest @ ..]
+            if area == "live" && cmd == "loopback-identity" && (sub == "init" || sub == "show") =>
+        {
+            use darkbot_bsc_execution::live_key::{create_loopback_identity, loopback_identity};
+            // An existing state only (its real place is what is refused).
+            let state = flag(rest, "--state")?;
+            let state = std::fs::canonicalize(state).map_err(|e| format!("{state}: {e}"))?;
+            let state = state.as_path();
+            let root = std::path::Path::new(flag(rest, "--root")?);
+            let address = if sub == "init" {
+                let refused = darkbot_bsc_execution::runtime::live::loopback_refused(
+                    state,
+                    darkbot_bsc_execution::sources::canonical_state_dir(),
+                );
+                create_loopback_identity(state, root, refused)?
+            } else {
+                darkbot_bsc_execution::paper::PaperIdentity::load(&loopback_identity(state), root, &[])
+                    .map_err(|e| e.to_string())?
+                    .address()
+            };
+            println!("loopback_identity=0x{}", hex(&address));
+            Ok(true)
+        }
         // Plan 28.10.: the LIVE ledger's positions and net result.
         [area, cmd, rest @ ..] if area == "live" && cmd == "positions" => {
             use darkbot_bsc_execution::live_ledger::{Ledger, fold};
@@ -810,7 +836,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
