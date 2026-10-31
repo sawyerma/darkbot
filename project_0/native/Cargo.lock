@@ -1067,6 +1067,7 @@ dependencies = [
 name = "darkbot-runner"
 version = "0.1.0"
 dependencies = [
+ "anchor-lang",
  "base64 0.22.1",
  "bincode",
  "bs58",
@@ -1078,6 +1079,7 @@ dependencies = [
  "juplend-mocks",
  "kamino-mocks",
  "libc",
+ "marginfi",
  "marginfi-type-crate",
  "rayon",
  "reqwest",
@@ -1087,9 +1089,13 @@ dependencies = [
  "solana-client",
  "solana-commitment-config",
  "solana-message 3.0.1",
+ "solana-program-option",
+ "solana-program-pack",
  "solana-sdk",
  "solana-transaction-status",
  "spl-associated-token-account",
+ "spl-token-2022-interface 2.1.0",
+ "spl-token-interface",
  "tungstenite 0.24.0",
 ]
 

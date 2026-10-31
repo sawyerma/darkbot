@@ -562,3 +562,7 @@ mod reservation_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "accounts_s4_tests.rs"]
+mod s4_tests;

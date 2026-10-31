@@ -7,7 +7,7 @@ license = "UNLICENSED"
 
 [features]
 default = []
-crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate", "kamino-mocks", "drift-mocks", "juplend-mocks"]
+crate_health = ["darkbot-project0/crate_health", "marginfi-type-crate", "kamino-mocks", "drift-mocks", "juplend-mocks", "marginfi", "anchor-lang"]
 txv1 = ["darkbot-solana/txv1"]
 # DEC-09: historical JSON readers (schema-1 views, legacy renders, pre-binary imports) for offline
 # tools only; the standard production binary is built without them.
@@ -58,10 +58,20 @@ marginfi-type-crate = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "m
 kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.12-rc2", default-features = false, features = ["no-entrypoint"], optional = true }
 drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.12-rc2", default-features = false, features = ["no-entrypoint"], optional = true }
 juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.12-rc2", default-features = false, features = ["no-entrypoint"], optional = true }
+# S4-02: the official marginfi event types and their Anchor encoding, the decode parity reference
+# of the market observer (the pinned source darkbot-project0 already builds with crate_health).
+marginfi = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.12-rc2", default-features = false, features = ["client", "no-entrypoint", "mainnet-beta"], optional = true }
+anchor-lang = { version = "1.0.2", optional = true }
 
 [dev-dependencies]
 # R1: loopback WebSocket peer for the capture end-to-end test (same version the WSS adapter uses).
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
 # S1-02: the loopback gRPC server of the owner's source E2E tests.
 darkbot-solana = { path = "../solana", features = ["test-support"] }
+# S4-02: the official SPL token layouts, the parity reference of the core's token account reading
+# (the versions solana-transaction-status and spl-associated-token-account already build).
+spl-token-interface = "=2.0.0"
+spl-token-2022-interface = "=2.1.0"
+solana-program-pack = "=3.1.0"
+solana-program-option = "=3.1.0"
 

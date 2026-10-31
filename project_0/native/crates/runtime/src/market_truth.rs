@@ -64,6 +64,16 @@ pub enum NativeEvidence {
         flows: Vec<NativeFlow>,
         units: String,
     },
+    /// S4-02: a 0.1.12 `LendingPoolBankHandleBankruptcyEvent` (mrgn-0.1.12-rc2 appends the
+    /// premium receivable written off with the bad debt: never socialized, never covered).
+    BankruptcyPremium {
+        provenance: String,
+        bad_debt_native_f64: f64,
+        covered_native_f64: f64,
+        socialized_native_f64: f64,
+        premium_written_off_native_f64: f64,
+        liability_decimals: Option<u8>,
+    },
 }
 
 /// The binary journal stores the tagged form; text formats (the historical untagged JSON view)
@@ -97,7 +107,7 @@ impl<'de> Deserialize<'de> for NativeEvidence {
         #[cfg(feature = "historical")]
         {
             let body = Value::deserialize(d)?;
-            ["Classic", "Bankruptcy", "Flows"]
+            ["Classic", "BankruptcyPremium", "Bankruptcy", "Flows"]
                 .into_iter()
                 .find_map(|tag| NativeEvidence::deserialize(json!({ tag: body.clone() })).ok())
                 .ok_or_else(|| D::Error::custom("NATIVE_EVIDENCE_NO_VARIANT"))
@@ -316,14 +326,27 @@ fn decode_payload(bytes: &[u8]) -> Result<Option<Decoded>, &'static str> {
         e.target = account;
         e.liability_bank = Some(c.key()?);
         e.liability_mint = Some(c.key()?);
-        e.native = Some(NativeEvidence::Bankruptcy {
-            provenance:
-                "LendingPoolBankHandleBankruptcyEvent f64 native amounts; NOT liquidator profit"
-                    .into(),
-            bad_debt_native_f64: c.number()?,
-            covered_native_f64: c.number()?,
-            socialized_native_f64: c.number()?,
-            liability_decimals: None,
+        let provenance =
+            "LendingPoolBankHandleBankruptcyEvent f64 native amounts; NOT liquidator profit".into();
+        let (bad_debt, covered, socialized) = (c.number()?, c.number()?, c.number()?);
+        // S4-02: both pinned layouts, each exact — 0.1.11 ends here, 0.1.12 appends the premium.
+        e.native = Some(if c.pos == bytes.len() {
+            NativeEvidence::Bankruptcy {
+                provenance,
+                bad_debt_native_f64: bad_debt,
+                covered_native_f64: covered,
+                socialized_native_f64: socialized,
+                liability_decimals: None,
+            }
+        } else {
+            NativeEvidence::BankruptcyPremium {
+                provenance,
+                bad_debt_native_f64: bad_debt,
+                covered_native_f64: covered,
+                socialized_native_f64: socialized,
+                premium_written_off_native_f64: c.number()?,
+                liability_decimals: None,
+            }
         });
     } else {
         return Ok(None);
@@ -794,3 +817,7 @@ impl TruthLedger {
         }
     }
 }
+
+#[cfg(all(test, feature = "crate_health"))]
+#[path = "market/s4_event_parity_tests.rs"]
+mod s4_event_parity_tests;

@@ -63,7 +63,9 @@ pub(super) fn parse_receiver_payload(b: &[u8]) -> Payload {
     if b.len() < 8 || b[..8] != LIQUIDATION_RECEIVER_EVENT_DISCRIMINATOR {
         return Payload::NotReceiverEvent;
     }
-    if b.len() < LIQUIDATION_RECEIVER_EVENT_LEN {
+    // S4-02: exactly the pinned layout, as the official event type and the pinned verifier read
+    // it; a payload of any other length is no receiver event of this program.
+    if b.len() != LIQUIDATION_RECEIVER_EVENT_LEN {
         return Payload::Invalid;
     }
     let mut target = [0u8; 32];

@@ -210,9 +210,16 @@ fn short_non_finite_or_undecodable_marginfi_data_is_a_decoder_error() {
     let short = format!("{PROGRAM_DATA_PREFIX}{}", b64(&short));
     let nan = data_line(Pubkey::new_unique(), Pubkey::new_unique(), f64::NAN, 1.0, 0);
     let bad_b64 = format!("{PROGRAM_DATA_PREFIX}!!!not-base64!!!");
-    let d = decode_receiver_events(&logs_with(&p, &[short, nan, bad_b64]), &p);
+    // S4-02: one byte past the pinned layout is no receiver event either.
+    let mut long = data_line(Pubkey::new_unique(), Pubkey::new_unique(), 2.0, 1.0, 0);
+    let mut bytes = base64::engine::general_purpose::STANDARD
+        .decode(&long[PROGRAM_DATA_PREFIX.len()..])
+        .unwrap();
+    bytes.push(0);
+    long = format!("{PROGRAM_DATA_PREFIX}{}", b64(&bytes));
+    let d = decode_receiver_events(&logs_with(&p, &[short, nan, bad_b64, long]), &p);
     assert!(d.events.is_empty());
-    assert_eq!((d.decoder_errors, d.base64_errors), (3, 0));
+    assert_eq!((d.decoder_errors, d.base64_errors), (4, 0));
 }
 
 #[test]
