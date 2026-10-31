@@ -522,6 +522,7 @@ fn exec_setup() -> ExecSetup {
             strategy_max_head_age_ms: 30_000,
             live_max_head_age_ms: 86_400_000,
             live_exit_reverts_max: 2,
+            live_lease_blocks: 200,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),

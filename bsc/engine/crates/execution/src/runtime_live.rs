@@ -221,6 +221,14 @@ struct Seen {
     gas_wei: Option<U256>,
     tokens: Option<U256>,
     eth_wei: Option<U256>,
+    /// BSC3-076: the unresolved lease at its nonce this transaction is the
+    /// BUY of (its fact lost in a crash after its dispatch), and the token
+    /// the Portal traded in it.
+    adopts: Option<Fact>,
+    token: Option<[u8; 20]>,
+    /// The Portal traded in it a BUY of the buyer's own (not a SELL, not
+    /// another trader's).
+    bought: bool,
 }
 
 /// The components a grant of `strategies` arms.
@@ -319,6 +327,16 @@ pub struct LiveRuntime {
     /// sighting comes only of a launch it still holds; the oldest first out).
     awaiting_granted: std::collections::VecDeque<[u8; 32]>,
     awaiting_bound: usize,
+    /// BSC3-076: the attempt of the C3 BUY lease last returned unused,
+    /// with its grant's generation: the next lease under that grant takes
+    /// it (its slots are taken).
+    lease_attempt: Option<(u64, [u8; 32])>,
+    /// Leases the owner refused or that could not be returned, the last why.
+    lease_refused: u64,
+    lease_error: Option<String>,
+    /// Transactions of the buyer's key at a recovered lease's nonce that
+    /// were no BUY of it (BSC3-076 review H3): the lease replaced.
+    lease_foreign: u64,
     /// BSC3-030 review: strategy exits refused because the position's exits
     /// stopped for the operator, per reason.
     exits_stopped: Vec<(&'static str, u64)>,
@@ -431,6 +449,10 @@ impl LiveRuntime {
             source_refused: 0,
             awaiting_granted: std::collections::VecDeque::new(),
             awaiting_bound: 0,
+            lease_attempt: None,
+            lease_refused: 0,
+            lease_error: None,
+            lease_foreign: 0,
             exits_stopped: Vec::new(),
             prober,
             boot: None,
@@ -691,15 +713,38 @@ impl LiveRuntime {
                     .filter(|t| t.sender == buyer)
                     .map(|t| (t.hash, t.nonce))
                     .collect();
+                // BSC3-076: the buyer's transaction at the nonce of an
+                // unresolved lease (recovered as UNKNOWN: the process ended
+                // between its BUY's dispatch and its fact) is that BUY; only
+                // the buyer's key signs at the buyer's nonce.
+                let lease_at = |nonce: u64| {
+                    self.book
+                        .unresolved()
+                        .find(|u| {
+                            u.released.nonce == nonce
+                                && u.released.intent == LiveIntentKind::Buy
+                                && u.released.token == [0; 20]
+                        })
+                        .map(|u| u.released.clone())
+                };
                 self.seen = txs
                     .iter()
-                    .filter(|t| t.sender == buyer && self.book.tx(&t.hash).is_some())
-                    .map(|t| Seen {
-                        tx_hash: t.hash,
-                        succeeded: t.succeeded,
-                        gas_wei: t.cost.map(|c| U256::from(c.wei())),
-                        tokens: None,
-                        eth_wei: None,
+                    .filter(|t| t.sender == buyer)
+                    .filter_map(|t| {
+                        let adopts = match self.book.tx(&t.hash) {
+                            Some(_) => None,
+                            None => Some(lease_at(t.nonce)?),
+                        };
+                        Some(Seen {
+                            tx_hash: t.hash,
+                            succeeded: t.succeeded,
+                            gas_wei: t.cost.map(|c| U256::from(c.wei())),
+                            tokens: None,
+                            eth_wei: None,
+                            adopts,
+                            token: None,
+                            bought: false,
+                        })
                     })
                     .collect();
                 Vec::new()
@@ -708,6 +753,8 @@ impl LiveRuntime {
                 if let Some(s) = self.seen.iter_mut().find(|s| s.tx_hash == t.tx_hash) {
                     s.tokens = Some(U256::from_be_bytes(t.amount));
                     s.eth_wei = Some(U256::from_be_bytes(t.eth));
+                    s.token = Some(t.token);
+                    s.bought = !t.sell && t.trader == buyer;
                 }
                 Vec::new()
             }
@@ -717,24 +764,56 @@ impl LiveRuntime {
                     return Vec::new();
                 };
                 let taken = std::mem::take(&mut self.nonces_taken);
-                let mut facts: Vec<Fact> = seen
-                    .iter()
-                    .filter_map(|s| {
-                        let tx = self.book.tx(&s.tx_hash)?;
-                        let kind = if s.succeeded {
-                            FactKind::Included
-                        } else {
-                            FactKind::Reverted
-                        };
-                        Some(Fact {
-                            block: Some(block),
-                            gas_wei: s.gas_wei,
-                            tokens: s.tokens,
-                            eth_wei: s.eth_wei,
-                            ..Fact::about(&tx.released, kind)
-                        })
-                    })
-                    .collect();
+                let mut facts: Vec<Fact> = Vec::new();
+                for s in &seen {
+                    // BSC3-076 review H3: adopted only as what the lease's
+                    // BUY can be: in its window, a Portal BUY of the buyer's
+                    // own of a token, within the lease's input (or reverted,
+                    // no trade). Anything else of the buyer's key at that
+                    // nonce is no BUY of the lease: it replaces the lease
+                    // (below), counted for the operator.
+                    let adoptable = |lease: &Fact| {
+                        let in_window = lease.max_block.is_some_and(|last| block.0 <= last);
+                        let input = lease.input_wei.unwrap_or_default();
+                        let bought = s.bought
+                            && s.token.is_some_and(|t| t != [0; 20])
+                            && s.eth_wei.is_some_and(|eth| eth <= input);
+                        in_window && (bought || !s.succeeded)
+                    };
+                    let released = match (&s.adopts, self.book.tx(&s.tx_hash)) {
+                        (Some(lease), _) if !adoptable(lease) => {
+                            self.lease_foreign += 1;
+                            continue;
+                        }
+                        // The lease's BUY, released as the lease held it
+                        // (its nonce, budget, window), its token the
+                        // Portal's trade (none: reverted, no position).
+                        (Some(lease), _) => {
+                            let r = Fact {
+                                kind: FactKind::Released,
+                                tx_hash: s.tx_hash,
+                                token: s.token.unwrap_or([0; 20]),
+                                ..lease.clone()
+                            };
+                            facts.push(r.clone());
+                            r
+                        }
+                        (None, Some(tx)) => tx.released.clone(),
+                        (None, None) => continue,
+                    };
+                    let kind = if s.succeeded {
+                        FactKind::Included
+                    } else {
+                        FactKind::Reverted
+                    };
+                    facts.push(Fact {
+                        block: Some(block),
+                        gas_wei: s.gas_wei,
+                        tokens: s.tokens,
+                        eth_wei: s.eth_wei,
+                        ..Fact::about(&released, kind)
+                    });
+                }
                 // Another transaction of the buyer took an unresolved one's
                 // nonce: it never happened. The fact names which one, and
                 // where (BSC3-048).
@@ -922,6 +1001,99 @@ impl LiveRuntime {
         self.stop(Phase::Off);
     }
 
+    /// BSC3-076: while armed for C3 and a C3 BUY may come now (no exit
+    /// first, funded, not closed), the owner's lease of it is held at the
+    /// free nonce, renewed before half its window is gone; otherwise the
+    /// lease held goes back unused. Outside the entry path (a reconcile).
+    fn keep_c3_lease(&mut self, owner: Option<&StateOwner>) {
+        let Some(x) = self.executor.as_ref() else {
+            return;
+        };
+        let grant = x.end().armed().grant();
+        let generation = x.end().armed().grant_generation();
+        let c3 = !grant.exit_only
+            && matches!(grant.strategies, LiveStrategies::C3 | LiveStrategies::Both);
+        let next = owner.and_then(|o| self.free_nonce(o));
+        let head = owner.and_then(|o| o.head()).map(|h| h.number);
+        let may_buy = self.buy_refusal(self.one_buy(), owner, next).is_none();
+        let (true, true, Some(nonce), Some(head)) = (c3, may_buy, next, head) else {
+            self.yield_lease();
+            return;
+        };
+        // As the executor hands the BUY over: the exits of the open
+        // positions and its own (approval and SELL at the signed gas).
+        let (approval, sell) = self.exit_gas();
+        let (Ok(max_wei), Ok(exit_reserve_wei)) = (
+            u128::try_from(self.one_buy()),
+            u128::try_from(self.exit_reserve_besides(self.buyer_key(nonce)) + approval + sell),
+        ) else {
+            self.yield_lease();
+            return;
+        };
+        let x = &self.exec.exec;
+        let want = crate::live_end::LeaseWant {
+            nonce,
+            input_wei: x.input_wei,
+            max_wei,
+            exit_reserve_wei,
+            head,
+            validity_blocks: x.validity_blocks,
+            lease_blocks: x.live_lease_blocks,
+            attempt: self
+                .lease_attempt
+                .filter(|(g, _)| *g == generation)
+                .map(|(_, a)| a),
+        };
+        let Some(end) = self.executor.as_mut().map(|x| x.end_mut()) else {
+            return;
+        };
+        match end.hold_lease(&want) {
+            Ok(()) => {
+                self.lease_attempt = None;
+                self.lease_error = None;
+            }
+            Err(why) => {
+                self.lease_refused += 1;
+                self.lease_error = Some(why);
+            }
+        }
+    }
+
+    /// BSC3-076 review H1: the attempt of the grant written at `generation`
+    /// the next C3 BUY takes: the one this arm's lease holds, or the one
+    /// kept from a lease returned under that grant. The runtime's reconcile
+    /// reads the owner's gate besides it too.
+    pub fn held_attempt(&self, generation: Option<u64>) -> Option<[u8; 32]> {
+        let generation = generation?;
+        let leased = self.executor.as_ref().and_then(|x| {
+            (x.end().armed().grant_generation() == generation)
+                .then(|| x.end().lease().map(|l| l.attempt()))
+                .flatten()
+        });
+        leased.or(self
+            .lease_attempt
+            .filter(|(g, _)| *g == generation)
+            .map(|(_, a)| a))
+    }
+
+    /// BSC3-076: the lease held goes back unused; its attempt is kept for
+    /// the next lease of the same grant. One that cannot go back counts on
+    /// (a restart recovers it as UNKNOWN at its nonce).
+    fn yield_lease(&mut self) {
+        let Some(x) = self.executor.as_mut() else {
+            return;
+        };
+        let generation = x.end().armed().grant_generation();
+        match x.end_mut().return_lease() {
+            Ok(Some(attempt)) => self.lease_attempt = Some((generation, attempt)),
+            Ok(None) => {}
+            Err(why) => {
+                self.lease_refused += 1;
+                self.lease_error = Some(why);
+            }
+        }
+    }
+
     /// The arm ends. Its fence stays while a transaction it may have
     /// released is unresolved or not known (BSC3-041): a later arm settles
     /// it only once the chain resolved them.
@@ -931,6 +1103,8 @@ impl LiveRuntime {
         if let Some(x) = self.executor.as_mut() {
             x.end_mut().record_responses();
         }
+        // BSC3-076: its lease, unused, goes back before the end goes.
+        self.yield_lease();
         let Some(x) = self.executor.take() else {
             return;
         };
@@ -1171,33 +1345,43 @@ impl LiveRuntime {
         if let Some(why) = invalid {
             return self.close(format!("LIVE_QUALIFICATION_INVALID: {why}"));
         }
-        let strategies = match store.current() {
-            Ok(g) => g.live.map(|grant| grant.strategies),
+        let (strategies, generation) = match store.current() {
+            Ok(g) => (
+                g.live.map(|grant| grant.strategies),
+                g.live_set_by.map(|by| by.generation),
+            ),
             Err(e) => return self.close(format!("owner state: {e}")),
         };
         let Some(strategies) = strategies else {
             return self.close(crate::sources::LIVE_GRANT_MISSING.into());
         };
         let components = components(strategies);
-        let live_now = match store.live_now(&components, &verified.view, now_ms) {
-            Ok(n) => {
-                self.buys_closed = None;
-                n
-            }
-            // BSC3-071: what only a BUY needs (its attempts, the grant's
-            // room for another input) does not end the exits of open
-            // positions under the same grant; BUYs stay refused.
-            Err(why) if self.positions_open() => {
-                match store.live_now_exits(&components, &verified.view, now_ms) {
-                    Ok(n) => {
-                        self.buys_closed = Some(why);
-                        n
-                    }
-                    Err(why) => return self.close(why),
+        // BSC3-076 review H1: the attempt the next C3 BUY takes (held by
+        // this arm's lease, or kept from one returned under this grant)
+        // already holds its slots: they refuse nothing.
+        let held = self
+            .held_attempt(generation)
+            .map(alloy_primitives::hex::encode);
+        let live_now =
+            match store.live_now_holding(&components, &verified.view, now_ms, held.as_deref()) {
+                Ok(n) => {
+                    self.buys_closed = None;
+                    n
                 }
-            }
-            Err(why) => return self.close(why),
-        };
+                // BSC3-071: what only a BUY needs (its attempts, the grant's
+                // room for another input) does not end the exits of open
+                // positions under the same grant; BUYs stay refused.
+                Err(why) if self.positions_open() => {
+                    match store.live_now_exits(&components, &verified.view, now_ms) {
+                        Ok(n) => {
+                            self.buys_closed = Some(why);
+                            n
+                        }
+                        Err(why) => return self.close(why),
+                    }
+                }
+                Err(why) => return self.close(why),
+            };
         if self.executor.is_some()
             && let Some(why) = self.ledger_fault()
         {
@@ -1240,6 +1424,7 @@ impl LiveRuntime {
                     if let Some(x) = self.executor.as_mut() {
                         let _ = x.end_mut().maintain(self.setup.connect_timeout);
                     }
+                    self.keep_c3_lease(owner);
                     self.phase = Phase::Armed;
                     self.reprobe(canonical);
                     return;
@@ -1485,6 +1670,8 @@ impl LiveRuntime {
                 self.next_nonce = Some(next_nonce);
                 self.executor = Some(executor);
                 self.phase = Phase::Armed;
+                // BSC3-076: a C3 BUY's lease from the arm on.
+                self.keep_c3_lease(Some(owner));
             }
             Err(e) => self.stop(Phase::ArmFailed(e.to_string())),
         }
@@ -1737,6 +1924,26 @@ impl LiveRuntime {
         owner: Option<&StateOwner>,
         next: Option<u64>,
     ) -> Option<Refusal> {
+        let (refusal, stopped) = self.buy_refusal(most, owner, next)?;
+        match (refusal, stopped) {
+            (Refusal::ExitStopped, Some(why)) => self.count_stopped(why),
+            (Refusal::ExitFirst, _) => self.exit_first += 1,
+            (Refusal::Owner, _) => self.buys_refused += 1,
+            (Refusal::Unfunded, _) => self.unfunded_refused += 1,
+            (Refusal::Dispatch, _) => self.provider_refused += 1,
+            _ => {}
+        }
+        Some(refusal)
+    }
+
+    /// [`Self::buy_refused`] without counting (BSC3-076: whether a C3 BUY
+    /// may come at all, for its lease), with the stopped exit's reason.
+    fn buy_refusal(
+        &self,
+        most: U256,
+        owner: Option<&StateOwner>,
+        next: Option<u64>,
+    ) -> Option<(Refusal, Option<&'static str>)> {
         // BSC3-030 review: while an open position's exits wait for the
         // operator, no new BUY (an exit failing for good would strand
         // every new position too).
@@ -1747,24 +1954,20 @@ impl LiveRuntime {
             .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
             .find_map(|p| self.exit_stopped(&p.token));
         if let Some(why) = stopped {
-            self.count_stopped(why);
-            return Some(Refusal::ExitStopped);
+            return Some((Refusal::ExitStopped, Some(why)));
         }
         let exit_out = self
             .book
             .unresolved()
             .any(|t| t.released.intent != LiveIntentKind::Buy);
         if !self.exits_wanted.is_empty() || exit_out {
-            self.exit_first += 1;
-            return Some(Refusal::ExitFirst);
+            return Some((Refusal::ExitFirst, None));
         }
         if self.buys_closed.is_some() {
-            self.buys_refused += 1;
-            return Some(Refusal::Owner);
+            return Some((Refusal::Owner, None));
         }
         if self.unfunded(most, owner, next).is_some() {
-            self.unfunded_refused += 1;
-            return Some(Refusal::Unfunded);
+            return Some((Refusal::Unfunded, None));
         }
         // BSC3-051: a provider refused a BUY under this grant (the end's
         // answer, or the ledger's across arms and restarts): no further BUY
@@ -1783,8 +1986,7 @@ impl LiveRuntime {
                 })
         });
         if refused {
-            self.provider_refused += 1;
-            return Some(Refusal::Dispatch);
+            return Some((Refusal::Dispatch, None));
         }
         None
     }
@@ -1834,6 +2036,16 @@ impl LiveRuntime {
         {
             self.count_stopped(why);
             return Some((Vec::new(), Some(Refusal::ExitStopped)));
+        }
+        // BSC3-076: the nonce a C3 BUY's lease holds goes to this intent:
+        // the lease goes back unused first (the next pass leases anew).
+        if self
+            .executor
+            .as_ref()
+            .and_then(|x| x.end().lease())
+            .is_some_and(|l| Some(l.nonce()) == next)
+        {
+            self.yield_lease();
         }
         let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
         let handed = strategy_to(
@@ -2022,6 +2234,8 @@ impl LiveRuntime {
             ("BUYS_CLOSED", self.buys_refused),
             ("BUYS_UNFUNDED", self.unfunded_refused),
             ("BUYS_PROVIDER_REFUSED", self.provider_refused),
+            ("LEASE_REFUSED", self.lease_refused),
+            ("LEASE_NONCE_TAKEN_BY_OTHER", self.lease_foreign),
         ] {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
@@ -3643,13 +3857,25 @@ mod tests {
 
     impl Rig {
         fn new(tag: &str, strategies: LiveStrategies) -> Rig {
-            let (state, _store, now) =
-                live_ready_granting(tag, |now| rig_grant(now + 3_600_000, strategies));
+            Rig::granting(tag, strategies, |now| {
+                rig_grant(now + 3_600_000, strategies)
+            })
+        }
+
+        /// [`Rig::new`] under the grant `grant` makes (its risk decided for
+        /// its own scope).
+        fn granting(
+            tag: &str,
+            strategies: LiveStrategies,
+            grant: impl Fn(u64) -> LiveGrant,
+        ) -> Rig {
+            let scope = grant(0).risk_scope_sha256();
+            let (state, _store, now) = live_ready_granting(tag, &grant);
             assert_eq!(now, NOW);
             let root = fixture(tag, "PASS");
-            let spec = rig_spec(
+            let spec = rig_spec_for(
                 Some(crate::live_qualification::running_build().unwrap()),
-                strategies,
+                scope,
             );
             fs::create_dir_all(root.join("bsc/config")).unwrap();
             fs::write(
@@ -3849,11 +4075,13 @@ mod tests {
     }
 
     /// BSC3-024/041: the process dies right after its BUY was handed to the
-    /// builders. The restart knows the BUY (the owner's admission wrote it
-    /// with its token and nonce before any byte could leave), refuses a new
-    /// arm while the BUY's nonce may still be taken by it, opens the
-    /// position once the chain includes it, and only then arms again, at
-    /// the next nonce. Nothing leaves in between.
+    /// builders. The restart knows the BUY (BSC3-076: the owner's lease of
+    /// it, its nonce and window on the medium before the launch was seen),
+    /// refuses a new arm while the BUY's nonce may still be taken by it,
+    /// adopts the buyer's transaction at that nonce as the BUY when the
+    /// chain includes it (its token the Portal's trade) and opens the
+    /// position, and only then arms again, at the next nonce. Nothing
+    /// leaves in between.
     #[test]
     fn a_release_lost_in_a_crash_is_recovered_and_blocks_the_next_arm() {
         let r = Rig::new("live-crash", LiveStrategies::C3);
@@ -3889,20 +4117,28 @@ mod tests {
         r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
         std::mem::forget(x);
         // The kill came between the dispatch and the outcome's fact: only
-        // the owner's admission entry, durable before any byte left, holds
-        // the BUY.
+        // the owner's lease, durable before the launch was seen, holds the
+        // BUY.
         for e in fs::read_dir(r.state.join("live-ledger")).unwrap() {
             fs::remove_file(e.unwrap().path()).unwrap();
         }
-        // The restart: the BUY is a fact again, UNKNOWN and unresolved.
+        let leases: Vec<_> = crate::sources::admitted_intents(&r.state)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.lease)
+            .map(|a| a.tx_hash)
+            .collect();
+        assert_eq!(leases.len(), 1);
+        // The restart: the lease is a fact, UNKNOWN and unresolved at the
+        // BUY's nonce.
         r.authorize("boot-2", "after-crash");
         let mut x = r.runtime("boot-2");
         let unresolved: Vec<_> = x.book().unresolved().map(|t| t.released.tx_hash).collect();
-        assert_eq!(unresolved, vec![buy.handoff.tx_hash]);
-        let tx = &x.book().tx(&buy.handoff.tx_hash).unwrap().released;
+        assert_eq!(unresolved, leases);
+        let tx = &x.book().tx(&leases[0]).unwrap().released;
         assert_eq!(
             (tx.kind, tx.token, tx.nonce),
-            (crate::live_ledger::FactKind::Unknown, buy.token, 5)
+            (crate::live_ledger::FactKind::Unknown, [0; 20], 5)
         );
         // C2 restarted, the nonce still 5: no new arm while the BUY may
         // take it.
@@ -3918,25 +4154,62 @@ mod tests {
             "{why:?}"
         );
         assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
-        // The chain includes it: the position opens; the next arm takes
-        // the next nonce.
-        let changes = include(
+        // The chain includes the buyer's transaction at that nonce, the
+        // Portal's trade in it: adopted as the lease's BUY, the position
+        // opens; the next arm takes the next nonce.
+        let changes = feed(
             &mut x,
             &mut c2,
-            vec![CanonicalTx {
-                hash: buy.handoff.tx_hash,
-                index: 0,
-                sender: r.buyer,
-                nonce: 5,
-                succeeded: true,
-                cost: None,
-            }],
+            vec![
+                block_of(
+                    HEAD + 1,
+                    0xb2,
+                    0xb1,
+                    vec![CanonicalTx {
+                        hash: buy.handoff.tx_hash,
+                        index: 0,
+                        sender: r.buyer,
+                        nonce: 5,
+                        succeeded: true,
+                        cost: None,
+                    }],
+                ),
+                CanonicalEvent::FlapTrade(crate::chain_follower::CanonicalTrade {
+                    block_number: HEAD + 1,
+                    block_hash: [0xb2; 32],
+                    tx_index: 0,
+                    tx_hash: buy.handoff.tx_hash,
+                    log_index: 0,
+                    origin: r.buyer,
+                    sell: false,
+                    token: buy.token,
+                    trader: r.buyer,
+                    amount: U256::from(1_000u64).to_be_bytes(),
+                    eth: U256::from(1_000_000_000_000_000u64).to_be_bytes(),
+                    fee: [0; 32],
+                    post_price: [0; 32],
+                }),
+                complete_of(HEAD + 1, 0xb2),
+            ],
         );
         assert!(
             matches!(changes.as_slice(), [PositionChange::Opened { token, .. }] if *token == buy.token),
             "{changes:?}"
         );
         assert_eq!(x.book().unresolved().count(), 0);
+        let adopted = x.book().tx(&buy.handoff.tx_hash).unwrap();
+        assert_eq!(
+            (
+                adopted.state,
+                adopted.released.token,
+                adopted.released.nonce
+            ),
+            (crate::live_ledger::FactKind::Included, buy.token, 5)
+        );
+        assert_eq!(
+            x.book().tx(&leases[0]).unwrap().state,
+            crate::live_ledger::FactKind::Replaced
+        );
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         assert_eq!(record(&x).opt_u64(l::NEXT_NONCE).unwrap(), Some(6));
@@ -5031,13 +5304,17 @@ mod tests {
         );
         assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
         std::mem::forget(x);
-        // The restart: the BUY is a fact, UNKNOWN, and blocks the arm.
+        // The restart: the BUY's lease (BSC3-076: its fact and the BUY's
+        // were not written) is a fact, UNKNOWN at the BUY's nonce, and
+        // blocks the arm.
         r.authorize("boot-2", "after-restart");
         let mut x = r.runtime("boot-2");
-        let tx = &x.book().tx(&buy.handoff.tx_hash).unwrap().released;
+        assert!(x.book().tx(&buy.handoff.tx_hash).is_none());
+        let unresolved: Vec<_> = x.book().unresolved().map(|t| &t.released).collect();
+        assert_eq!(unresolved.len(), 1);
         assert_eq!(
-            (tx.kind, tx.token, tx.nonce),
-            (crate::live_ledger::FactKind::Unknown, buy.token, 5)
+            (unresolved[0].kind, unresolved[0].token, unresolved[0].nonce),
+            (crate::live_ledger::FactKind::Unknown, [0; 20], 5)
         );
         let c2 = c2_at(&r.d.join("c2-restarted"), r.buyer, 5);
         settle(&mut x, &c2);
@@ -6177,11 +6454,13 @@ mod tests {
             "{:?}",
             refusals.texts(l::REFUSALS)
         );
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 0);
+        // BSC3-076: only the lease's attempt and entry, no transaction.
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
         assert!(
             crate::sources::admitted_intents(&r.state)
                 .unwrap()
-                .is_empty()
+                .iter()
+                .all(|a| a.lease)
         );
         assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
         // A fresh block: the next launch goes.
@@ -6508,6 +6787,531 @@ mod tests {
         assert!(x.armed(), "{:?}", reason(&x));
         x.shutdown();
         r.clean();
+    }
+
+    /// BSC3-076: on the real monotonic clock a launch's LIVE BUY starts its
+    /// transport within the 1 ms after its ingress (`BSC_EXEC_START_LIMIT_NS`):
+    /// nothing durable is left between the ingress and the first byte (the
+    /// owner admitted it before). The limit holds in an optimized build only.
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "the 1 ms transport start limit needs a release build"
+    )]
+    fn a_live_buy_starts_within_its_deadline_on_the_real_clock() {
+        let r = Rig::new("live-real-clock", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let base = Instant::now();
+        let clock = FnClock {
+            id: 1,
+            now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
+        };
+        let (hash, raw, launcher) = launch();
+        let at = clock.now_ns();
+        c2.pending(hash, launcher, 3, 0, at);
+        let buy = x.on_launch(SourceId::PublicNode, hash, &raw, at, &c2, &clock);
+        assert!(buy.is_some(), "{:?}", record(&x).texts(l::REFUSALS));
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076: on the real monotonic clock a block-driven intent (here
+    /// Strategy C's BUY) is admitted by the owner, durably, and then starts
+    /// its transport within the limit. Release build only.
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "the 1 ms transport start limit needs a release build"
+    )]
+    fn a_strategy_buy_starts_within_its_deadline_after_its_admission() {
+        use crate::paper_exec::StrategyCurve;
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+        };
+        let r = Rig::new("live-real-clock-sc", LiveStrategies::StrategyC);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let base = Instant::now();
+        let clock = FnClock {
+            id: 1,
+            now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
+        };
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let fresh = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let buy = StrategyAction::Buy {
+            token: [0xAB; 20],
+            curve: StrategyCurve {
+                terms,
+                reserve: fresh.reserve_after,
+                circulating: fresh.supply_after,
+            },
+            input_wei: U256::from(10_000_000_000_000_000u64),
+            decided_ns: clock.now_ns(),
+        };
+        // The decision's wall clock: half a second after C2's head.
+        let now_ms = 1_793_000_000_500;
+        let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
+        assert_eq!(
+            (intents.len(), refused),
+            (1, None),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        x.shutdown();
+        r.clean();
+    }
+
+    fn leases(state: &Path) -> Vec<crate::sources::Admitted> {
+        crate::sources::admitted_intents(state)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.lease)
+            .collect()
+    }
+
+    /// BSC3-076: the owner's state changes between the lease and the launch
+    /// (here an unrelated source switched, as a revoke or a switch off
+    /// would): the launch's BUY is refused before anything is taken or sent
+    /// (BSC3-010: the owner as it holds at the hand-over decides); the next
+    /// pass leases again under the same attempt and the next launch goes.
+    #[test]
+    fn a_c3_buy_after_an_owner_change_waits_for_its_lease_again() {
+        let r = Rig::new("live-lease-mark", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let held = leases(&r.state);
+        assert_eq!((held.len(), held[0].nonce), (1, Some(5)));
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        // Passes with nothing changed keep it (no write).
+        settle(&mut x, &c2);
+        settle(&mut x, &c2);
+        assert_eq!(leases(&r.state), held);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        let applied = s
+            .request("drpc", Entity::Source(SourceId::Drpc), Mode::Shadow, g, NOW)
+            .unwrap();
+        assert!(applied.applied(), "{}", applied.line());
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        let why = x.executor.as_ref().unwrap().end().last_refusal().unwrap();
+        assert!(
+            why.starts_with(crate::sources::LIVE_LEASE_STALE) && why.contains("owner"),
+            "{why}"
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        // The next pass: a new lease, the old one back, one attempt.
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let again = leases(&r.state);
+        assert_eq!(again.len(), 1);
+        assert_ne!(again[0].tx_hash, held[0].tx_hash);
+        let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash_b, launcher_b, 4, 0, 20);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock)
+                .is_some(),
+            "{:?}",
+            x.executor.as_ref().unwrap().end().last_refusal()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076: Strategy C's BUY at the nonce the C3 lease holds takes it
+    /// back first, unused: the lease then spends and recovers as nothing
+    /// (the strategy BUY's spend alone); its attempt stays its one slot,
+    /// for the next lease. An arm that ends gives its lease back too.
+    #[test]
+    fn the_c3_lease_yields_its_nonce_and_goes_back_with_the_arm() {
+        use crate::paper_exec::StrategyCurve;
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+        };
+        let r = Rig::new("live-lease-yield", LiveStrategies::Both);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let held = leases(&r.state);
+        assert_eq!((held.len(), held[0].nonce), (1, Some(5)));
+        let generation = x
+            .executor
+            .as_ref()
+            .unwrap()
+            .end()
+            .armed()
+            .grant_generation();
+        let spent = |s: &Path| crate::sources::spent_by_grant(s, generation).unwrap();
+        assert_eq!(spent(&r.state), held[0].max_wei);
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let fresh = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let buy = StrategyAction::Buy {
+            token: [0xAB; 20],
+            curve: StrategyCurve {
+                terms,
+                reserve: fresh.reserve_after,
+                circulating: fresh.supply_after,
+            },
+            input_wei: U256::from(10_000_000_000_000_000u64),
+            decided_ns: 0,
+        };
+        let (intents, refused) = x.on_strategy(&buy, &c2, &clock, 1_793_000_000_500).unwrap();
+        assert_eq!((intents.len(), refused), (1, None));
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert_eq!(
+            darkbot_bsc_trading::transactions::legacy::decode_signed(&intents[0].raw)
+                .unwrap()
+                .tx
+                .nonce,
+            5
+        );
+        // The lease went back before: no spend, no recovery of its own.
+        assert!(leases(&r.state).is_empty());
+        let admitted = crate::sources::admitted_intents(&r.state).unwrap();
+        assert_eq!(admitted.len(), 1);
+        assert_eq!(spent(&r.state), admitted[0].max_wei);
+        // Its attempt is the lease's slot; the strategy BUY took its own.
+        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 2);
+        // The arm ends (revoke): a lease it held goes back with it.
+        settle(&mut x, &c2);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
+                .unwrap()
+                .applied()
+        );
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(leases(&r.state).is_empty());
+        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 2);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076: a lease is renewed before half its window is gone: a new
+    /// entry under the same attempt (no second slot), the old one back; the
+    /// launch's BUY never takes a lease whose window ends before its own.
+    #[test]
+    fn the_c3_lease_is_renewed_before_its_window_runs_out() {
+        let mut r = Rig::new("live-lease-renew", LiveStrategies::C3);
+        r.exec.exec.live_lease_blocks = 4;
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let first = leases(&r.state);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].max_block, Some(HEAD + 4));
+        // One block on: HEAD + 1 + 2 (its window) + 2 (half) > HEAD + 4.
+        c2.canonical(&block_of(HEAD + 1, 0xb2, 0xb1, Vec::new()));
+        let _ = c2.take_evidence();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let renewed = leases(&r.state);
+        assert_eq!(renewed.len(), 1);
+        assert_ne!(renewed[0].tx_hash, first[0].tx_hash);
+        assert_eq!(renewed[0].max_block, Some(HEAD + 1 + 4));
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        // The renewed one moved whole out of the spend (it grows not).
+        let name = format!("{}.dbrec", alloy_primitives::hex::encode(first[0].tx_hash));
+        assert!(r.state.join("live-lease-returns").join(&name).exists());
+        assert!(!r.state.join("live-spend").join(&name).exists());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076: an arm that ends gives its lease back (the gate closes, a
+    /// revoke here): no spend, no recovery of it; its attempt's slot stays
+    /// taken, the next lease of the same grant takes no other.
+    #[test]
+    fn an_arm_that_ends_returns_its_lease() {
+        let r = Rig::new("live-lease-end", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(leases(&r.state).len(), 1);
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.request(
+                "send-off",
+                Entity::Switch(crate::sources::SwitchId::Send),
+                Mode::Disabled,
+                g,
+                NOW
+            )
+            .unwrap()
+            .applied()
+        );
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(leases(&r.state).is_empty());
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076: a launch's BUY whose bundle window would end after the
+    /// lease's takes nothing from it (a lease not renewed in time): refused
+    /// before anything leaves.
+    #[test]
+    fn a_c3_buy_never_outlasts_its_lease() {
+        let mut r = Rig::new("live-lease-window", LiveStrategies::C3);
+        r.exec.exec.live_lease_blocks = 4;
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(leases(&r.state)[0].max_block, Some(HEAD + 4));
+        // Three blocks on, no pass in between: its window HEAD + 3 + 2.
+        for (n, h) in [(1u64, 0xb2u8), (2, 0xb3), (3, 0xb4)] {
+            c2.canonical(&block_of(HEAD + n, h, h - 1, Vec::new()));
+        }
+        let _ = c2.take_evidence();
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        let why = x.executor.as_ref().unwrap().end().last_refusal().unwrap();
+        assert!(why.contains("window"), "{why}");
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076 review H1: a grant of one BUY attempt: the arm's lease takes
+    /// that last slot and the arm stays (its own attempt refuses nothing);
+    /// the launch's BUY goes under it.
+    #[test]
+    fn a_lease_of_the_last_attempt_keeps_the_arm_and_buys() {
+        let r = Rig::granting("live-lease-one", LiveStrategies::C3, |now| LiveGrant {
+            max_attempts: 1,
+            ..rig_grant(now + 3_600_000, LiveStrategies::C3)
+        });
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(leases(&r.state).len(), 1);
+        settle(&mut x, &c2);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        // Re-review HIGH: the runtime's reconcile reads the gate as this arm
+        // does: the venue, the runtime, C2, C3 and the source stay LIVE.
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap();
+        let q = crate::live_qualification::view(&r.root).0.view;
+        let view = crate::runtime::LiveView {
+            boot: Some("boot-1".into()),
+            ..crate::runtime::LiveView::of(&g, &r.state, Some(&q), NOW, Some(&x))
+        };
+        for e in [
+            Entity::Runtime,
+            crate::sources::VenueId::Flap.into(),
+            ComponentId::StateC2.into(),
+            ComponentId::ExecC3.into(),
+            SourceId::PublicNode.into(),
+        ] {
+            assert_eq!(
+                view.effective(&g, e, false),
+                crate::sources::Effective::Live,
+                "{e:?}"
+            );
+        }
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_some(),
+            "{:?}",
+            x.executor.as_ref().unwrap().end().last_refusal()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-076 review H3: after a crash with only a lease held, a
+    /// transaction of the buyer's key at the lease's nonce that is no BUY
+    /// of it (no Portal BUY of a token by the buyer, or after its window)
+    /// is never adopted: the lease is replaced by it, counted for the
+    /// operator, no position.
+    #[test]
+    fn only_the_leases_own_buy_is_adopted() {
+        // (sell, token, trader is the buyer, eth): the canonical BUY, and
+        // each condition broken alone.
+        let buy = (false, [0xAB; 20], true, U256::from(1_000u64));
+        for (tag, trade, past_window) in [
+            ("live-adopt-none", None, false),
+            ("live-adopt-late", Some(buy), true),
+            ("live-adopt-sell", Some((true, buy.1, buy.2, buy.3)), false),
+            (
+                "live-adopt-zero",
+                Some((buy.0, [0; 20], buy.2, buy.3)),
+                false,
+            ),
+            (
+                "live-adopt-trader",
+                Some((buy.0, buy.1, false, buy.3)),
+                false,
+            ),
+            (
+                "live-adopt-over",
+                Some((buy.0, buy.1, buy.2, U256::MAX)),
+                false,
+            ),
+        ] {
+            let mut r = Rig::new(tag, LiveStrategies::C3);
+            r.exec.exec.live_lease_blocks = 4;
+            let mut x = r.runtime("boot-1");
+            let c2 = c2_at(&r.d, r.buyer, 5);
+            settle(&mut x, &c2);
+            assert!(x.armed(), "{:?}", reason(&x));
+            let held = leases(&r.state);
+            assert_eq!(held.len(), 1);
+            std::mem::forget(x);
+            r.authorize("boot-2", "after-crash");
+            let mut x = r.runtime("boot-2");
+            assert_eq!(x.book().unresolved().count(), 1);
+            let mut c2 = c2_at(&r.d.join("c2-restarted"), r.buyer, 5);
+            let at = if past_window { HEAD + 10 } else { HEAD + 1 };
+            let tx = [0x5e; 32];
+            let mut events = vec![block_of(
+                at,
+                0xd2,
+                0xd1,
+                vec![CanonicalTx {
+                    hash: tx,
+                    index: 0,
+                    sender: r.buyer,
+                    nonce: 5,
+                    succeeded: true,
+                    cost: None,
+                }],
+            )];
+            if let Some((sell, token, by_buyer, eth)) = trade {
+                events.push(CanonicalEvent::FlapTrade(
+                    crate::chain_follower::CanonicalTrade {
+                        block_number: at,
+                        block_hash: [0xd2; 32],
+                        tx_index: 0,
+                        tx_hash: tx,
+                        log_index: 0,
+                        origin: r.buyer,
+                        sell,
+                        token,
+                        trader: if by_buyer { r.buyer } else { [0x77; 20] },
+                        amount: U256::from(1_000u64).to_be_bytes(),
+                        eth: eth.to_be_bytes(),
+                        fee: [0; 32],
+                        post_price: [0; 32],
+                    },
+                ));
+            }
+            events.push(complete_of(at, 0xd2));
+            let changes = feed(&mut x, &mut c2, events);
+            assert!(changes.is_empty(), "{tag}: {changes:?}");
+            assert!(x.book().tx(&tx).is_none(), "{tag}");
+            assert_eq!(
+                x.book().tx(&held[0].tx_hash).unwrap().state,
+                FactKind::Replaced,
+                "{tag}"
+            );
+            assert!(
+                x.book()
+                    .positions
+                    .iter()
+                    .all(|p| p.state != PositionState::Open),
+                "{tag}"
+            );
+            assert!(refused_by(&x, "LEASE_NONCE_TAKEN_BY_OTHER"), "{tag}");
+            x.shutdown();
+            r.clean();
+        }
+    }
+
+    fn refused_by(x: &LiveRuntime, why: &str) -> bool {
+        record(x)
+            .texts(l::REFUSALS)
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with(&format!("{why}=")))
     }
 
     /// BSC3-075: a source the grant does not name that sees a launch first

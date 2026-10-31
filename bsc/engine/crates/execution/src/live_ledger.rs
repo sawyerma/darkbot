@@ -97,6 +97,12 @@ fn intent_of(text: &str) -> Option<LiveIntentKind> {
     .find(|k| k.name() == text)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The next this many appends of this thread fail (a medium error).
+    pub(crate) static FAIL_APPENDS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 /// One fact.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
@@ -240,6 +246,10 @@ impl Ledger {
     /// middle leaves at most an unpublished temporary file, never a torn
     /// entry. Nothing here removes or skips an entry.
     pub fn append(&self, fact: &Fact, now_ms: u64) -> Result<u64, String> {
+        #[cfg(test)]
+        if FAIL_APPENDS.with(|f| f.get().checked_sub(1).map(|n| f.set(n)).is_some()) {
+            return Err("the ledger append failed (test)".into());
+        }
         let mut d = Draft::new(&k::SCHEMA);
         d.set(k::KIND, fact.kind.name())
             .set(k::TX_HASH, Value::B256(fact.tx_hash))
@@ -1023,6 +1033,7 @@ mod tests {
             nonce: token.map(|_| u64::from(n)),
             max_block: token.map(|_| 100),
             origin: token.map(|_| crate::sources::tests::ORIGIN),
+            lease: false,
         }
     }
 

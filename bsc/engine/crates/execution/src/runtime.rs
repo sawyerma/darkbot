@@ -419,6 +419,7 @@ impl RuntimeConfig {
                             600_000,
                         )?,
                         live_exit_reverts_max: take("BSC_EXEC_LIVE_EXIT_REVERTS_MAX", 1, 16)?,
+                        live_lease_blocks: take("BSC_EXEC_LIVE_LEASE_BLOCKS", 2, 28_800)?,
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -855,14 +856,32 @@ struct LiveView {
 }
 
 impl LiveView {
+    /// The reconcile's view: the owner state besides the attempt `live`'s
+    /// next C3 BUY takes under the grant of `g`.
+    fn of(
+        g: &Generation,
+        state: &Path,
+        qualification: Option<&crate::sources::LiveQualification>,
+        now_ms: u64,
+        live: Option<&LiveRuntime>,
+    ) -> Self {
+        let held = live
+            .and_then(|l| l.held_attempt(g.live_set_by.as_ref().map(|by| by.generation)))
+            .map(alloy_primitives::hex::encode);
+        Self::read(g, state, qualification, now_ms, held.as_deref())
+    }
+
     /// The owner state as it holds now; `qualification` is the reconcile's
     /// one verified LIVE qualification (BSC3-050: verified once per
-    /// reconcile, the same result the LIVE path ticks with).
+    /// reconcile, the same result the LIVE path ticks with); `held` the
+    /// attempt the LIVE path's next C3 BUY takes (BSC3-076 review H1: its
+    /// own slots refuse nothing, as at the LIVE path's gate).
     fn read(
         g: &Generation,
         state: &Path,
         qualification: Option<&crate::sources::LiveQualification>,
         now_ms: u64,
+        held: Option<&str>,
     ) -> Self {
         let Some(qualification) = qualification else {
             return LiveView {
@@ -874,11 +893,12 @@ impl LiveView {
                 qualification: Default::default(),
             };
         };
+        let (daily, total) = crate::sources::usage_besides(state, now_ms, held);
         LiveView {
             boot: crate::sources::boot_session().ok(),
             now_ms,
-            daily: crate::sources::buy_usage(state, now_ms).ok(),
-            total: crate::sources::total_usage(state).ok(),
+            daily,
+            total,
             spent: match &g.live_set_by {
                 Some(by) => crate::sources::spent_by_grant(state, by.generation).ok(),
                 None => Some(0),
@@ -2060,11 +2080,12 @@ pub fn run(
                 let qualified = live
                     .is_some()
                     .then(|| crate::live_qualification::view(repo_root));
-                let live_view = LiveView::read(
+                let live_view = LiveView::of(
                     &generation,
                     sources_dir,
                     qualified.as_ref().map(|(q, _)| &q.view),
                     now_ms,
+                    live.as_ref(),
                 );
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
                 let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
@@ -2623,6 +2644,68 @@ pub fn run(
 mod tests {
     use super::*;
 
+    /// BSC3-076 re-review HIGH: a lease that holds the grant's and the day's
+    /// last slot keeps the runtime's reconcile on (the venue, the runtime,
+    /// C2, C3 and the sources stay LIVE for its BUY); any other attempt
+    /// still finds them used.
+    #[test]
+    fn a_lease_on_the_last_slot_keeps_the_reconcile_on() {
+        use crate::sources::tests::{ORIGIN, grant_of, live_ready_limited, qualified_in};
+        use crate::sources::{
+            BUY_LIMIT_EXHAUSTED, LIVE_GRANT_ATTEMPTS_EXHAUSTED, LiveGrant, LiveIntent,
+            LiveIntentKind, LiveStrategies,
+        };
+        let (dir, s, now) = live_ready_limited("runtime-lease-last", (1, 1), |now| LiveGrant {
+            max_attempts: 1,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let attempt = alloy_primitives::hex::encode([0xa0; 32]);
+        let id = alloy_primitives::hex::encode([0xa1; 32]);
+        let lease = LiveIntent {
+            id: &id,
+            component: ComponentId::ExecC3,
+            kind: LiveIntentKind::Buy,
+            input_wei: 1_000,
+            max_wei: 1_000,
+            token: [0; 20],
+            nonce: 7,
+            origin: ORIGIN,
+            max_block: 900,
+            exit_reserve_wei: 0,
+        };
+        s.lease_live(&armed, &lease, &attempt, &q, now).unwrap();
+        let g = s.current().unwrap();
+        let entities = [
+            crate::sources::Entity::Runtime,
+            VenueId::Flap.into(),
+            ComponentId::StateC2.into(),
+            ComponentId::ExecC3.into(),
+            SourceId::PublicNode.into(),
+        ];
+        // The owner state's session (the switches are enabled in it).
+        let view = |held: Option<&str>| LiveView {
+            boot: Some("boot-1".into()),
+            ..LiveView::read(&g, &dir, Some(&q), now, held)
+        };
+        let other = alloy_primitives::hex::encode([0xb0; 32]);
+        let (held, others, none) = (view(Some(&attempt)), view(Some(&other)), view(None));
+        for e in entities {
+            assert_eq!(held.effective(&g, e, false), Effective::Live, "{e:?}");
+            for view in [&others, &none] {
+                assert!(
+                    matches!(
+                        view.effective(&g, e, false),
+                        Effective::Blocked(r) if r == LIVE_GRANT_ATTEMPTS_EXHAUSTED || r == BUY_LIMIT_EXHAUSTED
+                    ),
+                    "{e:?}"
+                );
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// BSC3-058/071 (review MEDIUM): under a grant that admits no BUY the
     /// runtime keeps the entities requested LIVE effective for the exits
     /// of the positions the LIVE path holds (the strategy decides them, C2
@@ -2958,9 +3041,9 @@ mod tests {
             ..Default::default()
         };
         let g = Generation::initial();
-        assert_eq!(LiveView::read(&g, &dir, Some(&q), 1).qualification, q);
+        assert_eq!(LiveView::read(&g, &dir, Some(&q), 1, None).qualification, q);
         assert_eq!(
-            LiveView::read(&g, &dir, None, 1).qualification,
+            LiveView::read(&g, &dir, None, 1, None).qualification,
             crate::sources::LiveQualification::default()
         );
     }

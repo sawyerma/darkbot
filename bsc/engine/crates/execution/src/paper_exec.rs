@@ -172,6 +172,9 @@ pub struct ExecConfig {
     /// BSC3-030: reverted exit steps of one position before its exits
     /// stop for the operator (`BSC_EXEC_LIVE_EXIT_REVERTS_MAX`).
     pub live_exit_reverts_max: u64,
+    /// BSC3-076: the blocks a C3 BUY's lease of the owner holds
+    /// (`BSC_EXEC_LIVE_LEASE_BLOCKS`), renewed before half are gone.
+    pub live_lease_blocks: u64,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -232,6 +235,13 @@ impl ExecConfig {
         }
         if self.live_exit_reverts_max == 0 {
             return Err("BSC_EXEC_LIVE_EXIT_REVERTS_MAX must be at least 1".into());
+        }
+        // A fresh lease covers a BUY's window with half its blocks left.
+        if self.live_lease_blocks < self.validity_blocks.saturating_mul(2) {
+            return Err(format!(
+                "BSC_EXEC_LIVE_LEASE_BLOCKS {} is below twice BSC_EXEC_VALIDITY_BLOCKS {}",
+                self.live_lease_blocks, self.validity_blocks
+            ));
         }
         Ok(())
     }
@@ -2229,6 +2239,7 @@ pub(crate) mod tests {
             strategy_max_head_age_ms: 30_000,
             live_max_head_age_ms: 86_400_000,
             live_exit_reverts_max: 2,
+            live_lease_blocks: 200,
             sender_paths: SenderPaths::Both,
         }
     }

@@ -57,6 +57,18 @@ jobs:
             -- --include-ignored --exact 2>&1 | tee ../release_e2e.txt
           grep -F "test result: ok. 1 passed; 0 failed" ../release_e2e.txt \
             || { echo "::error::the release journal end-to-end test did not run and pass"; exit 1; }
+      # BSC3-076: on the real clock a launch's LIVE BUY (its owner lease taken
+      # before the launch) and Strategy C's BUY (its admission first) start
+      # their transport within the 1 ms limit (optimized build only).
+      - name: the release-only LIVE start-limit tests ran and passed
+        run: |
+          cargo test --locked --release --all-features -p darkbot-bsc-execution --lib \
+            -- --include-ignored --exact \
+            runtime::live::tests::a_live_buy_starts_within_its_deadline_on_the_real_clock \
+            runtime::live::tests::a_strategy_buy_starts_within_its_deadline_after_its_admission \
+            2>&1 | tee ../release_live.txt
+          grep -F "test result: ok. 2 passed; 0 failed" ../release_live.txt \
+            || { echo "::error::the release LIVE start-limit tests did not run and pass"; exit 1; }
       - name: the seven tool tests ran, each with its fixed count
         run: |
           cargo test --locked --all-features -p darkbot-bsc-execution --test bsc_tools -- --nocapture 2>&1 | tee ../tools.txt

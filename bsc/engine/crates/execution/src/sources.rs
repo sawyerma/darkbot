@@ -270,6 +270,13 @@ pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
 pub const LIVE_INPUT_ABOVE_GRANT: &str = "LIVE_INPUT_ABOVE_GRANT";
 /// The same signed transaction again: never a second time (no retry).
 pub const LIVE_INTENT_SEEN: &str = "LIVE_INTENT_SEEN";
+/// BSC3-076: a launch's C3 BUY finds no lease of the owner held (the next
+/// reconcile takes one): nothing taken, nothing sent.
+pub const LIVE_LEASE_MISSING: &str = "LIVE_LEASE_MISSING";
+/// BSC3-076: the lease held is not this BUY's (another nonce, less budget,
+/// exit reserve or window) or the owner's state changed since it was taken:
+/// nothing taken, nothing sent; the next reconcile takes it again.
+pub const LIVE_LEASE_STALE: &str = "LIVE_LEASE_STALE";
 /// The grant admits the exits of open positions only (BSC3-058): no BUY.
 pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
 /// BSC3-069: a grant without the execution risk the operator confirmed
@@ -3004,6 +3011,77 @@ fn spend_dir(dir: &Path) -> PathBuf {
     dir.join("live-spend")
 }
 
+/// BSC3-076: the kind of a lease's spend entry ([`Store::lease_live`]).
+const LEASE_KIND: &str = "BUY_LEASE";
+/// The leases returned unused: their entries, moved here whole from the
+/// spend (a rename, never a rewrite or a removal), spend and recover as
+/// nothing; the spend directory a scan reads stays the entries that count.
+fn lease_returns_dir(dir: &Path) -> PathBuf {
+    dir.join("live-lease-returns")
+}
+
+/// BSC3-076 review M1: a lease's daily slot is of the UTC day it is held
+/// on: renewed after midnight it takes that day's (within that day's
+/// limit); the campaign's slot stays its one under its attempt.
+pub fn lease_daily_id(attempt: &str, now_ms: u64) -> String {
+    format!("{attempt}-{}", BuyDay::at(now_ms).utc)
+}
+
+/// The daily and campaign usage at `now_ms` besides the slots of the
+/// attempt `held` (BSC3-076 review H1: a lease's own attempt, already
+/// taken, never refuses itself): its slot of this UTC day and its campaign
+/// slot do not count. The LIVE path's gate and the runtime's reconcile read
+/// the owner's usage through this one function.
+pub fn usage_besides(
+    dir: &Path,
+    now_ms: u64,
+    held: Option<&str>,
+) -> (Option<BuyUsage>, Option<TotalUsage>) {
+    let mut daily = buy_usage(dir, now_ms).ok();
+    let mut total = total_usage(dir).ok();
+    let Some(attempt) = held else {
+        return (daily, total);
+    };
+    let today = lease_daily_id(attempt, now_ms);
+    if let Some(d) = daily.as_mut() {
+        let mine = buy_slots(&buy_day_dir(dir, &d.day))
+            .map(|slots| {
+                slots
+                    .iter()
+                    .filter(|(_, a)| a.as_deref() == Some(&today))
+                    .count()
+            })
+            .unwrap_or(0) as u64;
+        d.used = d.used.saturating_sub(mine);
+    }
+    if let (Some(t), Ok(slots)) = (total.as_mut(), total_slots(dir)) {
+        for (_, _, grant) in slots
+            .iter()
+            .filter(|(_, a, _)| a.as_deref() == Some(attempt))
+        {
+            t.used = t.used.saturating_sub(1);
+            if let Some(at) = t.grants.iter().position(|g| g == grant) {
+                t.grants.remove(at);
+            }
+        }
+    }
+    (daily, total)
+}
+
+/// BSC3-076: the owner's state as a lease saw it: any request applied
+/// since (a new generation, a revoke, a switch off, a limit) changes it, and
+/// the C3 BUY under the lease is refused at its launch (no attempt taken).
+/// One `lstat` of the generations directory: no read on the entry path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnerMark {
+    dev: u64,
+    ino: u64,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+    nlink: u64,
+    size: u64,
+}
+
 fn wei_u128(word: [u8; 32]) -> Option<u128> {
     if word[..16].iter().any(|b| *b != 0) {
         return None;
@@ -3162,6 +3240,9 @@ pub struct Admitted {
     /// Absent in an entry written before its sender and chain were: it
     /// counts alone.
     pub origin: Option<NonceOrigin>,
+    /// BSC3-076: a lease of the next C3 BUY ([`Store::lease_live`]): no
+    /// transaction of its own, its token none (zero), its id no hash.
+    pub lease: bool,
 }
 
 impl Admitted {
@@ -3195,18 +3276,20 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
             Ok(r) => (r, true),
             Err(_) => (decode(&ls::V1, &bytes).map_err(|_| bad())?, false),
         };
-        let kind = match r.text(ls::KIND).map_err(|_| bad())? {
-            "BUY" => LiveIntentKind::Buy,
-            "APPROVE" => LiveIntentKind::Approve,
-            "SELL" => LiveIntentKind::Sell,
+        let (kind, lease) = match r.text(ls::KIND).map_err(|_| bad())? {
+            "BUY" => (LiveIntentKind::Buy, false),
+            LEASE_KIND => (LiveIntentKind::Buy, true),
+            "APPROVE" => (LiveIntentKind::Approve, false),
+            "SELL" => (LiveIntentKind::Sell, false),
             _ => return Err(bad()),
         };
+        let id = r
+            .text(ls::INTENT_ID)
+            .ok()
+            .and_then(parse_hex32)
+            .ok_or_else(bad)?;
         out.push(Admitted {
-            tx_hash: r
-                .text(ls::INTENT_ID)
-                .ok()
-                .and_then(parse_hex32)
-                .ok_or_else(bad)?,
+            tx_hash: id,
             kind,
             component: r
                 .text(ls::COMPONENT)
@@ -3234,6 +3317,7 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
                 }),
                 false => None,
             },
+            lease,
         });
         // An entry that names its sender and chain names its nonce too.
         if out
@@ -3424,6 +3508,19 @@ impl Store {
         now_ms: u64,
         durability: Durability,
     ) -> Result<(BuySlot, TotalSlot), String> {
+        self.consume_attempt_split(attempt_id, attempt_id, grant_generation, now_ms, durability)
+    }
+
+    /// [`Store::consume_attempt_as`] with the daily slot named `daily_id`
+    /// (BSC3-076: a lease's per UTC day, [`lease_daily_id`]).
+    fn consume_attempt_split(
+        &self,
+        daily_id: &str,
+        attempt_id: &str,
+        grant_generation: u64,
+        now_ms: u64,
+        durability: Durability,
+    ) -> Result<(BuySlot, TotalSlot), String> {
         // BSC3-004: a clock set back takes no slot (its day would be one
         // already counted, or a day before the campaign's last attempt).
         if let Some(latest) = latest_slot_ms(&self.dir)?
@@ -3433,7 +3530,7 @@ impl Store {
                 "BUY_ATTEMPT_CLOCK_BEHIND: now {now_ms} ms is before the last BUY attempt at {latest} ms"
             ));
         }
-        let day = self.consume_daily(attempt_id, now_ms, durability)?;
+        let day = self.consume_daily(daily_id, now_ms, durability)?;
         let total = self.consume_total(attempt_id, grant_generation, now_ms, durability)?;
         Ok((day, total))
     }
@@ -3481,6 +3578,92 @@ impl Store {
         qualification: &LiveQualification,
         now_ms: u64,
     ) -> Result<LiveAdmission, String> {
+        self.admit(armed, intent, intent.id, false, qualification, now_ms)
+    }
+
+    /// BSC3-076: admits the next C3 BUY before its launch is seen, as
+    /// [`Store::admit_live`] admits one (its gate, input, spend at its
+    /// nonce with its exit reserve, its daily and campaign slot, its
+    /// window), its entry `intent.id` a lease of no token: the launch's
+    /// entry path then writes nothing before its first byte (master plan:
+    /// no file system work between ingress and the send). `attempt` names
+    /// its slots: a lease renewed or moved to another nonce under it takes
+    /// no second slot. Its BUY's own outcome becomes the ledger's fact
+    /// after the dispatch.
+    pub fn lease_live(
+        &self,
+        armed: &LiveNow,
+        intent: &LiveIntent<'_>,
+        attempt: &str,
+        qualification: &LiveQualification,
+        now_ms: u64,
+    ) -> Result<LiveAdmission, String> {
+        if intent.kind != LiveIntentKind::Buy || intent.component != ComponentId::ExecC3 {
+            return Err("a lease is of a C3 BUY".into());
+        }
+        if parse_hex32(attempt).is_none() {
+            return Err("a lease's attempt is named by 32 bytes, hex".into());
+        }
+        self.admit(armed, intent, attempt, true, qualification, now_ms)
+    }
+
+    /// BSC3-076: returns the leases `entries` unused (no BUY was handed over
+    /// under them: only the process that holds them knows): each entry moved
+    /// whole from the spend to the returns (one rename each, the directories
+    /// on the medium before this returns). A returned lease spends and
+    /// recovers as nothing; its attempt's slots stay taken (a later lease
+    /// under that attempt takes no other). An entry no longer in the spend
+    /// (returned already) is skipped; one that is no lease is refused.
+    pub fn return_leases(&self, entries: &[[u8; 32]]) -> Result<(), String> {
+        let admitted = admitted_intents(&self.dir)?;
+        let returns = lease_returns_dir(&self.dir);
+        create_durable_dir(&returns)?;
+        let mut moved = false;
+        for id in entries {
+            let Some(entry) = admitted.iter().find(|a| a.tx_hash == *id) else {
+                continue;
+            };
+            if !entry.lease {
+                return Err(format!(
+                    "{LIVE_SPEND_UNREADABLE}: {} is no lease",
+                    hex32(id)
+                ));
+            }
+            let name = format!("{}.dbrec", hex32(id));
+            fs::rename(spend_dir(&self.dir).join(&name), returns.join(&name))
+                .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: lease not returned: {e}"))?;
+            moved = true;
+        }
+        if moved {
+            flush_device(&spend_dir(&self.dir), &[returns])
+                .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: return not on the medium: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// BSC3-076: the owner's state as a lease sees it ([`OwnerMark`]).
+    pub fn owner_mark(&self) -> Result<OwnerMark, String> {
+        use std::os::unix::fs::MetadataExt;
+        let m = fs::symlink_metadata(self.dir.join("generations")).map_err(|e| e.to_string())?;
+        Ok(OwnerMark {
+            dev: m.dev(),
+            ino: m.ino(),
+            mtime: (m.mtime(), m.mtime_nsec()),
+            ctime: (m.ctime(), m.ctime_nsec()),
+            nlink: m.nlink(),
+            size: m.size(),
+        })
+    }
+
+    fn admit(
+        &self,
+        armed: &LiveNow,
+        intent: &LiveIntent<'_>,
+        attempt: &str,
+        lease: bool,
+        qualification: &LiveQualification,
+        now_ms: u64,
+    ) -> Result<LiveAdmission, String> {
         use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
         // One admission at a time, across threads and processes: what is
         // read and checked below is what the entry is written against.
@@ -3490,10 +3673,9 @@ impl Store {
             admitted_intents(&self.dir).and_then(|a| spend_of_grant(&a, armed.grant_generation));
         let spent = book.as_ref().ok().and_then(|b| b.wei().ok());
         after_spend_read();
-        let (daily, total) = (
-            buy_usage(&self.dir, now_ms).ok(),
-            total_usage(&self.dir).ok(),
-        );
+        // BSC3-076 review H1: a lease's own attempt (renewed, moved to
+        // another nonce) refuses nothing with the slots it already holds.
+        let (daily, total) = usage_besides(&self.dir, now_ms, lease.then_some(attempt));
         let ctx = LiveContext {
             boot: self.boot().ok(),
             now_unix_ms: now_ms,
@@ -3550,8 +3732,12 @@ impl Store {
             return Err(LIVE_INTENT_SEEN.into());
         }
         let slots = match exit {
-            false => Some(self.consume_attempt_as(
-                intent.id,
+            false => Some(self.consume_attempt_split(
+                &match lease {
+                    true => lease_daily_id(attempt, now_ms),
+                    false => attempt.to_string(),
+                },
+                attempt,
                 armed.grant_generation,
                 now_ms,
                 Durability::Handed,
@@ -3560,7 +3746,13 @@ impl Store {
         };
         let mut d = Draft::new(&ls::SCHEMA);
         d.set(ls::INTENT_ID, intent.id)
-            .set(ls::KIND, intent.kind.name())
+            .set(
+                ls::KIND,
+                match lease {
+                    true => LEASE_KIND,
+                    false => intent.kind.name(),
+                },
+            )
             .set(ls::COMPONENT, intent.component.name())
             .set(ls::PROVENANCE_TOOL, "bsc_runtime")
             .set(ls::PROVENANCE_OBSERVED_UNIX_MS, now_ms)
@@ -3632,6 +3824,18 @@ impl Store {
         self.live_now_with(components, qualification, now_ms, true)
     }
 
+    /// [`Store::live_now`] for an arm whose lease holds the attempt `held`
+    /// (BSC3-076 review H1): that attempt's own slots refuse nothing.
+    pub fn live_now_holding(
+        &self,
+        components: &[ComponentId],
+        qualification: &LiveQualification,
+        now_ms: u64,
+        held: Option<&str>,
+    ) -> Result<LiveNow, String> {
+        self.live_now_held(components, qualification, now_ms, false, held)
+    }
+
     fn live_now_with(
         &self,
         components: &[ComponentId],
@@ -3639,15 +3843,23 @@ impl Store {
         now_ms: u64,
         exit: bool,
     ) -> Result<LiveNow, String> {
+        self.live_now_held(components, qualification, now_ms, exit, None)
+    }
+
+    fn live_now_held(
+        &self,
+        components: &[ComponentId],
+        qualification: &LiveQualification,
+        now_ms: u64,
+        exit: bool,
+        held: Option<&str>,
+    ) -> Result<LiveNow, String> {
         let g = self.current()?;
         let (grant, by) = match (&g.live, &g.live_set_by) {
             (Some(grant), Some(by)) => (grant, by),
             _ => return Err(LIVE_GRANT_MISSING.into()),
         };
-        let (daily, total) = (
-            buy_usage(&self.dir, now_ms).ok(),
-            total_usage(&self.dir).ok(),
-        );
+        let (daily, total) = usage_besides(&self.dir, now_ms, held);
         let ctx = LiveContext {
             boot: self.boot().ok(),
             now_unix_ms: now_ms,
@@ -6473,6 +6685,7 @@ pub(crate) mod tests {
                 nonce: Some(40),
                 max_block: Some(900),
                 origin: Some(ORIGIN),
+                lease: false,
             }]
         );
         assert_eq!(
@@ -6586,6 +6799,7 @@ pub(crate) mod tests {
             nonce,
             max_block: Some(900),
             origin,
+            lease: false,
         }
     }
 
@@ -6719,6 +6933,124 @@ pub(crate) mod tests {
             11_000 + 3_000 + 4_000 + old
         );
         assert_eq!(spent_by_grant(&dir, 6).unwrap(), 12_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-076: a lease is the owner's admission of a C3 BUY before its
+    /// launch (its slots under its attempt, its spend at its nonce): only of
+    /// a C3 BUY; another lease under the same attempt takes no second slot;
+    /// a lease returned unused spends and recovers as nothing (its slots
+    /// stay taken); a return is idempotent, and a record that is not named
+    /// by the lease it returns returns none.
+    #[test]
+    fn a_lease_admits_ahead_and_goes_back_unused() {
+        let (dir, s, now) = live_ready_limited("live-lease", (5, 5), |now| LiveGrant {
+            max_attempts: 5,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let attempt = hex32(&[0xa0; 32]);
+        let (one, two) = (hex32(&[0xa1; 32]), hex32(&[0xa2; 32]));
+        let lease = |id| LiveIntent {
+            token: [0; 20],
+            ..nonce_buy(id, 7, 1_000)
+        };
+        // Only a C3 BUY is leased.
+        let exit = LiveIntent {
+            kind: LiveIntentKind::Approve,
+            ..lease(&one)
+        };
+        assert!(s.lease_live(&armed, &exit, &attempt, &q, now).is_err());
+        let strategy = LiveIntent {
+            component: ComponentId::StrategyC,
+            ..lease(&one)
+        };
+        assert!(s.lease_live(&armed, &strategy, &attempt, &q, now).is_err());
+        assert!(
+            s.lease_live(&armed, &lease(&one), "not-hex", &q, now)
+                .is_err()
+        );
+        s.lease_live(&armed, &lease(&one), &attempt, &q, now)
+            .unwrap();
+        // Renewed under the same attempt: its one slot, the nonce's spend once.
+        s.lease_live(&armed, &lease(&two), &attempt, &q, now)
+            .unwrap();
+        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
+        let generation = armed.grant_generation;
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 1_000);
+        let leased = admitted_intents(&dir).unwrap();
+        assert_eq!(leased.len(), 2);
+        assert!(leased.iter().all(|a| a.lease && a.token == Some([0; 20])));
+        // Returned: moved whole out of the spend, no spend, no recovery; the
+        // slots stay taken; again: nothing more.
+        let returns = dir.join("live-lease-returns");
+        s.return_leases(&[[0xa1; 32], [0xa2; 32]]).unwrap();
+        s.return_leases(&[[0xa1; 32], [0xa2; 32]]).unwrap();
+        assert!(admitted_intents(&dir).unwrap().is_empty());
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 0);
+        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert!(returns.join(format!("{one}.dbrec")).exists());
+        assert!(returns.join(format!("{two}.dbrec")).exists());
+        // Never a transaction's entry: a BUY entry is refused, kept.
+        let tx = hex32(&[0xb1; 32]);
+        s.admit_live(&armed, &nonce_buy(&tx, 8, 2_000), &q, now)
+            .unwrap();
+        assert!(s.return_leases(&[[0xb1; 32]]).is_err());
+        assert_eq!(admitted_intents(&dir).unwrap().len(), 1);
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 2_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-076 review H1/M1: a lease's own attempt refuses nothing with
+    /// the slots it already holds (the last slot of a day, of the campaign,
+    /// of the grant: renewed, the gate stays clear); another attempt is
+    /// refused there. Renewed on a later UTC day it takes that day's slot,
+    /// within that day's limit; the campaign's stays its one.
+    #[test]
+    fn a_lease_holds_its_last_slot_and_takes_each_days() {
+        let (dir, s, now) = live_ready_limited("live-lease-last", (1, 2), |now| LiveGrant {
+            max_attempts: 1,
+            ..grant_of(now + 3 * 86_400_000, LiveStrategies::C3)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let attempt = hex32(&[0xa0; 32]);
+        let (id_a1, id_a2, id_a3, id_a4) = (
+            hex32(&[0xa1; 32]),
+            hex32(&[0xa2; 32]),
+            hex32(&[0xa3; 32]),
+            hex32(&[0xa4; 32]),
+        );
+        let lease = |id| LiveIntent {
+            token: [0; 20],
+            ..nonce_buy(id, 7, 1_000)
+        };
+        s.lease_live(&armed, &lease(&id_a1), &attempt, &q, now)
+            .unwrap();
+        // The day's, the grant's last slot taken: the gate refuses another
+        // attempt, never this one.
+        assert!(s.live_now(&[ComponentId::ExecC3], &q, now).is_err());
+        assert!(
+            s.live_now_holding(&[ComponentId::ExecC3], &q, now, Some(&attempt))
+                .is_ok()
+        );
+        s.lease_live(&armed, &lease(&id_a2), &attempt, &q, now)
+            .unwrap();
+        let other = hex32(&[0xb0; 32]);
+        assert!(
+            s.lease_live(&armed, &lease(&id_a3), &other, &q, now)
+                .is_err()
+        );
+        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
+        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        // The next UTC day: renewed, it takes that day's slot.
+        let tomorrow = now + 86_400_000;
+        s.lease_live(&armed, &lease(&id_a4), &attempt, &q, tomorrow)
+            .unwrap();
+        assert_eq!(buy_usage(&dir, tomorrow).unwrap().used, 1);
+        assert_eq!(total_usage(&dir).unwrap().used, 1);
         fs::remove_dir_all(dir).unwrap();
     }
 

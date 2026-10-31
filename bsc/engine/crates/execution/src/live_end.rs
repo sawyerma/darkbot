@@ -23,7 +23,8 @@ use crate::live_ledger::{Fact, FactKind, Ledger};
 use crate::live_qualification::{Verified, capability};
 use crate::paper_exec::{End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by};
 use crate::sources::{
-    ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, NonceOrigin, Store,
+    BuyDay, ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, NonceOrigin, OwnerMark,
+    Store,
 };
 use crate::submission::frame::Frame;
 use crate::submission::loopback::{LoopbackTransport, loopback_response, qualify_loopback};
@@ -221,6 +222,76 @@ pub struct LiveEnd {
     /// The answers read and not yet written to the ledger: a poll only
     /// reads, the write waits until no hand-over is near.
     answered: Vec<Fact>,
+    /// The chain this end signs for.
+    chain_id: u64,
+    /// BSC3-076: the next C3 BUY the owner admitted before its launch.
+    lease: Option<Lease>,
+}
+
+/// BSC3-076: the owner's admission of the next C3 BUY taken before its
+/// launch ([`Store::lease_live`]): its nonce, the most it may cost, its
+/// exit reserve and window, the owner's state and the UTC day it was taken
+/// in (that day's slot is its own) and its spend entry.
+#[derive(Clone, Debug)]
+pub struct Lease {
+    attempt: [u8; 32],
+    entry: [u8; 32],
+    day: BuyDay,
+    nonce: u64,
+    origin: NonceOrigin,
+    input_wei: u128,
+    max_wei: u128,
+    exit_reserve_wei: u128,
+    max_block: u64,
+    mark: OwnerMark,
+}
+
+impl Lease {
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn max_block(&self) -> u64 {
+        self.max_block
+    }
+
+    /// The attempt its slots are taken under.
+    pub fn attempt(&self) -> [u8; 32] {
+        self.attempt
+    }
+}
+
+/// What the next C3 BUY's lease must cover ([`LiveEnd::hold_lease`]).
+#[derive(Clone, Copy, Debug)]
+pub struct LeaseWant {
+    pub nonce: u64,
+    pub input_wei: u128,
+    pub max_wei: u128,
+    pub exit_reserve_wei: u128,
+    /// The canonical head now.
+    pub head: u64,
+    /// The bundle window of a BUY (`BSC_EXEC_VALIDITY_BLOCKS`).
+    pub validity_blocks: u64,
+    /// The blocks one lease holds (`BSC_EXEC_LIVE_LEASE_BLOCKS`).
+    pub lease_blocks: u64,
+    /// The attempt of a lease returned unused before (its slots taken).
+    pub attempt: Option<[u8; 32]>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Set once a hand-over took its lease (a test's clock turns late then).
+    pub(crate) static LEASE_BOUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// 32 bytes of the operating system's randomness: a lease's name.
+fn random32() -> Result<[u8; 32], String> {
+    use std::io::Read;
+    let mut b = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .map_err(|e| format!("randomness: {e}"))?;
+    Ok(b)
 }
 
 impl core::fmt::Debug for LiveEnd {
@@ -344,7 +415,145 @@ impl LiveEnd {
             responses: Responses::default(),
             buy_refused: None,
             answered: Vec::new(),
+            chain_id,
+            lease: None,
         })
+    }
+
+    /// BSC3-076: the lease held.
+    pub fn lease(&self) -> Option<&Lease> {
+        self.lease.as_ref()
+    }
+
+    /// BSC3-076: holds a lease of the owner for the next C3 BUY as `want`
+    /// asks, outside the entry path: the one held if it covers it and its
+    /// window has half its blocks left and the owner's state is as it was;
+    /// otherwise a new one under the same attempt (a renewal or another
+    /// nonce: no second slot), then the one it replaces returned unused.
+    pub fn hold_lease(&mut self, want: &LeaseWant) -> Result<(), String> {
+        if let Some(l) = &self.lease {
+            let covers = l.nonce == want.nonce
+                && l.input_wei >= want.input_wei
+                && l.max_wei >= want.max_wei
+                && l.exit_reserve_wei >= want.exit_reserve_wei;
+            let left = want
+                .head
+                .saturating_add(want.validity_blocks)
+                .saturating_add(want.lease_blocks / 2)
+                <= l.max_block;
+            // Review M1: a lease holds only its own UTC day's slot; the next
+            // day's BUY takes that day's.
+            let today = BuyDay::at((self.wall_ms)()) == l.day;
+            if covers && left && today && self.store.owner_mark().ok() == Some(l.mark) {
+                return Ok(());
+            }
+        }
+        let attempt = match (&self.lease, want.attempt) {
+            (Some(l), _) => l.attempt,
+            (None, Some(a)) => a,
+            (None, None) => random32()?,
+        };
+        let id = random32()?;
+        let max_block = want
+            .head
+            .checked_add(want.lease_blocks)
+            .ok_or("the lease window overflows")?;
+        let origin = NonceOrigin {
+            chain_id: self.chain_id,
+            sender: self.key.address(),
+        };
+        // The owner's state before the admission reads it: a request applied
+        // in between leaves another mark at the launch (refused there).
+        let mark = self.store.owner_mark()?;
+        let now_ms = (self.wall_ms)();
+        self.store.lease_live(
+            &self.armed,
+            &LiveIntent {
+                id: &alloy_primitives::hex::encode(id),
+                component: ComponentId::ExecC3,
+                kind: LiveIntentKind::Buy,
+                input_wei: want.input_wei,
+                max_wei: want.max_wei,
+                token: [0; 20],
+                nonce: want.nonce,
+                origin,
+                max_block,
+                exit_reserve_wei: want.exit_reserve_wei,
+            },
+            &alloy_primitives::hex::encode(attempt),
+            &self.qualification.view,
+            now_ms,
+        )?;
+        let replaced = self.lease.replace(Lease {
+            attempt,
+            entry: id,
+            day: BuyDay::at(now_ms),
+            nonce: want.nonce,
+            origin,
+            input_wei: want.input_wei,
+            max_wei: want.max_wei,
+            exit_reserve_wei: want.exit_reserve_wei,
+            max_block,
+            mark,
+        });
+        if let Some(old) = replaced {
+            self.store.return_leases(&[old.entry])?;
+        }
+        Ok(())
+    }
+
+    /// BSC3-076: returns the lease held unused (an exit or Strategy C's BUY
+    /// takes its nonce, or the arm ends): its attempt, for the next lease.
+    /// Not returned (a write failed), it counts on; it is never used again.
+    pub fn return_lease(&mut self) -> Result<Option<[u8; 32]>, String> {
+        let Some(l) = self.lease.take() else {
+            return Ok(None);
+        };
+        self.store.return_leases(&[l.entry])?;
+        Ok(Some(l.attempt))
+    }
+
+    /// BSC3-076: the lease held for the launch's C3 BUY at `nonce` of
+    /// `origin`, taken: in memory and one look at the owner's state, no
+    /// read or write of a file. Refused (none, not this BUY's, the owner's
+    /// state changed, the grant expired), it stays held.
+    #[allow(clippy::too_many_arguments)]
+    fn lease_for(
+        held: &mut Option<Lease>,
+        store: &Store,
+        armed: &LiveNow,
+        now_ms: u64,
+        nonce: u64,
+        origin: NonceOrigin,
+        (input_wei, max_wei, exit_reserve_wei): (u128, u128, u128),
+        last_block: u64,
+    ) -> Result<Lease, String> {
+        use crate::sources::{LIVE_GRANT_EXPIRED, LIVE_LEASE_MISSING, LIVE_LEASE_STALE};
+        let Some(l) = held.as_ref() else {
+            return Err(LIVE_LEASE_MISSING.into());
+        };
+        if armed.grant().expires_unix_ms <= now_ms {
+            return Err(LIVE_GRANT_EXPIRED.into());
+        }
+        let stale = |what: &str| Err(format!("{LIVE_LEASE_STALE}: {what}"));
+        if l.nonce != nonce || l.origin != origin {
+            return stale("another nonce");
+        }
+        if input_wei > l.input_wei || max_wei > l.max_wei || exit_reserve_wei > l.exit_reserve_wei {
+            return stale("less budget");
+        }
+        if last_block > l.max_block {
+            return stale("its window is over");
+        }
+        if BuyDay::at(now_ms) != l.day {
+            return stale("another UTC day");
+        }
+        if store.owner_mark().ok() != Some(l.mark) {
+            return stale("the owner's state changed");
+        }
+        #[cfg(test)]
+        LEASE_BOUND.with(|b| b.set(true));
+        held.take().ok_or_else(|| LIVE_LEASE_MISSING.into())
     }
 
     /// Establishes every adapter's connection and waits for them (tools
@@ -671,6 +880,9 @@ impl End for LiveEnd {
             let why = format!("PROVIDER_REFUSED: {why}");
             return self.refuse(Refusal::Dispatch, why);
         }
+        // BSC3-076: Strategy C's BUY and every exit act on a block, not in
+        // the race after a launch's ingress.
+        let block_driven = matches!(submission, Submission::Single);
         let (component, profile, mode, launch, launch_raw, merge) = match submission {
             Submission::LaunchBundle(launch_raw) => (
                 ComponentId::ExecC3,
@@ -825,27 +1037,66 @@ impl End for LiveEnd {
             drop(transports);
             return self.refuse(Refusal::Plan, "the lane's sender is not the key's".into());
         }
-        let admitted = self.store.admit_live(
-            &self.armed,
-            &LiveIntent {
-                id: &id,
-                component,
-                kind,
-                input_wei,
-                max_wei,
-                token,
+        // BSC3-076: a launch's BUY was admitted before its ingress, as a
+        // lease: here only what is in memory and one look at the owner's
+        // state; an intent on a block is admitted now (milliseconds).
+        let admitted = match block_driven {
+            true => self
+                .store
+                .admit_live(
+                    &self.armed,
+                    &LiveIntent {
+                        id: &id,
+                        component,
+                        kind,
+                        input_wei,
+                        max_wei,
+                        token,
+                        nonce,
+                        origin,
+                        max_block: last_block,
+                        exit_reserve_wei,
+                    },
+                    &self.qualification.view,
+                    (self.wall_ms)(),
+                )
+                .map(|_| None),
+            false => Self::lease_for(
+                &mut self.lease,
+                &self.store,
+                &self.armed,
+                (self.wall_ms)(),
                 nonce,
                 origin,
-                max_block: last_block,
-                exit_reserve_wei,
-            },
-            &self.qualification.view,
-            (self.wall_ms)(),
-        );
-        if let Err(why) = admitted {
-            drop(transports);
-            return self.refuse(Refusal::Owner, why);
-        }
+                (input_wei, max_wei, exit_reserve_wei),
+                last_block,
+            )
+            .map(Some),
+        };
+        let lease = match admitted {
+            Ok(lease) => lease,
+            Err(why) => {
+                drop(transports);
+                return self.refuse(Refusal::Owner, why);
+            }
+        };
+        // BSC3-076: the owner's durable admission (slot, spend, one flush)
+        // takes milliseconds: an intent acting on a block starts its
+        // transport within the limit of its admission, not of its decision
+        // (checked above: a late decision took nothing). A launch's BUY was
+        // admitted before its ingress and keeps the limit from there.
+        // (A limit that could not be set from now keeps the one from the
+        // decision: the dispatch then skips and the fact says so.)
+        let deadline = match block_driven {
+            true => TransportStartDeadline::for_profile(
+                profile,
+                clock.id(),
+                clock.now_ns(),
+                config.start_limit_ns,
+            )
+            .unwrap_or(deadline),
+            false => deadline,
+        };
         let mut armed: Vec<ReleaseArmed<'_>> = transports
             .into_iter()
             .zip(frames.iter_mut())
@@ -918,9 +1169,32 @@ impl End for LiveEnd {
             response: None,
             origin: Some(origin),
         };
-        match self.ledger.append(&fact, (self.wall_ms)()) {
-            Ok(_) => self.facts += 1,
-            Err(e) => self.ledger_failure = Some(e),
+        let written = match self.ledger.append(&fact, (self.wall_ms)()) {
+            Ok(_) => {
+                self.facts += 1;
+                true
+            }
+            Err(e) => {
+                self.ledger_failure = Some(e);
+                false
+            }
+        };
+        // BSC3-076: the lease's entry was no transaction: a fact of its
+        // own, only once the BUY's is written (a crash between, or the BUY's
+        // not written, leaves it unresolved at the BUY's nonce: a restart
+        // recovers it, never the BUY untracked).
+        for entry in lease.iter().filter(|_| written).map(|l| l.entry) {
+            let lease_fact = Fact {
+                kind: FactKind::Withdrawn,
+                tx_hash: entry,
+                token: [0; 20],
+                max_block: lease.as_ref().map(|l| l.max_block),
+                ..fact.clone()
+            };
+            match self.ledger.append(&lease_fact, (self.wall_ms)()) {
+                Ok(_) => self.facts += 1,
+                Err(e) => self.ledger_failure = Some(e),
+            }
         }
         if disclosed {
             self.released.push(Released {
@@ -1171,6 +1445,25 @@ pub(crate) mod tests {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// BSC3-076: the owner's lease of the next C3 BUY at `nonce`, as the
+    /// LIVE runtime takes it before a launch (the economics of
+    /// [`config`]: the configured input, its gas and its own exit).
+    pub(crate) fn lease_c3(e: &mut Executor<LiveEnd>, nonce: u64) {
+        let c = config(2, 2);
+        let gas = |limit: u64| u128::from(c.gas_price_wei) * u128::from(limit);
+        let want = LeaseWant {
+            nonce,
+            input_wei: c.input_wei,
+            max_wei: c.input_wei + gas(c.gas_limit),
+            exit_reserve_wei: gas(c.approve_gas_limit) + gas(c.sell_gas_limit),
+            head: HEAD.number,
+            validity_blocks: c.validity_blocks,
+            lease_blocks: c.live_lease_blocks,
+            attempt: None,
+        };
+        e.end_mut().hold_lease(&want).unwrap();
+    }
+
     /// BSC3-025: a builder connection is begun and installed later, never
     /// waited for: with a builder that never answers the handshake (Q5A
     /// waits up to 5 s for it), beginning, the readiness check, the
@@ -1350,6 +1643,7 @@ pub(crate) mod tests {
             input: &input,
             ingress_ns: 100,
         };
+        lease_c3(&mut exec, 0);
         let buy = exec
             .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
@@ -1476,10 +1770,21 @@ pub(crate) mod tests {
         tag: &str,
         answers: Vec<Answer>,
     ) -> (PathBuf, PathBuf, Executor<LiveEnd>, mpsc::Receiver<Vec<u8>>) {
+        armed_clocked(tag, answers, 3_600_000, |now| Box::new(move || now))
+    }
+
+    /// [`armed_answering`] under a grant valid for `valid_ms`, its wall
+    /// clock what `wall` makes of the owner's `now`.
+    fn armed_clocked(
+        tag: &str,
+        answers: Vec<Answer>,
+        valid_ms: u64,
+        wall: impl FnOnce(u64) -> Box<dyn Fn() -> u64 + Send>,
+    ) -> (PathBuf, PathBuf, Executor<LiveEnd>, mpsc::Receiver<Vec<u8>>) {
         let (state, store, now) = live_ready_granting(tag, |now| LiveGrant {
             max_input_wei: 10_000_000_000_000_000,
             max_spend_wei: 100_000_000_000_000_000,
-            ..grant_of(now + 3_600_000, LiveStrategies::Both)
+            ..grant_of(now + valid_ms, LiveStrategies::Both)
         });
         let q = verified_in(&store);
         let armed = store
@@ -1506,7 +1811,7 @@ pub(crate) mod tests {
             LiveRoute::Loopback { port },
             56,
             cfg.capability_generation,
-            Box::new(move || now),
+            wall(now),
         )
         .unwrap();
         let mut exec = Executor::arm_end(
@@ -1570,6 +1875,7 @@ pub(crate) mod tests {
             Refusal::SenderNonce
         );
         assert!(requests.recv_timeout(silent).is_err());
+        lease_c3(&mut exec, 0);
         exec.on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
         requests.recv_timeout(wait).unwrap();
@@ -1671,11 +1977,15 @@ pub(crate) mod tests {
     /// no spend and leaves no fact. A deadline that passes after its
     /// admission (before the write) still counts the attempt: no byte left,
     /// the fact is WITHDRAWN, never on chain, no position, no cost.
+    /// BSC3-076: a launch's BUY late at its lease takes nothing from it (the
+    /// lease's one attempt stays held for the next launch); a block-driven
+    /// intent's limit runs from its admission.
     #[test]
     fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         use crate::live_ledger::fold;
         use crate::sources::total_usage;
         let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let wait = std::time::Duration::from_secs(2);
         let silent = std::time::Duration::from_millis(300);
         let (hash, raw, input) = launch(0, 7);
         let pending = || PendingLaunch {
@@ -1685,22 +1995,56 @@ pub(crate) mod tests {
             input: &input,
             ingress_ns: 100,
         };
-        // Late before the admission: nothing taken, nothing written.
+        // A launch's BUY late before its lease is taken: nothing more taken
+        // (the lease's attempt and spend only), nothing written.
         let (state, d, mut exec, requests) = armed_both("live-late");
+        lease_c3(&mut exec, 0);
+        let leased = crate::sources::admitted_intents(&state).unwrap();
+        assert_eq!(leased.len(), 1);
+        assert!(leased[0].lease);
         let late = clock(100 + 2_000_000, 1);
         let refused = exec.on_launch(pending(), &c2_next(Some(HEAD), 0), &late);
         assert_eq!(refused.unwrap_err(), Refusal::Deadline);
         assert!(requests.recv_timeout(silent).is_err());
-        assert_eq!(total_usage(&state).unwrap().used, 0);
-        assert!(crate::sources::admitted_intents(&state).unwrap().is_empty());
+        assert_eq!(total_usage(&state).unwrap().used, 1);
+        assert_eq!(crate::sources::admitted_intents(&state).unwrap(), leased);
         assert!(Ledger::open(&state).facts().unwrap().is_empty());
+        // The lease is still held: the next launch in time (another token;
+        // the late one's is used) takes it, under the same attempt.
+        assert!(exec.end().lease().is_some());
+        let (hash_b, raw_b, input_b) = launch(1, 7);
+        let next = PendingLaunch {
+            hash: hash_b,
+            raw: &raw_b,
+            to: Some(portal),
+            input: &input_b,
+            ingress_ns: 100,
+        };
+        let buy = exec
+            .on_launch(next, &c2_next(Some(HEAD), 0), &clock(100, 7))
+            .unwrap();
+        requests.recv_timeout(wait).unwrap();
+        assert_eq!(total_usage(&state).unwrap().used, 1);
+        assert!(exec.end().lease().is_none());
+        let facts = Ledger::open(&state).facts().unwrap();
+        assert_eq!(
+            facts
+                .iter()
+                .map(|f| (f.kind, f.tx_hash))
+                .collect::<Vec<_>>(),
+            vec![
+                (FactKind::Released, buy.handoff.tx_hash),
+                (FactKind::Withdrawn, leased[0].tx_hash)
+            ]
+        );
         exec.disarm().unwrap();
         fs::remove_dir_all(d).unwrap();
         fs::remove_dir_all(state).unwrap();
-        // Late only once the owner admitted it (its entry exists).
+        // Strategy C's BUY late only once the owner admitted it (its entry
+        // exists): its limit runs from the admission, which it misses too.
         let (state, d, mut exec, requests) = armed_both("live-late-after");
         let spend = state.join("live-spend");
-        let t = std::cell::Cell::new(100u64);
+        let t = std::cell::Cell::new(500u64);
         let after = crate::paper_exec::FnClock {
             id: 1,
             now: || {
@@ -1709,7 +2053,14 @@ pub(crate) mod tests {
                 t.get()
             },
         };
-        let refused = exec.on_launch(pending(), &c2_next(Some(HEAD), 0), &after);
+        let refused = exec.on_strategy_buy(
+            [0xAB; 20],
+            curve_after(1_000_000_000_000_000_000),
+            U256::from(10_000_000_000_000_000u64),
+            &strategy_c2_next(Some(HEAD), 0),
+            &after,
+            500,
+        );
         assert_eq!(refused.unwrap_err(), Refusal::Deadline);
         assert!(requests.recv_timeout(silent).is_err());
         assert!(exec.end().released().is_empty());
@@ -1735,6 +2086,147 @@ pub(crate) mod tests {
         fs::remove_dir_all(state).unwrap();
     }
 
+    /// BSC3-076 review: a launch's BUY whose start limit passes after it
+    /// took its lease (before the write): no byte left, its fact and the
+    /// lease's WITHDRAWN, the lease's attempt counted (BSC3-068), the lease
+    /// gone from the end.
+    #[test]
+    fn a_buy_late_after_its_lease_was_taken_withdraws_both() {
+        use crate::live_ledger::fold;
+        let (state, d, mut exec, requests) = armed_both("live-lease-late");
+        let silent = std::time::Duration::from_millis(300);
+        lease_c3(&mut exec, 0);
+        let leased = crate::sources::admitted_intents(&state).unwrap();
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        LEASE_BOUND.with(|b| b.set(false));
+        let t = std::cell::Cell::new(100u64);
+        let late = crate::paper_exec::FnClock {
+            id: 1,
+            now: || {
+                let bound = LEASE_BOUND.with(|b| b.get());
+                t.set(t.get() + if bound { 2_000_000 } else { 7 });
+                t.get()
+            },
+        };
+        let refused = exec.on_launch(pending, &c2_next(Some(HEAD), 0), &late);
+        assert_eq!(refused.unwrap_err(), Refusal::Deadline);
+        assert!(requests.recv_timeout(silent).is_err());
+        assert!(exec.end().lease().is_none());
+        let facts = Ledger::open(&state).facts().unwrap();
+        assert_eq!(
+            facts.iter().map(|f| f.kind).collect::<Vec<_>>(),
+            vec![FactKind::Withdrawn, FactKind::Withdrawn]
+        );
+        assert_eq!(facts[1].tx_hash, leased[0].tx_hash);
+        let book = fold(&facts);
+        assert_eq!(book.unresolved().count(), 0);
+        assert!(book.positions.is_empty());
+        assert_eq!(crate::sources::total_usage(&state).unwrap().used, 1);
+        LEASE_BOUND.with(|b| b.set(false));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-076 re-review M1: a lease holds its own UTC day's slot only: at
+    /// the next day it is renewed (taking that day's slot) and never bound
+    /// to a BUY of another day.
+    #[test]
+    fn a_lease_holds_only_its_own_utc_day() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        const DAY: u64 = 86_400_000;
+        let clock = Arc::new(AtomicU64::new(0));
+        let wall = clock.clone();
+        let (state, d, mut exec, _requests) =
+            armed_clocked("live-lease-day", Vec::new(), 2 * DAY, move |now| {
+                wall.store(now, Ordering::SeqCst);
+                Box::new(move || wall.load(Ordering::SeqCst))
+            });
+        let start = clock.load(Ordering::SeqCst);
+        let midnight = (start / DAY + 1) * DAY;
+        let usage = |at: u64| crate::sources::buy_usage(&state, at).unwrap().used;
+        clock.store(midnight - 60_000, Ordering::SeqCst);
+        lease_c3(&mut exec, 0);
+        assert_eq!(usage(midnight - 60_000), 1);
+        let lease = exec.end().lease().cloned().unwrap();
+        let bind = |exec: &Executor<LiveEnd>, now_ms: u64| {
+            LiveEnd::lease_for(
+                &mut Some(lease.clone()),
+                &exec.end().store,
+                exec.end().armed(),
+                now_ms,
+                lease.nonce,
+                lease.origin,
+                (lease.input_wei, lease.max_wei, lease.exit_reserve_wei),
+                lease.max_block,
+            )
+        };
+        assert!(bind(&exec, midnight - 1).is_ok());
+        let why = bind(&exec, midnight + 1_000).unwrap_err();
+        assert!(why.contains("another UTC day"), "{why}");
+        // After midnight the same lease is renewed: the new day's slot.
+        clock.store(midnight + 1_000, Ordering::SeqCst);
+        assert_eq!(usage(midnight + 1_000), 0);
+        lease_c3(&mut exec, 0);
+        assert_eq!(usage(midnight + 1_000), 1);
+        assert_eq!(exec.end().lease().unwrap().attempt(), lease.attempt());
+        assert!(bind(&exec, midnight + 2_000).is_err());
+        exec.disarm().unwrap();
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    /// BSC3-076 review H2: the lease's facts follow the BUY's only once it
+    /// is written: a BUY whose fact the ledger did not take leaves its lease
+    /// unresolved (a restart recovers it at the BUY's nonce), never the BUY
+    /// untracked behind a lease marked withdrawn.
+    #[test]
+    fn a_buy_whose_fact_is_not_written_keeps_its_lease_unresolved() {
+        let (state, d, mut exec, requests) = armed_both("live-lease-unwritten");
+        let wait = std::time::Duration::from_secs(2);
+        lease_c3(&mut exec, 0);
+        let leased = crate::sources::admitted_intents(&state).unwrap();
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let (hash, raw, input) = launch(0, 7);
+        let pending = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &input,
+            ingress_ns: 100,
+        };
+        crate::live_ledger::FAIL_APPENDS.with(|f| f.set(1));
+        let _ = exec.on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7));
+        crate::live_ledger::FAIL_APPENDS.with(|f| f.set(0));
+        // It left; neither its fact nor the lease's was written.
+        requests.recv_timeout(wait).unwrap();
+        assert!(exec.end().ledger_failure().is_some());
+        assert!(Ledger::open(&state).facts().unwrap().is_empty());
+        assert_eq!(crate::sources::admitted_intents(&state).unwrap(), leased);
+        // A restart recovers the lease, UNKNOWN at the BUY's nonce.
+        let recovered = Ledger::open(&state)
+            .recover(&crate::sources::admitted_intents(&state).unwrap(), 1)
+            .unwrap();
+        assert_eq!(recovered.unknown, 1);
+        let facts = Ledger::open(&state).facts().unwrap();
+        assert_eq!(
+            (facts[0].kind, facts[0].tx_hash, facts[0].nonce),
+            (FactKind::Unknown, leased[0].tx_hash, 0)
+        );
+        drop(exec);
+        fs::remove_dir_all(d).unwrap();
+        fs::remove_dir_all(state).unwrap();
+    }
+
     /// BSC3-055: a token is bought once per sender and arm, whichever
     /// strategy asks: Strategy C's BUY of the token C3 bought is refused.
     #[test]
@@ -1751,6 +2243,7 @@ pub(crate) mod tests {
             input: &input,
             ingress_ns: 100,
         };
+        lease_c3(&mut exec, 0);
         let buy = exec
             .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
@@ -1802,6 +2295,7 @@ pub(crate) mod tests {
                 input: &input,
                 ingress_ns: 100,
             };
+            lease_c3(&mut exec, 0);
             let buy = exec
                 .on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
                 .unwrap();
@@ -1889,6 +2383,7 @@ pub(crate) mod tests {
             input: &input,
             ingress_ns: 100,
         };
+        lease_c3(&mut exec, 0);
         exec.on_launch(pending, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
         requests.recv_timeout(wait).unwrap();
