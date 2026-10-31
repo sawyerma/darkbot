@@ -1490,5 +1490,14 @@ pub(crate) mod tests {
             e.starts_with("FE06_SCOPE_USE_UNKNOWN: priority_fee_lamports "),
             "{e}"
         );
+        // A WSOL position's unwrap swaps nothing: a scope of NO_SWAP admits it, never a sale.
+        let unwraps_only = scope_of(&[("route", "NO_SWAP")]);
+        let unwrap = ExitUse {
+            route: route_class(darkbot_project0::planner::RouteKind::NoSwap),
+            ..exit_use(&signer)
+        };
+        assert_eq!(check_use(&unwraps_only, &Use::Exit(unwrap)), Ok(()));
+        let e = check_use(&unwraps_only, &Use::Exit(exit_use(&signer))).unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_USE: route FREE_PUBLIC "), "{e}");
     }
 }

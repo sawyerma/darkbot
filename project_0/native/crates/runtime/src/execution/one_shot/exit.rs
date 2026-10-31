@@ -36,7 +36,8 @@ pub struct ExitApproval {
     pub binary_sha256: String,
     pub wallet: String,
     pub mint: String,
-    /// The swap program the signed exit routes through.
+    /// The swap program the signed exit routes through (a WSOL position's unwrap: the SPL Token
+    /// program).
     pub route_program: String,
     pub expires_unix_s: u64,
     pub max_state_age_ms: u64,
@@ -466,10 +467,13 @@ fn consistent(
         if sold != -i128::from(i.amount_in) {
             return Err(err("EXIT_PARTIAL_OR_MISMATCHED_SALE_HOLD_RETAINED"));
         }
-        if sol.checked_add(i128::from(fee)).ok_or_else(overflow)?
-            < i128::from(i.minimum_out_lamports)
-        {
+        let proceeds = sol.checked_add(i128::from(fee)).ok_or_else(overflow)?;
+        if proceeds < i128::from(i.minimum_out_lamports) {
             return Err(err("EXIT_BELOW_FLOOR_HOLD_RETAINED"));
+        }
+        // An unwrap pays exactly its units: more would be lamports that were never the position.
+        if i.mint == WSOL_MINT && proceeds != i128::from(i.amount_in) {
+            return Err(err("EXIT_UNWRAP_PAYOUT_MISMATCH_HOLD_RETAINED"));
         }
     } else if sold != 0 {
         return Err(err("EXIT_FAILED_BUT_SOLD_HOLD_RETAINED"));
@@ -1748,19 +1752,19 @@ pub(crate) mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
-    /// FE-04 exit ("unvollständiger Exit"): a partial or mismatched sale, foreign wallet activity
-    /// (also WSOL the unwrap paid out), proceeds below the signed floor, a failure that sold, or an
-    /// observation with unknown reasons never finalizes — the exit stays UNKNOWN with every hold,
-    /// nothing is booked.
     /// A WSOL position's exit (its unwrap, floor = units, no slippage) settles like every exit:
     /// the WSOL account's whole position leaves, the lamports gain the units net of the fee (the
     /// closed account's rent returns and is paid again), the position is released; an unwrap that
-    /// paid out more WSOL than the position (foreign units in the account) stays UNKNOWN with
-    /// every hold.
+    /// paid out more WSOL than the position (foreign units in the account) or more lamports than
+    /// its units (lamports that were never the position) stays UNKNOWN with every hold.
     #[cfg(feature = "crate_health")]
     #[test]
     fn a_wsol_positions_unwrap_settles_as_its_exit() {
-        for (paid_out, settles) in [(-1_000i128, true), (-1_500, false)] {
+        for (paid_out, extra_lamports, settles) in [
+            (-1_000i128, 0i128, true),
+            (-1_500, 0, false),
+            (-1_000, 7, false),
+        ] {
             let (path, a0, _, _) = setup();
             let (mut j, a, mint) = settled_in(&path, &a0.wallet, 1_000, WSOL_MINT);
             assert_eq!(j.open_inventory()[WSOL_MINT].units, 1_000);
@@ -1772,7 +1776,12 @@ pub(crate) mod tests {
                 .unwrap();
             let sig = &ei.signatures[0];
             let fee = i128::from(ei.transaction_fee_lamports);
-            let o = observation(sig, true, -paid_out - fee, &[(&mint, paid_out)]);
+            let o = observation(
+                sig,
+                true,
+                -paid_out + extra_lamports - fee,
+                &[(&mint, paid_out)],
+            );
             let step = j
                 .apply_exit_evidence(evidence(sig, o), &value, 2_000)
                 .unwrap();
@@ -1793,6 +1802,10 @@ pub(crate) mod tests {
         }
     }
 
+    /// FE-04 exit ("unvollständiger Exit"): a partial or mismatched sale, foreign wallet activity
+    /// (also WSOL the unwrap paid out), proceeds below the signed floor, a failure that sold, or an
+    /// observation with unknown reasons never finalizes — the exit stays UNKNOWN with every hold,
+    /// nothing is booked.
     #[test]
     fn inconsistent_exit_receipts_stay_unknown_with_every_hold() {
         let other = solana_sdk::pubkey::Pubkey::new_unique().to_string();

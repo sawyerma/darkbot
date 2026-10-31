@@ -44,6 +44,14 @@ pub mod p0 {
     pub(crate) fn liquidation_record_rent_lamports<S: AccountSource + ?Sized>(
         state: &S,
     ) -> Result<u64, &'static str> {
+        rent_exempt_lamports(state, LIQUIDATION_RECORD_SPACE)
+    }
+
+    /// The rent-exempt minimum of an account of `space` bytes from the canonical Rent sysvar.
+    pub(crate) fn rent_exempt_lamports<S: AccountSource + ?Sized>(
+        state: &S,
+        space: usize,
+    ) -> Result<u64, &'static str> {
         let (owner, _, data) = state
             .account(&solana_sdk::sysvar::rent::id())
             .ok_or("RENT_SYSVAR_MISSING")?;
@@ -52,7 +60,7 @@ pub mod p0 {
         }
         let rent: solana_sdk::rent::Rent =
             bincode::deserialize(data).map_err(|_| "RENT_SYSVAR_DECODE")?;
-        Ok(rent.minimum_balance(LIQUIDATION_RECORD_SPACE))
+        Ok(rent.minimum_balance(space))
     }
 
     /// B4: USD-micro cost of the new record's rent: canonical Rent sysvar, conservative SOL price.

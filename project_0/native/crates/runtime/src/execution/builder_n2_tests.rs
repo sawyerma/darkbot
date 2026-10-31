@@ -996,6 +996,7 @@ fn exit_candidate<'a>(
             (crate::execution::route::WSOL_MINT.to_string(), wsol_balance),
         ]
         .into(),
+        unwrap_payout_lamports: None,
         reserved_elsewhere: Default::default(),
         policy_reserve: Default::default(),
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),

@@ -145,6 +145,9 @@ impl ShadowOwner {
     }
 }
 
+/// The size of an SPL Token account (`Account::LEN`): what the re-creation of a WSOL ATA rents.
+const TOKEN_ACCOUNT_SPACE: usize = 165;
+
 impl ShadowOwner {
     /// One owner pass: apply a finished settlement read, then schedule the next step when due —
     /// the attempt first, then its open exit.
@@ -844,6 +847,20 @@ impl ShadowOwner {
                 balances.insert(m.to_string(), amount);
             }
         }
+        // An unwrap's net payout: every lamport of the payer's own (Token program) WSOL ATA the
+        // close pays out, less the rent-exempt minimum its re-creation pays (Rent sysvar).
+        let unwrap_payout_lamports = (mint == wsol)
+            .then(|| {
+                use solana_sdk::signer::Signer;
+                let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().ok()?;
+                let own = accounts::associated_token_address(&self.payer.pubkey(), &wsol, &token);
+                let (ata, _) = accounts::validated_liquidator_ata(&view, &wsol, &self.atas)?;
+                let rent =
+                    crate::execution::builder::p0::rent_exempt_lamports(&view, TOKEN_ACCOUNT_SPACE)
+                        .ok()?;
+                (ata == own).then(|| self.st.get(&ata)?.lamports.checked_sub(rent))?
+            })
+            .flatten();
         let candidate = ExitCandidate {
             route: &route,
             payer: &self.payer,
@@ -856,6 +873,7 @@ impl ShadowOwner {
             evaluated,
             state_valid: self.st.run_state().is_tradable() && !self.program_upgrade_latched,
             balances,
+            unwrap_payout_lamports,
             // P8-CTRL.5: the exit realizes its attempt's open position — that hold (units and the
             // exit reserve) is its own, never another's.
             reserved_elsewhere: self

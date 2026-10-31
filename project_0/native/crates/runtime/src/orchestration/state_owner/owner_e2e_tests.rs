@@ -6468,8 +6468,20 @@ fn dec06_active_crosscheck_without_budget_is_skipped() {
 /// server error, the send's fate unknown; a simulation answered after `sim_delay_ms`) under a
 /// budget that admits the test's calls at once; the node's methods in call order.
 fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mutex<Vec<String>>> {
+    dec13b_live_node_wires(f, send_ok, sim_delay_ms).0
+}
+
+/// The live node, with every transaction it was sent (decoded).
+type SentTxs = Arc<Mutex<Vec<solana_sdk::transaction::VersionedTransaction>>>;
+fn dec13b_live_node_wires(
+    f: &mut Fixture,
+    send_ok: bool,
+    sim_delay_ms: u64,
+) -> (Arc<Mutex<Vec<String>>>, SentTxs) {
     use crate::execution::one_shot::non_landing::loopback::{endpoint, Reply};
     use base64::Engine;
+    let sent: SentTxs = Default::default();
+    let record = sent.clone();
     let (url, calls) =
         endpoint(Arc::new(
             move |method: &str, params: &serde_json::Value| match method {
@@ -6489,7 +6501,9 @@ fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mu
                         .unwrap();
                     let tx: solana_sdk::transaction::VersionedTransaction =
                         bincode::deserialize(&wire).unwrap();
-                    Reply::Result(serde_json::json!(tx.signatures[0].to_string()))
+                    let signature = tx.signatures[0].to_string();
+                    record.lock().unwrap().push(tx);
+                    Reply::Result(serde_json::json!(signature))
                 }
                 _ => Reply::Status(500),
             },
@@ -6510,7 +6524,7 @@ fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mu
             RpcSubmitter::with_budget(url, true, budget).unwrap(),
         ),
     );
-    calls
+    (calls, sent)
 }
 
 /// DEC-13b: LIVE requested — P8-CTRL.1: every economic switch and the owner's signer ENABLED —
@@ -7193,21 +7207,33 @@ fn dec13b_exit_fixture(
     Arc<Mutex<Vec<String>>>,
     crate::execution::one_shot::exit::ExitApproval,
 ) {
-    dec13b_exit_fixture_of(tag, send_ok, None)
+    let (f, calls, _, e) = dec13b_exit_fixture_of(tag, send_ok, None);
+    (f, calls, e)
 }
 
-/// The exit fixture; with `wsol_units` the open position is WSOL (from a SOL bank), its route
-/// program the SPL Token program and its WSOL ATA holding `wsol_units`; the router then answers
-/// nothing (an unwrap asks none).
+/// A WSOL position's exit case: its WSOL ATA's tokens and lamports beyond the rent-exempt
+/// reserve, and the route program its approval names.
+#[derive(Clone, Copy)]
+struct WsolCase {
+    tokens: u64,
+    unsynced_lamports: u64,
+    route_program: &'static str,
+}
+
+/// The exit fixture; with a `WsolCase` the open position is 1000 WSOL (from a SOL bank) and the
+/// wallet's WSOL ATA a native account holding the case's tokens over the Rent sysvar's reserve;
+/// the router then answers nothing (an unwrap asks none). Also every transaction sent.
 fn dec13b_exit_fixture_of(
     tag: &str,
     send_ok: bool,
-    wsol_units: Option<u64>,
+    wsol_case: Option<WsolCase>,
 ) -> (
     Fixture,
     Arc<Mutex<Vec<String>>>,
+    SentTxs,
     crate::execution::one_shot::exit::ExitApproval,
 ) {
+    let wsol_units = wsol_case.map(|w| w.tokens);
     use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, EXIT_SCHEMA};
     use solana_sdk::signer::Signer;
     let mut f = fixture_with(tag, None);
@@ -7230,11 +7256,7 @@ fn dec13b_exit_fixture_of(
         }
     };
     let mint: Pubkey = mint_s.parse().unwrap();
-    let jup = if wsol_units.is_some() {
-        protocol::TOKEN_PROGRAM_ID
-    } else {
-        protocol::JUP_SWAP_PROGRAM_ID
-    };
+    let jup = wsol_case.map_or(protocol::JUP_SWAP_PROGRAM_ID, |w| w.route_program);
     let mut e = crate::execution::one_shot::exit::tests::exit_approval(&wallet, &mint_s, jup);
     if wsol_units.is_some() {
         // An unwrap pays the position one to one: its floor is the position's units.
@@ -7303,7 +7325,7 @@ fn dec13b_exit_fixture_of(
             t_rx_ns: 0,
         }
     };
-    let state = vec![
+    let mut state = vec![
         p2_clock(100, now_s),
         AccountUpdate {
             pubkey: liquidator,
@@ -7315,9 +7337,31 @@ fn dec13b_exit_fixture_of(
             source: SourceKind::Snapshot,
             t_rx_ns: 0,
         },
-        ata(&mint, 1_000),
-        ata(&wsol, wsol_units.unwrap_or(0)),
     ];
+    match wsol_case {
+        None => state.extend([ata(&mint, 1_000), ata(&wsol, 0)]),
+        Some(w) => {
+            // A native account: `is_native` = its rent-exempt reserve, lamports = reserve +
+            // tokens (+ lamports never synced).
+            let rent = solana_sdk::rent::Rent::default();
+            let reserve = rent.minimum_balance(165);
+            let mut native = ata(&wsol, w.tokens);
+            native.data[109..113].copy_from_slice(&1u32.to_le_bytes());
+            native.data[113..121].copy_from_slice(&reserve.to_le_bytes());
+            native.lamports = reserve + w.tokens + w.unsynced_lamports;
+            state.push(native);
+            state.push(AccountUpdate {
+                pubkey: solana_sdk::sysvar::rent::id(),
+                owner: solana_sdk::sysvar::id(),
+                lamports: 1,
+                data: bincode::serialize(&rent).unwrap(),
+                slot: 100,
+                write_version: None,
+                source: SourceKind::Snapshot,
+                t_rx_ns: 0,
+            });
+        }
+    }
     f.owner.st.install_snapshot(100, state.clone());
     f.owner.st.reconcile(100, &state);
     f.owner.st.confirm_ready();
@@ -7338,52 +7382,110 @@ fn dec13b_exit_fixture_of(
             // Nothing listens: a router asked would fail the exit.
             Some(_) => "http://127.0.0.1:9".into(),
         });
-    let calls = dec13b_live_node(&mut f, send_ok, 0);
-    (f, calls, e)
+    let (calls, sent) = dec13b_live_node_wires(&mut f, send_ok, 0);
+    (f, calls, sent, e)
 }
 
 /// FE-04 exit of a WSOL position (SOL-bank collateral): its unwrap — no router asked, the
-/// signed transaction exactly the close of the wallet's WSOL ATA holding the position and its
-/// re-creation, through the same FE-06/P8-CTRL permit, reservation, UNKNOWN handoff and one
-/// send as every exit; a WSOL account holding anything but the position is refused before
-/// anything is sent (the close would pay it out).
+/// signed and sent transaction exactly the compute budget, the close of the wallet's WSOL ATA
+/// holding the position and its re-creation, the wallet its only signer — through the same
+/// FE-06/P8-CTRL permit, reservation, UNKNOWN handoff and one send as every exit. Refused before
+/// anything is sent: a WSOL account holding more tokens than the position or lamports that were
+/// never synced (the close would pay them out), and an approval naming another route program.
 #[test]
 fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
     use solana_sdk::signer::Signer;
-    for (units, sent) in [(1_000u64, true), (1_500, false)] {
-        let (mut f, calls, e) =
-            dec13b_exit_fixture_of(&format!("wsol_exit_{units}"), true, Some(units));
+    let token = protocol::TOKEN_PROGRAM_ID;
+    let case = |tokens, unsynced_lamports, route_program| WsolCase {
+        tokens,
+        unsynced_lamports,
+        route_program,
+    };
+    for (name, w, refusal) in [
+        ("unwrap", case(1_000, 0, token), None),
+        (
+            "foreign_tokens",
+            case(1_500, 0, token),
+            Some("EXIT_WSOL_ACCOUNT_NOT_THE_POSITION_OR_UNKNOWN"),
+        ),
+        (
+            "unsynced_lamports",
+            case(1_000, 7, token),
+            Some("EXIT_WSOL_ACCOUNT_NOT_THE_POSITION_OR_UNKNOWN"),
+        ),
+        (
+            "router_named",
+            case(1_000, 0, protocol::JUP_SWAP_PROGRAM_ID),
+            Some("EXIT_ROUTE_NOT_BOUND"),
+        ),
+    ] {
+        let (mut f, calls, sent, e) =
+            dec13b_exit_fixture_of(&format!("wsol_exit_{name}"), true, Some(w));
         let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
         f.owner
             .fe04_approval
             .as_mut()
             .unwrap()
             .refresh(Some(&dir), &wallet);
-        assert_eq!(f.owner.approval_status().state, "VALID");
+        assert_eq!(f.owner.approval_status().state, "VALID", "{name}");
         dec13b_live(&mut f, true);
         f.owner.fe04_exit_admission();
         let a = &f.owner.fe04_admissions;
-        if sent {
-            assert_eq!(
-                calls.lock().unwrap().clone(),
-                ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
-                "{a:?}"
-            );
-            assert_eq!(a.exits_submitted, 1);
-            let held = f.owner.fe04_held.as_ref().unwrap();
-            assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
-            let taker = f.owner.payer.pubkey();
-            let unwrap = crate::execution::route::unwrap_exit_route(&taker, units).unwrap();
-            assert_eq!(
-                crate::execution::route::unwrap_route_shape(&unwrap.instructions, &taker),
-                Ok(())
-            );
-        } else {
-            assert!(calls.lock().unwrap().is_empty(), "nothing sent");
-            assert_eq!(
-                (a.exits_submitted, a.last_exit_refusal.as_str()),
-                (0, "EXIT_WSOL_ACCOUNT_NOT_THE_POSITION_OR_UNKNOWN")
-            );
+        match refusal {
+            None => {
+                assert_eq!(
+                    calls.lock().unwrap().clone(),
+                    ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
+                    "{a:?}"
+                );
+                assert_eq!(a.exits_submitted, 1);
+                let held = f.owner.fe04_held.as_ref().unwrap();
+                assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
+                // What was signed and sent: compute budget, close, create; one signer.
+                let tx = sent.lock().unwrap()[0].clone();
+                let taker = f.owner.payer.pubkey();
+                let keys = tx.message.static_account_keys();
+                assert_eq!(
+                    (tx.message.header().num_required_signatures, keys[0]),
+                    (1, taker)
+                );
+                let unwrap = crate::execution::route::unwrap_exit_route(&taker, 1_000).unwrap();
+                let compiled: Vec<(Pubkey, Vec<u8>, Vec<Pubkey>)> = tx
+                    .message
+                    .instructions()
+                    .iter()
+                    .map(|ix| {
+                        (
+                            keys[usize::from(ix.program_id_index)],
+                            ix.data.clone(),
+                            ix.accounts.iter().map(|k| keys[usize::from(*k)]).collect(),
+                        )
+                    })
+                    .filter(|(program, ..)| {
+                        *program != Pubkey::from_str_const(protocol::COMPUTE_BUDGET_PROGRAM_ID)
+                    })
+                    .collect();
+                let expected: Vec<(Pubkey, Vec<u8>, Vec<Pubkey>)> = unwrap
+                    .instructions
+                    .iter()
+                    .map(|ix| {
+                        (
+                            ix.program_id,
+                            ix.data.clone(),
+                            ix.accounts.iter().map(|m| m.pubkey).collect(),
+                        )
+                    })
+                    .collect();
+                assert_eq!(compiled, expected, "exactly the close and the re-creation");
+            }
+            Some(reason) => {
+                assert!(calls.lock().unwrap().is_empty(), "{name}: nothing sent");
+                assert_eq!(
+                    (a.exits_submitted, a.last_exit_refusal.as_str()),
+                    (0, reason),
+                    "{name}"
+                );
+            }
         }
         cleanup(f);
     }
