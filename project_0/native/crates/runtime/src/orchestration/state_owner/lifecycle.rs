@@ -3,8 +3,9 @@ use super::*;
 
 impl ShadowOwner {
     pub(super) fn lifecycle(&mut self) -> bool {
-        // P8-RES-02: the book follows the durable FE-04 journal (a finalized reconciliation
-        // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
+        // P8-RES-02: the book follows the durable FE-04 journal (a settlement releases the
+        // attempt, its open positions stay held until exited, UNKNOWN keeps holding, an
+        // unreadable journal blocks every offer).
         // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
         // DEC-13b (review M2): an admission (and its wallet lock) is open only while LIVE is.
         #[cfg(feature = "crate_health")]

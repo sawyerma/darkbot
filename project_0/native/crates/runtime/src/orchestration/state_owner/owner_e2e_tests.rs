@@ -7484,12 +7484,14 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         methods(&calls),
         f.owner.fe04_admissions
     );
-    // P8-CTRL.5 (WP1): the attempt holds its SOL debit and, beside it, the grant's exit reserve.
+    // P8-CTRL.5 (WP1): the attempt holds its SOL debit and, beside it, the exit reserve — the
+    // grant's exit ceiling for each mint it can leave open (asset and liability; native SOL
+    // needs no exit).
     let held = f.owner.fe04_held.as_ref().unwrap();
     let debit = held.attempt_records().unwrap()[0]
         .sol_debit_lamports
         .unwrap();
-    assert_eq!(held.holds()["SOL"], debit + 123_456);
+    assert_eq!(held.holds()["SOL"], debit + 2 * 123_456);
     cleanup(f);
     // What runs differs: no real signature at all.
     type Edit = Box<dyn FnOnce(&mut crate::orchestration::fe06::Running)>;
@@ -7531,7 +7533,7 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         cleanup(f);
     }
     // One fact of the attempt outside the scope: refused by its sign permit, nothing durable.
-    let facts: [(&str, (&str, &str), &str); 3] = [
+    let facts: [(&str, (&str, &str), &str); 4] = [
         (
             "fee",
             ("max_fee_lamports", "4999"),
@@ -7546,6 +7548,12 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
             "spend",
             ("max_spend_lamports", "1"),
             "FE06_SCOPE_USE: grant_spend_lamports ",
+        ),
+        // P8-CTRL.5 (WP1 review M3): no positive exit ceiling — no safe exit reserve.
+        (
+            "exit_reserve",
+            ("max_exit_cost_lamports", "0"),
+            "FE06_SCOPE_USE: max_exit_cost_lamports 0 ",
         ),
     ];
     for (tag, field, reason) in facts {

@@ -81,8 +81,8 @@ impl WalletReservations {
     }
 
     /// P8-RES-02: the book of `wallet` from its durable FE-04 journal in `dir` (`<wallet>.p0j`):
-    /// a hold that is not finalized — reserved, UNKNOWN after a restart, or handed off with an
-    /// UNKNOWN outcome — stays held; a finalized one is released; no journal is no hold. A
+    /// its `active_hold` — an attempt until its settlement, an exit in flight, the open positions
+    /// of a settled attempt, each with its exit reserve — stays held; no journal is no hold. A
     /// journal that cannot be opened (damaged, or locked by a running attempt) is an error.
     pub fn from_fe04_journal(dir: &std::path::Path, wallet: &str) -> Result<Self, String> {
         Self::replay_fe04_journal(dir, wallet).map(|(book, _)| book)
@@ -184,8 +184,8 @@ impl WalletReservations {
         Ok(())
     }
 
-    /// P8-RES-02: the book after a restart, from every not finalized FE-04 hold (reserved or with
-    /// an UNKNOWN outcome — both stay held until their finalized reconciliation).
+    /// P8-RES-02: the book after a restart, from every durable FE-04 hold (`Journal::active_hold`:
+    /// UNKNOWN keeps holding; a settlement releases an attempt exactly once).
     pub fn rebuild(holds: impl IntoIterator<Item = ActiveHold>) -> Result<Self, &'static str> {
         let mut book = Self::default();
         for h in holds {

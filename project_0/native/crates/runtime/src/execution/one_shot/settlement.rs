@@ -449,7 +449,10 @@ impl Journal {
                         SettlementSubject::from(&s.intent).non_landing(),
                         latest(None),
                     ),
-                    held_since_unix_ms: (!finalized).then_some(s.intent.evaluated_unix_ms),
+                    // Held until its settlement unless proven not landed (`active_hold`).
+                    held_since_unix_ms: (!finalized
+                        || (s.phase == Phase::HaltFinalized && s.non_landing.is_none()))
+                    .then_some(s.intent.evaluated_unix_ms),
                     release: s.non_landing.clone(),
                 }
             }

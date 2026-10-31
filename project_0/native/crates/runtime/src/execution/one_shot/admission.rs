@@ -236,9 +236,10 @@ impl Fe04Admission {
         };
         // P8-CTRL.5: the separate exit reserve of the grant the attempt runs under, held with it
         // until no position stays open — without a computable one no new liquidation.
+        let mints: Vec<String> = c.plan.assets.iter().map(ToString::to_string).collect();
         let Some(exit_reserve) = gates
             .and_then(|g| g.fe06)
-            .map(|f| f.exit_reserve_lamports())
+            .and_then(|f| f.exit_reserve_lamports(&mints))
         else {
             return refuse("FE04_EXIT_RESERVE_UNKNOWN");
         };

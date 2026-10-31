@@ -531,6 +531,24 @@ fn total(what: &str, booked: u64, this: u64, bound: u64) -> Result<(), String> {
     at_most(what, sum, bound)
 }
 
+/// P8-CTRL.5: the separate exit reserve of an attempt under `scope` — one exit's ceiling for
+/// every mint the attempt can leave open (its plan's mints but native SOL, at least one);
+/// `None`: a scope without a positive exit ceiling (no safe reserve: no new liquidation) or an
+/// overflow. The one reserve the FE-06 check keeps free and the FE-04 reservation holds.
+pub fn exit_reserve(scope: &Scope, mints: &[String]) -> Option<u64> {
+    if scope.max_exit_cost_lamports == 0 {
+        return None;
+    }
+    let open: BTreeSet<&str> = mints
+        .iter()
+        .map(String::as_str)
+        .filter(|m| *m != crate::execution::one_shot::exit::WSOL_MINT)
+        .collect();
+    scope
+        .max_exit_cost_lamports
+        .checked_mul(u64::try_from(open.len().max(1)).ok()?)
+}
+
 /// The wallet's free SOL after `spend`, against what must stay in it.
 fn reserve_within(
     free: Option<u64>,
@@ -631,9 +649,16 @@ pub fn check_use(s: &Scope, u: &Use) -> Result<(), String> {
                 spend,
                 s.max_spend_lamports,
             )?;
-            // The reserve, and what the position the attempt leaves costs to exit, stay in the
+            // The reserve, and what the positions the attempt can leave cost to exit, stay in the
             // wallet after its whole debit (P8-CTRL.5: no new liquidation without them).
-            let keep = s.reserve_lamports.checked_add(s.max_exit_cost_lamports);
+            let exit = exit_reserve(s, &a.mints).ok_or_else(|| {
+                outside(
+                    "max_exit_cost_lamports",
+                    s.max_exit_cost_lamports,
+                    "a positive exit ceiling (the attempt's exit reserve)",
+                )
+            })?;
+            let keep = s.reserve_lamports.checked_add(exit);
             reserve_within(a.sol_free_lamports, spend, keep, s)?;
             slippage_within(a.slippage_bps, s)?;
             route_within(a.route, s)?;
@@ -1270,6 +1295,36 @@ pub(crate) mod tests {
 
     /// P8-CTRL.3/.5: an egress stays within its grant's scope — every fact the scope bounds; one
     /// outside or unknown refuses with its name (never a default, never a zero).
+    #[test]
+    fn p8ctrl05_the_exit_reserve_is_one_exit_ceiling_per_mint_it_can_leave_open() {
+        use super::{check_use, exit_reserve, Use};
+        use crate::execution::one_shot::exit::WSOL_MINT;
+        let signer = Pubkey::new_unique();
+        let scope_of =
+            |o: &[(&str, &str)]| parse(text(&signer, o).as_bytes(), &ceilings()).unwrap();
+        let s = scope_of(&[("max_exit_cost_lamports", "1000")]);
+        let other = Pubkey::new_unique().to_string();
+        assert_eq!(exit_reserve(&s, &[KEY.into()]), Some(1_000));
+        assert_eq!(
+            exit_reserve(
+                &s,
+                &[KEY.into(), other.clone(), WSOL_MINT.into(), KEY.into()]
+            ),
+            Some(2_000),
+            "each distinct mint but native SOL"
+        );
+        assert_eq!(
+            exit_reserve(&s, &[WSOL_MINT.into()]),
+            Some(1_000),
+            "at least one exit"
+        );
+        // No positive exit ceiling: no safe reserve, no new liquidation.
+        let zero = scope_of(&[("max_exit_cost_lamports", "0")]);
+        assert_eq!(exit_reserve(&zero, &[KEY.into()]), None);
+        let refused = check_use(&zero, &Use::Attempt(attempt_use(&signer))).unwrap_err();
+        assert!(refused.contains("max_exit_cost_lamports 0 "), "{refused}");
+    }
+
     #[test]
     fn p8ctrl03_a_scope_bounds_every_fact_of_an_attempt_and_an_exit() {
         use super::{check_use, AttemptUse, ExitUse, GrantTotals, Use};

@@ -249,6 +249,8 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
         || p.observations != next.observations
         || p.non_landing != next.non_landing
         || p.hold != next.hold
+        || p.fe06 != next.fe06
+        || p.exit_reserve_lamports != next.exit_reserve_lamports
     {
         return false;
     }
@@ -809,27 +811,30 @@ impl Journal {
     }
 }
 
-/// The hold of the open exit (reserved or UNKNOWN), with the attempt's exit reserve, for the
-/// reservation book.
+/// The hold of the open exit (reserved or UNKNOWN) for the reservation book: its own holds, every
+/// other open position of the attempt beside them (each mint at the larger of both) and the
+/// attempt's exit reserve.
 pub(super) fn exit_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHold> {
     let e =
         active(s).filter(|e| matches!(e.phase, ExitPhase::Reserved | ExitPhase::HandoffUnknown))?;
+    let mut holds = e.intent.holds();
+    for (mint, units) in open_units(s) {
+        let held = holds.entry(mint).or_insert(0);
+        *held = (*held).max(units);
+    }
     Some(super::ActiveHold {
         attempt: e.approval.approval_id.clone(),
         target: e.intent.mint.clone(),
         unknown_outcome: e.phase == ExitPhase::HandoffUnknown,
-        holds: super::held_with_exit_reserve(&e.intent.holds(), exit_reserve)?,
+        holds: super::held_with_exit_reserve(&holds, exit_reserve),
         signature: e.intent.signatures.first().cloned(),
         last_valid_block_height: Some(e.intent.last_valid_block_height),
     })
 }
 
-/// P8-CTRL.5/P8-RES-02: the open positions of a settled attempt — the units of every open mint —
-/// and its exit reserve, held until they are exited (`None`: nothing stays open). The position
-/// is held under the attempt's id with the first open mint as its target, as an exit's (a mint
-/// is no MarginfiAccount: no candidate is ever deferred by it).
-pub(super) fn position_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHold> {
-    let units: BTreeMap<String, u64> = open_positions(s)
+/// The positive units of every open position of a settled attempt.
+fn open_units(s: &Saved) -> BTreeMap<String, u64> {
+    open_positions(s)
         .into_iter()
         .filter_map(|(mint, p)| {
             u64::try_from(p.units)
@@ -837,13 +842,21 @@ pub(super) fn position_hold(s: &Saved, exit_reserve: u64) -> Option<super::Activ
                 .filter(|u| *u > 0)
                 .map(|u| (mint, u))
         })
-        .collect();
+        .collect()
+}
+
+/// P8-CTRL.5/P8-RES-02: the open positions of a settled attempt — the units of every open mint —
+/// and its exit reserve, held until they are exited (`None`: nothing stays open). The position
+/// is held under the attempt's id with the first open mint as its target, as an exit's (a mint
+/// is no MarginfiAccount: no candidate is ever deferred by it).
+pub(super) fn position_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHold> {
+    let units = open_units(s);
     let target = units.keys().next()?.clone();
     Some(super::ActiveHold {
         attempt: s.approval.approval_id.clone(),
         target,
         unknown_outcome: false,
-        holds: super::held_with_exit_reserve(&units, exit_reserve)?,
+        holds: super::held_with_exit_reserve(&units, exit_reserve),
         signature: None,
         last_valid_block_height: None,
     })
@@ -1347,6 +1360,37 @@ pub(crate) mod tests {
         let step = j.apply_exit_evidence(evidence(sig, complete), &value, 2_000);
         assert!(matches!(step, Ok(ExitStep::Settled(_))), "{step:?}");
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// P8-CTRL.5 (WP1 review M1): while the exit of one mint is in flight, the attempt's other
+    /// open positions stay held beside it (each mint at the larger of exit and position).
+    #[test]
+    fn an_exit_in_flight_keeps_the_other_open_positions_held() {
+        let (path, mut j, mint, a) = settled(1_000);
+        let other = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        if let Some(Saved {
+            phase: Phase::Settled(done),
+            ..
+        }) = j.saved.as_mut()
+        {
+            done.open_inventory.insert(other.clone(), 400);
+        }
+        let position = j.active_hold().unwrap();
+        assert_eq!(
+            (position.holds.get(&mint), position.holds.get(&other)),
+            (Some(&1_000), Some(&400))
+        );
+        let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
+        j.reserve_exit(ea, ei.clone(), &c).unwrap();
+        let hold = j.active_hold().unwrap();
+        assert_eq!(hold.holds.get(&other), Some(&400), "the other position");
+        assert_eq!(
+            hold.holds.get(&mint).copied(),
+            ei.holds().get(&mint).map(|e| (*e).max(1_000))
+        );
+        assert_eq!(hold.holds.get("SOL"), ei.holds().get("SOL"));
+        drop(j);
+        let _ = fs::remove_dir_all(path);
     }
 
     /// FE-04 exit: the whole open position is sold once — durably reserved and held before its

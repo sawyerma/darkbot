@@ -186,7 +186,8 @@ fn safety_replay_of(s: &Saved) -> SafetyReplay {
     }
 }
 
-/// A durable FE-04 hold that is not finalized (P8-RES-02).
+/// A durable FE-04 hold (P8-RES-02): an attempt until its settlement, an exit in flight or the
+/// open positions of a settled attempt (`Journal::active_hold`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveHold {
     pub attempt: String,
@@ -209,7 +210,8 @@ pub enum Phase {
     Settled(settlement::Settlement),
 }
 impl Phase {
-    /// Finalized (with or without a booked settlement): no hold remains.
+    /// Finalized (reconciled, with or without a booked settlement); a landed attempt stays held
+    /// until its settlement (`Journal::active_hold`).
     pub fn finalized(&self) -> bool {
         matches!(self, Phase::HaltFinalized | Phase::Settled(_))
     }
@@ -1062,8 +1064,13 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         return false;
     }
     let same = |p: &Saved| p.approval == next.approval && p.intent == next.intent;
-    // DEC-04: the holds are written by the reservation and never change afterwards.
-    if previous.is_some_and(|p| p.hold != next.hold) {
+    // DEC-04 / P8-CTRL.5: the holds, the grant booking and the exit reserve are written by the
+    // reservation and never change afterwards.
+    if previous.is_some_and(|p| {
+        p.hold != next.hold
+            || p.fe06 != next.fe06
+            || p.exit_reserve_lamports != next.exit_reserve_lamports
+    }) {
         return false;
     }
     // DEC-03: only a non-landing writes a release class, and only a proving one.
@@ -1503,7 +1510,7 @@ impl Journal {
             attempt: s.approval.approval_id.clone(),
             target: s.intent.target.clone(),
             unknown_outcome: s.phase == Phase::HandoffUnknown,
-            holds: held_with_exit_reserve(&s.intent.holds, reserve)?,
+            holds: held_with_exit_reserve(&s.intent.holds, reserve),
             signature: s.intent.signatures.first().cloned(),
             last_valid_block_height: s.intent.last_valid_block_height,
         })
@@ -1555,17 +1562,18 @@ fn well_formed(a: &Approval) -> bool {
         || a.max_slippage_bps > 10_000)
 }
 
-/// P8-CTRL.5: `holds` with the separate exit reserve added to their SOL (`None`: overflow).
+/// P8-CTRL.5: `holds` with the separate exit reserve added to their SOL — saturating, so an
+/// overflowing reserve holds everything (fail closed: never fits a balance, never "no hold").
 fn held_with_exit_reserve(
     holds: &BTreeMap<String, u64>,
     exit_reserve: u64,
-) -> Option<BTreeMap<String, u64>> {
+) -> BTreeMap<String, u64> {
     let mut out = holds.clone();
     if exit_reserve > 0 {
         let sol = out.entry("SOL".to_string()).or_insert(0);
-        *sol = sol.checked_add(exit_reserve)?;
+        *sol = sol.saturating_add(exit_reserve);
     }
-    Some(out)
+    out
 }
 
 /// `exit_reserve`: the separate exit reserve held with the attempt's SOL (P8-CTRL.5): the free
@@ -1642,15 +1650,15 @@ fn validate(a: &Approval, i: &Intent, exit_reserve: u64, c: &Current) -> Result<
             .any(|k| k != "SOL" && !key(k))
         || i.holds.get("SOL").copied().unwrap_or(0) < debit
         || i.holds.keys().any(|k| k != "SOL" && !key(k))
-        || held_with_exit_reserve(&i.holds, exit_reserve).is_none_or(|holds| {
-            holds.iter().any(|(mint, n)| {
+        || held_with_exit_reserve(&i.holds, exit_reserve)
+            .iter()
+            .any(|(mint, n)| {
                 c.balances.get(mint).is_none_or(|balance| {
                     let elsewhere = c.reserved_elsewhere.get(mint).copied().unwrap_or(0);
                     let reserve = c.policy_reserve.get(mint).copied().unwrap_or(0);
                     balance.saturating_sub(elsewhere.saturating_add(reserve)) < *n
                 })
             })
-        })
     {
         return Err(err("WALLET_UNDERFUNDED_OR_HOLD_MISSING"));
     }
@@ -2214,6 +2222,36 @@ mod tests {
         );
     }
 
+    /// P8-CTRL.5 (WP1 review M2): replay never changes the exit reserve or the grant booking after
+    /// the reservation; an overflowing reserve holds everything (fail closed), never nothing.
+    #[test]
+    fn p8ctrl05_replay_never_changes_the_reserve_or_the_booking() {
+        let (dir, a, i, _) = setup();
+        let reserved = reserved(&a, &i);
+        let mut handed = reserved.clone();
+        handed.phase = Phase::HandoffUnknown;
+        assert!(legal(Some(&reserved), Transition::Handoff, &handed));
+        for change in [
+            |s: &mut Saved| s.exit_reserve_lamports = Some(1),
+            |s: &mut Saved| s.exit_reserve_lamports = None,
+            |s: &mut Saved| {
+                s.fe06 = Some(Fe06Attempt {
+                    grant: "a".repeat(64),
+                    campaign: "k".into(),
+                    utc_day: 1,
+                    owner_epoch: Some(1),
+                })
+            },
+        ] {
+            let mut next = handed.clone();
+            change(&mut next);
+            assert!(!legal(Some(&reserved), Transition::Handoff, &next));
+        }
+        let holds: BTreeMap<String, u64> = [("SOL".to_string(), u64::MAX - 1)].into();
+        assert_eq!(held_with_exit_reserve(&holds, 5)["SOL"], u64::MAX);
+        let _ = fs::remove_dir_all(dir);
+    }
+
     /// P8-CTRL.5/.6 (WP1): the separate exit reserve is held with the attempt — its SOL hold and
     /// the reserve must both be free at the reservation; the book holds both, across a restart;
     /// a reservation that recorded no reserve (before schema 10) is never handed off.
@@ -2552,7 +2590,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 9],
+                [1, 10],
                 "historical frame kept, the reopen transition is typed"
             );
         }
@@ -2747,8 +2785,8 @@ mod tests {
     }
 
     /// P8-RES-02: the global reservation book is rebuilt from the durable FE-04 journals after a
-    /// crash — a reserved attempt (UNKNOWN after the restart) and a handed-off one with an UNKNOWN
-    /// outcome stay held, a finalized one is released — and a second attempt on the same target
+    /// crash — a reserved attempt (UNKNOWN after the restart), a handed-off one with an UNKNOWN
+    /// outcome and a finalized, not yet settled one stay held — and a second attempt on the same target
     /// is refused.
     #[test]
     fn reservation_book_survives_restart_until_finalized() {
@@ -2831,7 +2869,8 @@ mod tests {
 
     /// P8-RES-02/FE-04: the owner's book follows the durable journal — no journal is no hold, a
     /// journal locked by a running attempt makes the book unreadable (nothing available), an
-    /// unreconciled hold survives the restart, a finalized reconciliation releases it.
+    /// unreconciled hold survives the restart, a finalized reconciliation keeps it until the
+    /// settlement books it.
     #[test]
     fn owner_book_follows_the_durable_journal() {
         use crate::execution::reservation::WalletReservations;

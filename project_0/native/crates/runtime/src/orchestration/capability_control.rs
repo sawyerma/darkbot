@@ -469,11 +469,15 @@ impl Fe06Authorization {
         self.scope.as_deref()
     }
 
-    /// P8-CTRL.5: the separate exit reserve an attempt under this grant holds with it — its
-    /// scope's maximal exit cost; the offline tests' stand-in (no scope, never part of a build)
-    /// reserves none.
-    pub fn exit_reserve_lamports(&self) -> u64 {
-        self.scope().map_or(0, |s| s.max_exit_cost_lamports)
+    /// P8-CTRL.5: the separate exit reserve an attempt of `mints` under this grant holds with it
+    /// (`fe06::exit_reserve`); `None`: no safe reserve — no new liquidation. Only the offline
+    /// tests' stand-in (no scope, never part of a build) reserves none.
+    pub fn exit_reserve_lamports(&self, mints: &[String]) -> Option<u64> {
+        match self.scope() {
+            Some(scope) => super::fe06::exit_reserve(scope, mints),
+            None if cfg!(test) => Some(0),
+            None => None,
+        }
     }
 
     /// P8-CTRL.3: in force at `now_unix_s` — within its scope's validity (expired: no grant).
