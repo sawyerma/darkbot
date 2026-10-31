@@ -9353,8 +9353,14 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
         .expect("journaled at the first pass");
     assert_eq!(host.build_arch, std::env::consts::ARCH);
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        assert_eq!(host.qualifying(), Ok(()), "{}", host.line());
         assert!(!host.perf_levels.is_empty());
+        // The verdict follows the facts journaled with it (review L: an M1–M3 or a VM fails it).
+        let m4 = host
+            .cpu_brand
+            .as_deref()
+            .is_some_and(|b| b.starts_with("Apple M4"))
+            && host.virtualized == Some(false);
+        assert_eq!(host.qualifying().is_ok(), m4, "{}", host.line());
     }
     f.owner.host_record();
     // A change of its runtime state is journaled again (review L5): a sample of no active CPU
