@@ -617,6 +617,11 @@ fn replay(
             (RecordKind::Runtime, Some(b'Q')) if p.len() == 1 => {
                 stop_ns = stop_ns.or(Some(record.timestamp_ns));
             }
+            // BSC3-074: a PAPER BUY's handoff is no census input and no
+            // damaged record (it was counted unparsed: a run with PAPER
+            // BUYs had no observable time).
+            (RecordKind::Runtime, Some(b'Q'))
+                if p.len() >= crate::runtime_journal::PAPER_HANDOFF_HEAD => {}
             (RecordKind::Runtime, Some(b'D')) if p.len() == 10 => match u64_at(p, 2) {
                 Some(total) => {
                     let e = dropped.entry(p[1]).or_default();
@@ -2526,6 +2531,203 @@ mod tests {
         // Block 20: the sender's two logs at 5; block 31: one.
         assert_eq!(c.creator_buys_after, 3);
         assert!(c.creator_buys_after <= c.external_buys);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-037 on real mainnet blocks (G0.4 campaign journal 27.10.,
+    /// checked against the chain over a free RPC: each buy's
+    /// `eth_getTransactionReceipt` log is the Portal's `TokenBought` of the
+    /// token, the launch transaction's `TokenCreated` names the creator):
+    /// block 130058628, Flap launch of 0x6388…7777 at index 2 by its
+    /// creator 0x5334…b74b, who buys again at index 3 (log 54): a creator
+    /// buy; block 130054762, launch of 0x3433…7777 at 2 by 0x4236…1c17
+    /// with its own purchase in the launch (log 54, not later), two other
+    /// accounts buy at 3 (log 82) and 4 (log 110): none.
+    #[test]
+    fn the_creator_buys_after_of_real_mainnet_blocks() {
+        use alloy_primitives::hex;
+        let dir = std::env::temp_dir().join(format!("bsc-g04-creator-real-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let joined =
+            |number: u64, hash: [u8; 32], tx: [u8; 32], index: u64, token: [u8; 20], buys| {
+                let mut l = launch(Venue::Flap, 1, 1, Some(buys), 100);
+                l.block_number = number;
+                l.block_hash = hash;
+                l.tx_hash = tx;
+                l.tx_index = index;
+                l.token = Some(token);
+                (
+                    RecordKind::Canonical,
+                    100,
+                    canonical_launch_payload(&Joined {
+                        launch: l,
+                        visibility: Visibility::Missed,
+                    }),
+                )
+            };
+        let buy = |number: u64,
+                   hash: [u8; 32],
+                   index: u64,
+                   tx: [u8; 32],
+                   log: u64,
+                   token: [u8; 20],
+                   origin: [u8; 20]| {
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_journal::flap_trade_payload(
+                    &crate::chain_follower::CanonicalTrade {
+                        block_number: number,
+                        block_hash: hash,
+                        tx_index: index,
+                        tx_hash: tx,
+                        log_index: log,
+                        origin,
+                        sell: false,
+                        token,
+                        trader: origin,
+                        amount: [1; 32],
+                        eth: [1; 32],
+                        fee: [0; 32],
+                        post_price: [1; 32],
+                    },
+                ),
+            )
+        };
+        let creator = |number: u64, index: u64, token: [u8; 20], word: [u8; 20]| {
+            (
+                RecordKind::Canonical,
+                90,
+                crate::runtime_strategy::flap_launch_payload(number, index, &token, &word),
+            )
+        };
+        let (b1, h1) = (
+            130_058_628,
+            hex!("84f8e010a8640ae8dc098a0d4353e925b188dbf488be921c8ee85f04842d588a"),
+        );
+        let t1 = hex!("638885fddda965a2b8f01ca48889af439f887777");
+        let c1 = hex!("5334897a2d2a3b92e3e1676c78f3f1222bd1b74b");
+        let (b2, h2) = (
+            130_054_762,
+            hex!("99f08d7a5a8dcc19ec8d3e97f3dfea9b9aafe877cc5b1f4c1b1827d07f67e4d4"),
+        );
+        let t2 = hex!("3433f5fa3a946496a9c056727e03570cff927777");
+        let records = vec![
+            (RecordKind::Canonical, 1, window_payload(b'H', 0, &[0; 32])),
+            creator(b2, 2, t2, hex!("423608a04556f71a7cfe2c6bcbec7fdcc74f1c17")),
+            // The launch transaction's own purchase (log 54): not later.
+            buy(
+                b2,
+                h2,
+                2,
+                hex!("92edcd2bb5d7d184657eb8b6154347d9081bdd0afb97105a465f69c75c54b0dd"),
+                54,
+                t2,
+                hex!("423608a04556f71a7cfe2c6bcbec7fdcc74f1c17"),
+            ),
+            buy(
+                b2,
+                h2,
+                3,
+                hex!("f4f13f2ee3748e24f9d3852c426740a42cbfe296d6c7b068baea8bbd8d25eeaf"),
+                82,
+                t2,
+                hex!("3ef6e4d369c787abf8f2924122173b8781258830"),
+            ),
+            buy(
+                b2,
+                h2,
+                4,
+                hex!("0bf5063064a3a35d3a19758ba667d3f729c804745e61c86fd54ca66b06cb1a72"),
+                110,
+                t2,
+                hex!("562f78167473800b73810e9373ed79d77d36414f"),
+            ),
+            joined(
+                b2,
+                h2,
+                hex!("92edcd2bb5d7d184657eb8b6154347d9081bdd0afb97105a465f69c75c54b0dd"),
+                2,
+                t2,
+                2,
+            ),
+            creator(b1, 2, t1, c1),
+            buy(
+                b1,
+                h1,
+                3,
+                hex!("2a0148a284d7badf847268e7e331d5dc281a9b4b7692a2dce3d6d3dbecda718b"),
+                54,
+                t1,
+                c1,
+            ),
+            joined(
+                b1,
+                h1,
+                hex!("8e5588ec763581ece621c1f5185d574e64b2f40deb15ebff262fc17930374941"),
+                2,
+                t1,
+                1,
+            ),
+            (RecordKind::Runtime, 501, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.external_buys, 3);
+        // Both launches' first external buy right after them (from the
+        // trades, not the stored counts).
+        assert_eq!(c.adjacent_buy_launches, 2);
+        assert_eq!(c.creator_buys_after, 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// BSC3-074: a run with a PAPER BUY (its `Q` handoff record, as the
+    /// runtime journals it) is unbroken: no record unparsed, its observable
+    /// time counted; a `Q` of another length stays damaged.
+    #[test]
+    fn a_paper_handoff_is_no_damaged_record() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-paper-q-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let buy = crate::paper_exec::PaperBuy {
+            launch_hash: [1; 32],
+            token: [2; 20],
+            handoff: crate::paper::PaperHandoff {
+                sequence: 1,
+                tx_hash: [3; 32],
+                raw_len: 110,
+                at_ns: 600,
+            },
+            times: crate::paper_exec::StageTimes {
+                ingress_ns: 100,
+                decoded_ns: 200,
+                admitted_ns: 300,
+                signed_ns: 400,
+                prepared_ns: 450,
+                planned_ns: 500,
+                sink_ns: 600,
+            },
+            raw: vec![0xf8; 110],
+        };
+        let handoff = crate::runtime_journal::paper_handoff_payload(&buy);
+        let records = |q: Vec<u8>| {
+            vec![
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 20, &[20; 32]),
+                ),
+                (RecordKind::Runtime, 600, q),
+                (RecordKind::Runtime, 900, EXIT_PAYLOAD.to_vec()),
+            ]
+        };
+        write(&dir, 1_000, &records(handoff.clone()));
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.windows[0].unparsed_records, 0);
+        assert!(c.windows[0].observable_ms.is_some());
+        fs::remove_dir_all(&dir).unwrap();
+        write(&dir, 1_000, &records(handoff[..20].to_vec()));
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.windows[0].unparsed_records, 1);
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -1250,6 +1250,44 @@ fn restart_quarantine_holds_until_a_matching_nonce_fact_reconciles() {
     assert!(s.snapshot_id(t(50), 1, 1).is_some());
 }
 
+/// BSC3-039: the gauges `counters()` reports (candidates, uncertain,
+/// unknown and quarantined senders), counted by hand as a candidate is
+/// sighted and included, a gap makes the senders unknown and the included
+/// transaction uncertain, and a restart quarantines the watched sender.
+#[test]
+fn the_gauges_count_each_state_as_it_changes() {
+    let gauges = |s: &ChainState| {
+        let c = s.counters();
+        (
+            c.held_candidates,
+            c.held_uncertain,
+            c.unknown_senders,
+            c.quarantined_senders,
+        )
+    };
+    let mut s = state();
+    assert_eq!(
+        gauges(&s),
+        (0, 0, 1, 0),
+        "the watched sender starts unknown"
+    );
+    s.apply(&block(BASE, 0, 0, &[]));
+    s.apply(&fact(own(), 0, BASE, 0));
+    assert_eq!(gauges(&s), (0, 0, 0, 0), "reconciled: clean");
+    s.apply(&pending(t(1), own(), 0, 1, 10));
+    s.apply(&pending(t(2), foreign(), 0, 1, 11));
+    assert_eq!(gauges(&s), (2, 0, 1, 0), "two candidates, a new sender");
+    s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)]));
+    assert_eq!(gauges(&s), (1, 0, 1, 0), "one included");
+    s.apply(&ChainInput::Gap {
+        from: BASE + 2,
+        to: BASE + 5,
+    });
+    assert_eq!(gauges(&s), (1, 1, 2, 0), "a gap");
+    s.quarantine_all();
+    assert_eq!(gauges(&s), (1, 1, 1, 1), "a restart");
+}
+
 /// Order C2: a nonce fact reconciles only with no pending or unresolved
 /// candidate of the sender.
 #[test]
@@ -1689,6 +1727,45 @@ fn coherent_follows_the_head_and_refusals() {
     assert!(!w.coherent());
     w.apply(&fact(own(), 0, BASE, 0));
     assert!(w.coherent());
+}
+
+/// BSC3-040: one watched sender that is not clean holds back every
+/// snapshot, the other sender's decisions too (fail-closed, kept): the buyer
+/// reconciled, the PAPER identity not yet → no candidate's snapshot and no
+/// canonical one, though the buyer's next nonce is known; the PAPER
+/// identity's nonce fact → snapshots again. A nonce discontinuity of the
+/// PAPER identity alone holds them back again until its next matching fact.
+#[test]
+fn one_unclean_watched_sender_holds_back_every_snapshot() {
+    let mut s = ChainState::new(CHAIN, limits(), &[own(), own2()]).unwrap();
+    accepted(&s.apply(&block(BASE, 0, 0, &[])));
+    s.apply(&fact(own(), 0, BASE, 0));
+    s.apply(&pending(t(50), creator(), 0, 1, 1));
+    assert_eq!(s.sender(own()), SenderView::Clean { next_nonce: 0 });
+    assert!(matches!(s.sender(own2()), SenderView::Unknown { .. }));
+    assert!(!s.coherent());
+    assert_eq!(s.snapshot_id(t(50), 1, 1), None);
+    assert_eq!(s.canonical_snapshot_id(1, 1), None);
+
+    s.apply(&fact(own2(), 0, BASE, 0));
+    assert!(s.coherent());
+    assert!(s.snapshot_id(t(50), 1, 1).is_some());
+
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(2), own2(), 3)])));
+    assert_eq!(
+        s.sender(own2()),
+        SenderView::Unknown {
+            reason: SenderReason::NonceDiscontinuity {
+                expected: 0,
+                observed: 3
+            }
+        }
+    );
+    assert_eq!(s.sender(own()), SenderView::Clean { next_nonce: 0 });
+    assert_eq!(s.snapshot_id(t(50), 1, 1), None);
+    s.apply(&fact(own2(), 4, BASE + 1, 0));
+    assert!(s.coherent());
+    assert!(s.snapshot_id(t(50), 1, 1).is_some());
 }
 
 /// `retained` is the retained window, ascending, bounded by `reorg_window`.

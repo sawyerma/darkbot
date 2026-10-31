@@ -106,13 +106,16 @@ pub fn first_sighting_payload(source: SourceId, hash: &[u8; 32], raw: &[u8]) -> 
     out
 }
 
+/// The bytes of a PAPER handoff (`Q`) before its signed bytes.
+pub const PAPER_HANDOFF_HEAD: usize = 1 + 8 + 32 + 32 + 20 + 5 * 8;
+
 /// One PAPER BUY taken by the PAPER sink (C3): `Q`, the sink sequence,
 /// the launch and BUY hashes, the token, the stage times (ingress, decoded,
 /// admitted, signed, sink) and the signed bytes (a local artefact, never
 /// sent).
 pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
     let t = buy.times;
-    let mut out = Vec::with_capacity(1 + 8 + 32 + 32 + 20 + 5 * 8 + buy.raw.len());
+    let mut out = Vec::with_capacity(PAPER_HANDOFF_HEAD + buy.raw.len());
     out.push(b'Q');
     out.extend_from_slice(&buy.handoff.sequence.to_le_bytes());
     out.extend_from_slice(&buy.launch_hash);

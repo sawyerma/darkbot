@@ -792,6 +792,77 @@ enum Confidence {
     Quarantined(SenderReason),
 }
 
+/// BSC3-039: what `counters()` reports of the held transactions and the
+/// senders, kept as the state changes (the status read scanned every one:
+/// 5.5 ms at the 262144 bound, on the runtime's decision loop).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Gauges {
+    candidates: u64,
+    uncertain: u64,
+    unknown_senders: u64,
+    quarantined_senders: u64,
+}
+
+/// The gauge a held transaction counts in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum TxGauge {
+    #[default]
+    None,
+    Candidate,
+    Uncertain,
+}
+
+impl TxGauge {
+    fn of(state: &TxState) -> Self {
+        match state {
+            TxState::Candidate => Self::Candidate,
+            TxState::Uncertain { .. } => Self::Uncertain,
+            TxState::Included { .. }
+            | TxState::Replaced { .. }
+            | TxState::NonceConsumedNotSeen { .. }
+            | TxState::ConsumedUnattributed { .. } => Self::None,
+        }
+    }
+}
+
+impl Gauges {
+    /// `record` counted in the gauge of its state now.
+    fn regauge(&mut self, record: &mut TxRecord) {
+        let gauge = TxGauge::of(&record.state);
+        if gauge != record.gauged {
+            self.tx(record.gauged, false);
+            self.tx(gauge, true);
+            record.gauged = gauge;
+        }
+    }
+
+    fn tx(&mut self, gauge: TxGauge, add: bool) {
+        let n = match gauge {
+            TxGauge::Candidate => &mut self.candidates,
+            TxGauge::Uncertain => &mut self.uncertain,
+            TxGauge::None => return,
+        };
+        *n = if add {
+            n.saturating_add(1)
+        } else {
+            n.saturating_sub(1)
+        };
+    }
+
+    fn sender(&mut self, confidence: Confidence, add: bool) {
+        let n = match confidence {
+            Confidence::Clean => return,
+            Confidence::Unknown(_) => &mut self.unknown_senders,
+            Confidence::Quarantined(_) => &mut self.quarantined_senders,
+        };
+        *n = if add {
+            n.saturating_add(1)
+        } else {
+            n.saturating_sub(1)
+        };
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SenderRecord {
     watched: bool,
@@ -817,19 +888,27 @@ impl SenderRecord {
         }
     }
 
+    /// The confidence now `to`, counted in `gauges`.
+    fn set_confidence(&mut self, to: Confidence, gauges: &mut Gauges) {
+        gauges.sender(self.confidence, false);
+        self.confidence = to;
+        gauges.sender(to, true);
+    }
+
     /// Loses `Clean`; a quarantine stays a quarantine.
-    fn degrade(&mut self, reason: SenderReason) {
-        self.confidence = match self.confidence {
+    fn degrade(&mut self, reason: SenderReason, gauges: &mut Gauges) {
+        let to = match self.confidence {
             Confidence::Quarantined(_) => Confidence::Quarantined(reason),
             Confidence::Clean | Confidence::Unknown(_) => Confidence::Unknown(reason),
         };
+        self.set_confidence(to, gauges);
     }
 
     /// A refused reconciliation: the reason of a sender that is not clean
     /// is updated; a clean sender stays clean.
-    fn note_refusal(&mut self, reason: SenderReason) {
+    fn note_refusal(&mut self, reason: SenderReason, gauges: &mut Gauges) {
         if self.confidence != Confidence::Clean {
-            self.degrade(reason);
+            self.degrade(reason, gauges);
         }
     }
 
@@ -861,6 +940,8 @@ struct TxRecord {
     /// Sighting epoch of the latest pending sighting; `None` if never
     /// sighted pending.
     seen_epoch: Option<u64>,
+    /// The gauge it counts in now (kept by `Gauges::regauge`).
+    gauged: TxGauge,
 }
 
 /// One transaction of a retained block, complete enough to re-encode the
@@ -934,6 +1015,8 @@ pub struct ChainState {
     txs: BTreeMap<B256, TxRecord>,
     slots: BTreeMap<(Address, u64), Vec<B256>>,
     senders: BTreeMap<Address, SenderRecord>,
+    /// BSC3-039: the gauges, kept as the state changes.
+    gauges: Gauges,
     /// Settled records in the order they settled; eviction order.
     settle_queue: VecDeque<B256>,
     /// Sighting epoch; every dropped chain starts a new one (rule 5).
@@ -967,8 +1050,11 @@ impl ChainState {
             });
         }
         let mut senders = BTreeMap::new();
+        let mut gauges = Gauges::default();
         for sender in watched {
-            if senders.insert(*sender, SenderRecord::new(true)).is_some() {
+            let record = SenderRecord::new(true);
+            gauges.sender(record.confidence, true);
+            if senders.insert(*sender, record).is_some() {
                 return Err(LimitsError::DuplicateWatchedSender(*sender));
             }
         }
@@ -990,6 +1076,7 @@ impl ChainState {
             #[cfg(test)]
             resolve_visits: 0,
             counters: StateCounters::default(),
+            gauges,
         })
     }
 
@@ -1005,6 +1092,18 @@ impl ChainState {
 
     /// Applies one input. Deterministic: see the module documentation.
     pub fn apply(&mut self, input: &ChainInput) -> Applied {
+        let out = self.apply_input(input);
+        // Tests: after every input the gauges kept equal a scan (BSC3-039).
+        #[cfg(all(test, debug_assertions))]
+        assert_eq!(
+            self.gauges,
+            self.scanned_gauges(),
+            "kept gauges after {input:?}"
+        );
+        out
+    }
+
+    fn apply_input(&mut self, input: &ChainInput) -> Applied {
         let mut out = Applied::default();
         bump(&mut self.counters.inputs);
         match input {
@@ -1054,7 +1153,10 @@ impl ChainState {
     pub fn quarantine_all(&mut self) {
         for record in self.senders.values_mut() {
             if record.watched {
-                record.confidence = Confidence::Quarantined(SenderReason::Restart);
+                record.set_confidence(
+                    Confidence::Quarantined(SenderReason::Restart),
+                    &mut self.gauges,
+                );
             }
         }
         bump(&mut self.counters.quarantines);
@@ -1261,28 +1363,32 @@ impl ChainState {
 
     /// All counters and gauges.
     pub fn counters(&self) -> StateCounters {
+        // Tests: the gauges kept equal a scan of every record.
+        #[cfg(all(test, debug_assertions))]
+        assert_eq!(self.gauges, self.scanned_gauges(), "kept gauges");
         let mut c = self.counters;
         c.held_txs = len_u64(self.txs.len());
-        for record in self.txs.values() {
-            match record.state {
-                TxState::Candidate => bump(&mut c.held_candidates),
-                TxState::Uncertain { .. } => bump(&mut c.held_uncertain),
-                TxState::Included { .. }
-                | TxState::Replaced { .. }
-                | TxState::NonceConsumedNotSeen { .. }
-                | TxState::ConsumedUnattributed { .. } => {}
-            }
-        }
+        c.held_candidates = self.gauges.candidates;
+        c.held_uncertain = self.gauges.uncertain;
         c.held_senders = len_u64(self.senders.len());
-        for record in self.senders.values() {
-            match record.confidence {
-                Confidence::Clean => {}
-                Confidence::Unknown(_) => bump(&mut c.unknown_senders),
-                Confidence::Quarantined(_) => bump(&mut c.quarantined_senders),
-            }
-        }
+        c.unknown_senders = self.gauges.unknown_senders;
+        c.quarantined_senders = self.gauges.quarantined_senders;
         c.retained_blocks = len_u64(self.blocks.len());
         c
+    }
+
+    /// The gauges as a scan of every record finds them (BSC3-039: what
+    /// `counters()` did on every status read).
+    #[cfg(all(test, debug_assertions))]
+    fn scanned_gauges(&self) -> Gauges {
+        let mut g = Gauges::default();
+        for record in self.txs.values() {
+            g.tx(TxGauge::of(&record.state), true);
+        }
+        for record in self.senders.values() {
+            g.sender(record.confidence, true);
+        }
+        g
     }
 
     // -----------------------------------------------------------------
@@ -1370,6 +1476,7 @@ impl ChainState {
                 state,
                 settled: false,
                 seen_epoch: Some(self.epoch),
+                gauged: TxGauge::None,
             },
         );
         if settled {
@@ -1617,6 +1724,7 @@ impl ChainState {
                     state: TxState::Candidate,
                     settled: false,
                     seen_epoch: None,
+                    gauged: TxGauge::None,
                 },
             );
             true
@@ -1699,10 +1807,13 @@ impl ChainState {
                 expected,
                 observed: nonce,
             });
-            record.degrade(SenderReason::NonceDiscontinuity {
-                expected,
-                observed: nonce,
-            });
+            record.degrade(
+                SenderReason::NonceDiscontinuity {
+                    expected,
+                    observed: nonce,
+                },
+                &mut self.gauges,
+            );
         }
         if recorded && record.lost_max == Some(nonce) {
             // The largest overflowed nonce was consumed by a held inclusion.
@@ -1710,9 +1821,9 @@ impl ChainState {
         }
         record.implied = nonce.checked_add(1);
         if record.implied.is_none() {
-            record.degrade(SenderReason::NonceExhausted);
+            record.degrade(SenderReason::NonceExhausted, &mut self.gauges);
         } else if !record.watched && recorded && skipped.is_none() {
-            record.confidence = Confidence::Clean;
+            record.set_confidence(Confidence::Clean, &mut self.gauges);
         }
     }
 
@@ -2024,7 +2135,7 @@ impl ChainState {
             .saturating_add(unmatched);
         for record in self.senders.values_mut() {
             record.implied = None;
-            record.degrade(reason);
+            record.degrade(reason, &mut self.gauges);
         }
         self.head = None;
         self.expect = expect;
@@ -2133,10 +2244,13 @@ impl ChainState {
         let Some(head_next) = head_next.filter(|_| consistent) else {
             let implied_next = after.first().copied().or(implied_now);
             record.implied = None;
-            record.degrade(SenderReason::NonceFactMismatch {
-                fact_next: next_nonce,
-                implied_next,
-            });
+            record.degrade(
+                SenderReason::NonceFactMismatch {
+                    fact_next: next_nonce,
+                    implied_next,
+                },
+                &mut self.gauges,
+            );
             bump(&mut self.counters.reconciliation_refusals);
             return;
         };
@@ -2174,7 +2288,7 @@ impl ChainState {
         }
         if let Some(record) = self.senders.get_mut(&sender) {
             record.lost_max = None;
-            record.confidence = Confidence::Clean;
+            record.set_confidence(Confidence::Clean, &mut self.gauges);
         }
         bump(&mut self.counters.reconciliations);
         out.reconciliations
@@ -2210,8 +2324,9 @@ impl ChainState {
             } = record.state
                 && block_number <= fact_block
             {
-                // Uncertain to candidate: open either way.
+                // Uncertain to candidate: open either way (another gauge).
                 record.state = TxState::Candidate;
+                self.gauges.regauge(record);
                 bump(&mut record.orphaned);
                 bump(&mut self.counters.orphaned_txs);
                 out.orphans
@@ -2309,7 +2424,7 @@ impl ChainState {
 
     fn refuse_fact(&mut self, sender: Address, reason: SenderReason) {
         if let Some(record) = self.senders.get_mut(&sender) {
-            record.note_refusal(reason);
+            record.note_refusal(reason, &mut self.gauges);
         }
         bump(&mut self.counters.reconciliation_refusals);
     }
@@ -2376,25 +2491,31 @@ impl ChainState {
         }
     }
 
-    fn insert_record(&mut self, hash: B256, record: TxRecord) {
+    fn insert_record(&mut self, hash: B256, mut record: TxRecord) {
         let sender = record.sender;
         let nonce = record.nonce;
+        // Counted from nothing: `sync_open` counts it in its state's gauge.
+        record.gauged = TxGauge::None;
         self.txs.insert(hash, record);
         self.sync_open(hash);
         self.slots.entry((sender, nonce)).or_default().push(hash);
-        let sender_record = self
-            .senders
-            .entry(sender)
-            .or_insert_with(|| SenderRecord::new(false));
+        let gauges = &mut self.gauges;
+        let sender_record = self.senders.entry(sender).or_insert_with(|| {
+            let new = SenderRecord::new(false);
+            gauges.sender(new.confidence, true);
+            new
+        });
         sender_record.refs = sender_record.refs.saturating_add(1);
     }
 
     /// Keeps the open index in step with the record of `hash` after its
     /// state changed: `Candidate` and `Uncertain` are open.
     fn sync_open(&mut self, hash: B256) {
-        let Some(record) = self.txs.get(&hash) else {
+        let Some(record) = self.txs.get_mut(&hash) else {
             return;
         };
+        // BSC3-039: and the gauges.
+        self.gauges.regauge(record);
         let key = (record.sender, record.nonce, hash);
         if matches!(record.state, TxState::Candidate | TxState::Uncertain { .. }) {
             self.open.insert(key);
@@ -2432,6 +2553,7 @@ impl ChainState {
         let Some(record) = self.txs.remove(&hash) else {
             return;
         };
+        self.gauges.tx(record.gauged, false);
         self.open.remove(&(record.sender, record.nonce, hash));
         let key = (record.sender, record.nonce);
         if let Some(slot) = self.slots.get_mut(&key) {
@@ -2447,8 +2569,8 @@ impl ChainState {
             }
             None => false,
         };
-        if remove_sender {
-            self.senders.remove(&record.sender);
+        if remove_sender && let Some(gone) = self.senders.remove(&record.sender) {
+            self.gauges.sender(gone.confidence, false);
         }
     }
 
@@ -2468,7 +2590,7 @@ impl ChainState {
             tx,
         });
         if let Some(record) = self.senders.get_mut(&sender) {
-            record.degrade(SenderReason::Overflow);
+            record.degrade(SenderReason::Overflow, &mut self.gauges);
             record.lost_max = Some(record.lost_max.map_or(nonce, |m| m.max(nonce)));
         }
     }
