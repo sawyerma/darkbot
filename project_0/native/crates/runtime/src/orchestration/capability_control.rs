@@ -475,7 +475,9 @@ impl Fe06Authorization {
     pub fn exit_reserve_lamports(&self, mints: &[String]) -> Option<u64> {
         match self.scope() {
             Some(scope) => super::fe06::exit_reserve(scope, mints),
-            None if cfg!(test) => Some(0),
+            #[cfg(test)]
+            None => Some(0),
+            #[cfg(not(test))]
             None => None,
         }
     }

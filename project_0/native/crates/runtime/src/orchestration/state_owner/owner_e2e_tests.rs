@@ -7533,7 +7533,7 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         cleanup(f);
     }
     // One fact of the attempt outside the scope: refused by its sign permit, nothing durable.
-    let facts: [(&str, (&str, &str), &str); 4] = [
+    let facts: [(&str, (&str, &str), &str); 3] = [
         (
             "fee",
             ("max_fee_lamports", "4999"),
@@ -7548,12 +7548,6 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
             "spend",
             ("max_spend_lamports", "1"),
             "FE06_SCOPE_USE: grant_spend_lamports ",
-        ),
-        // P8-CTRL.5 (WP1 review M3): no positive exit ceiling — no safe exit reserve.
-        (
-            "exit_reserve",
-            ("max_exit_cost_lamports", "0"),
-            "FE06_SCOPE_USE: max_exit_cost_lamports 0 ",
         ),
     ];
     for (tag, field, reason) in facts {

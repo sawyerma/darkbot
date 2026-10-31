@@ -188,7 +188,9 @@ pub fn parse(bytes: &[u8], ceilings: &Ceilings) -> Result<Scope, String> {
         max_tip_lamports: f.number("max_tip_lamports")?,
         max_rent_lamports: f.number("max_rent_lamports")?,
         max_protocol_fee_lamports: f.number("max_protocol_fee_lamports")?,
-        max_exit_cost_lamports: f.number("max_exit_cost_lamports")?,
+        // P8-CTRL.5: every scope bounds an exit (ALL/SIM_ONLY hold it as the attempt's exit
+        // reserve, EXIT_ONLY spends it): zero is no safe reserve, refused at the preview.
+        max_exit_cost_lamports: f.positive("max_exit_cost_lamports")?,
         reserve_lamports: f.number("reserve_lamports")?,
         max_slippage_bps: f.number("max_slippage_bps")?,
         min_out_bps: f.number("min_out_bps")?,
@@ -1318,8 +1320,16 @@ pub(crate) mod tests {
             Some(1_000),
             "at least one exit"
         );
-        // No positive exit ceiling: no safe reserve, no new liquidation.
-        let zero = scope_of(&[("max_exit_cost_lamports", "0")]);
+        // No positive exit ceiling: refused at the preview, and (a scope from elsewhere) no safe
+        // reserve, no new liquidation.
+        let refused = parse(
+            text(&signer, &[("max_exit_cost_lamports", "0")]).as_bytes(),
+            &ceilings(),
+        )
+        .unwrap_err();
+        assert!(refused.contains("max_exit_cost_lamports"), "{refused}");
+        let mut zero = s.clone();
+        zero.max_exit_cost_lamports = 0;
         assert_eq!(exit_reserve(&zero, &[KEY.into()]), None);
         let refused = check_use(&zero, &Use::Attempt(attempt_use(&signer))).unwrap_err();
         assert!(refused.contains("max_exit_cost_lamports 0 "), "{refused}");

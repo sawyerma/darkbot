@@ -1362,6 +1362,43 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&path);
     }
 
+    /// P8-CTRL.5 (WP1 re-check LOW-2): an exit transition never changes the attempt's exit
+    /// reserve or its grant booking.
+    #[test]
+    fn an_exit_never_changes_the_exit_reserve_or_the_booking() {
+        let (path, mut j, mint, a) = settled(1_000);
+        let settled_state = j.saved.clone().unwrap();
+        let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
+        j.reserve_exit(ea, ei, &c).unwrap();
+        let reserved = j.saved.clone().unwrap();
+        assert!(super::legal(
+            &settled_state,
+            Transition::ExitReserve,
+            &reserved
+        ));
+        let mut reserve = reserved.clone();
+        reserve.exit_reserve_lamports = Some(1);
+        assert!(!super::legal(
+            &settled_state,
+            Transition::ExitReserve,
+            &reserve
+        ));
+        let mut booking = reserved;
+        booking.fe06 = Some(super::super::Fe06Attempt {
+            grant: "a".repeat(64),
+            campaign: "k".into(),
+            utc_day: 1,
+            owner_epoch: Some(1),
+        });
+        assert!(!super::legal(
+            &settled_state,
+            Transition::ExitReserve,
+            &booking
+        ));
+        drop(j);
+        let _ = fs::remove_dir_all(path);
+    }
+
     /// P8-CTRL.5 (WP1 review M1): while the exit of one mint is in flight, the attempt's other
     /// open positions stay held beside it (each mint at the larger of exit and position).
     #[test]
