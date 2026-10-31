@@ -318,6 +318,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         v1_plans: false,
         prepared: None,
         route_cap: None,
+        route_attempts: darkbot_solana::runtime_config::Limits::default().route_attempts_max,
         path: Path::Rpc,
         resources: Resources {
             compute_unit_limit: 400_000,
@@ -619,6 +620,7 @@ fn n2_route_fit_requotes_stop_at_the_deadline() {
     let mut quote_starts = Vec::new();
     let result = quote_fitting_route(
         64,
+        &RouteAttempts::new(darkbot_solana::runtime_config::Limits::default().route_attempts_max),
         deadline,
         |cap| {
             quote_starts.push(std::time::Instant::now());

@@ -597,6 +597,27 @@ impl RouteProvider for JupiterV2RouteProvider {
             deadline,
         )
     }
+
+    /// P4A-JIT-01: the JIT buy's route fit — `forJitoBundle` under the account cap.
+    fn quote_bundle_exact_in_with_budget(
+        &self,
+        from_mint: &Pubkey,
+        to_mint: &Pubkey,
+        amount_in: u64,
+        prewarmed_atas: &[PrewarmedAta],
+        max_accounts: u8,
+        deadline: Instant,
+    ) -> Result<Option<Route>, String> {
+        self.exact_in(
+            from_mint,
+            to_mint,
+            amount_in,
+            prewarmed_atas,
+            max_accounts,
+            true,
+            deadline,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1150,10 +1171,18 @@ pub(crate) mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline);
         let _ = provider.quote_bundle_exact_in(&from, &to, 500, &[], deadline);
+        // P4A-JIT-01: the JIT buy's fit asks the bundle route under the smaller cap.
+        let _ = provider.quote_bundle_exact_in_with_budget(&from, &to, 500, &[], 23, deadline);
         let lines = requests.lock().unwrap().clone();
-        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].contains("forJitoBundle=false"), "{}", lines[0]);
         assert!(lines[1].contains("forJitoBundle=true"), "{}", lines[1]);
+        assert!(lines[1].contains("maxAccounts=64"), "{}", lines[1]);
+        assert!(
+            lines[2].contains("forJitoBundle=true") && lines[2].contains("maxAccounts=23"),
+            "{}",
+            lines[2]
+        );
     }
 
     /// FE-02/E2 through the real adapter (loopback `/build`, synthetic response): the route's

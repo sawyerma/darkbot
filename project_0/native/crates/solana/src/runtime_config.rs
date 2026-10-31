@@ -47,6 +47,10 @@ pub mod defaults {
     /// The quote rounds one rebalancing observation may take at most (each round asks the quotes
     /// the plan still lacks).
     pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;
+    /// The most route requests one funding class may be granted: a fit shrinks the router's
+    /// account cap (1..=64) by at least one per request and a solve halves its input interval,
+    /// so 64 bounds either search.
+    pub const ROUTE_ATTEMPTS_MAX: u64 = 64;
     /// A slippage bound in basis points is a fraction of the whole (10 000 bps).
     pub const BPS_MAX: u64 = 10_000;
     /// The most accounts a Jupiter route may use (the route provider refuses more).
@@ -240,6 +244,11 @@ parameters! {
     h0_recurring_min_wins = 2, "wins", "P0_H0_RECURRING_MIN_WINS";
     // P8-CTRL.3: the longest validity of one FE-06 scope (revision 17).
     fe06_grant_max_lifetime_seconds = 86400, "s", "P0_FE06_GRANT_MAX_LIFETIME_SECS";
+    // P4A-JIT-01: the remote route requests one funding class of a candidate may make — a swap's
+    // route fit, or a JIT buy's shortfall solve and the fit of its transaction together (a cold
+    // solve takes up to 6, a warm re-solve at a smaller cap 1–2); the route-cap hint re-probes
+    // after as many hits (revision 18).
+    route_attempts_max = 8, "requests", "P0_ROUTE_ATTEMPTS_MAX";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -258,8 +267,8 @@ parameters! {
 /// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06); 15: `index_rps` …
 /// `crosscheck_mib` (DEC-08, the verifiers' budgets per method); 16: `h0_window_days`,
 /// `h0_extended_window_days`, `h0_recurring_min_wins` (H0); 17: `fe06_grant_max_lifetime_seconds`
-/// (P8-CTRL.3).
-pub const LIMITS_REVISION: u16 = 17;
+/// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01).
+pub const LIMITS_REVISION: u16 = 18;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -280,6 +289,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("route_attempts_max") => 18,
         f if position(f) >= position("fe06_grant_max_lifetime_seconds") => 17,
         f if position(f) >= position("h0_window_days") => 16,
         f if position(f) >= position("index_rps") => 15,
@@ -379,6 +389,7 @@ impl Parameter {
             "analytics_runs_listed" => defaults::ANALYTICS_RUNS_MAX,
             "analytics_jobs_listed" => defaults::ANALYTICS_JOBS_MAX,
             "rebalance_quote_rounds" => defaults::REBALANCE_QUOTE_ROUNDS_MAX,
+            "route_attempts_max" => defaults::ROUTE_ATTEMPTS_MAX,
             // DEC-05: the owner's types (u64 USD-micro/lamports/ns, the census's i64 profit
             // floor, a bps fraction, the route provider's account bound).
             "max_total_capital"
@@ -2126,9 +2137,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                17,
-                154,
-                "DmuoC1E9uB74gJJDZJqFyzL4zsNZhTvgsiPkQnn4wtzh".to_string()
+                18,
+                155,
+                "Cqhcr6uST3mL37zgegtEEUE6pLEiDWZnfQaoNAuW21Kz".to_string()
             )
         );
     }

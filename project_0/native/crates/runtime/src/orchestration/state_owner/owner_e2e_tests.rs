@@ -133,7 +133,11 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             8,
             vec![],
         )),
-        route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(8, 64)),
+        route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(
+            8,
+            64,
+            darkbot_solana::runtime_config::Limits::default().route_attempts_max,
+        )),
         program_generation: 0,
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),

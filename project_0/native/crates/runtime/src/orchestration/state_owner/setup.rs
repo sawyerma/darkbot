@@ -1208,6 +1208,7 @@ pub(super) fn prepare(
         route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(
             usize::try_from(operational.prepared_candidates)?,
             crate::execution::builder::p0::RouteProvider::max_accounts(&routes),
+            operational.route_attempts_max,
         )),
         program_generation: 0,
         next_candidate_id: 1,

@@ -56,14 +56,6 @@ impl Hint {
     }
 }
 
-/// Every `ROUTE_CAP_HINT_REPROBE_HITS`-th hit of a key searches from the configured maximum
-/// again: a hinted search can only confirm or lower the fit cap, so without a re-probe a cap
-/// lowered during a congested market would never rise again (a smaller cap can yield a worse
-/// quote). The bound equals the attempt bound of one search (`ROUTE_FIT_MAX_ATTEMPTS`): a
-/// re-probe costs at most that many requests, so the amortized cost of re-probing stays at most
-/// one request per hinted evaluation.
-pub const ROUTE_CAP_HINT_REPROBE_HITS: u8 = crate::execution::builder::p0::ROUTE_FIT_MAX_ATTEMPTS;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Entry {
     fit_cap: u8,
@@ -89,17 +81,26 @@ pub struct RouteCapCache {
     entries: HashMap<RouteCapKey, Entry>,
     /// Insertion order: the oldest key is evicted first (deterministic).
     order: VecDeque<RouteCapKey>,
+    /// Every `reprobe_hits`-th hit of a key searches from the configured maximum again: a hinted
+    /// search can only confirm or lower the fit cap, so without a re-probe a cap lowered during a
+    /// congested market would never rise again (a smaller cap can yield a worse quote). It is the
+    /// attempt budget of one search (`route_attempts_max`): a re-probe costs at most that many
+    /// requests, so the amortized cost of re-probing stays at most one request per hinted
+    /// evaluation.
+    reprobe_hits: u64,
     pub stats: Stats,
 }
 
 impl RouteCapCache {
-    /// `capacity` keys at most; `max_accounts` is the configured cap the hints are bound to.
-    pub fn new(capacity: usize, max_accounts: u8) -> Self {
+    /// `capacity` keys at most; `max_accounts` is the configured cap the hints are bound to;
+    /// a key is re-probed every `reprobe_hits` hits (the route attempt budget of one search).
+    pub fn new(capacity: usize, max_accounts: u8, reprobe_hits: u64) -> Self {
         Self {
             capacity: capacity.max(1),
             max_accounts: max_accounts.clamp(1, 64),
             entries: HashMap::new(),
             order: VecDeque::new(),
+            reprobe_hits: reprobe_hits.max(1),
             stats: Stats::default(),
         }
     }
@@ -136,13 +137,13 @@ impl RouteCapCache {
             self.stats.misses += 1;
             return Hint::Miss { start_cap: max };
         };
-        if e.hits_since_probe >= ROUTE_CAP_HINT_REPROBE_HITS {
+        if u64::from(e.hits_since_probe) >= self.reprobe_hits {
             e.hits_since_probe = 0;
             self.stats.reprobes += 1;
             self.stats.misses += 1;
             return Hint::Miss { start_cap: max };
         }
-        e.hits_since_probe += 1;
+        e.hits_since_probe = e.hits_since_probe.saturating_add(1);
         self.stats.hits += 1;
         Hint::Hit {
             start_cap: e.fit_cap.min(max),
@@ -193,6 +194,10 @@ impl RouteCapCache {
 
 #[cfg(test)]
 mod tests {
+    /// The tests' re-probe period: the configured default route attempt budget.
+    fn reprobe() -> u64 {
+        darkbot_solana::runtime_config::Limits::default().route_attempts_max
+    }
     use super::*;
 
     fn key(n: u8) -> RouteCapKey {
@@ -217,7 +222,7 @@ mod tests {
     /// starts at the configured maximum, a hit at the proven fit cap (never above the maximum).
     #[test]
     fn mt4_bound_eviction_and_invalidation() {
-        let mut c = RouteCapCache::new(2, 64);
+        let mut c = RouteCapCache::new(2, 64, reprobe());
         assert_eq!(c.hint(&key(1), 64), Hint::Miss { start_cap: 64 });
         c.record_fit(key(1), 64, trace(30, Some(40)));
         c.record_fit(key(2), 64, trace(20, None));
@@ -247,13 +252,13 @@ mod tests {
         );
     }
 
-    /// A key is re-probed from the configured maximum every `ROUTE_CAP_HINT_REPROBE_HITS` hits,
-    /// so a lowered fit cap can rise again; the fit recorded by the re-probe replaces it.
+    /// A key is re-probed from the configured maximum every `reprobe_hits` hits, so a lowered
+    /// fit cap can rise again; the fit recorded by the re-probe replaces it.
     #[test]
     fn mt4_periodic_reprobe_lets_the_fit_cap_rise() {
-        let mut c = RouteCapCache::new(4, 64);
+        let mut c = RouteCapCache::new(4, 64, reprobe());
         c.record_fit(key(1), 64, trace(30, Some(40)));
-        for _ in 0..ROUTE_CAP_HINT_REPROBE_HITS {
+        for _ in 0..reprobe() {
             assert_eq!(c.hint(&key(1), 64), Hint::Hit { start_cap: 30 });
         }
         assert_eq!(c.hint(&key(1), 64), Hint::Miss { start_cap: 64 });
@@ -267,7 +272,7 @@ mod tests {
     /// a rejection records its own bound.
     #[test]
     fn mt4_rejected_bound_is_kept_across_hinted_fits() {
-        let mut c = RouteCapCache::new(4, 64);
+        let mut c = RouteCapCache::new(4, 64, reprobe());
         c.record_fit(key(1), 64, trace(30, Some(40)));
         c.record_fit(key(1), 64, trace(30, None));
         assert_eq!(c.remembered(&key(1)), Some((30, Some(40))));

@@ -467,6 +467,9 @@ impl ShadowOwner {
                 ),
             prepared: Some((&self.prepared, self.ingress_session.generation)),
             route_cap: Some(&self.route_cap),
+            route_attempts: darkbot_solana::runtime_config::active()
+                .limits
+                .route_attempts_max,
             path: Path::Rpc,
             resources: self.resources,
             limits: TxLimits::default(),
