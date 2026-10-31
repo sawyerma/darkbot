@@ -324,6 +324,7 @@ impl Journal {
         intent: super::exit::ExitIntent,
         now: &Current,
         simulated: &SimulatedPayload<'_>,
+        fe06: Option<super::Fe06Attempt>,
     ) -> Result<(), String> {
         if simulated.payload.path == SubmissionPath::JitoBundle {
             return Err(err("EXIT_BUNDLE_UNSUPPORTED"));
@@ -331,7 +332,7 @@ impl Journal {
         if !simulated.payload.matches_exit(&intent) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
-        self.reserve_exit(approval, intent, now)
+        self.reserve_exit_booked(approval, intent, now, fe06)
     }
 
     /// FE-04 exit: exactly one adapter call, only after the exit's UNKNOWN state was fsynced and

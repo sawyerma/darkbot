@@ -36,6 +36,8 @@ pub struct ExitRecord {
     pub mint: String,
     pub state: StepState,
     pub settlement: Option<ExitSettlement>,
+    /// P8-CTRL.5: the FE-06 grant the exit is booked against (`None`: none, or before it).
+    pub fe06: Option<crate::execution::one_shot::Fe06Attempt>,
 }
 
 /// One own attempt with its exits, as its journal holds it.

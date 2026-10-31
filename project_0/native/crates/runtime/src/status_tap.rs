@@ -508,6 +508,9 @@ pub struct OwnerFe06 {
     pub attempts_today: Option<u64>,
     pub attempts_campaign: Option<u64>,
     pub attempts_grant: Option<u64>,
+    /// P8-CTRL.5: the scope's exit limit and the exits booked against the grant.
+    pub max_exits_grant: u64,
+    pub exits_grant: Option<u64>,
     pub block_reason: String,
     pub previews: Vec<OwnerFe06Preview>,
 }

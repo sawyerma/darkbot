@@ -76,6 +76,10 @@ message Fe06State {
   string block_reason = 13;
   // The scopes previewed for this owner epoch (`p0ctl live scope`), each grantable by its digest.
   repeated Fe06Preview previews = 14;
+  // P8-CTRL.5: the scope's exits per grant (0 without a grant).
+  uint64 max_exits_grant = 15;
+  // Exits booked against the grant; unset while the journals are unreadable (never 0).
+  optional uint64 exits_grant = 16;
 }
 
 // One previewed FE-06 scope: its digest and exactly what a grant of it permits.

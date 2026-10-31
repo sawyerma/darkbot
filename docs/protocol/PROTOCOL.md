@@ -3026,6 +3026,8 @@ operator authentication is a separate gate (block_reason while no grant can be t
 | attempts_grant | [uint64](#uint64) | optional | Attempts booked against the grant; unset while the journals are unreadable. |
 | block_reason | [string](#string) |  | Why no grant is in force or can be taken (the first gate), else empty. |
 | previews | [Fe06Preview](#darkbot-project0-v1-Fe06Preview) | repeated | The scopes previewed for this owner epoch (`p0ctl live scope`), each grantable by its digest. |
+| max_exits_grant | [uint64](#uint64) |  | P8-CTRL.5: the scope&#39;s exits per grant (0 without a grant). |
+| exits_grant | [uint64](#uint64) | optional | Exits booked against the grant; unset while the journals are unreadable (never 0). |
 
 
 

@@ -37,6 +37,31 @@ pub struct ExitCandidate<'a> {
     pub t_handoff_ns: u64,
 }
 
+/// P8-CTRL.5: a new exit within its grant's exit limit — the exits booked against the grant in
+/// the wallet's journals (archived and active), against the scope's `max_exits_grant` (an
+/// unreadable journal refuses).
+pub(super) fn within_exit_limit(
+    journal: &Journal,
+    booking: &super::Fe06Attempt,
+    scope: &crate::orchestration::fe06::Scope,
+) -> Result<(), String> {
+    let used = super::Fe06Quota::Grant(&booking.grant).used(
+        journal
+            .attempt_records()?
+            .iter()
+            .flat_map(|r| r.exits.iter())
+            .filter_map(|e| e.fe06.as_ref())
+            .collect::<Vec<_>>(),
+    );
+    if used >= scope.max_exits_grant {
+        return Err(format!(
+            "FE06_EXIT_LIMIT_GRANT: {used} of {} exits used",
+            scope.max_exits_grant
+        ));
+    }
+    Ok(())
+}
+
 /// P8-CTRL.7: `gates` issue the exit's egress permit before anything is reserved.
 pub fn admit_exit(
     journal: &mut Journal,
@@ -178,7 +203,27 @@ pub fn admit_exit(
         Some(Err(e)) => return Admission::Refused(e),
         None => return Admission::Refused("EGRESS_NOT_PERMITTED: no egress authority".into()),
     };
-    if let Err(e) = journal.reserve_exit_payload(approval, intent, &current, &simulated) {
+    // P8-CTRL.5: the grant's exit limit — every exit booked against it, UNKNOWN or sent,
+    // counts; the booking is written with the reservation, before any dispatch.
+    let fe06 = match gates
+        .and_then(|g| g.fe06)
+        .and_then(|a| a.scope().map(|s| (a, s)))
+    {
+        Some((grant, scope)) => {
+            let booking = super::Fe06Attempt {
+                grant: grant.digest().to_string(),
+                campaign: scope.campaign_id.clone(),
+                utc_day: c.now_unix_ms / 86_400_000,
+                owner_epoch: permit.epoch(),
+            };
+            if let Err(e) = within_exit_limit(journal, &booking, scope) {
+                return Admission::Refused(e);
+            }
+            Some(booking)
+        }
+        None => None,
+    };
+    if let Err(e) = journal.reserve_exit_payload(approval, intent, &current, &simulated, fe06) {
         // A failed write may still have reached the disk: never treated as nothing.
         return if e.starts_with("JOURNAL") {
             Admission::Unknown(e)

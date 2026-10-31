@@ -9,6 +9,8 @@ pub(crate) struct LedgerView {
     pub(crate) verdict: Verdict,
     /// P8-CTRL.5: every attempt's FE-06 grant booking.
     pub(crate) bookings: Vec<crate::execution::one_shot::Fe06Attempt>,
+    /// P8-CTRL.5: every exit's FE-06 grant booking.
+    pub(crate) exit_bookings: Vec<crate::execution::one_shot::Fe06Attempt>,
 }
 
 impl LedgerView {
@@ -20,6 +22,12 @@ impl LedgerView {
                 .attempts
                 .iter()
                 .filter_map(|a| a.fe06.clone())
+                .collect(),
+            exit_bookings: ledger
+                .attempts
+                .iter()
+                .flat_map(|a| a.exits.iter())
+                .filter_map(|e| e.fe06.clone())
                 .collect(),
         }
     }

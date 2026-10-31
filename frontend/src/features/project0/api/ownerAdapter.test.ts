@@ -177,7 +177,7 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(granted.fe06).toEqual({
       grantDigest: "e".repeat(64), scopeMode: "EXIT_ONLY", validFromUnixS: 1_760_000_000n, validUntilUnixS: 1_760_003_600n, inForce: true,
       campaignId: "first-profit", maxAttemptsPerUtcDay: 1n, maxAttemptsCampaign: 2n, maxAttemptsGrant: 3n,
-      attemptsToday: 1n, attemptsCampaign: 2n, attemptsGrant: null, blockReason: "", previews: [],
+      attemptsToday: 1n, attemptsCampaign: 2n, attemptsGrant: null, maxExitsGrant: 2n, exitsGrant: 1n, blockReason: "", previews: [],
     });
     expect(liveGates(granted).find((g) => g.gate === "FE-06 grant")).toEqual({ gate: "FE-06 grant", met: true, detail: "e".repeat(64) });
   });

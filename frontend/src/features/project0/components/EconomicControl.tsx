@@ -69,6 +69,7 @@ function Fe06Rows({ fe06: f, blocked, version, epoch }: { fe06: Fe06View; blocke
       <DetailRow title="FE-06 grant · valid" value={`${f.validFromUnixS == null ? "—" : utc(f.validFromUnixS)} … ${f.validUntilUnixS == null ? "—" : utc(f.validUntilUnixS)} · campaign ${f.campaignId}`}/>
       <DetailRow title="FE-06 attempts · today / campaign / grant"
         value={`${used(f.attemptsToday, f.maxAttemptsPerUtcDay)} / ${used(f.attemptsCampaign, f.maxAttemptsCampaign)} / ${used(f.attemptsGrant, f.maxAttemptsGrant)} · UNKNOWN and sent attempts count`}/>
+      <DetailRow title="FE-06 exits · grant" value={`${used(f.exitsGrant, f.maxExitsGrant)} · UNKNOWN and sent exits count`}/>
       {f.scopeMode === "EXIT_ONLY" ? <Notice>EXIT_ONLY: exits of the scope&apos;s open positions only — no new liquidation; ECON_LIVE or ECON_SEND DISABLED, a halt or a revocation blocks every new exit too.</Notice> : null}
       <div className="p0-actions">
         {armed === `revoke:${f.grantDigest}`

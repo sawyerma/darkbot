@@ -382,6 +382,9 @@ export interface Fe06View {
   attemptsToday: bigint | null;
   attemptsCampaign: bigint | null;
   attemptsGrant: bigint | null;
+  /** P8-CTRL.5: the scope's exits per grant and those booked against it (null: unknown). */
+  maxExitsGrant: bigint;
+  exitsGrant: bigint | null;
   blockReason: string;
   previews: ReadonlyArray<{ digest: string; scopeMode: string; ownerEpoch: bigint; validUntilUnixS: bigint; terminal: string }>;
 }

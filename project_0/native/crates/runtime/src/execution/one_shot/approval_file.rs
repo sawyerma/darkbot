@@ -574,6 +574,7 @@ mod tests {
                     mint: key(4),
                     state: StepState::Settled,
                     settlement: None,
+                    fe06: None,
                 })
                 .collect(),
             open_positions: open_mint

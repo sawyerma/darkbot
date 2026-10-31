@@ -197,6 +197,7 @@ fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::Attemp
                     mint: e.intent.mint.clone(),
                     state,
                     settlement,
+                    fe06: e.fe06.clone(),
                 }
             })
             .collect(),

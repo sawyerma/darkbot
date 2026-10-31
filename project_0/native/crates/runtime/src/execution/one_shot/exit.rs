@@ -116,6 +116,50 @@ pub struct ExitAttempt {
     /// DEC-03 (journal schema 6): the class of a released non-landing of this exit.
     #[serde(default)]
     pub(super) non_landing: Option<NonLandingRelease>,
+    /// P8-CTRL.5 (journal schema 9): the FE-06 grant the exit is booked against, written by its
+    /// reservation before any dispatch (`None`: no grant, or a frame before it) — what the
+    /// grant's exit limit counts.
+    #[serde(default)]
+    pub(super) fe06: Option<super::Fe06Attempt>,
+}
+
+/// Journal schema-6…8 layout of `ExitAttempt` (before the P8-CTRL.5 exit booking).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(super) struct ExitAttemptV8 {
+    pub(super) approval: ExitApproval,
+    pub(super) intent: ExitIntent,
+    pub(super) phase: ExitPhase,
+    pub(super) observations: BTreeMap<String, FinalizedObservation>,
+    pub(super) finalized: Option<Vec<Receipt>>,
+    pub(super) non_landing: Option<NonLandingRelease>,
+}
+/// Tests write the earlier layouts from today's exits (their booking dropped).
+#[cfg(test)]
+impl From<ExitAttempt> for ExitAttemptV8 {
+    fn from(v: ExitAttempt) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            observations: v.observations,
+            finalized: v.finalized,
+            non_landing: v.non_landing,
+        }
+    }
+}
+impl From<ExitAttemptV8> for ExitAttempt {
+    fn from(v: ExitAttemptV8) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            observations: v.observations,
+            finalized: v.finalized,
+            non_landing: v.non_landing,
+            fe06: None,
+        }
+    }
 }
 
 /// Journal schema-5 layout of `ExitAttempt` (before the DEC-03 release class).
@@ -137,6 +181,7 @@ impl From<ExitAttemptV5> for ExitAttempt {
             observations: v.observations,
             finalized: v.finalized,
             non_landing: None,
+            fe06: None,
         }
     }
 }
@@ -487,11 +532,23 @@ impl Journal {
 
     /// Reserves one exit durably: validated against the approval, the open position and the
     /// current wallet; one approval is consumed once; at most one exit is open.
+    #[cfg(test)]
     pub fn reserve_exit(
         &mut self,
         approval: ExitApproval,
         intent: ExitIntent,
         now: &Current,
+    ) -> Result<(), String> {
+        self.reserve_exit_booked(approval, intent, now, None)
+    }
+
+    /// The exit's reservation with its FE-06 grant booking (P8-CTRL.5; `None`: no grant).
+    pub fn reserve_exit_booked(
+        &mut self,
+        approval: ExitApproval,
+        intent: ExitIntent,
+        now: &Current,
+        fe06: Option<super::Fe06Attempt>,
     ) -> Result<(), String> {
         let mut s = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
         if !matches!(s.phase, Phase::Settled(_)) {
@@ -514,6 +571,7 @@ impl Journal {
             observations: BTreeMap::new(),
             finalized: None,
             non_landing: None,
+            fe06,
         });
         // A23-07: a new exit only while its whole lifecycle keeps the wallet journal reopenable
         // (the open check refuses a larger file); beyond, it is refused and the position stays
@@ -809,6 +867,54 @@ pub(crate) mod tests {
             wallet_token_deltas: Some(tokens.iter().map(|(m, d)| (m.to_string(), *d)).collect()),
             unknown_reasons: vec![],
         }
+    }
+
+    /// P8-CTRL.5: an exit reserved under a grant is booked with it durably (a reopen reads it),
+    /// and the grant's exit limit counts it — the next exit under that grant is refused at the
+    /// limit, one under another grant is not (the exit admission is the `crate_health` owner's).
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn p8ctrl03_an_exit_is_booked_against_its_grant_and_bounded_by_its_exit_limit() {
+        use crate::orchestration::fe06;
+        let (path, mut j, mint, a) = settled(1_000);
+        let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
+        let booking = |grant: &str| super::super::Fe06Attempt {
+            grant: grant.into(),
+            campaign: "first-profit".into(),
+            utc_day: 1,
+            owner_epoch: Some(3),
+        };
+        j.reserve_exit_booked(ea, ei, &c, Some(booking("g1")))
+            .unwrap();
+        drop(j);
+        let j = Journal::open(&path, &a.wallet).unwrap();
+        let booked: Vec<_> = j
+            .attempt_records()
+            .unwrap()
+            .into_iter()
+            .flat_map(|r| r.exits)
+            .map(|e| e.fe06)
+            .collect();
+        assert_eq!(booked, [Some(booking("g1"))]);
+        let scope = fe06::parse(
+            fe06::tests::text(
+                &solana_sdk::pubkey::Pubkey::new_unique(),
+                &[("max_exits_grant", "1")],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::exit_admission::within_exit_limit(&j, &booking("g1"), &scope),
+            Err("FE06_EXIT_LIMIT_GRANT: 1 of 1 exits used".into())
+        );
+        assert_eq!(
+            super::super::exit_admission::within_exit_limit(&j, &booking("g2"), &scope),
+            Ok(())
+        );
+        drop(j);
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     /// A settled attempt that left `units` of a fresh mint in the wallet (mark = units).

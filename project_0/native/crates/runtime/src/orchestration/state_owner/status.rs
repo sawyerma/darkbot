@@ -329,6 +329,7 @@ impl ShadowOwner {
                     s.max_attempts_per_utc_day = scope.max_attempts_per_utc_day;
                     s.max_attempts_campaign = scope.max_attempts_campaign;
                     s.max_attempts_grant = scope.max_attempts_grant;
+                    s.max_exits_grant = scope.max_exits_grant;
                     if let Some(Ok(view)) = &self.ledger_view {
                         use crate::execution::one_shot::Fe06Quota;
                         let day = super::accounts::wall_unix_s().ok().map(|n| n / 86_400);
@@ -337,6 +338,8 @@ impl ShadowOwner {
                             Some(Fe06Quota::Campaign(&scope.campaign_id).used(&view.bookings));
                         s.attempts_grant =
                             Some(Fe06Quota::Grant(grant.digest()).used(&view.bookings));
+                        s.exits_grant =
+                            Some(Fe06Quota::Grant(grant.digest()).used(&view.exit_bookings));
                     }
                 }
                 if !s.in_force {

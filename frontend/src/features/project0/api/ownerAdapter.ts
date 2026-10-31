@@ -212,6 +212,8 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           attemptsToday: optional(m.fe06.attemptsToday),
           attemptsCampaign: optional(m.fe06.attemptsCampaign),
           attemptsGrant: optional(m.fe06.attemptsGrant),
+          maxExitsGrant: m.fe06.maxExitsGrant,
+          exitsGrant: optional(m.fe06.exitsGrant),
           blockReason: m.fe06.blockReason,
           previews: m.fe06.previews.map((p) => ({
             digest: p.digest, scopeMode: p.scopeMode, ownerEpoch: p.ownerEpoch, validUntilUnixS: p.validUntilUnixS, terminal: p.terminal,

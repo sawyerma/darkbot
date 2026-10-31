@@ -334,6 +334,8 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             attempts_today: o.fe06.attempts_today,
             attempts_campaign: o.fe06.attempts_campaign,
             attempts_grant: o.fe06.attempts_grant,
+            max_exits_grant: o.fe06.max_exits_grant,
+            exits_grant: o.fe06.exits_grant,
             block_reason: o.fe06.block_reason.clone(),
             previews: o
                 .fe06
@@ -2208,6 +2210,8 @@ mod contract_tests {
             attempts_today: Some(1),
             attempts_campaign: Some(2),
             attempts_grant: None,
+            max_exits_grant: 2,
+            exits_grant: Some(1),
             block_reason: "".into(),
             previews: vec![],
         };

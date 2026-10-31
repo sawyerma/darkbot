@@ -351,8 +351,53 @@ pub fn fe06_attempts_report(
                 }
             ));
         }
+        let exits = Fe06Quota::Grant(digest).used(
+            records
+                .iter()
+                .flat_map(|r| r.exits.iter())
+                .filter_map(|e| e.fe06.as_ref()),
+        );
+        out.push(format!(
+            "  EXITS GRANT {digest}: {exits} of {}{}",
+            s.max_exits_grant,
+            if exits >= s.max_exits_grant {
+                " · EXHAUSTED (no new exit)"
+            } else {
+                ""
+            }
+        ));
     }
     out
+}
+
+/// Schema-8 layout of `Saved` (the attempt's grant booking, before the exits' own).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV8 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    exits: Vec<exit::ExitAttemptV8>,
+    non_landing: Option<non_landing::NonLandingRelease>,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+    fe06: Option<Fe06Attempt>,
+}
+impl From<SavedV8> for Saved {
+    fn from(v: SavedV8) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: v.exits.into_iter().map(Into::into).collect(),
+            non_landing: v.non_landing,
+            hold: v.hold,
+            fe06: v.fe06,
+        }
+    }
 }
 
 /// Schema-7 layout of `Saved` (the DEC-04 holds, before the P8-CTRL.5 grant booking).
@@ -364,7 +409,7 @@ struct SavedV7 {
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
     observations: BTreeMap<String, receipts::FinalizedObservation>,
-    exits: Vec<exit::ExitAttempt>,
+    exits: Vec<exit::ExitAttemptV8>,
     non_landing: Option<non_landing::NonLandingRelease>,
     hold: Option<crate::execution::hold_b::HoldEvidence>,
 }
@@ -376,7 +421,7 @@ impl From<SavedV7> for Saved {
             phase: v.phase,
             finalized: v.finalized,
             observations: v.observations,
-            exits: v.exits,
+            exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: None,
@@ -489,7 +534,7 @@ struct SavedV6 {
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
     observations: BTreeMap<String, receipts::FinalizedObservation>,
-    exits: Vec<exit::ExitAttempt>,
+    exits: Vec<exit::ExitAttemptV8>,
     non_landing: Option<non_landing::NonLandingRelease>,
 }
 impl From<SavedV6> for Saved {
@@ -500,7 +545,7 @@ impl From<SavedV6> for Saved {
             phase: v.phase,
             finalized: v.finalized,
             observations: v.observations,
-            exits: v.exits,
+            exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: None,
             fe06: None,
@@ -657,10 +702,16 @@ struct VersionV7 {
     transition: Transition,
     state: SavedV7,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV8 {
+    transition: Transition,
+    state: SavedV8,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking.
-    const SCHEMA: u16 = 8;
+    /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking; 9 — each exit's own.
+    const SCHEMA: u16 = 9;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -689,6 +740,10 @@ impl crate::analytics::payload::Payload for Version {
                 state: v.state.into(),
             })),
             7 => Some(decode_wire::<VersionV7>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            8 => Some(decode_wire::<VersionV8>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -734,9 +789,14 @@ struct LegacyImportV7 {
     legacy_sha256: String,
     state: SavedV7,
 }
+#[derive(Deserialize)]
+struct LegacyImportV8 {
+    legacy_sha256: String,
+    state: SavedV8,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 8;
+    const SCHEMA: u16 = 9;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -765,6 +825,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 state: v.state.into(),
             })),
             7 => Some(decode_wire::<LegacyImportV7>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            8 => Some(decode_wire::<LegacyImportV8>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -1749,6 +1813,7 @@ mod tests {
             observations: BTreeMap::new(),
             finalized: Some(Vec::new()),
             non_landing: None,
+            fe06: None,
         });
         let v5 = VersionV5 {
             transition: Transition::ExitSettle,
@@ -1805,7 +1870,7 @@ mod tests {
                 phase: released.phase.clone(),
                 finalized: released.finalized.clone(),
                 observations: released.observations.clone(),
-                exits: released.exits.clone(),
+                exits: released.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: released.non_landing.clone(),
             },
         };
@@ -1852,7 +1917,7 @@ mod tests {
                 phase: held.phase.clone(),
                 finalized: held.finalized.clone(),
                 observations: held.observations.clone(),
-                exits: held.exits.clone(),
+                exits: held.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: held.non_landing.clone(),
                 hold: held.hold.clone(),
             },
@@ -1880,16 +1945,26 @@ mod tests {
             utc_day: 20_390,
             owner_epoch: Some(3),
         });
-        let version = Version {
+        let v8 = VersionV8 {
             transition: Transition::ExitNotLanded,
-            state: booked.clone(),
+            state: SavedV8 {
+                approval: booked.approval.clone(),
+                intent: booked.intent.clone(),
+                phase: booked.phase.clone(),
+                finalized: booked.finalized.clone(),
+                observations: booked.observations.clone(),
+                exits: booked.exits.iter().cloned().map(Into::into).collect(),
+                non_landing: booked.non_landing.clone(),
+                hold: booked.hold.clone(),
+                fe06: booked.fe06.clone(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let bytes = crate::analytics::payload::encode_wire(&v8).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 8, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitNotLanded, booked)
+            (Transition::ExitNotLanded, booked.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -1898,6 +1973,31 @@ mod tests {
                 "3uDH7ZajpnVMCcQXa22BxtkJEQPk1HadsXXPFDrciaX5".to_string()
             ),
             "FE04_TRANSITION schema-8 layout changed"
+        );
+        // Schema 9 (P8-CTRL.5) is pinned with the exit's own FE-06 grant booking.
+        let mut exit_booked = booked;
+        assert!(!exit_booked.exits.is_empty());
+        for e in &mut exit_booked.exits {
+            e.fe06 = exit_booked.fe06.clone();
+        }
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: exit_booked.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 9, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, exit_booked)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2475,
+                "J4TEw27jn4U7gQLLpHMgUgm9rrEKq7thpaNjkFxk3ALj".to_string()
+            ),
+            "FE04_TRANSITION schema-9 layout changed"
         );
     }
 
@@ -1943,12 +2043,22 @@ mod tests {
         )
         .unwrap();
         let g = "g".repeat(64);
-        let records = [
+        let mut records = [
             record("a1", booking(&g, "k1", 10)),
             record("a2", booking(&g, "k1", 9)),
             record("a3", booking("h", "k2", 10)),
             record("a4", None),
         ];
+        // P8-CTRL.5: an exit of a1 booked against the grant.
+        records[0]
+            .exits
+            .push(crate::execution::accounting::ExitRecord {
+                approval_id: "x1".into(),
+                mint: "m".into(),
+                state: StepState::Unknown,
+                settlement: None,
+                fe06: booking(&g, "k1", 10),
+            });
         let lines = fe06_attempts_report(&records, "W", 10, Some((&g, &scope)));
         assert_eq!(
             lines[0],
@@ -1964,6 +2074,7 @@ mod tests {
             "  UTC_DAY day 10 (today): 2 of 2 · EXHAUSTED (no new attempt)".into(),
             "  CAMPAIGN k1: 2 of 5".into(),
             format!("  GRANT {g}: 2 of 2 · EXHAUSTED (no new attempt)"),
+            format!("  EXITS GRANT {g}: 1 of 1 · EXHAUSTED (no new exit)"),
         ];
         for e in &expected {
             assert!(lines.contains(e), "{e}\n{lines:#?}");
@@ -2060,10 +2171,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 8 since the P8-CTRL.5 grant booking; schemas 7 … 2 stay readable.
+        // Schema 9 since the P8-CTRL.5 exit booking; schemas 8 … 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 8)
+            (journal::kind::FE04_TRANSITION, 9)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -2110,7 +2221,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 8],
+                [1, 9],
                 "historical frame kept, the reopen transition is typed"
             );
         }

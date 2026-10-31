@@ -7275,6 +7275,11 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
             booking("another-grant", "first-profit", today),
             booking("another-grant", "another-campaign", today),
         ],
+        // P8-CTRL.5: one exit under this grant, one under another.
+        exit_bookings: vec![
+            booking(&digest, "first-profit", today),
+            booking("another-grant", "first-profit", today),
+        ],
     }));
     f.owner
         .sources
@@ -7313,6 +7318,7 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         (s.attempts_today, s.attempts_campaign, s.attempts_grant),
         (Some(3), Some(3), Some(2))
     );
+    assert_eq!((s.max_exits_grant, s.exits_grant), (1, Some(1)));
     // Only this epoch's preview (the granted scope), with the owner's terminal text.
     assert_eq!(
         s.previews
@@ -7353,8 +7359,13 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
     f.owner.ledger_view = Some(Err("JOURNAL_CORRUPT".into()));
     let s = f.owner.owner_snapshot(4).fe06;
     assert_eq!(
-        (s.attempts_today, s.attempts_campaign, s.attempts_grant),
-        (None, None, None)
+        (
+            s.attempts_today,
+            s.attempts_campaign,
+            s.attempts_grant,
+            s.exits_grant
+        ),
+        (None, None, None, None)
     );
     // A grant outside its validity is not in force, with LIVE's reason.
     let expired = scope(3, "first-profit", now - 3_000, now - 60);
