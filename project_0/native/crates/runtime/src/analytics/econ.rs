@@ -639,7 +639,10 @@ pub fn spawn(
     let commit = source_commit(&repo);
     let worker = std::thread::Builder::new()
         .name("econ-analytics".into())
-        .spawn(move || Worker::new(h, rx, source, commitment, commit, min_sample)?.run())
+        .spawn(move || {
+            crate::host::set_thread_qos(crate::host::ThreadRole::Evidence);
+            Worker::new(h, rx, source, commitment, commit, min_sample)?.run()
+        })
         .map_err(|e| e.to_string())?;
     Ok((handle, worker))
 }

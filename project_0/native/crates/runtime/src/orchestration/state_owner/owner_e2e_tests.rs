@@ -174,6 +174,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fee_parity_journaled: None,
         fee_parity_mismatches: 0,
         local_fee: super::local_fee::LocalFeeControl::start(Default::default(), None, None),
+        host_journaled: None,
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -9333,4 +9334,44 @@ fn p6_mt10_active_decides_a_sealed_class_locally_and_its_simulation_verifies_it(
     assert_eq!(row(&f).1, "OFF");
     assert_eq!(f.owner.fee_model(), fee_parity::FeeModel::OFF);
     cleanup(f);
+}
+
+/// P6-MT.12/13: the owner journals its host at its first pass (`HOST_EVIDENCE`: topology, native
+/// or translated, power and thermal state, its M4 verdict) and again only when its runtime state
+/// changed — never the same record twice in a row.
+#[test]
+fn p6_mt12_the_owner_journals_its_host_at_its_start() {
+    use crate::analytics::payload::{decode, Payload};
+    use crate::host::HostEvidence;
+    let mut f = fixture_with("p6_mt12_host", None);
+    assert!(f.owner.host_journaled.is_none());
+    f.owner.lifecycle();
+    let host = f
+        .owner
+        .host_journaled
+        .clone()
+        .expect("journaled at the first pass");
+    assert_eq!(host.build_arch, std::env::consts::ARCH);
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        assert_eq!(host.qualifying(), Ok(()), "{}", host.line());
+        assert!(!host.perf_levels.is_empty());
+    }
+    f.owner.host_record();
+    f.owner.host_record();
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = Vec::new();
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == HostEvidence::KIND {
+            records.push(decode::<HostEvidence>(frame.kind, frame.schema, &frame.payload).unwrap());
+        }
+    }
+    assert_eq!(records.first(), Some(&host));
+    assert!(
+        records.windows(2).all(|w| w[0] != w[1]),
+        "a record only after a change"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

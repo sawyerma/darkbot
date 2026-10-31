@@ -53,6 +53,8 @@ impl ShadowOwner {
             }
             // P6-MT.10: the local fee model's parity counts when they changed (also at shutdown).
             self.fee_parity_record(false);
+            // P6-MT.13: the host's runtime state when it changed (also at shutdown).
+            self.host_record();
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,
@@ -258,6 +260,36 @@ impl ShadowOwner {
             .is_ok()
         {
             self.fee_parity_journaled = Some(record);
+        }
+    }
+
+    /// P6-MT.12/13: journals the host — in full at the run's first pass (logged with its M4
+    /// verdict), then its active CPUs, thermal pressure and low-power mode whenever they changed
+    /// since the last record (the topology does not change while a process runs).
+    pub(super) fn host_record(&mut self) {
+        let host = match &self.host_journaled {
+            None => {
+                let host = crate::host::read();
+                owner_log!(self, "{}", host.line());
+                host
+            }
+            Some(last) => crate::host::HostEvidence {
+                active_cpus: crate::host::active_cpus(),
+                thermal_pressure: crate::host::thermal_pressure(),
+                low_power_mode: crate::host::low_power_mode(),
+                qos_refusals: crate::host::qos_refusals(),
+                ..last.clone()
+            },
+        };
+        if self.host_journaled.as_ref() == Some(&host) {
+            return;
+        }
+        if self
+            .evidence
+            .emit(OwnerEvidence::Host(Box::new(host.clone())))
+            .is_ok()
+        {
+            self.host_journaled = Some(host);
         }
     }
 

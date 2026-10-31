@@ -54,7 +54,10 @@ fn configured_sources(
                     }
                     .into(),
                 )
-                .spawn(move || super::ingress::run_ingress(src, sink, stop, halt, slots, failure))
+                .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Ingress);
+                    super::ingress::run_ingress(src, sink, stop, halt, slots, failure)
+                })
                 .map_err(|e| format!("SOURCE_THREAD: {e}"))
         });
     let controls = match std::env::var_os("P0_PROJECT_DIR") {
@@ -579,6 +582,7 @@ pub(super) fn prepare(
         std::thread::Builder::new()
             .name("blockhash".into())
             .spawn(move || {
+                crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                 let admission_closed =
                     move || bh_econ.as_ref().is_some_and(|h| h.admission_closed());
                 run_blockhash_refresh(
@@ -1268,6 +1272,7 @@ pub(super) fn prepare(
         fee_parity_journaled: None,
         fee_parity_mismatches: 0,
         local_fee,
+        host_journaled: None,
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,

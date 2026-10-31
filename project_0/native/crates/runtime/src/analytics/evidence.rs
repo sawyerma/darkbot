@@ -277,6 +277,8 @@ pub enum OwnerEvidence {
     /// P6-MT.10: the same record after a new mismatch — synced at once after it is written (a
     /// mismatch is never lost to a crash after one sync).
     FeeParityMismatch(Box<crate::execution::fee_parity::FeeParityStatsRecord>),
+    /// P6-MT.12/13: the host at the run's start and after a change of its runtime state.
+    Host(Box<crate::host::HostEvidence>),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -458,6 +460,7 @@ impl OwnerEvidence {
             Self::FeeParityStats(v) | Self::FeeParityMismatch(v) => {
                 Encoded::of(v.as_ref(), None, None)
             }
+            Self::Host(v) => Encoded::of(v.as_ref(), None, None),
         }
     }
 }
@@ -585,6 +588,7 @@ impl OwnerEvidenceWriter {
         let worker = std::thread::Builder::new()
             .name("p0-owner-evidence".into())
             .spawn(move || {
+                crate::host::set_thread_qos(crate::host::ThreadRole::Evidence);
                 run_writer(
                     journal,
                     recovery,

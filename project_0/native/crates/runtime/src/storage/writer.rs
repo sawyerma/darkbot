@@ -284,6 +284,7 @@ impl MarketJournalWorker {
         let handle = std::thread::Builder::new()
             .name("market-journal-writer".into())
             .spawn(move || {
+                crate::host::set_thread_qos(crate::host::ThreadRole::Evidence);
                 // The receiver outlives the failure record: a submit never sees a closed lane
                 // without its reason.
                 let result = write_loop(writer, &rx, cfg, &thread_budget, &thread_counters, &dir);

@@ -263,6 +263,8 @@ pub(super) struct ShadowOwner {
     fee_parity_mismatches: u64,
     /// P6-MT.10 phase 2: the local fee model's controller mode and seal.
     local_fee: local_fee::LocalFeeControl,
+    /// P6-MT.12/13: the host as last journaled (`None`: not yet).
+    host_journaled: Option<crate::host::HostEvidence>,
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,
@@ -391,6 +393,8 @@ pub(super) fn run_shadow(
     admission: Option<super::boot_audit::NetworkAudit>,
     rolling: Option<super::until_stopped::Rolling>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // P6-MT.12: the owner thread's QoS class.
+    crate::host::set_thread_qos(crate::host::ThreadRole::Owner);
     let (mut owner, mut fetch, ingress) = setup::prepare(clock, econ, admission, rolling)?;
     let outcome = (|| -> Result<(), Box<dyn std::error::Error>> {
         loop {

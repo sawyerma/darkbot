@@ -108,7 +108,10 @@ impl IngressSessions {
         let sw = self.slot_watch.clone();
         let thread = std::thread::Builder::new()
             .name("ingress-ws".into())
-            .spawn(move || run_ingress(src, producer, sd, halt, sw, failure))?;
+            .spawn(move || {
+                crate::host::set_thread_qos(crate::host::ThreadRole::Ingress);
+                run_ingress(src, producer, sd, halt, sw, failure)
+            })?;
         Ok(IngressSession::new(session, thread, generation))
     }
 }

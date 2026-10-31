@@ -357,6 +357,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P5-JIT-01 | `route.rs`, `builder.rs`, `inventory.rs` | `a82f1a7`, `26f6194b` | PARTIAL | Holds Liability+Funding (V7), Kauf-Slippage, `P0_JIT_FUNDING_BANK`; Bundle-Admission (DEC-11 `56af6185`), Funding als Asset, Kauf `forJitoBundle` (`b95c53fc`); routes/Bundle-Simulation NOT_RUN |
 | T-01…03 tag TX / state / economics | economics curve only | — | OPEN · BLOCKED | 0.1.12 deployment |
 | P6-01 E2E telemetry | MT0, owner journal | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
+| P6-MT.12 M4 runtime | `host.rs`: startup evidence (`HOST_EVIDENCE`: perf levels, CPUs, cache line, native/Rosetta, macOS, model, low power, thermal; again on change = MT13 `thermal_state`/`active_cpu`), M4 verdict (native arm64 macOS, never Rosetta), QoS per role (owner/ingress/remote USER_INITIATED, evidence UTILITY; refusals counted) | `p6_mt12_the_owner_journals_its_host_at_its_start`, `host::tests` | LOCAL_PASS (this M4 Max) | M4 latency gates (P6-MT.15) NOT_MEASURED; no FAST pool yet; power source (AC/battery) not read |
 | P6-02 race shadow | — | — | OPEN · DEFERRED_PRIORITY | S1-RACE |
 | P6-03 long-tail shadow | Shadow runtime | R127d before FIX-134/135 | PARTIAL | 72 h P6-LT NOT_RUN |
 | P6-04 winner comparison / P6-05 loss classifier | `winner.rs`, `LossReason` | local | LOCAL_PASS | Mainnet sample |

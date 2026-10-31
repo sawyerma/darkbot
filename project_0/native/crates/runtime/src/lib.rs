@@ -26,6 +26,8 @@ pub use darkbot_common::console;
 /// `p0ctl boot` for the same environment (DEC-07).
 pub mod env_file;
 pub mod execution;
+/// P6-MT.12: the host a run executes on and the QoS class of each thread role.
+pub mod host;
 pub mod market;
 pub mod orchestration;
 

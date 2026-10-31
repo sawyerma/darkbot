@@ -351,6 +351,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("fe04-settlement-rpc".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     let rpc = darkbot_solana::provider::rpc_client(
                         fe04_rpc_url.clone(),
                         Duration::from_millis(
@@ -402,6 +403,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("winner-rpc".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     let rpc = darkbot_solana::provider::rpc_client(
                         winner_rpc_url,
                         Duration::from_millis(
@@ -442,6 +444,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("projection-rpc".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     let submitter = RpcSubmitter::new(projection_rpc_url, true);
                     while !projection_shutdown.is_requested() {
                         let Some(work) = projection_job_rx.pop_timeout(Duration::from_millis(250))
@@ -506,6 +509,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("oracle-price-projection-rpc".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     let submitter = RpcSubmitter::new(oracle_projection_rpc_url, true);
                     while !oracle_projection_shutdown.is_requested() {
                         let Some(work) =
@@ -594,6 +598,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("rebalance-quotes".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     while !shutdown.is_requested() {
                         let Some(work) = job_rx.pop_timeout(Duration::from_millis(250)) else {
                             continue;
@@ -657,6 +662,7 @@ impl RemoteWorkers {
             std::thread::Builder::new()
                 .name("threshold-crosscheck".into())
                 .spawn(move || {
+                    crate::host::set_thread_qos(crate::host::ThreadRole::Remote);
                     while !shutdown.is_requested() {
                         let Some(work) = job_rx.pop_timeout(Duration::from_millis(250)) else {
                             continue;

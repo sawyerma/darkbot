@@ -728,6 +728,7 @@ fn run_embedded_inner(
     let ingress: IngressThread = std::thread::Builder::new()
         .name("market-ingress-ws".into())
         .spawn(move || {
+            crate::host::set_thread_qos(crate::host::ThreadRole::Ingress);
             src.run(producer, session_for_thread, halt, slots)
                 .map_err(|e| {
                     let class = market_ingress_error_class(&e);
