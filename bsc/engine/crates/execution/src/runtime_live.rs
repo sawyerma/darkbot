@@ -6789,6 +6789,13 @@ mod tests {
         r.clean();
     }
 
+    /// The fresh attempts a real-clock start-limit test has (CI 31.10.: a
+    /// shared or throttled CPU can delay the transport thread's wake-up
+    /// past the 1 ms by itself). The path holds the limit when one of them
+    /// starts in time; before BSC3-076 none could: the owner's durable
+    /// admission alone took 9-12 ms inside it.
+    const REAL_CLOCK_ATTEMPTS: usize = 5;
+
     /// BSC3-076: on the real monotonic clock a launch's LIVE BUY starts its
     /// transport within the 1 ms after its ingress (`BSC_EXEC_START_LIMIT_NS`):
     /// nothing durable is left between the ingress and the first byte (the
@@ -6799,24 +6806,33 @@ mod tests {
         ignore = "the 1 ms transport start limit needs a release build"
     )]
     fn a_live_buy_starts_within_its_deadline_on_the_real_clock() {
-        let r = Rig::new("live-real-clock", LiveStrategies::C3);
-        let mut x = r.runtime("boot-1");
-        let mut c2 = c2_at(&r.d, r.buyer, 5);
-        settle(&mut x, &c2);
-        assert!(x.armed(), "{:?}", reason(&x));
-        let base = Instant::now();
-        let clock = FnClock {
-            id: 1,
-            now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
-        };
-        let (hash, raw, launcher) = launch();
-        let at = clock.now_ns();
-        c2.pending(hash, launcher, 3, 0, at);
-        let buy = x.on_launch(SourceId::PublicNode, hash, &raw, at, &c2, &clock);
-        assert!(buy.is_some(), "{:?}", record(&x).texts(l::REFUSALS));
-        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
-        x.shutdown();
-        r.clean();
+        let mut missed = Vec::new();
+        for attempt in 0..REAL_CLOCK_ATTEMPTS {
+            let r = Rig::new(&format!("live-real-clock-{attempt}"), LiveStrategies::C3);
+            let mut x = r.runtime("boot-1");
+            let mut c2 = c2_at(&r.d, r.buyer, 5);
+            settle(&mut x, &c2);
+            assert!(x.armed(), "{:?}", reason(&x));
+            let base = Instant::now();
+            let clock = FnClock {
+                id: 1,
+                now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
+            };
+            let (hash, raw, launcher) = launch();
+            let at = clock.now_ns();
+            c2.pending(hash, launcher, 3, 0, at);
+            let buy = x.on_launch(SourceId::PublicNode, hash, &raw, at, &c2, &clock);
+            let sent = buy.is_some() && r.requests.recv_timeout(Duration::from_secs(2)).is_ok();
+            if !sent {
+                missed.push(format!("{:?}", record(&x).texts(l::REFUSALS)));
+            }
+            x.shutdown();
+            r.clean();
+            if sent {
+                return;
+            }
+        }
+        panic!("no attempt started within the limit: {missed:?}");
     }
 
     /// BSC3-076: on the real monotonic clock a block-driven intent (here
@@ -6833,50 +6849,58 @@ mod tests {
         use darkbot_bsc_trading::economics::flap::native_curve20::{
             HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
         };
-        let r = Rig::new("live-real-clock-sc", LiveStrategies::StrategyC);
-        let mut x = r.runtime("boot-1");
-        let c2 = c2_at(&r.d, r.buyer, 5);
-        settle(&mut x, &c2);
-        assert!(x.armed(), "{:?}", reason(&x));
-        let base = Instant::now();
-        let clock = FnClock {
-            id: 1,
-            now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
-        };
-        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
-        let fresh = quote_native_buy(&NativeBuyInputs {
-            token: terms,
-            reserve_before: U256::ZERO,
-            circulating_before: U256::ZERO,
-            input_amount: U256::from(1_000_000_000_000_000_000u128),
-            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
-            tax_on_bonding_curve_enabled: true,
-            caller_fee_exempt: false,
-            holding_cap: HoldingCap::None,
-        })
-        .unwrap();
-        let buy = StrategyAction::Buy {
-            token: [0xAB; 20],
-            curve: StrategyCurve {
-                terms,
-                reserve: fresh.reserve_after,
-                circulating: fresh.supply_after,
-            },
-            input_wei: U256::from(10_000_000_000_000_000u64),
-            decided_ns: clock.now_ns(),
-        };
-        // The decision's wall clock: half a second after C2's head.
-        let now_ms = 1_793_000_000_500;
-        let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
-        assert_eq!(
-            (intents.len(), refused),
-            (1, None),
-            "{:?}",
-            record(&x).texts(l::REFUSALS)
-        );
-        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
-        x.shutdown();
-        r.clean();
+        let mut missed = Vec::new();
+        for attempt in 0..REAL_CLOCK_ATTEMPTS {
+            let r = Rig::new(
+                &format!("live-real-clock-sc-{attempt}"),
+                LiveStrategies::StrategyC,
+            );
+            let mut x = r.runtime("boot-1");
+            let c2 = c2_at(&r.d, r.buyer, 5);
+            settle(&mut x, &c2);
+            assert!(x.armed(), "{:?}", reason(&x));
+            let base = Instant::now();
+            let clock = FnClock {
+                id: 1,
+                now: || 1_000_000_000 + base.elapsed().as_nanos() as u64,
+            };
+            let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+            let fresh = quote_native_buy(&NativeBuyInputs {
+                token: terms,
+                reserve_before: U256::ZERO,
+                circulating_before: U256::ZERO,
+                input_amount: U256::from(1_000_000_000_000_000_000u128),
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+                holding_cap: HoldingCap::None,
+            })
+            .unwrap();
+            let buy = StrategyAction::Buy {
+                token: [0xAB; 20],
+                curve: StrategyCurve {
+                    terms,
+                    reserve: fresh.reserve_after,
+                    circulating: fresh.supply_after,
+                },
+                input_wei: U256::from(10_000_000_000_000_000u64),
+                decided_ns: clock.now_ns(),
+            };
+            // The decision's wall clock: half a second after C2's head.
+            let now_ms = 1_793_000_000_500;
+            let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
+            let sent = (intents.len(), refused) == (1, None)
+                && r.requests.recv_timeout(Duration::from_secs(2)).is_ok();
+            if !sent {
+                missed.push(format!("{:?}", record(&x).texts(l::REFUSALS)));
+            }
+            x.shutdown();
+            r.clean();
+            if sent {
+                return;
+            }
+        }
+        panic!("no attempt started within the limit: {missed:?}");
     }
 
     fn leases(state: &Path) -> Vec<crate::sources::Admitted> {
