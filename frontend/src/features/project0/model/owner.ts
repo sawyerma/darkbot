@@ -1,4 +1,7 @@
+import { ECON_SWITCHES, WALLET_PREFIX } from "@/core/realtime/analyticsControl";
 import type { FinanceSnapshot, MonitorSnapshot, ProgramPinView } from "./contracts";
+
+export { ECON_SWITCHES, WALLET_PREFIX };
 
 /**
  * Views of the Shadow/econ4h state owner (topics project0.liquidator.state, .wallets.state,
@@ -9,6 +12,13 @@ export interface CapabilityView {
   requested: string;
   effective: string;
   blockReason: string;
+  /** P8-CTRL.1: a signer's validated roles (WALLET:<pubkey> rows only). */
+  roles: readonly string[];
+}
+
+/** P8-CTRL.1: an economic switch or a signer — shown and changed in their own rows. */
+export function isEconomic(name: string): boolean {
+  return (ECON_SWITCHES as readonly string[]).includes(name) || name.startsWith(WALLET_PREFIX);
 }
 
 export interface OwnerEngineView {
@@ -182,6 +192,11 @@ export interface LiquidatorView {
   /** DEC-13b/DEC-02: the owner's FE-04 admission of LIVE candidates and exits (never LIVE itself:
    * that needs FE-06). */
   admission: AdmissionView | null;
+  /** P8-CTRL.6: the owner epoch an economic request states (a new one at every owner start);
+   * null without capability control. */
+  capabilityEpoch: bigint | null;
+  /** P8-CTRL.3/.5: null from an owner before P8-CTRL. */
+  fe06: Fe06View | null;
 }
 
 /** DEC-13b/DEC-02: the owner's FE-04 admission state and this run's counters. */
@@ -349,4 +364,55 @@ export function admissionLine(a: AdmissionView): string {
     + ` · attempts ${a.submitted} submitted / ${a.refused} refused / ${a.unknown} unknown${last(a.lastRefusal)}`
     + ` · simulations ${a.simulationReused} reused / ${a.simulationResimulated} again / ${a.simulationRefused} refused${last(a.lastReuseRefusal)}`
     + ` · exits ${a.exitsSubmitted} submitted / ${a.exitsRefused} refused / ${a.exitsUnknown} unknown${last(a.lastExitRefusal)}`;
+}
+
+/** P8-CTRL.3/.5: the FE-06 grant in force (none: `grantDigest` null and the reason), its scope's
+ * mode, validity, campaign and attempt limits, the attempts booked against them (null: the FE-04
+ * journal unreadable or no clock), and the scopes previewed for this owner epoch. */
+export interface Fe06View {
+  grantDigest: string | null;
+  scopeMode: string;
+  validFromUnixS: bigint | null;
+  validUntilUnixS: bigint | null;
+  inForce: boolean;
+  campaignId: string;
+  maxAttemptsPerUtcDay: bigint;
+  maxAttemptsCampaign: bigint;
+  maxAttemptsGrant: bigint;
+  attemptsToday: bigint | null;
+  attemptsCampaign: bigint | null;
+  attemptsGrant: bigint | null;
+  blockReason: string;
+  previews: ReadonlyArray<{ digest: string; scopeMode: string; ownerEpoch: bigint; validUntilUnixS: bigint; terminal: string }>;
+}
+
+/** P8-CTRL.8: why an economic request cannot be sent from this view (empty: it can). Never from
+ * a state that is not current, and never without the version and the epoch the owner checks. */
+export function economicBlock(s: { busy: boolean; live: boolean; version: bigint | null; epoch: bigint | null }): string {
+  if (s.busy) return "Command in progress";
+  if (!s.live) return "Runtime owner not current";
+  if (s.version == null) return "Capability configuration version unknown (no capability control in this runtime)";
+  if (s.epoch == null) return "Owner epoch unknown (an economic request states it)";
+  return "";
+}
+
+/** P8-CTRL.2/.8: the LIVE checklist from the owner's projection — each gate the owner reports
+ * with what it says. The checklist decides nothing: LIVE is what the owner made effective. */
+export function liveGates(o: LiquidatorView): ReadonlyArray<{ gate: string; met: boolean; detail: string }> {
+  const live = o.capabilities.find((c) => c.name === "LIVE") ?? null;
+  const signers = o.capabilities.filter((c) => c.name.startsWith(WALLET_PREFIX));
+  const enabled = signers.filter((c) => c.effective === "ENABLED").length;
+  const pin = programPinStatus(o.engine?.programPin ?? null, o.engine?.programUpgradeLatched ?? null);
+  return [
+    { gate: "LIVE requested", met: live?.requested === "LIVE", detail: live ? `requested ${live.requested}` : "not reported" },
+    ...ECON_SWITCHES.map((n) => {
+      const c = o.capabilities.find((x) => x.name === n);
+      return { gate: n, met: c?.effective === "ENABLED", detail: c?.effective ?? "not reported" };
+    }),
+    { gate: "Signers", met: signers.length > 0 && enabled === signers.length, detail: signers.length ? `${enabled} of ${signers.length} ENABLED` : "no configured signer" },
+    { gate: "FE-06 grant", met: o.fe06?.inForce === true, detail: o.fe06 ? (o.fe06.grantDigest ?? o.fe06.blockReason) : "not reported" },
+    { gate: "FE-04 approval", met: o.approval?.state === "VALID", detail: o.approval ? `${o.approval.state}${o.approval.reason ? ` (${o.approval.reason})` : ""}` : "not reported" },
+    { gate: "Program pin", met: pin.status === "REFERENCE", detail: pin.status },
+    { gate: "Safety", met: o.safety != null && o.safety.haltReason === "", detail: o.safety ? (o.safety.haltReason || "no halt") : "not reported" },
+  ];
 }

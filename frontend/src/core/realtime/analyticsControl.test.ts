@@ -5,10 +5,10 @@ import {
   AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootStartCommandSchema,
   H0JobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema,
 } from "../generated/darkbot/project0/v1/analytics_pb";
-import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
+import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 import {
   analyticsCommand, autostartGrantCommand, autostartPreviewCommand, backtestCommand, bootNetworkCommand, bootStartCommand, h0Command, optimizeCommand, recheck,
-  sourceCommand, untilStoppedDuration, useAnalyticsControl, verifyCommand, type PointInput,
+  economicCommand, sourceCommand, untilStoppedDuration, useAnalyticsControl, verifyCommand, type PointInput,
 } from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
@@ -80,6 +80,24 @@ describe("Analytics job commands", () => {
     expect([c.unit, c.mode]).toEqual(["geyser:publicnode", "observe"]);
     expect("problem" in sourceCommand("geyser:../x", "off")).toBe(true);
     expect("problem" in sourceCommand("", "off")).toBe(true);
+  });
+
+  it("P8-CTRL: types an economic switch, a signer or an FE-06 digest with the owner epoch, nothing else", () => {
+    const digest = "ab".repeat(32);
+    const valid: Array<[string, string]> = [["ECON_SIGN", "ENABLED"], ["ECON_LIVE", "DISABLED"], ["WALLET:11111111111111111111111111111112", "ENABLED"], ["FE06_GRANT", digest], ["FE06_REVOKE", digest]];
+    for (const [capability, requested] of valid) {
+      const ok = economicCommand(capability, requested, 3n);
+      if (!("params" in ok)) throw new Error(ok.problem);
+      const c = fromBinary(CapabilityControlCommandSchema, ok.params);
+      expect([c.capability, c.requested, c.ownerEpoch]).toEqual([capability, requested, 3n]);
+    }
+    expect(economicCommand("ECON_SIGN", "ENABLED", null)).toEqual({ problem: "Owner epoch unknown." });
+    expect(economicCommand("ECON_SIGN", "ENABLED", 0n)).toEqual({ problem: "Owner epoch unknown." });
+    const invalid: Array<[string, string]> = [["ECON_SIGN", "ON"], ["ECON_FOO", "ENABLED"], ["LIVE", "LIVE"], ["WALLET:", "ENABLED"],
+      ["WALLET:0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl", "ENABLED"], ["FE06_GRANT", "ABCD"], ["FE06_REVOKE", "A".repeat(64)]];
+    for (const [capability, requested] of invalid) {
+      expect("problem" in economicCommand(capability, requested, 3n), `${capability} ${requested}`).toBe(true);
+    }
   });
 
   it("posts one typed request whose id becomes the job id, and shows the native refusal", async () => {

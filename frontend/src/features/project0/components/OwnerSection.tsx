@@ -2,7 +2,8 @@ import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LatencyView, LiquidatorView, OwnerThresholdView } from "../model/owner";
 import type { SystemView } from "../model/status";
-import { admissionLine, nsToMs, programPinStatus } from "../model/owner";
+import { admissionLine, isEconomic, nsToMs, programPinStatus } from "../model/owner";
+import { EconomicControl } from "./EconomicControl";
 import { usdMicroDisplay } from "../model/format";
 import { orDash, parameterText } from "../model/statusFormat";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
@@ -89,9 +90,10 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
           + `${owner.approval.kind === "attempt" ? ` · ${owner.approval.fundingClass} · capital ≤ ${usdMicroDisplay(owner.approval.maxCapitalUsdMicro.toString())} · loss ≤ ${usdMicroDisplay(owner.approval.maxLossUsdMicro.toString())} · ${owner.approval.allowedTargets} targets` : ""}`
           + ` · slippage ≤ ${owner.approval.maxSlippageBps} bps · expires ${new Date(Number(owner.approval.expiresUnixS) * 1000).toISOString()} · LIVE not authorized (FE-06)`}/> : null}
     {owner.admission ? <DetailRow title="FE-04 admission" value={admissionLine(owner.admission)}/> : null}
-    {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
+    {owner.capabilities.filter((c) => !isEconomic(c.name)).map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     <LiveRequest owner={owner} live={live}/>
+    <EconomicControl owner={owner} live={live}/>
     <ModeRequest owner={owner} live={live} capability="HOLD_B" label="B hold mode" action="Request hold mode"
       active="Active (needs N and the evidence)"/>
     <ModeRequest owner={owner} live={live} capability="JITO_BUNDLE" label="Bundle path" action="Request bundle path"

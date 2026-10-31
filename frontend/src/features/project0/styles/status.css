@@ -18,3 +18,12 @@
   .p0-health .p0-right,
   .p0-live-section .p0-right { text-align: left; }
 }
+
+/* P8-CTRL.3: an FE-06 scope preview exactly as the owner rendered it. */
+.p0-scope {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  margin: 6px 0 10px;
+}

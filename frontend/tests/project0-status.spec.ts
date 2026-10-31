@@ -33,7 +33,7 @@ function ownerTopics(wallets = "wallets_state", edit?: (a: AnalyticsJobs) => voi
 }
 
 async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status"), wallets = "wallets_state",
-  edit?: (a: AnalyticsJobs) => void) {
+  edit?: (a: AnalyticsJobs) => void, ownerQuality = StateQuality.OK) {
   const extra = owner ? ownerTopics(wallets, edit) : new Map();
   let socket: WebSocketRoute;
   let seq = 1n;
@@ -67,7 +67,8 @@ async function feed(page: Page, initiallyReported = true, owner = false, system:
         if (msg.value.topic === TopicId.PROJECT0_STATUS) {
           send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n, quality: StateQuality.OK, sourceId: "TEST_ONLY", payload: system } });
         } else if (own) {
-          send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n, quality: StateQuality.OK, sourceId: "TEST_ONLY",
+          send({ case: "stateFull", value: { topic: msg.value.topic, generation: 1n, seq: 1n,
+            quality: msg.value.topic === TopicId.PROJECT0_LIQUIDATOR_STATE ? ownerQuality : StateQuality.OK, sourceId: "TEST_ONLY",
             sourceTimestampUnixNs: BigInt(Date.now()) * 1_000_000n, payload: own.payload } });
         } else capture();
       }
@@ -304,6 +305,74 @@ test("DEC-05: effective values reach the Liquidator tab with source, range and t
   await expect(row("threshold_trigger")).toContainText("true · environment · restart");
 });
 
+test("P8-CTRL-05: economic switches, FE-06 and the signer take the one command path with version and epoch", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await feed(page, true, true);
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    sent.push(req);
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema,
+      { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+  });
+  const line = (title: string | RegExp) => page.locator(".p0-line", { hasText: title });
+  const command = (i: number) => {
+    const c = fromBinary(CapabilityControlCommandSchema, sent[i]!.params);
+    expect([sent[i]!.action, sent[i]!.expected?.version]).toEqual(["project0.capability.set", { case: "configVersion", value: 1n }]);
+    return [c.capability, c.requested, c.ownerEpoch];
+  };
+  await tab(page, "Liquidator");
+  // Every economic switch as the owner decided it, the epoch and version a change states.
+  await expect(line("Economic control · owner epoch / configuration version")).toContainText("2 / 1 · every switch DISABLED at an owner start");
+  await expect(line(/^ECON_SIGN/)).toContainText("ENABLED");
+  await expect(line(/^ECON_LIVE/)).toContainText("DISABLED");
+  // The LIVE checklist names each gate the owner reports; LIVE itself stays the owner's.
+  await expect(line("LIVE gate · ECON_LIVE")).toContainText("missing · DISABLED");
+  await expect(line("LIVE gate · Signers")).toContainText("met · 1 of 1 ENABLED");
+  await expect(line("LIVE gate · FE-06 grant")).toContainText("missing · FE06_OPERATOR_AUTHORIZATION_UNDECIDED");
+  await expect(line(/^FE-06 grant/)).toContainText("none · FE06_OPERATOR_AUTHORIZATION_UNDECIDED");
+  await page.getByRole("button", { name: "Enable ECON_LIVE" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(command(0)).toEqual(["ECON_LIVE", "ENABLED", 2n]);
+  await page.getByRole("button", { name: "Disable ECON_SIGN" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(command(1)).toEqual(["ECON_SIGN", "DISABLED", 2n]);
+  // FE-06: the scope previewed for this epoch exactly as the owner rendered it; a grant names
+  // its digest only after the operator confirmed what is shown (arming sends nothing).
+  const digest = "d".repeat(64);
+  await expect(page.getByLabel(`FE-06 scope ${digest}`)).toHaveText("PROJECT 0 FE-06 SCOPE digest=dddd…");
+  await page.getByRole("button", { name: `Grant exactly this scope · ${digest}` }).click();
+  await expect(page.getByText(/^Grant exactly the scope above \(ALL, digest d{64}, owner epoch 2/)).toBeVisible();
+  expect(sent.length).toBe(2);
+  await page.getByRole("button", { name: `Confirm grant · ${digest}` }).click();
+  await expect.poll(() => sent.length).toBe(3);
+  expect(command(2)).toEqual(["FE06_GRANT", digest, 2n]);
+  // Wallets: the signer with its roles beside the frozen panel, through the same path.
+  await tab(page, "Wallets");
+  await expect(line("11111111111111111111111111111112 · LIQUIDATOR · FEE_PAYER")).toContainText("ENABLED");
+  await page.getByRole("button", { name: "Disable WALLET:11111111111111111111111111111112" }).click();
+  await expect.poll(() => sent.length).toBe(4);
+  expect(command(3)).toEqual(["WALLET:11111111111111111111111111111112", "DISABLED", 2n]);
+  await expect(page.getByTestId("p0-signer-command-receipt")).toContainText("COMPLETED");
+  expect(errors).toEqual([]);
+});
+
+test("P8-CTRL-05: an owner state that is not current sends no economic request and claims no current LIVE", async ({ page }) => {
+  await feed(page, true, true, golden("system_status"), "wallets_state", undefined, StateQuality.STALE);
+  const line = (title: string | RegExp) => page.locator(".p0-line", { hasText: title });
+  await tab(page, "Liquidator");
+  await expect(page.getByText("Last reported state (STALE); not current.")).toBeVisible();
+  await expect(line("Economic control · owner epoch / configuration version")).toContainText("last reported, not current");
+  await expect(page.getByRole("button", { name: "Enable ECON_LIVE" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: `Grant exactly this scope · ${"d".repeat(64)}` })).toBeDisabled();
+  await tab(page, "Wallets");
+  await expect(page.getByText("Last reported state (STALE); not current — no switch is sent.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Disable WALLET:11111111111111111111111111111112" })).toBeDisabled();
+});
+
 test("owner and analytics topics reach their tabs; job and source commands take the one command path", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -328,9 +397,9 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.getByText(/^runner idle · \d+ running · \d+ queued/)).toBeVisible();
   // DEC-10: the Liquidator tab shows the FE-04 approval status the engine projected (no secrets).
   await tab(page, "Liquidator");
-  await expect(page.locator(".p0-line", { hasText: "FE-04 approval" }))
+  await expect(page.locator(".p0-line", { hasText: /^FE-04 approval/ }))
     .toContainText("BINDING_MISMATCH (code_sha) · attempt pilot-1 · ZERO_PREFUND_SAME_TX");
-  await expect(page.locator(".p0-line", { hasText: "FE-04 approval" })).toContainText("LIVE not authorized (FE-06)");
+  await expect(page.locator(".p0-line", { hasText: /^FE-04 approval/ })).toContainText("LIVE not authorized (FE-06)");
   // DEC-13b: the owner's admission is OFF without FE-06 and has admitted nothing.
   await expect(page.locator(".p0-line", { hasText: "FE-04 admission" }))
     .toContainText("OFF · FE-06/P8-LT: LIVE is not authorized (B10) · attempts 0 submitted / 0 refused / 0 unknown");

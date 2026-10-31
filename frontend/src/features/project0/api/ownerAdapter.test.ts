@@ -3,7 +3,7 @@ import liquidatorHex from "../../../../../protocol/golden/project0/liquidator_st
 import walletsHex from "../../../../../protocol/golden/project0/wallets_state.hex?raw";
 import walletsNonLandingHex from "../../../../../protocol/golden/project0/wallets_state_non_landing.hex?raw";
 import financeHex from "../../../../../protocol/golden/project0/finance_summary.hex?raw";
-import { admissionLine, ownerMonitor, programPinStatus, unusableByReason } from "../model/owner";
+import { admissionLine, economicBlock, isEconomic, liveGates, ownerMonitor, programPinStatus, unusableByReason } from "../model/owner";
 import {
   decodeFinanceSummary,
   decodeLiquidatorState,
@@ -148,5 +148,35 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
   it("rejects malformed wire bytes", () => {
     expect(() => decodeLiquidatorState(new Uint8Array([0xff]))).toThrow();
     expect(() => decodeFinanceSummary(new Uint8Array([0xff]))).toThrow();
+  });
+
+  it("P8-CTRL: the owner epoch, every economic switch, the signer with its roles and FE-06 reach the view", () => {
+    expect(liquidator.capabilityEpoch).toBe(2n);
+    expect(liquidator.capabilities.filter((c) => isEconomic(c.name)).map((c) => [c.name, c.effective])).toEqual([
+      ["ECON_LIVE", "DISABLED"], ["ECON_ARM", "DISABLED"], ["ECON_SIGN", "ENABLED"], ["ECON_SEND", "DISABLED"], ["ECON_ATTEMPT", "DISABLED"],
+      ["WALLET:11111111111111111111111111111112", "ENABLED"],
+    ]);
+    expect(liquidator.capabilities.find((c) => c.name.startsWith("WALLET:"))?.roles).toEqual(["LIQUIDATOR", "FEE_PAYER"]);
+    expect(liquidator.capabilities.find((c) => c.name === "LIVE")?.blockReason)
+      .toBe("ECON_LIVE DISABLED (missing too: ECON_ARM DISABLED; ECON_SEND DISABLED; ECON_ATTEMPT DISABLED; FE-06/P8-LT: LIVE is not authorized (B10))");
+    // No grant (unknown usage stays null, never 0) and the one scope previewed for this epoch.
+    expect(liquidator.fe06).toMatchObject({ grantDigest: null, inForce: false, validFromUnixS: null, attemptsToday: null, attemptsGrant: null });
+    expect(liquidator.fe06?.blockReason).toMatch(/^FE06_OPERATOR_AUTHORIZATION_UNDECIDED: /);
+    expect(liquidator.fe06?.previews).toEqual([{ digest: "d".repeat(64), scopeMode: "ALL", ownerEpoch: 2n, validUntilUnixS: 1_760_003_600n, terminal: "PROJECT 0 FE-06 SCOPE digest=dddd…" }]);
+    // The checklist names what the owner reports, gate by gate; it decides nothing.
+    expect(liveGates(liquidator).map((g) => `${g.gate}:${g.met ? "met" : "missing"}`)).toEqual([
+      "LIVE requested:met", "ECON_LIVE:missing", "ECON_ARM:missing", "ECON_SIGN:met", "ECON_SEND:missing", "ECON_ATTEMPT:missing",
+      "Signers:met", "FE-06 grant:missing", "FE-04 approval:missing", "Program pin:missing", "Safety:met",
+    ]);
+    expect(liveGates({ ...liquidator, capabilities: [], fe06: null }).find((g) => g.gate === "Signers")).toEqual({ gate: "Signers", met: false, detail: "no configured signer" });
+  });
+
+  it("P8-CTRL.8: an economic request is never sent from a state that is not current or without its version and epoch", () => {
+    const ok = { busy: false, live: true, version: 1n, epoch: 2n };
+    expect(economicBlock(ok)).toBe("");
+    expect(economicBlock({ ...ok, live: false })).toBe("Runtime owner not current");
+    expect(economicBlock({ ...ok, busy: true })).toBe("Command in progress");
+    expect(economicBlock({ ...ok, version: null })).toMatch(/^Capability configuration version unknown/);
+    expect(economicBlock({ ...ok, epoch: null })).toMatch(/^Owner epoch unknown/);
   });
 });

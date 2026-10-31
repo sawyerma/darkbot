@@ -152,6 +152,7 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
       requested: c.requested,
       effective: c.effective,
       blockReason: c.blockReason,
+      roles: [...c.roles],
     })),
     rebalance: m.rebalance
       ? {
@@ -194,6 +195,27 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           lastReuseRefusal: m.admission.lastReuseRefusal, exitsSubmitted: m.admission.exitsSubmitted,
           exitsRefused: m.admission.exitsRefused, exitsUnknown: m.admission.exitsUnknown,
           lastExitRefusal: m.admission.lastExitRefusal,
+        }
+      : null,
+    capabilityEpoch: m.capabilityEpoch ?? null,
+    fe06: m.fe06
+      ? {
+          grantDigest: m.fe06.grantDigest ?? null,
+          scopeMode: m.fe06.scopeMode,
+          validFromUnixS: optional(m.fe06.validFromUnixS),
+          validUntilUnixS: optional(m.fe06.validUntilUnixS),
+          inForce: m.fe06.inForce,
+          campaignId: m.fe06.campaignId,
+          maxAttemptsPerUtcDay: m.fe06.maxAttemptsPerUtcDay,
+          maxAttemptsCampaign: m.fe06.maxAttemptsCampaign,
+          maxAttemptsGrant: m.fe06.maxAttemptsGrant,
+          attemptsToday: optional(m.fe06.attemptsToday),
+          attemptsCampaign: optional(m.fe06.attemptsCampaign),
+          attemptsGrant: optional(m.fe06.attemptsGrant),
+          blockReason: m.fe06.blockReason,
+          previews: m.fe06.previews.map((p) => ({
+            digest: p.digest, scopeMode: p.scopeMode, ownerEpoch: p.ownerEpoch, validUntilUnixS: p.validUntilUnixS, terminal: p.terminal,
+          })),
         }
       : null,
   };

@@ -194,6 +194,26 @@ export function capabilityCommand(capability: string, requested: string): { para
   return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested })) };
 }
 
+/** P8-CTRL.1: the economic switches, in the order the owner names a missing one. */
+export const ECON_SWITCHES = ["ECON_LIVE", "ECON_ARM", "ECON_SIGN", "ECON_SEND", "ECON_ATTEMPT"] as const;
+/** P8-CTRL.1: one switch per configured signer, `WALLET:<base58 public key>`. */
+export const WALLET_PREFIX = "WALLET:";
+
+/** P8-CTRL.1/.3/.8: the operands of `p0ctl capability set ECON_*|WALLET:<key> ENABLED|DISABLED`
+ * or of `p0ctl live grant|revoke --digest D` — stated with the owner epoch this view showed (the
+ * gateway refuses an economic request without one, the owner one of another epoch). ENABLED is a
+ * partial permission, never a command to sign or send; a grant is refused by the owner while the
+ * operator authentication is undecided. */
+export function economicCommand(capability: string, requested: string, ownerEpoch: bigint | null): { params: Uint8Array } | { problem: string } {
+  if (ownerEpoch == null || ownerEpoch <= 0n) return { problem: "Owner epoch unknown." };
+  const onOff = requested === "ENABLED" || requested === "DISABLED";
+  const valid = ((ECON_SWITCHES as readonly string[]).includes(capability) && onOff)
+    || (capability.startsWith(WALLET_PREFIX) && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(capability.slice(WALLET_PREFIX.length)) && onOff)
+    || ((capability === "FE06_GRANT" || capability === "FE06_REVOKE") && /^[0-9a-f]{64}$/.test(requested));
+  if (!valid) return { problem: "Not an economic switch, a signer or an FE-06 digest." };
+  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested, ownerEpoch })) };
+}
+
 async function csrf(): Promise<string> {
   const r = await fetch("/api/v1/session", { ...options, signal: AbortSignal.timeout(4000) });
   const token = r.headers.get("x-csrf-token");
