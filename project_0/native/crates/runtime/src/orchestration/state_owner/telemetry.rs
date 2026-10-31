@@ -246,7 +246,7 @@ impl ShadowOwner {
 impl ShadowOwner {
     /// P6-MT.10: journals the local fee model's cumulative parity counts of this run
     /// (`FEE_PARITY_STATS`; a continued run's earlier counts included) when they changed since
-    /// the last record, or always (`force`, the shutdown).
+    /// the last record, or always (`force`: the start and the shutdown).
     pub(super) fn fee_parity_record(&mut self, force: bool) {
         let record = crate::execution::fee_parity::record(
             self.fee_parity_base.as_ref(),
@@ -264,18 +264,26 @@ impl ShadowOwner {
         }
     }
 
-    /// P6-MT.10: a mismatch is journaled at once (never only at the next telemetry tick).
-    pub(super) fn fee_parity_mismatch(&mut self) {
-        let journaled = self.fee_parity_journaled.as_ref().map_or(0, |r| {
-            r.classes.iter().map(|(_, n)| n.mismatched).sum::<u64>()
-        });
-        let base = self.fee_parity_base.as_ref().map_or(0, |r| {
-            r.classes.iter().map(|(_, n)| n.mismatched).sum::<u64>()
-        });
-        let now = crate::execution::fee_parity::counts().mismatched();
-        let since = now.saturating_sub(self.fee_parity_start.mismatched());
-        if base.saturating_add(since) > journaled {
-            self.fee_parity_record(false);
+    /// P6-MT.10, each owner pass: the run's first record at its start, and a new mismatch at once
+    /// — journaled and synced (`FeeParityMismatch`), never only at the next telemetry tick.
+    pub(super) fn fee_parity_pass(&mut self) {
+        if self.fee_parity_journaled.is_none() {
+            self.fee_parity_record(true);
+        }
+        let mismatches = crate::execution::fee_parity::counts().mismatched();
+        if mismatches <= self.fee_parity_mismatches {
+            return;
+        }
+        let record = crate::execution::fee_parity::record(
+            self.fee_parity_base.as_ref(),
+            &self.fee_parity_start,
+        );
+        if self
+            .evidence
+            .emit(OwnerEvidence::FeeParityMismatch(Box::new(record.clone())))
+            .is_ok()
+        {
+            (self.fee_parity_journaled, self.fee_parity_mismatches) = (Some(record), mismatches);
         }
     }
 }

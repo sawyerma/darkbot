@@ -7,9 +7,11 @@
 //! Gate-FAIL"); one mismatch fails its class for good (the RPC quote stays). A qualified message is
 //! a distinct one: the same message quoted again (a candidate re-evaluated under the same
 //! blockhash) is compared again but counts once. Counted in the process, journaled by the owner
-//! (`FEE_PARITY_STATS`, cumulative over a resumed run, at once after a mismatch), summed across the
-//! saved runs of a project by `saved_runs`/`qualification` (an on-demand report, never an owner's
-//! start; a run whose journal does not read to its end qualifies nothing). Every owner runs on the
+//! (`FEE_PARITY_STATS`: at its start, when the counts changed, at shutdown, and synced at once
+//! after a new mismatch — so a mismatch survives a crash once one owner pass and one sync passed),
+//! summed across the saved runs of a project by `saved_runs`/`qualification` (an on-demand report,
+//! never an owner's start; a crashed or still running run counts with its last record — its
+//! matches a lower bound, its mismatches durable — and is named). Every owner runs on the
 //! Mainnet cluster only (BOOT-12 genesis pin), so every record is Mainnet's. No v1 transaction is
 //! built yet (S3-02): v1 has no class until it is.
 use serde::{Deserialize, Serialize};
@@ -155,10 +157,31 @@ impl crate::analytics::payload::Payload for FeeParityStatsRecord {
 static COUNTS: [[AtomicU64; 4]; CLASS_COUNT] =
     [const { [const { AtomicU64::new(0) }; 4] }; CLASS_COUNT];
 static FIRST_MISMATCH: std::sync::Mutex<Option<FeeMismatch>> = std::sync::Mutex::new(None);
-/// The messages compared under the current blockhash (a message names its blockhash, so one of
-/// an earlier blockhash never recurs): the set starts afresh with each blockhash.
-static SEEN: std::sync::Mutex<Option<(Hash, std::collections::HashSet<Hash>)>> =
-    std::sync::Mutex::new(None);
+/// The messages compared per blockhash and when that blockhash was last seen: a set is dropped
+/// once its blockhash is older than `blockhash_max_age_ms` (no fresh message names it any more), so
+/// evaluations around a refresh, under the old and the new blockhash, never count a message twice.
+type Seen = std::collections::HashMap<Hash, (std::time::Instant, std::collections::HashSet<Hash>)>;
+static SEEN: std::sync::Mutex<Option<Seen>> = std::sync::Mutex::new(None);
+
+/// Whether `tx` is compared for the first time (a poisoned record of what was seen: never first).
+fn first_seen(tx: &VersionedTransaction) -> bool {
+    let Ok(mut seen) = SEEN.lock() else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    let max_age = std::time::Duration::from_millis(
+        darkbot_solana::runtime_config::active()
+            .limits
+            .blockhash_max_age_ms,
+    );
+    let seen = seen.get_or_insert_with(Default::default);
+    seen.retain(|_, (at, _)| now.saturating_duration_since(*at) <= max_age);
+    let (at, hashes) = seen
+        .entry(*tx.message.recent_blockhash())
+        .or_insert_with(|| (now, Default::default()));
+    *at = now;
+    hashes.insert(tx.message.hash())
+}
 
 /// This process's counts, per class (an owner's start: what was not its own).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,16 +216,7 @@ pub fn observe(tx: &VersionedTransaction, role: FeeRole, rpc_lamports: u64) {
     let counts = &COUNTS[class.index()];
     match local {
         Some(local) if local == rpc_lamports => {
-            let hash = tx.message.hash();
-            let blockhash = *tx.message.recent_blockhash();
-            let fresh = SEEN.lock().map_or(true, |mut seen| {
-                let s = seen.get_or_insert_with(|| (blockhash, Default::default()));
-                if s.0 != blockhash {
-                    *s = (blockhash, Default::default());
-                }
-                s.1.insert(hash)
-            });
-            counts[if fresh { 0 } else { 1 }].fetch_add(1, Ordering::Relaxed);
+            counts[if first_seen(tx) { 0 } else { 1 }].fetch_add(1, Ordering::Relaxed);
             MT0.add(Counter::FeeParityMatch, 1);
         }
         Some(local) => {
@@ -282,12 +296,13 @@ pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, 
     }
 }
 
-/// The saved runs' parity: each run's last record, and how many runs' journals did not read to
-/// their end (none of their classes, and so none at all, can be known clean).
+/// The saved runs' parity: each run's last record, and the runs (by id) whose journal holds a
+/// record of the current model version but is not sealed, complete and untorn — a crashed or still
+/// running run: its matches are a lower bound, its mismatches were synced as they came.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SavedRuns {
     pub records: Vec<FeeParityStatsRecord>,
-    pub incomplete: usize,
+    pub incomplete: Vec<String>,
 }
 
 /// The saved runs of `project`: every run's owner journal (`until_stopped_view::SHADOW_RECORD` in
@@ -304,10 +319,13 @@ pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
             continue;
         };
         let (last, complete) = last_record(&journal);
+        let Some(last) = last.filter(|r| r.model_version == FEE_MODEL_VERSION) else {
+            continue;
+        };
         if !complete {
-            out.incomplete += 1;
+            out.incomplete.push(run.run_id.clone());
         }
-        out.records.extend(last);
+        out.records.push(last);
     }
     out
 }
@@ -317,16 +335,12 @@ pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
 pub struct ClassParity {
     pub class: FeeClass,
     pub counts: ParityCounts,
-    /// Runs whose journal did not read to its end: nothing qualifies while one is.
-    pub incomplete_runs: usize,
 }
 
 impl ClassParity {
-    /// At least `PARITY_MIN_MESSAGES` distinct matched, none mismatched, every run read clean.
+    /// At least `PARITY_MIN_MESSAGES` distinct matched and none mismatched.
     pub fn qualified(&self) -> bool {
-        self.counts.matched >= PARITY_MIN_MESSAGES
-            && self.counts.mismatched == 0
-            && self.incomplete_runs == 0
+        self.counts.matched >= PARITY_MIN_MESSAGES && self.counts.mismatched == 0
     }
 
     /// A mismatch failed the class (under this model version, for good).
@@ -347,24 +361,21 @@ pub fn qualification(runs: &SavedRuns) -> Vec<ClassParity> {
                 .filter(|r| r.model_version == FEE_MODEL_VERSION)
                 .flat_map(|r| r.classes.iter().filter(|(c, _)| *c == class))
                 .fold(ParityCounts::default(), |sum, (_, n)| sum.add(*n)),
-            incomplete_runs: runs.incomplete,
         })
         .collect()
 }
 
 /// The status of the local fee model over `classes` (`scope`: what they sum): how many are
-/// qualified, the largest matched count, every mismatch and every incomplete run; FAIL once a
-/// class failed. The RPC quote decides in this build (replacing it in a qualified class is not
-/// built yet).
+/// qualified, the largest matched count and every mismatch; FAIL once a class failed. The RPC
+/// quote decides in this build (replacing it in a qualified class is not built yet).
 pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
     let qualified = classes.iter().filter(|c| c.qualified()).count();
     let failed = classes.iter().filter(|c| c.failed()).count();
     let matched = classes.iter().map(|c| c.counts.matched).max().unwrap_or(0);
     let mismatched: u64 = classes.iter().map(|c| c.counts.mismatched).sum();
     let unsupported: u64 = classes.iter().map(|c| c.counts.unsupported).sum();
-    let incomplete = classes.first().map_or(0, |c| c.incomplete_runs);
     format!(
-        "{}: {scope}: {qualified}/{} classes qualified (≥{PARITY_MIN_MESSAGES} distinct matched, none mismatched), {failed} failed · most matched {matched} · mismatched {mismatched} · outside the model {unsupported} · incomplete runs {incomplete}; the RPC quote decides (v1: no v1 transaction is built)",
+        "{}: {scope}: {qualified}/{} classes qualified (≥{PARITY_MIN_MESSAGES} distinct matched, none mismatched), {failed} failed · most matched {matched} · mismatched {mismatched} · outside the model {unsupported}; the RPC quote decides (v1: no v1 transaction is built)",
         if failed > 0 {
             "LOCAL_FEE_MODEL_FAIL"
         } else {
@@ -495,10 +506,10 @@ mod tests {
     }
 
     /// The saved runs' parity: the last record of each run's owner journal (in the run or its
-    /// capture directory); a run without a record adds nothing; a journal that does not read to
-    /// its end is an incomplete run, and while one is nothing qualifies.
+    /// capture directory); a run without a record of this model version adds nothing; a torn run
+    /// (a crash) counts with its last record and is named.
     #[test]
-    fn saved_runs_read_each_runs_last_record_and_an_incomplete_one_qualifies_nothing() {
+    fn saved_runs_read_each_runs_last_record_and_name_an_incomplete_one() {
         use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
         let project =
             std::env::temp_dir().join(format!("p0_fee_parity_runs_{}", std::process::id()));
@@ -543,11 +554,14 @@ mod tests {
         );
         journal(project.join("data/econ4h/b/capture"), vec![at(4)]);
         std::fs::create_dir_all(project.join("data/shadow/empty")).unwrap();
+        let mut older = at(PARITY_MIN_MESSAGES);
+        older.model_version = FEE_MODEL_VERSION + 1;
+        journal(project.join("data/shadow/other_model"), vec![older]);
         let runs = saved_runs(&project);
         let mut matched: Vec<u64> = runs.records.iter().map(|r| of(r, class).matched).collect();
         matched.sort();
         assert_eq!(
-            (matched, runs.incomplete),
+            (matched, runs.incomplete.len()),
             (vec![4, PARITY_MIN_MESSAGES], 0)
         );
         let row = |runs: &SavedRuns| {
@@ -557,18 +571,60 @@ mod tests {
                 .unwrap()
         };
         assert!(row(&runs).qualified());
-        // A torn journal: what followed its last readable record is unknown.
-        let torn = journal(project.join("data/shadow/torn"), vec![at(1)]);
+        // A torn journal (a crash): its last readable record counts, the run is named.
+        let torn = journal(project.join("data/shadow/torn"), vec![at(1), at(2)]);
         let mut bytes = std::fs::read(&torn).unwrap();
         bytes.truncate(bytes.len() - 7);
         std::fs::write(&torn, bytes).unwrap();
         let runs = saved_runs(&project);
-        assert_eq!(runs.incomplete, 1);
-        assert!(
-            !row(&runs).qualified(),
-            "an incomplete run qualifies nothing"
+        assert_eq!(runs.incomplete, vec!["torn".to_string()]);
+        assert_eq!(
+            row(&runs).counts.matched,
+            4 + PARITY_MIN_MESSAGES + 2,
+            "its last record"
         );
         let _ = std::fs::remove_dir_all(project);
+    }
+
+    /// A mismatch survives a crash once it is written: the writer syncs at once after a
+    /// `FeeParityMismatch` record (here under an hour-long periodic sync), never after an
+    /// ordinary one.
+    #[test]
+    fn a_mismatch_record_is_synced_at_once() {
+        use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
+        let dir = std::env::temp_dir().join(format!("p0_fee_parity_sync_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut w, _) = OwnerEvidenceWriter::start_rolling(
+            dir.join("opportunities.p0j"),
+            dir.join("recovery.p0j"),
+            64,
+            std::time::Duration::from_secs(3_600),
+            1 << 20,
+            false,
+        )
+        .unwrap();
+        let zero = record(None, &counts());
+        let synced_after = |w: &OwnerEvidenceWriter, n: u64| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while w.syncs() < n && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            w.syncs()
+        };
+        w.emit(OwnerEvidence::FeeParityStats(Box::new(zero.clone())))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(
+            w.syncs(),
+            0,
+            "an ordinary record waits for the periodic sync"
+        );
+        w.emit(OwnerEvidence::FeeParityMismatch(Box::new(zero)))
+            .unwrap();
+        assert_eq!(synced_after(&w, 1), 1, "a mismatch is synced at once");
+        w.finish(None).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// The qualification sums every run's last record of the current model version per class: a
@@ -595,7 +651,7 @@ mod tests {
         };
         let saved = |records: Vec<FeeParityStatsRecord>| SavedRuns {
             records,
-            incomplete: 0,
+            incomplete: Vec::new(),
         };
         let of = |runs: &SavedRuns| {
             qualification(runs)

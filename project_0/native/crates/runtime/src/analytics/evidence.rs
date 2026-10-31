@@ -274,6 +274,9 @@ pub enum OwnerEvidence {
     ThresholdStats(Box<ThresholdStatsRecord>),
     /// P6-MT.10: the local fee model's cumulative parity counts per class.
     FeeParityStats(Box<crate::execution::fee_parity::FeeParityStatsRecord>),
+    /// P6-MT.10: the same record after a new mismatch — synced at once after it is written (a
+    /// mismatch is never lost to a crash after one sync).
+    FeeParityMismatch(Box<crate::execution::fee_parity::FeeParityStatsRecord>),
 }
 
 /// DEC-16: the cumulative counters of an unbounded Shadow owner run and what it has in flight
@@ -429,6 +432,11 @@ impl Encoded {
     }
 }
 impl OwnerEvidence {
+    /// The writer syncs the journal at once after this event (not only periodically).
+    fn sync_at_once(&self) -> bool {
+        matches!(self, Self::FeeParityMismatch(_))
+    }
+
     /// Typed binary encoding on the writer thread (JFI-02); no JSON in between.
     fn encode(&self) -> std::io::Result<Encoded> {
         match self {
@@ -447,7 +455,9 @@ impl OwnerEvidence {
             Self::ThresholdTransition(v) => Encoded::of(v, None, None),
             Self::ThresholdMiss(v) => Encoded::of(v, Some(v.slot), None),
             Self::ThresholdStats(v) => Encoded::of(v.as_ref(), None, None),
-            Self::FeeParityStats(v) => Encoded::of(v.as_ref(), None, None),
+            Self::FeeParityStats(v) | Self::FeeParityMismatch(v) => {
+                Encoded::of(v.as_ref(), None, None)
+            }
         }
     }
 }
@@ -847,7 +857,14 @@ fn run_writer(
     let mut next_sync = Instant::now() + sync_interval;
     loop {
         match rx.recv_timeout(next_sync.saturating_duration_since(Instant::now())) {
-            Ok(Msg::Event(event)) => sink.write(event),
+            Ok(Msg::Event(event)) => {
+                let at_once = event.sync_at_once();
+                sink.write(event);
+                if at_once {
+                    sink.sync();
+                    next_sync = Instant::now() + sync_interval;
+                }
+            }
             Ok(Msg::Rotate(reply)) => {
                 // The owner may have stopped waiting (its window failed); the result stays here.
                 let _ = reply.send(sink.rotate());

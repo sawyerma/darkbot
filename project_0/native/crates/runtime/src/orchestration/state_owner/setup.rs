@@ -1252,6 +1252,7 @@ pub(super) fn prepare(
         fee_parity_base,
         fee_parity_start: crate::execution::fee_parity::counts(),
         fee_parity_journaled: None,
+        fee_parity_mismatches: crate::execution::fee_parity::counts().mismatched(),
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,

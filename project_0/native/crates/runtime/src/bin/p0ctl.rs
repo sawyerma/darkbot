@@ -2725,10 +2725,14 @@ fn fee_parity_cmd(project: &Path) -> Result<bool, String> {
     let runs = fp::saved_runs(project);
     let classes = fp::qualification(&runs);
     println!(
-        "fee parity · model {} · {} saved runs with a record · {} incomplete",
+        "fee parity · model {} · {} saved runs with a record · incomplete (crashed or running, counted with their last record): {}",
         fp::FEE_MODEL_VERSION,
         runs.records.len(),
-        runs.incomplete
+        if runs.incomplete.is_empty() {
+            "none".to_string()
+        } else {
+            runs.incomplete.join(", ")
+        }
     );
     for c in &classes {
         println!(
