@@ -335,6 +335,8 @@ pub fn spawn(
     install_signal()?;
     let mut handed = baseline;
     let mut capabilities = capabilities;
+    // The newest capability request counted as a stop (none before this start's head).
+    let mut counted = capabilities.as_ref().map_or(0, |(_, head, _)| *head);
     std::thread::Builder::new()
         .name("p0-source-control".into())
         .spawn(move || {
@@ -352,7 +354,8 @@ pub fn spawn(
                         || capabilities_behind
                         || super::capability_control::head(dir).is_ok_and(|h| h > *handed)
                     {
-                        capabilities_behind = hand_over_capabilities(dir, handed, &owner, stop);
+                        capabilities_behind =
+                            hand_over_capabilities(dir, handed, &mut counted, &owner, stop);
                     }
                 }
             }
@@ -362,11 +365,13 @@ pub fn spawn(
 
 /// DEC-13: hands every capability request after `handed` to the owner in sequence order, like
 /// `hand_over` (a full queue delays the rest, nothing is skipped or dropped). P8-CTRL.7 (review
-/// M5): a stop is counted in `stop` before it is handed over — from then on no egress starts
-/// until the owner has decided it — and taken back if the queue refuses it.
+/// M5/N3): a stop is counted in `stop` once, when it is first read (`counted`: the newest
+/// sequence counted) — from then on no real signature and no egress starts until the owner has
+/// decided it, also while a full queue delays its hand-over.
 fn hand_over_capabilities(
     dir: &Path,
     handed: &mut u64,
+    counted: &mut u64,
     owner: &Producer<ControlMessage>,
     stop: &super::capability_control::StopSignal,
 ) -> bool {
@@ -375,20 +380,19 @@ fn hand_over_capabilities(
     };
     for seq in seqs {
         let request = super::capability_control::request_at(dir, seq);
-        let is_stop = request
-            .as_ref()
-            .is_ok_and(|r| super::capability_control::is_stop(&r.capability, &r.requested));
-        if is_stop {
-            stop.queue();
+        if seq > *counted {
+            *counted = seq;
+            if request
+                .as_ref()
+                .is_ok_and(|r| super::capability_control::is_stop(&r.capability, &r.requested))
+            {
+                stop.queue();
+            }
         }
         match owner.try_push(ControlMessage::Capability { seq, request }) {
             Ok(()) => *handed = seq,
-            Err(e) => {
-                if is_stop {
-                    stop.unqueue();
-                }
-                return matches!(e, ChannelError::Full(_));
-            }
+            Err(ChannelError::Full(_)) => return true,
+            Err(ChannelError::Disconnected(_)) => return false,
         }
     }
     false

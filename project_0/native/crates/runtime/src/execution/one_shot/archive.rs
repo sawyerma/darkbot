@@ -167,7 +167,7 @@ impl super::Journal {
 }
 
 /// The accounting view of one attempt (archived or active).
-fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::AttemptRecord {
+pub(super) fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::AttemptRecord {
     use crate::execution::accounting::{AttemptRecord, ExitRecord, StepState};
     let (state, settlement) = match &saved.phase {
         Phase::Reserved => (StepState::Reserved, None),
@@ -211,16 +211,24 @@ fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::Attemp
     }
 }
 
+/// The archived (verified sealed) attempts of `wallet`.
+pub(super) fn archived_records(
+    directory: &Path,
+    wallet: &str,
+) -> Result<Vec<crate::execution::accounting::AttemptRecord>, String> {
+    Ok(archived(directory, wallet)?
+        .iter()
+        .map(|a| record(&a.saved, true))
+        .collect())
+}
+
 /// FE-07: every own attempt of `wallet` — archived (verified sealed) then the active journal,
 /// read-only without the wallet lock. An unreadable journal is an error.
 pub fn records(
     directory: &Path,
     wallet: &str,
 ) -> Result<Vec<crate::execution::accounting::AttemptRecord>, String> {
-    let mut out: Vec<_> = archived(directory, wallet)?
-        .iter()
-        .map(|a| record(&a.saved, true))
-        .collect();
+    let mut out = archived_records(directory, wallet)?;
     let active = directory.join(format!("{wallet}.p0j"));
     if active.exists() {
         if let Some(saved) = replay(&active, wallet)?.0 {

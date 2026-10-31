@@ -986,6 +986,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1153,6 +1154,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     let account = Pubkey::new_unique();
     let key = |r: &OpportunityRecord| {
@@ -1355,6 +1357,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
+            use_facts: None,
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
     };
@@ -1472,6 +1475,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1745,6 +1749,7 @@ fn evaluate_in(
         hold,
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -2405,6 +2410,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -2532,6 +2538,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
+            use_facts: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason_text().unwrap_or_default();
@@ -2694,6 +2701,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             hold: &crate::execution::hold_b::HoldGate::OBSERVE,
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
+            use_facts: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -3496,6 +3504,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -3789,6 +3798,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
@@ -5218,6 +5228,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         hold: &crate::execution::hold_b::HoldGate::OBSERVE,
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
+        use_facts: None,
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }

@@ -558,6 +558,39 @@ impl ShadowOwner {
     /// with — the configured attempt approval (VALID: unexpired, bound, unspent) and the current
     /// wallet facts — or why there is none (`true`: an open admission is closed too, its wallet
     /// lock released). Single flight: none while an attempt holds the wallet.
+    /// P8-CTRL.4 (review N1): under a SIM_ONLY grant in force a Shadow candidate's real signature
+    /// is bound by the same facts as a LIVE attempt's — the wallet's free SOL (its balances less
+    /// every attempt's SOL hold and the policy reserve) and what the grant has booked in the FE-04
+    /// journals (unreadable or none configured: unknown, so the simulation is signed
+    /// synthetically). `None` without a SIM_ONLY grant.
+    pub(super) fn sim_only_use_facts(
+        &self,
+        target: &Pubkey,
+    ) -> Option<crate::execution::one_shot::admission::UseFacts> {
+        use crate::execution::one_shot::{archive, fe06_grant_totals, free_sol};
+        let grant = self.sources.capabilities.fe06.as_ref()?;
+        if grant.scope()?.mode != crate::orchestration::fe06::Mode::SimOnly {
+            return None;
+        }
+        let elsewhere: std::collections::BTreeMap<String, u64> =
+            [("SOL".to_string(), self.reservations.held("SOL"))].into();
+        let records = match &self.fe04_held {
+            Some(journal) => journal.attempt_records().ok(),
+            None => self
+                .fe04_journal
+                .as_ref()
+                .and_then(|dir| archive::records(dir, &self.liquidator.to_string()).ok()),
+        };
+        Some(crate::execution::one_shot::admission::UseFacts {
+            sol_free_lamports: free_sol(
+                &self.fe04_wallet_balances(target),
+                &elsewhere,
+                &crate::execution::inventory::reserves(&self.inventory_targets),
+            ),
+            booked: records.and_then(|r| fe06_grant_totals(&r, grant.digest())),
+        })
+    }
+
     pub(super) fn fe04_admission_facts(
         &self,
         target: &Pubkey,

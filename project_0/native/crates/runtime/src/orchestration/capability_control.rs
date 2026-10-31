@@ -561,11 +561,11 @@ pub const STOP_PENDING: &str =
     "EGRESS_STOP_PENDING: a stop (DISABLE, LIVE OFF or a revocation) waits for the owner";
 
 /// P8-CTRL.7 (review M5): the economic stops — a switch DISABLED, LIVE OFF, an FE-06 revocation —
-/// the control thread has handed to the owner and the owner has decided. While one waits no
-/// egress is permitted: a stop durably requested before an egress prevents its start without
-/// waiting for the owner's next step (which may be behind a network call). Counted by the
-/// control thread before it hands a stop over (taken back if the queue refuses it), and by the
-/// owner once it has decided it.
+/// the control thread has read from the request log and the owner has decided. While one waits
+/// no real signature and no egress is permitted: a stop durably requested before an egress
+/// prevents its start without waiting for the owner's next step (which may be behind a network
+/// call). Counted by the control thread once per request when it reads it (review N3: also while
+/// a full queue delays its hand-over), and by the owner once it has decided it.
 #[derive(Debug, Default)]
 pub struct StopSignal {
     queued: std::sync::atomic::AtomicU64,
@@ -573,15 +573,11 @@ pub struct StopSignal {
 }
 
 impl StopSignal {
-    /// A stop is handed to the owner.
+    /// A stop the control thread read from the request log (counted once; it waits from then
+    /// until the owner decided it, also while a full queue delays its hand-over).
     pub fn queue(&self) {
         self.queued
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
-    /// A stop that could not be handed over (it is handed again later).
-    pub fn unqueue(&self) {
-        self.queued
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
     /// The owner decided a stop (applied or refused).
     pub fn decide(&self) {
@@ -846,6 +842,8 @@ impl EgressPermit {
             return Err("EGRESS_PERMIT_PAYLOAD: the permit is another payload's".into());
         }
         // Review M5: immediately before the adapter call a stop that waits still prevents it.
+        // (Review N4, accepted: a stop first seen here leaves the durable reservation UNKNOWN —
+        // nothing was sent, its non-landing settlement releases the holds, its booking counts.)
         if self.stop.as_ref().is_some_and(|s| s.pending()) {
             return Err(STOP_PENDING.into());
         }
@@ -895,6 +893,10 @@ impl SignPermit {
         bound: Option<(&super::fe06::Use, darkbot_solana::submit::SubmissionPath)>,
     ) -> Result<Self, String> {
         use super::fe06::Mode;
+        // Review N2: no real signature while a stop waits for the owner either.
+        if g.stop.is_some_and(|s| s.pending()) {
+            return Err(STOP_PENDING.into());
+        }
         let scope = g.fe06.and_then(|a| a.scope());
         let unbound = "SIGN_SCOPE_USE: the signature's use is unknown";
         match purpose {
@@ -1645,9 +1647,9 @@ mod tests {
         }
     }
 
-    /// P8-CTRL.7 (review M5): the stops no egress runs ahead of — a switch or a signer DISABLED,
-    /// LIVE OFF, a revocation; never an enabling request, a grant or a mode; a stop waits from
-    /// its hand-over until the owner decided it (one taken back waits no more).
+    /// P8-CTRL.7 (review M5/N2): the stops no real signature and no egress runs ahead of — a
+    /// switch or a signer DISABLED, LIVE OFF, a revocation; never an enabling request, a grant or
+    /// a mode; a stop waits from its read until the owner decided it.
     #[test]
     fn p8ctrl06_stops_are_counted_from_their_hand_over_to_their_decision() {
         let wallet = format!("{WALLET_PREFIX}{}", Pubkey::new_unique());
@@ -1675,9 +1677,7 @@ mod tests {
         assert!(s.pending());
         s.decide();
         assert!(!s.pending());
-        s.queue();
-        s.unqueue();
-        assert!(!s.pending(), "a stop the queue refused waits no more");
+
         // A permit issued before a stop arrived is refused at its adapter call while it waits.
         let signer = Pubkey::new_unique();
         let offline = OfflineGates::enabled(signer);

@@ -488,6 +488,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     /// P8-CTRL.7: the owner's gates an egress permit is issued from at the FE-04 handoff
     /// (`None`: no permit, no egress).
     pub egress: Option<crate::orchestration::capability_control::LiveGates<'a>>,
+    /// P8-CTRL.3/.4 (review N1): the facts of a SIM_ONLY simulation's use in Shadow — the owner's
+    /// (`None`: no SIM_ONLY grant in force; a LIVE candidate's are its FE-04 admission's).
+    pub use_facts: Option<crate::execution::one_shot::admission::UseFacts>,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -1198,20 +1201,22 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             let priority = payload.iter().try_fold(0u64, |sum, tx| {
                 sum.checked_add(tx::requested_priority_lamports(tx)?)
             });
-            self.fe04
-                .as_deref()
-                .zip(self.egress.as_ref())
-                .map(|(fe04, g)| {
-                    fe04.attempt_use(
-                        &plan,
-                        &tx::payer_of(self.payer),
-                        fee_lamports,
-                        max_loss_usd_micro,
-                        priority,
-                        g.source.cloned(),
-                        g.fe06.map(|a| a.digest()),
-                    )
-                })
+            self.egress.as_ref().and_then(|g| {
+                let grant = g.fe06.map(|a| a.digest());
+                let facts = match self.fe04.as_deref() {
+                    Some(fe04) => fe04.use_facts(grant),
+                    None => self.use_facts?,
+                };
+                Some(crate::execution::one_shot::admission::attempt_use(
+                    &plan,
+                    &tx::payer_of(self.payer),
+                    fee_lamports,
+                    max_loss_usd_micro,
+                    priority,
+                    g.source.cloned(),
+                    facts,
+                ))
+            })
         };
         let bound = use_.as_ref().map(|u| (u, path));
         // P8-CTRL.4: the wallet's own signature only under a permit of the candidate's purpose

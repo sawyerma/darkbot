@@ -8013,3 +8013,60 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
     );
     cleanup(f);
 }
+
+/// P8-CTRL.4/.10 (L15, review N1): under a SIM_ONLY grant in force — LIVE BLOCKED for it, so the
+/// candidate is a Shadow one — with ECON_SIGN and the signer ENABLED, the simulation is signed
+/// with the wallet's own key, bound by the same facts as a LIVE attempt (the owner's free SOL
+/// and the grant's totals), and never sent; without the grant it is signed synthetically.
+#[test]
+fn p8ctrl06_l15_a_sim_only_grant_signs_the_shadow_simulation_with_the_wallet_never_sends() {
+    use crate::analytics::payload::{decode, Payload};
+    use crate::analytics::record::{OpportunityRecord, Signing};
+    for (tag, sim_only, expected) in [
+        ("wallet", true, Signing::Wallet),
+        ("synthetic", false, Signing::Synthetic),
+    ] {
+        let (mut f, target, calls) = dec13b_fixture(&format!("p8ctrl06_l15_{tag}"), true);
+        if sim_only {
+            p8ctrl03_scoped(
+                &mut f,
+                &[
+                    ("mode", "SIM_ONLY"),
+                    ("max_attempts_per_utc_day", "0"),
+                    ("max_attempts_campaign", "0"),
+                    ("max_attempts_grant", "0"),
+                    ("max_exits_grant", "0"),
+                ],
+                |_| {},
+            );
+        } else {
+            f.owner.sources.capabilities.fe06 = None;
+        }
+        assert!(!f.owner.live_effective(), "{tag}: a Shadow candidate");
+        f.owner
+            .detect(Some((
+                target,
+                f.owner.clock.now_ns(),
+                100,
+                "account_update",
+            )))
+            .unwrap();
+        let m = calls.lock().unwrap().clone();
+        assert!(m.iter().any(|m| m == "simulateTransaction"), "{tag}: {m:?}");
+        assert!(!m.iter().any(|m| m == "sendTransaction"), "{tag}: {m:?}");
+        let dir = f.dir.clone();
+        f.owner.finish().unwrap();
+        let mut reader =
+            crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+        let mut signings = vec![];
+        while let Some(frame) = reader.next_frame().unwrap() {
+            if frame.kind == OpportunityRecord::KIND {
+                let r: OpportunityRecord =
+                    decode(frame.kind, frame.schema, &frame.payload).unwrap();
+                signings.extend(r.signing);
+            }
+        }
+        assert_eq!(signings, [expected], "{tag}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

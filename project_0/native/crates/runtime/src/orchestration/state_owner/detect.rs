@@ -564,6 +564,11 @@ impl ShadowOwner {
             }
             crate::execution::pipeline::Mode::Shadow => None,
         };
+        // P8-CTRL.4 (review N1): a SIM_ONLY simulation's real signature binds the owner's facts.
+        let use_facts = match mode {
+            crate::execution::pipeline::Mode::Shadow => self.sim_only_use_facts(&acct),
+            crate::execution::pipeline::Mode::Live => None,
+        };
         let mut pipe = Pipeline {
             mode,
             clock: &self.clock,
@@ -605,6 +610,7 @@ impl ShadowOwner {
             hold: &self.hold_gate,
             egress: Some(self.sources.live_gates()),
             synthetic: &self.synthetic_signer,
+            use_facts,
         };
         #[cfg(feature = "crate_health")]
         let pipeline_started_ns = self.clock.now_ns();

@@ -636,6 +636,9 @@ pub struct Journal {
     directory: std::path::PathBuf,
     saved: Option<Saved>,
     writer: journal::Writer,
+    /// Review N5: the sealed archive's records, read once while this journal holds the wallet
+    /// (it cannot change meanwhile: archiving consumes the journal).
+    archived: std::sync::OnceLock<Vec<crate::execution::accounting::AttemptRecord>>,
     /// Last field: released after the journal file is closed.
     _lock: WalletLock,
 }
@@ -1207,6 +1210,7 @@ impl Journal {
             directory: directory.to_path_buf(),
             saved,
             writer,
+            archived: std::sync::OnceLock::new(),
             _lock: lock,
         };
         if let Some(mut prior) = this.saved.clone() {
@@ -1256,6 +1260,7 @@ impl Journal {
             directory: directory.to_path_buf(),
             saved,
             writer,
+            archived: std::sync::OnceLock::new(),
             _lock: lock,
         };
         match imported {
@@ -1312,11 +1317,22 @@ impl Journal {
         self.saved.as_ref().and_then(|s| s.fe06.as_ref())
     }
     /// P8-CTRL.5: every own attempt of this wallet (archived and active) — what the FE-06 limits
-    /// count.
+    /// count. Review N5: the sealed archive is read once per open journal, the active attempt is
+    /// this journal's own state (what it persisted last), so a candidate's three counts cost no
+    /// further disk read.
     pub fn attempt_records(
         &self,
     ) -> Result<Vec<crate::execution::accounting::AttemptRecord>, String> {
-        archive::records(&self.directory, &self.wallet)
+        let mut out = match self.archived.get() {
+            Some(records) => records.clone(),
+            None => {
+                let records = archive::archived_records(&self.directory, &self.wallet)?;
+                let _ = self.archived.set(records.clone());
+                records
+            }
+        };
+        out.extend(self.saved.as_ref().map(|s| archive::record(s, false)));
+        Ok(out)
     }
     /// The reservation with the attempt's holds (DEC-04, `None`: OFF).
     fn reserve_held(
