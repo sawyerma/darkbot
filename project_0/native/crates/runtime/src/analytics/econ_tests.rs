@@ -2999,10 +2999,13 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
             continue;
         }
         // DEC-01: written under EXHAUSTIVE_V3; DEC-12: the typed record layout; P8-CTRL.4: with
-        // its signing (schema 6).
+        // its signing (schema 6); P6-MT.10: with its plans' local fee (schema 7).
         assert_eq!(
             (frame.kind, frame.schema),
-            (kind::ECON_SHADOW_EVALUATION, 6)
+            (
+                kind::ECON_SHADOW_EVALUATION,
+                <super::ShadowEvaluation as crate::analytics::payload::Payload>::SCHEMA
+            )
         );
         count += 1;
     }
