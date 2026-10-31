@@ -140,7 +140,7 @@ BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLE
 # LIVE scope. `scope` prints the canonical scope text and its SHA-256, the
 # value `grant` must confirm; `revoke` withdraws it; `status` names every
 # condition LIVE still misses. A grant is a permission, never an order.
-BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit>; bsc live grant <the same fifteen> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status"
+BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms>; bsc live grant <the same nineteen> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status"
 bsc_live_flags() {
   for v in "$1" "$2" "$3" "$4"; do case "$v" in ''|*[!A-Z0-9_+,]*) die "unknown LIVE scope value" ;; esac; done
   for v in "$5" "$6" "$7" "$8"; do case "$v" in ''|*[!0-9]*) die "LIVE limits are unsigned integers" ;; esac; done
@@ -154,26 +154,33 @@ bsc_live_flags() {
   done
   LIVE_FLAGS+=(--max-buy-slippage-bps "${10}" --max-exit-slippage-bps "${11}" --max-gas-price-wei "${12}" \
     --max-buy-gas-limit "${13}" --max-approve-gas-limit "${14}" --max-sell-gas-limit "${15}")
+  # 31.10. order: the positions and losses the operator grants, every bound.
+  for v in "${16}" "${17}" "${18}" "${19}"; do
+    case "$v" in ''|*[!0-9]*) die "the LIVE limits are unsigned integers" ;; esac
+  done
+  LIVE_FLAGS+=(--max-open-positions "${16}" --max-realized-loss-wei "${17}" \
+    --max-daily-realized-loss-wei "${18}" --min-buy-interval-ms "${19}")
 }
 bsc_live() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   local rt="$APP_HOME/current/bsc_runtime" cmd="${1:-}"
   [ "$#" -gt 0 ] && shift
   case "$cmd" in
-    scope) [ "$#" -eq 15 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
+    scope) [ "$#" -eq 19 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live scope "${LIVE_FLAGS[@]}" ;;
-    grant) [ "$#" -eq 18 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
-      case "${16}" in ''|*[!0-9a-f]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
-      [ "${#16}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
-      case "${17}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
-      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${16}" \
-        --expect-generation "${17}" --request-id "${18}" --state "$RUNDIR/bsc-sources" ;;
+    grant) [ "$#" -eq 22 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
+      case "${20}" in ''|*[!0-9a-f]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
+      [ "${#20}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
+      case "${21}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${20}" \
+        --expect-generation "${21}" --request-id "${22}" --state "$RUNDIR/bsc-sources" ;;
     revoke) [ "$#" -eq 2 ] || die "$BSC_LIVE_USAGE"
       case "$1" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live revoke --expect-generation "$1" --request-id "$2" \
         --state "$RUNDIR/bsc-sources" ;;
     status) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
-      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" ;;
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
+        --rundir "$RUNDIR" ;;
     *) die "$BSC_LIVE_USAGE" ;;
   esac
 }
@@ -183,7 +190,8 @@ bsc_source_request() {
   case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \
-    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT"
+    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
+    --rundir "$RUNDIR"
 }
 cmd_bsc() {
   case "${1:-}" in

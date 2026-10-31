@@ -8,10 +8,13 @@ const OWNER_TEXT = "darkbot.bsc.live-grant.v1\nvenue=BSC_VENUE_FLAP\nstrategies=
   + "max_input_wei=1000000000000000\nmax_spend_wei=20000000000000000\nmax_attempts=2\nexpires_unix_ms=1793000000000\n"
   // BSC3-069: the execution risk (`--max-buy-slippage-bps 300 ... --max-sell-gas-limit 1500000`).
   + "max_buy_slippage_bps=300\nmax_exit_slippage_bps=500\nmax_gas_price_wei=1000000000\n"
-  + "max_buy_gas_limit=3000000\nmax_approve_gas_limit=100000\nmax_sell_gas_limit=1500000\n";
-const OWNER_SHA = "ad1a8f82ec3b81acd6410b40402fd2865e5d0cfff5e117778a40fd24cc3ad65a";
+  + "max_buy_gas_limit=3000000\nmax_approve_gas_limit=100000\nmax_sell_gas_limit=1500000\n"
+  // 31.10. order: the limits (`--max-open-positions 3 ... --min-buy-interval-ms 60000`).
+  + "max_open_positions=3\nmax_realized_loss_wei=5000000000000000\n"
+  + "max_daily_realized_loss_wei=2000000000000000\nmin_buy_interval_ms=60000\n";
+const OWNER_SHA = "567cec77f585f80ab0ab9408bcdb2ccc7db7ba2f3d70d770c379195dea6afceb";
 // The same scope as an EXIT-ONLY grant (`... --exit-only`, BSC3-058).
-const OWNER_EXIT_SHA = "dc80d35ca0a75070d6cb079513b9c5d6a026fe238d25417d570c1c44dcf19c65";
+const OWNER_EXIT_SHA = "e012c2fd97397c20f75972c2435989cac4ed0843260534b7d020a812f25a2162";
 
 describe("BSC LIVE tab (plan 28.10.)", () => {
   it("builds the owner's canonical scope text and digest byte for byte", async () => {
@@ -23,6 +26,10 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
         maxBuySlippageBps: 300, maxExitSlippageBps: 500, maxGasPriceWei: 1000000000n,
         maxBuyGasLimit: 3000000n, maxApproveGasLimit: 100000n, maxSellGasLimit: 1500000n,
       },
+      limits: {
+        maxOpenPositions: 3, maxRealizedLossWei: "5000000000000000",
+        maxDailyRealizedLossWei: "2000000000000000", minBuyIntervalMs: 60000n,
+      },
     };
     expect(scopeText(scope)).toBe(OWNER_TEXT);
     expect(await scopeSha256(scopeText(scope))).toBe(OWNER_SHA);
@@ -33,7 +40,8 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
 
   it("checks a grant form as the owner does and dates its expiry", () => {
     const form = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "1000", maxSpendWei: "5000", maxAttempts: "2", hours: "4", exitOnly: false,
-      buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000" };
+      buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000",
+      maxOpenPositions: "3", maxRealizedLossWei: "5000", maxDailyRealizedLossWei: "2000", minBuyIntervalMs: "0" };
     const ok = grantScope(form, 1_000);
     expect("scope" in ok && ok.scope.expiresUnixMs).toBe(1_000n + 4n * 3_600_000n);
     expect("scope" in ok && ok.scope.venue).toBe("BSC_VENUE_FLAP");
@@ -57,6 +65,13 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       { ...form, approveGasLimit: "1e5" },
       { ...form, maxAttempts: "0" },
       { ...form, hours: "0" },
+      // 31.10. order: no position, no loss bound, a day above the grant's, a non-decimal interval.
+      { ...form, maxOpenPositions: "0" },
+      { ...form, maxRealizedLossWei: "0" },
+      { ...form, maxDailyRealizedLossWei: "0" },
+      { ...form, maxDailyRealizedLossWei: "5001" },
+      { ...form, minBuyIntervalMs: "1e3" },
+      { ...form, minBuyIntervalMs: "" },
     ]) expect("error" in grantScope(bad, 1_000)).toBe(true);
     expect(weiOk("340282366920938463463374607431768211455")).toBe(true);
     expect(weiOk("340282366920938463463374607431768211456")).toBe(false);

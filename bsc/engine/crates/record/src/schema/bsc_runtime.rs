@@ -193,6 +193,15 @@ pub mod source_modes {
         pub const MAX_BUY_GAS_LIMIT: u16 = 17;
         pub const MAX_APPROVE_GAS_LIMIT: u16 = 18;
         pub const MAX_SELL_GAS_LIMIT: u16 = 19;
+        /// The positions and losses the operator granted (31.10. order):
+        /// the most open positions, the most realized net loss of the
+        /// grant's positions and of one UTC day's (wei), the least time
+        /// between two BUYs (ms). Absent in a grant written before: it
+        /// arms no LIVE path.
+        pub const MAX_OPEN_POSITIONS: u16 = 20;
+        pub const MAX_REALIZED_LOSS_WEI: u16 = 21;
+        pub const MAX_DAILY_REALIZED_LOSS_WEI: u16 = 22;
+        pub const MIN_BUY_INTERVAL_MS: u16 = 23;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.source-modes.live",
@@ -218,6 +227,14 @@ pub mod source_modes {
                 Field::opt(MAX_BUY_GAS_LIMIT, "max_buy_gas_limit", U64),
                 Field::opt(MAX_APPROVE_GAS_LIMIT, "max_approve_gas_limit", U64),
                 Field::opt(MAX_SELL_GAS_LIMIT, "max_sell_gas_limit", U64),
+                Field::opt(MAX_OPEN_POSITIONS, "max_open_positions", U64),
+                Field::opt(MAX_REALIZED_LOSS_WEI, "max_realized_loss_wei", U256),
+                Field::opt(
+                    MAX_DAILY_REALIZED_LOSS_WEI,
+                    "max_daily_realized_loss_wei",
+                    U256,
+                ),
+                Field::opt(MIN_BUY_INTERVAL_MS, "min_buy_interval_ms", U64),
             ],
         };
     }
@@ -1604,11 +1621,15 @@ pub mod runtime_status {
         pub const LATENCY_P50_NS: u16 = 26;
         pub const LATENCY_P99_NS: u16 = 27;
         pub const LATENCY_MAX_NS: u16 = 28;
+        /// v4 (BSC3-078): the attempt the next C3 BUY takes (its lease
+        /// holds it, or it was kept from a returned one), hex: the owner's
+        /// gate reads the grant's usage besides it, as the LIVE path does.
+        pub const LEASE_ATTEMPT: u16 = 29;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
             record_type: 0,
-            schema_version: 3,
+            schema_version: 4,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1638,6 +1659,7 @@ pub mod runtime_status {
                 Field::opt(LATENCY_P50_NS, "latency_p50_ns", U64),
                 Field::opt(LATENCY_P99_NS, "latency_p99_ns", U64),
                 Field::opt(LATENCY_MAX_NS, "latency_max_ns", U64),
+                Field::opt(LEASE_ATTEMPT, "lease_attempt", B256),
             ],
         };
     }
@@ -1684,7 +1706,8 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 23,
+        // v24 (BSC3-078): `live.lease_attempt`.
+        schema_version: 24,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

@@ -282,6 +282,16 @@ pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
 /// BSC3-069: a grant without the execution risk the operator confirmed
 /// (written before it): it admits nothing.
 pub const LIVE_GRANT_RISK_MISSING: &str = "LIVE_GRANT_RISK_MISSING";
+/// 31.10. order: a grant without its positions and losses bounds (one
+/// written before them) arms nothing; exits of open positions go on.
+pub const LIVE_GRANT_LIMITS_MISSING: &str = "LIVE_GRANT_LIMITS_MISSING";
+/// A BUY refused by the grant's limits (exits go on): as many positions
+/// open (pending, open or exiting) as it allows; its positions' or this
+/// UTC day's realized net loss at its bound; the last BUY too recent.
+pub const LIVE_OPEN_POSITIONS_MAX: &str = "LIVE_OPEN_POSITIONS_MAX";
+pub const LIVE_REALIZED_LOSS_MAX: &str = "LIVE_REALIZED_LOSS_MAX";
+pub const LIVE_DAILY_LOSS_MAX: &str = "LIVE_DAILY_LOSS_MAX";
+pub const LIVE_BUY_INTERVAL: &str = "LIVE_BUY_INTERVAL";
 /// BSC3-069: the executor's configuration signs beyond the granted risk.
 pub const LIVE_RISK_OUTSIDE_GRANT: &str = "LIVE_RISK_OUTSIDE_GRANT";
 /// BSC3-012: the verified LIVE qualification on file is another record than
@@ -341,7 +351,10 @@ pub const LIVE_CONDITIONS: [(&str, &[&str]); 20] = [
         &[LIVE_SPEND_UNREADABLE, LIVE_GRANT_SPEND_EXHAUSTED],
     ),
     ("GRANT_BUYS", &[LIVE_GRANT_EXIT_ONLY]),
-    ("GRANT_RISK", &[LIVE_GRANT_RISK_MISSING]),
+    (
+        "GRANT_RISK",
+        &[LIVE_GRANT_RISK_MISSING, LIVE_GRANT_LIMITS_MISSING],
+    ),
     ("VENUE_QUALIFIED", &[LIVE_VENUE_UNQUALIFIED]),
     ("SOURCES_QUALIFIED", &[LIVE_SOURCE_UNQUALIFIED]),
     ("ADAPTERS_QUALIFIED", &[LIVE_ADAPTER_UNQUALIFIED]),
@@ -363,8 +376,11 @@ const SCOPE_CONDITIONS_FROM: usize = 11;
 /// the grant's attempts), room for another BUY input, and a grant that
 /// admits exits only (BSC3-058). Its own gas must still fit the grant's
 /// spend ([`Store::admit_live`]).
-const EXIT_EXEMPT: [&str; 11] = [
+const EXIT_EXEMPT: [&str; 12] = [
     LIVE_ACQUISITION_BUILDER_UNPROVEN,
+    // 31.10. order: the limits bound new BUYs; the exits of what was bought
+    // go on under a grant without them.
+    LIVE_GRANT_LIMITS_MISSING,
     // BSC3-049: the risk decision binds the scope of new BUYs; the exits of
     // what was bought need one, for whichever scope.
     LIVE_RISK_DECISION_OTHER_SCOPE,
@@ -866,6 +882,70 @@ pub struct LiveGrant {
     /// The execution risk the operator confirmed (BSC3-069); none in a
     /// grant written before it: such a grant admits nothing.
     pub risk: Option<GrantRisk>,
+    /// The positions and losses the operator confirmed (31.10. order);
+    /// none in a grant written before them: such a grant arms nothing.
+    pub limits: Option<GrantLimits>,
+}
+
+/// The positions and losses of a LIVE grant (31.10. order): the most
+/// positions open at once (a BUY pending, open or exiting counts), the
+/// most realized net loss of the grant's positions and of the positions
+/// that closed on one UTC day (closed: proceeds − input − gas; failed:
+/// − gas; a gain offsets a loss), the least time between two BUYs. A BUY
+/// beyond any of them is refused; exits always go on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GrantLimits {
+    pub max_open_positions: u32,
+    pub max_realized_loss_wei: u128,
+    pub max_daily_realized_loss_wei: u128,
+    pub min_buy_interval_ms: u64,
+}
+
+impl GrantLimits {
+    /// Refused unless a BUY can come under them at all: one position at
+    /// least, a loss bound each, the daily within the grant's.
+    fn validate(&self) -> Result<(), String> {
+        if self.max_open_positions == 0 {
+            return Err("max_open_positions must be at least 1".into());
+        }
+        if self.max_realized_loss_wei == 0 || self.max_daily_realized_loss_wei == 0 {
+            return Err("a granted realized loss bound must be positive".into());
+        }
+        if self.max_daily_realized_loss_wei > self.max_realized_loss_wei {
+            return Err("max_daily_realized_loss_wei must be within max_realized_loss_wei".into());
+        }
+        Ok(())
+    }
+}
+
+/// The limits of a stored grant: all four, or none (a grant written before
+/// them); a part of them is refused.
+fn grant_limits_of(row: &Record) -> Result<Option<GrantLimits>, String> {
+    use darkbot_bsc_record::schema::bsc_runtime::source_modes::live as k;
+    let e = |x: darkbot_bsc_record::RecordError| x.0;
+    let wei = |w: Option<[u8; 32]>| match w {
+        None => Ok(None),
+        Some(w) => wei_u128(w)
+            .map(Some)
+            .ok_or_else(|| "a granted loss exceeds 128 bits".to_string()),
+    };
+    let values = (
+        row.opt_u64(k::MAX_OPEN_POSITIONS).map_err(e)?,
+        wei(row.opt_u256(k::MAX_REALIZED_LOSS_WEI).map_err(e)?)?,
+        wei(row.opt_u256(k::MAX_DAILY_REALIZED_LOSS_WEI).map_err(e)?)?,
+        row.opt_u64(k::MIN_BUY_INTERVAL_MS).map_err(e)?,
+    );
+    match values {
+        (None, None, None, None) => Ok(None),
+        (Some(open), Some(loss), Some(daily), Some(interval)) => Ok(Some(GrantLimits {
+            max_open_positions: u32::try_from(open)
+                .map_err(|_| "max_open_positions out of range")?,
+            max_realized_loss_wei: loss,
+            max_daily_realized_loss_wei: daily,
+            min_buy_interval_ms: interval,
+        })),
+        _ => Err("a LIVE grant names its limits whole or not at all".into()),
+    }
 }
 
 /// The execution risk of a LIVE grant (BSC3-069): the most slippage a BUY
@@ -1051,6 +1131,9 @@ impl LiveGrant {
         if self.expires_unix_ms == 0 {
             return Err("expires_unix_ms must be set".into());
         }
+        if let Some(l) = &self.limits {
+            l.validate()?;
+        }
         if let Some(r) = &self.risk {
             r.validate()?;
         }
@@ -1124,6 +1207,14 @@ impl LiveGrant {
                 r.max_buy_gas_limit,
                 r.max_approve_gas_limit,
                 r.max_sell_gas_limit
+            )
+        }) + &self.limits.map_or(String::new(), |l| {
+            format!(
+                "max_open_positions={}\nmax_realized_loss_wei={}\nmax_daily_realized_loss_wei={}\nmin_buy_interval_ms={}\n",
+                l.max_open_positions,
+                l.max_realized_loss_wei,
+                l.max_daily_realized_loss_wei,
+                l.min_buy_interval_ms
             )
         }) + if validity && self.exit_only {
             "exit_only=true\n"
@@ -1468,6 +1559,9 @@ impl Generation {
         }
         if grant.is_some_and(|g| g.risk.is_none()) {
             out.push(LIVE_GRANT_RISK_MISSING);
+        }
+        if grant.is_some_and(|g| g.limits.is_none()) {
+            out.push(LIVE_GRANT_LIMITS_MISSING);
         }
         if let Some(g) = grant {
             let q = ctx.qualification;
@@ -1824,6 +1918,18 @@ impl Generation {
                             .set(k::MAX_APPROVE_GAS_LIMIT, r.max_approve_gas_limit)
                             .set(k::MAX_SELL_GAS_LIMIT, r.max_sell_gas_limit);
                     }
+                    if let Some(l) = &g.limits {
+                        e.set(k::MAX_OPEN_POSITIONS, u64::from(l.max_open_positions))
+                            .set(
+                                k::MAX_REALIZED_LOSS_WEI,
+                                darkbot_bsc_record::Value::u128(l.max_realized_loss_wei),
+                            )
+                            .set(
+                                k::MAX_DAILY_REALIZED_LOSS_WEI,
+                                darkbot_bsc_record::Value::u128(l.max_daily_realized_loss_wei),
+                            )
+                            .set(k::MIN_BUY_INTERVAL_MS, l.min_buy_interval_ms);
+                    }
                     for s in &g.sources {
                         e.push(k::SOURCES, s.name());
                     }
@@ -2100,6 +2206,7 @@ impl Generation {
                         expires_unix_ms: expires,
                         exit_only: row.opt_bool(k::EXIT_ONLY).map_err(e)?.unwrap_or(false),
                         risk: grant_risk_of(&row)?,
+                        limits: grant_limits_of(&row)?,
                     };
                     grant.validate()?;
                     if grant.scope_sha256() != digest {
@@ -2693,9 +2800,14 @@ pub struct BuyDay {
 /// Milliseconds of one UTC day.
 const DAY_MS: u64 = 86_400_000;
 
+/// The UTC day of `unix_ms`, days since 1970-01-01 (no text).
+pub fn day_index(unix_ms: u64) -> u64 {
+    unix_ms / DAY_MS
+}
+
 impl BuyDay {
     pub fn at(unix_ms: u64) -> BuyDay {
-        let index = unix_ms / DAY_MS;
+        let index = day_index(unix_ms);
         // Civil date from days since the epoch (proleptic Gregorian).
         let z = index as i64 + 719_468;
         let era = z.div_euclid(146_097);
@@ -2983,11 +3095,19 @@ pub struct GateReads {
 
 impl GateReads {
     pub fn read(dir: &Path, g: &Generation, now_ms: u64) -> GateReads {
+        Self::read_holding(dir, g, now_ms, None)
+    }
+
+    /// [`Self::read`] besides the slots of the attempt `held` (BSC3-078:
+    /// the running LIVE path's, [`reported_held_attempt`]), as the LIVE
+    /// path's gate and the runtime's reconcile read them.
+    pub fn read_holding(dir: &Path, g: &Generation, now_ms: u64, held: Option<&str>) -> GateReads {
+        let (daily, total) = usage_besides(dir, now_ms, held);
         GateReads {
             boot: boot_session().ok(),
             now_unix_ms: now_ms,
-            daily: buy_usage(dir, now_ms).ok(),
-            total: total_usage(dir).ok(),
+            daily,
+            total,
             spent_wei: match &g.live_set_by {
                 Some(by) => spent_by_grant(dir, by.generation).ok(),
                 None => Some(0),
@@ -3025,6 +3145,33 @@ fn lease_returns_dir(dir: &Path) -> PathBuf {
 /// limit); the campaign's slot stays its one under its attempt.
 pub fn lease_daily_id(attempt: &str, now_ms: u64) -> String {
     format!("{attempt}-{}", BuyDay::at(now_ms).utc)
+}
+
+/// A runtime status written longer ago than this many of its own rewrite
+/// intervals is stale (the tabs' `STALE_AFTER_INTERVALS`).
+pub const STATUS_STALE_AFTER_INTERVALS: u64 = 3;
+
+/// BSC3-078: the attempt the running LIVE path's next C3 BUY takes, as its
+/// status record `status` (`<rundir>/bsc-runtime/status.dbrec`) reports it
+/// for the grant of `g`: the path armed under that grant, the record
+/// written within [`STATUS_STALE_AFTER_INTERVALS`] of its rewrites. Else
+/// none: every slot counts.
+pub fn reported_held_attempt(status: &Path, g: &Generation, now_ms: u64) -> Option<String> {
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+    let grant = g.live_set_by.as_ref()?.generation;
+    let r = darkbot_bsc_record::decode(&rs::SCHEMA, &fs::read(status).ok()?).ok()?;
+    let written = r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS).ok()?;
+    let interval = r.u64(rs::STATUS_INTERVAL_MS).ok()?;
+    if now_ms.saturating_sub(written) > STATUS_STALE_AFTER_INTERVALS.saturating_mul(interval) {
+        return None;
+    }
+    let live = r.nested_all(rs::LIVE).ok()?.into_iter().next()?;
+    let armed = live.text(rs::live::STATE).ok()? == "ARMED"
+        && live.opt_u64(rs::live::GRANT_GENERATION).ok()? == Some(grant);
+    armed
+        .then(|| live.opt_b256(rs::live::LEASE_ATTEMPT).ok().flatten())
+        .flatten()
+        .map(|a| hex32(&a))
 }
 
 /// The daily and campaign usage at `now_ms` besides the slots of the
@@ -5412,8 +5559,17 @@ pub(crate) mod tests {
             expires_unix_ms: expires,
             exit_only: false,
             risk: Some(TEST_RISK),
+            limits: Some(TEST_LIMITS),
         }
     }
+
+    /// Limits no test BUY reaches unless it means to (31.10. order).
+    pub(crate) const TEST_LIMITS: GrantLimits = GrantLimits {
+        max_open_positions: 16,
+        max_realized_loss_wei: 1_000_000_000_000_000_000,
+        max_daily_realized_loss_wei: 1_000_000_000_000_000_000,
+        min_buy_interval_ms: 0,
+    };
 
     /// A granted risk the tests' executor signs within.
     pub(crate) const TEST_RISK: GrantRisk = GrantRisk {
@@ -6225,7 +6381,9 @@ pub(crate) mod tests {
              max_attempts=2\nexpires_unix_ms=1\nmax_buy_slippage_bps=1000\n\
              max_exit_slippage_bps=1000\nmax_gas_price_wei=1000000000000\n\
              max_buy_gas_limit=10000000\nmax_approve_gas_limit=1000000\n\
-             max_sell_gas_limit=5000000\n"
+             max_sell_gas_limit=5000000\n\
+             max_open_positions=16\nmax_realized_loss_wei=1000000000000000000\n\
+             max_daily_realized_loss_wei=1000000000000000000\nmin_buy_interval_ms=0\n"
         );
         let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
         assert_eq!(
@@ -6312,7 +6470,9 @@ pub(crate) mod tests {
         assert_eq!(grant.risk, Some(TEST_RISK));
         assert!(grant.scope_text().ends_with(
             "max_buy_slippage_bps=1000\nmax_exit_slippage_bps=1000\nmax_gas_price_wei=1000000000000\n\
-             max_buy_gas_limit=10000000\nmax_approve_gas_limit=1000000\nmax_sell_gas_limit=5000000\n"
+             max_buy_gas_limit=10000000\nmax_approve_gas_limit=1000000\nmax_sell_gas_limit=5000000\n\
+             max_open_positions=16\nmax_realized_loss_wei=1000000000000000000\n\
+             max_daily_realized_loss_wei=1000000000000000000\nmin_buy_interval_ms=0\n"
         ));
         let tighter = LiveGrant {
             risk: Some(GrantRisk {
@@ -7000,6 +7160,69 @@ pub(crate) mod tests {
         assert!(s.return_leases(&[[0xb1; 32]]).is_err());
         assert_eq!(admitted_intents(&dir).unwrap().len(), 1);
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 2_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-078: the tabs read the owner's gate besides the attempt the
+    /// running LIVE path reports holding, and only while its status is
+    /// fresh, armed and of the current grant; else every slot counts.
+    #[test]
+    fn the_tabs_read_the_gate_besides_the_reported_lease_attempt() {
+        use crate::live_qualification::tests::filled;
+        use darkbot_bsc_record::Value;
+        use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+        let (dir, s, now) = live_ready_limited("live-lease-tab", (1, 1), |now| LiveGrant {
+            max_attempts: 1,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let attempt = [0xa0; 32];
+        let id = hex32(&[0xa1; 32]);
+        let lease = LiveIntent {
+            token: [0; 20],
+            ..nonce_buy(&id, 7, 1_000)
+        };
+        s.lease_live(&armed, &lease, &hex32(&attempt), &q, now)
+            .unwrap();
+        let g = s.current().unwrap();
+        let grant = g.live_set_by.as_ref().unwrap().generation;
+        let status = dir.join("status.dbrec");
+        let write = |state: &str, generation: u64, written: u64| {
+            let mut live = filled(&rs::live::SCHEMA);
+            live.set(rs::live::STATE, state)
+                .set(rs::live::GRANT_GENERATION, generation)
+                .set(rs::live::LEASE_ATTEMPT, Value::B256(attempt));
+            let mut r = filled(&rs::SCHEMA);
+            r.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
+                .set(rs::STATUS_INTERVAL_MS, 1_000u64)
+                .set(rs::LIVE, live.into_nested());
+            fs::write(&status, r.encode().unwrap()).unwrap();
+        };
+        let runtime = |held: Option<String>| {
+            let reads = GateReads::read_holding(&dir, &g, now, held.as_deref());
+            let ctx = LiveContext {
+                boot: Some("boot-1"),
+                ..reads.ctx(&q)
+            };
+            g.effective_live_now(Entity::Runtime, &ctx)
+        };
+        write("ARMED", grant, now - 2_000);
+        let held = reported_held_attempt(&status, &g, now);
+        assert_eq!(held, Some(hex32(&attempt)));
+        assert_eq!(runtime(held), Effective::Live);
+        assert!(matches!(runtime(None), Effective::Blocked(_)));
+        // Stale, not armed, of another grant, unreadable: every slot counts.
+        for (state, generation, written) in [
+            ("ARMED", grant, now - 3_001),
+            ("PROBING", grant, now),
+            ("ARMED", grant + 1, now),
+        ] {
+            write(state, generation, written);
+            assert_eq!(reported_held_attempt(&status, &g, now), None, "{state}");
+        }
+        fs::write(&status, b"no record").unwrap();
+        assert_eq!(reported_held_attempt(&status, &g, now), None);
         fs::remove_dir_all(dir).unwrap();
     }
 

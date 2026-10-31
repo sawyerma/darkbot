@@ -2706,6 +2706,42 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Review of the limits (LOW): a grant without limits admits no BUY
+    /// but keeps the exit path of positions held under it (the reason is
+    /// exempt for exits).
+    #[test]
+    fn a_grant_without_limits_keeps_the_exit_path_on() {
+        use crate::sources::tests::{grant_of, live_ready_granting, qualified};
+        use crate::sources::{LIVE_GRANT_LIMITS_MISSING, LiveGrant, LiveStrategies};
+        let (dir, s, now) = live_ready_granting("runtime-no-limits", |now| LiveGrant {
+            limits: None,
+            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        });
+        let g = s.current().unwrap();
+        let view = LiveView {
+            boot: Some("boot-1".into()),
+            now_ms: now,
+            daily: crate::sources::buy_usage(&dir, now).ok(),
+            total: crate::sources::total_usage(&dir).ok(),
+            spent: Some(0),
+            qualification: qualified(),
+        };
+        for e in [
+            crate::sources::Entity::Runtime,
+            ComponentId::StrategyC.into(),
+            ComponentId::StateC2.into(),
+            VenueId::Flap.into(),
+        ] {
+            assert_eq!(
+                view.effective(&g, e, false),
+                Effective::Blocked(LIVE_GRANT_LIMITS_MISSING),
+                "{e:?}"
+            );
+            assert_eq!(view.effective(&g, e, true), Effective::Live, "{e:?}");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// BSC3-058/071 (review MEDIUM): under a grant that admits no BUY the
     /// runtime keeps the entities requested LIVE effective for the exits
     /// of the positions the LIVE path holds (the strategy decides them, C2

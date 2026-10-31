@@ -364,7 +364,7 @@ const BROWSER_SCOPE: (&str, &str) = ("C3", "1");
 
 /// The synthetic LIVE grant's scope arguments with `strategies` and
 /// `attempts`, valid until `expires`.
-fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [&'a str; 28] {
+fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [&'a str; 36] {
     [
         "--venue",
         "BSC_VENUE_FLAP",
@@ -395,6 +395,15 @@ fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [
         "100000",
         "--max-sell-gas-limit",
         "1500000",
+        // 31.10. order: the positions and losses, none reached here.
+        "--max-open-positions",
+        "16",
+        "--max-realized-loss-wei",
+        "50000000000000000",
+        "--max-daily-realized-loss-wei",
+        "50000000000000000",
+        "--min-buy-interval-ms",
+        "0",
     ]
 }
 

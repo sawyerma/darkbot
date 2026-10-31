@@ -538,6 +538,11 @@ pub struct Position {
     pub gas_wei: U256,
     /// When the BUY's block was produced (unix ms).
     pub opened_ms: Option<u64>,
+    /// The grant its BUY was admitted under (an exit step without a lot:
+    /// its own).
+    pub grant_generation: u64,
+    /// When it closed: its SELL's block (closed), its BUY's (failed).
+    pub closed_ms: Option<u64>,
     /// An approval of this lot is included: its SELL needs no other.
     pub approved: bool,
     /// Proceeds − input − gas, once closed (failed: − gas).
@@ -656,6 +661,8 @@ pub fn fold(facts: &[Fact]) -> Book {
                     proceeds_wei: U256::ZERO,
                     gas_wei: U256::ZERO,
                     opened_ms: None,
+                    grant_generation: t.released.grant_generation,
+                    closed_ms: None,
                     approved: false,
                     pnl_wei: None,
                 });
@@ -675,11 +682,15 @@ pub fn fold(facts: &[Fact]) -> Book {
                 p.input_wei = t.released.input_wei.unwrap_or_default();
                 p.opened_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
             }
-            (LiveIntentKind::Buy, FactKind::Reverted) => p.state = PositionState::Failed,
+            (LiveIntentKind::Buy, FactKind::Reverted) => {
+                p.state = PositionState::Failed;
+                p.closed_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
+            }
             (LiveIntentKind::Approve, FactKind::Included) => p.approved = true,
             (LiveIntentKind::Sell, FactKind::Included) => {
                 p.state = PositionState::Closed;
                 p.proceeds_wei = inclusion.and_then(|f| f.eth_wei).unwrap_or_default();
+                p.closed_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
             }
             (LiveIntentKind::Sell, FactKind::Released | FactKind::Unknown)
                 if p.state == PositionState::Open =>

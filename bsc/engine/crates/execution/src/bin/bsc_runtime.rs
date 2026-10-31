@@ -144,6 +144,15 @@ fn grant_args(rest: &[String]) -> Result<darkbot_bsc_execution::sources::LiveGra
             max_sell_gas_limit: u64::try_from(number("--max-sell-gas-limit")?)
                 .map_err(|_| "--max-sell-gas-limit out of range")?,
         }),
+        // 31.10. order: the positions and losses the operator grants.
+        limits: Some(darkbot_bsc_execution::sources::GrantLimits {
+            max_open_positions: u32::try_from(number("--max-open-positions")?)
+                .map_err(|_| "--max-open-positions out of range")?,
+            max_realized_loss_wei: number("--max-realized-loss-wei")?,
+            max_daily_realized_loss_wei: number("--max-daily-realized-loss-wei")?,
+            min_buy_interval_ms: u64::try_from(number("--min-buy-interval-ms")?)
+                .map_err(|_| "--min-buy-interval-ms out of range")?,
+        }),
     })
 }
 
@@ -432,10 +441,25 @@ fn run(args: &[String]) -> Result<bool, String> {
         // The LIVE gate as it holds now: every missing condition, then
         // what each LIVE request is now.
         [area, cmd, rest @ ..] if area == "live" && cmd == "status" => {
-            use darkbot_bsc_execution::sources::{LiveContext, live_inputs, spent_by_grant};
+            use darkbot_bsc_execution::sources::{
+                LiveContext, current_generation, reported_held_attempt, spent_by_grant,
+                usage_besides,
+            };
             let dir = std::path::Path::new(flag(rest, "--state")?);
             let now = darkbot_bsc_record::observed_now()?;
-            let (g, daily, total) = live_inputs(dir, now)?;
+            let g = current_generation(dir)?;
+            // BSC3-078: besides the attempt the running LIVE path holds, as
+            // its status in --rundir reports it (as the tabs read it).
+            let held = flags(rest, "--rundir").first().and_then(|r| {
+                reported_held_attempt(
+                    &std::path::Path::new(r).join("bsc-runtime/status.dbrec"),
+                    &g,
+                    now,
+                )
+            });
+            let (daily, total) = usage_besides(dir, now, held.as_deref());
+            let daily = daily.ok_or("BUY_ATTEMPT_LIMIT_UNREADABLE")?;
+            let total = total.ok_or("BUY_ATTEMPT_LIMIT_UNREADABLE")?;
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
             let qualification = print_qualification(rest);
             // What the grant on file has spent (its admitted intents).
@@ -819,9 +843,12 @@ fn run(args: &[String]) -> Result<bool, String> {
             let mut receipt = store.request(flag(rest, "--request-id")?, source, mode, expected, now)?;
             // Plan 28.10.: a requested LIVE as the owner's LIVE gate decides it
             // now (the qualification in --root; without it none verifies),
-            // the same decision the runtime and every tab read.
+            // the same decision the runtime and every tab read: besides the
+            // attempt the running LIVE path holds, as its status in --rundir
+            // reports it (BSC3-078).
             if mode == Mode::Live {
-                use darkbot_bsc_execution::{live_qualification, sources::GateReads};
+                use darkbot_bsc_execution::sources::{GateReads, reported_held_attempt};
+                use darkbot_bsc_execution::live_qualification;
                 let dir = std::path::Path::new(flag(rest, "--state")?);
                 let g = darkbot_bsc_execution::sources::current_generation(dir)?;
                 if g.generation == receipt.generation {
@@ -829,14 +856,21 @@ fn run(args: &[String]) -> Result<bool, String> {
                         .first()
                         .map(|root| live_qualification::view(std::path::Path::new(root)).0.view)
                         .unwrap_or_default();
-                    let reads = GateReads::read(dir, &g, now);
+                    let held = flags(rest, "--rundir").first().and_then(|r| {
+                        reported_held_attempt(
+                            &std::path::Path::new(r).join("bsc-runtime/status.dbrec"),
+                            &g,
+                            now,
+                        )
+                    });
+                    let reads = GateReads::read_holding(dir, &g, now, held.as_deref());
                     receipt.effective = g.effective_live_now(source, &reads.ctx(&verified));
                 }
             }
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

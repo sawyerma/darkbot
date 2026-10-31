@@ -337,6 +337,13 @@ pub struct LiveRuntime {
     /// Transactions of the buyer's key at a recovered lease's nonce that
     /// were no BUY of it (BSC3-076 review H3): the lease replaced.
     lease_foreign: u64,
+    /// 31.10. order: BUYs the grant's limits refused, per reason, and when
+    /// this process last handed a BUY over (unix ms).
+    limit_refused: Vec<(&'static str, u64)>,
+    last_buy_ms: Option<u64>,
+    /// When this process's LIVE path began (unix ms): a BUY still pending
+    /// from before was handed over at the latest then.
+    started_ms: u64,
     /// BSC3-030 review: strategy exits refused because the position's exits
     /// stopped for the operator, per reason.
     exits_stopped: Vec<(&'static str, u64)>,
@@ -453,6 +460,9 @@ impl LiveRuntime {
             lease_refused: 0,
             lease_error: None,
             lease_foreign: 0,
+            limit_refused: Vec::new(),
+            last_buy_ms: None,
+            started_ms: wall_ms(),
             exits_stopped: Vec::new(),
             prober,
             boot: None,
@@ -983,6 +993,7 @@ impl LiveRuntime {
     pub(crate) fn in_session(mut self, boot: &str, wall: fn() -> u64) -> Self {
         self.boot = Some(boot.into());
         self.wall = wall;
+        self.started_ms = wall();
         self
     }
 
@@ -1221,6 +1232,17 @@ impl LiveRuntime {
 
     /// The buyer's nonce `nonce` on the probed chain, as the owner's
     /// admission names it (none: nothing probed).
+    /// Whether the end released a BUY (its bytes may have left) after its
+    /// first `before` releases.
+    fn released_buy_since(&self, before: usize) -> bool {
+        self.executor.as_ref().is_some_and(|x| {
+            x.end()
+                .released()
+                .get(before..)
+                .is_some_and(|r| r.iter().any(|r| r.kind == LiveIntentKind::Buy))
+        })
+    }
+
     fn buyer_key(&self, nonce: u64) -> Option<NonceKey> {
         Some(NonceKey {
             origin: NonceOrigin {
@@ -1824,8 +1846,14 @@ impl LiveRuntime {
         }
         let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
         let x = self.executor.as_mut()?;
+        let before = x.end().released().len();
         let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
         self.record_responses();
+        // Review of the limits (LOW): a BUY whose bytes may have left counts
+        // for the interval, handed over or UNKNOWN.
+        if buy.is_some() || self.released_buy_since(before) {
+            self.last_buy_ms = Some((self.wall)());
+        }
         buy
     }
 
@@ -1931,9 +1959,103 @@ impl LiveRuntime {
             (Refusal::Owner, _) => self.buys_refused += 1,
             (Refusal::Unfunded, _) => self.unfunded_refused += 1,
             (Refusal::Dispatch, _) => self.provider_refused += 1,
+            (Refusal::GrantLimit, Some(why)) => {
+                match self.limit_refused.iter_mut().find(|(w, _)| *w == why) {
+                    Some((_, n)) => *n += 1,
+                    None => self.limit_refused.push((why, 1)),
+                }
+            }
             _ => {}
         }
         Some(refusal)
+    }
+
+    /// 31.10. order: why the grant's limits refuse a new BUY at the nonce
+    /// `next` now (the canonical `head`), if they do (all from the ledger's
+    /// book, durable, and this process's hand-overs): no limits named; as
+    /// many positions pending, open or exiting as allowed; the realized net
+    /// loss of the grant's positions, or of the positions that closed on
+    /// this UTC day, at its bound; the last BUY (handed over here, opened
+    /// or failed on chain, or still pending from before this process: at
+    /// the latest when it began) less than the interval ago. Review: a
+    /// pending BUY whose bundle window is over at `next` is the new BUY's
+    /// alternative (at most one of them lands), never another position.
+    fn limit_refusal(&self, next: Option<u64>, head: Option<u64>) -> Option<&'static str> {
+        use crate::sources::{
+            LIVE_BUY_INTERVAL, LIVE_DAILY_LOSS_MAX, LIVE_GRANT_LIMITS_MISSING,
+            LIVE_OPEN_POSITIONS_MAX, LIVE_REALIZED_LOSS_MAX, day_index,
+        };
+        let x = self.executor.as_ref()?;
+        let generation = x.end().armed().grant_generation();
+        let Some(limits) = x.end().armed().grant().limits else {
+            return Some(LIVE_GRANT_LIMITS_MISSING);
+        };
+        let positions = &self.book.positions;
+        let alternative = |p: &crate::live_ledger::Position| {
+            p.state == PositionState::Pending
+                && self.book.txs.iter().any(|t| {
+                    t.released.tx_hash == p.lot
+                        && matches!(t.state, FactKind::Released | FactKind::Unknown)
+                        && Some(t.released.nonce) == next
+                        && t.released
+                            .key()
+                            .is_none_or(|k| Some(k) == next.and_then(|n| self.buyer_key(n)))
+                        && head.is_some_and(|h| t.window_over(h))
+                })
+        };
+        let open = positions
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.state,
+                    PositionState::Pending | PositionState::Open | PositionState::Exiting
+                ) && !alternative(p)
+            })
+            .count();
+        if open >= limits.max_open_positions as usize {
+            return Some(LIVE_OPEN_POSITIONS_MAX);
+        }
+        let net = |p: &crate::live_ledger::Position| p.pnl_wei.unwrap_or(0);
+        let now = (self.wall)();
+        let lost = |net: i128, most: u128| net < 0 && net.unsigned_abs() >= most;
+        let granted: i128 = positions
+            .iter()
+            .filter(|p| p.grant_generation == generation)
+            .map(net)
+            .fold(0, i128::saturating_add);
+        if lost(granted, limits.max_realized_loss_wei) {
+            return Some(LIVE_REALIZED_LOSS_MAX);
+        }
+        let today = day_index(now);
+        let daily: i128 = positions
+            .iter()
+            .filter(|p| p.closed_ms.is_some_and(|t| day_index(t) == today))
+            .map(net)
+            .fold(0, i128::saturating_add);
+        if lost(daily, limits.max_daily_realized_loss_wei) {
+            return Some(LIVE_DAILY_LOSS_MAX);
+        }
+        if limits.min_buy_interval_ms > 0 {
+            let pending = positions
+                .iter()
+                .any(|p| p.state == PositionState::Pending && !alternative(p));
+            let failed = |p: &crate::live_ledger::Position| {
+                (p.state == PositionState::Failed)
+                    .then_some(p.closed_ms)
+                    .flatten()
+            };
+            let last = positions
+                .iter()
+                .flat_map(|p| [p.opened_ms, failed(p)])
+                .flatten()
+                .chain(self.last_buy_ms)
+                .chain(pending.then_some(self.started_ms))
+                .max();
+            if last.is_some_and(|t| now.saturating_sub(t) < limits.min_buy_interval_ms) {
+                return Some(LIVE_BUY_INTERVAL);
+            }
+        }
+        None
     }
 
     /// [`Self::buy_refused`] without counting (BSC3-076: whether a C3 BUY
@@ -1965,6 +2087,10 @@ impl LiveRuntime {
         }
         if self.buys_closed.is_some() {
             return Some((Refusal::Owner, None));
+        }
+        let head = owner.and_then(|o| o.head()).map(|h| h.number);
+        if let Some(why) = self.limit_refusal(next, head) {
+            return Some((Refusal::GrantLimit, Some(why)));
         }
         if self.unfunded(most, owner, next).is_some() {
             return Some((Refusal::Unfunded, None));
@@ -2048,6 +2174,7 @@ impl LiveRuntime {
             self.yield_lease();
         }
         let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
+        let before = self.executor.as_ref()?.end().released().len();
         let handed = strategy_to(
             self.executor.as_mut()?,
             action,
@@ -2059,6 +2186,14 @@ impl LiveRuntime {
         );
         if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action {
             self.want_exit(token);
+        }
+        if handed
+            .0
+            .iter()
+            .any(|i| i.kind == crate::paper_exec::IntentKind::Buy)
+            || self.released_buy_since(before)
+        {
+            self.last_buy_ms = Some((self.wall)());
         }
         self.record_responses();
         Some(handed)
@@ -2194,7 +2329,12 @@ impl LiveRuntime {
             d.set(l::NEXT_NONCE, n);
         }
         if let Some(x) = x {
-            d.set(l::GRANT_GENERATION, x.end().armed().grant_generation());
+            let generation = x.end().armed().grant_generation();
+            d.set(l::GRANT_GENERATION, generation);
+            // BSC3-078: the tabs read the owner's gate besides it.
+            if let Some(a) = self.held_attempt(Some(generation)) {
+                d.set(l::LEASE_ATTEMPT, darkbot_bsc_record::Value::B256(a));
+            }
             if let Some(r) = x.end().last_refusal() {
                 d.set(l::LAST_REFUSAL, r);
             }
@@ -2242,6 +2382,9 @@ impl LiveRuntime {
             }
         }
         for (why, n) in &self.exits_stopped {
+            d.push(l::REFUSALS, format!("{why}={n}").as_str());
+        }
+        for (why, n) in &self.limit_refused {
             d.push(l::REFUSALS, format!("{why}={n}").as_str());
         }
         for (r, n) in x.into_iter().flat_map(|x| {
@@ -7209,6 +7352,16 @@ mod tests {
                 "{e:?}"
             );
         }
+        // BSC3-078: the status names the held attempt, for the tabs.
+        let held = x
+            .executor
+            .as_ref()
+            .unwrap()
+            .end()
+            .lease()
+            .unwrap()
+            .attempt();
+        assert_eq!(record(&x).opt_b256(l::LEASE_ATTEMPT).unwrap(), Some(held));
         let t = Cell::new(10u64);
         let clock = FnClock {
             id: 1,
@@ -7336,6 +7489,559 @@ mod tests {
             .unwrap()
             .iter()
             .any(|r| r.starts_with(&format!("{why}=")))
+    }
+
+    /// Strategy C's BUY of `token` on a fresh curve (the tests' economics).
+    fn fresh_buy(token: [u8; 20]) -> crate::runtime_strategy::StrategyAction {
+        use crate::paper_exec::StrategyCurve;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+        };
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let fresh = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        crate::runtime_strategy::StrategyAction::Buy {
+            token,
+            curve: StrategyCurve {
+                terms,
+                reserve: fresh.reserve_after,
+                circulating: fresh.supply_after,
+            },
+            input_wei: U256::from(10_000_000_000_000_000u64),
+            decided_ns: 0,
+        }
+    }
+
+    /// The ledger facts of one closed position of `token` bought under the
+    /// grant written at `generation`: BUY and SELL included, the SELL's
+    /// block produced at `closed_ms`, proceeds `eth` for an input `input`.
+    fn closed_position(
+        state: &Path,
+        generation: u64,
+        token: [u8; 20],
+        (buy, sell): ([u8; 32], [u8; 32]),
+        (input, eth): (u128, u128),
+        closed_ms: u64,
+    ) {
+        let ledger = Ledger::open(state);
+        let released = |tx, intent, nonce| Fact {
+            kind: FactKind::Released,
+            tx_hash: tx,
+            intent,
+            component: ComponentId::StrategyC,
+            token,
+            nonce,
+            grant_generation: generation,
+            input_wei: Some(U256::from(input)),
+            max_wei: Some(U256::from(input)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD - 10),
+            by_tx: None,
+            response: None,
+            origin: None,
+        };
+        let b = released(buy, LiveIntentKind::Buy, 1);
+        let s = released(sell, LiveIntentKind::Sell, 2);
+        for f in [
+            b.clone(),
+            Fact {
+                block: Some((HEAD - 20, [0x91; 32], closed_ms - 60_000)),
+                gas_wei: Some(U256::ZERO),
+                tokens: Some(U256::from(1_000u64)),
+                eth_wei: Some(U256::from(input)),
+                ..Fact::about(&b, FactKind::Included)
+            },
+            s.clone(),
+            Fact {
+                block: Some((HEAD - 19, [0x92; 32], closed_ms)),
+                gas_wei: Some(U256::ZERO),
+                eth_wei: Some(U256::from(eth)),
+                ..Fact::about(&s, FactKind::Included)
+            },
+        ] {
+            ledger.append(&f, NOW).unwrap();
+        }
+    }
+
+    fn granted_generation(state: &Path) -> u64 {
+        Store::open(state, 8)
+            .unwrap()
+            .current()
+            .unwrap()
+            .live_set_by
+            .unwrap()
+            .generation
+    }
+
+    fn limited(tag: &str, limits: crate::sources::GrantLimits) -> Rig {
+        Rig::granting(tag, LiveStrategies::Both, move |now| LiveGrant {
+            limits: Some(limits),
+            ..rig_grant(now + 3_600_000, LiveStrategies::Both)
+        })
+    }
+
+    fn refused_for(x: &LiveRuntime, why: &str) -> bool {
+        record(x)
+            .texts(l::REFUSALS)
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with(&format!("{why}=")))
+    }
+
+    fn a_clock() -> FnClock<impl Fn() -> u64> {
+        let t = Cell::new(10u64);
+        FnClock {
+            id: 1,
+            now: move || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        }
+    }
+
+    /// The decision's wall clock: half a second after C2's head.
+    const DECIDED_MS: u64 = 1_793_000_000_500;
+
+    /// 31.10. order: as many positions open as the grant allows (a BUY
+    /// pending counts): the next BUY is refused, counted with its reason,
+    /// nothing sent.
+    #[test]
+    fn a_buy_beyond_the_granted_open_positions_is_refused() {
+        use crate::sources::{GrantLimits, LIVE_OPEN_POSITIONS_MAX};
+        let r = limited(
+            "live-limit-open",
+            GrantLimits {
+                max_open_positions: 1,
+                ..crate::sources::tests::TEST_LIMITS
+            },
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (1, None));
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA2; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        assert!(refused_for(&x, LIVE_OPEN_POSITIONS_MAX));
+        assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// Review of the limits (LOW): a position open on chain (its BUY
+    /// included, no SELL) counts against the bound, as a pending one does.
+    #[test]
+    fn an_open_position_on_chain_counts_against_the_bound() {
+        use crate::sources::{GrantLimits, LIVE_OPEN_POSITIONS_MAX};
+        let r = limited(
+            "live-limit-open-chain",
+            GrantLimits {
+                max_open_positions: 1,
+                ..crate::sources::tests::TEST_LIMITS
+            },
+        );
+        let g = granted_generation(&r.state);
+        let buy = Fact {
+            kind: FactKind::Released,
+            tx_hash: [0xe1; 32],
+            intent: LiveIntentKind::Buy,
+            component: ComponentId::StrategyC,
+            token: [0xE1; 20],
+            nonce: 1,
+            grant_generation: g,
+            input_wei: Some(U256::from(10_000u64)),
+            max_wei: Some(U256::from(10_000u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD - 10),
+            by_tx: None,
+            response: None,
+            origin: None,
+        };
+        let ledger = Ledger::open(&r.state);
+        ledger.append(&buy, NOW).unwrap();
+        let included = Fact {
+            block: Some((HEAD - 20, [0x91; 32], NOW - 60_000)),
+            gas_wei: Some(U256::ZERO),
+            tokens: Some(U256::from(1_000u64)),
+            eth_wei: Some(U256::from(10_000u64)),
+            ..Fact::about(&buy, FactKind::Included)
+        };
+        ledger.append(&included, NOW).unwrap();
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(
+            x.book()
+                .positions
+                .iter()
+                .any(|p| p.state == PositionState::Open)
+        );
+        let clock = a_clock();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        assert!(
+            refused_for(&x, LIVE_OPEN_POSITIONS_MAX),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// Review of the limits (LOW): the C3 path holds the limits too: at a
+    /// realized loss at its bound no lease is taken and the launch is
+    /// refused by the limit, nothing leaves.
+    #[test]
+    fn a_c3_launch_is_refused_at_the_granted_loss() {
+        use crate::sources::{GrantLimits, LIVE_REALIZED_LOSS_MAX};
+        let r = limited(
+            "live-limit-c3-loss",
+            GrantLimits {
+                max_realized_loss_wei: 3_000,
+                max_daily_realized_loss_wei: 3_000,
+                ..crate::sources::tests::TEST_LIMITS
+            },
+        );
+        // 4000 lost under the grant.
+        let g = granted_generation(&r.state);
+        closed_position(
+            &r.state,
+            g,
+            [0xB1; 20],
+            ([0xc1; 32], [0xc2; 32]),
+            (10_000, 6_000),
+            NOW,
+        );
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(leases(&r.state).is_empty());
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        assert!(
+            refused_for(&x, LIVE_REALIZED_LOSS_MAX),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// 31.10. order: the realized net loss of the grant's positions, and of
+    /// the positions that closed on this UTC day (any grant's), each at its
+    /// bound refuses a new BUY; a loss of another day counts for the grant
+    /// only, another grant's for the day only. Read from the ledger when
+    /// the runtime starts: a restart keeps them.
+    #[test]
+    fn the_granted_losses_refuse_buys_from_the_ledger() {
+        use crate::sources::{GrantLimits, LIVE_DAILY_LOSS_MAX, LIVE_REALIZED_LOSS_MAX};
+        let limits = GrantLimits {
+            max_open_positions: 16,
+            max_realized_loss_wei: 3_000,
+            max_daily_realized_loss_wei: 2_000,
+            min_buy_interval_ms: 0,
+        };
+        // Within both: 2500 lost under the grant, yesterday.
+        let r = limited("live-limit-loss", limits);
+        let g = granted_generation(&r.state);
+        let yesterday = NOW - 86_400_000;
+        closed_position(
+            &r.state,
+            g,
+            [0xB1; 20],
+            ([0xc1; 32], [0xc2; 32]),
+            (10_000, 7_500),
+            yesterday,
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (1, None));
+        x.shutdown();
+        r.clean();
+        // Then also 1200 lost under another grant today and 900 under this
+        // one: the grant's 3400 is at its bound (the day's 2100 too: the
+        // grant's is named first).
+        let r = limited("live-limit-loss-2", limits);
+        let g = granted_generation(&r.state);
+        closed_position(
+            &r.state,
+            g,
+            [0xB1; 20],
+            ([0xc1; 32], [0xc2; 32]),
+            (10_000, 7_500),
+            yesterday,
+        );
+        closed_position(
+            &r.state,
+            g - 1,
+            [0xB2; 20],
+            ([0xc3; 32], [0xc4; 32]),
+            (10_000, 8_800),
+            NOW,
+        );
+        closed_position(
+            &r.state,
+            g,
+            [0xB3; 20],
+            ([0xc5; 32], [0xc6; 32]),
+            (10_000, 9_100),
+            NOW,
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA2; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        assert!(
+            refused_for(&x, LIVE_REALIZED_LOSS_MAX),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+        // The day's alone: 1200 under another grant and 900 under this one,
+        // both today, the grant's bound far.
+        let r = limited(
+            "live-limit-day",
+            GrantLimits {
+                max_realized_loss_wei: 1_000_000,
+                ..limits
+            },
+        );
+        let g = granted_generation(&r.state);
+        closed_position(
+            &r.state,
+            g - 1,
+            [0xB2; 20],
+            ([0xc3; 32], [0xc4; 32]),
+            (10_000, 8_800),
+            NOW,
+        );
+        closed_position(
+            &r.state,
+            g,
+            [0xB3; 20],
+            ([0xc5; 32], [0xc6; 32]),
+            (10_000, 9_100),
+            NOW,
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA2; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        assert!(
+            refused_for(&x, LIVE_DAILY_LOSS_MAX),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// 31.10. order: the least time between two BUYs: from the last BUY
+    /// opened on chain (the ledger's), or handed over here (one still
+    /// pending from before this process: at the latest when it began).
+    #[test]
+    fn a_buy_within_the_granted_interval_is_refused() {
+        use crate::sources::{GrantLimits, LIVE_BUY_INTERVAL};
+        let limits = GrantLimits {
+            min_buy_interval_ms: 60_000,
+            ..crate::sources::tests::TEST_LIMITS
+        };
+        // The last BUY opened 30 s ago: refused.
+        let r = limited("live-limit-gap", limits);
+        let g = granted_generation(&r.state);
+        closed_position(
+            &r.state,
+            g,
+            [0xB1; 20],
+            ([0xc1; 32], [0xc2; 32]),
+            (10_000, 10_000),
+            NOW + 30_000,
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        assert!(refused_for(&x, LIVE_BUY_INTERVAL));
+        x.shutdown();
+        r.clean();
+        // Two minutes ago: it goes; the next at once is refused (this
+        // process's last BUY, pending).
+        let r = limited("live-limit-gap-2", limits);
+        let g = granted_generation(&r.state);
+        closed_position(
+            &r.state,
+            g,
+            [0xB1; 20],
+            ([0xc1; 32], [0xc2; 32]),
+            (10_000, 10_000),
+            NOW - 60_000,
+        );
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!(
+            (out.len(), refusal),
+            (1, None),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        let (out, refusal) = x
+            .on_strategy(&fresh_buy([0xA2; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert_eq!((out.len(), refusal), (0, Some(Refusal::GrantLimit)));
+        x.shutdown();
+        r.clean();
+    }
+
+    /// Review of the limits (MEDIUM): a BUY whose bundle was lost (its
+    /// window over, still pending at the next nonce) is the next BUY's
+    /// alternative: under one open position or an interval it never blocks
+    /// the BUY that takes its nonce (before: refused for ever).
+    #[test]
+    fn a_lost_bundle_never_blocks_the_buy_that_takes_its_nonce() {
+        use crate::sources::GrantLimits;
+        for (tag, limits) in [
+            (
+                "live-lost-interval",
+                GrantLimits {
+                    min_buy_interval_ms: 60_000,
+                    ..crate::sources::tests::TEST_LIMITS
+                },
+            ),
+            (
+                "live-lost-open",
+                GrantLimits {
+                    max_open_positions: 1,
+                    ..crate::sources::tests::TEST_LIMITS
+                },
+            ),
+        ] {
+            let r = limited(tag, limits);
+            let g = granted_generation(&r.state);
+            let lost = Fact {
+                kind: FactKind::Released,
+                tx_hash: [0xd1; 32],
+                intent: LiveIntentKind::Buy,
+                component: ComponentId::StrategyC,
+                token: [0xD1; 20],
+                nonce: 5,
+                grant_generation: g,
+                input_wei: Some(U256::from(10_000u64)),
+                max_wei: Some(U256::from(10_000u64)),
+                block: None,
+                gas_wei: None,
+                tokens: None,
+                eth_wei: None,
+                max_block: Some(HEAD - 10),
+                by_tx: None,
+                response: None,
+                origin: None,
+            };
+            Ledger::open(&r.state).append(&lost, NOW).unwrap();
+            let c2 = c2_at(&r.d, r.buyer, 5);
+            let mut x = r.runtime("boot-1");
+            settle(&mut x, &c2);
+            assert!(x.armed(), "{tag}: {:?}", reason(&x));
+            let clock = a_clock();
+            let handed = x.on_strategy(&fresh_buy([0xA1; 20]), &c2, &clock, DECIDED_MS);
+            assert!(
+                handed.is_some(),
+                "{tag}: {:?}",
+                record(&x).texts(l::REFUSALS)
+            );
+            assert!(
+                r.requests.recv_timeout(Duration::from_secs(2)).is_ok(),
+                "{tag}"
+            );
+            assert!(!refused_for(&x, crate::sources::LIVE_BUY_INTERVAL), "{tag}");
+            assert!(
+                !refused_for(&x, crate::sources::LIVE_OPEN_POSITIONS_MAX),
+                "{tag}"
+            );
+            x.shutdown();
+            r.clean();
+        }
+    }
+
+    /// 31.10. order: a grant without its limits (written before them)
+    /// arms no LIVE path for BUYs: the gate names it.
+    #[test]
+    fn a_grant_without_limits_arms_no_buy() {
+        let r = Rig::granting("live-limit-none", LiveStrategies::Both, |now| LiveGrant {
+            limits: None,
+            ..rig_grant(now + 3_600_000, LiveStrategies::Both)
+        });
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let why = reason(&x).1.unwrap_or_default();
+        assert!(
+            why.contains(crate::sources::LIVE_GRANT_LIMITS_MISSING),
+            "{why}"
+        );
+        x.shutdown();
+        r.clean();
     }
 
     /// BSC3-075: a source the grant does not name that sees a launch first

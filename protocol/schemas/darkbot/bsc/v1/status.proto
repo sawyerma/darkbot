@@ -364,6 +364,20 @@ message LiveGrant {
   // The execution risk the operator granted (BSC3-069); absent in a grant written before it,
   // which admits nothing.
   LiveGrantRisk risk = 14;
+  // The positions and losses the operator granted (31.10. order); absent in a grant written
+  // before them, which arms nothing.
+  LiveGrantLimits limits = 15;
+}
+// The positions and losses of a LIVE grant: a BUY beyond any of them is refused, exits go on.
+message LiveGrantLimits {
+  // Most positions open at once (a BUY pending, open or exiting counts).
+  uint32 max_open_positions = 1;
+  // Most realized net loss of the grant's positions, decimal wei.
+  string max_realized_loss_wei = 2;
+  // Most realized net loss of the positions closed on one UTC day, decimal wei.
+  string max_daily_realized_loss_wei = 3;
+  // Least time between two BUYs, milliseconds.
+  uint64 min_buy_interval_ms = 4;
 }
 // The execution risk of a LIVE grant (BSC3-069): the executor arms only within it.
 message LiveGrantRisk {
@@ -502,4 +516,6 @@ message BscLiveGrantCommand {
   bool exit_only = 10;
   // The execution risk the operator grants (BSC3-069), every bound; required.
   LiveGrantRisk risk = 11;
+  // The positions and losses the operator grants (31.10. order), every bound; required.
+  LiveGrantLimits limits = 12;
 }

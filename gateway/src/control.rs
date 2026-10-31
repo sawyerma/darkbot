@@ -266,6 +266,18 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
         ]
         .iter()
         .all(|l| *l >= 21_000);
+    // 31.10. order: the positions and losses, every bound one a BUY can come
+    // under (the native owner checks again).
+    let limits = c.limits?;
+    let wei = |s: &str| s.parse::<u128>().ok().filter(|_| wei_ok(s));
+    let limits_ok = limits.max_open_positions > 0
+        && match (
+            wei(&limits.max_realized_loss_wei),
+            wei(&limits.max_daily_realized_loss_wei),
+        ) {
+            (Some(grant), Some(daily)) => grant > 0 && daily > 0 && daily <= grant,
+            _ => false,
+        };
     let ingress =
         |s: &String| s.starts_with("BSC_INGRESS_") && BSC_SOURCE_IDS.contains(&s.as_str());
     let ok = BSC_VENUE_IDS.contains(&c.venue.as_str())
@@ -284,7 +296,8 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
         && c.scope_sha256
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        && risk_ok;
+        && risk_ok
+        && limits_ok;
     ok.then(|| {
         vec![
             "bsc".into(),
@@ -306,6 +319,10 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             risk.max_buy_gas_limit.to_string(),
             risk.max_approve_gas_limit.to_string(),
             risk.max_sell_gas_limit.to_string(),
+            limits.max_open_positions.to_string(),
+            limits.max_realized_loss_wei,
+            limits.max_daily_realized_loss_wei,
+            limits.min_buy_interval_ms.to_string(),
             c.scope_sha256,
             generation.to_string(),
         ]
@@ -2873,7 +2890,7 @@ mod tests {
     /// most ten) are owner requests; anything else never reaches the owner.
     #[tokio::test]
     async fn the_live_grant_revoke_and_total_limit_reach_the_native_owner() {
-        use crate::proto::bsc::v1::{BscLiveGrantCommand, LiveGrantRisk};
+        use crate::proto::bsc::v1::{BscLiveGrantCommand, LiveGrantLimits, LiveGrantRisk};
         use crate::proto::expected_version::Version::{ConfigVersion, WalletPolicyVersion};
         let request =
             |action: &str, resource: &str, v: Option<expected_version::Version>| CommandRequest {
@@ -2904,6 +2921,12 @@ mod tests {
                 max_approve_gas_limit: 100_000,
                 max_sell_gas_limit: 1_500_000,
             }),
+            limits: Some(LiveGrantLimits {
+                max_open_positions: 3,
+                max_realized_loss_wei: "5000000000000000".into(),
+                max_daily_realized_loss_wei: "2000000000000000".into(),
+                min_buy_interval_ms: 60_000,
+            }),
         };
         let grant = |c: &BscLiveGrantCommand, resource: &str, v| {
             let mut r = request(BSC_LIVE_GRANT, resource, Some(v));
@@ -2931,6 +2954,10 @@ mod tests {
                 "3000000",
                 "100000",
                 "1500000",
+                "3",
+                "5000000000000000",
+                "2000000000000000",
+                "60000",
                 &"ab".repeat(32),
                 "9",
             ]
@@ -3011,6 +3038,40 @@ mod tests {
                 risk: Some(LiveGrantRisk {
                     max_sell_gas_limit: 20_999,
                     ..scope.risk.unwrap()
+                }),
+                ..scope.clone()
+            },
+            // 31.10. order: no limits, no position, no loss bound, a non-decimal loss.
+            BscLiveGrantCommand {
+                limits: None,
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                limits: Some(LiveGrantLimits {
+                    max_open_positions: 0,
+                    ..scope.limits.clone().unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                limits: Some(LiveGrantLimits {
+                    max_realized_loss_wei: "0".into(),
+                    ..scope.limits.clone().unwrap()
+                }),
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                limits: Some(LiveGrantLimits {
+                    max_daily_realized_loss_wei: "1e15".into(),
+                    ..scope.limits.clone().unwrap()
+                }),
+                ..scope.clone()
+            },
+            // The day's bound above the grant's.
+            BscLiveGrantCommand {
+                limits: Some(LiveGrantLimits {
+                    max_daily_realized_loss_wei: "5000000000000001".into(),
+                    ..scope.limits.clone().unwrap()
                 }),
                 ..scope.clone()
             },

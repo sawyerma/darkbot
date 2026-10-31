@@ -1636,6 +1636,99 @@ fn a_live_reason_of_an_earlier_boot_is_projected_as_it_holds_now() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// BSC3-078: the tabs count the owner's attempts as the running LIVE path
+/// does: besides the attempt its fresh status reports holding (armed under
+/// the current grant), every slot otherwise.
+#[test]
+fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
+    use darkbot_bsc_execution::sources::{
+        ComponentId, Entity, LiveAdapter, LiveGrant, LiveStrategies, Mode, SourceId, Store,
+        SwitchId, VenueId,
+    };
+    use darkbot_bsc_record::Value;
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-held-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join("bsc-sources");
+    fs::create_dir_all(rundir.join("bsc-runtime")).unwrap();
+    let store = Store::open(&dir, 8).unwrap();
+    let now = projection::clock_s().unwrap() * 1_000;
+    let mut g = 0;
+    let mut req = |e: Entity, m: Mode| {
+        let r = store.request(&format!("r{g}"), e, m, g, now).unwrap();
+        assert!(r.applied(), "{}", r.line());
+        g += 1;
+    };
+    for id in SwitchId::ALL {
+        req(Entity::Switch(id), Mode::Enabled);
+    }
+    req(Entity::Runtime, Mode::Live);
+    req(ComponentId::ExecC3.into(), Mode::Live);
+    req(Entity::BuyLimit, Mode::PerDay(1));
+    req(Entity::BuyTotal, Mode::PerDay(1));
+    let grant = LiveGrant {
+        venue: VenueId::Flap,
+        strategies: LiveStrategies::C3,
+        sources: vec![SourceId::PublicNode],
+        adapters: vec![LiveAdapter::Club48BuilderV1],
+        max_input_wei: 1_000_000_000_000_000,
+        max_spend_wei: 10_000_000_000_000_000,
+        max_attempts: 1,
+        expires_unix_ms: now + 3_600_000,
+        exit_only: false,
+        risk: Some(darkbot_bsc_execution::sources::GrantRisk {
+            max_buy_slippage_bps: 300,
+            max_exit_slippage_bps: 500,
+            max_gas_price_wei: 1_000_000_000,
+            max_buy_gas_limit: 3_000_000,
+            max_approve_gas_limit: 100_000,
+            max_sell_gas_limit: 1_500_000,
+        }),
+        limits: Some(darkbot_bsc_execution::sources::GrantLimits {
+            max_open_positions: 4,
+            max_realized_loss_wei: 50_000_000_000_000_000,
+            max_daily_realized_loss_wei: 20_000_000_000_000_000,
+            min_buy_interval_ms: 0,
+        }),
+    };
+    let r = store
+        .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
+        .unwrap();
+    assert!(r.applied(), "{}", r.line());
+    let generation = store.current().unwrap().live_set_by.unwrap().generation;
+    let attempt = [0xa0u8; 32];
+    let hex = darkbot_bsc_record::hex(&attempt);
+    store.consume_attempt(&hex, generation, now).unwrap();
+    let status = |armed: &str, written: u64| {
+        let mut live = filled(&rs::live::SCHEMA);
+        live.set(rs::live::STATE, armed)
+            .set(rs::live::GRANT_GENERATION, generation)
+            .set(rs::live::LEASE_ATTEMPT, Value::B256(attempt));
+        let mut d = filled(&rs::SCHEMA);
+        d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
+            .set(rs::STATUS_INTERVAL_MS, 1_000u64)
+            .set(rs::LIVE, live.into_nested());
+        fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
+    };
+    let counted = || {
+        let live = super::live::live_state(&root, &rundir, Some(now));
+        let launch = projection::project(&root, &rundir).launch;
+        (live.total_used, launch.buy_attempt_limit.unwrap().used)
+    };
+    // The total slot is the attempt's own, the day's another id: only the
+    // grant's total holds it.
+    assert_eq!(counted(), (1, 1));
+    status("ARMED", now);
+    assert_eq!(counted().0, 0);
+    // Not armed, stale: every slot counts.
+    status("PROBING", now);
+    assert_eq!(counted().0, 1);
+    status("ARMED", now - 10_000);
+    assert_eq!(counted().0, 1);
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// Plan 28.10.: the LIVE tab projects the owner's gate with every
 /// precondition and its reason, the grant's exact scope, the attempts and
 /// spend, the scope's entities and the ledger's positions; without the
@@ -1688,6 +1781,12 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
             max_approve_gas_limit: 100_000,
             max_sell_gas_limit: 1_500_000,
         }),
+        limits: Some(darkbot_bsc_execution::sources::GrantLimits {
+            max_open_positions: 4,
+            max_realized_loss_wei: 50_000_000_000_000_000,
+            max_daily_realized_loss_wei: 20_000_000_000_000_000,
+            min_buy_interval_ms: 0,
+        }),
     };
     let r = store
         .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
@@ -1736,6 +1835,17 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
             risk.max_sell_gas_limit
         ),
         (300, 1_000_000_000, 1_500_000)
+    );
+    // 31.10. order: the granted limits, as granted.
+    let limits = shown.limits.as_ref().unwrap();
+    assert_eq!(
+        (
+            limits.max_open_positions,
+            limits.max_realized_loss_wei.as_str(),
+            limits.max_daily_realized_loss_wei.as_str(),
+            limits.min_buy_interval_ms
+        ),
+        (4, "50000000000000000", "20000000000000000", 0)
     );
     assert_eq!(
         shown.scope_sha256,

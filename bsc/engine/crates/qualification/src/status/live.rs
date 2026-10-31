@@ -145,7 +145,7 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
         out.warnings.push("CLOCK_UNREADABLE".into());
         return out;
     };
-    let reads = sources::GateReads::read(&dir, &g, now);
+    let reads = super::projection::gate_reads(rundir, &dir, &g, now);
     let ctx = reads.ctx(&verified.view);
     let (boot, daily, total, spent) = (&reads.boot, &reads.daily, &reads.total, reads.spent_wei);
     let blockers = g.live_blockers(&ctx);
@@ -247,6 +247,12 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
                 max_buy_gas_limit: r.max_buy_gas_limit,
                 max_approve_gas_limit: r.max_approve_gas_limit,
                 max_sell_gas_limit: r.max_sell_gas_limit,
+            }),
+            limits: grant.limits.map(|l| LiveGrantLimits {
+                max_open_positions: l.max_open_positions,
+                max_realized_loss_wei: l.max_realized_loss_wei.to_string(),
+                max_daily_realized_loss_wei: l.max_daily_realized_loss_wei.to_string(),
+                min_buy_interval_ms: l.min_buy_interval_ms,
             }),
         });
         let mut scope = vec![Entity::Runtime, ComponentId::StateC2.into()];

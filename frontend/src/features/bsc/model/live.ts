@@ -28,7 +28,7 @@ export const CONDITION_TEXT: Record<string, { label: string; where: string }> = 
   GRANT_ATTEMPTS: { label: "The grant's attempts left", where: "A new grant" },
   GRANT_SPEND: { label: "The grant's spend left", where: "A new grant" },
   GRANT_BUYS: { label: "The grant admits BUYs (not EXIT-ONLY)", where: "A new grant" },
-  GRANT_RISK: { label: "The grant names its execution risk", where: "A new grant (slippage, gas price and limits)" },
+  GRANT_RISK: { label: "The grant names its execution risk and limits", where: "A new grant (slippage, gas price and limits; positions, losses, BUY interval)" },
   VENUE_QUALIFIED: { label: "Venue qualified", where: "LIVE qualification record (bsc_runtime live qualify)" },
   SOURCES_QUALIFIED: { label: "Sources qualified", where: "LIVE qualification record" },
   ADAPTERS_QUALIFIED: { label: "Adapters qualified", where: "LIVE qualification record" },
@@ -53,6 +53,8 @@ export function scopeText(s: LiveGrantScope): string {
     + `max_buy_slippage_bps=${s.risk.maxBuySlippageBps}\nmax_exit_slippage_bps=${s.risk.maxExitSlippageBps}\n`
     + `max_gas_price_wei=${s.risk.maxGasPriceWei.toString()}\nmax_buy_gas_limit=${s.risk.maxBuyGasLimit.toString()}\n`
     + `max_approve_gas_limit=${s.risk.maxApproveGasLimit.toString()}\nmax_sell_gas_limit=${s.risk.maxSellGasLimit.toString()}\n`
+    + `max_open_positions=${s.limits.maxOpenPositions}\nmax_realized_loss_wei=${s.limits.maxRealizedLossWei}\n`
+    + `max_daily_realized_loss_wei=${s.limits.maxDailyRealizedLossWei}\nmin_buy_interval_ms=${s.limits.minBuyIntervalMs.toString()}\n`
     + (s.exitOnly ? "exit_only=true\n" : "");
 }
 
@@ -76,6 +78,8 @@ export interface GrantForm {
   /** BSC3-069: the execution risk, as typed. */
   buySlippageBps: string; exitSlippageBps: string; gasPriceWei: string;
   buyGasLimit: string; approveGasLimit: string; sellGasLimit: string;
+  /** 31.10. order: the positions and losses, as typed. */
+  maxOpenPositions: string; maxRealizedLossWei: string; maxDailyRealizedLossWei: string; minBuyIntervalMs: string;
 }
 
 const U64_MAX = (1n << 64n) - 1n;
@@ -103,6 +107,10 @@ export function grantScope(f: GrantForm, nowMs: number): { scope: LiveGrantScope
   if (!bpsOk(f.buySlippageBps) || !bpsOk(f.exitSlippageBps)) return { error: "slippage: basis points below 10000" };
   if (!u64Ok(f.gasPriceWei, 1n)) return { error: "gas price: a positive plain decimal in wei" };
   if (![f.buyGasLimit, f.approveGasLimit, f.sellGasLimit].every(l => u64Ok(l, MIN_GAS_LIMIT))) return { error: `gas limits: at least ${MIN_GAS_LIMIT.toString()}` };
+  if (!/^[1-9][0-9]{0,9}$/.test(f.maxOpenPositions) || Number(f.maxOpenPositions) > 4_294_967_295) return { error: "open positions: 1..4294967295" };
+  if (!weiOk(f.maxRealizedLossWei) || BigInt(f.maxRealizedLossWei) === 0n) return { error: "realized loss: a positive plain decimal in wei" };
+  if (!weiOk(f.maxDailyRealizedLossWei) || BigInt(f.maxDailyRealizedLossWei) === 0n || BigInt(f.maxDailyRealizedLossWei) > BigInt(f.maxRealizedLossWei)) return { error: "daily realized loss: a positive plain decimal in wei, within the grant's" };
+  if (!u64Ok(f.minBuyIntervalMs, 0n)) return { error: "BUY interval: a plain decimal in milliseconds" };
   return {
     scope: {
       venue: LIVE_VENUES[0], strategies: f.strategies, sources: f.sources, adapters: f.adapters,
@@ -112,6 +120,10 @@ export function grantScope(f: GrantForm, nowMs: number): { scope: LiveGrantScope
         maxBuySlippageBps: Number(f.buySlippageBps), maxExitSlippageBps: Number(f.exitSlippageBps),
         maxGasPriceWei: BigInt(f.gasPriceWei), maxBuyGasLimit: BigInt(f.buyGasLimit),
         maxApproveGasLimit: BigInt(f.approveGasLimit), maxSellGasLimit: BigInt(f.sellGasLimit),
+      },
+      limits: {
+        maxOpenPositions: Number(f.maxOpenPositions), maxRealizedLossWei: f.maxRealizedLossWei,
+        maxDailyRealizedLossWei: f.maxDailyRealizedLossWei, minBuyIntervalMs: BigInt(f.minBuyIntervalMs),
       },
     },
   };

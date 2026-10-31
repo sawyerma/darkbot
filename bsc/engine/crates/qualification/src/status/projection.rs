@@ -231,6 +231,17 @@ fn native_record(root: &Path, path: &Path, r: &Record) -> NativeRecord {
 /// the owner decides it now: a requested LIVE under the LIVE gate (LIVE, or
 /// BLOCKED with the gate's first reason), any other as it reads in this
 /// boot session. The LIVE tab, Monitoring and a receipt name one decision.
+/// BSC3-078: the owner's gate as the running LIVE path reads it: besides
+/// the attempt its fresh status reports for the grant of `g`.
+pub(crate) fn gate_reads(rundir: &Path, sources: &Path, g: &Generation, now_ms: u64) -> GateReads {
+    let held = darkbot_bsc_execution::sources::reported_held_attempt(
+        &rundir.join("bsc-runtime/status.dbrec"),
+        g,
+        now_ms,
+    );
+    GateReads::read_holding(sources, g, now_ms, held.as_deref())
+}
+
 fn gate_rows(record: &mut NativeRecord, g: &Generation, ctx: &LiveContext<'_>) {
     const IDS: [&str; 4] = ["source_id", "component_id", "venue_id", "setting_id"];
     let rows: Vec<(String, Effective)> = record
@@ -1200,7 +1211,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             let boot = darkbot_bsc_execution::sources::boot_session().ok();
             match clock_s() {
                 Some(s) => {
-                    let reads = GateReads::read(&sources, &g, s * 1_000);
+                    let reads = gate_reads(rundir, &sources, &g, s * 1_000);
                     let verified = live_qualification::view(root).0;
                     gate_rows(&mut record, &g, &reads.ctx(&verified.view));
                 }
@@ -1256,7 +1267,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 // Plan 28.10.: a requested LIVE as the LIVE gate decides it now.
                 let runtime = match clock_s() {
                     Some(s) => {
-                        let reads = GateReads::read(&sources, &g, s * 1_000);
+                        let reads = gate_reads(rundir, &sources, &g, s * 1_000);
                         let verified = live_qualification::view(root).0;
                         g.effective_live_now(Entity::Runtime, &reads.ctx(&verified.view))
                     }
@@ -1274,8 +1285,9 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 // Without a clock there is no "today": the limit is shown
                 // without a day rather than for 1970-01-01.
                 let today = clock_s().map(|s| s * 1_000);
-                if let Some(Ok(usage)) =
-                    today.map(|ms| darkbot_bsc_execution::sources::buy_usage(&sources, ms))
+                // BSC3-078: as the gate counts it, besides the running LIVE
+                // path's held attempt.
+                if let Some(usage) = today.and_then(|ms| gate_reads(rundir, &sources, &g, ms).daily)
                 {
                     let (request_id, set_generation) = set_by(&g.buy_limit);
                     launch.buy_attempt_limit = Some(BuyAttemptLimit {

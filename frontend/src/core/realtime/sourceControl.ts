@@ -56,6 +56,12 @@ export interface LiveGrantScope {
   exitOnly: boolean;
   /** BSC3-069: the execution risk the operator grants, every bound. */
   risk: LiveGrantRiskScope;
+  /** 31.10. order: the positions and losses the operator grants, every bound. */
+  limits: LiveGrantLimitsScope;
+}
+/** The positions and losses of a LIVE grant: a BUY beyond any of them is refused, exits go on. */
+export interface LiveGrantLimitsScope {
+  maxOpenPositions: number; maxRealizedLossWei: string; maxDailyRealizedLossWei: string; minBuyIntervalMs: bigint;
 }
 /** The execution risk of a LIVE grant (BSC3-069): the executor arms only within it. */
 export interface LiveGrantRiskScope {

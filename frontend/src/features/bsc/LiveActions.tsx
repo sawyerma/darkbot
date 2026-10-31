@@ -27,7 +27,8 @@ function Confirm({ open, title, children, onConfirm, onClose, testId }: { open: 
 
 const GRANT = "bsc-live-grant";
 const EMPTY: GrantForm = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false,
-  buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "" };
+  buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "",
+  maxOpenPositions: "", maxRealizedLossWei: "", maxDailyRealizedLossWei: "", minBuyIntervalMs: "" };
 /** BSC3-069: the execution risk's inputs, each a bound the executor must stay within. */
 const RISK_INPUTS: { key: "buySlippageBps" | "exitSlippageBps" | "gasPriceWei" | "buyGasLimit" | "approveGasLimit" | "sellGasLimit"; label: string; test: string }[] = [
   { key: "buySlippageBps", label: "Max BUY slippage (bps)", test: "buy-slippage" },
@@ -36,6 +37,13 @@ const RISK_INPUTS: { key: "buySlippageBps" | "exitSlippageBps" | "gasPriceWei" |
   { key: "buyGasLimit", label: "Max BUY gas limit", test: "buy-gas" },
   { key: "approveGasLimit", label: "Max approval gas limit", test: "approve-gas" },
   { key: "sellGasLimit", label: "Max SELL gas limit", test: "sell-gas" },
+];
+/** 31.10. order: the positions and losses, each a bound no BUY goes beyond (exits go on). */
+const LIMIT_INPUTS: { key: "maxOpenPositions" | "maxRealizedLossWei" | "maxDailyRealizedLossWei" | "minBuyIntervalMs"; label: string; test: string }[] = [
+  { key: "maxOpenPositions", label: "Max open positions", test: "open-positions" },
+  { key: "maxRealizedLossWei", label: "Max realized loss of the grant (wei)", test: "realized-loss" },
+  { key: "maxDailyRealizedLossWei", label: "Max realized loss per UTC day (wei)", test: "daily-loss" },
+  { key: "minBuyIntervalMs", label: "Min time between BUYs (ms)", test: "buy-interval" },
 ];
 
 /** The grant of one scope: the form, then the exact canonical scope and its SHA-256 to confirm. */
@@ -63,6 +71,7 @@ export function LiveGrantActions({ generation, available }: { generation: bigint
       <input inputMode="numeric" aria-label="BUY attempts" placeholder="attempts 1..10" value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />
       <input inputMode="numeric" aria-label="Valid for hours" placeholder="hours" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value.trim() })} data-testid={`${GRANT}-hours`} />
       {RISK_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
+      {LIMIT_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
       <label title="BSC3-058: only the exits of open positions, no BUY"><input type="checkbox" checked={form.exitOnly} onChange={() => setForm({ ...form, exitOnly: !form.exitOnly })} data-testid={`${GRANT}-exit-only`} />EXIT-ONLY</label>
       <button className="g-secondary" disabled={!available || busy || "error" in checked} title={"error" in checked ? checked.error : `Grant at generation ${generation.toString()}`}
         data-testid={`${GRANT}-review`} onClick={() => void review()}>Grant LIVE…</button>

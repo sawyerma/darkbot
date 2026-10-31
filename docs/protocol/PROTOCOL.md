@@ -19,6 +19,7 @@
     - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
     - [JobStatus](#darkbot-bsc-v1-JobStatus)
     - [LiveGrant](#darkbot-bsc-v1-LiveGrant)
+    - [LiveGrantLimits](#darkbot-bsc-v1-LiveGrantLimits)
     - [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk)
     - [LivePosition](#darkbot-bsc-v1-LivePosition)
     - [LivePrecondition](#darkbot-bsc-v1-LivePrecondition)
@@ -245,6 +246,7 @@ The parameters of `bsc.live.grant`: the scope the operator confirmed and its dig
 | scope_sha256 | [string](#string) |  | SHA-256 of the canonical scope text the operator was shown, lowercase hex. |
 | exit_only | [bool](#bool) |  | A separate authorization of the exits of open positions only, no BUY (BSC3-058). |
 | risk | [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk) |  | The execution risk the operator grants (BSC3-069), every bound; required. |
+| limits | [LiveGrantLimits](#darkbot-bsc-v1-LiveGrantLimits) |  | The positions and losses the operator grants (31.10. order), every bound; required. |
 
 
 
@@ -556,6 +558,25 @@ The operator&#39;s LIVE grant of one scope as the native owner holds it.
 | set_generation | [uint64](#uint64) |  | The owner generation that request wrote. |
 | exit_only | [bool](#bool) |  | The grant admits the exits of open positions only, no BUY (BSC3-058). |
 | risk | [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk) |  | The execution risk the operator granted (BSC3-069); absent in a grant written before it, which admits nothing. |
+| limits | [LiveGrantLimits](#darkbot-bsc-v1-LiveGrantLimits) |  | The positions and losses the operator granted (31.10. order); absent in a grant written before them, which arms nothing. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveGrantLimits"></a>
+
+### LiveGrantLimits
+The positions and losses of a LIVE grant: a BUY beyond any of them is refused, exits go on.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| max_open_positions | [uint32](#uint32) |  | Most positions open at once (a BUY pending, open or exiting counts). |
+| max_realized_loss_wei | [string](#string) |  | Most realized net loss of the grant&#39;s positions, decimal wei. |
+| max_daily_realized_loss_wei | [string](#string) |  | Most realized net loss of the positions closed on one UTC day, decimal wei. |
+| min_buy_interval_ms | [uint64](#uint64) |  | Least time between two BUYs, milliseconds. |
 
 
 

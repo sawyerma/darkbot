@@ -333,6 +333,9 @@ pub enum Refusal {
     /// BSC3-030: the position's exit steps reverted as often as allowed,
     /// or the last one used all its gas: its exits wait for the operator.
     ExitStopped,
+    /// 31.10. order: a BUY beyond the grant's positions, losses or BUY
+    /// interval (exits go on).
+    GrantLimit,
 }
 
 impl Refusal {
@@ -362,6 +365,7 @@ impl Refusal {
             Self::ExitFirst => "EXIT_FIRST",
             Self::Unfunded => "UNFUNDED",
             Self::ExitStopped => "EXIT_STOPPED",
+            Self::GrantLimit => "GRANT_LIMIT",
         }
     }
 }
