@@ -141,6 +141,57 @@ pub struct CandidateCostRecord {
     /// this never makes the candidate actionable.
     pub route_min_out_unknown: bool,
     pub net_profit_usd_micro: Option<i128>,
+    /// P6-MT.10: the fee the local model decided for the plan's message (ACTIVE) in place of an
+    /// RPC quote (`message_fee_quote` is then `None`); its simulation verifies it.
+    pub local_fee: Option<crate::execution::fee_parity::LocalFee>,
+}
+
+/// P6-MT.10: `CandidateCostRecord` before the local fee (`OWNER_OPPORTUNITY` ≤ 4) — read only.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct CandidateCostRecordV2 {
+    required_working_capital_usd_micro: Option<u64>,
+    profit_per_capital_bps: Option<i128>,
+    gross_seized_realizable_usd_micro: Option<u64>,
+    repay_usd_micro: Option<u64>,
+    protocol_fees_usd_micro: Option<u64>,
+    flat_sol_fee_usd_micro: Option<u64>,
+    swap_fees_and_impact_usd_micro: Option<u64>,
+    jito_tip_usd_micro: Option<u64>,
+    funding: String,
+    path: String,
+    message_fee_quote: Option<darkbot_solana::submit::MessageFeeQuote>,
+    transaction_fee_usd_micro: Option<u64>,
+    failed_attempt_reserve_usd_micro: Option<u64>,
+    rent_and_token_usd_micro: Option<u64>,
+    economics_known: bool,
+    route_min_out_unknown: bool,
+    net_profit_usd_micro: Option<i128>,
+}
+
+impl From<CandidateCostRecordV2> for CandidateCostRecord {
+    fn from(v: CandidateCostRecordV2) -> Self {
+        Self {
+            required_working_capital_usd_micro: v.required_working_capital_usd_micro,
+            profit_per_capital_bps: v.profit_per_capital_bps,
+            gross_seized_realizable_usd_micro: v.gross_seized_realizable_usd_micro,
+            repay_usd_micro: v.repay_usd_micro,
+            protocol_fees_usd_micro: v.protocol_fees_usd_micro,
+            flat_sol_fee_usd_micro: v.flat_sol_fee_usd_micro,
+            swap_fees_and_impact_usd_micro: v.swap_fees_and_impact_usd_micro,
+            jito_tip_usd_micro: v.jito_tip_usd_micro,
+            funding: v.funding,
+            path: v.path,
+            message_fee_quote: v.message_fee_quote,
+            transaction_fee_usd_micro: v.transaction_fee_usd_micro,
+            failed_attempt_reserve_usd_micro: v.failed_attempt_reserve_usd_micro,
+            rent_and_token_usd_micro: v.rent_and_token_usd_micro,
+            economics_known: v.economics_known,
+            route_min_out_unknown: v.route_min_out_unknown,
+            net_profit_usd_micro: v.net_profit_usd_micro,
+            local_fee: None,
+        }
+    }
 }
 
 /// Same-clock points; missing evidence stays absent. Slot provenance is separate.
@@ -174,6 +225,7 @@ impl CandidateCostRecord {
         eval: darkbot_project0::economics::Evaluation,
         failed: Option<u64>,
         quote: Option<darkbot_solana::submit::MessageFeeQuote>,
+        local_fee: Option<crate::execution::fee_parity::LocalFee>,
     ) -> Self {
         use darkbot_project0::economics::Evaluation;
         let (net, ppc) = match eval {
@@ -203,6 +255,7 @@ impl CandidateCostRecord {
                 == darkbot_project0::funding::FundingClass::ZeroPrefundSameTx
                 && input.gross_seized_realizable_usd_micro.is_none(),
             net_profit_usd_micro: net,
+            local_fee,
         }
     }
 }
@@ -306,13 +359,15 @@ impl OpportunityRecord {
 
 impl super::payload::Payload for OpportunityRecord {
     const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
-    /// DEC-12: 3 — the typed rejection and the native message hash; P8-CTRL.4: 4 — the signing.
-    const SCHEMA: u16 = 4;
+    /// DEC-12: 3 — the typed rejection and the native message hash; P8-CTRL.4: 4 — the signing;
+    /// P6-MT.10: 5 — the local fee of each plan.
+    const SCHEMA: u16 = 5;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use super::payload::decode_wire;
         match schema {
             2 => Some(decode_wire::<OpportunityRecordV2>(bytes).and_then(TryInto::try_into)),
             3 => Some(decode_wire::<OpportunityRecordV3>(bytes).and_then(TryInto::try_into)),
+            4 => Some(decode_wire::<OpportunityRecordV4>(bytes).and_then(TryInto::try_into)),
             _ => None,
         }
     }
@@ -422,6 +477,7 @@ impl TryFrom<CandidateCostRecordV1> for CandidateCostRecord {
             economics_known: v.economics_known,
             route_min_out_unknown: v.route_min_out_unknown,
             net_profit_usd_micro: v.net_profit_usd_micro,
+            local_fee: None,
         })
     }
 }
@@ -481,7 +537,7 @@ pub(crate) struct OpportunityRecordV3 {
     timing: TimingEvidence,
     rx_slot: Option<u64>,
     detect_slot: Option<u64>,
-    selected_costs: Option<CandidateCostRecord>,
+    selected_costs: Option<CandidateCostRecordV2>,
     simulation_result: Option<String>,
     account: String,
     trigger: String,
@@ -498,7 +554,7 @@ pub(crate) struct OpportunityRecordV3 {
     signature: Option<String>,
     sign_slot: Option<u64>,
     simulated_cu: Option<u64>,
-    candidate_costs: Vec<CandidateCostRecord>,
+    candidate_costs: Vec<CandidateCostRecordV2>,
     exposure: Option<u64>,
     all_signatures: Vec<String>,
     bundle_id: Option<String>,
@@ -517,7 +573,7 @@ impl TryFrom<OpportunityRecordV3> for OpportunityRecord {
             timing: v.timing,
             rx_slot: v.rx_slot,
             detect_slot: v.detect_slot,
-            selected_costs: v.selected_costs,
+            selected_costs: v.selected_costs.map(Into::into),
             simulation_result: v.simulation_result,
             account: v.account,
             trigger: v.trigger,
@@ -534,7 +590,7 @@ impl TryFrom<OpportunityRecordV3> for OpportunityRecord {
             signature: v.signature,
             sign_slot: v.sign_slot,
             simulated_cu: v.simulated_cu,
-            candidate_costs: v.candidate_costs,
+            candidate_costs: v.candidate_costs.into_iter().map(Into::into).collect(),
             exposure: v.exposure,
             all_signatures: v.all_signatures,
             bundle_id: v.bundle_id,
@@ -545,6 +601,148 @@ impl TryFrom<OpportunityRecordV3> for OpportunityRecord {
             signing: None,
         })
     }
+}
+/// P6-MT.10: the record layout before the local fee (`OWNER_OPPORTUNITY` schema 4, embedded in
+/// `ECON_SHADOW_EVALUATION` 6, `ECON_OPPORTUNITY` 5, `ECON_CANONICAL` 6) — read only; no plan's
+/// fee was decided locally.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct OpportunityRecordV4 {
+    #[serde(default)]
+    progress: PipelineProgress,
+    #[serde(default)]
+    market_plan_identity: Option<MarketPlanIdentity>,
+    timing: TimingEvidence,
+    rx_slot: Option<u64>,
+    detect_slot: Option<u64>,
+    selected_costs: Option<CandidateCostRecordV2>,
+    simulation_result: Option<String>,
+    account: String,
+    trigger: String,
+    decision: Decision,
+    net_profit: Option<i128>,
+    economics_known: bool,
+    premium_bps: Option<u64>,
+    t_profitable_unix_s: Option<u64>,
+    tx_version: Option<String>,
+    serialized_bytes: Option<usize>,
+    locked_accounts: Option<usize>,
+    path: Option<String>,
+    funding: Option<String>,
+    signature: Option<String>,
+    sign_slot: Option<u64>,
+    simulated_cu: Option<u64>,
+    candidate_costs: Vec<CandidateCostRecordV2>,
+    exposure: Option<u64>,
+    all_signatures: Vec<String>,
+    bundle_id: Option<String>,
+    submitted_tip: Option<crate::execution::pending::SubmittedTip>,
+    intervals_ns: Vec<(String, Option<u64>)>,
+    reason: Option<super::rejection::Rejection>,
+    loss: Option<LossReason>,
+    signing: Option<Signing>,
+}
+
+impl TryFrom<OpportunityRecordV4> for OpportunityRecord {
+    type Error = std::io::Error;
+    fn try_from(v: OpportunityRecordV4) -> std::io::Result<Self> {
+        Ok(Self {
+            progress: v.progress,
+            market_plan_identity: v.market_plan_identity,
+            timing: v.timing,
+            rx_slot: v.rx_slot,
+            detect_slot: v.detect_slot,
+            selected_costs: v.selected_costs.map(Into::into),
+            simulation_result: v.simulation_result,
+            account: v.account,
+            trigger: v.trigger,
+            decision: v.decision,
+            net_profit: v.net_profit,
+            economics_known: v.economics_known,
+            premium_bps: v.premium_bps,
+            t_profitable_unix_s: v.t_profitable_unix_s,
+            tx_version: v.tx_version,
+            serialized_bytes: v.serialized_bytes,
+            locked_accounts: v.locked_accounts,
+            path: v.path,
+            funding: v.funding,
+            signature: v.signature,
+            sign_slot: v.sign_slot,
+            simulated_cu: v.simulated_cu,
+            candidate_costs: v.candidate_costs.into_iter().map(Into::into).collect(),
+            exposure: v.exposure,
+            all_signatures: v.all_signatures,
+            bundle_id: v.bundle_id,
+            submitted_tip: v.submitted_tip,
+            intervals_ns: v.intervals_ns,
+            reason: v.reason,
+            loss: v.loss,
+            signing: v.signing,
+        })
+    }
+}
+
+/// Test fixture: `r` in the layout of `OWNER_OPPORTUNITY` schema 4 (before the plans' local fee),
+/// as its writer wrote it — every plan's fee from its RPC quote.
+#[cfg(test)]
+pub(crate) fn layout_before_local_fee(r: &OpportunityRecord) -> Vec<u8> {
+    let cost = |c: &CandidateCostRecord| {
+        assert!(c.local_fee.is_none(), "schema 4 has no local fee");
+        CandidateCostRecordV2 {
+            required_working_capital_usd_micro: c.required_working_capital_usd_micro,
+            profit_per_capital_bps: c.profit_per_capital_bps,
+            gross_seized_realizable_usd_micro: c.gross_seized_realizable_usd_micro,
+            repay_usd_micro: c.repay_usd_micro,
+            protocol_fees_usd_micro: c.protocol_fees_usd_micro,
+            flat_sol_fee_usd_micro: c.flat_sol_fee_usd_micro,
+            swap_fees_and_impact_usd_micro: c.swap_fees_and_impact_usd_micro,
+            jito_tip_usd_micro: c.jito_tip_usd_micro,
+            funding: c.funding.clone(),
+            path: c.path.clone(),
+            message_fee_quote: c.message_fee_quote.clone(),
+            transaction_fee_usd_micro: c.transaction_fee_usd_micro,
+            failed_attempt_reserve_usd_micro: c.failed_attempt_reserve_usd_micro,
+            rent_and_token_usd_micro: c.rent_and_token_usd_micro,
+            economics_known: c.economics_known,
+            route_min_out_unknown: c.route_min_out_unknown,
+            net_profit_usd_micro: c.net_profit_usd_micro,
+        }
+    };
+    let r = r.clone();
+    super::payload::encode_wire(&OpportunityRecordV4 {
+        progress: r.progress,
+        market_plan_identity: r.market_plan_identity,
+        timing: r.timing,
+        rx_slot: r.rx_slot,
+        detect_slot: r.detect_slot,
+        selected_costs: r.selected_costs.as_ref().map(cost),
+        simulation_result: r.simulation_result,
+        account: r.account,
+        trigger: r.trigger,
+        decision: r.decision,
+        net_profit: r.net_profit,
+        economics_known: r.economics_known,
+        premium_bps: r.premium_bps,
+        t_profitable_unix_s: r.t_profitable_unix_s,
+        tx_version: r.tx_version,
+        serialized_bytes: r.serialized_bytes,
+        locked_accounts: r.locked_accounts,
+        path: r.path,
+        funding: r.funding,
+        signature: r.signature,
+        sign_slot: r.sign_slot,
+        simulated_cu: r.simulated_cu,
+        candidate_costs: r.candidate_costs.iter().map(cost).collect(),
+        exposure: r.exposure,
+        all_signatures: r.all_signatures,
+        bundle_id: r.bundle_id,
+        submitted_tip: r.submitted_tip,
+        intervals_ns: r.intervals_ns,
+        reason: r.reason,
+        loss: r.loss,
+        signing: r.signing,
+    })
+    .unwrap()
 }
 
 /// F1: the simulation evidence of one failed candidate (journal only, never stderr/Display).
@@ -644,10 +842,45 @@ mod dec12_tests {
             &current,
         )
         .unwrap();
-        // P8-CTRL.4: schema 3 is the layout before the signing (its last byte, `None`).
+        // P6-MT.10: schema 4 is the layout before the plans' local fee — written in it — and
+        // reads with none.
+        let v4 = layout_before_local_fee(&back);
+        let four: OpportunityRecord = payload::decode(OWNER_OPPORTUNITY, 4, &v4).unwrap();
+        let plan = &four.candidate_costs[0];
+        assert_eq!(
+            (
+                plan.local_fee.clone(),
+                plan.message_fee_quote.as_ref().map(|q| q.message_hash)
+            ),
+            (None, Some(hash))
+        );
+        assert!(
+            payload::decode::<OpportunityRecord>(OWNER_OPPORTUNITY, 5, &v4).is_err(),
+            "schema 4 is not the current layout"
+        );
+        // P8-CTRL.4: schema 3 is the layout before the signing (schema 4's last byte, `None`).
         let before: OpportunityRecord =
-            payload::decode(OWNER_OPPORTUNITY, 3, &current[..current.len() - 1]).unwrap();
+            payload::decode(OWNER_OPPORTUNITY, 3, &v4[..v4.len() - 1]).unwrap();
         assert_eq!(before.signing, None);
+        // The current schema carries a plan's local fee.
+        let mut local = back.clone();
+        local.candidate_costs[0].message_fee_quote = None;
+        local.candidate_costs[0].local_fee = Some(crate::execution::fee_parity::LocalFee {
+            message_hash: hash,
+            lamports: 5_300,
+            model_version: crate::execution::fee_parity::FEE_MODEL_VERSION,
+        });
+        let bytes = payload::encode(&local).unwrap();
+        let read: OpportunityRecord = payload::decode(
+            OWNER_OPPORTUNITY,
+            <OpportunityRecord as payload::Payload>::SCHEMA,
+            &bytes,
+        )
+        .unwrap();
+        assert_eq!(
+            read.candidate_costs[0].local_fee,
+            local.candidate_costs[0].local_fee
+        );
         assert_eq!(
             back.candidate_costs[0]
                 .message_fee_quote
@@ -788,6 +1021,7 @@ mod tests {
                 SimResult::Ok {
                     units_consumed: Some(1),
                     context_slot: None,
+                    fee: None,
                 },
                 SimResult::Failed(failure),
                 SimResult::Unavailable("RPC_SIMULATION_DECODE".into()),

@@ -149,15 +149,17 @@ fn a2_without_receipts_or_commitment_nothing_is_claimed() {
 fn a2_earlier_schema_frames_stay_readable() {
     use crate::analytics::payload::{decode, encode, encode_wire, Payload, TYPED};
     let r = identified();
-    // P8-CTRL.4: an earlier row's record has no signing (the record's last byte, `None`).
+    // P8-CTRL.4: an earlier row's record has no signing (the record's last byte, `None`) — and,
+    // P6-MT.10, no plan's local fee (the record in the layout before it).
     let rec_bytes = encode_wire(&r).unwrap();
+    let earlier_rec = crate::analytics::record::layout_before_local_fee(&r);
     let before_signing = |bytes: Vec<u8>| -> Vec<u8> {
         let n = rec_bytes.len();
         let mut out = Vec::with_capacity(bytes.len());
         let mut i = 0;
         while i < bytes.len() {
             if bytes[i..].starts_with(&rec_bytes) {
-                out.extend_from_slice(&rec_bytes[..n - 1]);
+                out.extend_from_slice(&earlier_rec[..earlier_rec.len() - 1]);
                 i += n;
             } else {
                 out.push(bytes[i]);
@@ -313,4 +315,62 @@ fn n1_n5_historical_econ_frames_stay_readable() {
             serde_json::from_slice(&std::fs::read(dir.join(golden)).unwrap()).unwrap();
         assert_eq!(rendered, expected, "{golden}");
     }
+}
+
+/// P6-MT.10: the opportunity row of schema 5 and the canonical row of schema 6 carry the record
+/// before its plans' local fee (the record of `OWNER_OPPORTUNITY` schema 4); both read, every
+/// plan without one, and the current schemas carry one.
+#[test]
+fn p6_mt10_rows_before_the_local_fee_stay_readable() {
+    use crate::analytics::payload::{decode, encode, encode_wire, Payload};
+    let r = identified();
+    assert!(!r.candidate_costs.is_empty(), "a plan whose layout changed");
+    let current = encode_wire(&r).unwrap();
+    let before = crate::analytics::record::layout_before_local_fee(&r);
+    let earlier = |bytes: Vec<u8>| -> Vec<u8> {
+        let at = bytes
+            .windows(current.len())
+            .position(|w| w == current.as_slice())
+            .expect("the record inside");
+        [&bytes[..at], &before[..], &bytes[at + current.len()..]].concat()
+    };
+    let opp = OpportunityRow {
+        rec: r.clone(),
+        winner: None,
+        market: None,
+        slot_seen: Some(3),
+        capital: vec![200],
+        market_commitment: "confirmed".into(),
+    };
+    let back: OpportunityRow =
+        decode(OpportunityRow::KIND, 5, &earlier(encode(&opp).unwrap())).unwrap();
+    assert_eq!(back.rec.candidate_costs.len(), r.candidate_costs.len());
+    assert!(back.rec.candidate_costs.iter().all(|c| c.local_fee.is_none()));
+    assert_eq!(back.slot_seen, Some(3));
+    let mut joined = row(&r, 10, 0);
+    joined.our = Some(r.clone());
+    let back: Joined = decode(Joined::KIND, 6, &earlier(encode(&joined).unwrap())).unwrap();
+    assert!(back
+        .our
+        .unwrap()
+        .candidate_costs
+        .iter()
+        .all(|c| c.local_fee.is_none()));
+    // The current schemas carry a plan's local fee.
+    let mut local = opp.clone();
+    local.rec.candidate_costs[0].local_fee = Some(crate::execution::fee_parity::LocalFee {
+        message_hash: solana_sdk::hash::Hash::new_unique(),
+        lamports: 5_000,
+        model_version: crate::execution::fee_parity::FEE_MODEL_VERSION,
+    });
+    let back: OpportunityRow = decode(
+        OpportunityRow::KIND,
+        OpportunityRow::SCHEMA,
+        &encode(&local).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        back.rec.candidate_costs[0].local_fee,
+        local.rec.candidate_costs[0].local_fee
+    );
 }

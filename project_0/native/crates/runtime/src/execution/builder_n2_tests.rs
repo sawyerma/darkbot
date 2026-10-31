@@ -374,6 +374,8 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let started = std::time::Instant::now();
     let rec = p.evaluate(f.account, "n2", clock.now_ns(), 1_000, 10, true);

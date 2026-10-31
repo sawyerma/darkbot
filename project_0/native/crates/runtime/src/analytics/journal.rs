@@ -152,6 +152,9 @@ pub mod kind {
     pub const UNTIL_STOPPED_AUTOSTART: u16 = 507;
     /// DEC-16: a previewed standing autostart approval awaiting its confirmation.
     pub const UNTIL_STOPPED_AUTOSTART_PREVIEW: u16 = 508;
+    /// P6-MT.10: the saved runs' fee parity sealed for an owner's ACTIVE local fee model
+    /// (`fee_parity::FeeParitySeal`), a sealed single-value journal `data/fee-parity/seal_<n>.p0j`.
+    pub const FEE_PARITY_SEAL: u16 = 509;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
@@ -270,6 +273,7 @@ pub mod kind {
         UNTIL_STOPPED_RUN,
         UNTIL_STOPPED_AUTOSTART,
         UNTIL_STOPPED_AUTOSTART_PREVIEW,
+        FEE_PARITY_SEAL,
         MT0_SNAPSHOT,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,

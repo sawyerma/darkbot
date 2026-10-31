@@ -102,6 +102,8 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
       active="Active (from Observe; needs N and the evidence)"/>
     <ModeRequest owner={owner} live={live} capability="INVENTORY_REBALANCING" label="Inventory rebalancing" action="Request rebalancing mode"
       active="Active (never effective: a trade needs its own authorization)"/>
+    <ModeRequest owner={owner} live={live} capability="LOCAL_FEE_MODEL" label="Local fee model" action="Request fee model mode"
+      active="Active (only in a class the sealed parity qualifies)"/>
     {params}
   </Section>;
 }
@@ -134,12 +136,13 @@ function ThresholdRows({ th }: { th: OwnerThresholdView }) {
 }
 
 /**
- * DEC-04/DEC-11/DEC-06/B01 (N-5): a capability mode through the same controller (`p0ctl capability
- * set HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|INVENTORY_REBALANCING …`, CAS on the capability
- * configuration version). ACTIVE is only requested here: the owner decides what is effective — the
- * B hold with the user's N (B-8) and N finalized attempts without an underestimation, the bundle
- * path never without a qualified bundle simulator, rebalancing never (OBSERVE plans, never trades)
- * — and the capability row shows the reason.
+ * DEC-04/DEC-11/DEC-06/B01/P6-MT.10 (N-5): a capability mode through the same controller (`p0ctl
+ * capability set HOLD_B|JITO_BUNDLE|THRESHOLD_TRIGGER|INVENTORY_REBALANCING|LOCAL_FEE_MODEL …`, CAS
+ * on the capability configuration version). ACTIVE is only requested here: the owner decides what
+ * is effective — the B hold with the user's N (B-8) and N finalized attempts without an
+ * underestimation, the bundle path never without a qualified bundle simulator, rebalancing never
+ * (OBSERVE plans, never trades), the local fee model only in a sealed qualified class — and the
+ * capability row shows the reason.
  */
 function ModeRequest({ owner, live, capability, label, action, active }: {
   owner: LiquidatorView; live: boolean; capability: ModeCapability; label: string; action: string; active: string;

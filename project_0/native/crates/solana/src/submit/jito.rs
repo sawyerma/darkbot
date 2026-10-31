@@ -314,6 +314,8 @@ impl SubmissionAdapter for JitoAdapter {
                     super::SimResult::Ok {
                         units_consumed: cu,
                         context_slot: v.pointer("/context/slot").and_then(Value::as_u64),
+                        // A bundle simulation names no per-transaction fee.
+                        fee: None,
                     }
                 } else {
                     super::SimResult::Failed("BUNDLE_SIMULATION_FAILED".into())

@@ -70,6 +70,9 @@ pub enum Rejection {
         cause: crate::analytics::record::LossReason,
         reason: Option<Box<Rejection>>,
     },
+    /// P6-MT.10: the fee the local model decided cannot stand on the node's fee of the
+    /// simulation (nothing was sent).
+    LocalFee(crate::execution::fee_parity::Unverified),
     /// A decoded record: its persisted code and the text its writer made.
     Recorded {
         code: RejectionCode,
@@ -159,6 +162,7 @@ pub enum RejectionCode {
     SubmissionUnknown,
     Bankruptcy,
     Earlier,
+    LocalFee,
 }
 
 impl Rejection {
@@ -199,6 +203,7 @@ impl Rejection {
             Self::SubmissionRefused { .. } => C::SubmissionRefused,
             Self::SubmissionUnknown(_) => C::SubmissionUnknown,
             Self::Bankruptcy { .. } => C::Bankruptcy,
+            Self::LocalFee(_) => C::LocalFee,
             Self::Recorded { code, .. } => *code,
         }
     }
@@ -285,6 +290,20 @@ impl Rejection {
                 cause,
                 reason.as_deref().map_or(Cow::Borrowed("-"), Rejection::text)
             )
+            }
+            Self::LocalFee(e) => {
+                use crate::execution::fee_parity::Unverified as U;
+                match e {
+                    U::Mismatch { node, local } => format!(
+                        "LOCAL_FEE_MISMATCH: the simulation charged {node} lamports, the local model {local}"
+                    ),
+                    U::NoNodeFee => {
+                        return "LOCAL_FEE_UNVERIFIED: the simulation named no fee".into()
+                    }
+                    U::OtherMessage => {
+                        return "LOCAL_FEE_UNVERIFIED: the simulated message is not the one its fee was decided for".into()
+                    }
+                }
             }
             Self::Recorded { text, .. } => return Cow::Borrowed(text),
         })
@@ -541,6 +560,13 @@ mod tests {
                 "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal \
                  receivership opportunity (reported as Sizing: SIZING:NO_PAIR)",
             ),
+            (
+                Rejection::LocalFee(crate::execution::fee_parity::Unverified::Mismatch {
+                    node: 5_300,
+                    local: 5_000,
+                }),
+                "LOCAL_FEE_MISMATCH: the simulation charged 5300 lamports, the local model 5000",
+            ),
         ];
         let mut codes = std::collections::HashSet::new();
         for (rejection, text) in &cases {
@@ -598,6 +624,7 @@ mod tests {
             C::SubmissionUnknown,
             C::Bankruptcy,
             C::Earlier,
+            C::LocalFee,
         ];
         for (index, code) in pinned.into_iter().enumerate() {
             assert_eq!(
@@ -618,6 +645,7 @@ mod tests {
                 C::RpcDeadlineBeforeSimulation | C::RpcDeadlineSimulation => {}
                 C::RpcBudgetSimulation | C::Simulation | C::Safety | C::LiveSendRequiresFe04 => {}
                 C::SubmissionRefused | C::SubmissionUnknown | C::Bankruptcy | C::Earlier => {}
+                C::LocalFee => {}
             }
         }
         let earlier: Rejection = serde_json::from_value(serde_json::json!("old text")).unwrap();

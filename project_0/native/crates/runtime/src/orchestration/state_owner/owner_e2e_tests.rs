@@ -170,9 +170,10 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         threshold_bootstrap_batch: 64,
         threshold: dec06_control(Default::default(), None),
         fee_parity_base: None,
-        fee_parity_start: crate::execution::fee_parity::counts(),
+        fee_parity: Default::default(),
         fee_parity_journaled: None,
-        fee_parity_mismatches: crate::execution::fee_parity::counts().mismatched(),
+        fee_parity_mismatches: 0,
+        local_fee: super::local_fee::LocalFeeControl::start(Default::default(), None, ""),
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
@@ -6475,10 +6476,16 @@ fn dec06_active_crosscheck_without_budget_is_skipped() {
 
 /// DEC-13b: the owner's production RPC submitter against a loopback node that quotes, simulates
 /// and records every send (`sendTransaction` answers the sent signature; with `send_ok` false a
-/// server error, the send's fate unknown; a simulation answered after `sim_delay_ms`) under a
-/// budget that admits the test's calls at once; the node's methods in call order.
-fn dec13b_live_node(f: &mut Fixture, send_ok: bool, sim_delay_ms: u64) -> Arc<Mutex<Vec<String>>> {
-    dec13b_live_node_wires(f, send_ok, sim_delay_ms).0
+/// server error, the send's fate unknown; a simulation answered after `sim_delay_ms`, naming
+/// the fee `sim_fee` when it is given) under a budget that admits the test's calls at once; the
+/// node's methods in call order.
+fn dec13b_live_node(
+    f: &mut Fixture,
+    send_ok: bool,
+    sim_delay_ms: u64,
+    sim_fee: Option<u64>,
+) -> Arc<Mutex<Vec<String>>> {
+    dec13b_live_node_wires(f, send_ok, sim_delay_ms, sim_fee).0
 }
 
 /// The live node, with every transaction it was sent (decoded).
@@ -6487,6 +6494,7 @@ fn dec13b_live_node_wires(
     f: &mut Fixture,
     send_ok: bool,
     sim_delay_ms: u64,
+    sim_fee: Option<u64>,
 ) -> (Arc<Mutex<Vec<String>>>, SentTxs) {
     use crate::execution::one_shot::non_landing::loopback::{endpoint, Reply};
     use base64::Engine;
@@ -6500,9 +6508,14 @@ fn dec13b_live_node_wires(
                 }
                 "simulateTransaction" => {
                     std::thread::sleep(Duration::from_millis(sim_delay_ms));
-                    Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": {
+                    let mut value = serde_json::json!({
                 "err": null, "logs": [], "accounts": null, "unitsConsumed": 100,
-                "returnData": null, "innerInstructions": null, "replacementBlockhash": null}}))
+                "returnData": null, "innerInstructions": null, "replacementBlockhash": null});
+                    // P6-MT.10: a node that names the simulated message's fee.
+                    if let Some(fee) = sim_fee {
+                        value["fee"] = serde_json::json!(fee);
+                    }
+                    Reply::Result(serde_json::json!({"context": {"slot": 100}, "value": value}))
                 }
                 "sendTransaction" if !send_ok => Reply::Status(500),
                 "sendTransaction" => {
@@ -6568,16 +6581,17 @@ fn dec13b_live(f: &mut Fixture, fe06: bool) {
 /// authorization (the offline tests' stand-in) opens LIVE and the submitter; without it nothing
 /// opens. Returns the fixture, the target and the node's methods in call order.
 fn dec13b_fixture(tag: &str, fe06: bool) -> (Fixture, Pubkey, Arc<Mutex<Vec<String>>>) {
-    dec13b_fixture_with(tag, fe06, true, 0)
+    dec13b_fixture_with(tag, fe06, true, 0, None)
 }
 
 /// `dec13b_fixture` whose node answers every send with a server error unless `send_ok` and every
-/// simulation after `sim_delay_ms`.
+/// simulation after `sim_delay_ms` (naming the fee `sim_fee` when it is given).
 fn dec13b_fixture_with(
     tag: &str,
     fe06: bool,
     send_ok: bool,
     sim_delay_ms: u64,
+    sim_fee: Option<u64>,
 ) -> (Fixture, Pubkey, Arc<Mutex<Vec<String>>>) {
     use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Usage, ATTEMPT_SCHEMA};
     use bytemuck::Zeroable;
@@ -6592,7 +6606,7 @@ fn dec13b_fixture_with(
     (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
     f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
     f.owner.zero_prefund_enabled = true;
-    let calls = dec13b_live_node(&mut f, send_ok, sim_delay_ms);
+    let calls = dec13b_live_node(&mut f, send_ok, sim_delay_ms, sim_fee);
     let num = |v: f64| WrappedI80F48 {
         value: ((v * (1u64 << 48) as f64) as i128).to_le_bytes(),
     };
@@ -7392,7 +7406,7 @@ fn dec13b_exit_fixture_of(
             // Nothing listens: a router asked would fail the exit.
             Some(_) => "http://127.0.0.1:9".into(),
         });
-    let (calls, sent) = dec13b_live_node_wires(&mut f, send_ok, 0);
+    let (calls, sent) = dec13b_live_node_wires(&mut f, send_ok, 0, None);
     (f, calls, sent, e)
 }
 
@@ -7705,7 +7719,7 @@ fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitt
 #[test]
 fn dec13b_an_unknown_send_keeps_every_hold_until_the_settlement_books_it_once() {
     use crate::execution::one_shot::settlement::{SettlementEvidence, SettlementSubject};
-    let (mut f, target, calls) = dec13b_fixture_with("dec13b_unknown", true, false, 0);
+    let (mut f, target, calls) = dec13b_fixture_with("dec13b_unknown", true, false, 0, None);
     f.owner
         .detect(Some((
             target,
@@ -7807,7 +7821,7 @@ fn dec13b_an_unknown_exit_halts_and_ends_the_exits_of_the_run() {
 /// owner's settlement proves its non-landing instead of the attempt staying RESERVED all run.
 #[test]
 fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlement() {
-    let (mut f, target, calls) = dec13b_fixture_with("dec13b_aged", true, true, 1_200);
+    let (mut f, target, calls) = dec13b_fixture_with("dec13b_aged", true, true, 1_200, None);
     let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
     let file = f.dir.join("approval.conf");
     let approval = std::fs::read_to_string(&file).unwrap();
@@ -8313,7 +8327,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
     // During (review M5): a DISABLE durably requested while the candidate is being simulated —
     // p0ctl's request log, the real control thread — waits as a counted stop before the owner's
     // next step: the egress permit is refused, nothing durable, nothing sent.
-    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 800);
+    let (mut f, target, calls) = dec13b_fixture_with("p8ctrl06_l07_during", true, true, 800, None);
     p8ctrl03_scoped(&mut f, &[], |_| {});
     let control = cap::request_dir(&f.dir);
     {
@@ -8996,7 +9010,6 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
     let (mut f, target, calls) = dec13b_fixture("p6_mt10_fee_parity", true);
     // No priority fee: the node's quote (one signature) is what the local model gives.
     f.owner.resources.priority_micro_lamports_per_cu = 0;
-    f.owner.fee_parity_start = fee_parity::counts();
     let class = FeeClass {
         format: FeeFormat::V0,
         priority: false,
@@ -9021,11 +9034,19 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
         "{:?}",
         calls.lock().unwrap()
     );
-    let run = fee_parity::record(None, &f.owner.fee_parity_start);
-    // Other tests run in this process: only this test's match is isolated, never the class's
-    // mismatches.
-    let (hit, _) = matched(&run);
-    assert!(hit >= 1, "a distinct match in its class: {run:?}");
+    let run = f.owner.fee_parity.record(None);
+    // The owner's own tally: each of the candidate's quotes (one per plan), each matched.
+    let quotes = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| *c == "getFeeForMessage")
+        .count() as u64;
+    assert_eq!(
+        matched(&run),
+        (quotes, 0),
+        "a distinct match per quote: {run:?}"
+    );
     let row = f
         .owner
         .owner_snapshot(1)
@@ -9138,5 +9159,170 @@ fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
         "FE04_TARGET_NOT_APPROVED"
     );
     assert!(f.owner.fe04_admission.is_some(), "kept open");
+    cleanup(f);
+}
+
+/// P6-MT.10 phase 2 (PHASENPLAN: "Lokales Fee-Modell ersetzt `getFeeForMessage` erst nach 100 %
+/// Parität … Mismatch → RPC-Fallback + Gate-FAIL"): LOCAL_FEE_MODEL through the one controller.
+/// ACTIVE without a seal stays OBSERVE (its reason); with a seal qualifying the candidate's class
+/// its fee is the local model's — no `getFeeForMessage` — and its simulation verifies it before
+/// the one send; a simulation naming another fee stops the candidate unsent and fails the class
+/// (RPC quotes again, the status FAIL); one naming none stops it too and ends ACTIVE for the run.
+#[test]
+fn p6_mt10_active_decides_a_sealed_class_locally_and_its_simulation_verifies_it() {
+    use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::execution::fee_parity::{
+        self, FeeClass, FeeFormat, FeeParityStatsRecord, FeeRole, ParityCounts, Unverified,
+        PARITY_MIN_MESSAGES,
+    };
+    let class = FeeClass {
+        format: FeeFormat::V0,
+        priority: false,
+        role: FeeRole::Single,
+    };
+    // A saved run that matched the class at the plan's minimum, sealed.
+    let seal = |project: &std::path::Path| {
+        let dir = project.join("data/shadow/qualifying");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut w, _) = OwnerEvidenceWriter::start_rolling(
+            dir.join("opportunities.p0j"),
+            dir.join("recovery.p0j"),
+            64,
+            Duration::from_millis(5),
+            1 << 20,
+            false,
+        )
+        .unwrap();
+        w.emit(OwnerEvidence::FeeParityStats(Box::new(
+            FeeParityStatsRecord {
+                model_version: fee_parity::FEE_MODEL_VERSION,
+                classes: vec![(
+                    class,
+                    ParityCounts {
+                        matched: PARITY_MIN_MESSAGES,
+                        ..Default::default()
+                    },
+                )],
+                first_mismatch: None,
+            },
+        )))
+        .unwrap();
+        w.finish(None).unwrap();
+        fee_parity::write_seal(project).unwrap();
+    };
+    let request = |f: &mut Fixture, seq: u64, requested: &str| {
+        f.owner.apply_capability_control(
+            seq,
+            Ok(CapabilityControlRequest {
+                seq,
+                capability: fee_parity::LOCAL_FEE_MODEL.into(),
+                requested: requested.into(),
+                requested_unix_s: 1,
+                request_id: format!("r-{seq}"),
+                owner_epoch: 0,
+            }),
+        );
+    };
+    let row = |f: &Fixture| {
+        let r = f
+            .owner
+            .owner_snapshot(1)
+            .capabilities
+            .into_iter()
+            .find(|c| c.name == fee_parity::LOCAL_FEE_MODEL)
+            .unwrap();
+        (r.requested, r.effective, r.block_reason.into_owned())
+    };
+    let count = |calls: &Arc<Mutex<Vec<String>>>, method: &str| {
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| *c == method)
+            .count()
+    };
+    let fixture = |tag: &str, sim_fee| {
+        let (mut f, target, calls) = dec13b_fixture_with(tag, true, true, 0, sim_fee);
+        // No priority fee: the local model's fee of the candidate is its one signature's.
+        f.owner.resources.priority_micro_lamports_per_cu = 0;
+        f.owner.sources.capabilities.dir = Some(f.dir.join("capability-control"));
+        f.owner.sources.capabilities.config_version = Some(0);
+        f.owner.local_fee.project = Some(f.dir.clone());
+        (f, target, calls)
+    };
+    let detect = |f: &mut Fixture, target| {
+        let now = f.owner.clock.now_ns();
+        f.owner
+            .detect(Some((target, now, 100, "account_update")))
+            .unwrap();
+    };
+
+    // Verified: the local fee decides, the simulation names the same, the candidate is sent once.
+    let (mut f, target, calls) = fixture("p6_mt10_active", Some(5_000));
+    request(&mut f, 1, "ACTIVE");
+    let (requested, effective, reason) = row(&f);
+    assert_eq!((requested, effective), ("ACTIVE", "OBSERVE"));
+    assert!(reason.contains("LOCAL_FEE_NOT_SEALED"), "{reason}");
+    seal(&f.dir);
+    request(&mut f, 2, "ACTIVE");
+    let (_, effective, reason) = row(&f);
+    assert_eq!(effective, "ACTIVE", "{reason}");
+    assert!(reason.contains("decides in 1 sealed classes"), "{reason}");
+    detect(&mut f, target);
+    assert_eq!(
+        (
+            count(&calls, "getFeeForMessage"),
+            count(&calls, "sendTransaction")
+        ),
+        (0, 1),
+        "{:?}",
+        calls.lock().unwrap()
+    );
+    let run = f.owner.fee_parity.record(None);
+    assert_eq!(
+        run.classes.iter().find(|(c, _)| *c == class).unwrap().1,
+        ParityCounts {
+            matched: 1,
+            ..Default::default()
+        },
+        "verified by the simulation"
+    );
+    cleanup(f);
+
+    // Another fee: the candidate stops unsent and the class fails for good (RPC quotes again).
+    let (mut f, target, calls) = fixture("p6_mt10_mismatch", Some(5_001));
+    seal(&f.dir);
+    request(&mut f, 1, "ACTIVE");
+    assert_eq!(row(&f).1, "ACTIVE");
+    detect(&mut f, target);
+    assert_eq!(count(&calls, "sendTransaction"), 0);
+    assert!(f.owner.fee_parity.failed(None).contains(class));
+    assert!(f.owner.fee_model().classes().is_empty());
+    let (_, effective, reason) = row(&f);
+    assert_eq!(effective, "OBSERVE");
+    assert!(
+        reason.starts_with("LOCAL_FEE_MODEL_FAIL") && reason.contains("LOCAL_FEE_CLASSES_FAILED"),
+        "{reason}"
+    );
+    cleanup(f);
+
+    // No fee named: the candidate stops unsent and ACTIVE ends for the run; OFF computes nothing.
+    let (mut f, target, calls) = fixture("p6_mt10_unverified", None);
+    seal(&f.dir);
+    request(&mut f, 1, "ACTIVE");
+    assert_eq!(row(&f).1, "ACTIVE");
+    detect(&mut f, target);
+    assert_eq!(count(&calls, "sendTransaction"), 0);
+    assert_eq!(f.owner.local_fee.unverified, Some(Unverified::NoNodeFee));
+    let (_, effective, reason) = row(&f);
+    assert_eq!(effective, "OBSERVE");
+    assert!(
+        reason.contains("ACTIVE ended: LOCAL_FEE_UNVERIFIED"),
+        "{reason}"
+    );
+    request(&mut f, 2, "OFF");
+    assert_eq!(row(&f).1, "OFF");
+    assert_eq!(f.owner.fee_model(), fee_parity::FeeModel::OFF);
     cleanup(f);
 }

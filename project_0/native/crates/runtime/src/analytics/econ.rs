@@ -225,12 +225,22 @@ impl crate::analytics::payload::Payload for ShadowEvaluation {
     /// V9/V17: 3 — attributed under EXHAUSTIVE_V2 (`LossReason::Plan`/`Safety`); DEC-01: 4 —
     /// under EXHAUSTIVE_V3 (a stale blockhash is `Build` decided before planning); DEC-12: 5 —
     /// the typed rejection and the native message hash (still EXHAUSTIVE_V3); P8-CTRL.4: 6 — the
-    /// record's signing.
-    const SCHEMA: u16 = 6;
+    /// record's signing; P6-MT.10: 7 — its plans' local fee.
+    const SCHEMA: u16 = 7;
     /// Schemas 2–4 have the record layout before DEC-12 (`LossReason` only gained variants at
     /// its end); 2 and 3 were written under an earlier attribution, and schema 2 cannot carry a
     /// cause added since.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        if schema == 6 {
+            return Some(
+                crate::analytics::payload::decode_wire::<ShadowEvaluationV6>(bytes).and_then(|v| {
+                    Ok(Self {
+                        previous: v.previous,
+                        record: v.record.try_into()?,
+                    })
+                }),
+            );
+        }
         if schema == 5 {
             return Some(
                 crate::analytics::payload::decode_wire::<ShadowEvaluationV5>(bytes).and_then(|v| {
@@ -269,6 +279,14 @@ struct ShadowEvaluationV4 {
 struct ShadowEvaluationV5 {
     previous: Option<EvalRef>,
     record: crate::analytics::record::OpportunityRecordV3,
+}
+
+/// P6-MT.10: `ShadowEvaluation` schema 6 (the record before its plans' local fee).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct ShadowEvaluationV6 {
+    previous: Option<EvalRef>,
+    record: crate::analytics::record::OpportunityRecordV4,
 }
 
 /// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
@@ -887,13 +905,36 @@ struct OpportunityRowV4 {
     capital: Vec<u64>,
     market_commitment: String,
 }
+/// P6-MT.10: layout of schema 5 (the record before its plans' local fee).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct OpportunityRowV5 {
+    rec: crate::analytics::record::OpportunityRecordV4,
+    winner: Option<Winner>,
+    market: Option<MarketEvent>,
+    slot_seen: Option<u64>,
+    capital: Vec<u64>,
+    market_commitment: String,
+}
 impl crate::analytics::payload::Payload for OpportunityRow {
     const KIND: u16 = kind::ECON_OPPORTUNITY;
     /// DEC-12: 4 — the record with the typed rejection and the native message hash; P8-CTRL.4: 5
-    /// — the record's signing.
-    const SCHEMA: u16 = 5;
+    /// — the record's signing; P6-MT.10: 6 — its plans' local fee.
+    const SCHEMA: u16 = 6;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::decode_wire;
+        if schema == 5 {
+            return Some(decode_wire::<OpportunityRowV5>(bytes).and_then(|v| {
+                Ok(Self {
+                    rec: v.rec.try_into()?,
+                    winner: v.winner,
+                    market: v.market,
+                    slot_seen: v.slot_seen,
+                    capital: v.capital,
+                    market_commitment: v.market_commitment,
+                })
+            }));
+        }
         if schema == 4 {
             return Some(decode_wire::<OpportunityRowV4>(bytes).and_then(|v| {
                 Ok(Self {

@@ -3151,6 +3151,7 @@ mod tests {
             simulation: darkbot_solana::submit::SimResult::Ok {
                 units_consumed: Some(10),
                 context_slot: None,
+                fee: None,
             },
         }
     }
@@ -3359,6 +3360,7 @@ mod tests {
         sim.simulation = SimResult::Ok {
             units_consumed: Some(10),
             context_slot: Some(10),
+            fee: None,
         };
         let token = payload(vec![tx.clone()], SubmissionPath::Rpc)
             .simulate_bound(&sim, test_deadline(), test_binding())
@@ -3408,6 +3410,7 @@ mod tests {
         sim.simulation = SimResult::Ok {
             units_consumed: None,
             context_slot: None,
+            fee: None,
         };
         let unknown = payload(vec![tx.clone()], SubmissionPath::Rpc)
             .simulate_bound(&sim, test_deadline(), test_binding())

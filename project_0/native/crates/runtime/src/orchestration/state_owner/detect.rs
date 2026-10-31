@@ -579,6 +579,8 @@ impl ShadowOwner {
                 _ => None,
             }
         };
+        // P6-MT.10: what this evaluation does with the local fee model.
+        let fee_model = self.fee_model();
         let mut pipe = Pipeline {
             mode,
             clock: &self.clock,
@@ -621,6 +623,8 @@ impl ShadowOwner {
             egress: Some(self.sources.live_gates()),
             synthetic: &self.synthetic_signer,
             use_facts,
+            fee_parity: &self.fee_parity,
+            fee_model,
         };
         #[cfg(feature = "crate_health")]
         let pipeline_started_ns = self.clock.now_ns();
@@ -641,6 +645,7 @@ impl ShadowOwner {
         );
         let simulation_failure = pipe.simulation_failure.take();
         self.blockhash_early = Some(pipe.blockhash_park);
+        self.local_fee.after(rec.reason.as_ref());
         // P6-MT.1 (MT5b): a ShadowReady (built, signed and simulated; never submitted in
         // Shadow) moves the ownership EXECUTING → SIGNED; every other outcome stays EXECUTING.
         // Both are RELEASED by the owning candidate in `detect`.

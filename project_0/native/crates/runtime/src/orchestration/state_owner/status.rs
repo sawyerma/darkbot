@@ -633,25 +633,16 @@ impl ShadowOwner {
 }
 
 impl ShadowOwner {
-    /// P6-MT.10: the local fee model's status row — observed against every RPC quote (the RPC
-    /// quote decides in this build) with this run's parity (the saved runs' sum: `p0ctl
-    /// fee-parity`).
+    /// P6-MT.10: the local fee model's status row — the controller's request, what is effective
+    /// (ACTIVE only in a sealed class no mismatch of this run failed) and this run's parity (the
+    /// saved runs' sum: `p0ctl fee-parity`).
     fn fee_parity_capability(&self) -> OwnerCapability {
-        use crate::execution::fee_parity;
-        let run = fee_parity::SavedRuns {
-            records: vec![fee_parity::record(
-                self.fee_parity_base.as_ref(),
-                &self.fee_parity_start,
-            )],
-            crashed: Vec::new(),
-            unreadable: Vec::new(),
-        };
+        let (requested, effective, block_reason) = self.local_fee_state();
         OwnerCapability {
-            name: "LOCAL_FEE_MODEL".into(),
-            requested: "OBSERVE",
-            effective: "OBSERVE",
-            block_reason: fee_parity::status_line(&fee_parity::qualification(&run), "this run")
-                .into(),
+            name: crate::execution::fee_parity::LOCAL_FEE_MODEL.into(),
+            requested,
+            effective,
+            block_reason: block_reason.into(),
             roles: Vec::new(),
         }
     }

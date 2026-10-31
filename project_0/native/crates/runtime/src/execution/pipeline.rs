@@ -440,6 +440,10 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     /// P8-CTRL.3/.4 (review N1): the facts of a SIM_ONLY simulation's use in Shadow — the owner's
     /// (`None`: no SIM_ONLY grant in force; a LIVE candidate's are its FE-04 admission's).
     pub use_facts: Option<crate::execution::one_shot::admission::UseFacts>,
+    /// P6-MT.10: the owner's tally of the local fee model and what the evaluation does with the
+    /// model (compare it with every RPC quote; decide a single transaction's fee where ACTIVE).
+    pub fee_parity: &'a crate::execution::fee_parity::FeeParity,
+    pub fee_model: crate::execution::fee_parity::FeeModel,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -900,11 +904,22 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 continue;
             }
             rec.progress.transaction_built = Some(true);
-            let fee_quote = if plan.input.path == Path::Rpc
+            // P6-MT.10: where the local model is ACTIVE for the message's class it decides the
+            // fee without an RPC quote; the simulation verifies it before anything is sent.
+            let single = plan.input.path == Path::Rpc
                 && self.submitter.path() == SubmissionPath::Rpc
                 && plan.prerequisite_txs.is_empty()
-                && plan.tip == 0
-            {
+                && plan.tip == 0;
+            let local_fee = single
+                .then(|| {
+                    crate::execution::fee_parity::decide(
+                        &built.tx,
+                        FeeRole::Single,
+                        &self.fee_model,
+                    )
+                })
+                .flatten();
+            let fee_quote = if single && local_fee.is_none() {
                 match self.quote_message(&built.tx, FeeRole::Single, deadline, &mut fee_quotes) {
                     Ok(quote) => quote,
                     Err((loss, reason)) => {
@@ -932,7 +947,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
             let fee_lamports = match &bundle {
                 Some(b) => b.fee_lamports,
-                None => fee_quote.as_ref().map(|q| q.lamports),
+                None => fee_quote
+                    .as_ref()
+                    .map(|q| q.lamports)
+                    .or(local_fee.as_ref().map(|l| l.lamports)),
             };
             plan.input.transaction_fee_usd_micro =
                 fee_lamports.and_then(|l| self.builder.native_cost_usd_micro(l));
@@ -942,7 +960,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     None => plan.input.transaction_fee_usd_micro = None,
                 }
             }
-            let candidate_failed = if fee_quote.is_some() {
+            let candidate_failed = if fee_quote.is_some() || local_fee.is_some() {
                 economics::rpc_message_failure_costs(plan.input.transaction_fee_usd_micro)
             } else {
                 *self.failed_costs
@@ -962,7 +980,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 safety_hits += 1;
             }
             // [MT0] avoidable remote work, classified only from decisions already made above.
-            if fee_lamports.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
+            if fee_lamports.is_some()
+                && local_fee.is_none()
+                && matches!(eval, Evaluation::Known { .. })
+                && !actionable
+            {
                 darkbot_common::mt0::MT0
                     .add(darkbot_common::mt0::Counter::FeeRpcForKnownNonActionable, 1);
             }
@@ -977,6 +999,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 eval,
                 failed_reserve,
                 fee_quote.clone(),
+                local_fee.clone(),
             );
             rec.candidate_costs.push(cost_record.clone());
             if !actionable && !technical_probe {
@@ -1112,10 +1135,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let fee_lamports = if use_bundle {
             bundle.as_ref().and_then(|b| b.fee_lamports)
         } else {
-            rec.selected_costs
-                .as_ref()
-                .and_then(|c| c.message_fee_quote.as_ref())
-                .map(|q| q.lamports)
+            rec.selected_costs.as_ref().and_then(|c| {
+                c.message_fee_quote
+                    .as_ref()
+                    .map(|q| q.lamports)
+                    .or(c.local_fee.as_ref().map(|l| l.lamports))
+            })
         };
         let max_loss_usd_micro = plan
             .sol_debit_lamports(fee_lamports)
@@ -1298,9 +1323,28 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .min(u64::MAX as u128) as u64,
         );
         match sim {
-            SimResult::Ok { units_consumed, .. } => {
+            SimResult::Ok {
+                units_consumed,
+                fee,
+                ..
+            } => {
                 rec.simulation_result = Some("PASS".into());
                 rec.simulated_cu = units_consumed;
+                // P6-MT.10: a fee the local model decided stands only on the node's fee of this
+                // simulation ("Mismatch → RPC-Fallback + Gate-FAIL": the class fails, the owner's
+                // next evaluations quote it by RPC; a simulation without a fee verifies nothing).
+                let decided = rec
+                    .selected_costs
+                    .as_ref()
+                    .and_then(|c| c.local_fee.as_ref());
+                if let Some(decided) = decided {
+                    let simulated = if use_bundle { None } else { fee };
+                    if let Err(e) = self.fee_parity.verify(&built.tx, decided, simulated) {
+                        rec.loss = Some(LossReason::Build);
+                        rec.reason = Some(Rejection::LocalFee(e));
+                        return rec.with_timeline(&tl);
+                    }
+                }
             }
             // N2: no simulation result exists; the cause is our own network bound.
             SimResult::Deadline => {
@@ -1529,8 +1573,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 // P6-MT.10: the local fee model's parity with this RPC quote of this message, per
                 // class (once per RPC quote; the quote decides).
                 if let Ok(q) = &quote {
-                    if q.message_hash == message_hash {
-                        crate::execution::fee_parity::observe(tx, role, q.lamports);
+                    if q.message_hash == message_hash && self.fee_model.observe {
+                        self.fee_parity.observe(tx, role, q.lamports);
                     }
                 }
                 record_timing(

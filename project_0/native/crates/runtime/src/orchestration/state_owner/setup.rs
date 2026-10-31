@@ -678,6 +678,11 @@ pub(super) fn prepare(
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
+    // P6-MT.10: the local fee model's start value and the project's seal as it is now (the
+    // controller changes the mode at run time).
+    let local_fee_mode = crate::execution::fee_parity::FeeModelMode::from_env(
+        &std::env::var("P0_LOCAL_FEE_MODEL").unwrap_or_default(),
+    )?;
     let remote = {
         #[cfg_attr(not(feature = "crate_health"), allow(unused_mut))]
         let mut remote = RemoteWorkers::start(
@@ -1094,6 +1099,12 @@ pub(super) fn prepare(
     {
         return Err(crate::execution::inventory::TARGETS_REQUIRED.into());
     }
+    let run_id = super::super::startup::owner_run_id(&|k| std::env::var(k).ok());
+    let local_fee = super::local_fee::LocalFeeControl::start(
+        local_fee_mode,
+        std::env::var_os("P0_PROJECT_DIR").map(std::path::PathBuf::from),
+        &run_id,
+    );
     let mut owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
@@ -1161,7 +1172,7 @@ pub(super) fn prepare(
             None => None,
         },
         mode,
-        run_id: super::super::startup::owner_run_id(&|k| std::env::var(k).ok()),
+        run_id,
         status_interval: Duration::from_millis(
             darkbot_solana::runtime_config::active()
                 .limits
@@ -1251,9 +1262,10 @@ pub(super) fn prepare(
         threshold_bootstrap_batch,
         threshold,
         fee_parity_base,
-        fee_parity_start: crate::execution::fee_parity::counts(),
+        fee_parity: Default::default(),
         fee_parity_journaled: None,
-        fee_parity_mismatches: crate::execution::fee_parity::counts().mismatched(),
+        fee_parity_mismatches: 0,
+        local_fee,
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,

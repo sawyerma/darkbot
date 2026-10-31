@@ -979,6 +979,9 @@ macro_rules! typed_kinds {
             k::UNTIL_STOPPED_AUTOSTART_PREVIEW => {
                 $f::<crate::orchestration::autostart::Preview>($kind, $schema, $bytes)
             }
+            k::FEE_PARITY_SEAL => {
+                $f::<crate::execution::fee_parity::FeeParitySeal>($kind, $schema, $bytes)
+            }
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::ECON_SNAPSHOT => $f::<super::econ::SnapshotFrame>($kind, $schema, $bytes),
             k::ECON_FINAL => $f::<super::econ::SnapshotReport>($kind, $schema, $bytes),

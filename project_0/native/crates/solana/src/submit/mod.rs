@@ -80,6 +80,9 @@ pub enum SimResult {
         units_consumed: Option<u64>,
         /// DEC-02: the slot the node simulated at (`context.slot`); `None` unknown.
         context_slot: Option<u64>,
+        /// P6-MT.10: the fee the node computed for the simulated message (`value.fee` of an RPC
+        /// simulation); `None`: not returned (a node without it, a bundle simulation).
+        fee: Option<u64>,
     },
     Failed(SimulationFailure),
     Unavailable(String),

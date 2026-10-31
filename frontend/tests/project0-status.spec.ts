@@ -469,6 +469,18 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const rb = fromBinary(CapabilityControlCommandSchema, reb.params);
   expect([rb.capability, rb.requested]).toEqual(["INVENTORY_REBALANCING", "OFF"]);
   expect(reb.expected?.version).toEqual({ case: "configVersion", value: 1n });
+  // P6-MT.10: the local fee model through the same controller; ACTIVE requested stays OBSERVE
+  // without a seal, OBSERVE is requested with the view's version.
+  await expect(page.locator(".p0-line", { hasText: /^LOCAL_FEE_MODEL/ }).first())
+    .toContainText("OBSERVE (requested ACTIVE) · LOCAL_FEE_NOT_SEALED");
+  await page.getByRole("combobox", { name: "Local fee model" }).selectOption("OBSERVE");
+  await page.getByRole("button", { name: "Request fee model mode" }).click();
+  await expect.poll(() => sent.length).toBe(6);
+  const fee = sent.at(-1)!;
+  expect(fee.action).toBe("project0.capability.set");
+  const fm = fromBinary(CapabilityControlCommandSchema, fee.params);
+  expect([fm.capability, fm.requested]).toEqual(["LOCAL_FEE_MODEL", "OBSERVE"]);
+  expect(fee.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   // H0: the newest completed report's headline and a start over every saved run (typed budget).
@@ -505,7 +517,7 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual([...Array(5).fill("project0.capability.set"), "project0.analytics.h0.start", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual([...Array(6).fill("project0.capability.set"), "project0.analytics.h0.start", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });
 

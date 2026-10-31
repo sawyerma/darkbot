@@ -1,6 +1,6 @@
 //! P6-MT.10: `p0ctl fee-parity` over the real binary sums each saved run's last fee parity record
 //! per class and names the classes qualified (≥ the plan's minimum matched, none mismatched) —
-//! read only, offline.
+//! read only, offline; `--seal` seals it for an owner's ACTIVE local fee model.
 use darkbot_runner::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
 use darkbot_runner::execution::fee_parity::{
     FeeClass, FeeFormat, FeeParityStatsRecord, FeeRole, ParityCounts, FEE_MODEL_VERSION,
@@ -100,6 +100,28 @@ fn p6_mt10_fee_parity_report_sums_the_saved_runs_per_class() {
     assert!(
         stdout.contains("LOCAL_FEE_MODEL_FAIL: saved runs: 1/16 classes qualified"),
         "{stdout}"
+    );
+    // Phase 2: `--seal` seals it — the qualified class is what an owner's ACTIVE rests on.
+    use darkbot_runner::execution::fee_parity::{sealed_classes, ClassSet};
+    assert!(sealed_classes(&project, "").is_err(), "nothing sealed yet");
+    let out = Command::new(env!("CARGO_BIN_EXE_p0ctl"))
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .arg("--project")
+        .arg(&project)
+        .args(["fee-parity", "--seal"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("as seal 1: 2 saved runs"), "{stdout}");
+    assert_eq!(
+        sealed_classes(&project, ""),
+        Ok(ClassSet::default().with(plain))
     );
     let _ = std::fs::remove_dir_all(project);
 }

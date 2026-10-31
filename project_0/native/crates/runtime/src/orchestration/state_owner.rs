@@ -76,6 +76,7 @@ mod detect;
 mod events;
 mod ingress;
 mod lifecycle;
+mod local_fee;
 mod remote_apply;
 mod setup;
 use ingress::{IngressSession, IngressSessions, RetiredEvents};
@@ -254,13 +255,14 @@ pub(super) struct ShadowOwner {
     /// DEC-06: the threshold mode (requested/effective, generation, OBSERVE evidence).
     threshold: threshold::ThresholdControl,
     /// P6-MT.10: the local fee model's parity a continued run journaled before
-    /// (`fee_parity::last_record` of its chain), the process's counts at this owner's start
-    /// (what was not its own), its last journaled record (`None`: none yet) and the process's
-    /// mismatches it journaled.
+    /// (`fee_parity::last_record` of its chain), this owner's tally (lent to each evaluation),
+    /// its last journaled record (`None`: none yet) and the tally's mismatches it journaled.
     fee_parity_base: Option<crate::execution::fee_parity::FeeParityStatsRecord>,
-    fee_parity_start: crate::execution::fee_parity::Counts,
+    fee_parity: crate::execution::fee_parity::FeeParity,
     fee_parity_journaled: Option<crate::execution::fee_parity::FeeParityStatsRecord>,
     fee_parity_mismatches: u64,
+    /// P6-MT.10 phase 2: the local fee model's controller mode and seal.
+    local_fee: local_fee::LocalFeeControl,
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,

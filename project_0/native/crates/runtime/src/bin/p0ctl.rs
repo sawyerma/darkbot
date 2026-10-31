@@ -31,11 +31,11 @@
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|index|strict|crosscheck [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
-//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
+//! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
-//! p0ctl [--project DIR] fee-parity   (P6-MT.10: the local fee model's parity per class over every saved run)
+//! p0ctl [--project DIR] fee-parity [--seal]   (P6-MT.10: the local fee model's parity per class over every saved run; --seal: sealed as what an owner's ACTIVE rests on)
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 archive --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 migrate --journal-dir DIR --wallet PUBKEY
@@ -2008,7 +2008,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
 
 /// DEC-13/P8-CTRL: the operator's capability request (`set`), the same controller path as
 /// `source`: written only for a running owner of this project, under a one-time request id (the
@@ -2720,7 +2720,7 @@ fn attempt_history(
 /// P6-MT.10: the local fee model's parity per class over every saved run of the project (each
 /// run's last `FEE_PARITY_STATS` record of the current model version) and which class is
 /// qualified (≥ the plan's minimum matched, none mismatched); read only, the RPC quote decides.
-fn fee_parity_cmd(project: &Path) -> Result<bool, String> {
+fn fee_parity_cmd(project: &Path, seal: bool) -> Result<bool, String> {
     use darkbot_runner::execution::fee_parity as fp;
     let listed = |ids: &[String]| {
         if ids.is_empty() {
@@ -2758,6 +2758,15 @@ fn fee_parity_cmd(project: &Path) -> Result<bool, String> {
         );
     }
     println!("{}", fp::status_line(&classes, "saved runs"));
+    // Phase 2: the seal an owner's ACTIVE rests on (read at its start and on each request).
+    if seal {
+        let (n, sealed) = fp::write_seal(project)?;
+        println!(
+            "sealed {} as seal {n}: {} saved runs; an owner's LOCAL_FEE_MODEL ACTIVE decides in its qualified single-transaction classes",
+            fp::seal_dir(project).display(),
+            sealed.runs.len()
+        );
+    }
     Ok(true)
 }
 
@@ -2798,7 +2807,10 @@ fn main() -> ExitCode {
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            (Some("fee-parity"), None) => fee_parity_cmd(&project),
+            (Some("fee-parity"), None) => fee_parity_cmd(&project, false),
+            (Some("fee-parity"), Some("--seal")) if rest.len() == 1 => {
+                fee_parity_cmd(&project, true)
+            }
             _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04|fee-parity …".into()),
         }
     });

@@ -631,12 +631,19 @@ impl ShadowOwner {
             &request_capability,
             Some(c) if c == crate::execution::inventory::INVENTORY_REBALANCING
         );
+        // P6-MT.10: the local fee model, applied by the owner (ACTIVE effective only in a sealed
+        // class).
+        let local_fee = matches!(
+            &request_capability,
+            Some(c) if c == crate::execution::fee_parity::LOCAL_FEE_MODEL
+        );
         let valid = match valid {
             Ok(requested) if threshold => self
                 .threshold_request(&requested, seq)
                 .map(|()| requested)
                 .map_err(String::from),
             Ok(requested) if rebalance => self.rebalance_request(&requested),
+            Ok(requested) if local_fee => self.local_fee_request(&requested),
             other => other,
         };
         let c = &mut self.sources.capabilities;
@@ -668,8 +675,9 @@ impl ShadowOwner {
             } else if hold_b {
                 c.hold_b_requested =
                     crate::execution::hold_b::HoldMode::parse(requested).unwrap_or_default();
-            } else if threshold || rebalance {
-                // Applied by `threshold_request` / `rebalance_request` (the owner's own modes).
+            } else if threshold || rebalance || local_fee {
+                // Applied by `threshold_request` / `rebalance_request` / `local_fee_request` (the
+                // owner's own modes).
             } else {
                 c.live_requested = cap::LIVE_VALUES
                     .into_iter()
@@ -727,6 +735,8 @@ impl ShadowOwner {
                 (t.requested.code(), t.effective.code(), t.block.into())
             } else if rebalance {
                 self.rebalance_state()
+            } else if local_fee {
+                self.local_fee_state()
             } else {
                 let c = &self.sources.capabilities;
                 let (effective, block_reason) = cap::live_decision(&c.live_gates());

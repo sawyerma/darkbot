@@ -37,6 +37,7 @@ pub(super) fn costs(capital: u64) -> CandidateCostRecord {
         economics::evaluate(&input, &failed),
         failed.conservative(input.path),
         None,
+        None,
     )
 }
 pub(crate) fn rec() -> OpportunityRecord {
@@ -299,7 +300,7 @@ fn economics_input_and_profit_capital_preserved() {
         net: 100,
         profit_per_capital_bps: 81,
     };
-    let c = CandidateCostRecord::from_input(&i, e, Some(2), None);
+    let c = CandidateCostRecord::from_input(&i, e, Some(2), None, None);
     assert_eq!(c.required_working_capital_usd_micro, Some(12345));
     assert_eq!(c.profit_per_capital_bps, Some(81));
     assert_eq!(
@@ -318,7 +319,7 @@ fn unknown_costs_and_economics_remain_null() {
             2 => i.rent_and_token_usd_micro = None,
             _ => fail = None,
         }
-        let c = CandidateCostRecord::from_input(&i, Evaluation::Unknown, fail, None);
+        let c = CandidateCostRecord::from_input(&i, Evaluation::Unknown, fail, None, None);
         assert_eq!(c.net_profit_usd_micro, None);
         assert_eq!(c.profit_per_capital_bps, None);
         if missing > 0 {
@@ -754,6 +755,7 @@ impl SubmissionAdapter for CountingSubmitter {
         SimResult::Ok {
             units_consumed: Some(100),
             context_slot: None,
+            fee: None,
         }
     }
     /// P8-CTRL.4: a Shadow simulation without a sign permit — signed, but never by the wallet.
@@ -767,6 +769,7 @@ impl SubmissionAdapter for CountingSubmitter {
         SimResult::Ok {
             units_consumed: Some(100),
             context_slot: None,
+            fee: None,
         }
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -987,6 +990,8 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1155,6 +1160,8 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let account = Pubkey::new_unique();
     let key = |r: &OpportunityRecord| {
@@ -1358,6 +1365,8 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
             use_facts: None,
+            fee_parity: &Default::default(),
+            fee_model: Default::default(),
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
     };
@@ -1476,6 +1485,8 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1523,6 +1534,7 @@ impl HandoffSubmitter {
             } else {
                 self.context_slot_again
             },
+            fee: None,
         }
     }
 }
@@ -1750,6 +1762,8 @@ fn evaluate_in(
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -2411,6 +2425,8 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -2539,6 +2555,8 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
             use_facts: None,
+            fee_parity: &Default::default(),
+            fee_model: Default::default(),
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason_text().unwrap_or_default();
@@ -2589,6 +2607,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             SimResult::Ok {
                 units_consumed: Some(100),
                 context_slot: None,
+                fee: None,
             }
         }
         fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -2702,6 +2721,8 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             egress: None,
             synthetic: crate::execution::pipeline::test_synthetic(),
             use_facts: None,
+            fee_parity: &Default::default(),
+            fee_model: Default::default(),
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -3398,6 +3419,7 @@ impl SubmissionAdapter for SlowSubmitter {
         SimResult::Ok {
             units_consumed: Some(100),
             context_slot: None,
+            fee: None,
         }
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -3505,6 +3527,8 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -3799,6 +3823,8 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         egress: None,
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: &Default::default(),
+        fee_model: Default::default(),
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
@@ -5119,6 +5145,7 @@ impl SubmissionAdapter for QualifiedBundleSim {
         SimResult::Ok {
             units_consumed: Some(300),
             context_slot: Some(10),
+            fee: None,
         }
     }
     fn submit(
@@ -5164,6 +5191,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
     (payer, target): (&solana_sdk::signature::Keypair, Pubkey),
     tip: crate::execution::bundle_path::BundleTip,
     builder: &BundleBuilder,
+    parity: &crate::execution::fee_parity::FeeParity,
 ) -> OpportunityRecord {
     use crate::execution::pipeline::{Mode, Pipeline};
     use darkbot_project0::{execution::Freshness, planner::Allowlist};
@@ -5229,6 +5257,8 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         egress: Some(gates.gates()),
         synthetic: crate::execution::pipeline::test_synthetic(),
         use_facts: None,
+        fee_parity: parity,
+        fee_model: Default::default(),
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
 }
@@ -5329,6 +5359,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         (&payer, target),
         tip,
         &priced,
+        &Default::default(),
     );
     let costs = &r.candidate_costs[0];
     assert_eq!(costs.path, "JitoBundle");
@@ -5366,6 +5397,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
             (&payer, target),
             tip,
             &builder,
+            &Default::default(),
         );
         let costs = &r.candidate_costs[0];
         assert_eq!(
@@ -5383,7 +5415,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
     };
     let mut safety = open_safety();
     let mut fe04 = journal("qualified");
-    let parity_start = crate::execution::fee_parity::counts();
+    let parity = crate::execution::fee_parity::FeeParity::default();
     let r = bundle_evaluate(
         &qualified,
         &mut safety,
@@ -5391,6 +5423,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         (&payer, target),
         tip,
         &priced,
+        &parity,
     );
     assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason_text());
     assert_eq!(
@@ -5407,10 +5440,11 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         3,
         "prerequisite, receivership and tip TX"
     );
-    // P6-MT.10: each part's RPC quote is counted against the local fee model in its own role.
+    // P6-MT.10: each part's RPC quote is counted against the local fee model in its own role,
+    // once (the evaluation's tally).
     {
-        use crate::execution::fee_parity::{record, FeeRole};
-        let run = record(None, &parity_start);
+        use crate::execution::fee_parity::FeeRole;
+        let run = parity.record(None);
         for role in [
             FeeRole::BundlePrerequisite,
             FeeRole::BundleReceivership,
@@ -5422,7 +5456,7 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
                 .filter(|(c, _)| c.role == role)
                 .map(|(_, n)| n.matched + n.repeated + n.mismatched + n.unsupported)
                 .sum();
-            assert!(counted >= 1, "{role:?} is counted: {run:?}");
+            assert_eq!(counted, 1, "{role:?} is counted: {run:?}");
         }
     }
     assert_eq!(r.all_signatures, intent.signatures);

@@ -248,10 +248,7 @@ impl ShadowOwner {
     /// (`FEE_PARITY_STATS`; a continued run's earlier counts included) when they changed since
     /// the last record, or always (`force`: the start and the shutdown).
     pub(super) fn fee_parity_record(&mut self, force: bool) {
-        let record = crate::execution::fee_parity::record(
-            self.fee_parity_base.as_ref(),
-            &self.fee_parity_start,
-        );
+        let record = self.fee_parity.record(self.fee_parity_base.as_ref());
         if !force && self.fee_parity_journaled.as_ref() == Some(&record) {
             return;
         }
@@ -270,14 +267,11 @@ impl ShadowOwner {
         if self.fee_parity_journaled.is_none() {
             self.fee_parity_record(true);
         }
-        let mismatches = crate::execution::fee_parity::counts().mismatched();
+        let mismatches = self.fee_parity.mismatched();
         if mismatches <= self.fee_parity_mismatches {
             return;
         }
-        let record = crate::execution::fee_parity::record(
-            self.fee_parity_base.as_ref(),
-            &self.fee_parity_start,
-        );
+        let record = self.fee_parity.record(self.fee_parity_base.as_ref());
         if self
             .evidence
             .emit(OwnerEvidence::FeeParityMismatch(Box::new(record.clone())))

@@ -576,6 +576,7 @@ fn sim_result_of(value: serde_json::Value) -> SimResult {
         None => SimResult::Ok {
             units_consumed: r.value.units_consumed,
             context_slot: Some(r.context.slot),
+            fee: r.value.fee,
         },
         Some(e) => {
             // F1: bounded, redacted logs for the native journal only.
@@ -956,7 +957,18 @@ mod q3_error_text_tests {
             sim_result_of(ok),
             SimResult::Ok {
                 units_consumed: Some(3),
-                context_slot: Some(5)
+                context_slot: Some(5),
+                fee: None,
+            }
+        ));
+        // P6-MT.10: the node's fee of the simulated message, when it names one.
+        let ok = serde_json::json!({"context": {"slot": 5},
+            "value": {"err": null, "unitsConsumed": 3, "fee": 5000}});
+        assert!(matches!(
+            sim_result_of(ok),
+            SimResult::Ok {
+                fee: Some(5000),
+                ..
             }
         ));
         use solana_sdk::instruction::InstructionError as I;

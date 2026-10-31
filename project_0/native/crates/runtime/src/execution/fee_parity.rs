@@ -1,23 +1,32 @@
-//! P6-MT.10 / S4: the parity of the local fee model (`tx::local_fee_lamports`) with every RPC fee
-//! quote of the pipeline, per class of message — its format, whether it pays a priority fee, its
-//! part of a bundle. The local model may replace `getFeeForMessage` only after 100 % parity over at
-//! least `PARITY_MIN_MESSAGES` qualified messages of a class (PHASENPLAN P6-MT.10: "Lokales
-//! Fee-Modell ersetzt `getFeeForMessage` erst nach 100 % Parität über >=10.000 qualifizierte
-//! v0/v1-Messages mit/ohne Priority und Bundle-Bestandteile. Mismatch → RPC-Fallback +
-//! Gate-FAIL"); one mismatch fails its class for good (the RPC quote stays). A qualified message is
-//! a distinct one: the same message quoted again (a candidate re-evaluated under the same
-//! blockhash) is compared again but counts once. Counted in the process, journaled by the owner
+//! P6-MT.10 / S4: the parity of the local fee model (`tx::local_fee_lamports`) with the node's
+//! fee of every message an owner's evaluations ask one for, per class of message — its format,
+//! whether it pays a priority fee, its part of a bundle. The local model may replace
+//! `getFeeForMessage` only after 100 % parity over at least `PARITY_MIN_MESSAGES` qualified
+//! messages of a class (PHASENPLAN P6-MT.10: "Lokales Fee-Modell ersetzt `getFeeForMessage` erst
+//! nach 100 % Parität über >=10.000 qualifizierte v0/v1-Messages mit/ohne Priority und
+//! Bundle-Bestandteile. Mismatch → RPC-Fallback + Gate-FAIL"); one mismatch fails its class for
+//! good. A qualified message is a distinct one: the same message quoted again (a candidate
+//! re-evaluated under the same blockhash) is compared again but counts once. Counted in the
+//! owner's own tally (`FeeParity`, lent to each evaluation), journaled by the owner
 //! (`FEE_PARITY_STATS`: at its start, when the counts changed, at shutdown, and synced at once
-//! after a new mismatch — so a mismatch survives a crash once one owner pass and one sync passed),
-//! summed across the saved runs of a project by `saved_runs`/`qualification` (an on-demand report,
-//! never an owner's start). A crashed or still running run counts with its last record and is
-//! named: its matches are a lower bound; a mismatch it journaled is durable, but one quoted in the
-//! owner pass it crashed in (bounded by that pass's candidate network deadlines, the evidence
-//! queued before it and one sync) can be lost — phase 2 re-checks every landed fee. A run whose
-//! journal cannot be read (an error, a cut chain, an undecodable record, a recovery journal from a
-//! failed write) qualifies nothing until it is resolved. Every owner runs on the
-//! Mainnet cluster only (BOOT-12 genesis pin), so every record is Mainnet's. No v1 transaction is
-//! built yet (S3-02): v1 has no class until it is.
+//! after a new mismatch — so a mismatch survives a crash once one owner pass and one sync
+//! passed), summed across the saved runs of a project by `saved_runs`/`qualification` (an
+//! on-demand report, never an owner's start). A crashed or still running run counts with its last
+//! record and is named: its matches are a lower bound; a mismatch it journaled is durable, but one
+//! quoted in the owner pass it crashed in (bounded by that pass's candidate network deadlines, the
+//! evidence queued before it and one sync) can be lost. A run whose journal cannot be read (an
+//! error, a cut chain, an undecodable record, a recovery journal from a failed write) qualifies
+//! nothing until it is resolved. Every owner runs on the Mainnet cluster only (BOOT-12 genesis
+//! pin), so every record is Mainnet's. No v1 transaction is built yet (S3-02): v1 has no class
+//! until it is.
+//!
+//! Phase 2 (`FeeModel`, the controller capability `LOCAL_FEE_MODEL`): `write_seal` seals the saved
+//! runs' parity (`p0ctl fee-parity --seal`); ACTIVE decides a single transaction's fee in a class
+//! the newest seal qualifies and no mismatch of the run failed (`decide`), and the simulation that
+//! precedes every send verifies it with the node's fee of that simulation (`FeeParity::verify`,
+//! counted like a quote): a mismatch stops the candidate unsent and fails the class (the RPC quote
+//! again), a simulation without the node's fee stops it and ends ACTIVE for the run. A bundle's
+//! parts are always quoted: a bundle simulation names no part's fee.
 use serde::{Deserialize, Serialize};
 use solana_sdk::hash::Hash;
 use solana_sdk::message::VersionedMessage;
@@ -124,15 +133,6 @@ impl ParityCounts {
             unsupported: self.unsupported.saturating_add(o.unsupported),
         }
     }
-
-    fn since(self, start: ParityCounts) -> ParityCounts {
-        ParityCounts {
-            matched: self.matched.saturating_sub(start.matched),
-            repeated: self.repeated.saturating_sub(start.repeated),
-            mismatched: self.mismatched.saturating_sub(start.mismatched),
-            unsupported: self.unsupported.saturating_sub(start.unsupported),
-        }
-    }
 }
 
 /// The first mismatch of a run: what the RPC charged and what the local model said.
@@ -157,116 +157,306 @@ impl crate::analytics::payload::Payload for FeeParityStatsRecord {
     const KIND: u16 = crate::analytics::journal::kind::FEE_PARITY_STATS;
 }
 
-/// This process's counts per class: matched, repeated, mismatched, unsupported.
-static COUNTS: [[AtomicU64; 4]; CLASS_COUNT] =
-    [const { [const { AtomicU64::new(0) }; 4] }; CLASS_COUNT];
-static FIRST_MISMATCH: std::sync::Mutex<Option<FeeMismatch>> = std::sync::Mutex::new(None);
-/// The messages compared per blockhash and when that blockhash was last seen: a set is dropped
-/// once its blockhash is older than `blockhash_max_age_ms` (no fresh message names it any more), so
-/// evaluations around a refresh, under the old and the new blockhash, never count a message twice.
+/// The messages compared per blockhash and when that blockhash was last seen.
 type Seen = std::collections::HashMap<Hash, (std::time::Instant, std::collections::HashSet<Hash>)>;
-static SEEN: std::sync::Mutex<Option<Seen>> = std::sync::Mutex::new(None);
 
-/// Whether `tx` is compared for the first time (a poisoned record of what was seen: never first).
-fn first_seen(tx: &VersionedTransaction) -> bool {
-    let Ok(mut seen) = SEEN.lock() else {
-        return false;
-    };
-    let now = std::time::Instant::now();
-    let max_age = std::time::Duration::from_millis(
-        darkbot_solana::runtime_config::active()
-            .limits
-            .blockhash_max_age_ms,
-    );
-    let seen = seen.get_or_insert_with(Default::default);
-    seen.retain(|_, (at, _)| now.saturating_duration_since(*at) <= max_age);
-    let (at, hashes) = seen
-        .entry(*tx.message.recent_blockhash())
-        .or_insert_with(|| (now, Default::default()));
-    *at = now;
-    hashes.insert(tx.message.hash())
+/// One owner's tally: every node fee its evaluations compared with the local model, per class —
+/// held by the owner and lent to each evaluation, so nothing else in the process counts into it.
+/// The messages compared are kept per blockhash and dropped once the blockhash is older than
+/// `blockhash_max_age_ms` (no fresh message names it any more), so evaluations around a refresh,
+/// under the old and the new blockhash, never count a message twice.
+#[derive(Debug, Default)]
+pub struct FeeParity {
+    /// Per class: matched, repeated, mismatched, unsupported.
+    counts: [[AtomicU64; 4]; CLASS_COUNT],
+    first_mismatch: std::sync::Mutex<Option<FeeMismatch>>,
+    seen: std::sync::Mutex<Seen>,
 }
 
-/// This process's counts, per class (an owner's start: what was not its own).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Counts([ParityCounts; CLASS_COUNT]);
-
-/// The counts now.
-pub fn counts() -> Counts {
-    let mut out = [ParityCounts::default(); CLASS_COUNT];
-    for (o, c) in out.iter_mut().zip(COUNTS.iter()) {
-        *o = ParityCounts {
-            matched: c[0].load(Ordering::Relaxed),
-            repeated: c[1].load(Ordering::Relaxed),
-            mismatched: c[2].load(Ordering::Relaxed),
-            unsupported: c[3].load(Ordering::Relaxed),
+impl FeeParity {
+    /// Whether `tx` is compared for the first time (a poisoned record of what was seen: never
+    /// first).
+    fn first_seen(&self, tx: &VersionedTransaction) -> bool {
+        let Ok(mut seen) = self.seen.lock() else {
+            return false;
         };
+        let now = std::time::Instant::now();
+        let max_age = std::time::Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .blockhash_max_age_ms,
+        );
+        seen.retain(|_, (at, _)| now.saturating_duration_since(*at) <= max_age);
+        let (at, hashes) = seen
+            .entry(*tx.message.recent_blockhash())
+            .or_insert_with(|| (now, Default::default()));
+        *at = now;
+        hashes.insert(tx.message.hash())
     }
-    Counts(out)
-}
 
-impl Counts {
-    /// Every mismatch so far (an owner journals at once when it grows).
-    pub fn mismatched(&self) -> u64 {
-        self.0.iter().map(|c| c.mismatched).sum()
-    }
-}
-
-/// Counts one RPC fee quote of `tx` in `role` against the local model (and the MT0 totals).
-pub fn observe(tx: &VersionedTransaction, role: FeeRole, rpc_lamports: u64) {
-    use darkbot_common::mt0::{Counter, MT0};
-    let local = darkbot_solana::tx::local_fee_lamports(tx);
-    let class = FeeClass::of(tx, role, local);
-    let counts = &COUNTS[class.index()];
-    match local {
-        Some(local) if local == rpc_lamports => {
-            counts[if first_seen(tx) { 0 } else { 1 }].fetch_add(1, Ordering::Relaxed);
-            MT0.add(Counter::FeeParityMatch, 1);
+    fn counts(&self) -> [ParityCounts; CLASS_COUNT] {
+        let mut out = [ParityCounts::default(); CLASS_COUNT];
+        for (o, c) in out.iter_mut().zip(self.counts.iter()) {
+            *o = ParityCounts {
+                matched: c[0].load(Ordering::Relaxed),
+                repeated: c[1].load(Ordering::Relaxed),
+                mismatched: c[2].load(Ordering::Relaxed),
+                unsupported: c[3].load(Ordering::Relaxed),
+            };
         }
-        Some(local) => {
-            counts[2].fetch_add(1, Ordering::Relaxed);
-            MT0.add(Counter::FeeParityMismatch, 1);
-            if let Ok(mut first) = FIRST_MISMATCH.lock() {
-                first.get_or_insert(FeeMismatch {
-                    class,
-                    message_hash: tx.message.hash().to_bytes(),
-                    rpc_lamports,
-                    local_lamports: local,
-                });
+        out
+    }
+
+    /// Every mismatch counted (an owner journals at once when it grows).
+    pub fn mismatched(&self) -> u64 {
+        self.counts
+            .iter()
+            .map(|c| c[2].load(Ordering::Relaxed))
+            .sum()
+    }
+
+    /// Counts the node's fee `node_lamports` of `tx` in `role` (an RPC quote, or the simulation
+    /// of a fee the model decided) against the local model (and the MT0 totals).
+    pub fn observe(&self, tx: &VersionedTransaction, role: FeeRole, node_lamports: u64) {
+        use darkbot_common::mt0::{Counter, MT0};
+        let local = darkbot_solana::tx::local_fee_lamports(tx);
+        let class = FeeClass::of(tx, role, local);
+        let counts = &self.counts[class.index()];
+        match local {
+            Some(local) if local == node_lamports => {
+                counts[if self.first_seen(tx) { 0 } else { 1 }].fetch_add(1, Ordering::Relaxed);
+                MT0.add(Counter::FeeParityMatch, 1);
+            }
+            Some(local) => {
+                counts[2].fetch_add(1, Ordering::Relaxed);
+                MT0.add(Counter::FeeParityMismatch, 1);
+                if let Ok(mut first) = self.first_mismatch.lock() {
+                    first.get_or_insert(FeeMismatch {
+                        class,
+                        message_hash: tx.message.hash().to_bytes(),
+                        rpc_lamports: node_lamports,
+                        local_lamports: local,
+                    });
+                }
+            }
+            None => {
+                counts[3].fetch_add(1, Ordering::Relaxed);
+                MT0.add(Counter::FeeParityUnsupported, 1);
             }
         }
-        None => {
-            counts[3].fetch_add(1, Ordering::Relaxed);
-            MT0.add(Counter::FeeParityUnsupported, 1);
+    }
+
+    /// The run's record: `base` (what a resumed run journaled before, of this model version) and
+    /// what this owner counted.
+    pub fn record(&self, base: Option<&FeeParityStatsRecord>) -> FeeParityStatsRecord {
+        let base = base.filter(|b| b.model_version == FEE_MODEL_VERSION);
+        let now = self.counts();
+        let classes = FeeClass::all()
+            .map(|class| {
+                let earlier = base
+                    .and_then(|b| b.classes.iter().find(|(c, _)| *c == class))
+                    .map(|(_, n)| *n)
+                    .unwrap_or_default();
+                (class, earlier.add(now[class.index()]))
+            })
+            .collect();
+        let first_mismatch = base
+            .and_then(|b| b.first_mismatch.clone())
+            .or_else(|| self.first_mismatch.lock().ok().and_then(|f| f.clone()));
+        FeeParityStatsRecord {
+            model_version: FEE_MODEL_VERSION,
+            classes,
+            first_mismatch,
+        }
+    }
+
+    /// The classes a mismatch failed in this run (`base` included): failed for good under this
+    /// model version. Asked per evaluation: it allocates nothing.
+    pub fn failed(&self, base: Option<&FeeParityStatsRecord>) -> ClassSet {
+        let base = base.filter(|b| b.model_version == FEE_MODEL_VERSION);
+        FeeClass::all()
+            .filter(|c| {
+                self.counts[c.index()][2].load(Ordering::Relaxed) > 0
+                    || base.is_some_and(|b| {
+                        b.classes.iter().any(|(bc, n)| bc == c && n.mismatched > 0)
+                    })
+            })
+            .fold(ClassSet::default(), ClassSet::with)
+    }
+
+    /// Verifies the fee `decided` for the simulated `tx` with the node's fee of that simulation
+    /// (`node`), counted as a comparison of its class; `Err`: the fee cannot stand — the
+    /// candidate stops before anything is sent.
+    pub fn verify(
+        &self,
+        tx: &VersionedTransaction,
+        decided: &LocalFee,
+        node: Option<u64>,
+    ) -> Result<(), Unverified> {
+        if tx.message.hash() != decided.message_hash {
+            return Err(Unverified::OtherMessage);
+        }
+        let node = node.ok_or(Unverified::NoNodeFee)?;
+        self.observe(tx, FeeRole::Single, node);
+        if node == decided.lamports {
+            Ok(())
+        } else {
+            Err(Unverified::Mismatch {
+                node,
+                local: decided.lamports,
+            })
         }
     }
 }
 
-/// The run's record: `base` (what a resumed run journaled before) and what this process counted
-/// since `start` (the owner's start).
-pub fn record(base: Option<&FeeParityStatsRecord>, start: &Counts) -> FeeParityStatsRecord {
-    let base = base.filter(|b| b.model_version == FEE_MODEL_VERSION);
-    let now = counts();
-    let classes = FeeClass::all()
-        .map(|class| {
-            let earlier = base
-                .and_then(|b| b.classes.iter().find(|(c, _)| *c == class))
-                .map(|(_, n)| *n)
-                .unwrap_or_default();
-            let i = class.index();
-            (class, earlier.add(now.0[i].since(start.0[i])))
-        })
-        .collect();
-    let first_mismatch = base.and_then(|b| b.first_mismatch.clone()).or_else(|| {
-        (now.mismatched() > start.mismatched())
-            .then(|| FIRST_MISMATCH.lock().ok().and_then(|f| f.clone()))
-            .flatten()
-    });
-    FeeParityStatsRecord {
-        model_version: FEE_MODEL_VERSION,
-        classes,
-        first_mismatch,
+/// A set of classes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClassSet(u16);
+
+const _: () = assert!(CLASS_COUNT <= u16::BITS as usize);
+
+impl ClassSet {
+    pub fn with(self, class: FeeClass) -> ClassSet {
+        ClassSet(self.0 | 1 << class.index())
     }
+
+    pub fn contains(self, class: FeeClass) -> bool {
+        self.0 & 1 << class.index() != 0
+    }
+
+    pub fn without(self, other: ClassSet) -> ClassSet {
+        ClassSet(self.0 & !other.0)
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn len(self) -> usize {
+        self.0.count_ones() as usize
+    }
+}
+
+/// P8-CTRL: the local fee model is a capability of the one controller.
+pub const LOCAL_FEE_MODEL: &str = "LOCAL_FEE_MODEL";
+/// OFF: not computed; OBSERVE: compared with every RPC quote, the quote decides; ACTIVE: the model
+/// decides a single transaction's fee in a class its seal qualifies (`FeeModel`).
+pub const MODE_VALUES: [&str; 3] = ["OFF", "OBSERVE", "ACTIVE"];
+
+/// The requested mode of the local fee model (ordered OFF < OBSERVE < ACTIVE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FeeModelMode {
+    Off,
+    /// Phase 1's behaviour: the RPC quote decides.
+    #[default]
+    Observe,
+    Active,
+}
+
+impl FeeModelMode {
+    /// A controller value (`MODE_VALUES`).
+    pub fn parse(value: &str) -> Option<FeeModelMode> {
+        match value {
+            "OFF" => Some(FeeModelMode::Off),
+            "OBSERVE" => Some(FeeModelMode::Observe),
+            "ACTIVE" => Some(FeeModelMode::Active),
+            _ => None,
+        }
+    }
+
+    /// The start value `P0_LOCAL_FEE_MODEL`: off|observe|active (empty: observe).
+    pub fn from_env(text: &str) -> Result<FeeModelMode, String> {
+        match text.trim() {
+            "" | "observe" => Ok(FeeModelMode::Observe),
+            "off" => Ok(FeeModelMode::Off),
+            "active" => Ok(FeeModelMode::Active),
+            other => Err(format!(
+                "LOCAL_FEE_MODEL_INVALID: {other} (off|observe|active)"
+            )),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        MODE_VALUES[self as usize]
+    }
+}
+
+/// What one evaluation does with the local model: compare it with every RPC quote (`observe`)
+/// and decide a single transaction's fee, without an RPC quote, in the classes it is active in.
+/// A bundle's parts are never decided: a bundle simulation names no fee of a part, so nothing
+/// would verify one before the send.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeeModel {
+    pub observe: bool,
+    active: ClassSet,
+}
+
+impl Default for FeeModel {
+    fn default() -> Self {
+        FeeModel::OBSERVE
+    }
+}
+
+impl FeeModel {
+    pub const OFF: FeeModel = FeeModel {
+        observe: false,
+        active: ClassSet(0),
+    };
+    pub const OBSERVE: FeeModel = FeeModel {
+        observe: true,
+        active: ClassSet(0),
+    };
+
+    /// ACTIVE in the single-transaction classes of `classes`.
+    pub fn active(classes: ClassSet) -> FeeModel {
+        let single = FeeClass::all()
+            .filter(|c| c.role == FeeRole::Single)
+            .fold(ClassSet::default(), ClassSet::with);
+        FeeModel {
+            observe: true,
+            active: ClassSet(classes.0 & single.0),
+        }
+    }
+
+    /// The classes it decides in.
+    pub fn classes(&self) -> ClassSet {
+        self.active
+    }
+}
+
+/// P6-MT.10: a fee the local model decided (ACTIVE) for exactly one message in place of its RPC
+/// quote; its simulation verifies it (`FeeParity::verify`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalFee {
+    #[serde(with = "darkbot_solana::submit::message_hash_serde")]
+    pub message_hash: Hash,
+    pub lamports: u64,
+    pub model_version: u32,
+}
+
+/// The local model's fee of `tx` in `role` where `model` decides its class; `None`: the RPC quote
+/// decides.
+pub fn decide(tx: &VersionedTransaction, role: FeeRole, model: &FeeModel) -> Option<LocalFee> {
+    let lamports = darkbot_solana::tx::local_fee_lamports(tx)?;
+    model
+        .active
+        .contains(FeeClass::of(tx, role, Some(lamports)))
+        .then(|| LocalFee {
+            message_hash: tx.message.hash(),
+            lamports,
+            model_version: FEE_MODEL_VERSION,
+        })
+}
+
+/// Why a decided fee cannot stand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unverified {
+    /// The node charged another fee for the message: the class fails for good.
+    Mismatch { node: u64, local: u64 },
+    /// The simulation named no fee: nothing verifies the model with this provider.
+    NoNodeFee,
+    /// The simulated message is not the one decided for.
+    OtherMessage,
 }
 
 /// How a run's owner journal read.
@@ -311,6 +501,8 @@ pub fn last_record(journal: &std::path::Path) -> (Option<FeeParityStatsRecord>, 
 /// (nothing qualifies while one is).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SavedRuns {
+    /// Every saved run read (with a record or not).
+    pub runs: Vec<String>,
     pub records: Vec<FeeParityStatsRecord>,
     pub crashed: Vec<String>,
     pub unreadable: Vec<String>,
@@ -325,6 +517,7 @@ pub fn saved_runs(project: &std::path::Path) -> SavedRuns {
     let stem = record.trim_end_matches(".p0j");
     let mut out = SavedRuns::default();
     for run in crate::run_layout::runs(project) {
+        out.runs.push(run.run_id.clone());
         let Some(journal) = [run.path.join(record), run.path.join("capture").join(record)]
             .into_iter()
             .find(|p| p.is_file())
@@ -397,9 +590,8 @@ pub fn qualification(runs: &SavedRuns) -> Vec<ClassParity> {
         .collect()
 }
 
-/// The status of the local fee model over `classes` (`scope`: what they sum): how many are
-/// qualified, the largest matched count and every mismatch; FAIL once a class failed. The RPC
-/// quote decides in this build (replacing it in a qualified class is not built yet).
+/// The parity of the local fee model over `classes` (`scope`: what they sum): how many are
+/// qualified, the largest matched count and every mismatch; FAIL once a class failed.
 pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
     let qualified = classes.iter().filter(|c| c.qualified()).count();
     let failed = classes.iter().filter(|c| c.failed()).count();
@@ -407,7 +599,7 @@ pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
     let mismatched: u64 = classes.iter().map(|c| c.counts.mismatched).sum();
     let unsupported: u64 = classes.iter().map(|c| c.counts.unsupported).sum();
     format!(
-        "{}: {scope}: {qualified}/{} classes qualified (≥{PARITY_MIN_MESSAGES} distinct matched, none mismatched), {failed} failed · most matched {matched} · mismatched {mismatched} · outside the model {unsupported}; the RPC quote decides (v1: no v1 transaction is built)",
+        "{}: {scope}: {qualified}/{} classes qualified (≥{PARITY_MIN_MESSAGES} distinct matched, none mismatched), {failed} failed · most matched {matched} · mismatched {mismatched} · outside the model {unsupported} (v1: no v1 transaction is built)",
         if failed > 0 {
             "LOCAL_FEE_MODEL_FAIL"
         } else {
@@ -417,41 +609,119 @@ pub fn status_line(classes: &[ClassParity], scope: &str) -> String {
     )
 }
 
+/// P6-MT.10 (kind `FEE_PARITY_SEAL`): the saved runs' parity at one instant, sealed by `p0ctl
+/// fee-parity --seal` — what an owner's ACTIVE rests on, read at its start and on each request
+/// (never the journals themselves).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeeParitySeal {
+    pub model_version: u32,
+    /// Every saved run at the seal.
+    pub runs: Vec<String>,
+    pub crashed: Vec<String>,
+    pub unreadable: Vec<String>,
+    pub classes: Vec<(FeeClass, ParityCounts)>,
+}
+
+impl crate::analytics::payload::Payload for FeeParitySeal {
+    const KIND: u16 = crate::analytics::journal::kind::FEE_PARITY_SEAL;
+}
+
+/// The seals of a project: `seal_<n>.p0j`, each sealed and immutable.
+pub fn seal_dir(project: &std::path::Path) -> std::path::PathBuf {
+    project.join("data").join("fee-parity")
+}
+
+/// Seals the saved runs' parity of `project` now as its next seal; its number and the seal.
+pub fn write_seal(project: &std::path::Path) -> Result<(u64, FeeParitySeal), String> {
+    let runs = saved_runs(project);
+    let seal = FeeParitySeal {
+        model_version: FEE_MODEL_VERSION,
+        classes: qualification(&runs)
+            .into_iter()
+            .map(|c| (c.class, c.counts))
+            .collect(),
+        runs: runs.runs,
+        crashed: runs.crashed,
+        unreadable: runs.unreadable,
+    };
+    let dir = seal_dir(project);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("LOCAL_FEE_SEAL_IO: {e}"))?;
+    let next = crate::orchestration::source_control::numbered(&dir, "seal_")
+        .map_err(|e| e.replace("SOURCE_CONTROL_IO", "LOCAL_FEE_SEAL_IO"))?
+        .last()
+        .map_or(1, |n| n + 1);
+    crate::analytics::journal::create_typed_value(
+        &dir.join(format!("seal_{next:08}.p0j")),
+        crate::analytics::journal::source::MEASUREMENT,
+        &seal,
+    )
+    .map_err(|e| format!("LOCAL_FEE_SEAL_IO: {e}"))?;
+    Ok((next, seal))
+}
+
+/// The newest seal of `project` (`None`: never sealed).
+pub fn newest_seal(project: &std::path::Path) -> Result<Option<FeeParitySeal>, String> {
+    let dir = seal_dir(project);
+    let Some(n) = crate::orchestration::source_control::numbered(&dir, "seal_")
+        .map_err(|e| e.replace("SOURCE_CONTROL_IO", "LOCAL_FEE_SEAL_IO"))?
+        .last()
+        .copied()
+    else {
+        return Ok(None);
+    };
+    crate::analytics::journal::read_typed_value(&dir.join(format!("seal_{n:08}.p0j")))
+        .map(Some)
+        .map_err(|e| format!("LOCAL_FEE_SEAL_INVALID: seal {n}: {e}"))
+}
+
+/// ACTIVE without a seal: the RPC quote decides.
+pub const NOT_SEALED: &str =
+    "LOCAL_FEE_NOT_SEALED: no seal of the saved runs (p0ctl fee-parity --seal)";
+
+/// The classes ACTIVE may decide in by the newest seal of `project`: its qualified classes
+/// (`ClassParity::qualified`) of this model version, the seal covering every saved run but
+/// `current` (the owner's own run, whose mismatches it counts itself). `Err`: why none.
+pub fn sealed_classes(project: &std::path::Path, current: &str) -> Result<ClassSet, String> {
+    let seal = newest_seal(project)?.ok_or(NOT_SEALED)?;
+    if seal.model_version != FEE_MODEL_VERSION {
+        return Err(format!(
+            "LOCAL_FEE_SEAL_MODEL: sealed under model {}, this build runs {FEE_MODEL_VERSION}",
+            seal.model_version
+        ));
+    }
+    if let Some(run) = crate::run_layout::runs(project)
+        .into_iter()
+        .find(|r| r.run_id != current && !seal.runs.contains(&r.run_id))
+    {
+        return Err(format!(
+            "LOCAL_FEE_SEAL_STALE: run {} is not in the seal (p0ctl fee-parity --seal)",
+            run.run_id
+        ));
+    }
+    let qualified = seal
+        .classes
+        .iter()
+        .filter(|(class, counts)| {
+            ClassParity {
+                class: *class,
+                counts: *counts,
+                unreadable_runs: seal.unreadable.len(),
+            }
+            .qualified()
+        })
+        .fold(ClassSet::default(), |set, (c, _)| set.with(*c));
+    if qualified.is_empty() {
+        return Err(format!(
+            "LOCAL_FEE_NOT_QUALIFIED: no class qualified in the seal (≥{PARITY_MIN_MESSAGES} distinct matched, none mismatched, every run readable)"
+        ));
+    }
+    Ok(qualified)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::tests_support::legacy;
     use super::*;
-
-    /// A legacy message (the pipeline builds none: these classes are the tests' own) under
-    /// `blockhash`, paying `price` µLamports/CU under an explicit limit.
-    fn legacy(price: u64, blockhash: Hash) -> VersionedTransaction {
-        use solana_sdk::instruction::Instruction;
-        let payer = solana_sdk::pubkey::Pubkey::new_unique();
-        let cb = |data: Vec<u8>| Instruction {
-            program_id: solana_sdk::pubkey::Pubkey::from_str_const(
-                darkbot_project0::protocol::COMPUTE_BUDGET_PROGRAM_ID,
-            ),
-            accounts: vec![],
-            data,
-        };
-        let mut ixs = vec![Instruction {
-            program_id: solana_sdk::pubkey::Pubkey::new_unique(),
-            accounts: vec![],
-            data: vec![1],
-        }];
-        if price > 0 {
-            // SetComputeUnitLimit (2) and SetComputeUnitPrice (3).
-            ixs.insert(0, cb([vec![2], 200_000u32.to_le_bytes().to_vec()].concat()));
-            ixs.insert(1, cb([vec![3], price.to_le_bytes().to_vec()].concat()));
-        }
-        VersionedTransaction {
-            signatures: vec![solana_sdk::signature::Signature::default()],
-            message: VersionedMessage::Legacy(solana_sdk::message::Message::new_with_blockhash(
-                &ixs,
-                Some(&payer),
-                &blockhash,
-            )),
-        }
-    }
 
     fn of(r: &FeeParityStatsRecord, class: FeeClass) -> ParityCounts {
         r.classes.iter().find(|(c, _)| *c == class).unwrap().1
@@ -478,10 +748,11 @@ mod tests {
         );
     }
 
-    /// Every RPC quote is counted in its class: a distinct matched message once, the same
-    /// message again as repeated (never qualified), mismatched otherwise (a repeated one too,
-    /// the first mismatch kept), outside the model when it has none; the run's record is what
-    /// was counted since the owner's start, a continued run's earlier counts added.
+    /// Every node fee is counted in its class of the owner's tally: a distinct matched message
+    /// once, the same message again as repeated (never qualified), mismatched otherwise (a
+    /// repeated one too, the first mismatch kept), outside the model when it has none; a
+    /// continued run's earlier counts are added, another model version's are not; a mismatch
+    /// fails its class (`failed`). Another owner's tally is its own.
     #[test]
     fn every_quote_is_counted_once_per_message_in_its_class() {
         let plain = FeeClass {
@@ -493,48 +764,70 @@ mod tests {
             priority: true,
             ..plain
         };
-        let start = counts();
+        let parity = FeeParity::default();
         let blockhash = Hash::new_unique();
         let tip = legacy(0, blockhash);
-        observe(&tip, FeeRole::BundleTip, 5_000);
-        observe(&tip, FeeRole::BundleTip, 5_000);
-        observe(&tip, FeeRole::BundleTip, 5_001);
+        parity.observe(&tip, FeeRole::BundleTip, 5_000);
+        parity.observe(&tip, FeeRole::BundleTip, 5_000);
+        parity.observe(&tip, FeeRole::BundleTip, 5_001);
         // ⌈200 000 × 1 500 / 10⁶⌉ = 300 on top of the signature.
-        observe(&legacy(1_500, blockhash), FeeRole::BundleTip, 5_300);
+        parity.observe(&legacy(1_500, blockhash), FeeRole::BundleTip, 5_300);
         // The same instructions under a new blockhash are a new message.
-        observe(&legacy(0, Hash::new_unique()), FeeRole::BundleTip, 5_000);
-        let run = record(None, &start);
-        let (plain_now, paid_now) = (of(&run, plain), of(&run, paid));
-        assert!(
-            plain_now.matched >= 2 && plain_now.repeated >= 1,
-            "{plain_now:?}"
+        parity.observe(&legacy(0, Hash::new_unique()), FeeRole::BundleTip, 5_000);
+        let run = parity.record(None);
+        assert_eq!(
+            (of(&run, plain), of(&run, paid)),
+            (
+                ParityCounts {
+                    matched: 2,
+                    repeated: 1,
+                    mismatched: 1,
+                    unsupported: 0
+                },
+                ParityCounts {
+                    matched: 1,
+                    ..Default::default()
+                }
+            )
         );
-        assert!(
-            plain_now.mismatched >= 1 && paid_now.matched >= 1,
-            "{plain_now:?}"
+        assert_eq!(
+            run.first_mismatch
+                .as_ref()
+                .map(|m| (m.rpc_lamports, m.local_lamports)),
+            Some((5_001, 5_000)),
+            "the first mismatch is kept"
         );
-        assert!(run.first_mismatch.is_some(), "a mismatch is kept");
-        // A resumed run's base adds to what was counted since the start; another model version
-        // does not.
+        assert_eq!(parity.mismatched(), 1);
+        assert_eq!(parity.failed(None), ClassSet::default().with(plain));
+        assert!(FeeParity::default()
+            .record(None)
+            .classes
+            .iter()
+            .all(|(_, n)| *n == ParityCounts::default()));
+        // A resumed run's base adds to what this owner counted; another model version's does not.
         let base = FeeParityStatsRecord {
             model_version: FEE_MODEL_VERSION,
             classes: vec![(
-                plain,
+                paid,
                 ParityCounts {
                     matched: 7,
+                    mismatched: 1,
                     ..Default::default()
                 },
             )],
             first_mismatch: None,
         };
-        let now = counts();
-        let resumed = record(Some(&base), &now);
-        assert_eq!(of(&resumed, plain).matched, 7, "nothing since this start");
+        assert_eq!(of(&parity.record(Some(&base)), paid).matched, 8);
+        assert_eq!(
+            parity.failed(Some(&base)),
+            ClassSet::default().with(plain).with(paid),
+            "a mismatch of the run's earlier owner fails its class too"
+        );
         let other = FeeParityStatsRecord {
             model_version: FEE_MODEL_VERSION + 1,
             ..base
         };
-        assert_eq!(of(&record(Some(&other), &now), plain).matched, 0);
+        assert_eq!(of(&parity.record(Some(&other)), paid).matched, 1);
     }
 
     /// The saved runs' parity: the last record of each run's owner journal (in the run or its
@@ -658,7 +951,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let zero = record(None, &counts());
+        let zero = FeeParity::default().record(None);
         let synced_after = |w: &OwnerEvidenceWriter, n: u64| {
             let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while w.syncs() < n && std::time::Instant::now() < until {
@@ -704,6 +997,7 @@ mod tests {
             first_mismatch: None,
         };
         let saved = |records: Vec<FeeParityStatsRecord>| SavedRuns {
+            runs: Vec::new(),
             records,
             crashed: Vec::new(),
             unreadable: Vec::new(),
@@ -736,5 +1030,223 @@ mod tests {
         );
         let other = saved(vec![run(PARITY_MIN_MESSAGES, 0, FEE_MODEL_VERSION + 1)]);
         assert_eq!(of(&other).counts, ParityCounts::default());
+    }
+}
+
+#[cfg(test)]
+mod phase2_tests {
+    use super::tests_support::*;
+    use super::*;
+
+    /// ACTIVE decides only a single transaction's fee in a class it is active in (a bundle part
+    /// never: nothing verifies it before the send), OBSERVE and OFF never; the simulation verifies
+    /// a decided fee — the same lamports count as a match of its class, other lamports fail the
+    /// class for good, none or another message verify nothing.
+    #[test]
+    fn a_local_fee_is_decided_only_where_active_and_verified_by_the_simulation() {
+        let tx = legacy(0, Hash::new_unique());
+        let single = FeeClass {
+            format: FeeFormat::Legacy,
+            priority: false,
+            role: FeeRole::Single,
+        };
+        let tip = FeeClass {
+            role: FeeRole::BundleTip,
+            ..single
+        };
+        let both = ClassSet::default().with(single).with(tip);
+        assert_eq!(
+            FeeModel::active(both).classes(),
+            ClassSet::default().with(single)
+        );
+        for model in [FeeModel::OFF, FeeModel::OBSERVE] {
+            assert_eq!(decide(&tx, FeeRole::Single, &model), None);
+        }
+        let active = FeeModel::active(both);
+        assert_eq!(decide(&tx, FeeRole::BundleTip, &active), None);
+        let decided = decide(&tx, FeeRole::Single, &active).unwrap();
+        assert_eq!(
+            (
+                decided.message_hash,
+                decided.lamports,
+                decided.model_version
+            ),
+            (tx.message.hash(), 5_000, FEE_MODEL_VERSION)
+        );
+        let paid = legacy(1_500, Hash::new_unique());
+        assert_eq!(
+            decide(&paid, FeeRole::Single, &active),
+            None,
+            "another class"
+        );
+
+        let parity = FeeParity::default();
+        assert_eq!(parity.verify(&tx, &decided, Some(5_000)), Ok(()));
+        assert_eq!(
+            parity
+                .record(None)
+                .classes
+                .iter()
+                .find(|(c, _)| *c == single)
+                .unwrap()
+                .1
+                .matched,
+            1
+        );
+        assert_eq!(
+            parity.verify(&tx, &decided, None),
+            Err(Unverified::NoNodeFee)
+        );
+        assert_eq!(
+            parity.verify(&paid, &decided, Some(5_000)),
+            Err(Unverified::OtherMessage)
+        );
+        assert!(parity.failed(None).is_empty());
+        assert_eq!(
+            parity.verify(&tx, &decided, Some(5_001)),
+            Err(Unverified::Mismatch {
+                node: 5_001,
+                local: 5_000
+            })
+        );
+        assert_eq!(parity.failed(None), ClassSet::default().with(single));
+    }
+
+    /// The mode's controller values and start value.
+    #[test]
+    fn the_mode_takes_its_controller_values_and_its_start_value() {
+        for (value, mode) in [
+            ("OFF", FeeModelMode::Off),
+            ("OBSERVE", FeeModelMode::Observe),
+            ("ACTIVE", FeeModelMode::Active),
+        ] {
+            assert_eq!(FeeModelMode::parse(value), Some(mode));
+            assert_eq!(mode.name(), value);
+        }
+        assert_eq!(FeeModelMode::parse("on"), None);
+        assert_eq!(FeeModelMode::from_env(""), Ok(FeeModelMode::Observe));
+        assert_eq!(FeeModelMode::from_env("active"), Ok(FeeModelMode::Active));
+        assert!(FeeModelMode::from_env("on")
+            .unwrap_err()
+            .starts_with("LOCAL_FEE_MODEL_INVALID"));
+    }
+
+    /// The seal: none before `write_seal`; it qualifies the classes the saved runs qualify (a
+    /// bundle class too — `FeeModel::active` decides only single ones); a run saved after it
+    /// makes it stale (the owner's own run excepted) until the next seal; a seal without a
+    /// qualified class names that.
+    #[test]
+    fn the_seal_names_the_qualified_classes_of_every_saved_run() {
+        let project =
+            std::env::temp_dir().join(format!("p0_fee_parity_seal_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let single = FeeClass {
+            format: FeeFormat::V0,
+            priority: true,
+            role: FeeRole::Single,
+        };
+        let tip = FeeClass {
+            role: FeeRole::BundleTip,
+            ..single
+        };
+        let at = |classes: Vec<(FeeClass, u64, u64)>| FeeParityStatsRecord {
+            model_version: FEE_MODEL_VERSION,
+            classes: classes
+                .into_iter()
+                .map(|(c, matched, mismatched)| {
+                    (
+                        c,
+                        ParityCounts {
+                            matched,
+                            mismatched,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect(),
+            first_mismatch: None,
+        };
+        let err = |r: Result<ClassSet, String>| r.unwrap_err();
+        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_NOT_SEALED"));
+        run_journal(
+            &project.join("data/shadow/a"),
+            vec![at(vec![
+                (single, PARITY_MIN_MESSAGES, 0),
+                (tip, PARITY_MIN_MESSAGES, 0),
+            ])],
+        );
+        let (n, seal) = write_seal(&project).unwrap();
+        assert_eq!((n, seal.runs.clone()), (1, vec!["a".to_string()]));
+        assert_eq!(
+            sealed_classes(&project, ""),
+            Ok(ClassSet::default().with(single).with(tip))
+        );
+        run_journal(&project.join("data/shadow/b"), vec![at(vec![])]);
+        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_SEAL_STALE: run b"));
+        assert!(sealed_classes(&project, "b").is_ok(), "the owner's own run");
+        run_journal(
+            &project.join("data/shadow/c"),
+            vec![at(vec![(single, 1, 1), (tip, 1, 1)])],
+        );
+        assert_eq!(write_seal(&project).unwrap().0, 2);
+        assert!(err(sealed_classes(&project, "")).starts_with("LOCAL_FEE_NOT_QUALIFIED"));
+        let _ = std::fs::remove_dir_all(project);
+    }
+}
+
+/// Test fixtures shared by the parity tests.
+#[cfg(test)]
+mod tests_support {
+    use super::*;
+
+    /// A legacy message (the pipeline builds none: these classes are the tests' own) under
+    /// `blockhash`, paying `price` µLamports/CU under an explicit limit.
+    pub(super) fn legacy(price: u64, blockhash: Hash) -> VersionedTransaction {
+        use solana_sdk::instruction::Instruction;
+        let payer = solana_sdk::pubkey::Pubkey::new_unique();
+        let cb = |data: Vec<u8>| Instruction {
+            program_id: solana_sdk::pubkey::Pubkey::from_str_const(
+                darkbot_project0::protocol::COMPUTE_BUDGET_PROGRAM_ID,
+            ),
+            accounts: vec![],
+            data,
+        };
+        let mut ixs = vec![Instruction {
+            program_id: solana_sdk::pubkey::Pubkey::new_unique(),
+            accounts: vec![],
+            data: vec![1],
+        }];
+        if price > 0 {
+            // SetComputeUnitLimit (2) and SetComputeUnitPrice (3).
+            ixs.insert(0, cb([vec![2], 200_000u32.to_le_bytes().to_vec()].concat()));
+            ixs.insert(1, cb([vec![3], price.to_le_bytes().to_vec()].concat()));
+        }
+        VersionedTransaction {
+            signatures: vec![solana_sdk::signature::Signature::default()],
+            message: VersionedMessage::Legacy(solana_sdk::message::Message::new_with_blockhash(
+                &ixs,
+                Some(&payer),
+                &blockhash,
+            )),
+        }
+    }
+
+    /// A saved run's sealed owner journal at `dir` with `records`.
+    pub(super) fn run_journal(dir: &std::path::Path, records: Vec<FeeParityStatsRecord>) {
+        use crate::analytics::evidence::{OwnerEvidence, OwnerEvidenceWriter};
+        std::fs::create_dir_all(dir).unwrap();
+        let (mut w, _) = OwnerEvidenceWriter::start_rolling(
+            dir.join("opportunities.p0j"),
+            dir.join("recovery.p0j"),
+            64,
+            std::time::Duration::from_millis(5),
+            1 << 20,
+            false,
+        )
+        .unwrap();
+        for r in records {
+            w.emit(OwnerEvidence::FeeParityStats(Box::new(r))).unwrap();
+        }
+        w.finish(None).unwrap();
     }
 }
