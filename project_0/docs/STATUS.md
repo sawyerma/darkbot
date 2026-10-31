@@ -328,7 +328,10 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | S3-05 JitoSubmitter core | `submit/jito.rs` | mock | CODE | Jito costs/lifecycle UNKNOWN (FIX-129) |
 | S3-06 landing reconciliation | `execution/pending.rs`, FE-04 receipts | FE-04 local | PARTIAL | finalized reconciliation in pilot |
 | S3-R00…R03 Jito access, gRPC, prewarm, race benchmark | ATA prewarm only | — | OPEN · DEFERRED_PRIORITY | after S1-RACE |
-| S4-01…04 parity corpus / decode / tx / performance | — | — | OPEN · DEFERRED_PRIORITY | — |
+| S4-01 parity corpus | `tests/s4_tx_parity.rs` (6 real winners `AUDIT_20261005`, SHA-pinned), DEC-08 mutations incl. bankruptcy 0.1.11/0.1.12 | `379b1e90`, `195c9b17` | LOCAL_PASS | no Token-2022 / init_record / integration / Titan / bundle winner; 0.1.12 captures = Mainnet read approval (P3-05) |
+| S4-02 decode/state parity | events vs `marginfi::events`, SPL token layouts, wire decode vs `solana-transaction-status` | `f981ded4`, `195c9b17`, `3629d77a` | PARTIAL | decode LOCAL_PASS (fixed: receiver exact length, 0.1.12 bankruptcy layout; DEC-08 I7/E7); state-transition parity NOT_RUN (no account-stream corpus) |
+| S4-03 tx parity | rebuild, compile, signatures, fee of the 6 winners (E-OPT/E-HEAP/E-PRIV/E-FEE/E-ORDER) | `379b1e90` | LOCAL_PASS | fee cases degenerate (CU price 0, exact v1 price); ≥10,000-message fee parity NOT_RUN (P4A-02) |
+| S4-04 performance baseline | MT0 core stages, allocations (`alloc-count`), RPC admission waits; `s4_04_core_stage_baseline` | `d4a104e7`, `195c9b17`; `S4_BASELINE_20261031` | LOCAL_PASS (loopback) | Mainnet tails NOT_MEASURED; fixed: pacing oversleep, T_handoff before the fsyncs; open: `fee_rps` pacing of plan variants, FE-04 journal open ~5 ms |
 | C0E1-P3-M06 … C0E1-P6-GATE | `market_*`, `analytics/*`, `p0-strict-verify` | `C0E1_P3…P6` evidence | LOCAL_PASS (offline) | 4 h master NOT_QUALIFIED; native report B7 LOCAL_PASS (index provenance stays pinned Python); dead in-capture recovery removed 2026-10-17; `scripts/smoke.sh` stale since `2c62d13` (NOT_RUN) |
 | P2-01 RAM model / P2-02 reverse indices | `state`, `liquidation/index.rs` | R127d Shadow | LOCAL_PASS | requalification after FIX-134/135 not recorded |
 | P2-03 threshold index | `index.rs` | — | CODE | not the default since R127 |
@@ -368,7 +371,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P8-CTRL-05 GUI | Liquidator/Wallets (switches, LIVE gates, FE-06 previews/grant/revoke, signers) | `a3c3a2fd` | LOCAL_PASS (Vitest, Playwright) | — |
 | P8-CTRL-06 offline matrix L01–L16 | owner E2E on production call sites (loopback node, synthetic keys) | `eab872dc`, `189b6e7f`, `3eac7623`, `1ce62e00` | OFFLINE_VERIFIED | L04 changed evidence = with grant acceptance; L14 real pilot NOT_RUN / NOT_AUTHORIZED |
 | P8-05 reconciliation / P8-RES-01/02 | FE-04 `one_shot.rs` journal, holds, UNKNOWN | FE-04 local evidence; P8 clock fix ledger 2026-10-17 | PARTIAL_LOCAL | reconcile wall-clock `unwrap_or(0)` **fixed fail-closed** (owner HALT, submission stays pending, LOCAL_PASS); global multi-mint reservation; FE-04 typed journal (FIX-06) before any financial handoff |
-| P8-INV-01 inventory / rebalance | `execution/inventory.rs` | `2774a5e` | PARTIAL | Bänder + Reserve-Gate aktiv; Planner ohne Aufrufer (braucht Live-Bestände + Quotes) |
+| P8-INV-01 inventory / rebalance | `execution/inventory.rs`, `state_owner/rebalance.rs` | `2774a5e`, `67815a7e` | PARTIAL | bands + reserve gate active; planner OBSERVE on real balances/quotes (B01), never trades; REBALANCE capability, typed plan record, ACTIVE open |
 | P9-01…03 | — | — | OPEN | after pilot |
 | P9-04 protocol-upgrade watch | = P1A-04 | — | LOCAL_PASS | — |
 | K-01…06 | — | — | OPEN · DEFERRED_PRIORITY | — |
