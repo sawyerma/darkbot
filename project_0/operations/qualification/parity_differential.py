@@ -105,6 +105,41 @@ def ordered(items):
     return out
 
 
+# I7/E7: the mrgn-0.1.12 bankruptcy event — its discriminator and its lengths (header with or
+# without signer, bank, mint, four amounts).
+BANKRUPTCY_EVENT = bytes([166, 77, 41, 140, 36, 94, 10, 57])
+BANKRUPTCY_0112_LENGTHS = {8 + 1 + 4 * 32 + 2 * 32 + 4 * 8, 8 + 1 + 3 * 32 + 2 * 32 + 4 * 8}
+
+
+def refused_payloads(raw):
+    """What the pinned verifier refuses among the marginfi program's own `Program data` payloads
+    (its attribution: the executing program): `BANKRUPTCY_0112` for a bankruptcy event of the
+    0.1.12 length, `OTHER` for anything else, `-` for none. Never compared — it qualifies I7/E7."""
+    import base64
+    import struct
+    logs = ((raw or {}).get('meta') or {}).get('logMessages')
+    kinds, stack = set(), []
+    for line in logs if isinstance(logs, list) else []:
+        if line.startswith('Program data: '):
+            if stack and stack[-1] == a.PROGRAM:
+                payload = None
+                try:
+                    payload = base64.b64decode(line[14:].strip(), validate=True)
+                    a.decode_payload(payload)
+                except (ValueError, TypeError, struct.error):
+                    zero_one_two = (payload is not None and payload[:8] == BANKRUPTCY_EVENT
+                                    and len(payload) in BANKRUPTCY_0112_LENGTHS)
+                    kinds.add('BANKRUPTCY_0112' if zero_one_two else 'OTHER')
+            continue
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == 'Program':
+            if parts[2] == 'invoke':
+                stack.append(parts[1])
+            elif (parts[2] == 'success' or parts[2].startswith('failed')) and stack and stack[-1] == parts[1]:
+                stack.pop()
+    return ','.join(sorted(kinds)) or '-'
+
+
 def tx_line(raw, slot):
     r = a.detect(raw, slot)
     status = 'UNKNOWN' if r['success'] is None else ('SUCCESS' if r['success'] else 'FAILED')
@@ -119,7 +154,7 @@ def tx_line(raw, slot):
             f"priority={opt(r.get('priority_fee_lamports'))} version={opt(r.get('version'))} "
             f"payer={opt(r.get('fee_payer'))} sigs={len(sigs) if isinstance(sigs, list) else '-'} "
             f"markers={','.join(markers)} related={','.join(related)} events={';'.join(events)} class={r['classification']} "
-            f"reasons={','.join(ordered(r['unknown_reasons']))}")
+            f"reasons={','.join(ordered(r['unknown_reasons']))} refused={refused_payloads(raw)}")
 
 
 def logs_line(raw, signature, slot):
@@ -214,7 +249,7 @@ def explain(diff, r, p):
         notes.append('E6_RELATED_UNKNOWN_WITHOUT_ACCOUNT_KEYS (Rust cannot prove absence; Python stops before instruction evidence)')
     elif (d <= {'class', 'events'} and r.get('class') == 'CLASSIFIED' and p.get('class') == 'UNKNOWN'
             and set(p.get('reasons', '').split(',')) <= MRGN_0112_BANKRUPTCY_REASONS
-            and 'MALFORMED_PROGRAM_EVENT' in p.get('reasons', '').split(',')
+            and 'MALFORMED_PROGRAM_EVENT' in p.get('reasons', '').split(',') and p.get('refused') == 'BANKRUPTCY_0112'
             and events_without_bankruptcy(r) == events_of(p) and events_without_bankruptcy(r) != events_of(r)):
         notes.append('E7_PINNED_VERIFIER_PREDATES_MRGN_0_1_12 (the pinned verifier refuses the 0.1.12 bankruptcy event '
                      'layout as malformed and misses exactly the settlement; every other event agrees)')
@@ -228,7 +263,7 @@ def index_tx_line(raw, slot):
     counts = ','.join(str((r.get('program_events') or {}).get(k, 0)) for k in a.KINDS)
     events = ';'.join(f"{e['type']}:{e['target']}:{e['actor']}:{e['event_index']}" for e in r['events'])
     return (f"INDEX {r['signature']} {slot} class={r['classification']} program_events={counts} "
-            f"events={events} reasons={','.join(ordered(r['unknown_reasons']))}")
+            f"events={events} reasons={','.join(ordered(r['unknown_reasons']))} refused={refused_payloads(raw)}")
 
 
 def payload_line(row):
@@ -285,7 +320,7 @@ def explain_index(diff, r, p):
                 'verifier stops at key resolution; the native INDEX reads the program-attributed log events as observed only, never qualified)')
     if (d <= {'class', 'events', 'program_events'} and r.get('class') == 'CLASSIFIED' and p.get('class') == 'UNKNOWN'
             and 'MALFORMED_PROGRAM_EVENT' in pr and set(pr) <= MRGN_0112_BANKRUPTCY_REASONS
-            and only_bankruptcy_missing(r, p)):
+            and p.get('refused') == 'BANKRUPTCY_0112' and only_bankruptcy_missing(r, p)):
         return ('I7_PINNED_VERIFIER_PREDATES_MRGN_0_1_12 (the 0.1.12 bankruptcy event appends premium_written_off: the '
                 'pinned verifier refuses that layout as malformed and misses exactly the settlement; the native INDEX '
                 'reads both pinned layouts exactly, every other event and count agree)')
@@ -343,7 +378,7 @@ def main_index(binary, rest):
     for label, r_line, p_line in zip(labels, rust, py):
         kinds[r_line.split(' ')[0]] += 1
         (rid, r), (pid, p) = parse(r_line), parse(p_line)
-        diff = sorted(k for k in set(r) | set(p) if k != 'reasons' and r.get(k) != p.get(k))
+        diff = sorted(k for k in set(r) | set(p) if k not in ('reasons', 'refused') and r.get(k) != p.get(k))
         if rid != pid:
             diff.insert(0, 'identity')
         if not diff:
@@ -394,7 +429,7 @@ def main(argv):
     for label, r_line, p_line in zip(labels, rust, py):
         kinds[r_line.split(' ')[0]] += 1
         (rid, r), (pid, p) = parse(r_line), parse(p_line)
-        diff = sorted(k for k in set(r) | set(p) if k != 'reasons' and r.get(k) != p.get(k))
+        diff = sorted(k for k in set(r) | set(p) if k not in ('reasons', 'refused') and r.get(k) != p.get(k))
         if rid != pid:
             diff.insert(0, 'identity')
         if not diff:

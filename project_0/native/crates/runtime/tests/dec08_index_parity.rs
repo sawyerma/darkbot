@@ -60,6 +60,31 @@ fn dec08_native_index_matches_the_pinned_verifier_on_the_committed_sources() {
     for rule in ["I2=E2", "I3=E3", "I4=E4", "I6_", "I7_"] {
         assert!(stdout.contains(rule), "{rule}: {stdout}");
     }
+    // The A4 decode differential of the same sources (its E-rules, E7 for 0.1.12 bankruptcy).
+    let out = Command::new("python3")
+        .arg("-I")
+        .arg(project.join("operations/qualification/parity_differential.py"))
+        .arg(env!("CARGO_BIN_EXE_p0-parity"))
+        .arg("tx")
+        .args(&tx)
+        .args(["--", "mut"])
+        .args(&tx)
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("compared=66 kinds={'TX': 66} identical=12 explained=54 unexplained=0"),
+        "{stdout}"
+    );
+    for rule in ["E1_", "E2_", "E3_", "E4_", "E5_", "E6_", "E7_"] {
+        assert!(stdout.contains(rule), "{rule}: {stdout}");
+    }
 }
 
 // ------------------------------------------------------------------------------------------
