@@ -677,7 +677,9 @@ pub mod precommit {
 /// g04-verdict` against the criteria file (`bsc/config/g04_criteria.env`).
 /// Criteria the user has not confirmed give `CRITERIA_UNCONFIRMED` and no
 /// venue rows: no evaluation before the confirmation. Since v2 it names the
-/// pre-commitment it was rated against (record hash, decider, time).
+/// pre-commitment it was rated against (record hash, decider, time), since
+/// v3 the actionable launches each source of the rated census delivered
+/// first (BSC3-049: what a LIVE source qualification rests on).
 pub mod verdict {
     use super::*;
 
@@ -729,8 +731,50 @@ pub mod verdict {
     pub const PRECOMMIT_SHA256: u16 = 11;
     pub const PRECOMMIT_DECIDED_BY: u16 = 12;
     pub const PRECOMMIT_UNIX_MS: u16 = 13;
+    /// The rated census's per-source rows (v3).
+    pub const SOURCES: u16 = 14;
+
+    /// The confirmed criteria state, and the verdict (of the campaign and of
+    /// a venue) to go on (`g04_criteria` decides them; a LIVE source
+    /// qualification reads them, BSC3-049).
+    pub const CONFIRMED: &str = "CONFIRMED";
+    pub const CONTINUE: &str = "CONTINUE";
+    /// The venue rows' names, in their order.
+    pub const RATED_VENUES: [&str; 3] = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.g04-verdict.v1",
+        record_type: 63,
+        schema_version: 3,
+        fields: &[
+            Field::req(CRITERIA_SHA256, "criteria_sha256", B256),
+            Field::req(CRITERIA_STATE, "criteria_state", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(CAMPAIGN_MS, "campaign_ms", U64),
+            Field::req(COVERED_MS, "covered_ms", U64),
+            Field::opt(COVERED_PPM, "covered_ppm", U64),
+            Field::nested(VENUES, "venues", Presence::Repeated, &venue::SCHEMA),
+            Field::opt(PRECOMMIT_SHA256, "precommit_sha256", B256),
+            Field::opt(PRECOMMIT_DECIDED_BY, "precommit_decided_by", Text),
+            Field::opt(PRECOMMIT_UNIX_MS, "precommit_unix_ms", U64),
+            Field::nested(
+                SOURCES,
+                "sources",
+                Presence::Repeated,
+                &census::source::SCHEMA,
+            ),
+        ],
+    };
+
+    /// v2 (no source rows), kept readable; it qualifies no source.
+    pub const V2: Schema = Schema {
         name: "darkbot.bsc.g04-verdict.v1",
         record_type: 63,
         schema_version: 2,
@@ -778,9 +822,11 @@ pub mod verdict {
         ],
     };
 
-    /// A verdict of any kept version (v2, v1).
+    /// A verdict of any kept version (v3, v2, v1).
     pub fn decode_verdict(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
-        crate::decode(&SCHEMA, bytes).or_else(|_| crate::decode(&V1, bytes))
+        crate::decode(&SCHEMA, bytes)
+            .or_else(|_| crate::decode(&V2, bytes))
+            .or_else(|_| crate::decode(&V1, bytes))
     }
 }
 
@@ -792,5 +838,6 @@ pub const ALL: &[&Schema] = &[
     &census::V8,
     &precommit::SCHEMA,
     &verdict::SCHEMA,
+    &verdict::V2,
     &verdict::V1,
 ];

@@ -740,7 +740,10 @@ pub mod live_qualification {
         };
     }
 
-    /// The operator's documented J risk decision for the scope.
+    /// The operator's documented J risk decision for the scope; since v2
+    /// (BSC3-049) bound to the grant scope it was decided for: the SHA-256
+    /// of the grant's risk scope text (its scope without validity and
+    /// exit-only), a grant of another scope finds no risk decision.
     pub mod risk {
         use super::*;
 
@@ -748,8 +751,23 @@ pub mod live_qualification {
         pub const DECIDED_UNIX_MS: u16 = 2;
         pub const STATEMENT: u16 = 3;
         pub const EVIDENCE: u16 = 4;
+        pub const SCOPE_SHA256: u16 = 5;
 
         pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-qualification.risk",
+            record_type: 0,
+            schema_version: 2,
+            fields: &[
+                Field::req(DECIDED_BY, "decided_by", Text),
+                Field::req(DECIDED_UNIX_MS, "decided_unix_ms", U64),
+                Field::req(STATEMENT, "statement", Text),
+                Field::nested(EVIDENCE, "evidence", Presence::Repeated, &evidence::SCHEMA),
+                Field::req(SCOPE_SHA256, "scope_sha256", B256),
+            ],
+        };
+
+        /// v1 (no scope), kept readable; it decides for no grant.
+        pub const V1: Schema = Schema {
             name: "darkbot.bsc.live-qualification.risk",
             record_type: 0,
             schema_version: 1,
@@ -779,7 +797,7 @@ pub mod live_qualification {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.live-qualification.v1",
         record_type: 66,
-        schema_version: 3,
+        schema_version: 4,
         fields: &[
             Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
             Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
@@ -796,6 +814,38 @@ pub mod live_qualification {
                 &evidence::SCHEMA,
             ),
             Field::nested(RISK, "risk", Presence::Optional, &risk::SCHEMA),
+            Field::nested(
+                ACQUISITION_ATTEMPT,
+                "acquisition_attempt",
+                Presence::Optional,
+                &evidence::SCHEMA,
+            ),
+            Field::req(RUNTIME_SHA256, "runtime_sha256", B256),
+        ],
+    };
+
+    /// v3 (a risk decision without its scope), kept readable; its risk
+    /// decision decides for no grant.
+    pub const V3: Schema = Schema {
+        name: "darkbot.bsc.live-qualification.v1",
+        record_type: 66,
+        schema_version: 3,
+        fields: &[
+            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
+            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::nested(
+                ACQUISITION,
+                "acquisition",
+                Presence::Optional,
+                &evidence::SCHEMA,
+            ),
+            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
             Field::nested(
                 ACQUISITION_ATTEMPT,
                 "acquisition_attempt",
@@ -826,7 +876,7 @@ pub mod live_qualification {
                 Presence::Optional,
                 &evidence::SCHEMA,
             ),
-            Field::nested(RISK, "risk", Presence::Optional, &risk::SCHEMA),
+            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
             Field::nested(
                 ACQUISITION_ATTEMPT,
                 "acquisition_attempt",
@@ -857,7 +907,7 @@ pub mod live_qualification {
                 Presence::Optional,
                 &evidence::SCHEMA,
             ),
-            Field::nested(RISK, "risk", Presence::Optional, &risk::SCHEMA),
+            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
         ],
     };
 }
@@ -1950,6 +2000,7 @@ pub const ALL: &[&Schema] = &[
     &live_ledger::SCHEMA,
     &live_ledger::V1,
     &live_qualification::SCHEMA,
+    &live_qualification::V3,
     &live_qualification::V2,
     &live_qualification::V1,
     &runtime_status::SCHEMA,

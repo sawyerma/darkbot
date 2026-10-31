@@ -1995,7 +1995,7 @@ mod tests {
     use crate::chain_follower::{CanonicalEvent, CanonicalTx};
     use crate::live_end::tests::{club48_findings, key_file, stand_in};
     use crate::live_qualification::tests::{acquisition, fixture, venue_evidence};
-    use crate::live_qualification::{LIVE_QUALIFICATION_PATH, Spec, build};
+    use crate::live_qualification::{LIVE_QUALIFICATION_PATH, RiskSpec, Spec, build};
     use crate::paper_exec::FnClock;
     use crate::runtime::exec::tests::{HEAD, launch, limits, observation, owner, setup};
     use crate::sources::tests::{grant_of, live_ready_granting};
@@ -2128,15 +2128,7 @@ mod tests {
     #[test]
     fn the_live_path_arms_only_in_the_qualified_build() {
         let r = Rig::new("live-build", LiveStrategies::C3);
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = |runtime| Spec {
-            runtime_sha256: runtime,
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = |runtime| rig_spec(runtime, LiveStrategies::C3);
         let write = |runtime: [u8; 32]| {
             fs::write(
                 r.root.join(LIVE_QUALIFICATION_PATH),
@@ -2206,23 +2198,15 @@ mod tests {
             }
             done()
         }
-        let (state, _store, now) = live_ready_granting("live-rt-025", |now| LiveGrant {
-            max_input_wei: 10_000_000_000_000_000,
-            max_spend_wei: 100_000_000_000_000_000,
-            adapters: vec![LiveAdapter::Club48BuilderV1],
-            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        let (state, _store, now) = live_ready_granting("live-rt-025", |now| {
+            rig_grant(now + 3_600_000, LiveStrategies::C3)
         });
         assert_eq!(now, NOW);
         let root = fixture("live-rt-025", "PASS");
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::C3,
+        );
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(
             root.join(LIVE_QUALIFICATION_PATH),
@@ -2404,23 +2388,15 @@ mod tests {
     /// its key goes.
     #[test]
     fn the_live_path_arms_under_the_gate_and_ends_with_it() {
-        let (state, store, now) = live_ready_granting("live-rt", |now| LiveGrant {
-            max_input_wei: 10_000_000_000_000_000,
-            max_spend_wei: 100_000_000_000_000_000,
-            adapters: vec![LiveAdapter::Club48BuilderV1],
-            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        let (state, store, now) = live_ready_granting("live-rt", |now| {
+            rig_grant(now + 3_600_000, LiveStrategies::C3)
         });
         assert_eq!(now, NOW);
         let root = fixture("live-rt", "PASS");
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::C3,
+        );
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(
             root.join(LIVE_QUALIFICATION_PATH),
@@ -2600,23 +2576,15 @@ mod tests {
     /// spend entry), no bytes on the wire.
     #[test]
     fn a_second_c3_launch_after_inclusion_takes_nothing_under_a_raised_cap() {
-        let (state, store, now) = live_ready_granting("live-rt-cap", |now| LiveGrant {
-            max_input_wei: 10_000_000_000_000_000,
-            max_spend_wei: 100_000_000_000_000_000,
-            adapters: vec![LiveAdapter::Club48BuilderV1],
-            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        let (state, store, now) = live_ready_granting("live-rt-cap", |now| {
+            rig_grant(now + 3_600_000, LiveStrategies::C3)
         });
         assert_eq!(now, NOW);
         let root = fixture("live-rt-cap", "PASS");
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::C3,
+        );
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(
             root.join(LIVE_QUALIFICATION_PATH),
@@ -2750,22 +2718,14 @@ mod tests {
             HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
             quote_native_sell,
         };
-        let (state, _store, _) = live_ready_granting("live-pos", |now| LiveGrant {
-            max_input_wei: 10_000_000_000_000_000,
-            max_spend_wei: 100_000_000_000_000_000,
-            adapters: vec![LiveAdapter::Club48BuilderV1],
-            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        let (state, _store, _) = live_ready_granting("live-pos", |now| {
+            rig_grant(now + 3_600_000, LiveStrategies::StrategyC)
         });
         let root = fixture("live-pos", "PASS");
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::StrategyC,
+        );
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(
             root.join(LIVE_QUALIFICATION_PATH),
@@ -3084,22 +3044,14 @@ mod tests {
             HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
             quote_native_sell,
         };
-        let (state, _store, _) = live_ready_granting(tag, |now| LiveGrant {
-            max_input_wei: 10_000_000_000_000_000,
-            max_spend_wei: 100_000_000_000_000_000,
-            adapters: vec![LiveAdapter::Club48BuilderV1],
-            ..grant_of(now + 3_600_000, LiveStrategies::StrategyC)
+        let (state, _store, _) = live_ready_granting(tag, |now| {
+            rig_grant(now + 3_600_000, LiveStrategies::StrategyC)
         });
         let root = fixture(tag, "PASS");
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let spec = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-        };
+        let spec = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::StrategyC,
+        );
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(
             root.join(LIVE_QUALIFICATION_PATH),
@@ -3536,25 +3488,55 @@ mod tests {
         requests: std::sync::mpsc::Receiver<Vec<u8>>,
     }
 
+    /// The LIVE path tests' grant of `strategies`, valid until `expires`.
+    fn rig_grant(expires: u64, strategies: LiveStrategies) -> LiveGrant {
+        LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            ..grant_of(expires, strategies)
+        }
+    }
+
+    /// The qualification of the fixture's evidence (`ev/`) for the scope
+    /// of [`rig_grant`] (BSC3-049: its risk decided for that scope),
+    /// naming the build `runtime`.
+    fn rig_spec(runtime: Option<[u8; 32]>, strategies: LiveStrategies) -> Spec {
+        rig_spec_for(runtime, rig_grant(0, strategies).risk_scope_sha256())
+    }
+
+    /// [`rig_spec`] with the risk decided for the grant risk scope `scope`.
+    fn rig_spec_for(runtime: Option<[u8; 32]>, scope: [u8; 32]) -> Spec {
+        Spec {
+            runtime_sha256: runtime,
+            venues: vec![(VenueId::Flap, venue_evidence())],
+            sources: vec![(SourceId::PublicNode, vec!["ev/g04.dbrec".into()])],
+            adapters: vec![(
+                LiveAdapter::Club48BuilderV1,
+                club48_findings(),
+                vec!["ev/g07.dbrec".into()],
+            )],
+            acquisition: acquisition(),
+            risk: Some(RiskSpec {
+                decided_by: "operator".into(),
+                decided_unix_ms: 1,
+                statement: "synthetic scope".into(),
+                scope_sha256: scope,
+                evidence: vec!["ev/g08.dbrec".into()],
+            }),
+        }
+    }
+
     impl Rig {
         fn new(tag: &str, strategies: LiveStrategies) -> Rig {
-            let (state, _store, now) = live_ready_granting(tag, |now| LiveGrant {
-                max_input_wei: 10_000_000_000_000_000,
-                max_spend_wei: 100_000_000_000_000_000,
-                adapters: vec![LiveAdapter::Club48BuilderV1],
-                ..grant_of(now + 3_600_000, strategies)
-            });
+            let (state, _store, now) =
+                live_ready_granting(tag, |now| rig_grant(now + 3_600_000, strategies));
             assert_eq!(now, NOW);
             let root = fixture(tag, "PASS");
-            let ev = || vec!["ev/measure.dbrec".to_string()];
-            let spec = Spec {
-                runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-                venues: vec![(VenueId::Flap, venue_evidence())],
-                sources: vec![(SourceId::PublicNode, ev())],
-                adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-                acquisition: acquisition(),
-                risk: Some(("operator".into(), 1, "synthetic scope".into(), ev())),
-            };
+            let spec = rig_spec(
+                Some(crate::live_qualification::running_build().unwrap()),
+                strategies,
+            );
             fs::create_dir_all(root.join("bsc/config")).unwrap();
             fs::write(
                 root.join(LIVE_QUALIFICATION_PATH),
@@ -5929,7 +5911,7 @@ mod tests {
         let r = Rig::new("live-alt-crash", LiveStrategies::C3);
         let b = r.buyer;
         let store = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
-        let q = crate::sources::tests::qualified();
+        let q = crate::sources::tests::qualified_in(&store);
         let armed = store.live_now(&[ComponentId::ExecC3], &q, NOW).unwrap();
         let origin = NonceOrigin {
             chain_id: 56,
@@ -6226,6 +6208,19 @@ mod tests {
             .grant_live("tight", tight.clone(), tight.scope_sha256(), g, NOW)
             .unwrap();
         assert!(receipt.applied(), "{}", receipt.line());
+        // The risk decided for the tight scope (BSC3-049).
+        let requalify = |g: &LiveGrant| {
+            let spec = rig_spec_for(
+                Some(crate::live_qualification::running_build().unwrap()),
+                g.risk_scope_sha256(),
+            );
+            fs::write(
+                r.root.join(LIVE_QUALIFICATION_PATH),
+                build(&r.root, &spec, 1).unwrap(),
+            )
+            .unwrap();
+        };
+        requalify(&tight);
         let mut x = r.runtime("boot-1");
         let c2 = c2_at(&r.d, r.buyer, 5);
         settle(&mut x, &c2);
@@ -6243,6 +6238,17 @@ mod tests {
                 .unwrap()
                 .applied()
         );
+        // BSC3-049: the risk on file was decided for the tight scope.
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(
+            reason(&x),
+            (
+                "BLOCKED".to_string(),
+                Some(crate::sources::LIVE_RISK_DECISION_OTHER_SCOPE.to_string())
+            )
+        );
+        requalify(&fits);
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         x.shutdown();
@@ -6326,15 +6332,14 @@ mod tests {
         let mut x = r.runtime("boot-1");
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
-        let ev = || vec!["ev/measure.dbrec".to_string()];
-        let other = Spec {
-            runtime_sha256: Some(crate::live_qualification::running_build().unwrap()),
-            venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, club48_findings(), ev())],
-            acquisition: acquisition(),
-            risk: Some(("operator".into(), 2, "another synthetic scope".into(), ev())),
-        };
+        let mut other = rig_spec(
+            Some(crate::live_qualification::running_build().unwrap()),
+            LiveStrategies::C3,
+        );
+        if let Some(risk) = other.risk.as_mut() {
+            risk.decided_unix_ms = 2;
+            risk.statement = "another synthetic scope".into();
+        }
         fs::write(
             r.root.join(LIVE_QUALIFICATION_PATH),
             build(&r.root, &other, 2).unwrap(),

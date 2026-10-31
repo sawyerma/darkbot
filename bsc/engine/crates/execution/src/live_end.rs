@@ -973,7 +973,7 @@ pub(crate) mod tests {
         HEAD, c2_next, clock, config, curve_after, dir, launch, strategy_c2_next, validated,
     };
     use crate::paper_exec::{Arming, Executor, IntentKind, PendingLaunch, StrategyCurve};
-    use crate::sources::tests::{grant_of, live_ready_granting, qualified};
+    use crate::sources::tests::{grant_of, live_ready_granting};
     use crate::sources::{
         Entity, LIVE_GRANT_CHANGED, LiveGrant, LiveStrategies, Mode, buy_usage, spent_by_grant,
     };
@@ -1126,11 +1126,17 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn verified() -> Verified {
+    /// [`verified`] for the scope of the grant `s` holds (BSC3-049: its
+    /// risk decided for it).
+    pub(crate) fn verified_in(s: &Store) -> Verified {
+        verified_as(crate::sources::tests::qualified_in(s))
+    }
+
+    fn verified_as(view: crate::sources::LiveQualification) -> Verified {
         let findings = club48_findings();
         Verified {
             runtime_sha256: crate::live_qualification::running_build().ok(),
-            view: qualified(),
+            view,
             adapters: vec![
                 AdapterQualification::from_findings(CapabilityId::Club48BuilderV1, &findings)
                     .unwrap(),
@@ -1177,7 +1183,7 @@ pub(crate) mod tests {
             adapters: vec![LiveAdapter::Club48BuilderV1],
             ..grant_of(now + 3_600_000, LiveStrategies::C3)
         });
-        let q = verified();
+        let q = verified_in(&store);
         let armed = store
             .live_now(&[ComponentId::ExecC3], &q.view, now)
             .unwrap();
@@ -1257,7 +1263,7 @@ pub(crate) mod tests {
             max_spend_wei: 100_000_000_000_000_000,
             ..grant_of(now + 3_600_000, LiveStrategies::Both)
         });
-        let q = verified();
+        let q = verified_in(&store);
         let armed = store
             .live_now(&[ComponentId::ExecC3, ComponentId::StrategyC], &q.view, now)
             .unwrap();
@@ -1475,7 +1481,7 @@ pub(crate) mod tests {
             max_spend_wei: 100_000_000_000_000_000,
             ..grant_of(now + 3_600_000, LiveStrategies::Both)
         });
-        let q = verified();
+        let q = verified_in(&store);
         let armed = store
             .live_now(&[ComponentId::ExecC3, ComponentId::StrategyC], &q.view, now)
             .unwrap();

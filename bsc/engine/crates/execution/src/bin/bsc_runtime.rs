@@ -159,6 +159,26 @@ fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// The SHA-256 `name` names: 64 lowercase hex digits (from `live scope`).
+fn sha256_flag(rest: &[String], name: &str) -> Result<[u8; 32], String> {
+    let value = flag(rest, name)?;
+    // The digits checked first: slicing never meets a multi-byte character.
+    (value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then(|| {
+        (0..32)
+            .map(|i| u8::from_str_radix(&value[2 * i..2 * i + 2], 16).ok())
+            .collect::<Option<Vec<u8>>>()
+    })
+    .flatten()
+    .and_then(|v| <[u8; 32]>::try_from(v).ok())
+    .ok_or(format!(
+        "{name} is 64 lowercase hex digits (from `live scope`)"
+    ))
+}
+
 /// `NAME@A,B[@C,D]`: a name and its comma lists.
 fn at_lists(value: &str) -> (&str, Vec<Vec<String>>) {
     let mut parts = value.split('@');
@@ -226,12 +246,14 @@ fn qualify_args(
             .filter(|s| !s.is_empty())
             .map(String::from)
             .collect();
-        spec.risk = Some((
-            by.to_string(),
-            now,
-            flag(rest, "--risk-statement")?.into(),
+        spec.risk = Some(darkbot_bsc_execution::live_qualification::RiskSpec {
+            decided_by: by.to_string(),
+            decided_unix_ms: now,
+            statement: flag(rest, "--risk-statement")?.into(),
+            // BSC3-049: the grant risk scope it is decided for.
+            scope_sha256: sha256_flag(rest, "--risk-scope-sha256")?,
             evidence,
-        ));
+        });
     }
     Ok(spec)
 }
@@ -255,7 +277,7 @@ fn print_qualification(rest: &[String]) -> darkbot_bsc_execution::sources::LiveQ
             println!("qualification=NONE path={LIVE_QUALIFICATION_PATH}")
         }
         None => println!(
-            "qualification=VERIFIED sha256={} runtime={} venues={} sources={} adapters={} acquisition={} risk_decision={}",
+            "qualification=VERIFIED sha256={} runtime={} venues={} sources={} adapters={} acquisition={} risk_decision={} risk_scope={}",
             hex(&v.sha256),
             v.runtime_sha256.map_or("NONE".to_string(), |b| hex(&b)),
             v.view
@@ -278,6 +300,9 @@ fn print_qualification(rest: &[String]) -> darkbot_bsc_execution::sources::LiveQ
                 .join(","),
             v.view.acquisition,
             v.view.risk_decision,
+            v.view
+                .risk_scope_sha256
+                .map_or("NONE".to_string(), |b| hex(&b)),
         ),
     }
     v.view
@@ -292,21 +317,12 @@ fn run(args: &[String]) -> Result<bool, String> {
             grant.validate()?;
             print!("{}", grant.scope_text());
             println!("scope_sha256={}", hex(&grant.scope_sha256()));
+            println!("risk_scope_sha256={}", hex(&grant.risk_scope_sha256()));
             Ok(true)
         }
         [area, cmd, rest @ ..] if area == "live" && cmd == "grant" => {
             let grant = grant_args(rest)?;
-            let confirmed = flag(rest, "--scope-sha256")?;
-            let digest = (confirmed.len() == 64)
-                .then(|| {
-                    (0..32)
-                        .map(|i| u8::from_str_radix(&confirmed[2 * i..2 * i + 2], 16).ok())
-                        .collect::<Option<Vec<u8>>>()
-                })
-                .flatten()
-                .and_then(|v| <[u8; 32]>::try_from(v).ok())
-                .filter(|_| confirmed.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-                .ok_or("--scope-sha256 is 64 lowercase hex digits (from `live scope`)")?;
+            let digest = sha256_flag(rest, "--scope-sha256")?;
             let expected = flag(rest, "--expect-generation")?
                 .parse::<u64>()
                 .map_err(|_| "--expect-generation is an unsigned integer")?;
@@ -414,6 +430,7 @@ fn run(args: &[String]) -> Result<bool, String> {
                 Some(grant) => {
                     print!("{}", grant.scope_text());
                     println!("scope_sha256={}", hex(&grant.scope_sha256()));
+                    println!("risk_scope_sha256={}", hex(&grant.risk_scope_sha256()));
                 }
                 None => println!("grant=NONE"),
             }
@@ -793,7 +810,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

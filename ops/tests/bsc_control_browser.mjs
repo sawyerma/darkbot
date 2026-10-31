@@ -311,7 +311,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  const scope=await p.getByTestId('bsc-live-grant-scope').innerText();const sha=(await p.getByTestId('bsc-live-grant-sha').innerText()).trim();
  const field=k=>scope.match(new RegExp('^'+k+'=(.*)$','m'))[1];
  const native=execFileSync(`${dir}/app/current/bsc_runtime`,['live','scope','--venue',field('venue'),'--strategies',field('strategies'),'--sources',field('sources'),'--adapters',field('adapters'),'--max-input-wei',field('max_input_wei'),'--max-spend-wei',field('max_spend_wei'),'--max-attempts',field('max_attempts'),'--expires-unix-ms',field('expires_unix_ms'),'--max-buy-slippage-bps',field('max_buy_slippage_bps'),'--max-exit-slippage-bps',field('max_exit_slippage_bps'),'--max-gas-price-wei',field('max_gas_price_wei'),'--max-buy-gas-limit',field('max_buy_gas_limit'),'--max-approve-gas-limit',field('max_approve_gas_limit'),'--max-sell-gas-limit',field('max_sell_gas_limit')],{encoding:'utf8'});
- assert.equal(native.replace(/scope_sha256=.*\n?$/,''),scope.endsWith('\n')?scope:scope+'\n','the shown scope is the native canonical text');
+ assert.equal(native.replace(/scope_sha256=[0-9a-f]{64}\nrisk_scope_sha256=[0-9a-f]{64}\n$/,''),scope.endsWith('\n')?scope:scope+'\n','the shown scope is the native canonical text');
  assert(native.includes('scope_sha256='+sha),'the confirmed digest is the native one');
  await p.getByTestId('bsc-live-grant-confirm').click();
  await until(async()=> (await p.getByTestId('bsc-live-grant-receipt').innerText()).includes('outcome=APPLIED'),'grant APPLIED');

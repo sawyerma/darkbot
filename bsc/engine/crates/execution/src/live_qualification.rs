@@ -9,14 +9,24 @@
 //! risk decision without evidence counts as not qualified.
 //!
 //! BSC3-049: each role takes only its own record schemas, bound to what it
-//! qualifies: a venue the G0.1 freeze of the pinned deployment, the
-//! acquisition the G0.8 PASS of the G0.7 attempt it names, of the pinned
-//! deployment, with its buyer and the builders it was sent through.
+//! qualifies: a venue the G0.1 freeze of the pinned deployment, a source
+//! the G0.4 verdict `CONTINUE` for Flap on confirmed, pre-committed
+//! criteria in whose census it delivered an actionable launch first, an
+//! adapter a G0.7 attempt it accepted, the acquisition the G0.8 PASS of the
+//! G0.7 attempt it names, of the pinned deployment, with its buyer and the
+//! builders it was sent through, the risk decision the economics snapshot
+//! of the pinned chain or the acquisition's own G0.8 result it rests on,
+//! made for one grant risk scope
+//! ([`LiveGrant::risk_scope_sha256`](crate::sources::LiveGrant::risk_scope_sha256)).
+//! An adapter's findings stay what the qualification states: one attempt
+//! proves no provider's ordering, atomicity or send time.
 //!
 //! No record: nothing is qualified, so nothing is live and no plan is
 //! released. A record that does not verify is refused as a whole.
 
 use crate::sources::{LiveAdapter, LiveQualification, SourceId, VenueId};
+use darkbot_bsc_record::schema::bsc_census::verdict as gv;
+use darkbot_bsc_record::schema::bsc_economics::economics_snapshot;
 use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
 use darkbot_bsc_record::schema::bsc_runtime::live_qualification as lq;
 use darkbot_bsc_record::schema::{g06a, g07, g08};
@@ -57,9 +67,14 @@ pub struct Verified {
 /// The schemas of a venue's evidence: the G0.1 freeze (v2, with its
 /// upgrade check).
 const VENUE_EVIDENCE: &[&Schema] = &[&ff::V2];
-/// The acquisition: the G0.8 result, and the G0.7 attempt it rates.
+/// A source's: the G0.4 verdict (v3, with the rated census's sources).
+const SOURCE_EVIDENCE: &[&Schema] = &[&gv::SCHEMA];
+/// The acquisition: the G0.8 result, and the G0.7 attempt it rates; an
+/// adapter's: a G0.7 attempt.
 const ACQUISITION_EVIDENCE: &[&Schema] = &[&g08::result::SCHEMA];
 const ATTEMPT_EVIDENCE: &[&Schema] = &[&g07::evidence::SCHEMA];
+/// The risk decision's: the economics snapshot and the G0.8 result.
+const RISK_EVIDENCE: &[&Schema] = &[&economics_snapshot::SCHEMA, &g08::result::SCHEMA];
 
 /// One evidence reference, verified: the file at `path` (relative, inside
 /// `root`) has this SHA-256 and decodes as the named schema, one of
@@ -150,12 +165,109 @@ fn freeze_binds(f: &Record, pin: &FlapDeployment) -> Result<(), String> {
     Ok(())
 }
 
+/// A G0.4 verdict that qualifies `source`: confirmed criteria committed
+/// before the campaign, `CONTINUE` for the campaign and for Flap, and in the
+/// census it rated `source` delivered at least one actionable launch first.
+fn source_binds(v: &Record, source: SourceId) -> Result<(), String> {
+    let mut flap = Vec::new();
+    for row in v.nested_all(gv::VENUES).map_err(re)? {
+        if row.text(gv::venue::VENUE).map_err(re)? == gv::RATED_VENUES[0] {
+            flap.push(row.text(gv::venue::VERDICT).map_err(re)? == gv::CONTINUE);
+        }
+    }
+    let mut firsts = Vec::new();
+    for row in v.nested_all(gv::SOURCES).map_err(re)? {
+        use darkbot_bsc_record::schema::bsc_census::census::source as cs;
+        if row.text(cs::SOURCE_ID).map_err(re)? == source.name() {
+            firsts.push(row.u64(cs::FIRST_FULL_BEFORE).map_err(re)?);
+        }
+    }
+    // One row each, as the verdict writes them.
+    let (flap, first) = match (flap.as_slice(), firsts.as_slice()) {
+        ([flap], [first]) => (*flap, *first),
+        _ => (false, 0),
+    };
+    let bound = v.text(gv::CRITERIA_STATE).map_err(re)? == gv::CONFIRMED
+        && v.text(gv::VERDICT).map_err(re)? == gv::CONTINUE
+        && v.opt_b256(gv::PRECOMMIT_SHA256).map_err(re)?.is_some()
+        && flap
+        && first > 0;
+    if !bound {
+        return Err(
+            "no G0.4 verdict CONTINUE for Flap on committed criteria in whose census it delivered an actionable launch first"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// The builders that accepted the G0.7 attempt `attempt` (bytes may have
+/// left, a 2xx answer with a result hash, no error, error code or message
+/// and nothing undecodable). Accepted is not included: which builder
+/// delivered is not on chain.
+fn accepted(attempt: &Record) -> Result<Vec<LiveAdapter>, String> {
+    use g07::evidence as a;
+    let mut sent = Vec::new();
+    if let Some(send) = attempt.opt_nested(a::SEND).map_err(re)? {
+        use g07::provider_result as pr;
+        for (tag, adapter) in [
+            (a::send::FORTYEIGHTCLUB, LiveAdapter::Club48BuilderV1),
+            (a::send::BLOCKRAZOR, LiveAdapter::BlockRazorBuilderV1),
+        ] {
+            if let Some(p) = send.opt_nested(tag).map_err(re)?
+                && p.bool(pr::BYTES_MAY_HAVE_LEFT).map_err(re)?
+                && p.opt_u64(pr::HTTP_STATUS_CODE)
+                    .map_err(re)?
+                    .is_some_and(|c| (200..300).contains(&c))
+                && p.opt_b256(pr::RPC_RESULT_HASH).map_err(re)?.is_some()
+                && p.opt_text(pr::ERROR).map_err(re)?.is_none()
+                && p.opt_i64(pr::RPC_ERROR_CODE).map_err(re)?.is_none()
+                && p.opt_text(pr::RPC_ERROR_MESSAGE).map_err(re)?.is_none()
+                && p.opt_text(pr::RESPONSE_UNDECODABLE).map_err(re)?.is_none()
+            {
+                sent.push(adapter);
+            }
+        }
+    }
+    Ok(sent)
+}
+
+/// A G0.7 attempt of the pinned deployment: its chain and Portal, its
+/// preflight's chain, Portal, version, implementation and code.
+fn attempt_of(attempt: &Record, pin: &FlapDeployment) -> Result<(), String> {
+    use g06a::preflight as pf;
+    use g07::evidence as a;
+    if attempt.text(a::GATE).map_err(re)? != "G0.7" {
+        return Err("not a G0.7 attempt".into());
+    }
+    let preflight = attempt
+        .opt_nested(a::PREFLIGHT)
+        .map_err(re)?
+        .ok_or("a G0.7 attempt without its preflight")?;
+    if attempt.u64(a::CHAIN_ID).map_err(re)? != pin.chain_id
+        || attempt.address(a::PORTAL).map_err(re)? != pin.portal.into_array()
+        || preflight.u64(pf::CHAIN_ID).map_err(re)? != pin.chain_id
+        || preflight.address(pf::PORTAL).map_err(re)? != pin.portal.into_array()
+        || preflight.text(pf::PORTAL_VERSION).map_err(re)? != pin.portal_version
+        || preflight.address(pf::PORTAL_IMPLEMENTATION).map_err(re)?
+            != pin.portal_implementation.into_array()
+        || preflight
+            .b256(pf::PORTAL_IMPLEMENTATION_CODE_SHA256)
+            .map_err(re)?
+            != pin.portal_implementation_runtime_sha256
+    {
+        return Err(format!(
+            "the G0.7 attempt is not of the pinned deployment (Portal {} at {})",
+            pin.portal_version, pin.portal
+        ));
+    }
+    Ok(())
+}
+
 /// The acquisition: a G0.8 PASS of the G0.7 attempt `attempt` (its file's
 /// SHA-256 `attempt_sha256`), the same attempt, buy, token and buyer, of
 /// the pinned deployment. Returns the attempt's buyer and the builders that
-/// accepted it (bytes may have left, a 2xx answer with a result hash, no
-/// error, error code or message and nothing undecodable). Accepted is not
-/// included: which builder delivered is not on chain.
+/// accepted it ([`accepted`]).
 fn acquisition_binds(
     result: &Record,
     attempt: &Record,
@@ -179,69 +291,34 @@ fn acquisition_binds(
     {
         return Err("the G0.8 result does not rate this G0.7 attempt".into());
     }
-    let preflight = attempt
-        .opt_nested(a::PREFLIGHT)
-        .map_err(re)?
-        .ok_or("a G0.7 attempt without its preflight")?;
-    use g06a::preflight as pf;
-    if attempt.u64(a::CHAIN_ID).map_err(re)? != pin.chain_id
-        || attempt.address(a::PORTAL).map_err(re)? != pin.portal.into_array()
-        || preflight.u64(pf::CHAIN_ID).map_err(re)? != pin.chain_id
-        || preflight.address(pf::PORTAL).map_err(re)? != pin.portal.into_array()
-        || preflight.text(pf::PORTAL_VERSION).map_err(re)? != pin.portal_version
-        || preflight.address(pf::PORTAL_IMPLEMENTATION).map_err(re)?
-            != pin.portal_implementation.into_array()
-        || preflight
-            .b256(pf::PORTAL_IMPLEMENTATION_CODE_SHA256)
-            .map_err(re)?
-            != pin.portal_implementation_runtime_sha256
-    {
-        return Err(format!(
-            "the G0.7 attempt is not of the pinned deployment (Portal {} at {})",
-            pin.portal_version, pin.portal
-        ));
-    }
-    let mut sent = Vec::new();
-    if let Some(send) = attempt.opt_nested(a::SEND).map_err(re)? {
-        use g07::provider_result as pr;
-        for (tag, adapter) in [
-            (a::send::FORTYEIGHTCLUB, LiveAdapter::Club48BuilderV1),
-            (a::send::BLOCKRAZOR, LiveAdapter::BlockRazorBuilderV1),
-        ] {
-            if let Some(p) = send.opt_nested(tag).map_err(re)?
-                && p.bool(pr::BYTES_MAY_HAVE_LEFT).map_err(re)?
-                && p.opt_u64(pr::HTTP_STATUS_CODE)
-                    .map_err(re)?
-                    .is_some_and(|c| (200..300).contains(&c))
-                && p.opt_b256(pr::RPC_RESULT_HASH).map_err(re)?.is_some()
-                && p.opt_text(pr::ERROR).map_err(re)?.is_none()
-                && p.opt_i64(pr::RPC_ERROR_CODE).map_err(re)?.is_none()
-                && p.opt_text(pr::RPC_ERROR_MESSAGE).map_err(re)?.is_none()
-                && p.opt_text(pr::RESPONSE_UNDECODABLE).map_err(re)?.is_none()
-            {
-                sent.push(adapter);
-            }
-        }
-    }
-    Ok((attempt.address(a::BUYER).map_err(re)?, sent))
+    attempt_of(attempt, pin)?;
+    Ok((attempt.address(a::BUYER).map_err(re)?, accepted(attempt)?))
 }
 
 /// Verifies the qualification record `bytes` against the evidence in `root`.
 pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
     // A v1 record names no G0.7 attempt: its acquisition verifies nothing;
-    // a v1 or v2 record names no runtime build: it qualifies none.
-    let (r, v1, runtime_sha256) = match decode(&lq::SCHEMA, bytes) {
+    // a v1 or v2 record names no runtime build: it qualifies none; before
+    // v4 a risk decision names no grant scope: it decides for none.
+    let (r, v1, runtime_sha256, scoped) = match decode(&lq::SCHEMA, bytes) {
         Ok(r) => {
             let build = r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?;
-            (r, false, Some(build))
+            (r, false, Some(build), true)
         }
-        Err(e3) => match decode(&lq::V2, bytes) {
-            Ok(r) => (r, false, None),
-            Err(_) => (
-                decode(&lq::V1, bytes).map_err(|_| e3.to_string())?,
-                true,
-                None,
-            ),
+        Err(e4) => match decode(&lq::V3, bytes) {
+            Ok(r) => {
+                let build = r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?;
+                (r, false, Some(build), false)
+            }
+            Err(_) => match decode(&lq::V2, bytes) {
+                Ok(r) => (r, false, None, false),
+                Err(_) => (
+                    decode(&lq::V1, bytes).map_err(|_| e4.to_string())?,
+                    true,
+                    None,
+                    false,
+                ),
+            },
         },
     };
     let e = |x: darkbot_bsc_record::RecordError| x.0;
@@ -266,10 +343,12 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                 view.venues.push(venue);
             }
             "SOURCE" => {
-                verified_all(root, &row, k::EVIDENCE, None)?;
                 let source = SourceId::parse(id).ok_or(format!("unknown source {id}"))?;
                 if view.sources.contains(&source) {
                     return Err(format!("{id} is qualified twice"));
+                }
+                for v in verified_all(root, &row, k::EVIDENCE, Some(SOURCE_EVIDENCE))? {
+                    source_binds(&v, source).map_err(|why| format!("{id}: {why}"))?;
                 }
                 view.sources.push(source);
             }
@@ -284,7 +363,12 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         if view.adapters.contains(&adapter) {
             return Err(format!("{name} is qualified twice"));
         }
-        verified_all(root, &row, k::EVIDENCE, None)?;
+        for attempt in verified_all(root, &row, k::EVIDENCE, Some(ATTEMPT_EVIDENCE))? {
+            attempt_of(&attempt, &pin).map_err(|why| format!("{name}: {why}"))?;
+            if !accepted(&attempt)?.contains(&adapter) {
+                return Err(format!("{name}: a G0.7 attempt it did not accept"));
+            }
+        }
         let findings = row
             .texts(k::FINDINGS)
             .map_err(e)?
@@ -300,8 +384,10 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         )?);
         view.adapters.push(adapter);
     }
+    let mut acquisition_sha256 = None;
     if let Some(row) = r.opt_nested(lq::ACQUISITION).map_err(e)? {
         let result = verified_evidence(root, &row, Some(ACQUISITION_EVIDENCE))?;
+        acquisition_sha256 = Some(row.b256(lq::evidence::SHA256).map_err(e)?);
         let attempt_ref = match v1 {
             true => None,
             false => r.opt_nested(lq::ACQUISITION_ATTEMPT).map_err(e)?,
@@ -322,8 +408,33 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         {
             return Err("a risk decision names who decided what, and when".into());
         }
-        verified_all(root, &row, k::EVIDENCE, None)?;
+        // BSC3-049 review M: the G0.8 result it rests on is the
+        // acquisition's own (a PASS bound above), the economics snapshot one
+        // of the pinned chain.
+        let refs = row.nested_all(k::EVIDENCE).map_err(e)?;
+        if refs.is_empty() {
+            return Err("a qualification without evidence".into());
+        }
+        for ev in refs {
+            let record = verified_evidence(root, &ev, Some(RISK_EVIDENCE))?;
+            let bound =
+                if ev.text(lq::evidence::SCHEMA_NAME).map_err(e)? == g08::result::SCHEMA.name {
+                    Some(ev.b256(lq::evidence::SHA256).map_err(e)?) == acquisition_sha256
+                } else {
+                    record.u64(economics_snapshot::CHAIN_ID).map_err(e)? == pin.chain_id
+                };
+            if !bound {
+                return Err(
+                    "the risk decision rests on a G0.8 result other than the acquisition's, or on another chain's economics"
+                        .into(),
+                );
+            }
+        }
         view.risk_decision = true;
+        view.risk_scope_sha256 = match scoped {
+            true => Some(row.b256(k::SCOPE_SHA256).map_err(e)?),
+            false => None,
+        };
     }
     Ok(Verified {
         view,
@@ -393,6 +504,20 @@ pub fn view(root: &Path) -> (Verified, Option<String>) {
     }
 }
 
+/// The operator's risk decision a qualification names: who decided, when,
+/// what, for which grant risk scope (BSC3-049), and the evidence it rests
+/// on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RiskSpec {
+    pub decided_by: String,
+    pub decided_unix_ms: u64,
+    pub statement: String,
+    /// [`LiveGrant::risk_scope_sha256`](crate::sources::LiveGrant::risk_scope_sha256)
+    /// of the scope it is decided for.
+    pub scope_sha256: [u8; 32],
+    pub evidence: Vec<String>,
+}
+
 /// What a qualification record names, for [`build`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Spec {
@@ -401,8 +526,7 @@ pub struct Spec {
     pub adapters: Vec<(LiveAdapter, Vec<Finding>, Vec<String>)>,
     /// The G0.8 result record and the G0.7 attempt record it rates.
     pub acquisition: Option<(String, String)>,
-    /// Who decided, when, what, and the evidence it rests on.
-    pub risk: Option<(String, u64, String, Vec<String>)>,
+    pub risk: Option<RiskSpec>,
     /// BSC3-012: the SHA-256 of the `bsc_runtime` build it qualifies.
     pub runtime_sha256: Option<[u8; 32]>,
 }
@@ -442,7 +566,7 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
         .chain(
             spec.sources
                 .iter()
-                .map(|(s, p)| ("SOURCE", s.name(), p, None)),
+                .map(|(s, p)| ("SOURCE", s.name(), p, Some(SOURCE_EVIDENCE))),
         );
     for (kind, id, paths, allowed) in items {
         let mut row = Draft::new(&lq::item::SCHEMA);
@@ -459,7 +583,10 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
             row.push(lq::adapter::FINDINGS, f.name());
         }
         for path in paths {
-            row.push(lq::adapter::EVIDENCE, evidence(path, None)?);
+            row.push(
+                lq::adapter::EVIDENCE,
+                evidence(path, Some(ATTEMPT_EVIDENCE))?,
+            );
         }
         d.push(lq::ADAPTERS, row.into_nested());
     }
@@ -473,13 +600,17 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
             evidence(attempt, Some(ATTEMPT_EVIDENCE))?,
         );
     }
-    if let Some((by, at, statement, paths)) = &spec.risk {
+    if let Some(risk) = &spec.risk {
         let mut row = Draft::new(&lq::risk::SCHEMA);
-        row.set(lq::risk::DECIDED_BY, by.as_str())
-            .set(lq::risk::DECIDED_UNIX_MS, *at)
-            .set(lq::risk::STATEMENT, statement.as_str());
-        for path in paths {
-            row.push(lq::risk::EVIDENCE, evidence(path, None)?);
+        row.set(lq::risk::DECIDED_BY, risk.decided_by.as_str())
+            .set(lq::risk::DECIDED_UNIX_MS, risk.decided_unix_ms)
+            .set(lq::risk::STATEMENT, risk.statement.as_str())
+            .set(
+                lq::risk::SCOPE_SHA256,
+                darkbot_bsc_record::Value::B256(risk.scope_sha256),
+            );
+        for path in &risk.evidence {
+            row.push(lq::risk::EVIDENCE, evidence(path, Some(RISK_EVIDENCE))?);
         }
         d.set(lq::RISK, row.into_nested());
     }
@@ -613,14 +744,46 @@ pub(crate) mod tests {
         g
     }
 
-    /// A root with typed evidence: the freeze of the pinned deployment, a
-    /// G0.7 attempt of the tests' buyer sent through Club48 and its G0.8
-    /// result of `verdict`, and one record of no role (`measure`).
+    /// A G0.4 verdict (v3) `CONTINUE` for Flap on confirmed, committed
+    /// criteria, in whose census PublicNode delivered `first` actionable
+    /// launches first.
+    pub(crate) fn g04(first: u64) -> Draft {
+        use darkbot_bsc_record::schema::bsc_census::census::source as cs;
+        let mut flap = filled(&gv::venue::SCHEMA);
+        flap.set(gv::venue::VENUE, gv::RATED_VENUES[0])
+            .set(gv::venue::VERDICT, gv::CONTINUE);
+        let mut source = filled(&cs::SCHEMA);
+        source
+            .set(cs::SOURCE_ID, SourceId::PublicNode.name())
+            .set(cs::FIRST_FULL_BEFORE, first);
+        let mut v = filled(&gv::SCHEMA);
+        v.set(gv::CRITERIA_STATE, gv::CONFIRMED)
+            .set(gv::VERDICT, gv::CONTINUE)
+            .set(gv::PRECOMMIT_SHA256, Value::B256([3; 32]))
+            .push(gv::VENUES, flap.into_nested())
+            .push(gv::SOURCES, source.into_nested());
+        v
+    }
+
+    /// The grant risk scope the tests' risk decision is made for
+    /// ([`crate::sources::tests::grant`]'s).
+    pub(crate) fn risk_scope() -> [u8; 32] {
+        crate::sources::tests::grant(0).risk_scope_sha256()
+    }
+
+    /// A root with typed evidence: the freeze of the pinned deployment, the
+    /// G0.4 verdict of [`g04`], an economics snapshot of BSC, a G0.7 attempt
+    /// of the tests' buyer accepted by Club48 and its G0.8 result of
+    /// `verdict`, and one record of no role (`measure`).
     pub(crate) fn fixture(tag: &str, verdict: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("bsc-live-q-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ev")).unwrap();
         fs::write(root.join("ev/freeze.dbrec"), freeze().encode().unwrap()).unwrap();
+        fs::write(root.join("ev/g04.dbrec"), g04(1).encode().unwrap()).unwrap();
+        let mut economics = filled(&economics_snapshot::SCHEMA);
+        economics.set(economics_snapshot::CHAIN_ID, 56u64);
+        fs::write(root.join("ev/economics.dbrec"), economics.encode().unwrap()).unwrap();
         let g07 = attempt(buyer(), &[LiveAdapter::Club48BuilderV1])
             .encode()
             .unwrap();
@@ -664,19 +827,23 @@ pub(crate) mod tests {
     }
 
     fn spec() -> Spec {
-        let ev = || vec!["ev/measure.dbrec".to_string()];
         Spec {
             runtime_sha256: Some(running_build().unwrap()),
             venues: vec![(VenueId::Flap, venue_evidence())],
-            sources: vec![(SourceId::PublicNode, ev())],
-            adapters: vec![(LiveAdapter::Club48BuilderV1, findings(), ev())],
+            sources: vec![(SourceId::PublicNode, vec!["ev/g04.dbrec".into()])],
+            adapters: vec![(
+                LiveAdapter::Club48BuilderV1,
+                findings(),
+                vec!["ev/g07.dbrec".into()],
+            )],
             acquisition: acquisition(),
-            risk: Some((
-                "operator".into(),
-                1,
-                "accepts the measured scope".into(),
-                ev(),
-            )),
+            risk: Some(RiskSpec {
+                decided_by: "operator".into(),
+                decided_unix_ms: 1,
+                statement: "accepts the measured scope".into(),
+                scope_sha256: risk_scope(),
+                evidence: vec!["ev/g08.dbrec".into()],
+            }),
         }
     }
 
@@ -689,17 +856,7 @@ pub(crate) mod tests {
         fs::create_dir_all(root.join("bsc/config")).unwrap();
         fs::write(root.join(LIVE_QUALIFICATION_PATH), &bytes).unwrap();
         let v = load(&root).unwrap().unwrap();
-        assert_eq!(
-            v.view,
-            LiveQualification {
-                venues: vec![VenueId::Flap],
-                sources: vec![SourceId::PublicNode],
-                adapters: vec![LiveAdapter::Club48BuilderV1],
-                acquisition: true,
-                acquisition_adapters: vec![LiveAdapter::Club48BuilderV1],
-                risk_decision: true,
-            }
-        );
+        assert_eq!(v.view, crate::sources::tests::qualified());
         assert_eq!(v.acquisition_buyer, Some(buyer()));
         assert_eq!(v.adapters.len(), 1);
         assert_eq!(v.adapters[0].id(), CapabilityId::Club48BuilderV1);
@@ -720,7 +877,7 @@ pub(crate) mod tests {
         let root = fixture("bad", "PASS");
         let bytes = build(&root, &spec(), 1).unwrap();
         // Evidence changed after the qualification.
-        fs::write(root.join("ev/measure.dbrec"), b"changed").unwrap();
+        fs::write(root.join("ev/g04.dbrec"), b"changed").unwrap();
         assert!(
             verify(&root, &bytes)
                 .unwrap_err()
@@ -752,7 +909,11 @@ pub(crate) mod tests {
         escape.sources = vec![(SourceId::Drpc, vec!["../outside.dbrec".into()])];
         assert!(build(&root2, &escape, 1).is_err());
         let mut anonymous = spec();
-        anonymous.risk = Some((" ".into(), 1, "x".into(), vec!["ev/measure.dbrec".into()]));
+        anonymous.risk = Some(RiskSpec {
+            decided_by: " ".into(),
+            statement: "x".into(),
+            ..spec().risk.unwrap()
+        });
         assert!(
             build(&root2, &anonymous, 1)
                 .unwrap_err()
@@ -774,6 +935,260 @@ pub(crate) mod tests {
         );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(root2).unwrap();
+    }
+
+    /// BSC3-049: a source takes only a G0.4 verdict that rates it, an
+    /// adapter only a G0.7 attempt it accepted, the risk decision only the
+    /// economics snapshot or the G0.8 result, decided for one grant risk
+    /// scope; a v3 record's risk decision names no scope (decides for none).
+    #[test]
+    fn sources_adapters_and_risk_take_only_their_bound_records() {
+        let root = fixture("roles-sar", "PASS");
+        // A correctly hashed record of no role, as each.
+        let measure = || vec!["ev/measure.dbrec".to_string()];
+        let mut source = spec();
+        source.sources = vec![(SourceId::PublicNode, measure())];
+        let mut adapter = spec();
+        adapter.adapters = vec![(LiveAdapter::Club48BuilderV1, findings(), measure())];
+        let mut risk = spec();
+        if let Some(r) = risk.risk.as_mut() {
+            r.evidence = measure();
+        }
+        for s in [source, adapter, risk] {
+            let e = build(&root, &s, 1).unwrap_err();
+            assert!(e.contains("no record this role takes"), "{e}");
+        }
+        // A verdict that does not rate the source: none delivered first,
+        // proposed criteria, another verdict, no pre-commitment, Flap not
+        // CONTINUE, only another source delivered.
+        let with = |f: &dyn Fn(&mut Draft)| {
+            let mut v = g04(1);
+            f(&mut v);
+            v
+        };
+        let mut adapt = filled(&gv::venue::SCHEMA);
+        adapt
+            .set(gv::venue::VENUE, gv::RATED_VENUES[0])
+            .set(gv::venue::VERDICT, "ADAPT");
+        let mut drpc = filled(&darkbot_bsc_record::schema::bsc_census::census::source::SCHEMA);
+        drpc.set(
+            darkbot_bsc_record::schema::bsc_census::census::source::SOURCE_ID,
+            SourceId::Drpc.name(),
+        );
+        for v in [
+            g04(0),
+            with(&|v| {
+                v.set(gv::CRITERIA_STATE, "PROPOSED");
+            }),
+            with(&|v| {
+                v.set(gv::VERDICT, "ADAPT");
+            }),
+            with(&|v| {
+                v.clear(gv::PRECOMMIT_SHA256);
+            }),
+            with(&|v| {
+                v.set(gv::VENUES, adapt.clone().into_nested());
+            }),
+            with(&|v| {
+                v.set(gv::SOURCES, drpc.clone().into_nested());
+            }),
+        ] {
+            fs::write(root.join("ev/g04.dbrec"), v.encode().unwrap()).unwrap();
+            let e = build(&root, &spec(), 1).unwrap_err();
+            assert!(e.contains("no G0.4 verdict CONTINUE"), "{e}");
+        }
+        // A v2 verdict names no source: it qualifies none.
+        let mut v2 = filled(&gv::V2);
+        v2.set(gv::CRITERIA_STATE, gv::CONFIRMED)
+            .set(gv::VERDICT, gv::CONTINUE);
+        fs::write(root.join("ev/g04.dbrec"), v2.encode().unwrap()).unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains("no record this role takes"), "{e}");
+        // Review L: one row each, as the verdict writes them.
+        let mut twice = g04(1);
+        let mut drpc_row = g04(1);
+        drpc_row.set(gv::CRITERIA_STATE, gv::CONFIRMED);
+        let mut flap_adapt = filled(&gv::venue::SCHEMA);
+        flap_adapt
+            .set(gv::venue::VENUE, gv::RATED_VENUES[0])
+            .set(gv::venue::VERDICT, "ADAPT");
+        twice.push(gv::VENUES, flap_adapt.into_nested());
+        let mut again = g04(1);
+        let mut source_again =
+            filled(&darkbot_bsc_record::schema::bsc_census::census::source::SCHEMA);
+        source_again.set(
+            darkbot_bsc_record::schema::bsc_census::census::source::SOURCE_ID,
+            SourceId::PublicNode.name(),
+        );
+        again.push(gv::SOURCES, source_again.into_nested());
+        for v in [twice, again] {
+            fs::write(root.join("ev/g04.dbrec"), v.encode().unwrap()).unwrap();
+            let e = build(&root, &spec(), 1).unwrap_err();
+            assert!(e.contains("no G0.4 verdict CONTINUE"), "{e}");
+        }
+        fs::write(root.join("ev/g04.dbrec"), g04(1).encode().unwrap()).unwrap();
+        // Review L: an attempt of another Portal version, though Club48
+        // accepted it, as Club48's evidence.
+        let mut old = filled(&g06a::preflight::SCHEMA);
+        old.set(g06a::preflight::PORTAL_VERSION, "5.24.0");
+        let mut drifted = attempt(buyer(), &[LiveAdapter::Club48BuilderV1]);
+        drifted.set(g07::evidence::PREFLIGHT, old.into_nested());
+        fs::write(root.join("ev/drifted.dbrec"), drifted.encode().unwrap()).unwrap();
+        let mut stale = spec();
+        stale.adapters = vec![(
+            LiveAdapter::Club48BuilderV1,
+            findings(),
+            vec!["ev/drifted.dbrec".into()],
+        )];
+        let e = build(&root, &stale, 1).unwrap_err();
+        assert!(e.contains("not of the pinned deployment"), "{e}");
+        // An attempt Club48 did not accept, as Club48's evidence.
+        let other = attempt(buyer(), &[LiveAdapter::BlockRazorBuilderV1]);
+        fs::write(root.join("ev/other.dbrec"), other.encode().unwrap()).unwrap();
+        let mut refused = spec();
+        refused.adapters = vec![(
+            LiveAdapter::Club48BuilderV1,
+            findings(),
+            vec!["ev/other.dbrec".into()],
+        )];
+        let e = build(&root, &refused, 1).unwrap_err();
+        assert!(e.contains("did not accept"), "{e}");
+        // The risk decision on the economics snapshot, for its scope.
+        let snapshot = filled(&economics_snapshot::SCHEMA);
+        fs::write(root.join("ev/snapshot.dbrec"), snapshot.encode().unwrap()).unwrap();
+        let mut on_snapshot = spec();
+        if let Some(r) = on_snapshot.risk.as_mut() {
+            r.evidence = vec!["ev/snapshot.dbrec".into()];
+        }
+        let mut bsc = filled(&economics_snapshot::SCHEMA);
+        bsc.set(economics_snapshot::CHAIN_ID, 56u64);
+        fs::write(root.join("ev/snapshot.dbrec"), bsc.encode().unwrap()).unwrap();
+        let v = verify(&root, &build(&root, &on_snapshot, 1).unwrap()).unwrap();
+        assert!(v.view.risk_decision);
+        assert_eq!(v.view.risk_scope_sha256, Some(risk_scope()));
+        // Review M: another chain's economics, a G0.8 result that is not
+        // the acquisition's (an ADAPT of the same attempt), or no
+        // acquisition at all.
+        fs::write(root.join("ev/snapshot.dbrec"), snapshot.encode().unwrap()).unwrap();
+        let g07 = fs::read(root.join("ev/g07.dbrec")).unwrap();
+        fs::write(
+            root.join("ev/adapt.dbrec"),
+            result(&g07, "ADAPT").encode().unwrap(),
+        )
+        .unwrap();
+        let mut on_adapt = spec();
+        if let Some(r) = on_adapt.risk.as_mut() {
+            r.evidence = vec!["ev/adapt.dbrec".into()];
+        }
+        let mut unacquired = spec();
+        unacquired.acquisition = None;
+        for s in [on_snapshot, on_adapt, unacquired] {
+            let e = build(&root, &s, 1).unwrap_err();
+            assert!(e.contains("other than the acquisition's"), "{e}");
+        }
+        // A v3 record's risk decision names no scope: it decides for none.
+        let economics = fs::read(root.join("ev/economics.dbrec")).unwrap();
+        let mut ev = Draft::new(&lq::evidence::SCHEMA);
+        ev.set(lq::evidence::PATH, "ev/economics.dbrec")
+            .set(
+                lq::evidence::SHA256,
+                Value::B256(darkbot_bsc_record::sha256(&economics)),
+            )
+            .set(lq::evidence::SCHEMA_NAME, economics_snapshot::SCHEMA.name);
+        let mut row = Draft::new(&lq::risk::V1);
+        row.set(lq::risk::DECIDED_BY, "operator")
+            .set(lq::risk::DECIDED_UNIX_MS, 1u64)
+            .set(lq::risk::STATEMENT, "accepts")
+            .push(lq::risk::EVIDENCE, ev.into_nested());
+        let mut d = Draft::new(&lq::V3);
+        d.set(lq::PROVENANCE_TOOL, "test")
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(lq::RUNTIME_SHA256, Value::B256([0x12; 32]))
+            .set(lq::RISK, row.into_nested());
+        let v3 = verify(&root, &d.encode().unwrap()).unwrap();
+        assert!(v3.view.risk_decision);
+        assert_eq!(v3.view.risk_scope_sha256, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A qualification (v4) of `role` alone (`SOURCE`, `ADAPTER` or
+    /// `RISK`) naming `path` as its evidence, with the schema name
+    /// `declared`, hand-encoded (not through `build`).
+    fn hand_role(root: &Path, role: &str, path: &str, declared: &str) -> Vec<u8> {
+        let bytes = fs::read(root.join(path)).unwrap();
+        let mut ev = Draft::new(&lq::evidence::SCHEMA);
+        ev.set(lq::evidence::PATH, path)
+            .set(
+                lq::evidence::SHA256,
+                Value::B256(darkbot_bsc_record::sha256(&bytes)),
+            )
+            .set(lq::evidence::SCHEMA_NAME, declared);
+        let mut d = Draft::new(&lq::SCHEMA);
+        d.set(lq::PROVENANCE_TOOL, "test")
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(lq::RUNTIME_SHA256, Value::B256([0x12; 32]));
+        match role {
+            "SOURCE" => {
+                let mut item = Draft::new(&lq::item::SCHEMA);
+                item.set(lq::item::KIND, "SOURCE")
+                    .set(lq::item::ID, SourceId::PublicNode.name())
+                    .push(lq::item::EVIDENCE, ev.into_nested());
+                d.push(lq::ITEMS, item.into_nested());
+            }
+            "ADAPTER" => {
+                let mut row = Draft::new(&lq::adapter::SCHEMA);
+                row.set(lq::adapter::ADAPTER, LiveAdapter::Club48BuilderV1.name());
+                for f in findings() {
+                    row.push(lq::adapter::FINDINGS, f.name());
+                }
+                row.push(lq::adapter::EVIDENCE, ev.into_nested());
+                d.push(lq::ADAPTERS, row.into_nested());
+            }
+            _ => {
+                let mut row = Draft::new(&lq::risk::SCHEMA);
+                row.set(lq::risk::DECIDED_BY, "operator")
+                    .set(lq::risk::DECIDED_UNIX_MS, 1u64)
+                    .set(lq::risk::STATEMENT, "accepts")
+                    .set(lq::risk::SCOPE_SHA256, Value::B256(risk_scope()))
+                    .push(lq::risk::EVIDENCE, ev.into_nested());
+                d.set(lq::RISK, row.into_nested());
+            }
+        }
+        d.encode().unwrap()
+    }
+
+    /// BSC3-049: a correctly hashed record of no role, named as what it
+    /// is, never verifies as a source's, an adapter's or the risk
+    /// decision's evidence; their own records do.
+    #[test]
+    fn a_record_of_no_role_verifies_for_none() {
+        let root = fixture("roles-hand", "PASS");
+        let slot = darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot::SCHEMA.name;
+        for (role, own, name, refused) in [
+            (
+                "SOURCE",
+                "ev/g04.dbrec",
+                gv::SCHEMA.name,
+                "not darkbot.bsc.g04-verdict.v1",
+            ),
+            (
+                "ADAPTER",
+                "ev/g07.dbrec",
+                g07::evidence::SCHEMA.name,
+                "not darkbot.g07",
+            ),
+            (
+                "RISK",
+                "ev/economics.dbrec",
+                economics_snapshot::SCHEMA.name,
+                "not darkbot.bsc.economics-snapshot.v1 or",
+            ),
+        ] {
+            let e = verify(&root, &hand_role(&root, role, "ev/measure.dbrec", slot)).unwrap_err();
+            assert!(e.contains(refused), "{role}: {e}");
+            verify(&root, &hand_role(&root, role, own, name)).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// A qualification naming `path` as the Flap venue's evidence, with the
@@ -848,6 +1263,14 @@ pub(crate) mod tests {
     #[test]
     fn each_role_takes_only_its_own_bound_records() {
         let root = fixture("roles", "PASS");
+        // The adapter's evidence apart from the attempt the acquisition
+        // cases below change.
+        fs::copy(root.join("ev/g07.dbrec"), root.join("ev/club48.dbrec")).unwrap();
+        let spec = || {
+            let mut s = spec();
+            s.adapters[0].2 = vec!["ev/club48.dbrec".into()];
+            s
+        };
         // A correctly hashed record of no role as the venue's freeze, built
         // or hand-encoded under its own or a borrowed schema name.
         let mut venue = spec();

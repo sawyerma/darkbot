@@ -14,12 +14,13 @@
 //! `NOT_EVALUABLE`.
 
 use crate::g04_census::{CRITERIA_UNCONFIRMED, CRITERIA_VENUES, Census, percentile};
+use crate::sources::SourceId;
 use darkbot_bsc_record::schema::bsc_census::{precommit as gp, verdict as gv};
 use darkbot_bsc_record::{Draft, Value};
 use std::collections::HashMap;
 
 pub const NOT_EVALUABLE: &str = "NOT_EVALUABLE";
-pub const CONTINUE: &str = "CONTINUE";
+pub use darkbot_bsc_record::schema::bsc_census::verdict::CONTINUE;
 pub const ADAPT: &str = "ADAPT";
 pub const STOP: &str = "STOP";
 
@@ -61,7 +62,7 @@ impl Criteria {
         }
         let confirmed = match values.remove("BSC_G04_CRITERIA_STATE") {
             Some("PROPOSED") => false,
-            Some("CONFIRMED") => true,
+            Some(gv::CONFIRMED) => true,
             Some(other) => {
                 return Err(format!(
                     "BSC_G04_CRITERIA_STATE={other} is neither PROPOSED nor CONFIRMED"
@@ -230,6 +231,9 @@ pub struct Evaluation {
     pub venues: Vec<VenueVerdict>,
     /// The pre-commitment read.
     pub precommit: Option<Precommit>,
+    /// BSC3-049: the actionable launches each source of the rated census
+    /// delivered first (the census's rows, rated with it).
+    pub sources: Vec<(SourceId, u64)>,
 }
 
 pub fn evaluate(
@@ -249,6 +253,7 @@ pub fn evaluate(
         covered_ppm: None,
         venues: Vec::new(),
         precommit: precommit.cloned(),
+        sources: census.first_full_before.clone(),
     };
     if !criteria.confirmed {
         e.reasons.push("CRITERIA_PROPOSED");
@@ -371,7 +376,7 @@ impl Evaluation {
             .set(
                 gv::CRITERIA_STATE,
                 if self.confirmed {
-                    "CONFIRMED"
+                    gv::CONFIRMED
                 } else {
                     "PROPOSED"
                 },
@@ -391,6 +396,13 @@ impl Evaluation {
             d.set(gv::PRECOMMIT_SHA256, Value::B256(p.sha256))
                 .set(gv::PRECOMMIT_DECIDED_BY, p.decided_by.as_str())
                 .set(gv::PRECOMMIT_UNIX_MS, p.committed_unix_ms);
+        }
+        for (source, n) in &self.sources {
+            use darkbot_bsc_record::schema::bsc_census::census::source as k;
+            let mut row = Draft::new(&k::SCHEMA);
+            row.set(k::SOURCE_ID, source.name())
+                .set(k::FIRST_FULL_BEFORE, *n);
+            d.push(gv::SOURCES, row.into_nested());
         }
         for v in &self.venues {
             use gv::venue as k;
@@ -420,7 +432,7 @@ impl Evaluation {
             "G0.4 verdict {} (criteria {}, sha256 {}); covered {} of {} ms; reasons [{}]\n",
             self.verdict,
             if self.confirmed {
-                "CONFIRMED"
+                gv::CONFIRMED
             } else {
                 "PROPOSED"
             },

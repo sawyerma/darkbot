@@ -255,6 +255,9 @@ pub const LIVE_ACQUISITION_UNPROVEN: &str = "LIVE_ACQUISITION_UNPROVEN";
 /// attempt (exits are exempt: they need no acquisition through it).
 pub const LIVE_ACQUISITION_BUILDER_UNPROVEN: &str = "LIVE_ACQUISITION_BUILDER_UNPROVEN";
 pub const LIVE_RISK_DECISION_MISSING: &str = "LIVE_RISK_DECISION_MISSING";
+/// BSC3-049: the qualification's risk decision was made for another grant
+/// scope (or, before it named one, for none).
+pub const LIVE_RISK_DECISION_OTHER_SCOPE: &str = "LIVE_RISK_DECISION_OTHER_SCOPE";
 /// The grant on file is not the one the executor was armed under.
 pub const LIVE_GRANT_CHANGED: &str = "LIVE_GRANT_CHANGED";
 /// A BUY's input exceeds the grant's largest input.
@@ -333,7 +336,10 @@ pub const LIVE_CONDITIONS: [(&str, &[&str]); 20] = [
         "ACQUISITION_PROVEN",
         &[LIVE_ACQUISITION_UNPROVEN, LIVE_ACQUISITION_BUILDER_UNPROVEN],
     ),
-    ("RISK_DECISION", &[LIVE_RISK_DECISION_MISSING]),
+    (
+        "RISK_DECISION",
+        &[LIVE_RISK_DECISION_MISSING, LIVE_RISK_DECISION_OTHER_SCOPE],
+    ),
 ];
 
 /// The first of [`LIVE_CONDITIONS`] judged only against a grant.
@@ -344,8 +350,11 @@ const SCOPE_CONDITIONS_FROM: usize = 11;
 /// the grant's attempts), room for another BUY input, and a grant that
 /// admits exits only (BSC3-058). Its own gas must still fit the grant's
 /// spend ([`Store::admit_live`]).
-const EXIT_EXEMPT: [&str; 10] = [
+const EXIT_EXEMPT: [&str; 11] = [
     LIVE_ACQUISITION_BUILDER_UNPROVEN,
+    // BSC3-049: the risk decision binds the scope of new BUYs; the exits of
+    // what was bought need one, for whichever scope.
+    LIVE_RISK_DECISION_OTHER_SCOPE,
     ECON_ATTEMPT_DISABLED,
     BUY_LIMIT_UNREADABLE,
     BUY_LIMIT_EXHAUSTED,
@@ -1038,9 +1047,50 @@ impl LiveGrant {
     /// The canonical scope text the operator confirms, one `key=value` per
     /// line in this order (the frontend builds the same text).
     pub fn scope_text(&self) -> String {
+        self.text("darkbot.bsc.live-grant.v1", true)
+    }
+
+    /// SHA-256 of [`LiveGrant::scope_text`].
+    pub fn scope_sha256(&self) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(self.scope_text().as_bytes()).into()
+    }
+
+    /// BSC3-049: the scope a risk decision is made for: the scope text
+    /// without its validity and exit-only (a grant of the same scope again,
+    /// or one for its exits alone, needs no new decision; any other limit,
+    /// venue, strategy, source, builder or risk bound does), and the code
+    /// of the venue it trades as this build pins it (another implementation
+    /// pinned needs a new decision too).
+    pub fn risk_scope_text(&self) -> String {
+        let code = match self.venue {
+            VenueId::Flap => {
+                let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+                format!(
+                    "{}:{}",
+                    pin.portal_implementation,
+                    pin.portal_implementation_runtime_sha256
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<String>()
+                )
+            }
+            // No execution path: nothing pinned.
+            VenueId::FourClassic | VenueId::OpenFour => "none".into(),
+        };
+        self.text("darkbot.bsc.live-risk-scope.v1", false) + &format!("venue_code={code}\n")
+    }
+
+    /// SHA-256 of [`LiveGrant::risk_scope_text`].
+    pub fn risk_scope_sha256(&self) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(self.risk_scope_text().as_bytes()).into()
+    }
+
+    fn text(&self, header: &str, validity: bool) -> String {
         let join = |names: Vec<&str>| names.join(",");
         format!(
-            "darkbot.bsc.live-grant.v1\nvenue={}\nstrategies={}\nsources={}\nadapters={}\nmax_input_wei={}\nmax_spend_wei={}\nmax_attempts={}\nexpires_unix_ms={}\n",
+            "{header}\nvenue={}\nstrategies={}\nsources={}\nadapters={}\nmax_input_wei={}\nmax_spend_wei={}\nmax_attempts={}\n",
             self.venue.name(),
             self.strategies.name(),
             join(self.sources.iter().map(|s| s.name()).collect()),
@@ -1048,8 +1098,11 @@ impl LiveGrant {
             self.max_input_wei,
             self.max_spend_wei,
             self.max_attempts,
-            self.expires_unix_ms
-        ) + &self.risk.map_or(String::new(), |r| {
+        ) + &if validity {
+            format!("expires_unix_ms={}\n", self.expires_unix_ms)
+        } else {
+            String::new()
+        } + &self.risk.map_or(String::new(), |r| {
             format!(
                 "max_buy_slippage_bps={}\nmax_exit_slippage_bps={}\nmax_gas_price_wei={}\nmax_buy_gas_limit={}\nmax_approve_gas_limit={}\nmax_sell_gas_limit={}\n",
                 r.max_buy_slippage_bps,
@@ -1059,17 +1112,11 @@ impl LiveGrant {
                 r.max_approve_gas_limit,
                 r.max_sell_gas_limit
             )
-        }) + if self.exit_only {
+        }) + if validity && self.exit_only {
             "exit_only=true\n"
         } else {
             ""
         }
-    }
-
-    /// SHA-256 of [`LiveGrant::scope_text`].
-    pub fn scope_sha256(&self) -> [u8; 32] {
-        use sha2::Digest;
-        sha2::Sha256::digest(self.scope_text().as_bytes()).into()
     }
 
     /// Whether `entity` is within the scope.
@@ -1100,6 +1147,9 @@ pub struct LiveQualification {
     pub acquisition_adapters: Vec<LiveAdapter>,
     /// The operator's documented J risk decision for the scope.
     pub risk_decision: bool,
+    /// BSC3-049: the grant risk scope it was made for
+    /// ([`LiveGrant::risk_scope_sha256`]); none before it named one.
+    pub risk_scope_sha256: Option<[u8; 32]>,
 }
 
 /// Everything the LIVE gate reads besides the owner state, as it is now.
@@ -1428,6 +1478,8 @@ impl Generation {
             }
             if !q.risk_decision {
                 out.push(LIVE_RISK_DECISION_MISSING);
+            } else if q.risk_scope_sha256 != Some(g.risk_scope_sha256()) {
+                out.push(LIVE_RISK_DECISION_OTHER_SCOPE);
             }
         }
         out
@@ -5140,8 +5192,18 @@ pub(crate) mod tests {
         max_sell_gas_limit: 5_000_000,
     };
 
-    /// Evidence for exactly that scope.
+    /// Evidence for exactly that scope ([`grant`]'s).
     pub(crate) fn qualified() -> LiveQualification {
+        qualified_for(&grant(0))
+    }
+
+    /// Evidence for exactly the scope of the grant `s` holds.
+    pub(crate) fn qualified_in(s: &Store) -> LiveQualification {
+        qualified_for(s.current().unwrap().live.as_ref().unwrap())
+    }
+
+    /// Evidence for exactly the scope of `g`, its risk decided for it.
+    pub(crate) fn qualified_for(g: &LiveGrant) -> LiveQualification {
         LiveQualification {
             venues: vec![VenueId::Flap],
             sources: vec![SourceId::PublicNode],
@@ -5149,6 +5211,7 @@ pub(crate) mod tests {
             acquisition: true,
             acquisition_adapters: vec![LiveAdapter::Club48BuilderV1],
             risk_decision: true,
+            risk_scope_sha256: Some(g.risk_scope_sha256()),
         }
     }
 
@@ -5327,6 +5390,12 @@ pub(crate) mod tests {
         other_builder.acquisition_adapters = vec![LiveAdapter::BlockRazorBuilderV1];
         let mut no_risk = qualified();
         no_risk.risk_decision = false;
+        // BSC3-049: a risk decision for another grant scope, or (a v3
+        // record) for none.
+        let mut other_scope = qualified();
+        other_scope.risk_scope_sha256 = Some([0x0e; 32]);
+        let mut unscoped = qualified();
+        unscoped.risk_scope_sha256 = None;
         let cases: Vec<(LiveContext<'_>, &str)> = vec![
             (
                 LiveContext {
@@ -5407,6 +5476,20 @@ pub(crate) mod tests {
                 },
                 LIVE_RISK_DECISION_MISSING,
             ),
+            (
+                LiveContext {
+                    qualification: &other_scope,
+                    ..ctx
+                },
+                LIVE_RISK_DECISION_OTHER_SCOPE,
+            ),
+            (
+                LiveContext {
+                    qualification: &unscoped,
+                    ..ctx
+                },
+                LIVE_RISK_DECISION_OTHER_SCOPE,
+            ),
         ];
         for (c, reason) in cases {
             assert_eq!(g.live_blockers(&c), vec![reason]);
@@ -5415,14 +5498,24 @@ pub(crate) mod tests {
                 Effective::Blocked(reason)
             );
         }
-        // BSC3-049 review: a builder without the acquisition still takes the
-        // exits of what the grant holds.
-        assert!(
+        // BSC3-049 review: a builder without the acquisition, or a risk
+        // decision for another scope, still takes the exits of what the
+        // grant holds; no risk decision at all does not.
+        for q in [&other_builder, &other_scope] {
+            assert!(
+                g.exit_blockers(&LiveContext {
+                    qualification: q,
+                    ..ctx
+                })
+                .is_empty()
+            );
+        }
+        assert_eq!(
             g.exit_blockers(&LiveContext {
-                qualification: &other_builder,
+                qualification: &no_risk,
                 ..ctx
-            })
-            .is_empty()
+            }),
+            vec![LIVE_RISK_DECISION_MISSING]
         );
         // Another boot session: the switches and the grant are reset.
         let reboot = LiveContext {
@@ -5797,6 +5890,92 @@ pub(crate) mod tests {
         fs::write(&path, d.encode().unwrap()).unwrap();
         assert!(s.current().unwrap_err().contains("not the owner's"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-049: the risk scope is the grant's scope without its validity
+    /// and exit-only: the same scope again, or for its exits alone, keeps
+    /// it; any other limit, strategy, source, builder or risk bound changes
+    /// it. The scope text itself is unchanged by it (the frontend builds the
+    /// same).
+    #[test]
+    fn the_risk_scope_is_the_grant_scope_without_its_validity() {
+        let g = grant(1);
+        assert_eq!(
+            g.scope_text(),
+            "darkbot.bsc.live-grant.v1\nvenue=BSC_VENUE_FLAP\nstrategies=C3\n\
+             sources=BSC_INGRESS_PUBLICNODE\nadapters=CLUB48_BUILDER_V1\n\
+             max_input_wei=1000000000000\nmax_spend_wei=10000000000000000\n\
+             max_attempts=2\nexpires_unix_ms=1\nmax_buy_slippage_bps=1000\n\
+             max_exit_slippage_bps=1000\nmax_gas_price_wei=1000000000000\n\
+             max_buy_gas_limit=10000000\nmax_approve_gas_limit=1000000\n\
+             max_sell_gas_limit=5000000\n"
+        );
+        let pin = darkbot_bsc_trading::venues::flap::deployment::bsc_mainnet_v5_27_0();
+        assert_eq!(
+            g.risk_scope_text(),
+            g.scope_text()
+                .replace(
+                    "darkbot.bsc.live-grant.v1",
+                    "darkbot.bsc.live-risk-scope.v1"
+                )
+                .replace("expires_unix_ms=1\n", "")
+                + &format!(
+                    "venue_code={}:{}\n",
+                    pin.portal_implementation,
+                    hex32(&pin.portal_implementation_runtime_sha256)
+                )
+        );
+        let mut again = grant(2);
+        again.exit_only = true;
+        assert_ne!(again.scope_sha256(), g.scope_sha256());
+        assert_eq!(again.risk_scope_sha256(), g.risk_scope_sha256());
+        let others = [
+            LiveGrant {
+                max_spend_wei: g.max_spend_wei + 1,
+                ..g.clone()
+            },
+            LiveGrant {
+                max_input_wei: g.max_input_wei + 1,
+                ..g.clone()
+            },
+            LiveGrant {
+                max_attempts: g.max_attempts + 1,
+                ..g.clone()
+            },
+            grant_of(1, LiveStrategies::StrategyC),
+            LiveGrant {
+                sources: vec![SourceId::Drpc],
+                ..g.clone()
+            },
+            LiveGrant {
+                adapters: vec![LiveAdapter::BlockRazorBuilderV1],
+                ..g.clone()
+            },
+            LiveGrant {
+                risk: Some(GrantRisk {
+                    max_gas_price_wei: 1,
+                    ..TEST_RISK
+                }),
+                ..g.clone()
+            },
+            LiveGrant {
+                risk: Some(GrantRisk {
+                    max_exit_slippage_bps: 1,
+                    ..TEST_RISK
+                }),
+                ..g.clone()
+            },
+            LiveGrant {
+                risk: Some(GrantRisk {
+                    max_sell_gas_limit: 1,
+                    ..TEST_RISK
+                }),
+                ..g.clone()
+            },
+        ];
+        for other in others {
+            assert_ne!(other.risk_scope_sha256(), g.risk_scope_sha256());
+        }
     }
 
     /// BSC3-069: a grant names the execution risk the operator confirms:
@@ -6347,7 +6526,7 @@ pub(crate) mod tests {
             max_spend_wei: 21_000,
             ..grant_of(now + 3_600_000, LiveStrategies::C3)
         });
-        let q = qualified();
+        let q = qualified_in(&s);
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let generation = armed.grant_generation();
         let ids: Vec<String> = (0..10u8).map(|n| hex32(&[n; 32])).collect();
@@ -6452,7 +6631,7 @@ pub(crate) mod tests {
             max_attempts: 5,
             ..grant_of(now + 3_600_000, LiveStrategies::C3)
         });
-        let q = qualified();
+        let q = qualified_in(&s);
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let ids: Vec<String> = (0..4u8).map(|n| hex32(&[n; 32])).collect();
         let medium = || MEDIUM.with(|m| std::mem::take(&mut *m.borrow_mut()));
@@ -6686,7 +6865,7 @@ pub(crate) mod tests {
         let at = dir.clone();
         let first = std::thread::spawn(move || {
             let s = Store::open_in_session(&at, 8, Ok("boot-1".into())).unwrap();
-            let q = qualified();
+            let q = qualified_in(&s);
             let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
             // Holds its read until the second admission has run.
             AFTER_SPEND_READ.with(|h| {
@@ -6701,7 +6880,7 @@ pub(crate) mod tests {
         });
         first_read.recv().unwrap();
         let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
-        let q = qualified();
+        let q = qualified_in(&s);
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let ids = [hex32(&[2; 32]), hex32(&[3; 32])];
         let during = s.admit_live(&armed, &nonce_buy(&ids[0], 8, 6_000), &q, now);
@@ -6738,7 +6917,7 @@ pub(crate) mod tests {
         };
         let dir = PathBuf::from(dir);
         let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
-        let q = qualified();
+        let q = qualified_in(&s);
         let now = 1_793_059_200_000;
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let (marker, parent) = (dir.join("child-read"), dir.join("parent-done"));
@@ -6792,7 +6971,7 @@ pub(crate) mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let q = qualified();
+        let q = qualified_in(&s);
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let ids = [hex32(&[2; 32]), hex32(&[3; 32])];
         let during = s.admit_live(&armed, &nonce_buy(&ids[0], 8, 6_000), &q, now);

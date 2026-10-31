@@ -203,7 +203,8 @@ pub struct Census {
 }
 
 /// The venues of the G0.4 criteria, in [`Census::criteria_inputs`] order.
-pub const CRITERIA_VENUES: [&str; 3] = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
+pub const CRITERIA_VENUES: [&str; 3] =
+    darkbot_bsc_record::schema::bsc_census::verdict::RATED_VENUES;
 
 /// One venue's G0.4 criteria inputs (order V2 §8, `bsc/config/g04_criteria.env`):
 /// its launches while a source was connected (`connected`), those of them in

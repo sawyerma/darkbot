@@ -102,10 +102,12 @@ fn filled(s: &'static Schema) -> Draft {
 const BUYER_SECRET: [u8; 32] = [0x44; 32];
 
 /// Synthetic typed evidence under `root`/`ev` (BSC3-049): the G0.1 freeze
-/// of the pinned deployment, a G0.7 attempt of the synthetic buyer of that
-/// deployment sent through Club48, its G0.8 result of `verdict`, and one
+/// of the pinned deployment, a G0.4 verdict `CONTINUE` in whose census
+/// PublicNode delivered first, a G0.7 attempt of the synthetic buyer of
+/// that deployment accepted by Club48, its G0.8 result of `verdict`, and one
 /// measurement of no particular role.
 fn write_evidence(root: &Path, ev: &str, verdict: &str) {
+    use darkbot_bsc_record::schema::bsc_census::{census, verdict as gv};
     use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
     use darkbot_bsc_record::schema::{bsc_runtime, g06a, g07, g08};
     fs::create_dir_all(root.join(ev)).unwrap();
@@ -127,6 +129,18 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
         .set(ff::PIN_RECHECKED, true)
         .set(ff::UPGRADE_CHECK, upgrade.into_nested());
     fs::write(root.join(ev).join("freeze.dbrec"), f.encode().unwrap()).unwrap();
+    let mut flap = filled(&gv::venue::SCHEMA);
+    flap.set(gv::venue::VENUE, gv::RATED_VENUES[0])
+        .set(gv::venue::VERDICT, gv::CONTINUE);
+    let mut publicnode = filled(&census::source::SCHEMA);
+    publicnode.set(census::source::SOURCE_ID, "BSC_INGRESS_PUBLICNODE");
+    let mut g04 = filled(&gv::SCHEMA);
+    g04.set(gv::CRITERIA_STATE, gv::CONFIRMED)
+        .set(gv::VERDICT, gv::CONTINUE)
+        .set(gv::PRECOMMIT_SHA256, Value::B256([3; 32]))
+        .push(gv::VENUES, flap.into_nested())
+        .push(gv::SOURCES, publicnode.into_nested());
+    fs::write(root.join(ev).join("g04.dbrec"), g04.encode().unwrap()).unwrap();
     let buyer = Signer::from_secret_bytes(&BUYER_SECRET)
         .unwrap()
         .address()
@@ -269,7 +283,7 @@ FEATURE:POSITION_FIRST,FEATURE:MAX_BLOCK_NUMBER,MODE:SINGLE_RAW,SEND_TIME";
 
 /// The LIVE qualification of the synthetic scope, through the CLI.
 fn qualify(root: &Path) {
-    qualify_in(root, "ev");
+    qualify_in(root, "ev", E2E_SCOPE);
 }
 
 /// BSC3-012: the build a qualification names: the browser E2E's runtime
@@ -284,12 +298,25 @@ fn qualified_build() -> String {
     })
 }
 
-fn qualify_in(root: &Path, ev: &str) {
-    let measure = format!("{ev}/measure.dbrec");
-    let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{measure}");
+fn qualify_in(root: &Path, ev: &str, (strategies, attempts): (&str, &str)) {
+    let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{ev}/g07.dbrec");
     let venue = format!("BSC_VENUE_FLAP@{ev}/freeze.dbrec");
-    let source = format!("BSC_INGRESS_PUBLICNODE@{measure}");
+    let source = format!("BSC_INGRESS_PUBLICNODE@{ev}/g04.dbrec");
     let g08 = format!("{ev}/g08.dbrec@{ev}/g07.dbrec");
+    let risk = format!("{ev}/g08.dbrec");
+    // BSC3-049: the risk is decided for the grant scope [`activate`] grants
+    // (its validity aside).
+    let (code, out) = cli(&[
+        &["live", "scope"][..],
+        &scope_args(strategies, attempts, "1"),
+    ]
+    .concat());
+    assert_eq!(code, 0, "{out}");
+    let risk_scope = out
+        .lines()
+        .find_map(|l| l.strip_prefix("risk_scope_sha256="))
+        .unwrap()
+        .to_string();
     let root_s = root.to_str().unwrap();
     let (code, out) = cli(&[
         "live",
@@ -310,8 +337,10 @@ fn qualify_in(root: &Path, ev: &str) {
         "operator",
         "--risk-statement",
         "synthetic non-sending E2E scope",
+        "--risk-scope-sha256",
+        &risk_scope,
         "--risk-evidence",
-        &measure,
+        &risk,
     ]);
     assert_eq!(code, 0, "{out}");
 }
@@ -329,7 +358,49 @@ fn write_synthetic_qualification_for_the_browser_e2e() {
     };
     let root = PathBuf::from(root);
     write_evidence(&root, "bsc/config/live_synthetic", "PASS");
-    qualify_in(&root, "bsc/config/live_synthetic");
+    qualify_in(&root, "bsc/config/live_synthetic", BROWSER_SCOPE);
+}
+
+/// The strategies and BUY attempts of this test's grant ([`activate`]).
+const E2E_SCOPE: (&str, &str) = ("C3+STRATEGY_C", "2");
+/// Those the browser E2E grants (`ops/tests/bsc_control_browser.mjs`: the
+/// grant form's default strategies, one attempt; the rest as here).
+const BROWSER_SCOPE: (&str, &str) = ("C3", "1");
+
+/// The synthetic LIVE grant's scope arguments with `strategies` and
+/// `attempts`, valid until `expires`.
+fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [&'a str; 28] {
+    [
+        "--venue",
+        "BSC_VENUE_FLAP",
+        "--strategies",
+        strategies,
+        "--sources",
+        "BSC_INGRESS_PUBLICNODE",
+        "--adapters",
+        "CLUB48_BUILDER_V1",
+        "--max-input-wei",
+        "2000000000000000",
+        "--max-spend-wei",
+        "50000000000000000",
+        "--max-attempts",
+        attempts,
+        "--expires-unix-ms",
+        expires,
+        // BSC3-069: the execution risk, exactly the executor's.
+        "--max-buy-slippage-bps",
+        "100",
+        "--max-exit-slippage-bps",
+        "100",
+        "--max-gas-price-wei",
+        "50000000",
+        "--max-buy-gas-limit",
+        "3000000",
+        "--max-approve-gas-limit",
+        "100000",
+        "--max-sell-gas-limit",
+        "1500000",
+    ]
 }
 
 /// Activates the isolated owner `state` through the CLI, leaving out the
@@ -380,37 +451,7 @@ fn activate(state: &Path, skip: &[&str], expires: u64) {
         }
         if id == "GRANT" {
             let expires = expires.to_string();
-            let scope = [
-                "--venue",
-                "BSC_VENUE_FLAP",
-                "--strategies",
-                "C3+STRATEGY_C",
-                "--sources",
-                "BSC_INGRESS_PUBLICNODE",
-                "--adapters",
-                "CLUB48_BUILDER_V1",
-                "--max-input-wei",
-                "2000000000000000",
-                "--max-spend-wei",
-                "50000000000000000",
-                "--max-attempts",
-                "2",
-                "--expires-unix-ms",
-                &expires,
-                // BSC3-069: the execution risk, exactly the executor's.
-                "--max-buy-slippage-bps",
-                "100",
-                "--max-exit-slippage-bps",
-                "100",
-                "--max-gas-price-wei",
-                "50000000",
-                "--max-buy-gas-limit",
-                "3000000",
-                "--max-approve-gas-limit",
-                "100000",
-                "--max-sell-gas-limit",
-                "1500000",
-            ];
+            let scope = scope_args(E2E_SCOPE.0, E2E_SCOPE.1, &expires);
             let (code, out) = cli(&[&["live", "scope"][..], &scope].concat());
             assert_eq!(code, 0, "{out}");
             let sha = out
@@ -1055,7 +1096,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     assert_eq!(status(&unqualified).0, "BLOCKED");
     let tampered = evidence_root("tampered", "PASS");
     qualify(&tampered);
-    fs::write(tampered.join("ev/measure.dbrec"), b"changed").unwrap();
+    fs::write(tampered.join("ev/g04.dbrec"), b"changed").unwrap();
     let mut invalid = runtime(
         &key,
         buyer,
@@ -1084,7 +1125,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     assert!(!poor.armed());
     // A G0.8 result that is not a PASS qualifies nothing.
     let adapt = evidence_root("adapt", "ADAPT");
-    let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@ev/measure.dbrec");
+    let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@ev/g07.dbrec");
     let (code, out) = cli(&[
         "live",
         "qualify",
@@ -1101,6 +1142,22 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         code != 0 && out.contains("not an acquisition PASS"),
         "{out}"
     );
+    // BSC3-049: a risk decision names the grant risk scope it is made for.
+    let (code, out) = cli(&[
+        "live",
+        "qualify",
+        "--root",
+        adapt.to_str().unwrap(),
+        "--runtime-binary",
+        &qualified_build(),
+        "--risk-by",
+        "operator",
+        "--risk-statement",
+        "synthetic",
+        "--risk-evidence",
+        "ev/g08.dbrec",
+    ]);
+    assert!(code != 0 && out.contains("--risk-scope-sha256"), "{out}");
     // A launch first seen by a source the grant does not name never trades.
     let mut armed = runtime(
         &key,
