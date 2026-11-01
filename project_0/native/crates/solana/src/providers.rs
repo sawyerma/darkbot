@@ -307,6 +307,16 @@ impl ProviderDescriptor {
         if AuthKind::parse(&self.auth.text())? != self.auth {
             return Err("PROVIDER_AUTH_NAME ([A-Za-z0-9_-]{1,64})".into());
         }
+        // A Geyser provider is a Yellowstone gRPC source: none or the protocol's token header.
+        let yellowstone = crate::ingress::sources::YELLOWSTONE_TOKEN_HEADER;
+        if self.kind == ProviderKind::Geyser
+            && !matches!(&self.auth, AuthKind::None)
+            && self.auth != AuthKind::Header(yellowstone.into())
+        {
+            return Err(format!(
+                "PROVIDER_AUTH_UNSUPPORTED: a Geyser provider authenticates by header:{yellowstone} or none"
+            ));
+        }
         if self.qualification.as_ref().is_some_and(|q| !nonce_ok(q)) {
             return Err("PROVIDER_QUALIFICATION_INVALID".into());
         }
@@ -587,6 +597,11 @@ impl ProviderRegistry {
         }
         let mut kinds = std::collections::BTreeSet::new();
         for (kind, id) in &self.selected {
+            // The Geyser source unit names its provider (`source-geyser-provider`, S1-02): a
+            // selection of the kind would be a second authority.
+            if *kind == ProviderKind::Geyser {
+                return Err("PROVIDER_SELECTION_GEYSER: the Geyser source unit names its provider (source-geyser-provider)".into());
+            }
             if !kinds.insert(*kind) {
                 return Err(format!("PROVIDER_SELECTION_DUPLICATE: {}", kind.name()));
             }
@@ -1358,6 +1373,27 @@ mod tests {
             .validate()
             .unwrap_err()
             .starts_with("PROVIDER_SELECTION_DISABLED"));
+        // A Geyser provider authenticates by the Yellowstone token header or not at all; the
+        // Geyser source unit names its provider, so the registry selects none of the kind.
+        let mut geyser = helius();
+        (geyser.id, geyser.kind) = ("geyser".into(), ProviderKind::Geyser);
+        geyser.auth = AuthKind::Query("token".into());
+        assert!(geyser
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_AUTH_UNSUPPORTED"));
+        geyser.auth = AuthKind::Header("x-token".into());
+        assert!(geyser.validate().is_ok());
+        let mut selects_geyser = r.clone();
+        selects_geyser.providers[0].enabled = true;
+        selects_geyser.providers.push(geyser);
+        selects_geyser
+            .selected
+            .push((ProviderKind::Geyser, "geyser".into()));
+        assert!(selects_geyser
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_SELECTION_GEYSER"));
         let mut bad = r.clone();
         bad.uid = String::new();
         assert_eq!(bad.validate().unwrap_err(), "PROVIDER_REGISTRY_UID_INVALID");

@@ -223,8 +223,16 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         })
     };
     if mode == "econ4h" {
-        if let Ok(record) = &admission {
-            admitted(record).map_err(OperationalConfigError)?;
+        // A configuration drifted since the admission is an admission refusal (the refused run
+        // keeps its local manifest, like every other).
+        let admission = admission.and_then(|record| match admitted(&record) {
+            Ok(()) => Ok(record),
+            Err(e) => {
+                crate::console::line(format!("BOOT admission refused: {e}"));
+                Err("BOOT_IDENTITY_DRIFT")
+            }
+        });
+        if admission.is_ok() {
             credentials(&bound_registry).map_err(OperationalConfigError)?;
         }
         let code = admission.as_ref().err().copied();
