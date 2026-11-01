@@ -70,6 +70,12 @@ solana-short-vec-v1 = { package = "solana-short-vec", version = "=3.2.2", option
 async-trait = "0.1"
 time = { version = "0.3", features = ["parsing"] }
 
+# DEC-18: provider credentials in the macOS keychain (generic passwords of one service). The crate
+# is already in the graph at this version (rustls-native-certs, rustls-platform-verifier): no new
+# crate, no new trust boundary beyond the user's login keychain the decision names.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "=3.7.0", default-features = false }
+
 [dev-dependencies]
 
 [[bin]]

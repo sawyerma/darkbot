@@ -1114,6 +1114,7 @@ dependencies = [
  "http 1.5.0",
  "prost",
  "reqwest",
+ "security-framework",
  "serde",
  "serde_json",
  "solana-account-decoder",

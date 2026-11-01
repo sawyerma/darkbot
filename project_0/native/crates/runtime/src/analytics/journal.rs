@@ -214,6 +214,13 @@ pub mod kind {
     /// P8-CTRL.3: one previewed FE-06 scope, a sealed single-value journal
     /// `data/fe06/scope_<digest>.p0j`.
     pub const FE06_SCOPE: u16 = 1105;
+    /// DEC-18: one committed version of the provider registry
+    /// (`orchestration::provider_registry::ProviderRegistryRecord`), a sealed single-value journal
+    /// `data/providers/registry_<version>.p0j`.
+    pub const PROVIDER_REGISTRY: u16 = 1106;
+    /// DEC-18: the redacted receipt of one provider request, a sealed single-value journal
+    /// `data/providers/receipt_<request_id>.p0j`.
+    pub const PROVIDER_RECEIPT: u16 = 1107;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -303,6 +310,8 @@ pub mod kind {
         CAPABILITY_CONTROL_OUTCOME,
         CAPABILITY_OWNER_EPOCH,
         FE06_SCOPE,
+        PROVIDER_REGISTRY,
+        PROVIDER_RECEIPT,
         super::MANIFEST,
     ];
 }
@@ -334,6 +343,8 @@ pub mod source {
     pub const BOOT_CONTROL: u32 = 16;
     /// DEC-16: the unbounded-run controller (qualifications, rolling windows).
     pub const UNTIL_STOPPED: u32 = 17;
+    /// DEC-18: the provider registry (`p0ctl provider …`).
+    pub const PROVIDER_CONTROL: u32 = 18;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

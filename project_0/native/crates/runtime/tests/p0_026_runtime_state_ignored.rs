@@ -5,8 +5,8 @@
 use darkbot_runner::analytics::{backtest, h0, jobs};
 use darkbot_runner::execution::fee_parity;
 use darkbot_runner::orchestration::{
-    boot_control, capability_control, control, fe06, provider_evidence, source_control,
-    until_stopped,
+    boot_control, capability_control, control, fe06, provider_evidence, provider_registry,
+    source_control, until_stopped,
 };
 use std::path::{Path, PathBuf};
 
@@ -28,6 +28,7 @@ fn p0_026_every_runtime_state_directory_of_a_project_is_ignored() {
     let dirs: Vec<PathBuf> = vec![
         boot_control::BOOT_DIR.into(),
         provider_evidence::STORE.into(),
+        provider_registry::STORE.into(),
         until_stopped::STORE.into(),
         fe06::STORE.into(),
         jobs::JOB_DIR.into(),

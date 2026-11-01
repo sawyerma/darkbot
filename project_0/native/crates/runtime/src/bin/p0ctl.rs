@@ -34,6 +34,7 @@
 //! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
+//! p0ctl [--project DIR] provider status|add|update|remove|enable|disable|priority|select|unselect|qualify|credential … (DEC-18: the provider registry)
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fee-parity [--seal]   (P6-MT.10: the local fee model's parity per class over every saved run; --seal: sealed as what an owner's ACTIVE rests on)
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
@@ -2007,6 +2008,345 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
+const PROVIDER_USAGE: &str = "usage: p0ctl provider status
+  | p0ctl provider add|update --id ID [--kind rpc|wss|geyser|jupiter|jito] [--endpoint URL] [--plan free|unknown] [--entitlement NAME] [--auth none|query:NAME|header:NAME] [--credential CID] [--priority N] [--capacity-rps N] [--disabled]
+  | p0ctl provider remove|enable|disable --id ID | p0ctl provider priority --id ID --priority N
+  | p0ctl provider select --kind KIND --id ID | p0ctl provider unselect --kind KIND | p0ctl provider qualify --id ID --evidence RECORD_ID|-
+  | p0ctl provider credential set|rotate --credential CID   (the secret from a hidden prompt or the standard input, never an argument)
+  | p0ctl provider credential revoke --credential CID
+  | p0ctl provider credential import-env --credential CID --variable NAME [--env-file FILE]   (the one-time import of an existing .env key)
+  every change: [--request-id ID] [--expect-version N]; effective at the next controlled start (DEC-05)";
+
+/// The value of `flag` once at most among `allowed` flags; any other flag is refused (a secret is
+/// never a flag).
+fn provider_options(
+    args: &[String],
+    allowed: &[&str],
+    switches: &[&str],
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        if switches.contains(&flag.as_str()) {
+            if out.insert(flag.clone(), String::new()).is_some() {
+                return Err(format!("{flag} given twice\n{PROVIDER_USAGE}"));
+            }
+            continue;
+        }
+        if !allowed.contains(&flag.as_str()) {
+            return Err(format!("PROVIDER_OPTION_UNKNOWN: {flag}\n{PROVIDER_USAGE}"));
+        }
+        let value = it
+            .next()
+            .filter(|v| !v.starts_with("--"))
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        if out.insert(flag.clone(), value.clone()).is_some() {
+            return Err(format!("{flag} given twice\n{PROVIDER_USAGE}"));
+        }
+    }
+    Ok(out)
+}
+
+/// DEC-18: a credential's secret, never an argument: from a hidden prompt (no echo) on a
+/// terminal, else the whole standard input (the gateway's pipe); one trailing line break is not
+/// part of it; bounded.
+fn read_secret() -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String> {
+    use darkbot_runner::orchestration::provider_registry::SECRET_LIMIT;
+    use darkbot_solana::providers::Zeroizing;
+    use std::io::{BufRead, Read};
+    // SAFETY: isatty on the process's standard input descriptor.
+    let tty = unsafe { libc::isatty(0) } == 1;
+    let mut secret = Zeroizing::new(Vec::new());
+    if tty {
+        // SAFETY: termios of fd 0, read and restored around one line.
+        let mut old: libc::termios = unsafe { std::mem::zeroed() };
+        if unsafe { libc::tcgetattr(0, &mut old) } != 0 {
+            return Err("CREDENTIAL_INPUT_TERMINAL".into());
+        }
+        let mut quiet = old;
+        quiet.c_lflag &= !libc::ECHO;
+        eprint!("credential (input hidden): ");
+        if unsafe { libc::tcsetattr(0, libc::TCSANOW, &quiet) } != 0 {
+            return Err("CREDENTIAL_INPUT_TERMINAL".into());
+        }
+        let mut line = Zeroizing::new(String::new());
+        let read = std::io::stdin().lock().read_line(&mut line);
+        unsafe { libc::tcsetattr(0, libc::TCSANOW, &old) };
+        eprintln!();
+        read.map_err(|_| "CREDENTIAL_INPUT_READ")?;
+        secret.extend_from_slice(line.as_bytes());
+    } else {
+        std::io::stdin()
+            .lock()
+            .take(SECRET_LIMIT as u64 + 3)
+            .read_to_end(&mut secret)
+            .map_err(|_| "CREDENTIAL_INPUT_READ")?;
+    }
+    for ending in [&b"\r\n"[..], b"\n"] {
+        if secret.ends_with(ending) {
+            let n = secret.len() - ending.len();
+            secret.truncate(n);
+            break;
+        }
+    }
+    Ok(secret)
+}
+
+/// DEC-18: the provider registry — decided here, staged (a runtime takes the version current at
+/// its start), every change under a one-time request id with an optional expected version and a
+/// durable redacted receipt; a credential's secret goes to the macOS keychain, never into a
+/// record, an argument or a log.
+fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::provider_registry as reg;
+    use darkbot_solana::providers::{
+        canonical_endpoint, AuthKind, Plan, ProviderDescriptor, ProviderKind,
+    };
+    use reg::ProviderAction as A;
+    const CHANGE: [&str; 2] = ["--request-id", "--expect-version"];
+    let with = |extra: &[&'static str]| -> Vec<&'static str> {
+        CHANGE
+            .iter()
+            .copied()
+            .chain(extra.iter().copied())
+            .collect()
+    };
+    let (verb, rest) = match args {
+        [verb, rest @ ..] => (verb.as_str(), rest),
+        [] => return Err(PROVIDER_USAGE.into()),
+    };
+    if verb == "status" {
+        if !rest.is_empty() {
+            return Err(PROVIDER_USAGE.into());
+        }
+        for line in reg::status_lines(&reg::current(project)?) {
+            println!("{line}");
+        }
+        println!("PROVIDER_EFFECTIVE: a change takes effect at the next controlled start (DEC-05)");
+        return Ok(true);
+    }
+    let need =
+        |o: &std::collections::BTreeMap<String, String>, f: &str| -> Result<String, String> {
+            o.get(f)
+                .cloned()
+                .ok_or_else(|| format!("{f} required\n{PROVIDER_USAGE}"))
+        };
+    let number = |v: &str, f: &str| -> Result<u64, String> {
+        v.parse::<u64>()
+            .map_err(|_| format!("PROVIDER_NUMBER_INVALID: {f} {v}"))
+    };
+    let current = reg::current(project)?;
+    let (action, opts, secret) = match (verb, rest) {
+        ("add" | "update", _) => {
+            let o = provider_options(
+                rest,
+                &with(&[
+                    "--id",
+                    "--kind",
+                    "--endpoint",
+                    "--plan",
+                    "--entitlement",
+                    "--auth",
+                    "--credential",
+                    "--priority",
+                    "--capacity-rps",
+                ]),
+                &["--disabled"],
+            )?;
+            let id = need(&o, "--id")?;
+            let base = match (verb, current.provider(&id)) {
+                ("update", Some(p)) => p.clone(),
+                ("update", None) => return Err(format!("PROVIDER_UNKNOWN: {id}")),
+                _ => {
+                    let kind = ProviderKind::parse(&need(&o, "--kind")?)?;
+                    ProviderDescriptor {
+                        id: id.clone(),
+                        kind,
+                        endpoint: canonical_endpoint(kind, &need(&o, "--endpoint")?)?,
+                        auth: AuthKind::None,
+                        credential: None,
+                        priority: 0,
+                        capacity_rps: None,
+                        plan: Plan::parse(&need(&o, "--plan")?)?,
+                        entitlement: need(&o, "--entitlement")?,
+                        qualification: None,
+                        enabled: true,
+                    }
+                }
+            };
+            let mut p = base;
+            if verb == "update" && o.contains_key("--kind") {
+                return Err(
+                    "PROVIDER_KIND_IMMUTABLE: remove and add a provider of another kind".into(),
+                );
+            }
+            if let Some(v) = o.get("--endpoint") {
+                p.endpoint = canonical_endpoint(p.kind, v)?;
+            }
+            if let Some(v) = o.get("--plan") {
+                p.plan = Plan::parse(v)?;
+            }
+            if let Some(v) = o.get("--entitlement") {
+                p.entitlement = v.clone();
+            }
+            if let Some(v) = o.get("--auth") {
+                p.auth = AuthKind::parse(v)?;
+                if p.auth == AuthKind::None {
+                    p.credential = None;
+                }
+            }
+            if let Some(v) = o.get("--credential") {
+                p.credential = Some(v.clone());
+            }
+            if let Some(v) = o.get("--priority") {
+                p.priority = u32::try_from(number(v, "--priority")?)
+                    .map_err(|_| "PROVIDER_NUMBER_INVALID: --priority")?;
+            }
+            if let Some(v) = o.get("--capacity-rps") {
+                p.capacity_rps = Some(number(v, "--capacity-rps")?);
+            }
+            if o.contains_key("--disabled") {
+                p.enabled = false;
+            }
+            let action = if verb == "add" {
+                A::Add(p)
+            } else {
+                A::Update(p)
+            };
+            (action, o, None)
+        }
+        ("remove" | "enable" | "disable", _) => {
+            let o = provider_options(rest, &with(&["--id"]), &[])?;
+            let id = need(&o, "--id")?;
+            let action = match verb {
+                "remove" => A::Remove(id),
+                "enable" => A::Enable(id),
+                _ => A::Disable(id),
+            };
+            (action, o, None)
+        }
+        ("priority", _) => {
+            let o = provider_options(rest, &with(&["--id", "--priority"]), &[])?;
+            let n = u32::try_from(number(&need(&o, "--priority")?, "--priority")?)
+                .map_err(|_| "PROVIDER_NUMBER_INVALID: --priority")?;
+            (A::Priority(need(&o, "--id")?, n), o, None)
+        }
+        ("select", _) => {
+            let o = provider_options(rest, &with(&["--kind", "--id"]), &[])?;
+            let kind = ProviderKind::parse(&need(&o, "--kind")?)?;
+            (A::Select(kind, need(&o, "--id")?), o, None)
+        }
+        ("unselect", _) => {
+            let o = provider_options(rest, &with(&["--kind"]), &[])?;
+            (
+                A::Unselect(ProviderKind::parse(&need(&o, "--kind")?)?),
+                o,
+                None,
+            )
+        }
+        ("qualify", _) => {
+            let o = provider_options(rest, &with(&["--id", "--evidence"]), &[])?;
+            let evidence = need(&o, "--evidence")?;
+            let evidence = (evidence != "-").then_some(evidence);
+            if let Some(e) = &evidence {
+                darkbot_runner::orchestration::provider_evidence::resolve(project, e)?;
+            }
+            (A::Qualify(need(&o, "--id")?, evidence), o, None)
+        }
+        ("credential", [sub, more @ ..]) => match sub.as_str() {
+            "set" | "rotate" => {
+                let o = provider_options(more, &with(&["--credential"]), &[])?;
+                let credential = need(&o, "--credential")?;
+                let action = if sub == "set" {
+                    A::CredentialSet {
+                        credential,
+                        origin: "input".into(),
+                    }
+                } else {
+                    A::CredentialRotate(credential)
+                };
+                (action, o, Some(read_secret()?))
+            }
+            "revoke" => {
+                let o = provider_options(more, &with(&["--credential"]), &[])?;
+                (A::CredentialRevoke(need(&o, "--credential")?), o, None)
+            }
+            "import-env" => {
+                let o = provider_options(
+                    more,
+                    &with(&["--credential", "--variable", "--env-file"]),
+                    &[],
+                )?;
+                let credential = need(&o, "--credential")?;
+                let variable = need(&o, "--variable")?;
+                let origin = format!("env:{variable}");
+                // The one-time migration: never over an existing credential, never twice.
+                if current.credential(&credential).is_some() {
+                    return Err(format!("CREDENTIAL_EXISTS: {credential} (import is the one-time migration; use set or rotate)"));
+                }
+                if current.credentials.iter().any(|c| c.origin == origin) {
+                    return Err(format!(
+                        "CREDENTIAL_ENV_IMPORTED: {variable} was imported already"
+                    ));
+                }
+                let file = match o.get("--env-file") {
+                    Some(f) => PathBuf::from(f),
+                    None => std::env::var("P0_ENV_FILE")
+                        .ok()
+                        .and_then(|l| l.split(':').next().map(PathBuf::from))
+                        .unwrap_or_else(|| project.join(".env")),
+                };
+                let text = darkbot_solana::providers::Zeroizing::new(
+                    std::fs::read_to_string(&file)
+                        .map_err(|e| format!("CREDENTIAL_ENV_FILE: {}: {e}", file.display()))?,
+                );
+                let pairs = darkbot_runner::env_file::parse(&text)
+                    .map_err(|e| format!("CREDENTIAL_ENV_FILE: {}: {e}", file.display()))?;
+                let secret = pairs
+                    .into_iter()
+                    .find(|(k, _)| *k == variable)
+                    .map(|(_, v)| darkbot_solana::providers::Zeroizing::new(v.into_bytes()))
+                    .ok_or_else(|| {
+                        format!(
+                            "CREDENTIAL_ENV_VARIABLE: {variable} not in {}",
+                            file.display()
+                        )
+                    })?;
+                (A::CredentialSet { credential, origin }, o, Some(secret))
+            }
+            _ => return Err(PROVIDER_USAGE.into()),
+        },
+        _ => return Err(PROVIDER_USAGE.into()),
+    };
+    let request_id = match opts.get("--request-id") {
+        Some(id) => id.clone(),
+        None => darkbot_runner::analytics::jobs::new_id()?,
+    };
+    let expected = opts
+        .get("--expect-version")
+        .map(|v| number(v, "--expect-version"))
+        .transpose()?;
+    let store: Box<dyn darkbot_solana::providers::CredentialStore> =
+        if reg::touches_credentials(&action) {
+            darkbot_solana::providers::system_store()?
+        } else {
+            Box::new(reg::NoCredentialStore)
+        };
+    let r = reg::decide(
+        project,
+        &request_id,
+        expected,
+        &action,
+        secret.as_deref().map(|s| &s[..]),
+        store.as_ref(),
+        unix_now()?,
+    )?;
+    println!(
+        "PROVIDER_RECEIPT request_id={} applied={} version={} action=\"{}\" detail=\"{}\"",
+        r.request_id, r.applied, r.version, r.action, r.detail
+    );
+    Ok(r.applied)
+}
+
 const CAPABILITY_USAGE: &str =
     "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
 
@@ -2796,6 +3136,7 @@ fn main() -> ExitCode {
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("capability"), _) => capability_cmd(&project, &rest),
+            (Some("provider"), _) => provider_cmd(&project, &rest),
             (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),
@@ -2811,7 +3152,7 @@ fn main() -> ExitCode {
             (Some("fee-parity"), Some("--seal")) if rest.len() == 1 => {
                 fee_parity_cmd(&project, true)
             }
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04|fee-parity …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|provider|live|boot|horizon|autostart|backtest|optimize|job|profiles|approval|fe04|fee-parity …".into()),
         }
     });
     match result {
