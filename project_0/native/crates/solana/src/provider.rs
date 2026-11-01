@@ -1772,7 +1772,15 @@ mod http_tests {
                         let n = match c.read(&mut b) {
                             Ok(0) => return,
                             Ok(n) => n,
-                            Err(_) => continue,
+                            Err(e)
+                                if matches!(
+                                    e.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                continue
+                            }
+                            Err(_) => return,
                         };
                         data.extend_from_slice(&b[..n]);
                         while let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
@@ -1789,7 +1797,9 @@ mod http_tests {
                             }
                             data.drain(..end + 4 + len);
                             served.fetch_add(1, Ordering::AcqRel);
-                            c.write_all(reply.as_bytes()).unwrap();
+                            if c.write_all(reply.as_bytes()).is_err() {
+                                return;
+                            }
                         }
                     }
                 }));
@@ -1803,19 +1813,33 @@ mod http_tests {
         (url, t)
     }
     /// P6-MT.14 #14: the shared HTTP client (the process's one RPC transport, one connection
-    /// pool per host) does not change a request's mapping. Clients of two endpoints and two
-    /// workloads call interleaved from four threads over the same transport: every answer is its
-    /// own endpoint's, each endpoint served exactly its clients' requests, and the pool kept its
-    /// connections alive (fewer connections than requests) — shared, never crossed.
+    /// pool per host) does not change a request's mapping. Two endpoints, both named by the
+    /// fallback configuration, and two workloads, called interleaved from four threads with a
+    /// fresh client per call: every answer is its own endpoint's (only the primary's requests
+    /// may move to a fallback), each endpoint served exactly its clients' requests, and fewer
+    /// connections than requests were opened — only the process's one pool keeps them across
+    /// clients: shared, never crossed.
     #[test]
-    fn p6_mt14_the_shared_http_client_keeps_every_request_on_its_endpoint() {
+    fn p6_mt14_14_the_shared_http_client_keeps_every_request_on_its_endpoint() {
         use std::sync::atomic::Ordering;
+        /// The servers stop however the test ends (a panicking caller included).
+        struct StopOnDrop(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for StopOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
         const THREADS: u64 = 4;
         const CALLS: u64 = 25;
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let guard = StopOnDrop(stop.clone());
         let (a_url, a) = keepalive_server(1, stop.clone());
         let (b_url, b) = keepalive_server(2, stop.clone());
-        let mut config = crate::runtime_config::RuntimeConfig::default();
+        let mut config = crate::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![a_url.clone(), b_url.clone()],
+            fallback: true,
+            ..Default::default()
+        };
         config.limits.rpc_rps = 10_000;
         config.limits.rpc_burst = 10_000;
         config.limits.hotpath_rps = 10_000;
@@ -1825,19 +1849,19 @@ mod http_tests {
             .map(|i| {
                 let (a_url, b_url, budget) = (a_url.clone(), b_url.clone(), budget.clone());
                 std::thread::spawn(move || {
-                    let client = |url: String, work| {
-                        rpc_client_with(
-                            url,
+                    for n in 0..CALLS {
+                        let (url, work, expected) = if (n + i) % 2 == 0 {
+                            (&a_url, Workload::LiveRead, 1)
+                        } else {
+                            (&b_url, Workload::Bootstrap, 2)
+                        };
+                        let rpc = rpc_client_with(
+                            url.clone(),
                             Duration::from_secs(2),
                             CommitmentConfig::processed(),
                             work,
                             budget.clone(),
-                        )
-                    };
-                    let a = client(a_url, Workload::LiveRead);
-                    let b = client(b_url, Workload::Bootstrap);
-                    for n in 0..CALLS {
-                        let (rpc, expected) = if (n + i) % 2 == 0 { (&a, 1) } else { (&b, 2) };
+                        );
                         assert_eq!(rpc.get_slot().unwrap(), expected, "thread {i} call {n}");
                     }
                 })
@@ -1846,7 +1870,7 @@ mod http_tests {
         for c in callers {
             c.join().unwrap();
         }
-        stop.store(true, Ordering::Release);
+        drop(guard);
         let ((a_served, a_opened), (b_served, b_opened)) = (a.join().unwrap(), b.join().unwrap());
         let each = THREADS * CALLS / 2;
         assert_eq!(

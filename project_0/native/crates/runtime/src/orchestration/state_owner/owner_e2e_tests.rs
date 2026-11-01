@@ -3420,7 +3420,7 @@ fn p2_accounts(
 /// maintenance threshold is a threshold-index hit and promotes it to L0, its first receive time
 /// kept — fails if the hit were admitted as a re-check.
 #[test]
-fn p6_mt14_a_threshold_crossing_raises_an_account_to_l0() {
+fn p6_mt14_29_a_threshold_crossing_raises_an_account_to_l0() {
     use super::candidates::Lane;
     use marginfi_type_crate::types::{Bank, OracleSetup};
     use std::str::FromStr;
@@ -3529,14 +3529,16 @@ fn p6_mt14_a_threshold_crossing_raises_an_account_to_l0() {
     cleanup(f);
 }
 
-/// P6-MT.14 #4 on the wired path: older pending revisions create no full remote work. A full
-/// candidate's evaluation asks the node its fee quotes and one simulation (`one`). Three newer
-/// revisions of it wait coalesced in its lane: the one detection that takes the entry asks
-/// exactly `one` again and nothing is left to evaluate. While a candidate owns the account, two
-/// more revisions ask the node nothing; the owner's release re-arms only the newest, whose one
-/// evaluation asks `one` once more — fails if a revision were evaluated on its own.
+/// P6-MT.14 #4 on the wired path (lane triggers): older pending revisions create no full remote
+/// work. A full candidate's evaluation asks the node its fee quotes and one simulation (`one`).
+/// Three newer revisions of it wait coalesced in its lane: the one detection that takes the
+/// entry asks exactly `one` again and nothing is left to evaluate. While a candidate owns the
+/// account, two more revisions are each deferred — the ownership table keeps the newest — and
+/// ask the node nothing; the owner's release re-arms only the newest, whose one evaluation asks
+/// `one` once more — fails if a revision were evaluated on its own. (A direct account update is
+/// detected at once, the newest state the owner knows then.)
 #[test]
-fn p6_mt14_older_pending_revisions_create_no_remote_work() {
+fn p6_mt14_4_older_pending_revisions_create_no_remote_work() {
     let (mut f, target, calls) = dec13b_fixture_with("p6_mt14_4", false, true, 0, None);
     f.owner.ingress_burst_before_detect = usize::MAX;
     let taken = |calls: &Arc<Mutex<Vec<String>>>| std::mem::take(&mut *calls.lock().unwrap());
@@ -3559,31 +3561,47 @@ fn p6_mt14_older_pending_revisions_create_no_remote_work() {
         .unwrap();
     let one = taken(&calls);
     assert!(one.iter().any(|m| m == "simulateTransaction"), "{one:?}");
+    let coalesced = f.owner.metrics.oracle_coalesced;
     for revision in 1..=3 {
         admit(&mut f, revision);
     }
-    assert_eq!(f.owner.oracle_lanes.len(), 1, "coalesced");
+    assert_eq!(f.owner.oracle_lanes.len(), 1);
+    assert_eq!(f.owner.metrics.oracle_coalesced, coalesced + 2, "coalesced");
     let work = next(&mut f);
     assert!(work.is_some());
     f.owner.detect(work).unwrap();
     assert_eq!(taken(&calls), one, "one evaluation for three revisions");
     assert!(next(&mut f).is_none(), "no older revision left to evaluate");
-    // Owned: the revisions are deferred, nothing is asked.
+    // Owned: each revision is deferred, the table keeps the newest, nothing is asked.
     f.owner.ownership.acquire(target, 99).unwrap();
+    let before = f.owner.ownership.stats;
+    let mut newest = None;
     for revision in 4..=5 {
         admit(&mut f, revision);
-    }
-    while let Some(work) = next(&mut f) {
+        let work = next(&mut f).expect("its lane entry");
         assert!(!f.owner.detect(Some(work)).unwrap(), "deferred while owned");
+        newest = Some(work);
     }
+    let s = f.owner.ownership.stats;
+    assert_eq!(
+        (s.deferred - before.deferred, s.coalesced - before.coalesced),
+        (1, 1),
+        "one pending revision"
+    );
+    assert!(next(&mut f).is_none());
     assert_eq!(
         taken(&calls),
         Vec::<String>::new(),
         "no remote work while owned"
     );
     f.owner.release_candidate(target, 99);
+    assert_eq!(
+        f.owner.oracle_lanes.get(&target).map(|e| e.work),
+        newest,
+        "the newest is re-armed"
+    );
     let work = next(&mut f);
-    assert!(work.is_some(), "the newest is re-armed");
+    assert!(work.is_some());
     f.owner.detect(work).unwrap();
     assert_eq!(taken(&calls), one, "one evaluation after the release");
     assert!(next(&mut f).is_none());
