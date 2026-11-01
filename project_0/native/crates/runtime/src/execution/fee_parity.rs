@@ -1292,6 +1292,10 @@ mod phase2_tests {
         running
             .emit(OwnerEvidence::FeeParityStats(Box::new(qualified.clone())))
             .unwrap();
+        // The writer journals asynchronously; its rotation answers once every event emitted
+        // before it is on disk, so the seal holds the run as it was (before: a loaded host sealed
+        // it ahead of that write and found it "wrote after the seal").
+        running.rotate().unwrap().recv().unwrap().unwrap();
         write_seal(&project).unwrap();
         assert!(sealed_classes(&project, None).is_ok());
         running
