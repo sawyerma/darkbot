@@ -72,38 +72,37 @@ fn operating_mode_and_qualification_are_separate() {
 }
 
 /// S1-08 admission with stated reasons: OBSERVE runs with unproven capabilities but needs the
-/// token from the environment; ACTIVE needs every used capability proven; an absent capability,
-/// an exceeded quota, a plaintext remote endpoint or a logs subscription reject in any mode.
+/// provider's credential (DEC-18: the run's installed one of its bound registry provider, never an
+/// environment variable); ACTIVE needs every used capability proven; an absent capability, an
+/// exceeded quota, a plaintext remote endpoint or a logs subscription reject in any mode.
 #[test]
 fn providers_are_admitted_with_reasons() {
-    let p = ProviderConfig::publicnode();
-    let token = |k: &str| (k == "P0_GEYSER_PUBLICNODE_TOKEN").then(|| "t".to_string());
-    let none = |_: &str| None;
-    let empty = |_: &str| Some(" ".to_string());
+    let p = ProviderConfig::yellowstone(&publicnode_bound()).unwrap();
+    let (token, none, empty) = (Some("t"), None, Some(" "));
     let s = Subscription {
         programs: vec![Pubkey::new_unique()],
         slots: true,
         roots: true,
         ..Default::default()
     };
-    assert!(p.rejections(OperatingMode::Observe, &s, &token).is_empty());
-    assert!(p.rejections(OperatingMode::Off, &s, &none).is_empty());
+    assert!(p.rejections(OperatingMode::Observe, &s, token).is_empty());
+    assert!(p.rejections(OperatingMode::Off, &s, none).is_empty());
     assert_eq!(
-        p.rejections(OperatingMode::Observe, &s, &none),
+        p.rejections(OperatingMode::Observe, &s, none),
         ["PROVIDER_AUTH_TOKEN_MISSING"]
     );
     assert_eq!(
-        p.rejections(OperatingMode::Observe, &s, &empty),
+        p.rejections(OperatingMode::Observe, &s, empty),
         ["PROVIDER_AUTH_TOKEN_MISSING"]
     );
     assert_eq!(
-        p.rejections(OperatingMode::Active, &s, &token),
+        p.rejections(OperatingMode::Active, &s, token),
         ["PROVIDER_CAPABILITY_UNPROVEN"]
     );
     let mut absent = p.clone();
     absent.capabilities.slots = Capability::Absent;
     assert_eq!(
-        absent.rejections(OperatingMode::Observe, &s, &token),
+        absent.rejections(OperatingMode::Observe, &s, token),
         ["PROVIDER_CAPABILITY_ABSENT"]
     );
     let mut proven = p.clone();
@@ -115,7 +114,7 @@ fn providers_are_admitted_with_reasons() {
         *c = Capability::Proven;
     }
     assert!(proven
-        .rejections(OperatingMode::Active, &s, &token)
+        .rejections(OperatingMode::Active, &s, token)
         .is_empty());
     let many = Subscription {
         programs: (0..17).map(|_| Pubkey::new_unique()).collect(),
@@ -123,7 +122,7 @@ fn providers_are_admitted_with_reasons() {
         ..Default::default()
     };
     assert_eq!(
-        p.rejections(OperatingMode::Observe, &many, &token),
+        p.rejections(OperatingMode::Observe, &many, token),
         [
             "PROVIDER_LOGS_NOT_A_GEYSER_STREAM",
             "PROVIDER_QUOTA_OWNER_FILTERS"
@@ -133,7 +132,7 @@ fn providers_are_admitted_with_reasons() {
     plaintext.endpoint = "http://solana.publicnode.com".into();
     plaintext.quota.max_streams = 0;
     assert_eq!(
-        plaintext.rejections(OperatingMode::Observe, &s, &token),
+        plaintext.rejections(OperatingMode::Observe, &s, token),
         [
             "PROVIDER_ENDPOINT_OR_TLS_INVALID",
             "PROVIDER_QUOTA_NO_STREAM"
@@ -146,8 +145,8 @@ fn providers_are_admitted_with_reasons() {
 /// another provider builds nothing. No test calls `run` against a remote endpoint.
 #[test]
 fn geyser_source_is_built_only_for_an_admitted_unit() {
-    let p = ProviderConfig::publicnode();
-    let token = |k: &str| (k == "P0_GEYSER_PUBLICNODE_TOKEN").then(|| "t".to_string());
+    let p = ProviderConfig::yellowstone(&publicnode_bound()).unwrap();
+    let token = || Some("t".to_string());
     let s = Subscription {
         slots: true,
         ..Default::default()
@@ -155,11 +154,11 @@ fn geyser_source_is_built_only_for_an_admitted_unit() {
     let control =
         |mode| SourceControl::new(geyser("publicnode"), mode, Qualification::NotRun).unwrap();
     assert!(
-        geyser_source(&control(OperatingMode::Off), &p, s.clone(), &token)
+        geyser_source(&control(OperatingMode::Off), &p, s.clone(), token())
             .unwrap()
             .is_none()
     );
-    let built = geyser_source(&control(OperatingMode::Observe), &p, s.clone(), &token)
+    let built = geyser_source(&control(OperatingMode::Observe), &p, s.clone(), token())
         .unwrap()
         .unwrap();
     assert_eq!(built.config.endpoint, "https://solana.publicnode.com");
@@ -170,7 +169,7 @@ fn geyser_source_is_built_only_for_an_admitted_unit() {
         "token never printed"
     );
     assert_eq!(
-        geyser_source(&control(OperatingMode::Observe), &p, s.clone(), &|_| None).err(),
+        geyser_source(&control(OperatingMode::Observe), &p, s.clone(), None).err(),
         Some(vec!["PROVIDER_AUTH_TOKEN_MISSING"])
     );
     let other = SourceControl::new(
@@ -180,8 +179,19 @@ fn geyser_source_is_built_only_for_an_admitted_unit() {
     )
     .unwrap();
     assert_eq!(
-        geyser_source(&other, &p, s, &token).err(),
+        geyser_source(&other, &p, s, token()).err(),
         Some(vec!["SOURCE_UNIT_PROVIDER_MISMATCH"])
+    );
+    // DEC-18: a Yellowstone provider authenticates by its `x-token` header only, a provider of
+    // another kind is none.
+    let mut bound = publicnode_bound();
+    bound.auth = crate::providers::AuthKind::Query("token".into());
+    assert!(ProviderConfig::yellowstone(&bound).is_err());
+    let mut rpc = publicnode_bound();
+    rpc.kind = crate::providers::ProviderKind::Rpc;
+    assert_eq!(
+        ProviderConfig::yellowstone(&rpc).err(),
+        Some("SOURCE_PROVIDER_NOT_GEYSER")
     );
 }
 

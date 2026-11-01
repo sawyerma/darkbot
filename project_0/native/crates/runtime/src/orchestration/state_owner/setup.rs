@@ -21,24 +21,28 @@ fn configured_sources(
     let ops = darkbot_solana::runtime_config::active();
     let mode: OperatingMode = ops.source_geyser.parse()?;
     let provider_id = ops.source_geyser_provider.clone();
-    let provider = ProviderConfig::publicnode();
-    if provider_id != provider.id {
-        return Err(format!("SOURCE_PROVIDER_UNKNOWN: {provider_id}").into());
-    }
+    // DEC-18: the registry's Geyser provider the source unit names, bound with its credential
+    // (none bound: a Geyser source cannot start — `p0ctl provider add --kind geyser`).
+    let provider = ops
+        .provider_of(darkbot_solana::providers::ProviderKind::Geyser)
+        .filter(|p| p.id == provider_id)
+        .map(ProviderConfig::yellowstone)
+        .transpose()?;
     let unit = SourceUnit::BinaryGeyser {
-        provider: provider.id.clone(),
+        provider: provider_id.clone(),
     };
     let arbiter = SourceArbiter::new(&[
         source_control::control_of(SourceUnit::WsRpcControl, OperatingMode::Active)?,
         source_control::control_of(unit.clone(), mode)?,
     ])?;
-    let token_env = provider.auth.map(|a| a.token_env);
-    let token = token_env.and_then(|k| std::env::var(k).ok());
     let failure = econ.map(|h| h.shared.clone());
     let spawn: super::sources::GeyserSpawner =
         Box::new(move |control, sub, sink, stop, halt, slots, canonical| {
-            let env = |k: &str| (Some(k) == token_env).then(|| token.clone()).flatten();
-            let mut src = geyser_source(control, &provider, sub, &env)
+            let provider = provider.as_ref().ok_or_else(|| {
+                format!("SOURCE_PROVIDER_UNBOUND: {provider_id} (p0ctl provider add --kind geyser)")
+            })?;
+            let token = darkbot_solana::ingress::sources::installed_token(provider);
+            let mut src = geyser_source(control, provider, sub, token)
                 .map_err(|reasons| reasons.join(","))?
                 .ok_or_else(|| "SOURCE_OFF".to_string())?;
             // One clock with the owner: T_rx stays comparable to its queue-wait measurement.

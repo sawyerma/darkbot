@@ -860,13 +860,21 @@ fn source_backs_off_and_a_healthy_stream_restarts_the_reconnect_budget() {
     );
 }
 
-/// Production and the offline config read the provider's one token variable and the one
-/// configured reconnect policy (`P0_WSS_RECONNECT_MS` / `_MAX_MS`), no literal of their own.
+/// Production (the bound registry provider) and the offline config share the endpoint and the one
+/// configured reconnect policy (`P0_WSS_RECONNECT_MS` / `_MAX_MS`), no literal of their own; the
+/// token is the bound provider's credential (DEC-18), never an environment variable.
 #[test]
-fn publicnode_config_reads_the_providers_token_variable() {
-    let provider = super::super::sources::ProviderConfig::publicnode();
+fn publicnode_config_takes_the_bound_provider_and_the_reconnect_policy() {
+    let provider = super::super::sources::ProviderConfig::yellowstone(
+        &super::super::sources::publicnode_bound(),
+    )
+    .unwrap();
     let config = GeyserConfig::publicnode();
-    assert_eq!(Some(config.token_env), provider.auth.map(|a| a.token_env));
+    assert_eq!(config.endpoint, provider.endpoint);
+    assert_eq!(
+        provider.auth.map(|a| a.header),
+        Some(super::super::sources::YELLOWSTONE_TOKEN_HEADER)
+    );
     let limits = &crate::runtime_config::active().limits;
     assert_eq!(
         (config.reconnect_initial, config.reconnect_max),

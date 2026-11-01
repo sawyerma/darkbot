@@ -1480,12 +1480,31 @@ mod tests {
                     .unwrap();
                 target
             });
-            activate_credentials(vec![ActiveCredential {
-                endpoint: endpoint.clone(),
-                auth: AuthKind::Query("api-key".into()),
-                secret: Secret::new(Zeroizing::new(b"WSS-SECRET".to_vec())),
-            }])
+            activate_credentials(vec![
+                ActiveCredential {
+                    endpoint: endpoint.clone(),
+                    auth: AuthKind::Query("api-key".into()),
+                    secret: Secret::new(Zeroizing::new(b"WSS-SECRET".to_vec())),
+                },
+                ActiveCredential {
+                    endpoint: "https://solana.publicnode.com".into(),
+                    auth: AuthKind::Header("x-token".into()),
+                    secret: Secret::new(Zeroizing::new(b"GEYSER-SECRET".to_vec())),
+                },
+            ])
             .unwrap();
+            // The Geyser source's token: the installed credential of its bound provider (never
+            // an environment variable); a provider without authentication has none.
+            let mut geyser = crate::ingress::sources::ProviderConfig::yellowstone(
+                &crate::ingress::sources::publicnode_bound(),
+            )
+            .unwrap();
+            assert_eq!(
+                crate::ingress::sources::installed_token(&geyser).as_deref(),
+                Some("GEYSER-SECRET")
+            );
+            geyser.auth = None;
+            assert_eq!(crate::ingress::sources::installed_token(&geyser), None);
             let request = ws_client_request(&endpoint).unwrap();
             assert_eq!(
                 request.uri().path_and_query().unwrap().as_str(),

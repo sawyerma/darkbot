@@ -949,11 +949,11 @@ pub fn deshred_supported(server_version: &str) -> bool {
     }
 }
 
-/// Where and how the source connects. The token only from the environment (never logged).
+/// Where and how the source connects. Its token is the transport's — the run's installed
+/// credential of the bound provider (DEC-18), never logged.
 #[derive(Clone, Debug)]
 pub struct GeyserConfig {
     pub endpoint: String,
-    pub token_env: &'static str,
     pub commitment: proto::CommitmentLevel,
     pub max_message_bytes: usize,
     /// Consecutive failed sessions (no update delivered) before `GEYSER_RECONNECTS_EXHAUSTED`;
@@ -969,12 +969,13 @@ pub struct GeyserConfig {
 
 impl GeyserConfig {
     /// The first FREE_ONLY candidate (S1-08); its capability is NOT_RUN. Production builds its
-    /// config from `ProviderConfig::publicnode` (`sources::geyser_source`); this is the same.
+    /// config from the bound registry provider (`ProviderConfig::yellowstone`,
+    /// `sources::geyser_source`); this is the same adapter profile (a test fixture).
+    #[cfg(test)]
     pub fn publicnode() -> Self {
         let (reconnect_initial, reconnect_max) = super::sources::configured_reconnect_backoff();
         Self {
             endpoint: "https://solana.publicnode.com".into(),
-            token_env: "P0_GEYSER_PUBLICNODE_TOKEN",
             commitment: proto::CommitmentLevel::Processed,
             max_message_bytes: 16 << 20,
             max_reconnects: 5,

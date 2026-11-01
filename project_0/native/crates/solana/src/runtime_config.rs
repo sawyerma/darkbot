@@ -1722,6 +1722,29 @@ impl Resolved {
             }
         }
         self.config.non_landing_sources = entries;
+        // The Geyser source unit's provider: the registry's Geyser provider it names, bound
+        // whenever the registry has it (a hot `p0ctl source set` may start it); a start that
+        // requests the source refuses an unknown or unselectable one.
+        let geyser = registry
+            .provider(&self.config.source_geyser_provider)
+            .filter(|p| p.kind == ProviderKind::Geyser);
+        match geyser.map(|p| (p, registry.selection_block(p))) {
+            Some((p, None)) => {
+                self.config
+                    .providers
+                    .retain(|q| q.kind != ProviderKind::Geyser);
+                self.config.providers.push(registry.bound(p)?);
+            }
+            blocked if self.config.source_geyser != "off" => {
+                return Err(blocked.and_then(|(_, b)| b).unwrap_or_else(|| {
+                    format!(
+                        "PROVIDER_UNKNOWN: {} is no Geyser provider of the registry",
+                        self.config.source_geyser_provider
+                    )
+                }));
+            }
+            _ => {}
+        }
         // The single-provider kinds: the registry's selection replaces the default profile.
         for kind in [ProviderKind::Jupiter] {
             if let Some(selected) = registry.run_providers(kind, false)?.first() {
@@ -2813,6 +2836,41 @@ mod tests {
                 .starts_with("PROVIDER_UNKNOWN"),
             "a WSS provider is no RPC"
         );
+        // The Geyser source unit's provider: bound whenever the registry has the one it names (a
+        // hot switch may start it); a start that requests the source refuses an unknown or a
+        // disabled one, an OFF start does not.
+        let mut geyser = extra(
+            "publicnode",
+            ProviderKind::Geyser,
+            "https://solana.publicnode.com",
+        );
+        geyser.auth = AuthKind::Header("x-token".into());
+        geyser.credential = Some("helius".into());
+        more.providers.push(geyser);
+        more.validate().unwrap();
+        let mut off = parse(&[]).unwrap();
+        off.bind_registry(&more).unwrap();
+        assert_eq!(
+            off.config.provider_of(ProviderKind::Geyser).unwrap().id,
+            "publicnode"
+        );
+        let observe = |registry: &crate::providers::ProviderRegistry, id: &str| {
+            parse(&["--source-geyser", "observe", "--source-geyser-provider", id])
+                .unwrap()
+                .bind_registry(registry)
+        };
+        assert!(observe(&more, "publicnode").is_ok());
+        assert!(observe(&more, "triton")
+            .unwrap_err()
+            .starts_with("PROVIDER_UNKNOWN"));
+        let mut disabled = more.clone();
+        disabled.providers.last_mut().unwrap().enabled = false;
+        assert!(observe(&disabled, "publicnode")
+            .unwrap_err()
+            .starts_with("PROVIDER_DISABLED"));
+        let mut off = parse(&["--source-geyser-provider", "triton"]).unwrap();
+        off.bind_registry(&more).unwrap();
+        assert!(off.config.provider_of(ProviderKind::Geyser).is_none());
     }
     #[test]
     fn full_mode_has_its_own_defaults_and_shared_explicit_budgets() {

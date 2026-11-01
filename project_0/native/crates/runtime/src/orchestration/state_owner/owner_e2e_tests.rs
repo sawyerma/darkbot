@@ -1999,7 +1999,6 @@ fn with_loopback_geyser(
             let src = BinaryGeyserSource {
                 config: GeyserConfig {
                     endpoint: url.clone(),
-                    token_env: "",
                     commitment: proto::CommitmentLevel::Processed,
                     max_message_bytes: 1 << 20,
                     max_reconnects: 0,

@@ -3,8 +3,9 @@
 //! pre-execution sensor (K-02 `SubscribeDeshred`, K-02b LocalShred Lite). Its operating mode
 //! (OFF / OBSERVE / ACTIVE) and its qualification are separate: ACTIVE needs a qualification, is
 //! never `P0_MODE=live`, and only an ACTIVE, qualified, authoritative unit feeds canonical state.
-//! A provider is admitted against its typed configuration (endpoint/TLS, auth from the
-//! environment, quotas, retry budget, capabilities) with stated reasons; OFF starts nothing. The
+//! A provider is admitted against its typed configuration (endpoint/TLS and credential of its
+//! bound registry provider — DEC-18 —, quotas, retry budget, capabilities) with stated reasons;
+//! OFF starts nothing. The
 //! arbiter routes several sources: one canonical unit, the others observation only; two copies of
 //! the same write that differ are a conflict, never resolved by arrival order. The later
 //! `p0ctl`/frontend control uses this contract; nothing here connects to a provider.
@@ -52,9 +53,12 @@ impl SourceUnit {
     }
 }
 
-/// The id of the one Geyser provider of this build (`ProviderConfig::publicnode`), the default
-/// of `runtime_config`'s `source_geyser_provider`.
+/// The default of `runtime_config`'s `source_geyser_provider`: the id of the registry's Geyser
+/// provider the source unit uses (DEC-18; PublicNode, the first FREE_ONLY candidate, S1-08).
 pub const PUBLICNODE_ID: &str = "publicnode";
+
+/// The metadata header of a Yellowstone gRPC token (the protocol's `x-token`).
+pub const YELLOWSTONE_TOKEN_HEADER: &str = "x-token";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperatingMode {
@@ -184,12 +188,12 @@ pub fn configured_reconnect_backoff() -> (Duration, Duration) {
     )
 }
 
-/// The authentication a provider requires: a header whose value comes only from this
-/// environment variable (never from the repository, never logged).
+/// The authentication a provider requires: a header whose value is the run's installed
+/// credential of the provider (DEC-18: the keychain's, never the repository's or an environment
+/// variable's; never logged).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AuthRequirement {
     pub header: &'static str,
-    pub token_env: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,18 +207,32 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// PublicNode Yellowstone gRPC, the first FREE_ONLY candidate (S1-08). Its token is free per
-    /// the provider; every capability is `Unknown` until a separately approved qualification.
-    pub fn publicnode() -> Self {
+    /// The Yellowstone gRPC adapter's configuration of a bound registry Geyser provider (DEC-18):
+    /// its id, endpoint and authentication (none, or the protocol's `x-token` header carrying
+    /// its credential); the adapter's quota and retry profile of the first FREE_ONLY candidate
+    /// (S1-08, PublicNode); every capability `Unknown` until a separately approved qualification.
+    pub fn yellowstone(bound: &crate::providers::BoundProvider) -> Result<Self, &'static str> {
+        use crate::providers::{AuthKind, ProviderKind};
+        if bound.kind != ProviderKind::Geyser {
+            return Err("SOURCE_PROVIDER_NOT_GEYSER");
+        }
+        let auth = match &bound.auth {
+            AuthKind::None => None,
+            AuthKind::Header(name) if name == YELLOWSTONE_TOKEN_HEADER => Some(AuthRequirement {
+                header: YELLOWSTONE_TOKEN_HEADER,
+            }),
+            _ => {
+                return Err(
+                    "SOURCE_PROVIDER_AUTH_UNSUPPORTED: Yellowstone authenticates by header:x-token",
+                )
+            }
+        };
         let unknown = Capability::Unknown;
         let (reconnect_initial, reconnect_max) = configured_reconnect_backoff();
-        Self {
-            id: PUBLICNODE_ID.into(),
-            endpoint: "https://solana.publicnode.com".into(),
-            auth: Some(AuthRequirement {
-                header: "x-token",
-                token_env: "P0_GEYSER_PUBLICNODE_TOKEN",
-            }),
+        Ok(Self {
+            id: bound.id.clone(),
+            endpoint: bound.endpoint.clone(),
+            auth,
             quota: Quota {
                 max_streams: 1,
                 max_account_keys: 10_000,
@@ -237,17 +255,18 @@ impl ProviderConfig {
                 bank_id: unknown,
                 deshred: unknown,
             },
-        }
+        })
     }
 
-    /// Every reason this provider cannot serve `subscription` in `mode` (empty: admitted). OBSERVE
-    /// may run with unproven capabilities (that is how they are measured); ACTIVE needs every
-    /// used one proven; an absent one rejects in any mode.
+    /// Every reason this provider cannot serve `subscription` in `mode` (empty: admitted), with
+    /// `token` the run's installed credential of it. OBSERVE may run with unproven capabilities
+    /// (that is how they are measured); ACTIVE needs every used one proven; an absent one
+    /// rejects in any mode.
     pub fn rejections(
         &self,
         mode: OperatingMode,
         s: &Subscription,
-        env: &dyn Fn(&str) -> Option<String>,
+        token: Option<&str>,
     ) -> Vec<&'static str> {
         let mut out = Vec::new();
         if mode == OperatingMode::Off {
@@ -256,10 +275,8 @@ impl ProviderConfig {
         if Endpoint::parse(&self.endpoint).is_err() {
             out.push("PROVIDER_ENDPOINT_OR_TLS_INVALID");
         }
-        if let Some(auth) = self.auth {
-            if env(auth.token_env).is_none_or(|t| t.trim().is_empty()) {
-                out.push("PROVIDER_AUTH_TOKEN_MISSING");
-            }
+        if self.auth.is_some() && token.is_none_or(|t| t.trim().is_empty()) {
+            out.push("PROVIDER_AUTH_TOKEN_MISSING");
         }
         if self.quota.max_streams == 0 {
             out.push("PROVIDER_QUOTA_NO_STREAM");
@@ -297,13 +314,25 @@ impl ProviderConfig {
     }
 }
 
+/// The provider's token: the run's installed credential of its endpoint (DEC-18, the transport's
+/// `authorize`), `None` without one.
+pub fn installed_token(provider: &ProviderConfig) -> Option<String> {
+    let auth = provider.auth?;
+    let target = crate::providers::authorize(&provider.endpoint).ok()?;
+    target
+        .header()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(auth.header))
+        .map(|(_, value)| value.to_string())
+}
+
 /// The production entry: a `BinaryGeyserSource` for this unit and provider, or `None` when the
-/// unit is OFF (nothing is constructed or started). `from_slot` replay is used only when proven.
+/// unit is OFF (nothing is constructed or started); `token` the provider's credential
+/// ([`installed_token`]). `from_slot` replay is used only when proven.
 pub fn geyser_source(
     control: &SourceControl,
     provider: &ProviderConfig,
     subscription: Subscription,
-    env: &dyn Fn(&str) -> Option<String>,
+    token: Option<String>,
 ) -> Result<Option<BinaryGeyserSource<GrpcTransport>>, Vec<&'static str>> {
     match &control.unit {
         SourceUnit::BinaryGeyser { provider: id } if *id == provider.id => {}
@@ -312,11 +341,11 @@ pub fn geyser_source(
     if !control.may_connect() {
         return Ok(None);
     }
-    let reasons = provider.rejections(control.mode, &subscription, env);
+    let reasons = provider.rejections(control.mode, &subscription, token.as_deref());
     if !reasons.is_empty() {
         return Err(reasons);
     }
-    let token = provider.auth.and_then(|a| env(a.token_env));
+    let token = token.filter(|_| provider.auth.is_some());
     let transport = GrpcTransport::new(
         &provider.endpoint,
         token,
@@ -327,7 +356,6 @@ pub fn geyser_source(
     Ok(Some(BinaryGeyserSource {
         config: GeyserConfig {
             endpoint: provider.endpoint.clone(),
-            token_env: provider.auth.map_or("", |a| a.token_env),
             commitment: proto::CommitmentLevel::Processed,
             max_message_bytes: provider.quota.max_message_bytes,
             max_reconnects: provider.retry.max_reconnects,
@@ -709,6 +737,36 @@ impl SourceArbiter {
             }
         }
     }
+}
+
+/// Test fixture: PublicNode as a bound registry Geyser provider (its `x-token` credential).
+#[cfg(test)]
+pub(crate) fn publicnode_bound() -> crate::providers::BoundProvider {
+    use crate::providers::*;
+    let mut r = ProviderRegistry::empty();
+    (r.version, r.uid, r.project) = (1, "0123456789abcdef".into(), "/p".into());
+    r.providers.push(ProviderDescriptor {
+        id: PUBLICNODE_ID.into(),
+        kind: ProviderKind::Geyser,
+        endpoint: "https://solana.publicnode.com".into(),
+        auth: AuthKind::Header(YELLOWSTONE_TOKEN_HEADER.into()),
+        credential: Some("publicnode".into()),
+        priority: 0,
+        capacity_rps: None,
+        plan: Plan::Free,
+        entitlement: "publicnode-free".into(),
+        qualification: None,
+        enabled: true,
+    });
+    r.credentials.push(CredentialMeta {
+        id: "publicnode".into(),
+        revision: 1,
+        nonce: "aaaaaaaaaaaaaaaa".into(),
+        state: CredentialState::Active,
+        created_unix_s: 1,
+        origin: "input".into(),
+    });
+    r.bound(&r.providers[0]).unwrap()
 }
 
 #[cfg(test)]
