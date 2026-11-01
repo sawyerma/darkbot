@@ -104,4 +104,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:bsc
+      - name: npm run test:bsc (a failure's error lines become an annotation; the run log is not public)
+        run: |
+          code=0
+          npm run test:bsc 2>&1 | tee "$RUNNER_TEMP/bsc-spec.txt" || code=$?
+          if [ "$code" -ne 0 ]; then
+            set +o pipefail
+            msg=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bsc-spec.txt" | grep -E 'Error|Expected|Received|Locator|Timeout|✘|bsc.spec.ts:' | head -n 40 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=bsc.spec.ts::$msg"
+          fi
+          exit "$code"
