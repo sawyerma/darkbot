@@ -311,6 +311,10 @@ pub const LIVE_POSITION_OFF_CURVE: &str = "LIVE_POSITION_OFF_CURVE";
 /// outside its launch's block or without tokens (the ledger's `PLACED`):
 /// no new BUY until the operator grants anew; the exits go on.
 pub const LIVE_PLACEMENT_VIOLATED: &str = "LIVE_PLACEMENT_VIOLATED";
+/// REV.1.0 R3 (BSC3-045): an entry of the LIVE ledger was quarantined (it
+/// did not decode): what it said may be missing; no BUY under a grant
+/// written before it until the operator grants anew; the exits go on.
+pub const LIVE_LEDGER_QUARANTINED: &str = "LIVE_LEDGER_QUARANTINED";
 /// 01.11. (R1 review): an open lot whose curve read fails for a reason a
 /// retry does not change (an ABI violation, no Portal state): no exit
 /// prices it; no new BUY until it ends.
@@ -2387,7 +2391,7 @@ pub struct Store {
 }
 
 /// A request ID is a single safe path component (the gateway's UUIDs fit).
-fn safe_id(id: &str) -> bool {
+pub(crate) fn safe_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
@@ -3067,27 +3071,38 @@ fn daily_slot_of(dir: &Path, attempt_id: &str) -> Result<Option<(BuyDay, u64)>, 
     Ok(None)
 }
 
-/// The latest time a campaign slot was taken at (BSC3-004: slots are taken
-/// on a forward clock only).
+/// BSC3-068: the slots of attempts no byte of which left (every ledger fact
+/// of theirs WITHDRAWN), moved here whole from the days and the campaign's
+/// slots (a rename each, never a rewrite or a removal): the slot
+/// directories a count reads stay the slots that count; the returned ones
+/// still bound the forward clock (BSC3-004).
+fn slot_returns_dir(dir: &Path) -> PathBuf {
+    dir.join("buy-attempt-returns")
+}
+
+/// The latest time a campaign slot was taken at, a returned one too
+/// (BSC3-004: slots are taken on a forward clock only).
 fn latest_slot_ms(dir: &Path) -> Result<Option<u64>, String> {
     use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_total_slot as ts;
-    let entries = match fs::read_dir(total_dir(dir)) {
-        Ok(e) => e,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("total BUY attempts unreadable: {e}")),
-    };
     let mut latest = None;
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
-            continue;
-        }
-        if let Some(t) = fs::read(entry.path())
-            .ok()
-            .and_then(|b| decode(&ts::SCHEMA, &b).ok())
-            .and_then(|r| r.u64(ts::PROVENANCE_OBSERVED_UNIX_MS).ok())
-        {
-            latest = latest.max(Some(t));
+    for d in [total_dir(dir), slot_returns_dir(dir)] {
+        let entries = match fs::read_dir(&d) {
+            Ok(e) => e,
+            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("total BUY attempts unreadable: {e}")),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if !entry.file_name().to_string_lossy().ends_with(".dbrec") {
+                continue;
+            }
+            if let Some(t) = fs::read(entry.path())
+                .ok()
+                .and_then(|b| decode(&ts::SCHEMA, &b).ok())
+                .and_then(|r| r.u64(ts::PROVENANCE_OBSERVED_UNIX_MS).ok())
+            {
+                latest = latest.max(Some(t));
+            }
         }
     }
     Ok(latest)
@@ -3829,6 +3844,74 @@ impl Store {
                 .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: return not on the medium: {e}"))?;
         }
         Ok(())
+    }
+
+    /// BSC3-068: gives back the slots of the BUY attempt `attempt` (hex),
+    /// every ledger fact of which the caller found WITHDRAWN (no byte of it
+    /// left) and which no lease holds: its campaign slot and each daily
+    /// slot it took (a lease's of each UTC day it was held on), under the
+    /// spend lock (no admission counts them meanwhile), each moved whole to
+    /// the returns, every directory on the medium before this returns. Run
+    /// again (a crash in between), it moves what is left. A slot that does
+    /// not decode is nobody's and stays. How many it moved.
+    pub fn return_attempt(&self, attempt: &str) -> Result<u64, String> {
+        if parse_hex32(attempt).is_none() {
+            return Err("an attempt is named by 32 bytes, hex".into());
+        }
+        let _admitting = self.spend_lock()?;
+        let returns = slot_returns_dir(&self.dir);
+        let lease_day = format!("{attempt}-");
+        let mut moves: Vec<(PathBuf, String)> = Vec::new();
+        let days = match fs::read_dir(self.dir.join("buy-attempts")) {
+            Ok(e) => e
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(format!("buy attempts unreadable: {e}")),
+        };
+        for day in days.iter().map(|d| d.path()).filter(|d| d.is_dir()) {
+            let utc = day
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            for (slot, of) in buy_slots(&day)? {
+                if of.is_some_and(|a| a == attempt || a.starts_with(&lease_day)) {
+                    moves.push((
+                        day.join(format!("{slot:010}.dbrec")),
+                        format!("{attempt}-daily-{utc}-{slot:010}.dbrec"),
+                    ));
+                }
+            }
+        }
+        for (slot, of, _) in total_slots(&self.dir)? {
+            if of.as_deref() == Some(attempt) {
+                moves.push((
+                    total_dir(&self.dir).join(format!("{slot:010}.dbrec")),
+                    format!("{attempt}-total-{slot:010}.dbrec"),
+                ));
+            }
+        }
+        if moves.is_empty() {
+            return Ok(0);
+        }
+        create_durable_dir(&returns)?;
+        let mut touched = vec![returns.clone()];
+        for (from, name) in &moves {
+            let to = returns.join(name);
+            if to.exists() {
+                return Err(format!("{}: returned already", to.display()));
+            }
+            fs::rename(from, &to).map_err(|e| format!("slot not returned: {e}"))?;
+            if let Some(d) = from.parent().filter(|d| !touched.iter().any(|t| t == d)) {
+                touched.push(d.to_path_buf());
+            }
+        }
+        for d in &touched {
+            sync_dir_as(d, Durability::Handed).map_err(|e| format!("{}: {e}", d.display()))?;
+        }
+        flush_device(&returns, &touched).map_err(|e| format!("return not on the medium: {e}"))?;
+        Ok(moves.len() as u64)
     }
 
     /// BSC3-076: the owner's state as a lease sees it ([`OwnerMark`]).
@@ -7823,6 +7906,110 @@ pub(crate) mod tests {
         assert_eq!(reason("LIVE_GRANT"), Some(LIVE_GRANT_MISSING));
         assert_eq!(reason("VENUE_QUALIFIED"), Some(LIVE_GRANT_MISSING));
         assert_eq!(reason("WALLET_BUYER"), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// BSC3-068 (REV.1.0 R3): the slots of an attempt no byte of which
+    /// left go back whole (its campaign slot and each daily slot it took, a
+    /// lease's of every UTC day it was held on), once; another attempt then
+    /// takes them; the returned slots still hold the forward clock; a
+    /// return a crash cut off is completed; the spend entries stay; a held
+    /// spend lock refuses it, a name that is no attempt too.
+    #[test]
+    fn a_withdrawn_attempts_slots_go_back_and_the_clock_still_holds() {
+        const DAY: u64 = 86_400_000;
+        let (dir, s, now) = live_ready_limited("slot-return", (2, 2), |now| LiveGrant {
+            max_attempts: 2,
+            ..grant_of(now + 3 * DAY, LiveStrategies::Both)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let lease = |id| LiveIntent {
+            token: [0; 20],
+            ..nonce_buy(id, 7, 1_000)
+        };
+        let (a, c) = (hex32(&[0xa0; 32]), hex32(&[0xc0; 32]));
+        let (one, tx) = (hex32(&[0xa1; 32]), hex32(&[0xb1; 32]));
+        let ids: Vec<String> = [0xd1, 0xf1, 0xf2, 0x91].map(|b| hex32(&[b; 32])).to_vec();
+        s.lease_live(&armed, &lease(&one), &a, &q, now).unwrap();
+        s.admit_live(&armed, &nonce_buy(&tx, 8, 2_000), &q, now)
+            .unwrap();
+        let used = |at| {
+            (
+                buy_usage(&dir, at).unwrap().used,
+                total_usage(&dir).unwrap().used,
+            )
+        };
+        assert_eq!(used(now), (2, 2));
+        let three = hex32(&[0xc1; 32]);
+        assert!(s.lease_live(&armed, &lease(&three), &c, &q, now).is_err());
+        let entries = admitted_intents(&dir).unwrap().len();
+        // A's lease never sent its BUY: both its slots go back, once.
+        assert_eq!(s.return_attempt(&a), Ok(2));
+        assert_eq!(s.return_attempt(&a), Ok(0));
+        assert_eq!(used(now), (1, 1));
+        let returns = dir.join("buy-attempt-returns");
+        let day = BuyDay::at(now).utc;
+        assert!(returns.join(format!("{a}-total-{:010}.dbrec", 0)).exists());
+        assert!(
+            returns
+                .join(format!("{a}-daily-{day}-{:010}.dbrec", 0))
+                .exists()
+        );
+        // The freed slot is C's now; the BUY of its own goes back as well.
+        s.lease_live(&armed, &lease(&three), &c, &q, now).unwrap();
+        assert_eq!(used(now), (2, 2));
+        assert_eq!(s.return_attempt(&tx), Ok(2));
+        assert_eq!(s.return_attempt(&c), Ok(2));
+        assert_eq!(used(now), (0, 0));
+        assert_eq!(admitted_intents(&dir).unwrap().len(), entries + 1);
+        // No slot is taken any more, yet a clock set back is still refused.
+        let d = hex32(&[0xd0; 32]);
+        let e = s
+            .lease_live(&armed, &lease(&ids[0]), &d, &q, now - 1)
+            .unwrap_err();
+        assert!(e.contains("BUY_ATTEMPT_CLOCK_BEHIND"), "{e}");
+        // A lease held across midnight: its slot of each day goes back.
+        let next = now + DAY;
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, next).unwrap();
+        let f = hex32(&[0xf0; 32]);
+        s.lease_live(&armed, &lease(&ids[1]), &f, &q, now).unwrap();
+        s.lease_live(&armed, &lease(&ids[2]), &f, &q, next).unwrap();
+        assert_eq!((used(now).0, used(next).0, used(next).1), (1, 1, 1));
+        assert_eq!(s.return_attempt(&f), Ok(3));
+        assert_eq!((used(now).0, used(next)), (0, (0, 0)));
+        // A return cut off after its first move is completed.
+        let g = hex32(&[0x90; 32]);
+        s.lease_live(&armed, &lease(&ids[3]), &g, &q, next).unwrap();
+        let next_day = BuyDay::at(next).utc;
+        let daily = buy_day_dir(&dir, &BuyDay::at(next));
+        let (slot, _) = buy_slots(&daily)
+            .unwrap()
+            .into_iter()
+            .find(|(_, of)| of.as_deref().is_some_and(|o| o.starts_with(&g)))
+            .unwrap();
+        fs::rename(
+            daily.join(format!("{slot:010}.dbrec")),
+            returns.join(format!("{g}-daily-{next_day}-{slot:010}.dbrec")),
+        )
+        .unwrap();
+        assert_eq!(used(next), (0, 1));
+        assert_eq!(s.return_attempt(&g), Ok(1));
+        assert_eq!(used(next), (0, 0));
+        // Never while an admission holds the spend lock; never a non-attempt.
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join("live-spend.lock"))
+            .unwrap();
+        lock.try_lock().unwrap();
+        assert!(
+            s.return_attempt(&g)
+                .unwrap_err()
+                .contains("held by another admission")
+        );
+        drop(lock);
+        assert!(s.return_attempt("not-an-attempt").is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 }

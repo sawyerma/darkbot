@@ -711,6 +711,7 @@ pub(crate) mod tests {
                 live_max_head_age_ms: 86_400_000,
                 live_exit_reverts_max: 2,
                 live_lease_blocks: 200,
+                live_operator_exit: false,
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

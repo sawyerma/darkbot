@@ -372,6 +372,7 @@ impl RuntimeConfig {
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
+        let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -538,6 +539,9 @@ impl RuntimeConfig {
                 if exit_slippage.is_some() {
                     return Err("BSC_EXEC_EXIT_SLIPPAGE_BPS needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if operator_exit.is_some() {
+                    return Err("BSC_EXEC_LIVE_OPERATOR_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -609,6 +613,16 @@ impl RuntimeConfig {
                         )?,
                         live_exit_reverts_max: take("BSC_EXEC_LIVE_EXIT_REVERTS_MAX", 1, 16)?,
                         live_lease_blocks: take("BSC_EXEC_LIVE_LEASE_BLOCKS", 2, 28_800)?,
+                        live_operator_exit: match operator_exit {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_OPERATOR_EXIT={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_OPERATOR_EXIT is required".into()),
+                        },
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -1740,6 +1754,15 @@ impl LotDeciders {
         let at = Instant::now() + Duration::from_millis(self.config.lot_read_retry_ms);
         self.retry_at.retain(|(t, _)| *t != token);
         self.retry_at.push((token, at));
+    }
+
+    /// REV.1.0 R3: the operator resumed `token`'s lot: stranded no more,
+    /// its curve is read again at the next block's end (no backoff, no
+    /// refusal counted from before).
+    fn resume(&mut self, token: [u8; 20]) {
+        self.stranded.retain(|(t, _)| *t != token);
+        self.retry_at.retain(|(t, _)| *t != token);
+        self.refused.retain(|(t, _)| *t != token);
     }
 }
 
@@ -3037,6 +3060,36 @@ pub fn run(
                         None => l.tick(owner.as_ref(), follower, started_ms, now_ms),
                     }
                 }
+                // REV.1.0 R3: what the operator decided of the lots since
+                // (`bsc_runtime live lot`, `live adopt-g07`): the strategy
+                // lets a lot no longer open go and holds an opened one
+                // (journaled first), a resumed lot's curve is read again.
+                let (changes, resumed) =
+                    live.as_mut().map(|l| l.take_decided()).unwrap_or_default();
+                if let Some(c) = canonical.as_mut()
+                    && (!changes.is_empty() || !resumed.is_empty())
+                {
+                    let at = clock.now_ns();
+                    if let Some(s) = c.strategy.as_mut() {
+                        for change in changes {
+                            match change {
+                                live::PositionChange::Opened {
+                                    token,
+                                    tokens,
+                                    spent_wei,
+                                    filled_ms,
+                                } => s.hold(token, tokens, spent_wei, filled_ms, at, &mut journal),
+                                live::PositionChange::Ended { token } => {
+                                    s.unhold(token, at, &mut journal)
+                                }
+                            }
+                        }
+                    }
+                    for token in resumed {
+                        c.lot.resume(token);
+                    }
+                    refresh_lot_deciders(c, &mut live);
+                }
             }
             for source in SourceId::ALL {
                 let i = index(source);
@@ -4214,6 +4267,9 @@ mod tests {
             CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C", "BSC_EXEC_SENDER_PATHS=C3+C2"),
             CONFIG.replace("BSC_EXEC_SLIPPAGE_BPS=100", "BSC_EXEC_SLIPPAGE_BPS=10000"),
             CONFIG.replace("BSC_EXEC_GAS_LIMIT=3000000", "BSC_EXEC_GAS_LIMIT=20999"),
+            // R3: the operator exit switch, required and exact.
+            CONFIG.replace("BSC_EXEC_LIVE_OPERATOR_EXIT=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_OPERATOR_EXIT=OFF", "BSC_EXEC_LIVE_OPERATOR_EXIT=on"),
             CONFIG.replace("BSC_STATE_WATCHED=\n", ""),
             CONFIG.replace("BSC_STATE_WATCHED=\n", "BSC_STATE_WATCHED=0x12\n"),
             CONFIG.replace(
@@ -4235,6 +4291,48 @@ mod tests {
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
+    }
+
+    /// REV.1.0 R3: the operator's exit-now is held back unless the operator
+    /// switched `BSC_EXEC_LIVE_OPERATOR_EXIT` ON (the repository's OFF).
+    #[test]
+    fn the_operator_exit_is_off_unless_the_operator_sets_it_on() {
+        let exit = |text: &str| {
+            RuntimeConfig::parse(text)
+                .unwrap()
+                .exec
+                .unwrap()
+                .exec
+                .live_operator_exit
+        };
+        assert!(!exit(CONFIG));
+        assert!(exit(&CONFIG.replace(
+            "BSC_EXEC_LIVE_OPERATOR_EXIT=OFF",
+            "BSC_EXEC_LIVE_OPERATOR_EXIT=ON"
+        )));
+    }
+
+    /// REV.1.0 R3: a lot the operator resumed is stranded no more and is
+    /// read again at once (no backoff, no refused answer counted from
+    /// before); another lot keeps its state.
+    #[test]
+    fn a_resumed_lot_is_read_again_at_once() {
+        let config = RuntimeConfig::parse(CONFIG).unwrap().canonical.unwrap();
+        let mut lot = LotDeciders::new(&config);
+        let (a, b) = ([0xA1; 20], [0xB1; 20]);
+        for t in [a, b] {
+            lot.stranded
+                .push((t, crate::sources::LIVE_POSITION_UNREADABLE));
+            lot.retry_later(t);
+            lot.refused_in_a_row(t, true);
+        }
+        lot.resume(a);
+        assert_eq!(
+            lot.stranded,
+            vec![(b, crate::sources::LIVE_POSITION_UNREADABLE)]
+        );
+        assert!(lot.retry_at.iter().all(|(t, _)| *t == b));
+        assert_eq!(lot.refused, vec![(b, 1)]);
     }
 
     /// Phase E review L3: while the drift guard says DRIFT, a Four launch the

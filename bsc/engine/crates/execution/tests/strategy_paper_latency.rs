@@ -187,6 +187,7 @@ fn strategy_paper_path_latency() {
             live_max_head_age_ms: 86_400_000,
             live_exit_reverts_max: 2,
             live_lease_blocks: 200,
+            live_operator_exit: false,
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::StrategyC,
         },
         Arming {

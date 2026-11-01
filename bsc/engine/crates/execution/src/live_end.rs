@@ -829,6 +829,9 @@ impl End for LiveEnd {
                 origin: Some(released.origin),
                 launcher: None,
                 placement: None,
+                attempt: None,
+                operator: None,
+                source: None,
             };
             let (Some(transport), Some(buffer), Some(frame)) =
                 (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
@@ -1243,6 +1246,11 @@ impl End for LiveEnd {
             origin: Some(origin),
             launcher,
             placement: None,
+            // R3 (BSC3-068): a BUY's attempt, its lease's own fact the same.
+            attempt: (kind == LiveIntentKind::Buy)
+                .then(|| lease.as_ref().map_or(tx_hash, |l| l.attempt)),
+            operator: None,
+            source: None,
         };
         let written = match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => {

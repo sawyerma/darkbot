@@ -11,6 +11,10 @@
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
 //! bsc_runtime live attempts --rundir <dir> --state <dir> --config <ingress.public.env> [--manifest <live_campaign.env>] [--witness-dir <dir>]
 //! bsc_runtime live campaign-precommit --rundir <dir> --manifest <live_campaign.env> --decided-by <who>
+//! bsc_runtime live lot resume|write-off|exit-now --lot <0x hash> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
+//! bsc_runtime live adopt-g07 --g08 <result.dbrec> --capture <chain journal> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
+//! bsc_runtime live ledger check --state <dir>
+//! bsc_runtime live ledger quarantine --seq <n> --state <dir> --request-id <id> --decided-by <who>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime g04-precommit --rundir <dir> --criteria <g04_criteria.env> --decided-by <who>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
@@ -84,6 +88,21 @@
 //! UNKNOWN. Exit 0 unless the campaign is not ready. `live
 //! campaign-precommit` commits a reviewed manifest's hash once, before the
 //! campaign's first attempt.
+//!
+//! `live lot` (REV.1.0 R3) writes the operator's decision of a lot (its
+//! BUY's hash) as a ledger fact, once per request ID: `resume` lets its
+//! stopped exits go on and its curve be read again, `write-off` ends it as
+//! lost (its input and gas; no exit, no BUY held back by it; nothing of
+//! its exit out), `exit-now` wants its exit now (`BSC_EXEC_LIVE_OPERATOR_EXIT`
+//! ON). `live adopt-g07` takes a G0.7 BUY's acquisition from its G0.8
+//! result and chain capture as an included lot of the LIVE buyer (its
+//! launch's block final). The running runtime acts on both at its next
+//! reconcile. `live ledger check` decodes every LIVE ledger entry on its
+//! own (exit 0 only when each does); `live ledger quarantine` moves one that
+//! does not decode out, once per request (its record first): the ledger
+//! reads again, but what the entry said is the operator's reconstruction
+//! (a launch's C3 BUY has no admission of its own); the BUYs of every grant
+//! written before stay refused and no BUY attempt's slot goes back.
 //!
 //! `control require` is the check a Mainnet signing or sending path runs
 //! before it touches a wallet key: exit 0 only if every named switch is
@@ -192,9 +211,8 @@ fn flags<'a>(args: &'a [String], name: &str) -> Vec<&'a str> {
         .collect()
 }
 
-/// The SHA-256 `name` names: 64 lowercase hex digits (from `live scope`).
-fn sha256_flag(rest: &[String], name: &str) -> Result<[u8; 32], String> {
-    let value = flag(rest, name)?;
+/// 64 lowercase hex digits as 32 bytes.
+fn hex32(value: &str) -> Option<[u8; 32]> {
     // The digits checked first: slicing never meets a multi-byte character.
     (value.len() == 64
         && value
@@ -207,7 +225,11 @@ fn sha256_flag(rest: &[String], name: &str) -> Result<[u8; 32], String> {
     })
     .flatten()
     .and_then(|v| <[u8; 32]>::try_from(v).ok())
-    .ok_or(format!(
+}
+
+/// The SHA-256 `name` names: 64 lowercase hex digits (from `live scope`).
+fn sha256_flag(rest: &[String], name: &str) -> Result<[u8; 32], String> {
+    hex32(flag(rest, name)?).ok_or(format!(
         "{name} is 64 lowercase hex digits (from `live scope`)"
     ))
 }
@@ -520,6 +542,106 @@ fn run(args: &[String]) -> Result<bool, String> {
                 p.decided_by,
                 p.committed_unix_ms
             );
+            Ok(true)
+        }
+        // REV.1.0 R3: the operator's decision of a lot (its BUY's hash) as
+        // a ledger fact, once per request; the runtime acts on it.
+        [area, cmd, what, rest @ ..] if area == "live" && cmd == "lot" => {
+            use darkbot_bsc_execution::live_ledger::{Ledger, LotDecision};
+            let what = LotDecision::parse(what).ok_or("live lot resume|write-off|exit-now")?;
+            let lot = flag(rest, "--lot")?;
+            let lot = hex32(lot.strip_prefix("0x").unwrap_or(lot))
+                .ok_or("--lot is the lot's BUY hash, 0x and 64 lowercase hex digits")?;
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let operator_exit = config.exec.as_ref().is_some_and(|x| x.exec.live_operator_exit);
+            let written = Ledger::open(std::path::Path::new(flag(rest, "--state")?)).decide(
+                lot,
+                what,
+                flag(rest, "--request-id")?,
+                flag(rest, "--decided-by")?,
+                operator_exit,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            match written {
+                Some(seq) => println!("lot=0x{} decision={what:?} fact={seq}", hex(&lot)),
+                None => println!("lot=0x{} decision={what:?} written before", hex(&lot)),
+            }
+            Ok(true)
+        }
+        // REV.1.0 R3: a G0.7 BUY's acquisition (its G0.8 result and that
+        // result's chain capture) as an included lot of the LIVE buyer.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "adopt-g07" => {
+            use darkbot_bsc_execution::live_ledger::{Ledger, g07_buy};
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let buyer = config.live.as_ref().ok_or("BSC_LIVE_BUYER is not configured")?.buyer;
+            let finality = config
+                .canonical
+                .as_ref()
+                .ok_or("BSC_CANONICAL_RPC is not configured")?
+                .limits
+                .reorg_depth;
+            let path = flag(rest, "--g08")?;
+            let result = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+            let capture_path = flag(rest, "--capture")?;
+            let capture = std::fs::read(capture_path).map_err(|e| format!("{capture_path}: {e}"))?;
+            let buy = g07_buy(&result, &capture, buyer, finality)?;
+            let written = Ledger::open(std::path::Path::new(flag(rest, "--state")?)).adopt(
+                &buy,
+                darkbot_bsc_execution::wss::BSC_MAINNET_CHAIN_ID,
+                flag(rest, "--request-id")?,
+                flag(rest, "--decided-by")?,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!(
+                "lot=0x{} token=0x{} tokens={} input_wei={} gas_wei={} evidence_sha256={} {}",
+                hex(&buy.tx_hash),
+                hex(&buy.token),
+                buy.tokens,
+                buy.value_wei,
+                buy.gas_wei,
+                hex(&buy.evidence),
+                written.map_or("written before".into(), |seq| format!("fact={seq}")),
+            );
+            Ok(true)
+        }
+        // REV.1.0 R3 (BSC3-045): every entry of the LIVE ledger decoded on
+        // its own; exit 0 only when each one does.
+        [area, cmd, sub, rest @ ..] if area == "live" && cmd == "ledger" && sub == "check" => {
+            use darkbot_bsc_execution::live_ledger::Ledger;
+            let ledger = Ledger::open(std::path::Path::new(flag(rest, "--state")?));
+            let (entries, bad) = ledger.check()?;
+            println!(
+                "entries={entries} unreadable={} quarantined_at_generation={}",
+                bad.len(),
+                ledger.quarantined()?.map_or("-".into(), |g| g.to_string())
+            );
+            for (seq, why) in &bad {
+                println!("unreadable seq={seq} why={why}");
+            }
+            Ok(bad.is_empty())
+        }
+        // R3 (BSC3-045): the operator moves an entry that does not decode
+        // out of the ledger, once per request; BUYs under the grants
+        // written before stay refused.
+        [area, cmd, sub, rest @ ..] if area == "live" && cmd == "ledger" && sub == "quarantine" => {
+            use darkbot_bsc_execution::live_ledger::Ledger;
+            let dir = std::path::Path::new(flag(rest, "--state")?);
+            let seq: u64 = flag(rest, "--seq")?
+                .parse()
+                .map_err(|_| "--seq is the entry's sequence number")?;
+            let generation = Store::open(dir, KEEP_GENERATIONS)?.current()?.generation;
+            Ledger::open(dir).quarantine(
+                seq,
+                flag(rest, "--request-id")?,
+                flag(rest, "--decided-by")?,
+                generation,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!("seq={seq} quarantined at generation {generation}");
             Ok(true)
         }
         [area, cmd, rest @ ..] if area == "live" && cmd == "positions" => {

@@ -451,6 +451,25 @@ pub struct LiveRuntime {
     unfunded_refused: u64,
     /// BUYs refused since a provider refused one of the arm's (BSC3-051).
     provider_refused: u64,
+    /// REV.1.0 R3: the ledger's facts the book folds (another process's,
+    /// the operator's, are folded at the next reconcile).
+    folded_len: usize,
+    /// BSC3-068: the attempts whose slots went back in this process, and
+    /// the returns that failed (tried again), the last why.
+    returned: std::collections::BTreeSet<[u8; 32]>,
+    slot_return_failed: u64,
+    slot_return_error: Option<String>,
+    /// R3: each lot's RESUMED facts acted on in this process, the lots
+    /// whose EXIT_REQUESTED was, and those the operator exit switch held
+    /// back; what the strategy is still to be told (lots no longer open,
+    /// lots resumed).
+    resumes_seen: Vec<([u8; 32], u64)>,
+    exit_requests_done: std::collections::BTreeSet<[u8; 32]>,
+    operator_exits_locked: u64,
+    decided: (Vec<PositionChange>, Vec<[u8; 20]>),
+    /// R3 (BSC3-045): the highest owner generation an entry of the ledger
+    /// was quarantined at (unreadable: every one).
+    quarantine: Option<u64>,
 }
 
 /// The buyer's balance at a probe's block (number and hash): a
@@ -555,6 +574,15 @@ impl LiveRuntime {
             funds: None,
             unfunded_refused: 0,
             provider_refused: 0,
+            folded_len: 0,
+            returned: Default::default(),
+            slot_return_failed: 0,
+            slot_return_error: None,
+            resumes_seen: Vec::new(),
+            exit_requests_done: Default::default(),
+            operator_exits_locked: 0,
+            decided: Default::default(),
+            quarantine: None,
         }
         .folded()
     }
@@ -562,7 +590,20 @@ impl LiveRuntime {
     /// At the start, nothing armed: what the last process admitted and
     /// could not write is recovered, then the ledger folded.
     fn folded(mut self) -> Self {
+        // R3 (BSC3-045): what a crashed append left unpublished goes.
+        if let Err(e) = self.ledger.clear_pending() {
+            self.ledger_error = Some(e);
+        }
         let _ = self.reconciled(wall_ms());
+        // R3: the lots open from before count as reported (their curve is
+        // read and they are held again, R1): one that closes or is written
+        // off ends for the strategy, before any reconcile too.
+        for p in &self.book.positions {
+            let open = self.book.open_lot(&p.token).is_some_and(|o| o.lot == p.lot);
+            if open && !self.opened.iter().any(|(t, _)| *t == p.token) {
+                self.opened.push((p.token, p.lot));
+            }
+        }
         self
     }
 
@@ -770,7 +811,9 @@ impl LiveRuntime {
         match self.ledger.facts() {
             Ok(facts) => {
                 self.book = fold(&facts);
+                self.folded_len = facts.len();
                 self.ledger_error = None;
+                self.quarantine = self.ledger.quarantined().unwrap_or(Some(u64::MAX));
             }
             Err(e) => {
                 self.book = Book::default();
@@ -830,6 +873,126 @@ impl LiveRuntime {
             self.refold();
         }
         self.fail_closed_on_ledger();
+    }
+
+    /// REV.1.0 R3: facts another process wrote since the last fold (the
+    /// operator's, `bsc_runtime live lot`/`adopt-g07`) are folded, and what
+    /// they decided is acted on once: a lot no longer open is let go, an
+    /// opened one reported; a RESUMED lot's exit opens again and is wanted
+    /// (its curve read again, [`Self::take_decided`]); an EXIT_REQUESTED
+    /// open lot's exit is wanted now when `BSC_EXEC_LIVE_OPERATOR_EXIT` is
+    /// ON (else held back, counted). Outside the entry path.
+    fn fold_decisions(&mut self) {
+        let grown = self.ledger.fact_count().is_ok_and(|n| n != self.folded_len);
+        if grown {
+            self.refold();
+        }
+        // A quarantine another process wrote holds at once (its entry may
+        // never have been read here).
+        self.quarantine = self.ledger.quarantined().unwrap_or(Some(u64::MAX));
+        // Review F3: every reconcile (a fold of another path may have taken
+        // them in first); only what differs is reported.
+        let changes = self.position_changes();
+        self.decided.0.extend(changes);
+        // An exit is wanted of an open lot only (one written off is none:
+        // it holds no BUY back); a ledger that does not read says nothing.
+        if self.ledger_error.is_none() {
+            let book = &self.book;
+            self.exits_wanted.retain(|t| book.open_lot(t).is_some());
+        }
+        // Each open lot: token, lot, its RESUMED count, exit requested, not
+        // yet exiting.
+        type Decided = ([u8; 20], [u8; 32], u64, bool, bool);
+        let open: Vec<Decided> = self
+            .book
+            .positions
+            .iter()
+            .filter(|p| self.book.open_lot(&p.token).is_some_and(|o| o.lot == p.lot))
+            .filter_map(|p| {
+                let d = &self.book.tx(&p.lot)?.decided;
+                Some((
+                    p.token,
+                    p.lot,
+                    d.resumes,
+                    d.exit_requested,
+                    p.state == PositionState::Open,
+                ))
+            })
+            .collect();
+        for (token, lot, resumes, exit_requested, unsold) in open {
+            let seen = self
+                .resumes_seen
+                .iter()
+                .find(|(l, _)| *l == lot)
+                .map_or(0, |(_, n)| *n);
+            if resumes > seen {
+                self.resumes_seen.retain(|(l, _)| *l != lot);
+                self.resumes_seen.push((lot, resumes));
+                let approval = !self.book.open_lot(&token).is_some_and(|p| p.approved);
+                if let Some(x) = self.executor.as_mut() {
+                    x.reopen_exit(token, approval);
+                }
+                self.decided.1.push(token);
+                // An exit the strategy decided (it has steps) is wanted
+                // again; a lot without one is read and held again first.
+                let decided = self
+                    .book
+                    .txs
+                    .iter()
+                    .any(|t| t.lot == Some(lot) && t.released.intent != LiveIntentKind::Buy);
+                if decided {
+                    self.want_exit(token);
+                }
+            }
+            if exit_requested && unsold && self.exit_requests_done.insert(lot) {
+                match self.exec.exec.live_operator_exit {
+                    true => self.want_exit(token),
+                    false => self.operator_exits_locked += 1,
+                }
+            }
+        }
+    }
+
+    /// R3: what the operator decided since the last call, for the
+    /// strategy: the lots no longer open (let go) or opened (held), and
+    /// the tokens of lots resumed (their curve read again).
+    pub fn take_decided(&mut self) -> (Vec<PositionChange>, Vec<[u8; 20]>) {
+        std::mem::take(&mut self.decided)
+    }
+
+    /// BSC3-068: the slots of every attempt no byte of which left (each of
+    /// its ledger facts WITHDRAWN, its BUY's own among them,
+    /// [`Book::withdrawn_attempts`]; none after a quarantine) go back to
+    /// the owner, once each in this process and again after a restart (a
+    /// return a crash cut off is completed); one a lease holds stays (its
+    /// BUY may still come). A return that fails is tried again.
+    fn return_withdrawn(&mut self, store: &Store) {
+        // Review F1: a quarantined entry may have been a BUY's own fact (a
+        // lease's alone looks withdrawn): no slot goes back after one.
+        if self.quarantine.is_some() {
+            return;
+        }
+        let held: Vec<[u8; 32]> = self
+            .executor
+            .as_ref()
+            .and_then(|x| x.end().lease().map(|l| l.attempt()))
+            .into_iter()
+            .chain(self.lease_attempt.map(|(_, a)| a))
+            .collect();
+        for attempt in self.book.withdrawn_attempts() {
+            if self.returned.contains(&attempt) || held.contains(&attempt) {
+                continue;
+            }
+            match store.return_attempt(&alloy_primitives::hex::encode(attempt)) {
+                Ok(_) => {
+                    self.returned.insert(attempt);
+                }
+                Err(why) => {
+                    self.slot_return_failed += 1;
+                    self.slot_return_error = Some(why);
+                }
+            }
+        }
     }
 
     /// One canonical event: the buyer's transactions of a block become
@@ -1042,20 +1205,17 @@ impl LiveRuntime {
         }
     }
 
-    /// Appends `facts`, folds the ledger again and reports what changed:
-    /// a position opened is adopted by the executor (its exit sells the
-    /// real tokens).
-    fn record(&mut self, facts: &[Fact]) -> Vec<PositionChange> {
-        if facts.is_empty() {
+    /// What the book changed of the lots reported to the executor and the
+    /// strategy: a token's reported lot ends when it is no longer the
+    /// token's open lot; then the open lot is reported (a reorg may reopen
+    /// an earlier lot of a token bought again, BSC3-047), adopted by the
+    /// executor (its exit sells the real tokens).
+    fn position_changes(&mut self) -> Vec<PositionChange> {
+        // Re-check RC1: a ledger that does not read says nothing of the
+        // lots (its empty fold would end every one for the strategy).
+        if self.ledger_error.is_some() {
             return Vec::new();
         }
-        for f in facts {
-            self.append(f);
-        }
-        self.refold();
-        // A token's reported lot ends when it is no longer the token's open
-        // lot; then the open lot is reported (a reorg may reopen an earlier
-        // lot of a token bought again, BSC3-047).
         let mut changes = Vec::new();
         let book = &self.book;
         self.opened.retain(|(token, lot)| {
@@ -1081,9 +1241,27 @@ impl LiveRuntime {
                 filled_ms: p.opened_ms.unwrap_or_default(),
             });
         }
-        // An exit is wanted of an open position only.
-        let book = &self.book;
-        self.exits_wanted.retain(|t| book.open_lot(t).is_some());
+        changes
+    }
+
+    /// Appends `facts`, folds the ledger again and reports what changed:
+    /// a position opened is adopted by the executor (its exit sells the
+    /// real tokens).
+    fn record(&mut self, facts: &[Fact]) -> Vec<PositionChange> {
+        if facts.is_empty() {
+            return Vec::new();
+        }
+        for f in facts {
+            self.append(f);
+        }
+        self.refold();
+        let changes = self.position_changes();
+        // An exit is wanted of an open position only (a ledger that does
+        // not read says nothing, R3 re-check RC1).
+        if self.ledger_error.is_none() {
+            let book = &self.book;
+            self.exits_wanted.retain(|t| book.open_lot(t).is_some());
+        }
         // An approval the chain included: the armed exit sells its lot
         // without approving again (also one that landed after its window).
         for f in facts
@@ -1555,6 +1733,10 @@ impl LiveRuntime {
             Ok(s) => s,
             Err(e) => return self.close(format!("owner state: {e}")),
         };
+        // R3: the operator's decisions, then the slots of attempts that
+        // never left (BSC3-068), before the gate reads the owner.
+        self.fold_decisions();
+        self.return_withdrawn(&store);
         let (verified, invalid) = qualification;
         if let Some(why) = invalid {
             return self.close(format!("LIVE_QUALIFICATION_INVALID: {why}"));
@@ -2095,7 +2277,11 @@ impl LiveRuntime {
                 | FactKind::Replaced
                 | FactKind::Orphaned
                 | FactKind::Responded
-                | FactKind::Placed => false,
+                | FactKind::Placed
+                | FactKind::Resumed
+                | FactKind::WrittenOff
+                | FactKind::ExitRequested
+                | FactKind::Adopted => false,
             };
             let key = t.released.key();
             if !counts || key.is_some_and(|k| settled.contains(&k)) {
@@ -2276,6 +2462,18 @@ impl LiveRuntime {
             return Some((
                 Refusal::GrantLimit,
                 Some(crate::sources::LIVE_PLACEMENT_VIOLATED),
+            ));
+        }
+        // R3 (BSC3-045): a ledger entry quarantined after the grant was
+        // written may have said what holds BUYs back; a new grant decides.
+        let quarantined = self.executor.as_ref().is_some_and(|x| {
+            self.quarantine
+                .is_some_and(|q| x.end().armed().grant_generation() <= q)
+        });
+        if quarantined {
+            return Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_LEDGER_QUARANTINED),
             ));
         }
         // BSC3-030 review: while an open position's exits wait for the
@@ -2487,6 +2685,9 @@ impl LiveRuntime {
     /// same limit fails again). Never an automatic repetition past it.
     fn exit_stopped(&self, token: &[u8; 20]) -> Option<&'static str> {
         let lot = self.book.open_lot(token)?.lot;
+        // R3: the steps reverted before the operator's last RESUMED stop
+        // nothing.
+        let excused = self.book.tx(&lot).map(|t| &t.decided.excused);
         let reverted: Vec<&crate::live_ledger::Tx> = self
             .book
             .txs
@@ -2495,6 +2696,7 @@ impl LiveRuntime {
                 t.lot == Some(lot)
                     && t.released.intent != LiveIntentKind::Buy
                     && t.state == FactKind::Reverted
+                    && !excused.is_some_and(|e| e.contains(&t.released.tx_hash))
             })
             .collect();
         // Out of gas stops only while the step would go with no more gas
@@ -2668,6 +2870,8 @@ impl LiveRuntime {
             ("BUYS_PROVIDER_REFUSED", self.provider_refused),
             ("LEASE_REFUSED", self.lease_refused),
             ("LEASE_NONCE_TAKEN_BY_OTHER", self.lease_foreign),
+            ("SLOT_RETURN_FAILED", self.slot_return_failed),
+            ("OPERATOR_EXIT_LOCKED", self.operator_exits_locked),
         ] {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
@@ -5745,6 +5949,9 @@ mod tests {
                     origin: None,
                     launcher: None,
                     placement: None,
+                    attempt: None,
+                    operator: None,
+                    source: None,
                 },
                 1,
             )
@@ -5924,6 +6131,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -6250,6 +6460,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -6364,6 +6577,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -6695,6 +6911,9 @@ mod tests {
             }),
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         }
     }
 
@@ -8068,6 +8287,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         let b = released(buy, LiveIntentKind::Buy, 1);
         let s = released(sell, LiveIntentKind::Sell, 2);
@@ -8197,6 +8419,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         let ledger = Ledger::open(&r.state);
         ledger.append(&buy, NOW).unwrap();
@@ -8958,6 +9183,9 @@ mod tests {
             origin: None,
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         };
         let ledger = Ledger::open(&r.state);
         ledger.append(&buy, NOW).unwrap();
@@ -9126,6 +9354,9 @@ mod tests {
                 origin: None,
                 launcher: None,
                 placement: None,
+                attempt: None,
+                operator: None,
+                source: None,
             };
             ledger.append(&buy, NOW).unwrap();
             let included = Fact {
@@ -9540,6 +9771,9 @@ mod tests {
                 origin: None,
                 launcher: None,
                 placement: None,
+                attempt: None,
+                operator: None,
+                source: None,
             };
             Ledger::open(&r.state).append(&lost, NOW).unwrap();
             let c2 = c2_at(&r.d, r.buyer, 5);
@@ -9786,6 +10020,347 @@ mod tests {
                 Some(crate::sources::LIVE_QUALIFICATION_CHANGED.to_string())
             )
         );
+        r.clean();
+    }
+
+    // ---- REV.1.0 R3 ----
+
+    /// BSC3-068: a launch's C3 BUY withdrawn before any byte left (its
+    /// transport start passed once its lease was taken): both facts name
+    /// the lease's attempt, and at the next reconcile that attempt's slots
+    /// go back to the owner (kept beside, never deleted); the arm's next
+    /// lease is another attempt and takes the freed slot.
+    #[test]
+    fn a_withdrawn_c3_buys_slots_go_back_at_the_next_reconcile() {
+        withdrawn_c3_buy("live-slot-return", false);
+    }
+
+    /// Review F1: after a quarantine (an entry that may have been a BUY's
+    /// own fact) no slot goes back, a withdrawn BUY's neither.
+    #[test]
+    fn no_slot_goes_back_after_a_quarantine() {
+        withdrawn_c3_buy("live-slot-keep", true);
+    }
+
+    fn withdrawn_c3_buy(tag: &str, quarantined: bool) {
+        use crate::live_end::LEASE_BOUND;
+        use crate::live_ledger::{FactKind, Ledger, fold};
+        let r = Rig::granting(tag, LiveStrategies::C3, |now| LiveGrant {
+            max_attempts: 1,
+            ..rig_grant(now + 3_600_000, LiveStrategies::C3)
+        });
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let attempt = x
+            .executor
+            .as_ref()
+            .unwrap()
+            .end()
+            .lease()
+            .unwrap()
+            .attempt();
+        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        LEASE_BOUND.with(|b| b.set(false));
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                let bound = LEASE_BOUND.with(|b| b.get());
+                t.set(t.get() + if bound { 2_000_000_000 } else { 3 });
+                t.get()
+            },
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+                .is_none()
+        );
+        LEASE_BOUND.with(|b| b.set(false));
+        assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
+        let facts = Ledger::open(&r.state).facts().unwrap();
+        assert_eq!(
+            facts
+                .iter()
+                .map(|f| (f.kind, f.attempt))
+                .collect::<Vec<_>>(),
+            vec![
+                (FactKind::Withdrawn, Some(attempt)),
+                (FactKind::Withdrawn, Some(attempt))
+            ]
+        );
+        assert_eq!(fold(&facts).withdrawn_attempts(), vec![attempt]);
+        let a = alloy_primitives::hex::encode(attempt);
+        let returns = r.state.join("buy-attempt-returns");
+        if quarantined {
+            let bad = r.state.join("live-ledger").join(format!("{:020}.dbrec", 2));
+            fs::write(&bad, b"torn").unwrap();
+            Ledger::open(&r.state)
+                .quarantine(2, "q-2", "operator", 0, NOW)
+                .unwrap();
+            settle(&mut x, &c2);
+            assert!(!returns.exists());
+            assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+            x.shutdown();
+            r.clean();
+            return;
+        }
+        settle(&mut x, &c2);
+        assert!(returns.join(format!("{a}-total-{:010}.dbrec", 0)).exists());
+        assert!(x.armed(), "{:?}", reason(&x));
+        let next = x
+            .executor
+            .as_ref()
+            .unwrap()
+            .end()
+            .lease()
+            .unwrap()
+            .attempt();
+        assert_ne!(next, attempt);
+        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        assert!(
+            !record(&x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .iter()
+                .any(|r| r.starts_with("SLOT_RETURN_FAILED"))
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// One released fact of the buyer's `intent` of `token` at `nonce`.
+    fn r3_fact(
+        n: u8,
+        intent: LiveIntentKind,
+        token: [u8; 20],
+        nonce: u64,
+    ) -> crate::live_ledger::Fact {
+        crate::live_ledger::Fact {
+            kind: FactKind::Released,
+            tx_hash: [n; 32],
+            intent,
+            component: ComponentId::StrategyC,
+            token,
+            nonce,
+            grant_generation: 1,
+            input_wei: Some(U256::from(1_000u64)),
+            max_wei: Some(U256::from(1_300u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD + 2),
+            by_tx: None,
+            response: None,
+            origin: None,
+            launcher: None,
+            placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
+        }
+    }
+
+    /// What became of `f` in a block before the head.
+    fn r3_chain(f: &crate::live_ledger::Fact, kind: FactKind, n: u8) -> crate::live_ledger::Fact {
+        crate::live_ledger::Fact {
+            block: Some((HEAD - 20 + u64::from(n), [n; 32], 1_793_000_000_000)),
+            gas_wei: Some(U256::from(1u8)),
+            tokens: (f.intent == LiveIntentKind::Buy).then(|| U256::from(7u8)),
+            eth_wei: (f.intent == LiveIntentKind::Buy).then(|| U256::from(1_000u64)),
+            ..crate::live_ledger::Fact::about(f, kind)
+        }
+    }
+
+    /// R3: the operator's decisions written by another process (`bsc_runtime
+    /// live lot`) reach the running LIVE path at its next reconcile: a
+    /// resumed lot's stopped exit opens again and is wanted, its token named
+    /// for a new curve read; an exit request is held back (counted) while
+    /// the operator exit is OFF and wanted by a process with it ON; a lot
+    /// written off ends for the strategy, also one never reported (held
+    /// again after a restart).
+    #[test]
+    fn the_operators_lot_decisions_reach_the_running_runtime() {
+        use crate::live_ledger::{Ledger, LotDecision};
+        let mut r = Rig::new("live-decide", LiveStrategies::Both);
+        let ledger = Ledger::open(&r.state);
+        let (a, b) = ([0xA1; 20], [0xB1; 20]);
+        let buy_a = r3_fact(1, LiveIntentKind::Buy, a, 0);
+        let approve = r3_fact(2, LiveIntentKind::Approve, a, 1);
+        let sell = r3_fact(3, LiveIntentKind::Sell, a, 2);
+        let buy_b = r3_fact(4, LiveIntentKind::Buy, b, 3);
+        for f in [
+            buy_a.clone(),
+            r3_chain(&buy_a, FactKind::Included, 1),
+            approve.clone(),
+            r3_chain(&approve, FactKind::Reverted, 2),
+            sell.clone(),
+            r3_chain(&sell, FactKind::Reverted, 3),
+            buy_b.clone(),
+            r3_chain(&buy_b, FactKind::Included, 4),
+        ] {
+            ledger.append(&f, 1).unwrap();
+        }
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 4);
+        settle(&mut x, &c2);
+        assert_eq!(
+            x.exit_stopped(&a),
+            Some(crate::sources::LIVE_EXIT_REVERTS_EXHAUSTED)
+        );
+        // The lots open from before count as reported: nothing to tell.
+        assert_eq!(x.take_decided(), (Vec::new(), Vec::new()));
+        ledger
+            .decide(
+                [1; 32],
+                LotDecision::Resume,
+                "resume-a",
+                "operator",
+                false,
+                NOW,
+            )
+            .unwrap();
+        settle(&mut x, &c2);
+        let (_, resumed) = x.take_decided();
+        assert_eq!(resumed, vec![a]);
+        assert_eq!(x.exit_stopped(&a), None);
+        assert!(x.exits_wanted.contains(&a));
+        // Exit-now written while this process runs with the switch OFF.
+        ledger
+            .decide(
+                [4; 32],
+                LotDecision::ExitNow,
+                "exit-b",
+                "operator",
+                true,
+                NOW,
+            )
+            .unwrap();
+        settle(&mut x, &c2);
+        settle(&mut x, &c2);
+        assert!(!x.exits_wanted.contains(&b));
+        let status = record(&x);
+        let refusals = status.texts(l::REFUSALS).unwrap();
+        assert!(refusals.contains(&"OPERATOR_EXIT_LOCKED=1"), "{refusals:?}");
+        x.shutdown();
+        r.exec.exec.live_operator_exit = true;
+        let mut y = r.runtime("boot-1");
+        settle(&mut y, &c2);
+        assert!(y.exits_wanted.contains(&b));
+        y.shutdown();
+        // A new process (B never reported to it) sees B written off.
+        let lot_b = [4; 32];
+        let mut z = r.runtime("boot-1");
+        settle(&mut z, &c2);
+        let _ = z.take_decided();
+        // B's exit is wanted but nothing of it is out: the write-off holds.
+        ledger
+            .decide(
+                lot_b,
+                LotDecision::WriteOff,
+                "off-b",
+                "operator",
+                false,
+                NOW,
+            )
+            .unwrap();
+        // Review F3: another path folds it first; the next fold of the
+        // decisions still reports it (B, open from before, counts as
+        // reported: it ends).
+        z.refold();
+        z.fold_decisions();
+        let (changes, _) = z.take_decided();
+        assert!(
+            changes.contains(&PositionChange::Ended { token: b }),
+            "{changes:?}"
+        );
+        assert!(
+            z.open_positions()
+                .iter()
+                .all(|p| !matches!(p, PositionChange::Opened { token, .. } if *token == b))
+        );
+        assert!(!z.exits_wanted.contains(&b));
+        z.shutdown();
+        r.clean();
+    }
+
+    /// BSC3-045: an entry of the ledger the operator quarantined (it did
+    /// not decode) may have said what holds BUYs back: no BUY under a grant
+    /// written before it (no lease either); the operator's new grant
+    /// decides anew.
+    #[test]
+    fn a_quarantined_entry_refuses_the_buys_of_the_grants_before_it() {
+        use crate::live_ledger::Ledger;
+        let r = Rig::new("live-quarantine", LiveStrategies::C3);
+        let live = r.state.join("live-ledger");
+        fs::create_dir_all(&live).unwrap();
+        fs::write(live.join(format!("{:020}.dbrec", 0)), b"torn").unwrap();
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        Ledger::open(&r.state)
+            .quarantine(0, "q-0", "operator", g, NOW)
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let refusal = x.buy_refusal(x.one_buy(), Some(&c2), x.free_nonce(&c2));
+        assert_eq!(
+            refusal,
+            Some((
+                crate::paper_exec::Refusal::GrantLimit,
+                Some(crate::sources::LIVE_LEDGER_QUARANTINED)
+            ))
+        );
+        assert!(leases(&r.state).is_empty());
+        x.shutdown();
+        r.authorize("boot-1", "after-quarantine");
+        let mut y = r.runtime("boot-1");
+        settle(&mut y, &c2);
+        assert!(y.armed(), "{:?}", reason(&y));
+        assert_eq!(
+            y.buy_refusal(y.one_buy(), Some(&c2), y.free_nonce(&c2)),
+            None
+        );
+        assert_eq!(leases(&r.state).len(), 1);
+        y.shutdown();
+        r.clean();
+    }
+
+    /// R3 re-check RC1: while the ledger does not read (its fold empty),
+    /// no lot ends for the strategy and no wanted exit is dropped; once it
+    /// reads again, nothing changed.
+    #[test]
+    fn an_unreadable_ledger_ends_no_lot_for_the_strategy() {
+        use crate::live_ledger::Ledger;
+        let r = Rig::new("live-r3-unreadable", LiveStrategies::Both);
+        let ledger = Ledger::open(&r.state);
+        let a = [0xA1; 20];
+        let buy = r3_fact(1, LiveIntentKind::Buy, a, 0);
+        ledger.append(&buy, 1).unwrap();
+        ledger
+            .append(&r3_chain(&buy, FactKind::Included, 1), 1)
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 1);
+        settle(&mut x, &c2);
+        x.exits_wanted.push(a);
+        let torn = r.state.join("live-ledger").join(format!("{:020}.dbrec", 2));
+        fs::write(&torn, b"torn").unwrap();
+        x.refold();
+        assert!(x.ledger_error.is_some());
+        x.fold_decisions();
+        assert_eq!(x.take_decided(), (Vec::new(), Vec::new()));
+        assert_eq!(x.exits_wanted, vec![a]);
+        fs::remove_file(&torn).unwrap();
+        x.refold();
+        x.fold_decisions();
+        assert_eq!(x.take_decided(), (Vec::new(), Vec::new()));
+        assert_eq!(x.exits_wanted, vec![a]);
+        x.shutdown();
         r.clean();
     }
 }

@@ -577,7 +577,9 @@ pub mod live_ledger {
     /// admitted and the process ended before its outcome was written),
     /// `WITHDRAWN` (admitted, but no byte of it left: never on chain),
     /// `INCLUDED`, `REVERTED`, `REPLACED` (another transaction took its
-    /// nonce) or `ORPHANED` (its block left the canonical chain).
+    /// nonce) or `ORPHANED` (its block left the canonical chain);
+    /// `RESPONDED`, `PLACED`; an operator's `RESUMED`, `WRITTEN_OFF`,
+    /// `EXIT_REQUESTED` (of a lot) and `ADOPTED` (a G0.7 BUY as a lot).
     pub const KIND: u16 = 1;
     pub const TX_HASH: u16 = 2;
     pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
@@ -631,7 +633,68 @@ pub mod live_ledger {
     pub const OWN_INDEX: u16 = 26;
     pub const BUYS_BEFORE: u16 = 27;
 
+    /// v4 (01.11., REV.1.0 R3): a BUY's attempt (a launch's C3 BUY: its
+    /// lease's, the lease's own fact the same; another BUY: its own hash):
+    /// its slots go back once every fact of it is WITHDRAWN (BSC3-068).
+    pub const ATTEMPT: u16 = 28;
+    /// v4: an operator's fact (`RESUMED`, `WRITTEN_OFF`, `EXIT_REQUESTED`,
+    /// `ADOPTED`): the request it answers (once in the ledger) and who
+    /// decided it; `ADOPTED`: the SHA-256 of the G0.8 result it rests on.
+    pub const REQUEST_ID: u16 = 29;
+    pub const DECIDED_BY: u16 = 30;
+    pub const EVIDENCE_SHA256: u16 = 31;
+    /// v4: where a chain fact comes from when not from the canonical
+    /// follower's block (BSC3-024/041): `RECEIPT` (its receipt by hash, the
+    /// block confirmed by the second source) or `NONCE` (`REPLACED`: no
+    /// receipt, the sender's confirmed nonce past it).
+    pub const SOURCE: u16 = 32;
+
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 4,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
+            Field::opt(SENDER, "sender", Address),
+            Field::opt(CHAIN_ID, "chain_id", U64),
+            Field::opt(LAUNCHER, "launcher", Address),
+            Field::opt(PLACEMENT, "placement", Text),
+            Field::opt(LAUNCH_INDEX, "launch_index", U64),
+            Field::opt(OWN_INDEX, "own_index", U64),
+            Field::opt(BUYS_BEFORE, "buys_before", U64),
+            Field::opt(ATTEMPT, "attempt", B256),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::opt(DECIDED_BY, "decided_by", Text),
+            Field::opt(EVIDENCE_SHA256, "evidence_sha256", B256),
+            Field::opt(SOURCE, "source", Text),
+        ],
+    };
+
+    /// v3 (no attempt, operator, source), kept readable.
+    pub const V3: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
         record_type: 68,
         schema_version: 3,
@@ -2245,6 +2308,49 @@ pub mod live_campaign_precommit {
     };
 }
 
+/// REV.1.0 R3 (BSC3-045): an operator's quarantine of a LIVE ledger entry
+/// that does not decode (`bsc_runtime live ledger quarantine`):
+/// `live-ledger-quarantine/<seq>.dbrec`, written create-new before the
+/// entry is moved beside it whole (`<seq>.entry`, never rewritten). A
+/// readable fact is never quarantined. The BUYs of every LIVE grant written
+/// at or before `generation` stay refused (a new grant decides anew); what
+/// the entry said is recovered from the admissions and the chain.
+pub mod live_ledger_quarantine {
+    use super::*;
+
+    pub const SEQ: u16 = 1;
+    /// The SHA-256 of the entry's bytes.
+    pub const SHA256: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const REQUEST_ID: u16 = 5;
+    pub const DECIDED_BY: u16 = 6;
+    /// Why it does not decode.
+    pub const WHY: u16 = 7;
+    /// The owner generation when it was quarantined.
+    pub const GENERATION: u16 = 8;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger-quarantine.v1",
+        record_type: 74,
+        schema_version: 1,
+        fields: &[
+            Field::req(SEQ, "seq", U64),
+            Field::req(SHA256, "sha256", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(DECIDED_BY, "decided_by", Text),
+            Field::req(WHY, "why", Text),
+            Field::req(GENERATION, "generation", U64),
+        ],
+    };
+}
+
 /// REV.1.0 R2 (master plan §13 J): the campaign and release verdicts of
 /// the evaluated attempts against the manifest: `CAMPAIGN_NOT_READY`
 /// (no reviewed, complete, pre-committed manifest of this build and
@@ -2384,6 +2490,7 @@ pub const ALL: &[&Schema] = &[
     &live_spend::SCHEMA,
     &live_spend::V1,
     &live_ledger::SCHEMA,
+    &live_ledger::V3,
     &live_ledger::V2,
     &live_ledger::V1,
     &live_qualification::SCHEMA,
@@ -2394,4 +2501,5 @@ pub const ALL: &[&Schema] = &[
     &live_attempt::SCHEMA,
     &live_campaign_precommit::SCHEMA,
     &live_campaign_verdict::SCHEMA,
+    &live_ledger_quarantine::SCHEMA,
 ];

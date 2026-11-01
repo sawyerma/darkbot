@@ -2451,6 +2451,9 @@ mod tests {
             }),
             launcher: None,
             placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
         }
     }
 

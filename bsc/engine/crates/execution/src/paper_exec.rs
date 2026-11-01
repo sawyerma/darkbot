@@ -176,6 +176,9 @@ pub struct ExecConfig {
     /// BSC3-076: the blocks a C3 BUY's lease of the owner holds
     /// (`BSC_EXEC_LIVE_LEASE_BLOCKS`), renewed before half are gone.
     pub live_lease_blocks: u64,
+    /// REV.1.0 R3: an operator's EXIT_REQUESTED of a lot wants its exit
+    /// now (`BSC_EXEC_LIVE_OPERATOR_EXIT`, OFF by default: held back).
+    pub live_operator_exit: bool,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -2269,6 +2272,7 @@ pub(crate) mod tests {
             live_max_head_age_ms: 86_400_000,
             live_exit_reverts_max: 2,
             live_lease_blocks: 200,
+            live_operator_exit: false,
             sender_paths: SenderPaths::Both,
         }
     }

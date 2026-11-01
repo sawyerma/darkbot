@@ -583,6 +583,7 @@ fn exec_setup() -> ExecSetup {
             live_max_head_age_ms: 86_400_000,
             live_exit_reverts_max: 2,
             live_lease_blocks: 200,
+            live_operator_exit: false,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),
@@ -1319,5 +1320,145 @@ fn source_init_keeps_a_running_live_grant_and_a_reset_ends_it() {
         "{out}"
     );
     assert_ne!(live_switch(), 0, "a reset leaves every switch DISABLED");
+    fs::remove_dir_all(state).unwrap();
+}
+
+/// REV.1.0 R3 (BSC3-045, R1's stranded lots): the operator's commands
+/// through the binary: `live lot resume` writes its fact once per request,
+/// `exit-now` is refused while the configuration's operator exit is OFF,
+/// `write-off` ends the lot (`live positions` shows it lost); `live ledger
+/// check` names an entry that does not decode and `quarantine` moves it
+/// out, after which the ledger checks clean; `live adopt-g07` without a
+/// configured LIVE buyer is refused.
+#[test]
+fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
+    use darkbot_bsc_execution::live_ledger::{Fact, FactKind, Ledger};
+    use darkbot_bsc_execution::sources::{ComponentId, LiveIntentKind};
+    let state = scratch("operator-cli");
+    activate(&state, &[], now_ms() + 3_600_000);
+    let s = state.to_str().unwrap();
+    let config = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../config/ingress.public.env"
+    );
+    let ledger = Ledger::open(&state);
+    let buy = Fact {
+        kind: FactKind::Released,
+        tx_hash: [1; 32],
+        intent: LiveIntentKind::Buy,
+        component: ComponentId::StrategyC,
+        token: [0xA; 20],
+        nonce: 0,
+        grant_generation: 1,
+        input_wei: Some(U256::from(1_000u64)),
+        max_wei: Some(U256::from(1_300u64)),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+        max_block: Some(100),
+        by_tx: None,
+        response: None,
+        origin: None,
+        launcher: None,
+        placement: None,
+        attempt: None,
+        operator: None,
+        source: None,
+    };
+    ledger.append(&buy, 1).unwrap();
+    let included = Fact {
+        block: Some((5, [5; 32], 5_000)),
+        gas_wei: Some(U256::from(100u64)),
+        tokens: Some(U256::from(7u64)),
+        eth_wei: Some(U256::from(1_000u64)),
+        ..Fact::about(&buy, FactKind::Included)
+    };
+    ledger.append(&included, 2).unwrap();
+    let lot = format!("0x{}", hex::encode([1u8; 32]));
+    let decide = |what: &str, id: &str| {
+        cli(&[
+            "live",
+            "lot",
+            what,
+            "--lot",
+            &lot,
+            "--state",
+            s,
+            "--config",
+            config,
+            "--request-id",
+            id,
+            "--decided-by",
+            "operator",
+        ])
+    };
+    let (code, out) = decide("resume", "resume-1");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("fact=2"), "{out}");
+    let (code, out) = decide("resume", "resume-1");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("written before"), "{out}");
+    let (code, out) = decide("exit-now", "exit-1");
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("LIVE_OPERATOR_EXIT_OFF"), "{out}");
+    let (code, out) = decide("write-off", "off-1");
+    assert_eq!(code, 0, "{out}");
+    let (_, out) = cli(&["live", "positions", "--state", s]);
+    assert!(
+        out.contains("state=WRITTEN_OFF") && out.contains("pnl_wei=-1100"),
+        "{out}"
+    );
+    // A torn entry: the check names it, the operator quarantines it.
+    let check = || cli(&["live", "ledger", "check", "--state", s]);
+    let (code, out) = check();
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("entries=4 unreadable=0"), "{out}");
+    fs::write(
+        state.join("live-ledger").join(format!("{:020}.dbrec", 4)),
+        b"torn",
+    )
+    .unwrap();
+    let (code, out) = check();
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("unreadable seq=4"), "{out}");
+    let (code, out) = cli(&[
+        "live",
+        "ledger",
+        "quarantine",
+        "--seq",
+        "4",
+        "--state",
+        s,
+        "--request-id",
+        "q-4",
+        "--decided-by",
+        "operator",
+    ]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = check();
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("entries=4 unreadable=0 quarantined_at_generation="),
+        "{out}"
+    );
+    let (code, out) = cli(&[
+        "live",
+        "adopt-g07",
+        "--g08",
+        "none.dbrec",
+        "--capture",
+        "none.journal",
+        "--state",
+        s,
+        "--config",
+        config,
+        "--request-id",
+        "adopt-1",
+        "--decided-by",
+        "operator",
+    ]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("BSC_LIVE_BUYER is not configured"), "{out}");
     fs::remove_dir_all(state).unwrap();
 }
