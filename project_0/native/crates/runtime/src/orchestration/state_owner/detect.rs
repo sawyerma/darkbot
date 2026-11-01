@@ -667,6 +667,8 @@ impl ShadowOwner {
                 Some(R::RpcBudgetFeeQuote(_)) => Some(S::FeeQuote),
                 Some(R::RpcBudgetSimulation(_)) => Some(S::Simulation),
                 Some(R::RpcBudgetDrain) => Some(S::Network),
+                // P6-MT.7: only a route the router's quota refused is a plan with this loss.
+                Some(R::Plan(_)) => Some(S::Route),
                 _ => None,
             };
             if let Some(stage) = stage {

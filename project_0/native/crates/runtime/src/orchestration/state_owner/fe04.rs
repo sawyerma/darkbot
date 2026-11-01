@@ -895,7 +895,10 @@ impl ShadowOwner {
             use solana_sdk::signer::Signer;
             crate::execution::route::unwrap_exit_route(&self.payer.pubkey(), units)
         } else {
-            self.routes.exit_to_sol(&mint, units, deadline)
+            // P6-MT.7: an exit may take every token of Jupiter's bucket.
+            self.routes
+                .for_class(crate::execution::route::JupiterClass::Exit)
+                .exit_to_sol(&mint, units, deadline)
         };
         let route = match route {
             Ok(r) => r,

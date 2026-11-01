@@ -138,28 +138,58 @@ pub(crate) fn swap_terms(
     })
 }
 
+/// P6-MT.7: the refusals of Jupiter's account bucket (never sent): a 429's hold, no token for the
+/// request's class, no slot in flight.
+pub const JUPITER_RATE_LIMITED: &str = "JUPITER_RATE_LIMITED";
+pub const JUPITER_RATE_BUDGET: &str = "JUPITER_RATE_BUDGET";
+pub const JUPITER_INFLIGHT: &str = "JUPITER_INFLIGHT";
+
+/// Whether a route error is the account bucket's refusal (the request was never sent: the route
+/// is deferred, never judged).
+pub fn budget_refusal(error: &str) -> bool {
+    [JUPITER_RATE_LIMITED, JUPITER_RATE_BUDGET, JUPITER_INFLIGHT]
+        .iter()
+        .any(|code| error.contains(code))
+}
+
+/// P6-MT.7 priority: an exit ranks above a candidate, a candidate above an observation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JupiterClass {
+    /// An FE-04 exit of a held position: it may take every token.
+    Exit,
+    /// A candidate's routes: it leaves the exits' reserve (`jupiter_exit_reserve`).
+    Candidate,
+    /// An observation (rebalancing OBSERVE): it also leaves one request for a candidate.
+    Observe,
+}
+
 /// P6-MT.7: Jupiter's quota is one bucket per account — every credential and endpoint of it — so
-/// the one provider and its clones share this budget. A request is admitted only with a token
-/// (one per the account tier's interval, `jupiter_authenticated_interval_ms` with an API key,
-/// `jupiter_anonymous_interval_ms` without; at most `jupiter_burst` saved) and a slot of
-/// `jupiter_inflight`; a 429 empties the bucket until its Retry-After (else one interval). It never
-/// waits: without a token or a slot the request is refused and counted — no thread sleeps or spins
-/// on the quota (P6-MT.7: without a token the candidate stays as it is, no re-prepare, no spin).
+/// the process holds one per tier (`shared`) and every router of that tier and its clones take
+/// from it. A request is admitted only with a token above its class's floor (one per the tier's
+/// interval, `jupiter_authenticated_interval_ms` with an API key, `jupiter_anonymous_interval_ms`
+/// without; at most `jupiter_burst` saved, a full bucket restarting its accrual) and a slot of
+/// `jupiter_inflight`. A 429 holds the account for its Retry-After (A23-06's reading: a longer
+/// hold kept, a value beyond any instant holds until the process ends — fail closed — and none
+/// or an unreadable one holds one interval), the bucket empty after it. It never waits: a refusal
+/// is immediate and counted — no thread sleeps or spins on the quota (P6-MT.7: without a token
+/// the candidate stays as it is, no re-prepare, no spin).
 #[derive(Debug)]
 pub struct JupiterBudget {
     interval: Duration,
     burst: u32,
     inflight_max: u32,
+    exit_reserve: u32,
     state: std::sync::Mutex<JupiterState>,
 }
 
 #[derive(Debug)]
 struct JupiterState {
     tokens: u32,
-    /// When the next token accrues.
+    /// When the next token accrues (while the bucket is not full).
     refill_at: Instant,
-    /// A 429's wait: nothing is admitted before it.
-    cooldown_until: Option<Instant>,
+    /// A 429's hold: nothing is admitted before it; `held_until_end` for one beyond any instant.
+    hold_until: Option<Instant>,
+    held_until_end: bool,
     inflight: u32,
 }
 
@@ -177,15 +207,18 @@ impl Drop for JupiterPermit {
 }
 
 impl JupiterBudget {
-    pub fn new(interval: Duration, burst: u32, inflight_max: u32) -> Self {
+    pub fn new(interval: Duration, burst: u32, inflight_max: u32, exit_reserve: u32) -> Self {
+        let now = Instant::now();
         Self {
             interval,
             burst,
             inflight_max,
+            exit_reserve,
             state: std::sync::Mutex::new(JupiterState {
                 tokens: burst,
-                refill_at: Instant::now() + interval,
-                cooldown_until: None,
+                refill_at: now.checked_add(interval).unwrap_or(now),
+                hold_until: None,
+                held_until_end: false,
                 inflight: 0,
             }),
         }
@@ -201,37 +234,97 @@ impl JupiterBudget {
         } else {
             limits.jupiter_anonymous_interval_ms
         };
+        let count = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
         Self::new(
             Duration::from_millis(interval),
-            u32::try_from(limits.jupiter_burst).unwrap_or(u32::MAX),
-            u32::try_from(limits.jupiter_inflight).unwrap_or(u32::MAX),
+            count(limits.jupiter_burst),
+            count(limits.jupiter_inflight),
+            count(limits.jupiter_exit_reserve),
         )
     }
 
-    /// A request now, or the code it is refused with (`JUPITER_RATE_LIMITED`: a 429's wait;
-    /// `JUPITER_RATE_BUDGET`: no token; `JUPITER_INFLIGHT`: no slot).
-    pub fn admit(self: &std::sync::Arc<Self>) -> Result<JupiterPermit, &'static str> {
-        let now = Instant::now();
-        let mut s = self.state.lock().map_err(|_| "JUPITER_BUDGET_POISONED")?;
-        if s.cooldown_until.is_some_and(|until| now < until) {
-            return Err("JUPITER_RATE_LIMITED");
+    /// The process's bucket of a tier: created at its first use under the active limits, then
+    /// shared by every router of that tier (one account, one quota).
+    pub fn shared(authenticated: bool) -> std::sync::Arc<JupiterBudget> {
+        static TIERS: std::sync::OnceLock<[std::sync::Arc<JupiterBudget>; 2]> =
+            std::sync::OnceLock::new();
+        let tiers = TIERS.get_or_init(|| {
+            let limits = &darkbot_solana::runtime_config::active().limits;
+            [
+                std::sync::Arc::new(JupiterBudget::configured(limits, false)),
+                std::sync::Arc::new(JupiterBudget::configured(limits, true)),
+            ]
+        });
+        tiers[usize::from(authenticated)].clone()
+    }
+
+    /// The tokens a class must leave.
+    fn floor(&self, class: JupiterClass) -> u32 {
+        match class {
+            JupiterClass::Exit => 0,
+            JupiterClass::Candidate => self.exit_reserve,
+            JupiterClass::Observe => self.exit_reserve.saturating_add(1),
         }
+    }
+
+    fn refill(&self, s: &mut JupiterState, now: Instant) {
         if self.interval.is_zero() {
             s.tokens = self.burst;
-        } else {
-            while s.tokens < self.burst && s.refill_at <= now {
-                s.tokens += 1;
-                s.refill_at += self.interval;
-            }
-            if s.tokens == self.burst && s.refill_at <= now {
-                s.refill_at = now + self.interval;
+            return;
+        }
+        while s.tokens < self.burst && s.refill_at <= now {
+            s.tokens += 1;
+            match s.refill_at.checked_add(self.interval) {
+                Some(next) => s.refill_at = next,
+                None => break,
             }
         }
+        // A full bucket saves nothing more: its next token accrues one interval after now.
+        if s.tokens >= self.burst {
+            s.refill_at = now.checked_add(self.interval).unwrap_or(now);
+        }
+    }
+
+    /// The requests `class` may take now (above its floor) — a search checks its minimum before
+    /// its first request.
+    pub fn available(&self, class: JupiterClass) -> u32 {
+        self.available_at(class, Instant::now())
+    }
+
+    fn available_at(&self, class: JupiterClass, now: Instant) -> u32 {
+        let Ok(mut s) = self.state.lock() else {
+            return 0;
+        };
+        if s.held_until_end || s.hold_until.is_some_and(|until| now < until) {
+            return 0;
+        }
+        self.refill(&mut s, now);
+        s.tokens.saturating_sub(self.floor(class))
+    }
+
+    /// A request of `class` now, or the code it is refused with.
+    pub fn admit(
+        self: &std::sync::Arc<Self>,
+        class: JupiterClass,
+    ) -> Result<JupiterPermit, &'static str> {
+        self.admit_at(class, Instant::now())
+    }
+
+    fn admit_at(
+        self: &std::sync::Arc<Self>,
+        class: JupiterClass,
+        now: Instant,
+    ) -> Result<JupiterPermit, &'static str> {
+        let mut s = self.state.lock().map_err(|_| JUPITER_RATE_LIMITED)?;
+        if s.held_until_end || s.hold_until.is_some_and(|until| now < until) {
+            return Err(JUPITER_RATE_LIMITED);
+        }
+        self.refill(&mut s, now);
         if s.inflight >= self.inflight_max {
-            return Err("JUPITER_INFLIGHT");
+            return Err(JUPITER_INFLIGHT);
         }
-        if s.tokens == 0 {
-            return Err("JUPITER_RATE_BUDGET");
+        if s.tokens <= self.floor(class) {
+            return Err(JUPITER_RATE_BUDGET);
         }
         s.tokens -= 1;
         s.inflight += 1;
@@ -240,14 +333,30 @@ impl JupiterBudget {
         })
     }
 
-    /// A 429: nothing is admitted for `wait` (its Retry-After, else one interval); the bucket is
-    /// empty after it.
-    pub fn rate_limited(&self, wait: Option<Duration>) {
-        if let Ok(mut s) = self.state.lock() {
-            let until = Instant::now() + wait.unwrap_or(self.interval);
-            s.cooldown_until = Some(until);
-            s.tokens = 0;
-            s.refill_at = until + self.interval;
+    /// A 429 with its Retry-After `header`.
+    pub fn rate_limited(&self, header: darkbot_solana::provider::RetryAfterHeader) {
+        self.rate_limited_at(header, Instant::now())
+    }
+
+    fn rate_limited_at(&self, header: darkbot_solana::provider::RetryAfterHeader, now: Instant) {
+        use darkbot_solana::provider::RetryAfterHeader as H;
+        let Ok(mut s) = self.state.lock() else {
+            return;
+        };
+        let wait = match header {
+            H::Delay { secs } => Duration::from_secs(secs),
+            H::Absent | H::Invalid => self.interval,
+        };
+        s.tokens = 0;
+        match now
+            .checked_add(wait)
+            .and_then(|until| until.checked_add(self.interval).map(|next| (until, next)))
+        {
+            Some((until, next)) => {
+                s.hold_until = Some(s.hold_until.map_or(until, |held| held.max(until)));
+                s.refill_at = s.refill_at.max(next);
+            }
+            None => s.held_until_end = true,
         }
     }
 }
@@ -255,8 +364,9 @@ impl JupiterBudget {
 #[derive(Clone)]
 pub struct JupiterV2RouteProvider {
     client: reqwest::blocking::Client,
-    /// P6-MT.7: the account's bucket, shared by every clone.
+    /// P6-MT.7: the account's bucket (the process's of its tier) and the class its requests take.
     budget: std::sync::Arc<JupiterBudget>,
+    class: JupiterClass,
     /// D01: upper bound of one Jupiter request, also when the candidate deadline is further
     /// away (`jupiter_timeout_ms`).
     request_timeout: Duration,
@@ -282,9 +392,9 @@ impl JupiterV2RouteProvider {
         }
         let limits = &darkbot_solana::runtime_config::active().limits;
         let request_timeout = Duration::from_millis(limits.jupiter_timeout_ms);
-        let budget = std::sync::Arc::new(JupiterBudget::configured(limits, api_key.is_some()));
         Ok(Self {
-            budget,
+            budget: JupiterBudget::shared(api_key.is_some()),
+            class: JupiterClass::Candidate,
             client: darkbot_solana::provider::blocking_http()
                 .timeout(request_timeout)
                 .build()
@@ -306,10 +416,24 @@ impl JupiterV2RouteProvider {
         self
     }
 
+    /// This router for `class`'s requests (the same account bucket).
+    pub fn for_class(&self, class: JupiterClass) -> Self {
+        Self {
+            class,
+            ..self.clone()
+        }
+    }
+
     /// Tests of other behaviour than the quota ask a loopback endpoint without Jupiter's spacing.
     #[cfg(test)]
-    pub(crate) fn unpaced(mut self) -> Self {
-        self.budget = std::sync::Arc::new(JupiterBudget::new(Duration::ZERO, u32::MAX, u32::MAX));
+    pub(crate) fn unpaced(self) -> Self {
+        self.with_budget(JupiterBudget::new(Duration::ZERO, u32::MAX, u32::MAX, 0))
+    }
+
+    /// Tests of the quota give the router a bucket of their own.
+    #[cfg(test)]
+    pub(crate) fn with_budget(mut self, budget: JupiterBudget) -> Self {
+        self.budget = std::sync::Arc::new(budget);
         self
     }
 
@@ -342,7 +466,7 @@ impl JupiterV2RouteProvider {
             ));
         }
         // P6-MT.7: the account's bucket admits it, or it is not sent.
-        let _permit = self.budget.admit().map_err(|code| {
+        let _permit = self.budget.admit(self.class).map_err(|code| {
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::JupiterBudgetRefused, 1);
             format!("jupiter /build: {code}")
         })?;
@@ -413,16 +537,17 @@ impl JupiterV2RouteProvider {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err("jupiter /build: no route (HTTP 404)".into());
         }
-        // P6-MT.7: a 429 holds the account's bucket for its Retry-After (seconds), else one
-        // interval.
+        // P6-MT.7: a 429 holds the account's bucket for its Retry-After (A23-06's reading).
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let wait = response
+            let header = response
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<u64>().ok())
-                .map(Duration::from_secs);
-            self.budget.rate_limited(wait);
+                .map(|v| v.to_str().unwrap_or(""));
+            self.budget
+                .rate_limited(darkbot_solana::provider::retry_after_header(
+                    header,
+                    std::time::SystemTime::now(),
+                ));
         }
         if !response.status().is_success() {
             let status = response.status();
@@ -673,6 +798,10 @@ impl JupiterV2RouteProvider {
 }
 
 impl RouteProvider for JupiterV2RouteProvider {
+    fn route_budget(&self) -> u32 {
+        self.budget.available(self.class)
+    }
+
     fn quote_exact_in(
         &self,
         from_mint: &Pubkey,
@@ -1442,41 +1571,99 @@ pub(crate) mod tests {
         (url, requests)
     }
 
-    /// P6-MT.7: Jupiter's account bucket — a token per interval, at most the burst saved (also
-    /// after a long idle), at most its slots in flight; a 429's wait admits nothing and leaves the
-    /// bucket empty; every refusal is immediate.
+    /// P6-MT.7: Jupiter's account bucket on its own clock — a token per interval, at most the
+    /// burst saved and a full bucket restarting its accrual (never two requests closer than an
+    /// interval at burst 1, review F4), at most its slots in flight; the class floors rank an
+    /// exit above a candidate above an observation; a 429 holds for its Retry-After, a longer
+    /// hold kept, none or an unreadable one for one interval, one beyond any instant for good
+    /// (no overflow); every refusal is immediate.
     #[test]
-    fn p6_mt7_the_jupiter_bucket_paces_bounds_and_holds_after_a_429() {
+    fn p6_mt7_the_jupiter_bucket_paces_ranks_and_holds() {
+        use darkbot_solana::provider::RetryAfterHeader as H;
         use std::sync::Arc;
-        let ms = Duration::from_millis;
-        let b = Arc::new(JupiterBudget::new(ms(80), 1, 1));
-        let first = b.admit().unwrap();
-        assert_eq!(b.admit().err(), Some("JUPITER_INFLIGHT"));
+        use JupiterClass::{Candidate, Exit, Observe};
+        let (ms, s) = (Duration::from_millis, Duration::from_secs);
+        let b = Arc::new(JupiterBudget::new(s(2), 1, 1, 0));
+        let t = Instant::now();
+        let first = b.admit_at(Candidate, t).unwrap();
+        assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_INFLIGHT));
         drop(first);
-        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
-        std::thread::sleep(ms(90));
-        drop(b.admit().unwrap());
+        assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_RATE_BUDGET));
+        assert_eq!(
+            b.admit_at(Candidate, t + ms(1_999)).err(),
+            Some(JUPITER_RATE_BUDGET)
+        );
+        drop(b.admit_at(Candidate, t + s(2)).unwrap());
+        // A full bucket restarts its accrual: never two requests 100 ms apart.
+        let b = Arc::new(JupiterBudget::new(s(2), 1, 4, 0));
+        let t = Instant::now();
+        drop(b.admit_at(Candidate, t + ms(1_900)).unwrap());
+        assert_eq!(
+            b.admit_at(Candidate, t + ms(2_000)).err(),
+            Some(JUPITER_RATE_BUDGET)
+        );
+        drop(b.admit_at(Candidate, t + ms(3_900)).unwrap());
         // A long idle saves the burst, never more.
-        std::thread::sleep(ms(300));
-        drop(b.admit().unwrap());
-        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
-        let b = Arc::new(JupiterBudget::new(ms(80), 2, 4));
-        let (a, c) = (b.admit().unwrap(), b.admit().unwrap());
-        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
-        drop((a, c));
-        b.rate_limited(Some(ms(150)));
-        std::thread::sleep(ms(100));
-        assert_eq!(b.admit().err(), Some("JUPITER_RATE_LIMITED"));
-        // After the wait and one interval: one token.
-        std::thread::sleep(ms(160));
-        drop(b.admit().unwrap());
-        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
+        let b = Arc::new(JupiterBudget::new(s(2), 2, 4, 0));
+        let t = Instant::now() + s(60);
+        let (x, y) = (
+            b.admit_at(Candidate, t).unwrap(),
+            b.admit_at(Candidate, t).unwrap(),
+        );
+        assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_RATE_BUDGET));
+        drop((x, y));
+        // Floors: an observation leaves the exits' reserve and one request for a candidate, a
+        // candidate the exits' reserve, an exit nothing.
+        let b = Arc::new(JupiterBudget::new(s(2), 3, 8, 1));
+        let t = Instant::now();
+        assert_eq!(
+            [Observe, Candidate, Exit].map(|c| b.available_at(c, t)),
+            [1, 2, 3]
+        );
+        let o = b.admit_at(Observe, t).unwrap();
+        assert_eq!(b.admit_at(Observe, t).err(), Some(JUPITER_RATE_BUDGET));
+        let c = b.admit_at(Candidate, t).unwrap();
+        assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_RATE_BUDGET));
+        let e = b.admit_at(Exit, t).unwrap();
+        assert_eq!(b.admit_at(Exit, t).err(), Some(JUPITER_RATE_BUDGET));
+        drop((o, c, e));
+        // A 429: its Retry-After, a shorter one later never shortens it, then one interval to
+        // the first token.
+        let b = Arc::new(JupiterBudget::new(s(2), 1, 4, 0));
+        let t = Instant::now();
+        b.rate_limited_at(H::Delay { secs: 30 }, t);
+        b.rate_limited_at(H::Delay { secs: 1 }, t);
+        assert_eq!(
+            b.admit_at(Exit, t + s(29)).err(),
+            Some(JUPITER_RATE_LIMITED)
+        );
+        assert_eq!(b.available_at(Exit, t + s(29)), 0);
+        assert_eq!(b.admit_at(Exit, t + s(30)).err(), Some(JUPITER_RATE_BUDGET));
+        drop(b.admit_at(Exit, t + s(32)).unwrap());
+        // None or an unreadable one: one interval.
+        for header in [H::Absent, H::Invalid] {
+            let b = Arc::new(JupiterBudget::new(s(2), 1, 4, 0));
+            let t = Instant::now();
+            b.rate_limited_at(header, t);
+            assert_eq!(b.admit_at(Exit, t + s(1)).err(), Some(JUPITER_RATE_LIMITED));
+            drop(b.admit_at(Exit, t + s(4)).unwrap());
+        }
+        // Beyond any instant: held for good, no overflow.
+        let b = Arc::new(JupiterBudget::new(s(2), 1, 4, 0));
+        let t = Instant::now();
+        b.rate_limited_at(H::Delay { secs: u64::MAX }, t);
+        assert_eq!(
+            b.admit_at(Exit, t + s(1_000_000)).err(),
+            Some(JUPITER_RATE_LIMITED)
+        );
+        assert!(budget_refusal("jupiter /build: JUPITER_RATE_LIMITED"));
+        assert!(!budget_refusal("jupiter /build: no route (HTTP 404)"));
     }
 
-    /// P6-MT.7 through the real adapter: the configured bucket (the anonymous tier's spacing)
-    /// admits the first `/build` and refuses the next at once without sending it — also from a
-    /// clone (one bucket per account); a 429 with its Retry-After holds the account, its next
-    /// request is refused before anything is sent.
+    /// P6-MT.7 through the real adapter: a router sends only what its account bucket admits — the
+    /// next request is refused at once and never sent, also from a clone of another class (one
+    /// bucket per account); a 429 with its Retry-After holds the account before anything is
+    /// sent; the routers of one tier share the process's bucket, those of the other tier do not.
     #[test]
     fn p6_mt7_the_router_sends_only_what_the_account_bucket_admits() {
         let (taker, from, to) = (
@@ -1488,21 +1675,23 @@ pub(crate) mod tests {
         let (url, requests) = serve_build_logged(serde_json::json!({}));
         let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
             .unwrap()
-            .with_base_url(url);
-        let clone = provider.clone();
+            .with_base_url(url)
+            .with_budget(JupiterBudget::new(Duration::from_secs(3_600), 1, 1, 0));
+        let exit = provider.for_class(JupiterClass::Exit);
         let refused =
             darkbot_common::mt0::MT0.get(darkbot_common::mt0::Counter::JupiterBudgetRefused);
         let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline());
         let second = provider.quote_exact_in(&from, &to, 500, &[], deadline());
-        let third = clone.quote_exact_in(&from, &to, 500, &[], deadline());
+        let third = exit.quote_exact_in(&from, &to, 500, &[], deadline());
         assert_eq!(
             requests.lock().unwrap().len(),
             1,
             "only the admitted one is sent"
         );
         for e in [second.unwrap_err(), third.unwrap_err()] {
-            assert!(e.contains("JUPITER_RATE_BUDGET"), "{e}");
+            assert!(budget_refusal(&e) && e.contains(JUPITER_RATE_BUDGET), "{e}");
         }
+        assert_eq!(provider.route_budget(), 0);
         assert!(
             darkbot_common::mt0::MT0.get(darkbot_common::mt0::Counter::JupiterBudgetRefused)
                 >= refused + 2
@@ -1521,7 +1710,20 @@ pub(crate) mod tests {
         let held = provider
             .quote_exact_in(&from, &to, 500, &[], deadline())
             .unwrap_err();
-        assert!(held.contains("JUPITER_RATE_LIMITED"), "{held}");
+        assert!(held.contains(JUPITER_RATE_LIMITED), "{held}");
         assert_eq!(requests.lock().unwrap().len(), 1);
+        // One bucket per tier in the process.
+        let new = |key: Option<&str>| {
+            JupiterV2RouteProvider::new(taker, key.map(str::to_string), 50, 64, false).unwrap()
+        };
+        assert!(std::sync::Arc::ptr_eq(&new(None).budget, &new(None).budget));
+        assert!(std::sync::Arc::ptr_eq(
+            &new(Some("a")).budget,
+            &new(Some("b")).budget
+        ));
+        assert!(!std::sync::Arc::ptr_eq(
+            &new(None).budget,
+            &new(Some("a")).budget
+        ));
     }
 }

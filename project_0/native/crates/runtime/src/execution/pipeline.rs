@@ -199,6 +199,9 @@ pub enum PlanErrorKind {
     HealthUnavailable,
     /// No route for any pair (`ROUTING:`).
     Routing,
+    /// P6-MT.7: a route the router's account bucket refused (never sent): deferred, never a
+    /// routing verdict (`ROUTE_BUDGET:`).
+    RouteBudget,
     /// Any other planning failure (state, layout, build); V17: loss `Plan` of its own.
     Other,
 }
@@ -229,6 +232,7 @@ impl PlanError {
             | PlanErrorKind::MissingAta
             | PlanErrorKind::IntegrationStale
             | PlanErrorKind::Routing
+            | PlanErrorKind::RouteBudget
             | PlanErrorKind::Other => Decision::Skip,
         }
     }
@@ -245,6 +249,8 @@ impl PlanError {
             PlanErrorKind::IntegrationStale => LossReason::IntegrationRefresh,
             PlanErrorKind::HealthUnavailable => LossReason::Health,
             PlanErrorKind::Routing => LossReason::Routing,
+            // P6-MT.7: the remote budget refused it, like the owner's network budget.
+            PlanErrorKind::RouteBudget => LossReason::RpcBudget,
             PlanErrorKind::Other => LossReason::Plan,
         }
     }
@@ -1772,6 +1778,7 @@ mod plan_error_tests {
             // V17: every kind has its own persisted cause (before: both ROUTING).
             K::HealthUnavailable => (Decision::Unavailable, LossReason::Health),
             K::Routing => (Decision::Skip, LossReason::Routing),
+            K::RouteBudget => (Decision::Skip, LossReason::RpcBudget),
             K::Other => (Decision::Skip, LossReason::Plan),
         };
         let texts = [
@@ -1790,6 +1797,7 @@ mod plan_error_tests {
             K::IntegrationStale,
             K::HealthUnavailable,
             K::Routing,
+            K::RouteBudget,
             K::Other,
         ] {
             for text in texts {

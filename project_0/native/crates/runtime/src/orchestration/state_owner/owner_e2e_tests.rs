@@ -9567,3 +9567,33 @@ fn p6_mt13_a_reservation_conflict_is_a_resource_another_attempt_holds() {
     ));
     assert!(!conflict(None, None, "FE04_ATTEMPT_HELD:SUBMITTED"));
 }
+
+/// P6-MT.7 (review F2): a rebalance quote the router's quota refused was never asked — it stays
+/// unanswered and is asked again (an unreachable provider's answer is an unknown quote: taken).
+#[test]
+fn p6_mt7_a_rebalance_quote_the_quota_refused_is_asked_again() {
+    use crate::orchestration::remote_workers::RebalanceQuoteResult;
+    let (mut f, _mint) = b01_observing("p6_mt7_rebalance");
+    let (jobs, results) = f.owner.remote.detached_rebalance();
+    f.owner.rebalance_observe();
+    let job = jobs.try_pop().expect("asked");
+    results
+        .try_push(RebalanceQuoteResult {
+            key: job.key.clone(),
+            minimum_out: Err(format!(
+                "jupiter /build: {}",
+                crate::execution::route::JUPITER_RATE_BUDGET
+            )),
+            generation: job.generation,
+        })
+        .ok()
+        .unwrap();
+    f.owner.rebalance_observe();
+    let again = jobs.try_pop().expect("asked again");
+    assert_eq!(
+        (again.key.clone(), again.generation),
+        (job.key, job.generation)
+    );
+    let plan = f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(plan.quotes_pending, 1, "unanswered, asked again");
+}

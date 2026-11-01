@@ -348,12 +348,15 @@ pub enum BudgetStage {
     Network,
     FeeQuote,
     Simulation,
+    /// P6-MT.7: a route the router's account bucket refused.
+    Route,
 }
 
-pub const BUDGET_STAGES: [BudgetStage; 3] = [
+pub const BUDGET_STAGES: [BudgetStage; 4] = [
     BudgetStage::Network,
     BudgetStage::FeeQuote,
     BudgetStage::Simulation,
+    BudgetStage::Route,
 ];
 
 impl BudgetStage {
@@ -362,6 +365,7 @@ impl BudgetStage {
             BudgetStage::Network => "network",
             BudgetStage::FeeQuote => "fee_quote",
             BudgetStage::Simulation => "simulation",
+            BudgetStage::Route => "route",
         }
     }
 }
@@ -1321,7 +1325,7 @@ mod tests {
             ),
             (1, 1, 1, 0)
         );
-        assert_eq!(m.candidate_budget_denied.len(), 12);
+        assert_eq!(m.candidate_budget_denied.len(), 16);
         assert_eq!(
             (
                 m.reservation_conflicts,

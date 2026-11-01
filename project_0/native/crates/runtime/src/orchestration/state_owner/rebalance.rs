@@ -170,6 +170,14 @@ impl ShadowOwner {
                     continue;
                 }
                 self.rebalance.pending.remove(&r.key);
+                // P6-MT.7: a quote the router's quota refused was never asked — it stays unanswered
+                // and is asked again in the next round.
+                if r.minimum_out
+                    .as_ref()
+                    .is_err_and(|e| crate::execution::route::budget_refusal(e))
+                {
+                    continue;
+                }
                 // An unreachable provider is an unknown quote too (never a guessed output).
                 self.rebalance
                     .quotes

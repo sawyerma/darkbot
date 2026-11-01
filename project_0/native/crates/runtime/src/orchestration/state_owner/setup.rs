@@ -698,7 +698,11 @@ pub(super) fn prepare(
         )?;
         #[cfg(feature = "crate_health")]
         if !inventory_targets.is_empty() {
-            remote.start_rebalance_quoter(routes.clone(), &shutdown)?;
+            // P6-MT.7: an observation ranks below every candidate and exit in Jupiter's bucket.
+            remote.start_rebalance_quoter(
+                routes.for_class(crate::execution::route::JupiterClass::Observe),
+                &shutdown,
+            )?;
         }
         // DEC-06: ACTIVE's sweep cross-check runs off the owner.
         #[cfg(feature = "crate_health")]

@@ -580,6 +580,11 @@ pub mod p0 {
         fn max_accounts(&self) -> u8 {
             64
         }
+        /// P6-MT.7: the requests the router's quota admits now for its class (a router without
+        /// one: no bound) — a search checks its minimum before its first request.
+        fn route_budget(&self) -> u32 {
+            u32::MAX
+        }
         /// ExactIn with an account cap; a provider without caps answers the uncapped quote under
         /// the same deadline.
         fn quote_exact_in_with_budget(
@@ -614,6 +619,25 @@ pub mod p0 {
                 deadline,
             )
         }
+    }
+
+    /// The plan error of a candidate none of whose pairs found a route: a pair the router's quota
+    /// refused leaves it deferred (P6-MT.7: `ROUTE_BUDGET`, never judged unroutable), else no
+    /// route (`ROUTING`).
+    pub(crate) fn routing_error(route_errors: &[String]) -> PlanError {
+        if route_errors
+            .iter()
+            .any(|e| crate::execution::route::budget_refusal(e))
+        {
+            return PlanError::new(
+                PlanErrorKind::RouteBudget,
+                format!("ROUTE_BUDGET:{}", route_errors.join(" | ")),
+            );
+        }
+        PlanError::new(
+            PlanErrorKind::Routing,
+            format!("ROUTING:{}", route_errors.join(" | ")),
+        )
     }
 
     /// P4A-JIT-01: the remote route requests one funding class may still make for one sizing
@@ -716,7 +740,18 @@ pub mod p0 {
             max_input,
             prewarmed_atas,
         } = *buy;
-        if amount_out == 0 || max_input == 0 || Instant::now() >= deadline || !budget.take() {
+        if amount_out == 0 || max_input == 0 || Instant::now() >= deadline {
+            return Ok(None);
+        }
+        // P6-MT.7: the solve needs its reverse and one forward quote — it starts only when the
+        // router's quota admits both, never spending the reverse quote on a solve that cannot end.
+        if routes.route_budget() < 2 {
+            return Err(format!(
+                "jit shortfall: {}: the quota admits no reverse and forward quote now",
+                crate::execution::route::JUPITER_RATE_BUDGET
+            ));
+        }
+        if !budget.take() {
             return Ok(None);
         }
         let mut cap = routes.max_accounts().clamp(1, 64);
@@ -2115,10 +2150,7 @@ pub mod p0 {
                 ));
             }
             if out.is_empty() && !route_errors.is_empty() {
-                return Err(PlanError::new(
-                    PlanErrorKind::Routing,
-                    format!("ROUTING:{}", route_errors.join(" | ")),
-                ));
+                return Err(routing_error(&route_errors));
             }
             let creates_record = prep.init_record.clone()?;
             // B4: the record rent in lamports, the SOL the intent binds (unknown sysvar: None).
@@ -4229,8 +4261,13 @@ pub mod p0 {
             requests: std::cell::RefCell<Vec<(bool, u64, u8)>>,
             /// The provider fails every request after this many.
             fails_after: Option<usize>,
+            /// P6-MT.7: the requests its quota admits now (`None`: no quota).
+            quota: Option<u32>,
         }
         impl RouteProvider for CappedMarket {
+            fn route_budget(&self) -> u32 {
+                self.quota.unwrap_or(u32::MAX)
+            }
             fn quote_exact_in(
                 &self,
                 _: &Pubkey,
@@ -4436,6 +4473,60 @@ pub mod p0 {
             );
             assert!(result.unwrap_err().contains("TX_BUDGET_EXHAUSTED"));
             assert!(calls > 1 && calls <= attempts());
+        }
+
+        /// P6-MT.7: a JIT solve starts only when the router's quota admits its reverse and one
+        /// forward quote — below that nothing is asked (no reverse quote spent on a solve that
+        /// cannot end) and the refusal is the quota's; a pair the quota refused makes the
+        /// candidate's plan error deferred (`ROUTE_BUDGET`, the budget loss), never `ROUTING`.
+        #[test]
+        fn p6_mt7_a_jit_solve_waits_for_its_minimum_and_a_quota_refusal_is_deferred() {
+            let (liab, funding) = (Pubkey::default(), Pubkey::new_unique());
+            let later = Instant::now() + std::time::Duration::from_secs(60);
+            let request = buy(&funding, &liab, 1_000_000, u64::MAX);
+            let solve = |m: &CappedMarket| {
+                fitted_shortfall_exact_in(
+                    m,
+                    &request,
+                    &RouteAttempts::new(attempts()),
+                    later,
+                    |r| compile_route(r, TxLimits::default()),
+                )
+            };
+            let one = CappedMarket {
+                quota: Some(1),
+                ..Default::default()
+            };
+            let e = solve(&one).unwrap_err();
+            assert!(crate::execution::route::budget_refusal(&e), "{e}");
+            assert!(one.requests.borrow().is_empty(), "nothing asked");
+            let two = CappedMarket {
+                quota: Some(2),
+                ..Default::default()
+            };
+            let _ = solve(&two);
+            assert!(!two.requests.borrow().is_empty(), "the solve starts");
+            let deferred = routing_error(&[
+                "exact-in a→b: no route (HTTP 404)".to_string(),
+                format!(
+                    "exact-in c→d: jupiter /build: {}",
+                    crate::execution::route::JUPITER_RATE_BUDGET
+                ),
+            ]);
+            assert_eq!(
+                (deferred.kind, deferred.loss()),
+                (
+                    PlanErrorKind::RouteBudget,
+                    crate::analytics::record::LossReason::RpcBudget
+                )
+            );
+            assert!(
+                deferred.text.starts_with("ROUTE_BUDGET:"),
+                "{}",
+                deferred.text
+            );
+            let unroutable = routing_error(&["exact-in a→b: no route (HTTP 404)".to_string()]);
+            assert_eq!(unroutable.kind, PlanErrorKind::Routing);
         }
 
         #[test]
