@@ -2,9 +2,24 @@
 //! staged, under request ids with redacted receipts; a credential's secret only through the
 //! standard input into the credential store (here the `test-support` directory store; the
 //! production build has the macOS keychain alone), never in an argument, an output or a record.
+//! A debug build only: in a release build the test store does not exist and the binary would
+//! reach the real keychain.
+#![cfg(debug_assertions)]
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+/// The secret of the one item of credential `id` in the test store (`<uid>%<id>@<rev>.<nonce>`).
+fn item(store: &Path, id: &str, revision: u64) -> Vec<u8> {
+    let marker = format!("%{id}@{revision}.");
+    let found: Vec<_> = std::fs::read_dir(store)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().unwrap().to_string_lossy().contains(&marker))
+        .collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    std::fs::read(&found[0]).unwrap()
+}
 
 struct Out {
     ok: bool,
@@ -152,7 +167,7 @@ fn dec18_a_provider_and_its_credential_through_the_cli() {
         set.text
     );
     assert!(!set.text.contains("KEY-ONE"), "{}", set.text);
-    assert_eq!(std::fs::read(store.join("helius@1")).unwrap(), b"KEY-ONE");
+    assert_eq!(item(&store, "helius", 1), b"KEY-ONE");
     let selected = select("sel-2");
     assert!(
         selected.ok && selected.text.contains("version=3"),
@@ -187,15 +202,33 @@ fn dec18_a_provider_and_its_credential_through_the_cli() {
         "{}",
         imported.text
     );
-    assert_eq!(
-        std::fs::read(store.join("helius-env@1")).unwrap(),
-        b"ENV-KEY"
-    );
+    assert_eq!(item(&store, "helius-env", 1), b"ENV-KEY");
     let again = import("helius-env2");
     assert!(
         !again.ok && again.text.contains("CREDENTIAL_ENV_IMPORTED"),
         "{}",
         again.text
+    );
+    // A key typed where an identifier belongs is never echoed nor persisted.
+    let slip = run(
+        &[
+            "credential",
+            "revoke",
+            "--credential",
+            "0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f",
+        ],
+        None,
+    );
+    assert!(
+        !slip.ok && slip.text.contains("CREDENTIAL_ID_INVALID") && !slip.text.contains("0b6c2d4e"),
+        "{}",
+        slip.text
+    );
+    let stray = run(&["remove", "SECRET-STRAY"], None);
+    assert!(
+        !stray.ok && !stray.text.contains("SECRET-STRAY"),
+        "{}",
+        stray.text
     );
     assert!(
         std::fs::read_to_string(&env).unwrap().contains("ENV-KEY"),

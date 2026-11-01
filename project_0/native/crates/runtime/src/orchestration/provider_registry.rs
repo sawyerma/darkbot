@@ -2,18 +2,24 @@
 //!
 //! Every committed version of the registry ([`darkbot_solana::providers::ProviderRegistry`]) is a
 //! sealed single-value journal `data/providers/registry_<version>.p0j`, published create-new: the
-//! next version number is the compare-and-swap, so of two concurrent decisions exactly one wins.
-//! Every request has a receipt `data/providers/receipt_<request_id>.p0j`: the same request id
-//! with the same action returns its receipt (idempotent), another action under it is a
-//! conflict, and a receipt lost after its version was committed is rebuilt from that version
-//! (the version names its request). `p0ctl provider …` decides — the configuration is staged:
-//! a runtime takes the version current at its start (DEC-05), a running one is never
+//! next version number is the compare-and-swap. Every request has a receipt
+//! `data/providers/receipt_<request_id>.p0j`: the same request id with the same action returns
+//! its receipt (idempotent), another action under it is a conflict, and a receipt lost after its
+//! version was committed is rebuilt from that version (the version names its request and its
+//! action's digest). One decision at a time: the whole decision — receipt, rebuild, read, the
+//! secret's store, commit, sweep, receipt — runs under an exclusive lock of the store, so a
+//! retried or concurrent request never meets a half-made one.
+//!
+//! `p0ctl provider …` decides — and later the GUI through the same `decide`: every rule lives in
+//! [`apply`] and [`ProviderAction::check`], none in a caller. The configuration is staged: a
+//! runtime takes the version current at its start (DEC-05), a running one is never
 //! reconfigured. A credential's secret never enters a record: it goes to the credential store
-//! (the macOS keychain) under its new revision **before** the version that names the revision is
-//! committed, and a superseded or revoked revision's item is deleted **after** it.
+//! (the macOS keychain) under its new revision's account **before** the version naming it is
+//! committed; every item of this registry that no active revision names — a superseded or
+//! revoked revision, an orphan of an interrupted decision — is deleted by the sweep after it.
 use crate::analytics::journal;
 use darkbot_solana::providers::{
-    CredentialMeta, CredentialRef, CredentialState, CredentialStore, ProviderDescriptor,
+    id_ok, nonce_ok, CredentialMeta, CredentialState, CredentialStore, ProviderDescriptor,
     ProviderKind, ProviderRegistry,
 };
 use serde::{Deserialize, Serialize};
@@ -22,14 +28,17 @@ use std::path::{Path, PathBuf};
 pub const STORE: &str = "data/providers";
 const VERSION_PREFIX: &str = "registry_";
 const RECEIPT_PREFIX: &str = "receipt_";
+const LOCK: &str = ".decide.lock";
 /// The bound of a credential's secret (bytes).
 pub const SECRET_LIMIT: usize = 4096;
 
-/// One committed version and the request that committed it.
+/// One committed version, the request that committed it and its action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRegistryRecord {
     pub registry: ProviderRegistry,
     pub request_id: String,
+    pub action: String,
+    pub action_sha256: String,
     pub decided_unix_s: u64,
 }
 impl crate::analytics::payload::Payload for ProviderRegistryRecord {
@@ -58,7 +67,8 @@ impl crate::analytics::payload::Payload for ProviderReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderAction {
     Add(ProviderDescriptor),
-    /// Replaces the provider of the descriptor's id.
+    /// Replaces the provider of the descriptor's id (its kind and qualification are kept by
+    /// [`apply`]: a qualification belongs to a binding, never to an edit).
     Update(ProviderDescriptor),
     Remove(String),
     Enable(String),
@@ -66,9 +76,10 @@ pub enum ProviderAction {
     Priority(String, u32),
     Select(ProviderKind, String),
     Unselect(ProviderKind),
-    /// Names (or clears) the provider evidence record that qualified a provider.
+    /// Names (or clears) the provider evidence record that qualified a provider's binding.
     Qualify(String, Option<String>),
-    /// A new credential, or a new revision of a revoked one (`origin`: `input`, `env:NAME`).
+    /// A new credential, or a new revision of a revoked one (`origin`: `input`, `env:NAME` — the
+    /// one-time import).
     CredentialSet {
         credential: String,
         origin: String,
@@ -79,7 +90,7 @@ pub enum ProviderAction {
 }
 
 impl ProviderAction {
-    /// The action's canonical text (receipts, status): never a secret.
+    /// The action's canonical text (receipts, status): only checked identifiers, never a secret.
     pub fn text(&self) -> String {
         match self {
             Self::Add(p) => format!("add {} {}", p.id, p.kind.name()),
@@ -98,12 +109,64 @@ impl ProviderAction {
             Self::CredentialRevoke(c) => format!("credential revoke {c}"),
         }
     }
+
     fn digest(&self) -> String {
         sha(&bincode::serialize(self).expect("bincode of plain data"))
     }
+
     /// Whether the action stores a new secret.
     fn stores_secret(&self) -> bool {
         matches!(self, Self::CredentialSet { .. } | Self::CredentialRotate(_))
+    }
+
+    /// Every identifier and value of the action, checked before anything is persisted: a
+    /// refused value is never written (not even into a receipt) and never echoed — an operator's
+    /// slip may be a key.
+    pub fn check(&self) -> Result<(), String> {
+        let id = |s: &str, what: &str| {
+            if id_ok(s) {
+                Ok(())
+            } else {
+                Err(format!("{what}_ID_INVALID ([a-z0-9_-]{{1,32}})"))
+            }
+        };
+        match self {
+            Self::Add(p) | Self::Update(p) => p.validate(),
+            Self::Remove(i) | Self::Enable(i) | Self::Disable(i) | Self::Priority(i, _) => {
+                id(i, "PROVIDER")
+            }
+            Self::Select(_, i) => id(i, "PROVIDER"),
+            Self::Unselect(_) => Ok(()),
+            Self::Qualify(i, e) => {
+                id(i, "PROVIDER")?;
+                match e {
+                    Some(e) if !nonce_ok(e) => Err("PROVIDER_EVIDENCE_ID_INVALID".into()),
+                    _ => Ok(()),
+                }
+            }
+            Self::CredentialSet { credential, origin } => {
+                id(credential, "CREDENTIAL")?;
+                origin_ok(origin)
+            }
+            Self::CredentialRotate(c) | Self::CredentialRevoke(c) => id(c, "CREDENTIAL"),
+        }
+    }
+}
+
+/// A credential's origin: `input`, or `env:NAME` with an environment key's syntax.
+fn origin_ok(origin: &str) -> Result<(), String> {
+    let ok = origin == "input"
+        || origin.strip_prefix("env:").is_some_and(|k| {
+            !k.is_empty()
+                && k.len() <= 64
+                && k.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+                && !k.as_bytes()[0].is_ascii_digit()
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err("CREDENTIAL_ORIGIN_INVALID (input|env:NAME)".into())
     }
 }
 
@@ -113,6 +176,13 @@ fn sha(bytes: &[u8]) -> String {
 
 fn io(e: std::io::Error) -> String {
     format!("PROVIDER_STORE_IO: {e}")
+}
+
+/// A fresh random 16-hex nonce (a revision's, or a registry's uid).
+pub fn fresh_nonce() -> Result<String, String> {
+    journal::random16()
+        .map(|b| journal::hex(&b[..8]))
+        .map_err(io)
 }
 
 /// A request id: 1–64 of `[A-Za-z0-9_-]` (a file name).
@@ -155,7 +225,7 @@ fn versions(project: &Path) -> Result<Vec<u64>, String> {
         };
         out.push(
             n.parse::<u64>()
-                .map_err(|_| format!("PROVIDER_REGISTRY_NAME: {n}"))?,
+                .map_err(|_| "PROVIDER_REGISTRY_NAME".to_string())?,
         );
     }
     out.sort_unstable();
@@ -195,63 +265,110 @@ pub fn receipt(project: &Path, request_id: &str) -> Result<Option<ProviderReceip
         .map_err(|e| format!("PROVIDER_RECEIPT_UNREADABLE: {e}"))
 }
 
-/// The next registry of `action` on `current` (version not yet advanced), every invariant
-/// checked; `now` dates a new credential.
+/// The next registry of `action` on `current` (version and uid not yet advanced), every rule and
+/// invariant checked. `nonce` is the decision's fresh nonce for a new credential revision, `now`
+/// dates it.
 pub fn apply(
     current: &ProviderRegistry,
     action: &ProviderAction,
+    nonce: &str,
     now: u64,
 ) -> Result<ProviderRegistry, String> {
     use ProviderAction as A;
+    action.check()?;
     let mut next = current.clone();
     let selected = |id: &str| current.selected.iter().any(|(_, s)| s == id);
-    let provider = |next: &mut ProviderRegistry, id: &str| -> Result<usize, String> {
+    let position = |next: &ProviderRegistry, id: &str| -> Result<usize, String> {
         next.providers
             .iter()
             .position(|p| p.id == id)
             .ok_or_else(|| format!("PROVIDER_UNKNOWN: {id}"))
+    };
+    // A changed credential revision changes the binding of every provider using it: their
+    // qualifications were measured under another identity.
+    let unqualify_users = |next: &mut ProviderRegistry, credential: &str| {
+        for p in next
+            .providers
+            .iter_mut()
+            .filter(|p| p.credential.as_deref() == Some(credential))
+        {
+            p.qualification = None;
+        }
     };
     match action {
         A::Add(p) => {
             if current.provider(&p.id).is_some() {
                 return Err(format!("PROVIDER_EXISTS: {}", p.id));
             }
-            p.validate()?;
+            if p.qualification.is_some() {
+                return Err(
+                    "PROVIDER_QUALIFICATION_BY_EDIT: a qualification comes from provider evidence"
+                        .into(),
+                );
+            }
             next.providers.push(p.clone());
         }
         A::Update(p) => {
-            let i = provider(&mut next, &p.id)?;
-            p.validate()?;
-            next.providers[i] = p.clone();
+            let i = position(&next, &p.id)?;
+            let old = &current.providers[i];
+            if old.kind != p.kind {
+                return Err(
+                    "PROVIDER_KIND_IMMUTABLE: remove and add a provider of another kind".into(),
+                );
+            }
+            let mut p = p.clone();
+            // The qualification is the binding's: kept for the same identity, cleared otherwise,
+            // never set by an edit.
+            p.qualification = if old.same_identity(&p) {
+                old.qualification.clone()
+            } else {
+                None
+            };
+            if selected(&p.id) {
+                let mut probe = current.clone();
+                probe.providers[i] = p.clone();
+                if let Some(block) = probe.selection_block(&p) {
+                    return Err(format!("PROVIDER_SELECTED: {block} (unselect it first)"));
+                }
+            }
+            next.providers[i] = p;
         }
         A::Remove(id) => {
-            let i = provider(&mut next, id)?;
+            let i = position(&next, id)?;
             if selected(id) {
                 return Err(format!("PROVIDER_SELECTED: {id} (unselect it first)"));
             }
             next.providers.remove(i);
         }
         A::Enable(id) => {
-            let i = provider(&mut next, id)?;
+            let i = position(&next, id)?;
             next.providers[i].enabled = true;
         }
         A::Disable(id) => {
-            let i = provider(&mut next, id)?;
+            let i = position(&next, id)?;
             if selected(id) {
                 return Err(format!("PROVIDER_SELECTED: {id} (unselect it first)"));
             }
             next.providers[i].enabled = false;
         }
         A::Priority(id, n) => {
-            let i = provider(&mut next, id)?;
+            let i = position(&next, id)?;
             next.providers[i].priority = *n;
         }
         A::Select(kind, id) => {
             let p = current
                 .provider(id)
                 .ok_or_else(|| format!("PROVIDER_UNKNOWN: {id}"))?;
-            // A selection needs a provider that can authenticate now.
-            current.credential_of(p)?;
+            if p.kind != *kind {
+                return Err(format!(
+                    "PROVIDER_SELECTION_KIND: {id} is {}",
+                    p.kind.name()
+                ));
+            }
+            // A selection needs a free, enabled provider that can authenticate now.
+            if let Some(block) = current.selection_block(p) {
+                return Err(block);
+            }
             next.selected.retain(|(k, _)| k != kind);
             next.selected.push((*kind, id.clone()));
             next.selected.sort();
@@ -263,15 +380,24 @@ pub fn apply(
             next.selected.retain(|(k, _)| k != kind);
         }
         A::Qualify(id, evidence) => {
-            let i = provider(&mut next, id)?;
-            if let Some(e) = evidence {
-                if !crate::orchestration::provider_evidence::is_id(e) {
-                    return Err(format!("PROVIDER_EVIDENCE_ID_INVALID: {e}"));
-                }
-            }
+            let i = position(&next, id)?;
             next.providers[i].qualification = evidence.clone();
         }
         A::CredentialSet { credential, origin } => {
+            if !nonce_ok(nonce) {
+                return Err("CREDENTIAL_NONCE_INVALID".into());
+            }
+            let import = origin.starts_with("env:");
+            // The `.env` import is the one-time migration: never over an existing credential,
+            // never the same variable twice.
+            if import && current.credential(credential).is_some() {
+                return Err(format!(
+                    "CREDENTIAL_EXISTS: {credential} (the import is the one-time migration; use set or rotate)"
+                ));
+            }
+            if import && current.credentials.iter().any(|c| &c.origin == origin) {
+                return Err(format!("CREDENTIAL_ENV_IMPORTED: {origin}"));
+            }
             match next.credentials.iter_mut().find(|c| &c.id == credential) {
                 Some(c) if c.state == CredentialState::Active => {
                     return Err(format!(
@@ -281,6 +407,7 @@ pub fn apply(
                 // A revoked credential continues at its next revision, never a reused one.
                 Some(c) => {
                     c.revision += 1;
+                    c.nonce = nonce.to_string();
                     c.state = CredentialState::Active;
                     c.created_unix_s = now;
                     c.origin = origin.clone();
@@ -288,22 +415,29 @@ pub fn apply(
                 None => next.credentials.push(CredentialMeta {
                     id: credential.clone(),
                     revision: 1,
+                    nonce: nonce.to_string(),
                     state: CredentialState::Active,
                     created_unix_s: now,
                     origin: origin.clone(),
                 }),
             }
             next.credentials.sort_by(|a, b| a.id.cmp(&b.id));
+            unqualify_users(&mut next, credential);
         }
         A::CredentialRotate(credential) => {
+            if !nonce_ok(nonce) {
+                return Err("CREDENTIAL_NONCE_INVALID".into());
+            }
             match next.credentials.iter_mut().find(|c| &c.id == credential) {
                 Some(c) if c.state == CredentialState::Active => {
                     c.revision += 1;
+                    c.nonce = nonce.to_string();
                     c.created_unix_s = now;
                 }
                 Some(_) => return Err(format!("CREDENTIAL_REVOKED: {credential}")),
                 None => return Err(format!("CREDENTIAL_UNKNOWN: {credential}")),
             }
+            unqualify_users(&mut next, credential);
         }
         A::CredentialRevoke(credential) => {
             match next.credentials.iter_mut().find(|c| &c.id == credential) {
@@ -311,43 +445,66 @@ pub fn apply(
                 Some(_) => return Err(format!("CREDENTIAL_REVOKED: {credential}")),
                 None => return Err(format!("CREDENTIAL_UNKNOWN: {credential}")),
             }
+            unqualify_users(&mut next, credential);
         }
     }
     next.validate()?;
     Ok(next)
 }
 
-/// The credential revision an action's secret is stored under in `next`.
-fn new_revision(next: &ProviderRegistry, action: &ProviderAction) -> Option<CredentialRef> {
+/// The account a stored-secret action writes in `next`.
+fn new_account(next: &ProviderRegistry, action: &ProviderAction) -> Option<String> {
     let id = match action {
         ProviderAction::CredentialSet { credential, .. } => credential,
         ProviderAction::CredentialRotate(c) => c,
         _ => return None,
     };
-    next.credential(id).map(|c| CredentialRef {
-        id: c.id.clone(),
-        revision: c.revision,
-    })
+    next.credential(id).map(|c| next.account(&c.reference()))
 }
 
-/// The revision whose item an applied action makes obsolete in the store: the superseded one of
-/// a rotation, the revoked one of a revocation.
-fn obsolete_revision(current: &ProviderRegistry, action: &ProviderAction) -> Option<CredentialRef> {
-    let id = match action {
-        ProviderAction::CredentialRotate(c) | ProviderAction::CredentialRevoke(c) => c,
-        _ => return None,
-    };
-    current.credential(id).map(|c| CredentialRef {
-        id: c.id.clone(),
-        revision: c.revision,
-    })
+/// Deletes every item of `registry` that no active revision names (superseded, revoked, the
+/// orphan of an interrupted decision); items of other registries are never touched. Returns the
+/// accounts it could not delete.
+fn sweep(registry: &ProviderRegistry, store: &dyn CredentialStore) -> Result<Vec<String>, String> {
+    if registry.uid.is_empty() {
+        return Ok(vec![]);
+    }
+    let keep: std::collections::BTreeSet<String> = registry
+        .credentials
+        .iter()
+        .filter(|c| c.state == CredentialState::Active)
+        .map(|c| registry.account(&c.reference()))
+        .collect();
+    let mut failed = vec![];
+    for account in store.list(&registry.account_prefix())? {
+        if !keep.contains(&account) && store.delete(&account).is_err() {
+            failed.push(account);
+        }
+    }
+    Ok(failed)
 }
 
-/// Decides one request: idempotent per request id, compare-and-swap on `expected` (the version
-/// the operator saw; `None`: the current one), the secret of a credential set or rotation into
-/// `store` before the commit, an obsolete revision's item deleted after it, a durable redacted
-/// receipt either way. `Err` only when the store itself fails or a request id is reused for
-/// another action; a refused request is an `Ok` receipt with `applied = false`.
+/// Holds the store's decision lock (exclusive, blocking) until dropped.
+struct DecisionLock(#[allow(dead_code)] std::fs::File);
+
+fn lock(project: &Path) -> Result<DecisionLock, String> {
+    use std::os::fd::AsRawFd;
+    std::fs::create_dir_all(dir(project)).map_err(io)?;
+    let file = crate::analytics::jobs::open_lock(&dir(project).join(LOCK)).map_err(io)?;
+    // SAFETY: flock on an owned, open file descriptor.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io(std::io::Error::last_os_error()));
+    }
+    Ok(DecisionLock(file))
+}
+
+/// Decides one request: one decision at a time (the store's lock), idempotent per request id,
+/// compare-and-swap on `expected` (the version the operator saw; `None`: the current one), the
+/// secret of a credential set or rotation into `store` under the new revision's account before
+/// the commit, the sweep after it, a durable redacted receipt either way. `Err` (nothing
+/// persisted) for a malformed request — an invalid identifier, a missing or unexpected secret —
+/// or a failing store, and for a request id reused for another action; a refused request is an
+/// `Ok` receipt with `applied = false`.
 pub fn decide(
     project: &Path,
     request_id: &str,
@@ -358,20 +515,35 @@ pub fn decide(
     now: u64,
 ) -> Result<ProviderReceipt, String> {
     if !request_id_ok(request_id) {
-        return Err(format!("PROVIDER_REQUEST_ID_INVALID: {request_id}"));
+        return Err("PROVIDER_REQUEST_ID_INVALID ([A-Za-z0-9_-]{1,64})".into());
     }
+    action.check()?;
+    if action.stores_secret() != secret.is_some() {
+        return Err(if secret.is_some() {
+            "CREDENTIAL_SECRET_UNEXPECTED".into()
+        } else {
+            "CREDENTIAL_SECRET_REQUIRED".into()
+        });
+    }
+    if secret.is_some_and(|s| {
+        s.is_empty() || s.len() > SECRET_LIMIT || s.iter().any(|b| b.is_ascii_control())
+    }) {
+        return Err("CREDENTIAL_SECRET_FORMAT".into());
+    }
+    let _lock = lock(project)?;
     let digest = action.digest();
+    let conflict = |other: &str| {
+        Err(format!(
+            "PROVIDER_REQUEST_ID_CONFLICT: {request_id} decided another action ({other})"
+        ))
+    };
     if let Some(r) = receipt(project, request_id)? {
         return if r.action_sha256 == digest {
             Ok(r)
         } else {
-            Err(format!(
-                "PROVIDER_REQUEST_ID_CONFLICT: {request_id} decided another action ({})",
-                r.action
-            ))
+            conflict(&r.action)
         };
     }
-    std::fs::create_dir_all(dir(project)).map_err(io)?;
     let receipt_of = |applied: bool, version: u64, detail: String| ProviderReceipt {
         request_id: request_id.to_string(),
         action: action.text(),
@@ -382,35 +554,23 @@ pub fn decide(
         decided_unix_s: now,
     };
     let write = |r: ProviderReceipt| -> Result<ProviderReceipt, String> {
-        match journal::create_typed_value(
+        journal::create_typed_value(
             &receipt_path(project, request_id),
             journal::source::PROVIDER_CONTROL,
             &r,
-        ) {
-            Ok(()) => Ok(r),
-            // A concurrent decision of the same request id wrote it first: that one stands.
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                receipt(project, request_id)?.ok_or_else(|| "PROVIDER_RECEIPT_LOST".to_string())
-            }
-            Err(e) => Err(io(e)),
-        }
+        )
+        .map_err(io)?;
+        Ok(r)
     };
-    // A receipt lost after its version was committed: rebuilt from that version.
+    // A receipt lost after its version was committed: rebuilt from that version, if it is
+    // this action's.
     for v in versions(project)?.into_iter().rev() {
-        if read_version(project, v)?.request_id == request_id {
+        let committed = read_version(project, v)?;
+        if committed.request_id == request_id {
+            if committed.action_sha256 != digest {
+                return conflict(&committed.action);
+            }
             return write(receipt_of(true, v, "committed (receipt rebuilt)".into()));
-        }
-    }
-    if action.stores_secret() != secret.is_some() {
-        return Err(if secret.is_some() {
-            "CREDENTIAL_SECRET_UNEXPECTED".into()
-        } else {
-            "CREDENTIAL_SECRET_REQUIRED".into()
-        });
-    }
-    if let Some(s) = secret {
-        if s.is_empty() || s.len() > SECRET_LIMIT || s.iter().any(|b| b.is_ascii_control()) {
-            return Err("CREDENTIAL_SECRET_FORMAT".into());
         }
     }
     let current = current(project)?;
@@ -424,21 +584,27 @@ pub fn decide(
             ),
         ));
     }
-    let mut next = match apply(&current, action, now) {
+    let nonce = fresh_nonce()?;
+    let mut next = match apply(&current, action, &nonce, now) {
         Ok(n) => n,
         Err(e) => return write(receipt_of(false, current.version, e)),
     };
     next.version = current.version + 1;
-    let stored = new_revision(&next, action);
-    if let (Some(r), Some(s)) = (&stored, secret) {
-        store.put(r, s)?;
+    if next.uid.is_empty() {
+        next.uid = fresh_nonce()?;
+    }
+    let stored = new_account(&next, action);
+    if let (Some(account), Some(s)) = (&stored, secret) {
+        store.put(account, s)?;
     }
     let record = ProviderRegistryRecord {
         registry: next.clone(),
         request_id: request_id.to_string(),
+        action: action.text(),
+        action_sha256: digest.clone(),
         decided_unix_s: now,
     };
-    if !commit(project, &record, stored.as_ref(), store)? {
+    if !commit(project, &record, stored.as_deref(), store)? {
         return write(receipt_of(
             false,
             current.version,
@@ -446,35 +612,41 @@ pub fn decide(
         ));
     }
     let mut detail = "committed (effective at the next controlled start)".to_string();
-    if let Some(old) = obsolete_revision(&current, action) {
-        if let Err(e) = store.delete(&old) {
+    match sweep(&next, store) {
+        Ok(failed) if failed.is_empty() => {}
+        Ok(failed) => {
             detail = format!(
-                "{detail}; obsolete revision {}@{} not deleted: {e}",
-                old.id, old.revision
-            );
+                "{detail}; {} obsolete item(s) not deleted (swept again at the next decision)",
+                failed.len()
+            )
         }
+        Err(e) => detail = format!("{detail}; sweep: {e}"),
     }
     write(receipt_of(true, next.version, detail))
 }
 
 /// Publishes `record` as its version (create-new: the compare-and-swap). `false`: another
 /// decision committed that version first — then the new revision's item `stored` is deleted, so
-/// a lost race never leaves a secret behind.
+/// a lost race never leaves a secret behind. A failure after the version was linked (its
+/// directory sync) is no lost commit: the version stands with its item.
 fn commit(
     project: &Path,
     record: &ProviderRegistryRecord,
-    stored: Option<&CredentialRef>,
+    stored: Option<&str>,
     store: &dyn CredentialStore,
 ) -> Result<bool, String> {
-    match journal::create_typed_value(
-        &version_path(project, record.registry.version),
-        journal::source::PROVIDER_CONTROL,
-        record,
-    ) {
+    let path = version_path(project, record.registry.version);
+    match journal::create_typed_value(&path, journal::source::PROVIDER_CONTROL, record) {
         Ok(()) => Ok(true),
         Err(e) => {
-            if let Some(r) = stored {
-                let _ = store.delete(r);
+            let ours = read_version(project, record.registry.version).is_ok_and(|v| {
+                v.request_id == record.request_id && v.action_sha256 == record.action_sha256
+            });
+            if ours {
+                return Ok(true);
+            }
+            if let Some(account) = stored {
+                let _ = store.delete(account);
             }
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 Ok(false)
@@ -489,21 +661,22 @@ fn commit(
 pub struct NoCredentialStore;
 
 impl CredentialStore for NoCredentialStore {
-    fn put(&self, _: &CredentialRef, _: &[u8]) -> Result<(), String> {
+    fn put(&self, _: &str, _: &[u8]) -> Result<(), String> {
         Err("CREDENTIAL_STORE_NOT_OPENED".into())
     }
-    fn get(
-        &self,
-        _: &CredentialRef,
-    ) -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String> {
+    fn get(&self, _: &str) -> Result<darkbot_solana::providers::Secret, String> {
         Err("CREDENTIAL_STORE_NOT_OPENED".into())
     }
-    fn delete(&self, _: &CredentialRef) -> Result<(), String> {
+    fn delete(&self, _: &str) -> Result<(), String> {
+        Err("CREDENTIAL_STORE_NOT_OPENED".into())
+    }
+    fn list(&self, _: &str) -> Result<Vec<String>, String> {
         Err("CREDENTIAL_STORE_NOT_OPENED".into())
     }
 }
 
-/// Whether an action needs the credential store (it stores or deletes a revision's item).
+/// Whether an action needs the credential store (it stores a revision's item, or makes one
+/// obsolete for the sweep).
 pub fn touches_credentials(action: &ProviderAction) -> bool {
     matches!(
         action,
@@ -513,27 +686,30 @@ pub fn touches_credentials(action: &ProviderAction) -> bool {
     )
 }
 
-/// The operator's view of the current version: one line per provider (host only, never a
-/// path or a credential) with its binding, and one per credential (id, revision, state, origin).
+/// The operator's view of the current version: one line per provider (host only, never a path
+/// or a credential) with its binding and why it cannot be selected, and one per credential (id,
+/// revision, state, origin).
 pub fn status_lines(registry: &ProviderRegistry) -> Vec<String> {
-    let mut out = vec![format!("PROVIDER_REGISTRY version={}", registry.version)];
+    let mut out = vec![format!(
+        "PROVIDER_REGISTRY version={} restart_rule=next_controlled_start",
+        registry.version
+    )];
     let mut providers: Vec<&ProviderDescriptor> = registry.providers.iter().collect();
     providers.sort_by(|a, b| (a.kind, a.priority, &a.id).cmp(&(b.kind, b.priority, &b.id)));
     for p in providers {
         let selected = registry.selected(p.kind).map(|s| s.id == p.id) == Some(true);
-        let credential = registry.credential_of(p);
-        let auth = match &credential {
+        let credential = match registry.credential_of(p) {
             Ok(Some(c)) => format!("{}@{}", c.id, c.revision),
             Ok(None) => "-".into(),
-            Err(e) => e.clone(),
+            Err(e) => e,
         };
         out.push(format!(
-            "provider {} kind={} host={} auth={} credential={} plan={} entitlement={} capacity_rps={} priority={} enabled={} selected={} qualification={} binding={}",
+            "provider {} kind={} host={} auth={} credential={} plan={} entitlement={} capacity_rps={} priority={} enabled={} selected={} qualification={} binding={} block={}",
             p.id,
             p.kind.name(),
             p.host(),
             p.auth.text(),
-            auth,
+            credential,
             p.plan.name(),
             p.entitlement,
             p.capacity_rps.map_or("-".into(), |c| c.to_string()),
@@ -541,10 +717,11 @@ pub fn status_lines(registry: &ProviderRegistry) -> Vec<String> {
             p.enabled,
             selected,
             p.qualification.as_deref().unwrap_or("-"),
-            credential
-                .ok()
-                .map(|c| p.binding(c.as_ref())[..16].to_string())
-                .unwrap_or_else(|| "-".into()),
+            registry
+                .binding_of(p)
+                .map(|b| b[..16].to_string())
+                .unwrap_or_else(|_| "-".into()),
+            registry.selection_block(p).unwrap_or_else(|| "-".into()),
         ));
     }
     for c in &registry.credentials {
@@ -591,11 +768,22 @@ mod tests {
         }
     }
 
+    fn set() -> ProviderAction {
+        ProviderAction::CredentialSet {
+            credential: "helius".into(),
+            origin: "input".into(),
+        }
+    }
+
+    fn items(store: &DirectoryStore, registry: &ProviderRegistry) -> Vec<String> {
+        store.list(&registry.account_prefix()).unwrap()
+    }
+
     /// DEC-18: a provider and its credential through the store — the secret is stored under its
-    /// revision before the version naming it is committed, never in a record or a receipt; a
-    /// selection needs an active credential; a rotation stores the next revision and deletes the
-    /// superseded item; a revocation is always possible and deletes the item; a revoked
-    /// credential continues at its next revision, never a reused one.
+    /// revision's account before the version naming it is committed, never in a record or a
+    /// receipt; a selection needs an active credential; a rotation stores the next revision and
+    /// the sweep deletes the superseded item; a revocation is always possible and deletes the
+    /// item; a revoked credential continues at its next revision with a new nonce.
     #[test]
     fn a_provider_and_its_credential_through_the_store() {
         let d = project("flow");
@@ -617,33 +805,23 @@ mod tests {
         let select = ProviderAction::Select(ProviderKind::Rpc, "helius-rpc".into());
         let refused = decide(&d, "r2", None, &select, None, &store, 11).unwrap();
         assert!(!refused.applied && refused.detail.starts_with("CREDENTIAL_UNKNOWN"));
-        let set = ProviderAction::CredentialSet {
-            credential: "helius".into(),
-            origin: "input".into(),
-        };
         assert_eq!(
-            decide(&d, "r3", None, &set, None, &store, 12).unwrap_err(),
+            decide(&d, "r3", None, &set(), None, &store, 12).unwrap_err(),
             "CREDENTIAL_SECRET_REQUIRED"
         );
-        ok(decide(&d, "r3", None, &set, Some(b"KEY-ONE"), &store, 12));
-        let r1 = CredentialRef {
-            id: "helius".into(),
-            revision: 1,
-        };
-        assert_eq!(&store.get(&r1).unwrap()[..], b"KEY-ONE");
+        assert!(receipt(&d, "r3").unwrap().is_none(), "nothing persisted");
+        ok(decide(&d, "r3", None, &set(), Some(b"KEY-ONE"), &store, 12));
         ok(decide(&d, "r4", None, &select, None, &store, 13));
         let reg = current(&d).unwrap();
         assert_eq!(reg.version, 3);
-        assert_eq!(
-            reg.selected(ProviderKind::Rpc).map(|p| p.id.as_str()),
-            Some("helius-rpc")
-        );
-        // No secret in any committed byte.
+        let r1 = reg.credential("helius").unwrap().reference();
+        assert_eq!(store.get(&reg.account(&r1)).unwrap().expose(), b"KEY-ONE");
+        assert_eq!(items(&store, &reg).len(), 1);
         for e in std::fs::read_dir(d.join(STORE)).unwrap() {
             let bytes = std::fs::read(e.unwrap().path()).unwrap();
             assert!(!bytes.windows(7).any(|w| w == b"KEY-ONE"));
         }
-        // Rotation: the next revision, the superseded item deleted.
+        // Rotation: the next revision with a new nonce, the superseded item swept.
         let rotate = ProviderAction::CredentialRotate("helius".into());
         ok(decide(
             &d,
@@ -654,14 +832,12 @@ mod tests {
             &store,
             14,
         ));
-        let r2 = CredentialRef {
-            revision: 2,
-            ..r1.clone()
-        };
-        assert_eq!(&store.get(&r2).unwrap()[..], b"KEY-TWO");
-        assert!(store.get(&r1).is_err(), "superseded revision deleted");
-        // Revocation while selected: possible, the item deleted, the provider can no longer
-        // authenticate; a new set continues at revision 3.
+        let reg = current(&d).unwrap();
+        let r2 = reg.credential("helius").unwrap().reference();
+        assert_eq!((r2.revision, r2.nonce != r1.nonce), (2, true));
+        assert_eq!(items(&store, &reg), vec![reg.account(&r2)]);
+        assert_eq!(store.get(&reg.account(&r2)).unwrap().expose(), b"KEY-TWO");
+        // Revocation while selected: possible, the item swept; a new set continues at 3.
         ok(decide(
             &d,
             "r6",
@@ -671,13 +847,21 @@ mod tests {
             &store,
             15,
         ));
-        assert!(store.get(&r2).is_err());
         let reg = current(&d).unwrap();
+        assert!(items(&store, &reg).is_empty());
         assert!(reg
             .credential_of(reg.selected(ProviderKind::Rpc).unwrap())
             .unwrap_err()
             .starts_with("CREDENTIAL_REVOKED"));
-        ok(decide(&d, "r7", None, &set, Some(b"KEY-THREE"), &store, 16));
+        ok(decide(
+            &d,
+            "r7",
+            None,
+            &set(),
+            Some(b"KEY-THREE"),
+            &store,
+            16,
+        ));
         assert_eq!(
             current(&d).unwrap().credential("helius").unwrap().revision,
             3
@@ -686,8 +870,9 @@ mod tests {
     }
 
     /// DEC-18 (P8-CTRL.6 pattern): one request id is one decision — the same action returns its
-    /// receipt, another action under it is a conflict; a stale expected version is refused
-    /// with a receipt; a receipt lost after the commit is rebuilt, never a second commit.
+    /// receipt, another action under it is a conflict (also when only the committed version
+    /// remembers it); a stale expected version is refused with a receipt; a receipt lost after
+    /// the commit is rebuilt, never a second commit.
     #[test]
     fn a_request_id_is_one_decision_and_the_version_is_the_cas() {
         let d = project("cas");
@@ -699,17 +884,10 @@ mod tests {
             decide(&d, "a", Some(0), &add, None, &store, 2).unwrap(),
             first
         );
-        assert!(decide(
-            &d,
-            "a",
-            None,
-            &ProviderAction::Remove("helius-rpc".into()),
-            None,
-            &store,
-            3
-        )
-        .unwrap_err()
-        .starts_with("PROVIDER_REQUEST_ID_CONFLICT"));
+        let remove = ProviderAction::Remove("helius-rpc".into());
+        assert!(decide(&d, "a", None, &remove, None, &store, 3)
+            .unwrap_err()
+            .starts_with("PROVIDER_REQUEST_ID_CONFLICT"));
         let stale = decide(
             &d,
             "b",
@@ -722,18 +900,93 @@ mod tests {
         .unwrap();
         assert!(!stale.applied && stale.detail.starts_with("PROVIDER_VERSION_CONFLICT"));
         assert_eq!(current(&d).unwrap().version, 1);
-        // A lost receipt: rebuilt from the committed version.
+        // A lost receipt: rebuilt from the committed version for its own action only.
         std::fs::remove_file(receipt_path(&d, "a")).unwrap();
+        assert!(decide(&d, "a", None, &remove, None, &store, 5)
+            .unwrap_err()
+            .starts_with("PROVIDER_REQUEST_ID_CONFLICT"));
         let rebuilt = decide(&d, "a", Some(0), &add, None, &store, 5).unwrap();
         assert!(rebuilt.applied && rebuilt.version == 1, "{rebuilt:?}");
         assert_eq!(current(&d).unwrap().version, 1, "never a second commit");
         let _ = std::fs::remove_dir_all(d);
     }
 
-    /// The version is the compare-and-swap: a concurrent decision that committed the same
-    /// version first wins; the loser commits nothing and its new secret is never left behind.
+    /// Review M1: two decisions on one credential at once never destroy the committed secret —
+    /// serialized by the store's lock, both rotations apply in turn (revisions 2 and 3) and the
+    /// store holds exactly the active revision's item with its secret; two at the same expected
+    /// version: one applies, the other is refused and its secret is never stored.
     #[test]
-    fn a_lost_race_commits_nothing_and_leaves_no_secret() {
+    fn concurrent_decisions_on_one_credential_keep_the_committed_secret() {
+        let d = project("racers");
+        let store_dir = d.join("keychain");
+        let store = DirectoryStore(store_dir.clone());
+        decide(
+            &d,
+            "a",
+            None,
+            &ProviderAction::Add(helius()),
+            None,
+            &store,
+            1,
+        )
+        .unwrap();
+        decide(&d, "s", None, &set(), Some(b"KEY-0"), &store, 2).unwrap();
+        let race = |expected: Option<u64>, tag: &str| {
+            let handles: Vec<_> = ["X", "Y"]
+                .into_iter()
+                .map(|who| {
+                    let (d, store_dir, tag) = (d.clone(), store_dir.clone(), tag.to_string());
+                    std::thread::spawn(move || {
+                        let secret = format!("KEY-{tag}{who}");
+                        decide(
+                            &d,
+                            &format!("{tag}{who}"),
+                            expected,
+                            &ProviderAction::CredentialRotate("helius".into()),
+                            Some(secret.as_bytes()),
+                            &DirectoryStore(store_dir),
+                            3,
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let both = race(None, "n");
+        assert!(both.iter().all(|r| r.applied), "{both:?}");
+        let reg = current(&d).unwrap();
+        let active = reg.credential("helius").unwrap().reference();
+        assert_eq!(active.revision, 3);
+        assert_eq!(items(&store, &reg), vec![reg.account(&active)]);
+        let last = both.iter().max_by_key(|r| r.version).unwrap();
+        let expected_secret = format!("KEY-{}", last.request_id);
+        assert_eq!(
+            store.get(&reg.account(&active)).unwrap().expose(),
+            expected_secret.as_bytes()
+        );
+        let at = reg.version;
+        let one = race(Some(at), "e");
+        assert_eq!(one.iter().filter(|r| r.applied).count(), 1, "{one:?}");
+        let reg = current(&d).unwrap();
+        let active = reg.credential("helius").unwrap().reference();
+        let winner = one.iter().find(|r| r.applied).unwrap();
+        assert_eq!(items(&store, &reg), vec![reg.account(&active)]);
+        assert_eq!(
+            store.get(&reg.account(&active)).unwrap().expose(),
+            format!("KEY-{}", winner.request_id).as_bytes()
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// The version is the compare-and-swap: a decision that loses the race for its version
+    /// commits nothing and its new item is deleted; the sweep deletes an orphan of an
+    /// interrupted decision of this registry and never touches another registry's items.
+    #[test]
+    fn a_lost_race_leaves_no_secret_and_the_sweep_removes_orphans() {
         let d = project("race");
         let store = DirectoryStore(d.join("keychain"));
         decide(
@@ -751,20 +1004,183 @@ mod tests {
         let record = |request_id: &str| ProviderRegistryRecord {
             registry: v2.clone(),
             request_id: request_id.into(),
+            action: "x".into(),
+            action_sha256: request_id.into(),
             decided_unix_s: 2,
         };
         assert!(commit(&d, &record("winner"), None, &store).unwrap());
-        let secret = CredentialRef {
-            id: "helius".into(),
-            revision: 1,
-        };
-        store.put(&secret, b"SECRET").unwrap();
-        assert!(!commit(&d, &record("loser"), Some(&secret), &store).unwrap());
-        assert!(store.get(&secret).is_err(), "the loser's secret is deleted");
+        store.put("loser-account", b"SECRET").unwrap();
+        assert!(!commit(&d, &record("loser"), Some("loser-account"), &store).unwrap());
+        assert!(
+            store.get("loser-account").is_err(),
+            "the loser's item is deleted"
+        );
+        assert_eq!(read_version(&d, 2).unwrap().request_id, "winner");
+        // An orphan of this registry and an item of another registry.
+        let reg = current(&d).unwrap();
+        let orphan = format!("{}helius@9.0000000000000000", reg.account_prefix());
+        store.put(&orphan, b"ORPHAN").unwrap();
+        store
+            .put("ffffffffffffffff/helius@1.0000000000000000", b"OTHER")
+            .unwrap();
+        decide(&d, "s", None, &set(), Some(b"KEY"), &store, 3).unwrap();
+        let reg = current(&d).unwrap();
+        assert!(store.get(&orphan).is_err(), "the orphan is swept");
+        assert_eq!(items(&store, &reg).len(), 1);
+        assert!(
+            store
+                .get("ffffffffffffffff/helius@1.0000000000000000")
+                .is_ok(),
+            "another registry's item kept"
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Review L2/L3: every rule lives in `apply` (the GUI decides through the same path) and a
+    /// refused value is never persisted: an invalid credential id (a key typed into it) is no
+    /// receipt; the kind of a provider is immutable; an edit never sets a qualification and a
+    /// changed binding clears it; the `.env` import is one-time; a selection needs a free plan.
+    #[test]
+    fn every_rule_is_the_store_s_and_a_refused_value_is_never_persisted() {
+        let d = project("rules");
+        let store = DirectoryStore(d.join("keychain"));
+        let key = "0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f";
+        let e = decide(
+            &d,
+            "k",
+            None,
+            &ProviderAction::CredentialSet {
+                credential: key.into(),
+                origin: "input".into(),
+            },
+            Some(b"S"),
+            &store,
+            1,
+        )
+        .unwrap_err();
+        assert!(
+            e.starts_with("CREDENTIAL_ID_INVALID") && !e.contains(key),
+            "{e}"
+        );
+        assert!(receipt(&d, "k").unwrap().is_none());
+        decide(
+            &d,
+            "a",
+            None,
+            &ProviderAction::Add(helius()),
+            None,
+            &store,
+            1,
+        )
+        .unwrap();
+        let mut other_kind = helius();
+        other_kind.kind = ProviderKind::Jupiter;
+        other_kind.auth = AuthKind::Header("x-api-key".into());
+        let r = decide(
+            &d,
+            "u1",
+            None,
+            &ProviderAction::Update(other_kind),
+            None,
+            &store,
+            2,
+        )
+        .unwrap();
+        assert!(
+            !r.applied && r.detail.starts_with("PROVIDER_KIND_IMMUTABLE"),
+            "{r:?}"
+        );
+        decide(
+            &d,
+            "q",
+            None,
+            &ProviderAction::Qualify("helius-rpc".into(), Some("0123456789abcdef".into())),
+            None,
+            &store,
+            3,
+        )
+        .unwrap();
+        let mut same = helius();
+        same.priority = 4;
+        same.qualification = Some("fedcba9876543210".into());
+        decide(
+            &d,
+            "u2",
+            None,
+            &ProviderAction::Update(same),
+            None,
+            &store,
+            4,
+        )
+        .unwrap();
         assert_eq!(
-            read_version(&d, 2).unwrap().request_id,
-            "winner",
-            "the winner's version stands"
+            current(&d)
+                .unwrap()
+                .provider("helius-rpc")
+                .unwrap()
+                .qualification
+                .as_deref(),
+            Some("0123456789abcdef"),
+            "kept, never set by an edit"
+        );
+        let mut moved = helius();
+        moved.capacity_rps = Some(5);
+        decide(
+            &d,
+            "u3",
+            None,
+            &ProviderAction::Update(moved),
+            None,
+            &store,
+            5,
+        )
+        .unwrap();
+        assert_eq!(
+            current(&d)
+                .unwrap()
+                .provider("helius-rpc")
+                .unwrap()
+                .qualification,
+            None,
+            "a changed binding clears it"
+        );
+        let import = |credential: &str| ProviderAction::CredentialSet {
+            credential: credential.into(),
+            origin: "env:HELIUS_API_KEY".into(),
+        };
+        assert!(
+            decide(&d, "i1", None, &import("helius"), Some(b"E"), &store, 6)
+                .unwrap()
+                .applied
+        );
+        let again = decide(&d, "i2", None, &import("helius2"), Some(b"E"), &store, 7).unwrap();
+        assert!(!again.applied && again.detail.starts_with("CREDENTIAL_ENV_IMPORTED"));
+        let mut unknown = helius();
+        unknown.id = "anon".into();
+        unknown.plan = Plan::Unknown;
+        decide(
+            &d,
+            "a2",
+            None,
+            &ProviderAction::Add(unknown),
+            None,
+            &store,
+            8,
+        )
+        .unwrap();
+        let sel = decide(
+            &d,
+            "s",
+            None,
+            &ProviderAction::Select(ProviderKind::Rpc, "anon".into()),
+            None,
+            &store,
+            9,
+        )
+        .unwrap();
+        assert!(
+            !sel.applied && sel.detail.starts_with("PROVIDER_PLAN_UNPROVEN"),
+            "{sel:?}"
         );
         let _ = std::fs::remove_dir_all(d);
     }

@@ -2034,7 +2034,16 @@ fn provider_options(
             continue;
         }
         if !allowed.contains(&flag.as_str()) {
-            return Err(format!("PROVIDER_OPTION_UNKNOWN: {flag}\n{PROVIDER_USAGE}"));
+            // A stray value may be a key: only a flag-shaped argument is named.
+            let flag_shaped = flag.len() <= 32
+                && flag.strip_prefix("--").is_some_and(|f| {
+                    !f.is_empty() && f.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+                });
+            return Err(if flag_shaped {
+                format!("PROVIDER_OPTION_UNKNOWN: {flag}\n{PROVIDER_USAGE}")
+            } else {
+                format!("PROVIDER_ARGUMENT_UNEXPECTED (not echoed)\n{PROVIDER_USAGE}")
+            });
         }
         let value = it
             .next()
@@ -2047,47 +2056,100 @@ fn provider_options(
     Ok(out)
 }
 
-/// DEC-18: a credential's secret, never an argument: from a hidden prompt (no echo) on a
-/// terminal, else the whole standard input (the gateway's pipe); one trailing line break is not
-/// part of it; bounded.
+/// The terminal settings a hidden prompt restores — on return, and on SIGINT/SIGTERM/SIGHUP.
+static PROMPT_TERMIOS: std::sync::OnceLock<libc::termios> = std::sync::OnceLock::new();
+
+extern "C" fn restore_prompt_and_reraise(signal: libc::c_int) {
+    // SAFETY: tcsetattr, signal and raise are async-signal-safe; the termios is initialized
+    // before the handler is installed.
+    unsafe {
+        if let Some(t) = PROMPT_TERMIOS.get() {
+            libc::tcsetattr(0, libc::TCSANOW, t);
+        }
+        libc::signal(signal, libc::SIG_DFL);
+        libc::raise(signal);
+    }
+}
+
+/// The hidden prompt's terminal state: echo off until dropped (also on panic), restored by the
+/// signal handler on an interrupt.
+struct HiddenPrompt {
+    old: libc::termios,
+    handlers: [(libc::c_int, libc::sighandler_t); 3],
+}
+
+impl HiddenPrompt {
+    fn start() -> Result<Self, String> {
+        // SAFETY: termios of fd 0 and the process's signal dispositions, restored by Drop.
+        unsafe {
+            let mut old: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(0, &mut old) != 0 {
+                return Err("CREDENTIAL_INPUT_TERMINAL".into());
+            }
+            let _ = PROMPT_TERMIOS.set(old);
+            let handler =
+                restore_prompt_and_reraise as extern "C" fn(libc::c_int) as libc::sighandler_t;
+            let handlers =
+                [libc::SIGINT, libc::SIGTERM, libc::SIGHUP].map(|s| (s, libc::signal(s, handler)));
+            let prompt = Self { old, handlers };
+            let mut quiet = old;
+            quiet.c_lflag &= !libc::ECHO;
+            if libc::tcsetattr(0, libc::TCSANOW, &quiet) != 0 {
+                return Err("CREDENTIAL_INPUT_TERMINAL".into());
+            }
+            Ok(prompt)
+        }
+    }
+}
+
+impl Drop for HiddenPrompt {
+    fn drop(&mut self) {
+        // SAFETY: restores what `start` changed.
+        unsafe {
+            libc::tcsetattr(0, libc::TCSANOW, &self.old);
+            for (s, h) in self.handlers {
+                libc::signal(s, h);
+            }
+        }
+        eprintln!();
+    }
+}
+
+/// DEC-18: a credential's secret, never an argument: one line from a hidden prompt (no echo) on
+/// a terminal, else from the standard input (the gateway's pipe) up to its end or first line
+/// break. Read unbuffered into a buffer allocated once at its bound (no copy is left behind by a
+/// reallocation or a reader's buffer); longer than the bound is refused.
 fn read_secret() -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String> {
     use darkbot_runner::orchestration::provider_registry::SECRET_LIMIT;
-    use darkbot_solana::providers::Zeroizing;
-    use std::io::{BufRead, Read};
     // SAFETY: isatty on the process's standard input descriptor.
     let tty = unsafe { libc::isatty(0) } == 1;
-    let mut secret = Zeroizing::new(Vec::new());
-    if tty {
-        // SAFETY: termios of fd 0, read and restored around one line.
-        let mut old: libc::termios = unsafe { std::mem::zeroed() };
-        if unsafe { libc::tcgetattr(0, &mut old) } != 0 {
-            return Err("CREDENTIAL_INPUT_TERMINAL".into());
-        }
-        let mut quiet = old;
-        quiet.c_lflag &= !libc::ECHO;
+    let _prompt = if tty {
         eprint!("credential (input hidden): ");
-        if unsafe { libc::tcsetattr(0, libc::TCSANOW, &quiet) } != 0 {
-            return Err("CREDENTIAL_INPUT_TERMINAL".into());
-        }
-        let mut line = Zeroizing::new(String::new());
-        let read = std::io::stdin().lock().read_line(&mut line);
-        unsafe { libc::tcsetattr(0, libc::TCSANOW, &old) };
-        eprintln!();
-        read.map_err(|_| "CREDENTIAL_INPUT_READ")?;
-        secret.extend_from_slice(line.as_bytes());
+        Some(HiddenPrompt::start()?)
     } else {
-        std::io::stdin()
-            .lock()
-            .take(SECRET_LIMIT as u64 + 3)
-            .read_to_end(&mut secret)
-            .map_err(|_| "CREDENTIAL_INPUT_READ")?;
-    }
-    for ending in [&b"\r\n"[..], b"\n"] {
-        if secret.ends_with(ending) {
-            let n = secret.len() - ending.len();
-            secret.truncate(n);
-            break;
+        None
+    };
+    let mut secret =
+        darkbot_solana::providers::Zeroizing::new(Vec::with_capacity(SECRET_LIMIT + 1));
+    loop {
+        let mut byte = 0u8;
+        // SAFETY: read(2) of one byte from fd 0 into a local.
+        let n = unsafe { libc::read(0, (&mut byte as *mut u8).cast(), 1) };
+        match n {
+            0 => break,
+            1 if byte == b'\n' => break,
+            1 => {
+                if secret.len() == SECRET_LIMIT + 1 {
+                    return Err("CREDENTIAL_SECRET_FORMAT (longer than its bound)".into());
+                }
+                secret.push(byte);
+            }
+            _ if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => {}
+            _ => return Err("CREDENTIAL_INPUT_READ".into()),
         }
+    }
+    if secret.last() == Some(&b'\r') {
+        secret.pop();
     }
     Ok(secret)
 }
@@ -2174,10 +2236,9 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 }
             };
             let mut p = base;
-            if verb == "update" && o.contains_key("--kind") {
-                return Err(
-                    "PROVIDER_KIND_IMMUTABLE: remove and add a provider of another kind".into(),
-                );
+            // The kind is immutable — the store's rule (`provider_registry::apply`).
+            if let Some(v) = o.get("--kind") {
+                p.kind = ProviderKind::parse(v)?;
             }
             if let Some(v) = o.get("--endpoint") {
                 p.endpoint = canonical_endpoint(p.kind, v)?;
@@ -2202,7 +2263,11 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     .map_err(|_| "PROVIDER_NUMBER_INVALID: --priority")?;
             }
             if let Some(v) = o.get("--capacity-rps") {
-                p.capacity_rps = Some(number(v, "--capacity-rps")?);
+                p.capacity_rps = if v == "-" {
+                    None
+                } else {
+                    Some(number(v, "--capacity-rps")?)
+                };
             }
             if o.contains_key("--disabled") {
                 p.enabled = false;
@@ -2278,16 +2343,8 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 )?;
                 let credential = need(&o, "--credential")?;
                 let variable = need(&o, "--variable")?;
+                // The one-time rules are the store's (`provider_registry::apply`).
                 let origin = format!("env:{variable}");
-                // The one-time migration: never over an existing credential, never twice.
-                if current.credential(&credential).is_some() {
-                    return Err(format!("CREDENTIAL_EXISTS: {credential} (import is the one-time migration; use set or rotate)"));
-                }
-                if current.credentials.iter().any(|c| c.origin == origin) {
-                    return Err(format!(
-                        "CREDENTIAL_ENV_IMPORTED: {variable} was imported already"
-                    ));
-                }
                 let file = match o.get("--env-file") {
                     Some(f) => PathBuf::from(f),
                     None => std::env::var("P0_ENV_FILE")
@@ -2305,12 +2362,7 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     .into_iter()
                     .find(|(k, _)| *k == variable)
                     .map(|(_, v)| darkbot_solana::providers::Zeroizing::new(v.into_bytes()))
-                    .ok_or_else(|| {
-                        format!(
-                            "CREDENTIAL_ENV_VARIABLE: {variable} not in {}",
-                            file.display()
-                        )
-                    })?;
+                    .ok_or_else(|| format!("CREDENTIAL_ENV_VARIABLE: not in {}", file.display()))?;
                 (A::CredentialSet { credential, origin }, o, Some(secret))
             }
             _ => return Err(PROVIDER_USAGE.into()),
