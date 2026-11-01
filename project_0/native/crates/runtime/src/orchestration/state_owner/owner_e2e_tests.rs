@@ -9601,7 +9601,8 @@ fn p6_mt12_the_owner_journals_its_host_at_its_start() {
 /// never twice within `mt0_interval_seconds`; a second liquidatable candidate that reaches its
 /// send boundary while a sent attempt holds the wallet is a reservation conflict (no second
 /// send); the signed intents in flight are a gauge. (MT0 is the process's: other tests count into
-/// it too, so increases are asserted.)
+/// it too, so increases are asserted.) The record carries the owner's own telemetry: a lane
+/// promotion counts in it, every lane has its wait.
 #[test]
 fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
     use crate::analytics::mt13::Mt13Telemetry;
@@ -9654,8 +9655,24 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
         "no remote work"
     );
     assert!(after.evidence_queue_depth.count > before.evidence_queue_depth.count);
+    // The owner's own telemetry: a threshold hit promotes an entry waiting in L2.
+    let waiting = Pubkey::new_unique();
+    f.owner
+        .admit_oracle_accounts(HashSet::new(), HashSet::from([waiting]), (1, 100), 1);
+    f.owner
+        .admit_oracle_accounts(HashSet::from([waiting]), HashSet::new(), (2, 100), 2);
     f.owner.mt13_record(true);
     let (_, journaled) = f.owner.mt13_journaled.clone().expect("journaled");
+    let owner = journaled.owner.clone().expect("the owner's telemetry");
+    assert_eq!((owner.lane_promotions, owner.lane_demotions), (1, 0));
+    assert_eq!(
+        owner
+            .lane_wait_ns
+            .iter()
+            .map(|(lane, _)| lane.as_str())
+            .collect::<Vec<_>>(),
+        ["L0", "L1", "L2"]
+    );
     f.owner.mt13_record(false);
     f.owner.mt13_record(false);
     let dir = f.dir.clone();
