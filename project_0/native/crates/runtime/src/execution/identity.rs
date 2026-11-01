@@ -11,11 +11,12 @@ use darkbot_project0::readset::{EpochSource, ReadSet, ReadSetOverflow};
 use solana_sdk::pubkey::Pubkey;
 
 /// The policy generation of a run, fixed. The owner's runtime controls (every P8-CTRL capability
-/// — WALLET, ECON_*, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER, LOCAL_FEE_MODEL,
-/// INVENTORY_REBALANCING — and FE-06 grants, the CTRL-03 source configuration) change what an
-/// evaluation decides, never what a result of candidate work holds: every decision they enter
-/// is taken on the owner thread by the evaluation after the result's judgement, under the gates
-/// in force then (a projection result holds projected state, the input of Health). Work that
+/// — LIVE, WALLET, ECON_*, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER, LOCAL_FEE_MODEL,
+/// INVENTORY_REBALANCING — and FE-06 grants, the CTRL-03 source configuration) change what the
+/// owner decides, never what a result of candidate work holds: every decision they enter is
+/// taken on the owner thread, at admission or by the evaluation after the result's judgement,
+/// under the gates in force then (a projection result holds projected state, the input of
+/// Health). Work that
 /// holds a decision across a later control change (MT7–MT9: prepared candidates, SignedIntents)
 /// must bind the owner's control version here (test #40 proves the invalidation).
 pub const POLICY_GENERATION: u64 = 0;

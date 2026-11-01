@@ -1775,7 +1775,9 @@ mod http_tests {
                             Err(e)
                                 if matches!(
                                     e.kind(),
-                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                    std::io::ErrorKind::WouldBlock
+                                        | std::io::ErrorKind::TimedOut
+                                        | std::io::ErrorKind::Interrupted
                                 ) =>
                             {
                                 continue
@@ -1844,6 +1846,9 @@ mod http_tests {
         config.limits.rpc_burst = 10_000;
         config.limits.hotpath_rps = 10_000;
         config.limits.bootstrap_rps = 10_000;
+        // One attempt: the fallback branch runs (attempt 0 is the primary itself), no retry may
+        // move a request to the other endpoint.
+        config.limits.rpc_attempts = 1;
         let budget = Arc::new(Budget::configured(&config));
         let callers: Vec<_> = (0..THREADS)
             .map(|i| {
