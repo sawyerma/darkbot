@@ -6,8 +6,9 @@ import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, Welc
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
 
 // The BSC page in a production build (`npm run test:bsc`, CI workflow `bsc`): its six tabs, the one
-// LIVE source and fail-closed controls. The gateway is a local stand-in serving the reporter's
-// golden projections (protocol/golden/bsc); nothing leaves the browser.
+// LIVE source and fail-closed controls. The static fixture server has no proxy (/api and /ws answer
+// 503); the gateway is a stand-in in page routes serving the reporter's golden projections
+// (protocol/golden/bsc). No request reaches a real gateway.
 const golden = (name: string) => Buffer.from(readFileSync(new URL(`../../protocol/golden/bsc/${name}.hex`, import.meta.url), "utf8").trim(), "hex");
 const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.meta.url), "utf8").trim();
 const TABS = ["Overview", "Launch / BUY", "Monitoring", "Analytics", "Wallets", "LIVE"];
@@ -25,6 +26,8 @@ async function feed(page: Page, live: Uint8Array = golden("live")) {
   const payloads = new Map<TopicId, Uint8Array>(STATE_TOPICS.map(([t, , , name]) => [t, t === TopicId.BSC_LIVE_STATE ? live : golden(name)]));
   const send = (msg: MessageInitShape<typeof ServerMessageSchema>["msg"]) =>
     socket.send(Buffer.from(toBinary(ServerMessageSchema, create(ServerMessageSchema, { msg }))));
+  // The connection's session bootstrap comes first; without it no WebSocket is opened.
+  await page.route("**/api/v1/session", (route) => route.fulfill({ status: 204, headers: { "x-csrf-token": "TEST_ONLY" } }));
   await page.routeWebSocket("**/ws/v1/gateway", (ws) => {
     socket = ws;
     ws.onMessage((data) => {
