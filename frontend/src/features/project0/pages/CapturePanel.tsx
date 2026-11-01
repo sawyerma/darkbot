@@ -4,6 +4,7 @@ import type { CaptureMode, CaptureSource, VerificationMode, ReportMarker } from 
 import type { CaptureView } from "../model/status";
 import type { AnalyticsView } from "../model/analytics";
 import { RunsSection } from "../components/RunsSection";
+import { ProvidersSection } from "../components/ProvidersSection";
 import { SourcesSection } from "../components/SourcesSection";
 import { BootSection } from "../components/BootSection";
 import type { SystemView } from "../model/status";
@@ -57,6 +58,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
   <RunsSection analytics={analytics} topicStatus={analyticsStatus}/>
   <BootSection analytics={analytics} topicStatus={analyticsStatus} ttl={system?.parameters.get("boot_token_ttl_seconds") ?? null}/>
   <SourcesSection owner={owner} topicStatus={ownerStatus}/>
+  <ProvidersSection title="Providers · RPC, WSS, Geyser" kinds={["rpc", "wss", "geyser"]} analytics={analytics} topicStatus={analyticsStatus} system={system}/>
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">
       {PRESETS.map(d => <button key={d} className={preset === d ? "p0-selected" : ""} onClick={() => setPreset(d)}>{d === "custom" ? "Custom" : d}</button>)}

@@ -53,7 +53,8 @@ const project0: ProjectRegistration<Project0Panel> = {
     // Every topic a tab renders (Project0Page holds them while the tab is visible).
     panels: {
       overview: [TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_ANALYTICS_JOBS],
-      liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
+      // DEC-18: the Jupiter/Jito providers of the registry (project0.analytics.jobs).
+      liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_ANALYTICS_JOBS],
       capture: [TopicId.PROJECT0_CAPTURE_STATE, TopicId.PROJECT0_ANALYTICS_JOBS, TopicId.PROJECT0_LIQUIDATOR_STATE],
       analytics: [TopicId.PROJECT0_ANALYTICS_JOBS],
       wallets: [TopicId.PROJECT0_WALLETS_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],

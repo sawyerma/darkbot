@@ -131,6 +131,14 @@
     - [PostCaptureJobCommand](#darkbot-project0-v1-PostCaptureJobCommand)
     - [PostCaptureResult](#darkbot-project0-v1-PostCaptureResult)
     - [PostCaptureSpec](#darkbot-project0-v1-PostCaptureSpec)
+    - [ProviderCredentialCommand](#darkbot-project0-v1-ProviderCredentialCommand)
+    - [ProviderDescriptorCommand](#darkbot-project0-v1-ProviderDescriptorCommand)
+    - [ProviderPriorityCommand](#darkbot-project0-v1-ProviderPriorityCommand)
+    - [ProviderQualifyCommand](#darkbot-project0-v1-ProviderQualifyCommand)
+    - [ProviderRegistryView](#darkbot-project0-v1-ProviderRegistryView)
+    - [ProviderSelectCommand](#darkbot-project0-v1-ProviderSelectCommand)
+    - [RegistryCredential](#darkbot-project0-v1-RegistryCredential)
+    - [RegistryProvider](#darkbot-project0-v1-RegistryProvider)
     - [RunQualification](#darkbot-project0-v1-RunQualification)
     - [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual)
     - [UntilStopped](#darkbot-project0-v1-UntilStopped)
@@ -195,6 +203,7 @@
     - [EffectiveRecord.SourcesEntry](#darkbot-project0-v1-EffectiveRecord-SourcesEntry)
     - [OperationalConfig](#darkbot-project0-v1-OperationalConfig)
     - [OperationalParameter](#darkbot-project0-v1-OperationalParameter)
+    - [RunProvider](#darkbot-project0-v1-RunProvider)
     - [SystemStatus](#darkbot-project0-v1-SystemStatus)
 
 - [Scalar Value Types](#scalar-value-types)
@@ -2022,6 +2031,8 @@ i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 | boot | [BootFlow](#darkbot-project0-v1-BootFlow) |  | DEC-07: the boot controller&#39;s flow (data/boot, `p0ctl boot …`) — the one with an active step, else the newest — shown on the Capture tab: this always-on feed is the controller&#39;s projection while no capture runs. Unset without a flow. |
 | boot_error | [string](#string) |  | DEC-07: why the boot store was not (completely) readable; empty when read. |
 | until_stopped | [UntilStopped](#darkbot-project0-v1-UntilStopped) |  | DEC-16: unbounded runs beside the boot flow — the standing autostart approval, the newest raw-capture qualification and the newest unbounded raw capture. |
+| providers | [ProviderRegistryView](#darkbot-project0-v1-ProviderRegistryView) |  | DEC-18: the provider registry (data/providers, `p0ctl provider …`) as its store holds it — staged: a change is effective at the next controlled start (the running run&#39;s providers: project0.status EffectiveRecord.providers). Unset when the store is unreadable. |
+| providers_error | [string](#string) |  | DEC-18: why the provider registry was not readable (providers is then unset); empty when read. |
 
 
 
@@ -2541,6 +2552,164 @@ The verification request of a post-capture job (A08/F-02).
 | offline | [bool](#bool) |  | A history read from the verification checkpoint only (no network). |
 | resume | [bool](#bool) |  | Resume an incomplete verification. |
 | provider_evidence | [bool](#bool) |  | An operator provider evidence was given (an online history read; terminal only). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderCredentialCommand"></a>
+
+### ProviderCredentialCommand
+DEC-18: params of `project0.provider.credential.set` and `…credential.rotate`. The gateway
+separates the secret before any durable record (its command ledger holds the request without
+it) and hands it to the native controller&#39;s standard input only.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| credential | [string](#string) |  | Credential id. |
+| secret | [bytes](#bytes) |  | The secret (in transit only). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderDescriptorCommand"></a>
+
+### ProviderDescriptorCommand
+DEC-18: params of `project0.provider.add` and `project0.provider.update` (the registry&#39;s
+rules decide: a canonical endpoint without a credential in it, FREE_ONLY, a known kind). An
+update changes only the fields it sets.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Provider id. |
+| kind | [string](#string) | optional | rpc | wss | geyser | jupiter | jito (add: required). |
+| endpoint | [string](#string) | optional | The endpoint (add: required); refused with a credential in it, never echoed. |
+| auth | [string](#string) | optional | none | query:NAME | header:NAME | path. |
+| credential | [string](#string) | optional | The credential id it authenticates with. |
+| priority | [uint32](#uint32) | optional | Priority among its kind. |
+| capacity_rps | [uint64](#uint64) | optional | Configured capacity in requests per second. |
+| plan | [string](#string) | optional | free | unknown. |
+| entitlement | [string](#string) | optional | The plan&#39;s name. |
+| disabled | [bool](#bool) |  | Added disabled (add only). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderPriorityCommand"></a>
+
+### ProviderPriorityCommand
+DEC-18: params of `project0.provider.priority`.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Provider id. |
+| priority | [uint32](#uint32) |  | The new priority. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderQualifyCommand"></a>
+
+### ProviderQualifyCommand
+DEC-18: params of `project0.provider.qualify`.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Provider id. |
+| evidence | [string](#string) |  | The stored provider evidence record id (16 hex), or &#34;-&#34; to clear the qualification. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderRegistryView"></a>
+
+### ProviderRegistryView
+DEC-18: one committed version of the provider registry — secret-free (hosts, credential ids
+and revisions; never an endpoint&#39;s path, a key or a keychain account).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| version | [uint64](#uint64) |  | The committed version (0: no provider yet); the expected version of every change (CAS). |
+| providers | [RegistryProvider](#darkbot-project0-v1-RegistryProvider) | repeated | Every provider, by kind, priority and id. |
+| credentials | [RegistryCredential](#darkbot-project0-v1-RegistryCredential) | repeated | Every credential&#39;s newest revision. |
+| restart_rule | [string](#string) |  | When a change takes effect: next_controlled_start (DEC-05). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderSelectCommand"></a>
+
+### ProviderSelectCommand
+DEC-18: params of `project0.provider.select`.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| kind | [string](#string) |  | rpc | wss | jupiter | jito. |
+| id | [string](#string) |  | Provider id. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RegistryCredential"></a>
+
+### RegistryCredential
+DEC-18: a credential&#39;s newest revision (the secret is the macOS keychain&#39;s alone).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Credential id. |
+| revision | [uint64](#uint64) |  | Its newest revision (a rotation is a new one, never reused). |
+| state | [string](#string) |  | active | revoked. |
+| origin | [string](#string) |  | input | env:NAME (the one-time .env import). |
+| created_unix_s | [uint64](#uint64) |  | When the revision was created. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RegistryProvider"></a>
+
+### RegistryProvider
+DEC-18: one provider of the registry.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  | Provider id ([a-z0-9_-]{1,32}). |
+| kind | [string](#string) |  | rpc | wss | geyser | jupiter | jito. |
+| host | [string](#string) |  | The endpoint&#39;s host (its path and scheme stay in the engine). |
+| auth | [string](#string) |  | How it authenticates: none | query:NAME | header:NAME | path (a name, never a value). |
+| credential | [string](#string) |  | The credential it authenticates with (its id); empty without authentication. |
+| priority | [uint32](#uint32) |  | Lower first among the providers of its kind. |
+| capacity_rps | [uint64](#uint64) | optional | Configured capacity in requests per second; unset when not configured. |
+| plan | [string](#string) |  | free | unknown (FREE_ONLY: paid is refused, unknown never selected). |
+| entitlement | [string](#string) |  | The plan&#39;s name as the provider publishes it. |
+| qualification | [string](#string) | optional | The provider evidence record that qualified its binding; unset when not qualified. |
+| enabled | [bool](#bool) |  | Enabled (a disabled provider is never selected). |
+| selected | [bool](#bool) |  | The selected provider of its kind. |
+| binding | [string](#string) | optional | Its secret-free binding (hex SHA-256) with the active credential revision; unset when its credential is revoked or unknown. |
+| selection_block | [string](#string) | optional | Why it cannot be the selected one of its kind now; unset when it can. |
 
 
 
@@ -3844,6 +4013,7 @@ Secret-free effective operational record (runtime_config::EffectiveConfig).
 | c0_census | [bool](#bool) |  | C0 census on the startup sweep (P0_C0_CENSUS). |
 | source_geyser | [string](#string) |  | Start mode of the Geyser source unit: off | observe | active. |
 | source_geyser_provider | [string](#string) |  | Provider of the Geyser source unit. |
+| providers | [RunProvider](#darkbot-project0-v1-RunProvider) | repeated | DEC-18: the providers the run is bound to (runtime_config::ProviderBinding), secret-free and without their endpoints; empty in a record of an earlier revision. |
 
 
 
@@ -3900,6 +4070,27 @@ One numeric operational parameter of runtime_config::PARAMETERS.
 | maximum | [uint64](#uint64) |  | Largest valid value. |
 | provisional | [string](#string) |  | Open measurement question (ENTSCHEIDUNGEN §3, e.g. B-2) that keeps the value provisional; empty for a value no measurement question covers. |
 | change_rule | [string](#string) |  | When a change takes effect: restart (every numeric parameter today). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RunProvider"></a>
+
+### RunProvider
+DEC-18: one provider a run is bound to.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| kind | [string](#string) |  | rpc | wss | geyser | jupiter | jito. |
+| id | [string](#string) |  | Provider id (local: a named loopback endpoint; jupiter-default: the contract&#39;s profile). |
+| binding | [string](#string) |  | Its secret-free binding (hex SHA-256). |
+| registry_version | [uint64](#uint64) |  | The registry version it was bound from; 0 for a local endpoint or a default profile. |
+| credential_id | [string](#string) |  | The credential id it authenticates with; empty without. |
+| credential_revision | [uint64](#uint64) |  | The credential revision bound. |
+| plan | [string](#string) |  | free | paid | unknown. |
 
 
 

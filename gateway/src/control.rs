@@ -145,6 +145,160 @@ const AUTOSTART_PREVIEW: &str = "project0.autostart.preview";
 const AUTOSTART_GRANT: &str = "project0.autostart.grant";
 const AUTOSTART_REVOKE: &str = "project0.autostart.revoke";
 const AUTOSTART_ACTIONS: [&str; 3] = [AUTOSTART_PREVIEW, AUTOSTART_GRANT, AUTOSTART_REVOKE];
+/// DEC-18 (P0-020): the provider registry (`p0ctl provider …`) — a provider's add, update,
+/// removal, enablement, priority, selection and qualification, a credential's set, rotation and
+/// revocation; every change with the registry version its view showed (CAS) and its request id,
+/// effective at the next controlled start.
+const PROVIDER_ADD: &str = "project0.provider.add";
+const PROVIDER_UPDATE: &str = "project0.provider.update";
+const PROVIDER_REMOVE: &str = "project0.provider.remove";
+const PROVIDER_ENABLE: &str = "project0.provider.enable";
+const PROVIDER_DISABLE: &str = "project0.provider.disable";
+const PROVIDER_PRIORITY: &str = "project0.provider.priority";
+const PROVIDER_SELECT: &str = "project0.provider.select";
+const PROVIDER_UNSELECT: &str = "project0.provider.unselect";
+const PROVIDER_QUALIFY: &str = "project0.provider.qualify";
+const PROVIDER_CREDENTIAL_SET: &str = "project0.provider.credential.set";
+const PROVIDER_CREDENTIAL_ROTATE: &str = "project0.provider.credential.rotate";
+const PROVIDER_CREDENTIAL_REVOKE: &str = "project0.provider.credential.revoke";
+const PROVIDER_ACTIONS: [&str; 12] = [
+    PROVIDER_ADD,
+    PROVIDER_UPDATE,
+    PROVIDER_REMOVE,
+    PROVIDER_ENABLE,
+    PROVIDER_DISABLE,
+    PROVIDER_PRIORITY,
+    PROVIDER_SELECT,
+    PROVIDER_UNSELECT,
+    PROVIDER_QUALIFY,
+    PROVIDER_CREDENTIAL_SET,
+    PROVIDER_CREDENTIAL_ROTATE,
+    PROVIDER_CREDENTIAL_REVOKE,
+];
+/// DEC-18 (P0-019): the actions that carry a credential's secret — separated from the request
+/// before any durable record (the ledger holds the request without it) and handed to the native
+/// controller's standard input only.
+const SECRET_ACTIONS: [&str; 2] = [PROVIDER_CREDENTIAL_SET, PROVIDER_CREDENTIAL_ROTATE];
+
+/// DEC-18 §1.2: the provider fields' secret-free shape, the native descriptor's rules
+/// (`darkbot_solana::providers`) applied before the ledger, so a key typed into an endpoint or a
+/// name is refused and never recorded; the native controller decides every change.
+mod provider_shape {
+    /// 16 or more hex digits and nothing else (the form of many providers' keys).
+    fn key_shaped(s: &str) -> bool {
+        s.len() >= 16 && s.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+    /// A provider or credential id: 1–32 of `[a-z0-9_-]`, never key-shaped.
+    pub fn id_ok(s: &str) -> bool {
+        !s.is_empty()
+            && s.len() <= 32
+            && !key_shaped(s)
+            && s.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+    }
+    /// A token-like path segment (the descriptor's three rules).
+    fn token_like(segment: &str) -> bool {
+        let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
+        let word = segment.split(['-', '_', '.']).any(|w| {
+            w.len() >= 16 && has(w, u8::is_ascii_digit) && has(w, u8::is_ascii_alphabetic)
+        });
+        let joined: String = segment
+            .chars()
+            .filter(|c| !matches!(c, '-' | '_' | '.'))
+            .collect();
+        let hex = joined.len() >= 16
+            && joined.bytes().all(|b| b.is_ascii_hexdigit())
+            && has(&joined, u8::is_ascii_digit)
+            && has(&joined, u8::is_ascii_alphabetic);
+        let mixed = segment.len() >= 20
+            && has(segment, u8::is_ascii_uppercase)
+            && has(segment, u8::is_ascii_lowercase)
+            && has(segment, u8::is_ascii_digit);
+        word || hex || mixed
+    }
+    /// An endpoint without user info, query, fragment or token-like path segment, at most 512
+    /// characters of visible ASCII.
+    pub fn endpoint_ok(url: &str) -> bool {
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return false;
+        };
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        url.len() <= 512
+            && url.bytes().all(|b| b.is_ascii_graphic())
+            && ["https", "http", "wss", "ws"].contains(&scheme)
+            && !authority.is_empty()
+            && !authority.contains('@')
+            && !url.contains(['?', '#'])
+            && !path.split('/').any(token_like)
+    }
+    /// none | path | query:NAME | header:NAME (a name, never a key).
+    pub fn auth_ok(auth: &str) -> bool {
+        let name = |n: &str| {
+            !n.is_empty()
+                && n.len() <= 64
+                && !key_shaped(n)
+                && !token_like(n)
+                && n.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        match auth.split_once(':') {
+            None => ["none", "path"].contains(&auth),
+            Some(("query" | "header", n)) => name(n),
+            _ => false,
+        }
+    }
+    /// The plan's published name: 1–32 of `[a-z0-9_.-]`, never key-shaped.
+    pub fn entitlement_ok(s: &str) -> bool {
+        !s.is_empty()
+            && s.len() <= 32
+            && !key_shaped(s)
+            && s.bytes().all(|b| {
+                b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+            })
+    }
+    pub const KINDS: [&str; 5] = ["rpc", "wss", "geyser", "jupiter", "jito"];
+}
+
+/// A credential's secret in transit: its bytes overwritten when it is released, on every path
+/// (volatile: never elided); never printed.
+struct SecretBuf(Vec<u8>);
+
+impl Drop for SecretBuf {
+    fn drop(&mut self) {
+        for b in self.0.iter_mut() {
+            // SAFETY: a valid, exclusive reference to an initialized byte.
+            unsafe { std::ptr::write_volatile(b, 0) };
+        }
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// DEC-18 (P0-019): `req` without its secret (the request every durable record holds) and the
+/// secret, for a credential action; `None` when its parameters do not decode or carry none.
+fn separate_secret(req: &CommandRequest) -> Option<(CommandRequest, Option<SecretBuf>)> {
+    use crate::proto::project0::v1::ProviderCredentialCommand;
+    if !SECRET_ACTIONS.contains(&req.action.as_str()) {
+        return Some((req.clone(), None));
+    }
+    let mut c = ProviderCredentialCommand::decode(req.params.as_ref()).ok()?;
+    if c.secret.is_empty() {
+        return None;
+    }
+    // Room for the line end the controller's input takes: the buffer never reallocates (an
+    // unwiped copy left behind).
+    let mut buf = Vec::with_capacity(c.secret.len() + 1);
+    buf.extend_from_slice(&c.secret);
+    let secret = SecretBuf(buf);
+    c.secret = Default::default();
+    Some((
+        CommandRequest {
+            params: c.encode_to_vec().into(),
+            ..req.clone()
+        },
+        Some(secret),
+    ))
+}
+
 const JOB_ACTIONS: [&str; 14] = [
     BACKTEST_START,
     OPTIMIZE_START,
@@ -172,7 +326,9 @@ fn online_history_read(req: &CommandRequest) -> bool {
 }
 fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
-        && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
+        && ([START, STOP].contains(&action)
+            || JOB_ACTIONS.contains(&action)
+            || PROVIDER_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
             && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
                 || BSC_OWNER_ACTIONS.contains(&action)))
@@ -469,7 +625,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
         AutostartGrantCommand, AutostartPreviewCommand, BacktestJobCommand, BootNetworkCommand,
         BootOfflineCommand, BootStartCommand, CapabilityControlCommand, H0JobCommand,
-        OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
+        OptimizeJobCommand, PostCaptureJobCommand, ProviderCredentialCommand,
+        ProviderDescriptorCommand, ProviderPriorityCommand, ProviderQualifyCommand,
+        ProviderSelectCommand, SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
@@ -477,7 +635,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     let expect_version = match req.expected.as_ref().map(|e| e.version) {
         None => None,
         Some(Some(expected_version::Version::ConfigVersion(v)))
-            if req.action == SOURCE_SET || req.action == CAPABILITY_SET =>
+            if req.action == SOURCE_SET
+                || req.action == CAPABILITY_SET
+                || PROVIDER_ACTIONS.contains(&req.action.as_str()) =>
         {
             Some(v)
         }
@@ -637,6 +797,145 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 args.extend(["--expect-epoch".into(), c.owner_epoch.to_string()]);
             }
             args.extend(["--request-id".into(), req.request_id.clone()]);
+            Some(args)
+        }
+        // DEC-18 (P0-020): a registry change — its shape here (a key in an endpoint or a name
+        // is never recorded), its rules the native controller's; the registry version the view
+        // showed and the request id always.
+        action if PROVIDER_ACTIONS.contains(&action) => {
+            use provider_shape::{auth_ok, endpoint_ok, entitlement_ok, id_ok, KINDS};
+            if !valid_job_id(&req.request_id) {
+                return None;
+            }
+            let none = req.params.is_empty();
+            let mut args: Vec<String> = ["p0", "provider"].map(String::from).to_vec();
+            let mut push = |items: &[&str]| args.extend(items.iter().map(|s| s.to_string()));
+            match action {
+                PROVIDER_ADD | PROVIDER_UPDATE if req.resource_id.is_empty() => {
+                    let c = ProviderDescriptorCommand::decode(req.params.as_ref()).ok()?;
+                    let add = action == PROVIDER_ADD;
+                    if !id_ok(&c.id)
+                        || (add
+                            && (c.kind.is_none()
+                                || c.endpoint.is_none()
+                                || c.plan.is_none()
+                                || c.entitlement.is_none()))
+                        || (!add && c.disabled)
+                    {
+                        return None;
+                    }
+                    push(&[if add { "add" } else { "update" }, "--id", &c.id]);
+                    if let Some(k) = &c.kind {
+                        if !KINDS.contains(&k.as_str()) {
+                            return None;
+                        }
+                        push(&["--kind", k]);
+                    }
+                    if let Some(e) = &c.endpoint {
+                        if !endpoint_ok(e) {
+                            return None;
+                        }
+                        push(&["--endpoint", e]);
+                    }
+                    if let Some(a) = &c.auth {
+                        if !auth_ok(a) {
+                            return None;
+                        }
+                        push(&["--auth", a]);
+                    }
+                    if let Some(cred) = &c.credential {
+                        if !id_ok(cred) {
+                            return None;
+                        }
+                        push(&["--credential", cred]);
+                    }
+                    if let Some(plan) = &c.plan {
+                        if !["free", "unknown"].contains(&plan.as_str()) {
+                            return None;
+                        }
+                        push(&["--plan", plan]);
+                    }
+                    if let Some(e) = &c.entitlement {
+                        if !entitlement_ok(e) {
+                            return None;
+                        }
+                        push(&["--entitlement", e]);
+                    }
+                    if let Some(n) = c.priority {
+                        push(&["--priority", &n.to_string()]);
+                    }
+                    if let Some(n) = c.capacity_rps {
+                        if n == 0 {
+                            return None;
+                        }
+                        push(&["--capacity-rps", &n.to_string()]);
+                    }
+                    if c.disabled {
+                        push(&["--disabled"]);
+                    }
+                }
+                PROVIDER_REMOVE | PROVIDER_ENABLE | PROVIDER_DISABLE
+                    if none && id_ok(&req.resource_id) =>
+                {
+                    let verb = action.rsplit('.').next()?;
+                    push(&[verb, "--id", &req.resource_id]);
+                }
+                PROVIDER_PRIORITY if req.resource_id.is_empty() => {
+                    let c = ProviderPriorityCommand::decode(req.params.as_ref()).ok()?;
+                    if !id_ok(&c.id) {
+                        return None;
+                    }
+                    push(&[
+                        "priority",
+                        "--id",
+                        &c.id,
+                        "--priority",
+                        &c.priority.to_string(),
+                    ]);
+                }
+                PROVIDER_SELECT if req.resource_id.is_empty() => {
+                    let c = ProviderSelectCommand::decode(req.params.as_ref()).ok()?;
+                    if !KINDS.contains(&c.kind.as_str()) || !id_ok(&c.id) {
+                        return None;
+                    }
+                    push(&["select", "--kind", &c.kind, "--id", &c.id]);
+                }
+                PROVIDER_UNSELECT if none && KINDS.contains(&req.resource_id.as_str()) => {
+                    push(&["unselect", "--kind", &req.resource_id]);
+                }
+                PROVIDER_QUALIFY if req.resource_id.is_empty() => {
+                    let c = ProviderQualifyCommand::decode(req.params.as_ref()).ok()?;
+                    let evidence_ok = c.evidence == "-"
+                        || (c.evidence.len() == 16
+                            && c.evidence
+                                .bytes()
+                                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+                    if !id_ok(&c.id) || !evidence_ok {
+                        return None;
+                    }
+                    push(&["qualify", "--id", &c.id, "--evidence", &c.evidence]);
+                }
+                PROVIDER_CREDENTIAL_SET | PROVIDER_CREDENTIAL_ROTATE
+                    if req.resource_id.is_empty() =>
+                {
+                    let c = ProviderCredentialCommand::decode(req.params.as_ref()).ok()?;
+                    if !id_ok(&c.credential) {
+                        return None;
+                    }
+                    let verb = action.rsplit('.').next()?;
+                    push(&["credential", verb, "--credential", &c.credential]);
+                }
+                PROVIDER_CREDENTIAL_REVOKE if none && id_ok(&req.resource_id) => {
+                    push(&["credential", "revoke", "--credential", &req.resource_id]);
+                }
+                _ => return None,
+            }
+            args.extend([
+                "--request-id".into(),
+                req.request_id.clone(),
+                "--expect-version".into(),
+                expect_version?.to_string(),
+            ]);
             Some(args)
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
@@ -1312,6 +1611,7 @@ impl Control {
         // DEC-07: project0.capture.start with the start approval of a market flow is the boot
         // controller's start step; a bare one is refused before dispatch (below).
         let job = if JOB_ACTIONS.contains(&req.action.as_str())
+            || PROVIDER_ACTIONS.contains(&req.action.as_str())
             || (req.action == START
                 && req.project == ProjectId::Project0 as i32
                 && !req.params.is_empty())
@@ -1323,7 +1623,9 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        if req.action == CAPABILITY_SET {
+                        if PROVIDER_ACTIONS.contains(&req.action.as_str()) {
+                            "Provider request invalid (ids [a-z0-9_-]{1,32}, kind rpc|wss|geyser|jupiter|jito, an endpoint without a credential in it, auth none|path|query:NAME|header:NAME, plan free|unknown, the registry version and a credential's secret; never echoed)"
+                        } else if req.action == CAPABILITY_SET {
                             "Capability request invalid (LIVE OFF|LIVE, HOLD_B, JITO_BUNDLE, THRESHOLD_TRIGGER, INVENTORY_REBALANCING or LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE, ECON_* or WALLET:<pubkey> ENABLED|DISABLED, FE06_GRANT|FE06_REVOKE <digest>; the configuration version, and the owner epoch for all but a move to OFF)"
                         } else if BOOT_ACTIONS.contains(&req.action.as_str()) || req.action == START
                         {
@@ -1362,7 +1664,18 @@ impl Control {
                 "Capture controller not configured",
             );
         };
-        let encoded = req.encode_to_vec();
+        // DEC-18 (P0-019): a credential's secret never enters the ledger — the request is
+        // recorded without it, the secret goes to the controller's standard input only.
+        let Some((stored, secret)) = separate_secret(req) else {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::InvalidParams,
+                "Credential request invalid: a credential id and its secret",
+            );
+        };
+        let encoded = stored.encode_to_vec();
+        drop(stored);
         match self.load(id) {
             Ok(Some(record)) if record.request == encoded => {
                 // A replay returns the stored receipt with the current ledger phase.
@@ -1430,8 +1743,11 @@ impl Control {
             _ => {}
         }
         if let Some(args) = job {
-            return self.dispatch_job(p, id, encoded, &req.action, args).await;
+            return self
+                .dispatch_job(p, id, encoded, &req.action, args, secret)
+                .await;
         }
+        drop(secret);
         if let Some(source) = source {
             return self.dispatch_source(p, id, encoded, source).await;
         }
@@ -1583,12 +1899,17 @@ impl Control {
         encoded: Vec<u8>,
         action: &str,
         args: Vec<String>,
+        secret: Option<SecretBuf>,
     ) -> CommandResponse {
         let accepted = reply(
             id,
             CommandStatus::Accepted,
             CommandRejectReason::Unspecified,
-            "Analytics job intent persisted; the job's progress is project0.analytics.jobs",
+            if PROVIDER_ACTIONS.contains(&action) {
+                "Provider change intent persisted; its receipt by request id, the registry in project0.analytics.jobs (providers)"
+            } else {
+                "Analytics job intent persisted; the job's progress is project0.analytics.jobs"
+            },
         );
         let mut record = Record {
             request: encoded,
@@ -1606,7 +1927,7 @@ impl Control {
                 "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
             );
         }
-        let output = tokio::time::timeout(self.controller, {
+        let output = tokio::time::timeout(self.controller, async {
             let mut ctl = Command::new(&p.ctl);
             ctl.args(&args).kill_on_drop(true);
             // DEC-07: the boot controller audits the staged capture environment, as the
@@ -1617,10 +1938,50 @@ impl Control {
             {
                 ctl.env("DARKBOT_STAGED", "1");
             }
-            ctl.output()
+            let Some(mut secret) = secret else {
+                // A controller never reads the gateway's own standard input.
+                ctl.stdin(std::process::Stdio::null());
+                return ctl.output().await;
+            };
+            // DEC-18 (P0-019): the secret through the controller's standard input only (never an
+            // argument, the environment or a record); wiped when this ends.
+            use tokio::io::AsyncWriteExt;
+            ctl.stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            let mut child = ctl.spawn()?;
+            if let Some(mut stdin) = child.stdin.take() {
+                secret.0.push(b'\n');
+                let written = stdin.write_all(&secret.0).await;
+                drop(stdin);
+                drop(secret);
+                written?;
+            }
+            child.wait_with_output().await
         })
         .await;
+        // DEC-18: the registry's receipt (`PROVIDER_RECEIPT …`, redacted): its outcome either way.
+        let provider_receipt = |out: &std::process::Output| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .find(|l| l.starts_with("PROVIDER_RECEIPT "))
+                .map(|l| redact(l.trim()).chars().take(300).collect::<String>())
+        };
+        let provider = PROVIDER_ACTIONS.contains(&action);
         match output {
+            Ok(Ok(out)) if out.status.success() && provider => {
+                record.phase = CommandPhase::Completed as i32;
+                record.detail = format!(
+                    "Provider change recorded, effective at the next controlled start (project0.analytics.jobs providers): {}",
+                    provider_receipt(&out).unwrap_or_else(|| "no receipt line".into())
+                );
+            }
+            Ok(Ok(out)) if provider => {
+                record.phase = CommandPhase::Failed as i32;
+                record.detail = provider_receipt(&out)
+                    .map(|r| format!("Native controller refused: {r}"))
+                    .unwrap_or_else(|| refusal(&out.stderr));
+            }
             Ok(Ok(out)) if out.status.success() => {
                 record.phase = CommandPhase::Completed as i32;
                 record.detail = if action == JOB_CANCEL {
@@ -1655,7 +2016,9 @@ impl Control {
                 record.detail = refusal(&out.stderr);
             }
             _ => {
-                record.detail = if action == CAPABILITY_SET {
+                record.detail = if provider {
+                    "Controller outcome unknown; inspect the provider registry in project0.analytics.jobs before a new request (the same request id returns its receipt)"
+                } else if action == CAPABILITY_SET {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
                 } else if BOOT_ACTIONS.contains(&action) || action == START {
                     "Controller outcome unknown; inspect the boot flow in project0.analytics.jobs before a new approval"
@@ -4289,6 +4652,204 @@ mod tests {
     /// `p0ctl job` (through `darkbotctl p0 job`), without observing a capture process; a native
     /// refusal is a FAILED receipt with its code; invalid parameters are rejected before the
     /// ledger and never dispatched.
+    #[tokio::test]
+    async fn dec18_provider_commands_map_onto_p0ctl_and_no_secret_is_recorded() {
+        // DEC-18 (P0-019/P0-020): every registry change through the one controller with its CAS
+        // and request id; a key in an endpoint or a name is refused before the ledger; a
+        // credential's secret reaches only the controller's standard input — never the ledger,
+        // an argument or the receipt; a replay never runs the controller again.
+        use crate::proto::project0::v1::{
+            ProviderCredentialCommand, ProviderDescriptorCommand, ProviderSelectCommand,
+        };
+        use crate::proto::{expected_version, ExpectedVersion};
+        let dir = std::env::temp_dir().join(format!("gw-providers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let (log, input, runs) = (dir.join("argv"), dir.join("stdin"), dir.join("runs"));
+        executable(
+            &ctl,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{log}'\necho run >> '{runs}'\ncat > '{input}'\nif [ \"$7\" = refused ]; then echo 'PROVIDER_RECEIPT request_id=x applied=false version=4 action=\"select rpc refused\" detail=\"PROVIDER_UNKNOWN: refused\"'; exit 2; fi\necho 'PROVIDER_RECEIPT request_id=x applied=true version=5 action=\"credential set helius\" detail=\"stored\"'\n",
+                log = log.display(),
+                runs = runs.display(),
+                input = input.display()
+            ),
+        );
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "com.darkbot.test.absent.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let request =
+            |n: u8, action: &str, resource: &str, params: Vec<u8>, version: Option<u64>| {
+                CommandRequest {
+                    project: ProjectId::Project0 as i32,
+                    request_id: format!("{n}2345678-1234-1234-1234-123456789abc"),
+                    action: action.into(),
+                    resource_id: resource.into(),
+                    expected: version.map(|v| ExpectedVersion {
+                        version: Some(expected_version::Version::ConfigVersion(v)),
+                    }),
+                    params: params.into(),
+                    issued_at_unix_ns: crate::overview::unix_ns_now(),
+                }
+            };
+        let argv = || fs::read_to_string(&log).unwrap_or_default();
+        let ledger = || {
+            let mut all = Vec::new();
+            for e in fs::read_dir(dir.join("run/commands")).unwrap() {
+                let path = e.unwrap().path();
+                if path.is_file() {
+                    all.extend(fs::read(path).unwrap());
+                }
+            }
+            all
+        };
+        let holds = |bytes: &[u8], needle: &str| {
+            bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+        };
+        let descriptor = |endpoint: &str, credential: &str| ProviderDescriptorCommand {
+            id: "helius-rpc".into(),
+            kind: Some("rpc".into()),
+            endpoint: Some(endpoint.into()),
+            auth: Some("query:api-key".into()),
+            credential: Some(credential.into()),
+            priority: Some(0),
+            capacity_rps: Some(10),
+            plan: Some("free".into()),
+            entitlement: Some("helius-free".into()),
+            disabled: false,
+        };
+        let add = descriptor("https://mainnet.helius-rpc.com", "helius").encode_to_vec();
+        let r = control
+            .execute(&request(1, PROVIDER_ADD, "", add.clone(), Some(4)))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert_eq!(
+            argv(),
+            "p0\nprovider\nadd\n--id\nhelius-rpc\n--kind\nrpc\n--endpoint\nhttps://mainnet.helius-rpc.com\n--auth\nquery:api-key\n--credential\nhelius\n--plan\nfree\n--entitlement\nhelius-free\n--priority\n0\n--capacity-rps\n10\n--request-id\n12345678-1234-1234-1234-123456789abc\n--expect-version\n4\n"
+        );
+        assert!(r.detail.contains("PROVIDER_RECEIPT"), "{}", r.detail);
+        // The registry version is required (CAS).
+        let r = control
+            .execute(&request(2, PROVIDER_ADD, "", add, None))
+            .await;
+        assert_eq!(r.reject_reason, CommandRejectReason::InvalidParams as i32);
+        // A key in an endpoint or typed into a name is refused before any record.
+        for (n, params) in [
+            (
+                3,
+                descriptor(
+                    "https://mainnet.helius-rpc.com/?api-key=LEAKED-KEY-1",
+                    "helius",
+                ),
+            ),
+            (
+                4,
+                descriptor("https://user:LEAKED-KEY-1@rpc.example", "helius"),
+            ),
+            (
+                5,
+                descriptor("https://rpc.example/LEAKEDKEY1a2b3c4d5e6f7g8h9", "helius"),
+            ),
+            (
+                6,
+                descriptor(
+                    "https://mainnet.helius-rpc.com",
+                    "0123456789abcdef0123456789abcdef",
+                ),
+            ),
+        ] {
+            let r = control
+                .execute(&request(
+                    n,
+                    PROVIDER_ADD,
+                    "",
+                    params.encode_to_vec(),
+                    Some(4),
+                ))
+                .await;
+            assert_eq!(
+                r.reject_reason,
+                CommandRejectReason::InvalidParams as i32,
+                "{n}"
+            );
+            assert!(!r.detail.contains("LEAKED"), "{}", r.detail);
+        }
+        let l = ledger();
+        assert!(!holds(&l, "LEAKED") && !holds(&l, "0123456789abcdef0123"));
+        // A credential's secret: the controller's standard input only.
+        let set = ProviderCredentialCommand {
+            credential: "helius".into(),
+            secret: b"SECRET-KEY-1".to_vec().into(),
+        }
+        .encode_to_vec();
+        let set_request = request(7, PROVIDER_CREDENTIAL_SET, "", set, Some(4));
+        let r = control.execute(&set_request).await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert_eq!(fs::read_to_string(&input).unwrap(), "SECRET-KEY-1\n");
+        assert!(argv().contains("credential\nset\n--credential\nhelius\n"));
+        assert!(!argv().contains("SECRET") && !r.detail.contains("SECRET"));
+        assert!(
+            !holds(&ledger(), "SECRET-KEY-1"),
+            "the ledger holds no secret"
+        );
+        // The same request again is the stored receipt; the controller is not run again.
+        let before = fs::read_to_string(&runs).unwrap().lines().count();
+        let again = control.execute(&set_request).await;
+        assert_eq!(again.phase, CommandPhase::Completed as i32);
+        assert!(again.detail.starts_with("Provider change intent persisted"));
+        assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), before);
+        // A credential action without its secret is refused.
+        let empty = ProviderCredentialCommand {
+            credential: "helius".into(),
+            secret: Default::default(),
+        }
+        .encode_to_vec();
+        let r = control
+            .execute(&request(8, PROVIDER_CREDENTIAL_ROTATE, "", empty, Some(4)))
+            .await;
+        assert_eq!(r.reject_reason, CommandRejectReason::InvalidParams as i32);
+        // A refused change is FAILED with the registry's receipt.
+        let refused = ProviderSelectCommand {
+            kind: "rpc".into(),
+            id: "refused".into(),
+        }
+        .encode_to_vec();
+        let r = control
+            .execute(&request(9, PROVIDER_SELECT, "", refused, Some(4)))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Failed as i32, "{}", r.detail);
+        assert!(
+            r.detail.contains("PROVIDER_UNKNOWN: refused"),
+            "{}",
+            r.detail
+        );
+        // Remove, revoke and unselect name their resource; a kind is one of the five.
+        let r = control
+            .execute(&request(
+                0,
+                PROVIDER_CREDENTIAL_REVOKE,
+                "helius",
+                vec![],
+                Some(5),
+            ))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert!(argv().starts_with("p0\nprovider\ncredential\nrevoke\n--credential\nhelius\n"));
+        let r = control
+            .execute(&request(6, PROVIDER_UNSELECT, "ftp", vec![], Some(5)))
+            .await;
+        assert_eq!(r.reject_reason, CommandRejectReason::InvalidParams as i32);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn analytics_job_commands_dispatch_the_p0ctl_job_options() {
         use crate::proto::project0::v1::{BacktestJobCommand, FundingSet, OptimizeJobCommand};

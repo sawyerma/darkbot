@@ -8,7 +8,7 @@ F3 transport layer for the browser. Protocol contract: `frontend/docs/GATEWAY_WI
 - Hello/Welcome, bounded subscriptions and connections, latest-value state via Tokio watch, ordered generation/sequence, heartbeat/Pong and watermark.
 - Overview source statuses; unavailable engine projections are not synthesized.
 - Engine feeds: Project_0 and BSC reporters over unix sockets, same-user peer check, exact per-source frame bound (a larger frame is a counted engine protocol violation), `StateTooLarge` as a per-topic FRAME_TOO_LARGE with recovery on the next valid state.
-- Commands: same-origin protobuf POST with session/CSRF/Origin/Host and one idempotency ledger with time-bounded idempotency (Wire V1.3 §7) configured by `DARKBOT_GATEWAY_COMMAND_CLOCK_WINDOW_MS`, `_RETENTION_MS` (at least twice the window) and `_LEDGER_RECORDS`.
+- Commands: same-origin protobuf POST with session/CSRF/Origin/Host and one idempotency ledger with time-bounded idempotency (Wire V1.3 §7) configured by `DARKBOT_GATEWAY_COMMAND_CLOCK_WINDOW_MS`, `_RETENTION_MS` (at least twice the window) and `_LEDGER_RECORDS`. DEC-18: a provider credential's key (`project0.provider.credential.set|rotate`) is separated from the request before the ledger records it and reaches only the native controller's standard input; an endpoint or name carrying a key is refused before any record.
 
 ## Boundaries
 EVENT catch-up (F4) and native engine receipts are future phases. Trading and LIVE are not authorized. Gateway-owned overview data cannot be written through external EngineFeed.

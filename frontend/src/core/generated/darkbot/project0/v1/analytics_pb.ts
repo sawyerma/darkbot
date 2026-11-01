@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/project0/v1/analytics.proto.
  */
 export const file_darkbot_project0_v1_analytics: GenFile = /*@__PURE__*/
-  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSLHAgoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCRIrCgRib290GAcgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290RmxvdxISCgpib290X2Vycm9yGAggASgJEjgKDXVudGlsX3N0b3BwZWQYCSABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZCKGAgoMVW50aWxTdG9wcGVkEjYKCWF1dG9zdGFydBgBIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSNAoHcHJldmlldxgCIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQXV0b3N0YXJ0R3JhbnQSRQoNcXVhbGlmaWNhdGlvbhgDIAEoCzIuLmRhcmtib3QucHJvamVjdDAudjEuVW50aWxTdG9wcGVkUXVhbGlmaWNhdGlvbhIxCgNydW4YBCABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZFJ1bhIOCgZlcnJvcnMYBSADKAkinAMKDkF1dG9zdGFydEdyYW50Eg4KBmRpZ2VzdBgBIAEoCRIMCgRtb2RlGAIgASgJEhUKDWNvbmZpZ19zaGEyNTYYAyABKAkSFQoNYmluYXJ5X3NoYTI1NhgEIAEoCRIQCghkdXJhdGlvbhgFIAEoCRIaChJjaGVja3BvaW50X3NlY29uZHMYBiABKAQSHgoWbWluaW11bV9ydW53YXlfc2Vjb25kcxgHIAEoBBIYChBxdWFsaWZpY2F0aW9uX2lkGAggASgJEhwKFHByb3ZpZGVyX2V2aWRlbmNlX2lkGAkgASgJEhQKDGdlbmVzaXNfaGFzaBgKIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgLIAEoCRIPCgdycGNfcnBzGAwgASgEEhQKDG1heF9yZXF1ZXN0cxgNIAEoBBIVCg1tYXhfdG90YWxfbWliGA4gASgEEhsKE21heF9ydW50aW1lX3NlY29uZHMYDyABKAQSFgoOZXhwaXJlc191bml4X3MYECABKAQSFwoPcmVjb3JkZWRfdW5peF9zGBEgASgEIqICChlVbnRpbFN0b3BwZWRRdWFsaWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBG1vZGUYAiABKAkSGgoSY2hlY2twb2ludF9zZWNvbmRzGAMgASgEEh4KFm1pbmltdW1fcnVud2F5X3NlY29uZHMYBCABKAQSEAoIY29tcGxldGUYBSABKAgSDAoEb3BlbhgGIAMoCRIYCgtldmlkZW5jZV9pZBgHIAEoCUgAiAEBEigKG2V2aWRlbmNlX3ZhbGlkX3VudGlsX3VuaXhfcxgIIAEoBEgBiAEBEhsKE3F1YWxpZmllZF9hdF91bml4X3MYCSABKARCDgoMX2V2aWRlbmNlX2lkQh4KHF9ldmlkZW5jZV92YWxpZF91bnRpbF91bml4X3MiuQIKD1VudGlsU3RvcHBlZFJ1bhIOCgZydW5faWQYASABKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgCIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgDIAEoBBIaChJjaGVja3BvaW50X3NlY29uZHMYBCABKAQSDwoHd2luZG93cxgFIAEoBBIZCgxsYXN0X3ZlcmRpY3QYBiABKAlIAIgBARITCgtsYXN0X2RldGFpbBgHIAEoCRIeChFsYXN0X2VuZGVkX3VuaXhfcxgIIAEoBEgBiAEBEhMKBmhhbHRlZBgJIAEoCUgCiAEBEg4KBnNlYWxlZBgKIAEoCBIQCghjb21wbGV0ZRgLIAEoCEIPCg1fbGFzdF92ZXJkaWN0QhQKEl9sYXN0X2VuZGVkX3VuaXhfc0IJCgdfaGFsdGVkIpgECghCb290RmxvdxIPCgdmbG93X2lkGAEgASgJEgwKBG1vZGUYAiABKAkSHAoPY3JlYXRlZF91bml4X21zGAMgASgESACIAQESFwoPb2ZmbGluZV92ZXJkaWN0GAQgASgJEhUKDW9mZmxpbmVfdG9rZW4YBSABKAkSFwoPb2ZmbGluZV9ibG9ja2VkGAYgAygJEhMKC3R0bF9zZWNvbmRzGAcgASgEEhIKCnR0bF9zb3VyY2UYCCABKAkSLgoHbmV0d29yaxgJIAEoCzIdLmRhcmtib3QucHJvamVjdDAudjEuQm9vdFN0ZXASHAoPbmV0d29ya192ZXJkaWN0GAogASgJSAGIAQESGgoNbmV0d29ya190b2tlbhgLIAEoCUgCiAEBEhcKD25ldHdvcmtfYmxvY2tlZBgMIAMoCRIcCg9vYnNlcnZlZF91bml4X3MYDSABKARIA4gBARIbCg5leHBpcmVzX3VuaXhfcxgOIAEoBEgEiAEBEiwKBXN0YXJ0GA8gASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290U3RlcBIQCghkdXJhdGlvbhgQIAEoCUISChBfY3JlYXRlZF91bml4X21zQhIKEF9uZXR3b3JrX3ZlcmRpY3RCEAoOX25ldHdvcmtfdG9rZW5CEgoQX29ic2VydmVkX3VuaXhfc0IRCg9fZXhwaXJlc191bml4X3MirQEKCEJvb3RTdGVwEg0KBXN0YXRlGAEgASgJEgwKBGNvZGUYAiABKAkSEwoGcnVuX2lkGAMgASgJSACIAQESHAoPc3RhcnRlZF91bml4X21zGAQgASgESAGIAQESHQoQZmluaXNoZWRfdW5peF9tcxgFIAEoBEgCiAEBQgkKB19ydW5faWRCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyKYAgoMQW5hbHl0aWNzUnVuEg4KBnJ1bl9pZBgBIAEoCRIMCgRyb290GAIgASgJEg4KBmxheW91dBgDIAEoCRIYChBjYXB0dXJlX2NvbXBsZXRlGAQgASgIEjwKDXF1YWxpZmljYXRpb24YBSABKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJ1blF1YWxpZmljYXRpb24SHQoQbW9kaWZpZWRfdW5peF9tcxgGIAEoBEgAiAEBEg8KB3J1bm5pbmcYByABKAgSPQoMdmVyaWZpY2F0aW9uGAggAygLMicuZGFya2JvdC5wcm9qZWN0MC52MS5WZXJpZmljYXRpb25NZXRob2RCEwoRX21vZGlmaWVkX3VuaXhfbXMi+AYKElZlcmlmaWNhdGlvbk1ldGhvZBIOCgZtZXRob2QYASABKAkSDwoHc3BlY19pZBgCIAEoCRIQCghhdHRlbXB0cxgDIAEoBBIPCgdydW5uaW5nGAQgASgIEg4KBnN0YXR1cxgFIAEoCRITCgZyZWFzb24YBiABKAlIAIgBARIWCglyZXN1bHRfaWQYByABKAlIAYgBARIPCgdvZmZsaW5lGAggASgIEh0KEHByb3ZpZGVyX2JpbmRpbmcYCSABKAlIAogBARIYChBjaGVja3BvaW50X3JlYWRzGAogASgEEhIKBWNhbGxzGAsgASgESAOIAQESEgoFYnl0ZXMYDCABKARIBIgBARIVCg1wcm9ncmVzc191bml0GA0gASgJEhUKDXByb2dyZXNzX2RvbmUYDiABKAQSGwoOcHJvZ3Jlc3NfdG90YWwYDyABKARIBYgBARIyCglxdWFsaWZpZWQYECADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSMQoIb2JzZXJ2ZWQYESADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSMAoHbWFya2VycxgSIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuTmFtZWRDb3VudBIzCgpjb21wYXJpc29uGBMgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5OYW1lZENvdW50EhoKDWRpc2FncmVlbWVudHMYFCABKARIBogBARIXCgp1bnJlc29sdmVkGBUgASgESAeIAQESFAoHdW5rbm93bhgWIAEoBEgIiAEBEjUKDHRyYW5zYWN0aW9ucxgXIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuTmFtZWRDb3VudBIYCgtjYWxsc190b3RhbBgYIAEoBEgJiAEBEhgKC2J5dGVzX3RvdGFsGBkgASgESAqIAQFCCQoHX3JlYXNvbkIMCgpfcmVzdWx0X2lkQhMKEV9wcm92aWRlcl9iaW5kaW5nQggKBl9jYWxsc0IICgZfYnl0ZXNCEQoPX3Byb2dyZXNzX3RvdGFsQhAKDl9kaXNhZ3JlZW1lbnRzQg0KC191bnJlc29sdmVkQgoKCF91bmtub3duQg4KDF9jYWxsc190b3RhbEIOCgxfYnl0ZXNfdG90YWwiKQoKTmFtZWRDb3VudBIMCgRuYW1lGAEgASgJEg0KBWNvdW50GAIgASgEInIKEFJ1blF1YWxpZmljYXRpb24SDwoHdmVyZGljdBgBIAEoCRIUCgx2ZXJpZmljYXRpb24YAiABKAkSDgoGZmFpbGVkGAMgAygJEhgKEHF1YWxpZmljYXRpb25faWQYBCABKAkSDQoFZXJyb3IYBSABKAki7wUKDEFuYWx5dGljc0pvYhIOCgZqb2JfaWQYASABKAkSDAoEa2luZBgCIAEoCRILCgNydW4YAyABKAkSDQoFc3RhdGUYBCABKAkSDAoEY29kZRgFIAEoCRIeChFyZXF1ZXN0ZWRfdW5peF9tcxgGIAEoBEgBiAEBEhwKD3N0YXJ0ZWRfdW5peF9tcxgHIAEoBEgCiAEBEh0KEGZpbmlzaGVkX3VuaXhfbXMYCCABKARIA4gBARITCgttYXhfc2Vjb25kcxgJIAEoBBIVCg1tYXhfcmFtX2J5dGVzGAogASgEEi4KBnBhcmFtcxgLIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEioKBGdyaWQYDCABKAsyHC5kYXJrYm90LnByb2plY3QwLnYxLkpvYkdyaWQSGwoTdmVyaWZpY2F0aW9uX3Jlc3VsdBgNIAEoCRI3CghiYWNrdGVzdBgOIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQmFja3Rlc3RSZXN1bHRIABI3CghvcHRpbWl6ZRgPIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuT3B0aW1pemVSZXN1bHRIABI+Cgxwb3N0X2NhcHR1cmUYESABKAsyJi5kYXJrYm90LnByb2plY3QwLnYxLlBvc3RDYXB0dXJlUmVzdWx0SAASKwoCaDAYEiABKAsyHS5kYXJrYm90LnByb2plY3QwLnYxLkgwUmVzdWx0SAASPwoRcG9zdF9jYXB0dXJlX3NwZWMYECABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLlBvc3RDYXB0dXJlU3BlYxIsCgdoMF9zcGVjGBMgASgLMhsuZGFya2JvdC5wcm9qZWN0MC52MS5IMFNwZWNCCAoGcmVzdWx0QhQKEl9yZXF1ZXN0ZWRfdW5peF9tc0ISChBfc3RhcnRlZF91bml4X21zQhMKEV9maW5pc2hlZF91bml4X21zIlkKBkgwU3BlYxITCgt3aW5kb3dfZGF5cxgBIAEoBBIXCgptaW5fc2FtcGxlGAIgASgESACIAQESEgoKZW5kX3VuaXhfcxgDIAEoA0INCgtfbWluX3NhbXBsZSKQBQoISDBSZXN1bHQSEQoJcmVzdWx0X2lkGAEgASgJEhsKE3dpbmRvd19zdGFydF91bml4X3MYAiABKAMSGQoRd2luZG93X2VuZF91bml4X3MYAyABKAMSFAoMbGlxdWlkYXRpb25zGAQgASgEEhIKCmR1cGxpY2F0ZXMYBSABKAQSFQoNcnVuc192ZXJpZmllZBgGIAEoBBIbChNydW5zX3dpdGhvdXRfcmVzdWx0GAcgASgEEg8KB3dpbm5lcnMYCCABKAQSIQoUdG9wX3dpbm5lcl9zaGFyZV9icHMYCSABKARIAIgBARINCgViYW5kcxgKIAEoBBIVCg1zYW1wbGVfc3RhdHVzGAsgASgJEgwKBHRhZ3MYDCABKAkSGAoLY29tcGV0aXRpdmUYDSABKARIAYgBARIZCgx0cmFuc2FjdGlvbnMYDiABKARIAogBARIcCg9mYWlsZWRfYXR0ZW1wdHMYDyABKARIA4gBARIcCg9jb3ZlcmVkX3NlY29uZHMYECABKARIBIgBARIaCg1iYW5kc19ib3VuZGVkGBEgASgESAWIAQESJwoaYmFuZHNfYmVsb3dfb3VyX21pbl9wcm9maXQYEiABKARIBogBARIZCgx0aXBfYWNjb3VudHMYEyABKARIB4gBAUIXChVfdG9wX3dpbm5lcl9zaGFyZV9icHNCDgoMX2NvbXBldGl0aXZlQg8KDV90cmFuc2FjdGlvbnNCEgoQX2ZhaWxlZF9hdHRlbXB0c0ISChBfY292ZXJlZF9zZWNvbmRzQhAKDl9iYW5kc19ib3VuZGVkQh0KG19iYW5kc19iZWxvd19vdXJfbWluX3Byb2ZpdEIPCg1fdGlwX2FjY291bnRzImMKD1Bvc3RDYXB0dXJlU3BlYxIUCgxjaGFpbl92ZXJpZnkYASABKAkSDwoHb2ZmbGluZRgCIAEoCBIOCgZyZXN1bWUYAyABKAgSGQoRcHJvdmlkZXJfZXZpZGVuY2UYBCABKAgiUAoRUG9zdENhcHR1cmVSZXN1bHQSFwoPdmVyaWZpY2F0aW9uX29rGAEgASgIEhEKCXJlcG9ydF9vaxgCIAEoCBIPCgd2ZXJkaWN0GAMgASgJIn8KCUpvYlBhcmFtcxJGChttaW5fcHJvZml0X3VzZF9taWNyb19zaWduZWQYASABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIZChFjYXBpdGFsX3VzZF9taWNybxgCIAMoBBIPCgdmdW5kaW5nGAMgAygJIscBCgdKb2JHcmlkEkYKG21pbl9wcm9maXRfdXNkX21pY3JvX3NpZ25lZBgBIAMoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsEjUKDGZ1bmRpbmdfc2V0cxgCIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuRnVuZGluZ1NldBITCgtob2xkb3V0X2JwcxgDIAEoBBISCgptYXhfcG9pbnRzGAQgASgEEhQKDHNhdmVfcHJvZmlsZRgFIAEoCCIdCgpGdW5kaW5nU2V0Eg8KB2NsYXNzZXMYASADKAki3QEKDkJhY2t0ZXN0UmVzdWx0EhEKCXJlc3VsdF9pZBgBIAEoCRIWCg5jYXB0dXJlX3J1bl9pZBgCIAEoCRIMCgRyb3dzGAMgASgEEhAKCGF0dGVtcHRzGAQgASgEEhQKDGxpcXVpZGF0aW9ucxgFIAEoBBJBCg5jb3VudGVyZmFjdHVhbBgGIAEoCzIpLmRhcmtib3QucHJvamVjdDAudjEuU2hhZG93Q291bnRlcmZhY3R1YWwSEAoIcmVhbGl6ZWQYByABKAkSFQoNcmVzdWx0X3NoYTI1NhgIIAEoDCL9AQoUU2hhZG93Q291bnRlcmZhY3R1YWwSDwoHbWF0Y2hlZBgBIAEoBBIPCgd1bmtub3duGAIgASgEEhgKEGZ1bmRpbmdfZXhjbHVkZWQYAyABKAQSFQoNYmVsb3dfbWluaW11bRgEIAEoBBIMCgR3aW5zGAUgASgEEhIKCmxvc3RfcmFjZXMYBiABKAQSFgoObm9fY2hhaW5fZXZlbnQYByABKAQSNwoJc2NlbmFyaW9zGAggAygLMiQuZGFya2JvdC5wcm9qZWN0MC52MS5DYXBpdGFsU2NlbmFyaW8SDwoHbGFuZGluZxgJIAEoCRIOCgZzYWZldHkYCiABKAki0wIKD0NhcGl0YWxTY2VuYXJpbxIZChFjYXBpdGFsX3VzZF9taWNybxgBIAEoBBIMCgR3aW5zGAIgASgEEkMKGHdpbl9uZXRfdXNkX21pY3JvX3NpZ25lZBgDIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsEhcKD2ZhaWxlZF9hdHRlbXB0cxgEIAEoBBJGChlmYWlsZWRfY29zdF91c2RfbWljcm9fc3VtGAUgASgLMiMuZGFya2JvdC5jb250cm9sLnYxLlVuc2lnbmVkRGVjaW1hbBIbChNmYWlsZWRfY29zdF91bmtub3duGAYgASgEEhMKC292ZXJfYnVkZ2V0GAcgASgEEj8KFG5ldF91c2RfbWljcm9fc2lnbmVkGAggASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwinQIKDk9wdGltaXplUmVzdWx0EhEKCXJlc3VsdF9pZBgBIAEoCRIWCg5jYXB0dXJlX3J1bl9pZBgCIAEoCRIOCgZwb2ludHMYAyABKAQSLgoGY2hvc2VuGAQgASgLMh4uZGFya2JvdC5wcm9qZWN0MC52MS5Kb2JQYXJhbXMSOgoOY2hvc2VuX2hvbGRvdXQYBSABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplU2NvcmUSPAoQYmFzZWxpbmVfaG9sZG91dBgGIAEoCzIiLmRhcmtib3QucHJvamVjdDAudjEuT3B0aW1pemVTY29yZRIVCg1yZXN1bHRfc2hhMjU2GAcgASgMEg8KB3Byb2ZpbGUYCCABKAkikwEKDU9wdGltaXplU2NvcmUSQQoOY291bnRlcmZhY3R1YWwYASABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlNoYWRvd0NvdW50ZXJmYWN0dWFsEj8KFG9iamVjdGl2ZV9icHNfc2lnbmVkGAIgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwiqwEKEkJhY2t0ZXN0Sm9iQ29tbWFuZBIOCgZydW5faWQYASABKAkSFgoObWluX3Byb2ZpdF91c2QYAiABKAkSEwoLY2FwaXRhbF91c2QYAyADKAQSDwoHZnVuZGluZxgEIAMoCRITCgttYXhfc2Vjb25kcxgFIAEoBBIVCg1tYXhfcmFtX2J5dGVzGAYgASgEEhsKE3ZlcmlmaWNhdGlvbl9yZXN1bHQYByABKAkiTwoMSDBKb2JDb21tYW5kEhMKC3dpbmRvd19kYXlzGAEgASgEEhMKC21heF9zZWNvbmRzGAIgASgEEhUKDW1heF9yYW1fYnl0ZXMYAyABKAQi4gEKEk9wdGltaXplSm9iQ29tbWFuZBI5CghiYXNlbGluZRgBIAEoCzInLmRhcmtib3QucHJvamVjdDAudjEuQmFja3Rlc3RKb2JDb21tYW5kEhsKE21pbl9wcm9maXRfdXNkX2dyaWQYAiADKAkSNQoMZnVuZGluZ19zZXRzGAMgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5GdW5kaW5nU2V0EhMKC2hvbGRvdXRfYnBzGAQgASgEEhIKCm1heF9wb2ludHMYBSABKAQSFAoMc2F2ZV9wcm9maWxlGAYgASgIIl4KEkJvb3RPZmZsaW5lQ29tbWFuZBIMCgRtb2RlGAEgASgJEhgKC3R0bF9zZWNvbmRzGAIgASgESACIAQESEAoIZHVyYXRpb24YAyABKAlCDgoMX3R0bF9zZWNvbmRzIoYBChJCb290TmV0d29ya0NvbW1hbmQSDwoHZmxvd19pZBgBIAEoCRIWCg5hcHByb3ZlZF90b2tlbhgCIAEoCRIUCgxnZW5lc2lzX2hhc2gYAyABKAkSGQoRcHJvdmlkZXJfZXZpZGVuY2UYBCABKAkSFgoOY2FwdHVyZV9zb3VyY2UYBSABKAkiqQEKEEJvb3RTdGFydENvbW1hbmQSDwoHZmxvd19pZBgBIAEoCRIWCg5hcHByb3ZlZF90b2tlbhgCIAEoCRIQCghkdXJhdGlvbhgDIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgEIAEoCRIUCgxjaGFpbl92ZXJpZnkYBSABKAkSGgoNcXVhbGlmaWNhdGlvbhgGIAEoCUgAiAEBQhAKDl9xdWFsaWZpY2F0aW9uIrIBChdBdXRvc3RhcnRQcmV2aWV3Q29tbWFuZBIVCg1xdWFsaWZpY2F0aW9uGAEgASgJEhIKCmNoZWNrcG9pbnQYAiABKAkSFgoObWluaW11bV9ydW53YXkYAyABKAkSFAoMZ2VuZXNpc19oYXNoGAQgASgJEhMKC21heF9ydW50aW1lGAUgASgJEhEKCXZhbGlkX2ZvchgGIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgHIAEoCSIvChVBdXRvc3RhcnRHcmFudENvbW1hbmQSFgoOY29uZmlybV9kaWdlc3QYASABKAkilwEKFVBvc3RDYXB0dXJlSm9iQ29tbWFuZBIOCgZydW5faWQYASABKAkSFAoMY2hhaW5fdmVyaWZ5GAIgASgJEg8KB29mZmxpbmUYAyABKAgSGwoTcmVzdW1lX3ZlcmlmaWNhdGlvbhgEIAEoCBITCgttYXhfc2Vjb25kcxgFIAEoBBIVCg1tYXhfcmFtX2J5dGVzGAYgASgEQpcBChdjb20uZGFya2JvdC5wcm9qZWN0MC52MUIOQW5hbHl0aWNzUHJvdG9QAaICA0RQWKoCE0Rhcmtib3QuUHJvamVjdDAuVjHKAhNEYXJrYm90XFByb2plY3QwXFYx4gIfRGFya2JvdFxQcm9qZWN0MFxWMVxHUEJNZXRhZGF0YeoCFURhcmtib3Q6OlByb2plY3QwOjpWMWIGcHJvdG8z", [file_darkbot_control_v1_numeric]);
+  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSKeAwoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCRIrCgRib290GAcgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290RmxvdxISCgpib290X2Vycm9yGAggASgJEjgKDXVudGlsX3N0b3BwZWQYCSABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZBI8Cglwcm92aWRlcnMYCiABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlByb3ZpZGVyUmVnaXN0cnlWaWV3EhcKD3Byb3ZpZGVyc19lcnJvchgLIAEoCSK1AQoUUHJvdmlkZXJSZWdpc3RyeVZpZXcSDwoHdmVyc2lvbhgBIAEoBBI4Cglwcm92aWRlcnMYAiADKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJlZ2lzdHJ5UHJvdmlkZXISPAoLY3JlZGVudGlhbHMYAyADKAsyJy5kYXJrYm90LnByb2plY3QwLnYxLlJlZ2lzdHJ5Q3JlZGVudGlhbBIUCgxyZXN0YXJ0X3J1bGUYBCABKAki4gIKEFJlZ2lzdHJ5UHJvdmlkZXISCgoCaWQYASABKAkSDAoEa2luZBgCIAEoCRIMCgRob3N0GAMgASgJEgwKBGF1dGgYBCABKAkSEgoKY3JlZGVudGlhbBgFIAEoCRIQCghwcmlvcml0eRgGIAEoDRIZCgxjYXBhY2l0eV9ycHMYByABKARIAIgBARIMCgRwbGFuGAggASgJEhMKC2VudGl0bGVtZW50GAkgASgJEhoKDXF1YWxpZmljYXRpb24YCiABKAlIAYgBARIPCgdlbmFibGVkGAsgASgIEhAKCHNlbGVjdGVkGAwgASgIEhQKB2JpbmRpbmcYDSABKAlIAogBARIcCg9zZWxlY3Rpb25fYmxvY2sYDiABKAlIA4gBAUIPCg1fY2FwYWNpdHlfcnBzQhAKDl9xdWFsaWZpY2F0aW9uQgoKCF9iaW5kaW5nQhIKEF9zZWxlY3Rpb25fYmxvY2siaQoSUmVnaXN0cnlDcmVkZW50aWFsEgoKAmlkGAEgASgJEhAKCHJldmlzaW9uGAIgASgEEg0KBXN0YXRlGAMgASgJEg4KBm9yaWdpbhgEIAEoCRIWCg5jcmVhdGVkX3VuaXhfcxgFIAEoBCLTAgoZUHJvdmlkZXJEZXNjcmlwdG9yQ29tbWFuZBIKCgJpZBgBIAEoCRIRCgRraW5kGAIgASgJSACIAQESFQoIZW5kcG9pbnQYAyABKAlIAYgBARIRCgRhdXRoGAQgASgJSAKIAQESFwoKY3JlZGVudGlhbBgFIAEoCUgDiAEBEhUKCHByaW9yaXR5GAYgASgNSASIAQESGQoMY2FwYWNpdHlfcnBzGAcgASgESAWIAQESEQoEcGxhbhgIIAEoCUgGiAEBEhgKC2VudGl0bGVtZW50GAkgASgJSAeIAQESEAoIZGlzYWJsZWQYCiABKAhCBwoFX2tpbmRCCwoJX2VuZHBvaW50QgcKBV9hdXRoQg0KC19jcmVkZW50aWFsQgsKCV9wcmlvcml0eUIPCg1fY2FwYWNpdHlfcnBzQgcKBV9wbGFuQg4KDF9lbnRpdGxlbWVudCI3ChdQcm92aWRlclByaW9yaXR5Q29tbWFuZBIKCgJpZBgBIAEoCRIQCghwcmlvcml0eRgCIAEoDSIxChVQcm92aWRlclNlbGVjdENvbW1hbmQSDAoEa2luZBgBIAEoCRIKCgJpZBgCIAEoCSI2ChZQcm92aWRlclF1YWxpZnlDb21tYW5kEgoKAmlkGAEgASgJEhAKCGV2aWRlbmNlGAIgASgJIj8KGVByb3ZpZGVyQ3JlZGVudGlhbENvbW1hbmQSEgoKY3JlZGVudGlhbBgBIAEoCRIOCgZzZWNyZXQYAiABKAwihgIKDFVudGlsU3RvcHBlZBI2CglhdXRvc3RhcnQYASABKAsyIy5kYXJrYm90LnByb2plY3QwLnYxLkF1dG9zdGFydEdyYW50EjQKB3ByZXZpZXcYAiABKAsyIy5kYXJrYm90LnByb2plY3QwLnYxLkF1dG9zdGFydEdyYW50EkUKDXF1YWxpZmljYXRpb24YAyABKAsyLi5kYXJrYm90LnByb2plY3QwLnYxLlVudGlsU3RvcHBlZFF1YWxpZmljYXRpb24SMQoDcnVuGAQgASgLMiQuZGFya2JvdC5wcm9qZWN0MC52MS5VbnRpbFN0b3BwZWRSdW4SDgoGZXJyb3JzGAUgAygJIpwDCg5BdXRvc3RhcnRHcmFudBIOCgZkaWdlc3QYASABKAkSDAoEbW9kZRgCIAEoCRIVCg1jb25maWdfc2hhMjU2GAMgASgJEhUKDWJpbmFyeV9zaGEyNTYYBCABKAkSEAoIZHVyYXRpb24YBSABKAkSGgoSY2hlY2twb2ludF9zZWNvbmRzGAYgASgEEh4KFm1pbmltdW1fcnVud2F5X3NlY29uZHMYByABKAQSGAoQcXVhbGlmaWNhdGlvbl9pZBgIIAEoCRIcChRwcm92aWRlcl9ldmlkZW5jZV9pZBgJIAEoCRIUCgxnZW5lc2lzX2hhc2gYCiABKAkSFgoOY2FwdHVyZV9zb3VyY2UYCyABKAkSDwoHcnBjX3JwcxgMIAEoBBIUCgxtYXhfcmVxdWVzdHMYDSABKAQSFQoNbWF4X3RvdGFsX21pYhgOIAEoBBIbChNtYXhfcnVudGltZV9zZWNvbmRzGA8gASgEEhYKDmV4cGlyZXNfdW5peF9zGBAgASgEEhcKD3JlY29yZGVkX3VuaXhfcxgRIAEoBCKiAgoZVW50aWxTdG9wcGVkUXVhbGlmaWNhdGlvbhIKCgJpZBgBIAEoCRIMCgRtb2RlGAIgASgJEhoKEmNoZWNrcG9pbnRfc2Vjb25kcxgDIAEoBBIeChZtaW5pbXVtX3J1bndheV9zZWNvbmRzGAQgASgEEhAKCGNvbXBsZXRlGAUgASgIEgwKBG9wZW4YBiADKAkSGAoLZXZpZGVuY2VfaWQYByABKAlIAIgBARIoChtldmlkZW5jZV92YWxpZF91bnRpbF91bml4X3MYCCABKARIAYgBARIbChNxdWFsaWZpZWRfYXRfdW5peF9zGAkgASgEQg4KDF9ldmlkZW5jZV9pZEIeChxfZXZpZGVuY2VfdmFsaWRfdW50aWxfdW5peF9zIrkCCg9VbnRpbFN0b3BwZWRSdW4SDgoGcnVuX2lkGAEgASgJEhgKEHF1YWxpZmljYXRpb25faWQYAiABKAkSFgoOc3RhcnRlZF91bml4X3MYAyABKAQSGgoSY2hlY2twb2ludF9zZWNvbmRzGAQgASgEEg8KB3dpbmRvd3MYBSABKAQSGQoMbGFzdF92ZXJkaWN0GAYgASgJSACIAQESEwoLbGFzdF9kZXRhaWwYByABKAkSHgoRbGFzdF9lbmRlZF91bml4X3MYCCABKARIAYgBARITCgZoYWx0ZWQYCSABKAlIAogBARIOCgZzZWFsZWQYCiABKAgSEAoIY29tcGxldGUYCyABKAhCDwoNX2xhc3RfdmVyZGljdEIUChJfbGFzdF9lbmRlZF91bml4X3NCCQoHX2hhbHRlZCKYBAoIQm9vdEZsb3cSDwoHZmxvd19pZBgBIAEoCRIMCgRtb2RlGAIgASgJEhwKD2NyZWF0ZWRfdW5peF9tcxgDIAEoBEgAiAEBEhcKD29mZmxpbmVfdmVyZGljdBgEIAEoCRIVCg1vZmZsaW5lX3Rva2VuGAUgASgJEhcKD29mZmxpbmVfYmxvY2tlZBgGIAMoCRITCgt0dGxfc2Vjb25kcxgHIAEoBBISCgp0dGxfc291cmNlGAggASgJEi4KB25ldHdvcmsYCSABKAsyHS5kYXJrYm90LnByb2plY3QwLnYxLkJvb3RTdGVwEhwKD25ldHdvcmtfdmVyZGljdBgKIAEoCUgBiAEBEhoKDW5ldHdvcmtfdG9rZW4YCyABKAlIAogBARIXCg9uZXR3b3JrX2Jsb2NrZWQYDCADKAkSHAoPb2JzZXJ2ZWRfdW5peF9zGA0gASgESAOIAQESGwoOZXhwaXJlc191bml4X3MYDiABKARIBIgBARIsCgVzdGFydBgPIAEoCzIdLmRhcmtib3QucHJvamVjdDAudjEuQm9vdFN0ZXASEAoIZHVyYXRpb24YECABKAlCEgoQX2NyZWF0ZWRfdW5peF9tc0ISChBfbmV0d29ya192ZXJkaWN0QhAKDl9uZXR3b3JrX3Rva2VuQhIKEF9vYnNlcnZlZF91bml4X3NCEQoPX2V4cGlyZXNfdW5peF9zIq0BCghCb290U3RlcBINCgVzdGF0ZRgBIAEoCRIMCgRjb2RlGAIgASgJEhMKBnJ1bl9pZBgDIAEoCUgAiAEBEhwKD3N0YXJ0ZWRfdW5peF9tcxgEIAEoBEgBiAEBEh0KEGZpbmlzaGVkX3VuaXhfbXMYBSABKARIAogBAUIJCgdfcnVuX2lkQhIKEF9zdGFydGVkX3VuaXhfbXNCEwoRX2ZpbmlzaGVkX3VuaXhfbXMimAIKDEFuYWx5dGljc1J1bhIOCgZydW5faWQYASABKAkSDAoEcm9vdBgCIAEoCRIOCgZsYXlvdXQYAyABKAkSGAoQY2FwdHVyZV9jb21wbGV0ZRgEIAEoCBI8Cg1xdWFsaWZpY2F0aW9uGAUgASgLMiUuZGFya2JvdC5wcm9qZWN0MC52MS5SdW5RdWFsaWZpY2F0aW9uEh0KEG1vZGlmaWVkX3VuaXhfbXMYBiABKARIAIgBARIPCgdydW5uaW5nGAcgASgIEj0KDHZlcmlmaWNhdGlvbhgIIAMoCzInLmRhcmtib3QucHJvamVjdDAudjEuVmVyaWZpY2F0aW9uTWV0aG9kQhMKEV9tb2RpZmllZF91bml4X21zIvgGChJWZXJpZmljYXRpb25NZXRob2QSDgoGbWV0aG9kGAEgASgJEg8KB3NwZWNfaWQYAiABKAkSEAoIYXR0ZW1wdHMYAyABKAQSDwoHcnVubmluZxgEIAEoCBIOCgZzdGF0dXMYBSABKAkSEwoGcmVhc29uGAYgASgJSACIAQESFgoJcmVzdWx0X2lkGAcgASgJSAGIAQESDwoHb2ZmbGluZRgIIAEoCBIdChBwcm92aWRlcl9iaW5kaW5nGAkgASgJSAKIAQESGAoQY2hlY2twb2ludF9yZWFkcxgKIAEoBBISCgVjYWxscxgLIAEoBEgDiAEBEhIKBWJ5dGVzGAwgASgESASIAQESFQoNcHJvZ3Jlc3NfdW5pdBgNIAEoCRIVCg1wcm9ncmVzc19kb25lGA4gASgEEhsKDnByb2dyZXNzX3RvdGFsGA8gASgESAWIAQESMgoJcXVhbGlmaWVkGBAgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5OYW1lZENvdW50EjEKCG9ic2VydmVkGBEgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5OYW1lZENvdW50EjAKB21hcmtlcnMYEiADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSMwoKY29tcGFyaXNvbhgTIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuTmFtZWRDb3VudBIaCg1kaXNhZ3JlZW1lbnRzGBQgASgESAaIAQESFwoKdW5yZXNvbHZlZBgVIAEoBEgHiAEBEhQKB3Vua25vd24YFiABKARICIgBARI1Cgx0cmFuc2FjdGlvbnMYFyADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLk5hbWVkQ291bnQSGAoLY2FsbHNfdG90YWwYGCABKARICYgBARIYCgtieXRlc190b3RhbBgZIAEoBEgKiAEBQgkKB19yZWFzb25CDAoKX3Jlc3VsdF9pZEITChFfcHJvdmlkZXJfYmluZGluZ0IICgZfY2FsbHNCCAoGX2J5dGVzQhEKD19wcm9ncmVzc190b3RhbEIQCg5fZGlzYWdyZWVtZW50c0INCgtfdW5yZXNvbHZlZEIKCghfdW5rbm93bkIOCgxfY2FsbHNfdG90YWxCDgoMX2J5dGVzX3RvdGFsIikKCk5hbWVkQ291bnQSDAoEbmFtZRgBIAEoCRINCgVjb3VudBgCIAEoBCJyChBSdW5RdWFsaWZpY2F0aW9uEg8KB3ZlcmRpY3QYASABKAkSFAoMdmVyaWZpY2F0aW9uGAIgASgJEg4KBmZhaWxlZBgDIAMoCRIYChBxdWFsaWZpY2F0aW9uX2lkGAQgASgJEg0KBWVycm9yGAUgASgJIu8FCgxBbmFseXRpY3NKb2ISDgoGam9iX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSCwoDcnVuGAMgASgJEg0KBXN0YXRlGAQgASgJEgwKBGNvZGUYBSABKAkSHgoRcmVxdWVzdGVkX3VuaXhfbXMYBiABKARIAYgBARIcCg9zdGFydGVkX3VuaXhfbXMYByABKARIAogBARIdChBmaW5pc2hlZF91bml4X21zGAggASgESAOIAQESEwoLbWF4X3NlY29uZHMYCSABKAQSFQoNbWF4X3JhbV9ieXRlcxgKIAEoBBIuCgZwYXJhbXMYCyABKAsyHi5kYXJrYm90LnByb2plY3QwLnYxLkpvYlBhcmFtcxIqCgRncmlkGAwgASgLMhwuZGFya2JvdC5wcm9qZWN0MC52MS5Kb2JHcmlkEhsKE3ZlcmlmaWNhdGlvbl9yZXN1bHQYDSABKAkSNwoIYmFja3Rlc3QYDiABKAsyIy5kYXJrYm90LnByb2plY3QwLnYxLkJhY2t0ZXN0UmVzdWx0SAASNwoIb3B0aW1pemUYDyABKAsyIy5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplUmVzdWx0SAASPgoMcG9zdF9jYXB0dXJlGBEgASgLMiYuZGFya2JvdC5wcm9qZWN0MC52MS5Qb3N0Q2FwdHVyZVJlc3VsdEgAEisKAmgwGBIgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5IMFJlc3VsdEgAEj8KEXBvc3RfY2FwdHVyZV9zcGVjGBAgASgLMiQuZGFya2JvdC5wcm9qZWN0MC52MS5Qb3N0Q2FwdHVyZVNwZWMSLAoHaDBfc3BlYxgTIAEoCzIbLmRhcmtib3QucHJvamVjdDAudjEuSDBTcGVjQggKBnJlc3VsdEIUChJfcmVxdWVzdGVkX3VuaXhfbXNCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyJZCgZIMFNwZWMSEwoLd2luZG93X2RheXMYASABKAQSFwoKbWluX3NhbXBsZRgCIAEoBEgAiAEBEhIKCmVuZF91bml4X3MYAyABKANCDQoLX21pbl9zYW1wbGUikAUKCEgwUmVzdWx0EhEKCXJlc3VsdF9pZBgBIAEoCRIbChN3aW5kb3dfc3RhcnRfdW5peF9zGAIgASgDEhkKEXdpbmRvd19lbmRfdW5peF9zGAMgASgDEhQKDGxpcXVpZGF0aW9ucxgEIAEoBBISCgpkdXBsaWNhdGVzGAUgASgEEhUKDXJ1bnNfdmVyaWZpZWQYBiABKAQSGwoTcnVuc193aXRob3V0X3Jlc3VsdBgHIAEoBBIPCgd3aW5uZXJzGAggASgEEiEKFHRvcF93aW5uZXJfc2hhcmVfYnBzGAkgASgESACIAQESDQoFYmFuZHMYCiABKAQSFQoNc2FtcGxlX3N0YXR1cxgLIAEoCRIMCgR0YWdzGAwgASgJEhgKC2NvbXBldGl0aXZlGA0gASgESAGIAQESGQoMdHJhbnNhY3Rpb25zGA4gASgESAKIAQESHAoPZmFpbGVkX2F0dGVtcHRzGA8gASgESAOIAQESHAoPY292ZXJlZF9zZWNvbmRzGBAgASgESASIAQESGgoNYmFuZHNfYm91bmRlZBgRIAEoBEgFiAEBEicKGmJhbmRzX2JlbG93X291cl9taW5fcHJvZml0GBIgASgESAaIAQESGQoMdGlwX2FjY291bnRzGBMgASgESAeIAQFCFwoVX3RvcF93aW5uZXJfc2hhcmVfYnBzQg4KDF9jb21wZXRpdGl2ZUIPCg1fdHJhbnNhY3Rpb25zQhIKEF9mYWlsZWRfYXR0ZW1wdHNCEgoQX2NvdmVyZWRfc2Vjb25kc0IQCg5fYmFuZHNfYm91bmRlZEIdChtfYmFuZHNfYmVsb3dfb3VyX21pbl9wcm9maXRCDwoNX3RpcF9hY2NvdW50cyJjCg9Qb3N0Q2FwdHVyZVNwZWMSFAoMY2hhaW5fdmVyaWZ5GAEgASgJEg8KB29mZmxpbmUYAiABKAgSDgoGcmVzdW1lGAMgASgIEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgIIlAKEVBvc3RDYXB0dXJlUmVzdWx0EhcKD3ZlcmlmaWNhdGlvbl9vaxgBIAEoCBIRCglyZXBvcnRfb2sYAiABKAgSDwoHdmVyZGljdBgDIAEoCSJ/CglKb2JQYXJhbXMSRgobbWluX3Byb2ZpdF91c2RfbWljcm9fc2lnbmVkGAEgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSGQoRY2FwaXRhbF91c2RfbWljcm8YAiADKAQSDwoHZnVuZGluZxgDIAMoCSLHAQoHSm9iR3JpZBJGChttaW5fcHJvZml0X3VzZF9taWNyb19zaWduZWQYASADKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBI1CgxmdW5kaW5nX3NldHMYAiADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLkZ1bmRpbmdTZXQSEwoLaG9sZG91dF9icHMYAyABKAQSEgoKbWF4X3BvaW50cxgEIAEoBBIUCgxzYXZlX3Byb2ZpbGUYBSABKAgiHQoKRnVuZGluZ1NldBIPCgdjbGFzc2VzGAEgAygJIt0BCg5CYWNrdGVzdFJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDAoEcm93cxgDIAEoBBIQCghhdHRlbXB0cxgEIAEoBBIUCgxsaXF1aWRhdGlvbnMYBSABKAQSQQoOY291bnRlcmZhY3R1YWwYBiABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlNoYWRvd0NvdW50ZXJmYWN0dWFsEhAKCHJlYWxpemVkGAcgASgJEhUKDXJlc3VsdF9zaGEyNTYYCCABKAwi/QEKFFNoYWRvd0NvdW50ZXJmYWN0dWFsEg8KB21hdGNoZWQYASABKAQSDwoHdW5rbm93bhgCIAEoBBIYChBmdW5kaW5nX2V4Y2x1ZGVkGAMgASgEEhUKDWJlbG93X21pbmltdW0YBCABKAQSDAoEd2lucxgFIAEoBBISCgpsb3N0X3JhY2VzGAYgASgEEhYKDm5vX2NoYWluX2V2ZW50GAcgASgEEjcKCXNjZW5hcmlvcxgIIAMoCzIkLmRhcmtib3QucHJvamVjdDAudjEuQ2FwaXRhbFNjZW5hcmlvEg8KB2xhbmRpbmcYCSABKAkSDgoGc2FmZXR5GAogASgJItMCCg9DYXBpdGFsU2NlbmFyaW8SGQoRY2FwaXRhbF91c2RfbWljcm8YASABKAQSDAoEd2lucxgCIAEoBBJDChh3aW5fbmV0X3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIXCg9mYWlsZWRfYXR0ZW1wdHMYBCABKAQSRgoZZmFpbGVkX2Nvc3RfdXNkX21pY3JvX3N1bRgFIAEoCzIjLmRhcmtib3QuY29udHJvbC52MS5VbnNpZ25lZERlY2ltYWwSGwoTZmFpbGVkX2Nvc3RfdW5rbm93bhgGIAEoBBITCgtvdmVyX2J1ZGdldBgHIAEoBBI/ChRuZXRfdXNkX21pY3JvX3NpZ25lZBgIIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIp0CCg5PcHRpbWl6ZVJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDgoGcG9pbnRzGAMgASgEEi4KBmNob3NlbhgEIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEjoKDmNob3Nlbl9ob2xkb3V0GAUgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVNjb3JlEjwKEGJhc2VsaW5lX2hvbGRvdXQYBiABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplU2NvcmUSFQoNcmVzdWx0X3NoYTI1NhgHIAEoDBIPCgdwcm9maWxlGAggASgJIpMBCg1PcHRpbWl6ZVNjb3JlEkEKDmNvdW50ZXJmYWN0dWFsGAEgASgLMikuZGFya2JvdC5wcm9qZWN0MC52MS5TaGFkb3dDb3VudGVyZmFjdHVhbBI/ChRvYmplY3RpdmVfYnBzX3NpZ25lZBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIqsBChJCYWNrdGVzdEpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhYKDm1pbl9wcm9maXRfdXNkGAIgASgJEhMKC2NhcGl0YWxfdXNkGAMgAygEEg8KB2Z1bmRpbmcYBCADKAkSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GAcgASgJIk8KDEgwSm9iQ29tbWFuZBITCgt3aW5kb3dfZGF5cxgBIAEoBBITCgttYXhfc2Vjb25kcxgCIAEoBBIVCg1tYXhfcmFtX2J5dGVzGAMgASgEIuIBChJPcHRpbWl6ZUpvYkNvbW1hbmQSOQoIYmFzZWxpbmUYASABKAsyJy5kYXJrYm90LnByb2plY3QwLnYxLkJhY2t0ZXN0Sm9iQ29tbWFuZBIbChNtaW5fcHJvZml0X3VzZF9ncmlkGAIgAygJEjUKDGZ1bmRpbmdfc2V0cxgDIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuRnVuZGluZ1NldBITCgtob2xkb3V0X2JwcxgEIAEoBBISCgptYXhfcG9pbnRzGAUgASgEEhQKDHNhdmVfcHJvZmlsZRgGIAEoCCJeChJCb290T2ZmbGluZUNvbW1hbmQSDAoEbW9kZRgBIAEoCRIYCgt0dGxfc2Vjb25kcxgCIAEoBEgAiAEBEhAKCGR1cmF0aW9uGAMgASgJQg4KDF90dGxfc2Vjb25kcyKGAQoSQm9vdE5ldHdvcmtDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSFAoMZ2VuZXNpc19oYXNoGAMgASgJEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgJEhYKDmNhcHR1cmVfc291cmNlGAUgASgJIqkBChBCb290U3RhcnRDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSEAoIZHVyYXRpb24YAyABKAkSFgoOY2FwdHVyZV9zb3VyY2UYBCABKAkSFAoMY2hhaW5fdmVyaWZ5GAUgASgJEhoKDXF1YWxpZmljYXRpb24YBiABKAlIAIgBAUIQCg5fcXVhbGlmaWNhdGlvbiKyAQoXQXV0b3N0YXJ0UHJldmlld0NvbW1hbmQSFQoNcXVhbGlmaWNhdGlvbhgBIAEoCRISCgpjaGVja3BvaW50GAIgASgJEhYKDm1pbmltdW1fcnVud2F5GAMgASgJEhQKDGdlbmVzaXNfaGFzaBgEIAEoCRITCgttYXhfcnVudGltZRgFIAEoCRIRCgl2YWxpZF9mb3IYBiABKAkSFgoOY2FwdHVyZV9zb3VyY2UYByABKAkiLwoVQXV0b3N0YXJ0R3JhbnRDb21tYW5kEhYKDmNvbmZpcm1fZGlnZXN0GAEgASgJIpcBChVQb3N0Q2FwdHVyZUpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhQKDGNoYWluX3ZlcmlmeRgCIAEoCRIPCgdvZmZsaW5lGAMgASgIEhsKE3Jlc3VtZV92ZXJpZmljYXRpb24YBCABKAgSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBEKXAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCDkFuYWx5dGljc1Byb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw", [file_darkbot_control_v1_numeric]);
 
 /**
  * project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
@@ -90,6 +90,23 @@ export type AnalyticsJobs = Message<"darkbot.project0.v1.AnalyticsJobs"> & {
    * @generated from field: darkbot.project0.v1.UntilStopped until_stopped = 9;
    */
   untilStopped?: UntilStopped;
+
+  /**
+   * DEC-18: the provider registry (data/providers, `p0ctl provider …`) as its store holds it —
+   * staged: a change is effective at the next controlled start (the running run's providers:
+   * project0.status EffectiveRecord.providers). Unset when the store is unreadable.
+   *
+   * @generated from field: darkbot.project0.v1.ProviderRegistryView providers = 10;
+   */
+  providers?: ProviderRegistryView;
+
+  /**
+   * DEC-18: why the provider registry was not readable (providers is then unset); empty when
+   * read.
+   *
+   * @generated from field: string providers_error = 11;
+   */
+  providersError: string;
 };
 
 /**
@@ -98,6 +115,411 @@ export type AnalyticsJobs = Message<"darkbot.project0.v1.AnalyticsJobs"> & {
  */
 export const AnalyticsJobsSchema: GenMessage<AnalyticsJobs> = /*@__PURE__*/
   messageDesc(file_darkbot_project0_v1_analytics, 0);
+
+/**
+ * DEC-18: one committed version of the provider registry — secret-free (hosts, credential ids
+ * and revisions; never an endpoint's path, a key or a keychain account).
+ *
+ * @generated from message darkbot.project0.v1.ProviderRegistryView
+ */
+export type ProviderRegistryView = Message<"darkbot.project0.v1.ProviderRegistryView"> & {
+  /**
+   * The committed version (0: no provider yet); the expected version of every change (CAS).
+   *
+   * @generated from field: uint64 version = 1;
+   */
+  version: bigint;
+
+  /**
+   * Every provider, by kind, priority and id.
+   *
+   * @generated from field: repeated darkbot.project0.v1.RegistryProvider providers = 2;
+   */
+  providers: RegistryProvider[];
+
+  /**
+   * Every credential's newest revision.
+   *
+   * @generated from field: repeated darkbot.project0.v1.RegistryCredential credentials = 3;
+   */
+  credentials: RegistryCredential[];
+
+  /**
+   * When a change takes effect: next_controlled_start (DEC-05).
+   *
+   * @generated from field: string restart_rule = 4;
+   */
+  restartRule: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderRegistryView.
+ * Use `create(ProviderRegistryViewSchema)` to create a new message.
+ */
+export const ProviderRegistryViewSchema: GenMessage<ProviderRegistryView> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 1);
+
+/**
+ * DEC-18: one provider of the registry.
+ *
+ * @generated from message darkbot.project0.v1.RegistryProvider
+ */
+export type RegistryProvider = Message<"darkbot.project0.v1.RegistryProvider"> & {
+  /**
+   * Provider id ([a-z0-9_-]{1,32}).
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * rpc | wss | geyser | jupiter | jito.
+   *
+   * @generated from field: string kind = 2;
+   */
+  kind: string;
+
+  /**
+   * The endpoint's host (its path and scheme stay in the engine).
+   *
+   * @generated from field: string host = 3;
+   */
+  host: string;
+
+  /**
+   * How it authenticates: none | query:NAME | header:NAME | path (a name, never a value).
+   *
+   * @generated from field: string auth = 4;
+   */
+  auth: string;
+
+  /**
+   * The credential it authenticates with (its id); empty without authentication.
+   *
+   * @generated from field: string credential = 5;
+   */
+  credential: string;
+
+  /**
+   * Lower first among the providers of its kind.
+   *
+   * @generated from field: uint32 priority = 6;
+   */
+  priority: number;
+
+  /**
+   * Configured capacity in requests per second; unset when not configured.
+   *
+   * @generated from field: optional uint64 capacity_rps = 7;
+   */
+  capacityRps?: bigint;
+
+  /**
+   * free | unknown (FREE_ONLY: paid is refused, unknown never selected).
+   *
+   * @generated from field: string plan = 8;
+   */
+  plan: string;
+
+  /**
+   * The plan's name as the provider publishes it.
+   *
+   * @generated from field: string entitlement = 9;
+   */
+  entitlement: string;
+
+  /**
+   * The provider evidence record that qualified its binding; unset when not qualified.
+   *
+   * @generated from field: optional string qualification = 10;
+   */
+  qualification?: string;
+
+  /**
+   * Enabled (a disabled provider is never selected).
+   *
+   * @generated from field: bool enabled = 11;
+   */
+  enabled: boolean;
+
+  /**
+   * The selected provider of its kind.
+   *
+   * @generated from field: bool selected = 12;
+   */
+  selected: boolean;
+
+  /**
+   * Its secret-free binding (hex SHA-256) with the active credential revision; unset when its
+   * credential is revoked or unknown.
+   *
+   * @generated from field: optional string binding = 13;
+   */
+  binding?: string;
+
+  /**
+   * Why it cannot be the selected one of its kind now; unset when it can.
+   *
+   * @generated from field: optional string selection_block = 14;
+   */
+  selectionBlock?: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.RegistryProvider.
+ * Use `create(RegistryProviderSchema)` to create a new message.
+ */
+export const RegistryProviderSchema: GenMessage<RegistryProvider> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 2);
+
+/**
+ * DEC-18: a credential's newest revision (the secret is the macOS keychain's alone).
+ *
+ * @generated from message darkbot.project0.v1.RegistryCredential
+ */
+export type RegistryCredential = Message<"darkbot.project0.v1.RegistryCredential"> & {
+  /**
+   * Credential id.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Its newest revision (a rotation is a new one, never reused).
+   *
+   * @generated from field: uint64 revision = 2;
+   */
+  revision: bigint;
+
+  /**
+   * active | revoked.
+   *
+   * @generated from field: string state = 3;
+   */
+  state: string;
+
+  /**
+   * input | env:NAME (the one-time .env import).
+   *
+   * @generated from field: string origin = 4;
+   */
+  origin: string;
+
+  /**
+   * When the revision was created.
+   *
+   * @generated from field: uint64 created_unix_s = 5;
+   */
+  createdUnixS: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.RegistryCredential.
+ * Use `create(RegistryCredentialSchema)` to create a new message.
+ */
+export const RegistryCredentialSchema: GenMessage<RegistryCredential> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 3);
+
+/**
+ * DEC-18: params of `project0.provider.add` and `project0.provider.update` (the registry's
+ * rules decide: a canonical endpoint without a credential in it, FREE_ONLY, a known kind). An
+ * update changes only the fields it sets.
+ *
+ * @generated from message darkbot.project0.v1.ProviderDescriptorCommand
+ */
+export type ProviderDescriptorCommand = Message<"darkbot.project0.v1.ProviderDescriptorCommand"> & {
+  /**
+   * Provider id.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * rpc | wss | geyser | jupiter | jito (add: required).
+   *
+   * @generated from field: optional string kind = 2;
+   */
+  kind?: string;
+
+  /**
+   * The endpoint (add: required); refused with a credential in it, never echoed.
+   *
+   * @generated from field: optional string endpoint = 3;
+   */
+  endpoint?: string;
+
+  /**
+   * none | query:NAME | header:NAME | path.
+   *
+   * @generated from field: optional string auth = 4;
+   */
+  auth?: string;
+
+  /**
+   * The credential id it authenticates with.
+   *
+   * @generated from field: optional string credential = 5;
+   */
+  credential?: string;
+
+  /**
+   * Priority among its kind.
+   *
+   * @generated from field: optional uint32 priority = 6;
+   */
+  priority?: number;
+
+  /**
+   * Configured capacity in requests per second.
+   *
+   * @generated from field: optional uint64 capacity_rps = 7;
+   */
+  capacityRps?: bigint;
+
+  /**
+   * free | unknown.
+   *
+   * @generated from field: optional string plan = 8;
+   */
+  plan?: string;
+
+  /**
+   * The plan's name.
+   *
+   * @generated from field: optional string entitlement = 9;
+   */
+  entitlement?: string;
+
+  /**
+   * Added disabled (add only).
+   *
+   * @generated from field: bool disabled = 10;
+   */
+  disabled: boolean;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderDescriptorCommand.
+ * Use `create(ProviderDescriptorCommandSchema)` to create a new message.
+ */
+export const ProviderDescriptorCommandSchema: GenMessage<ProviderDescriptorCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 4);
+
+/**
+ * DEC-18: params of `project0.provider.priority`.
+ *
+ * @generated from message darkbot.project0.v1.ProviderPriorityCommand
+ */
+export type ProviderPriorityCommand = Message<"darkbot.project0.v1.ProviderPriorityCommand"> & {
+  /**
+   * Provider id.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * The new priority.
+   *
+   * @generated from field: uint32 priority = 2;
+   */
+  priority: number;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderPriorityCommand.
+ * Use `create(ProviderPriorityCommandSchema)` to create a new message.
+ */
+export const ProviderPriorityCommandSchema: GenMessage<ProviderPriorityCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 5);
+
+/**
+ * DEC-18: params of `project0.provider.select`.
+ *
+ * @generated from message darkbot.project0.v1.ProviderSelectCommand
+ */
+export type ProviderSelectCommand = Message<"darkbot.project0.v1.ProviderSelectCommand"> & {
+  /**
+   * rpc | wss | jupiter | jito.
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * Provider id.
+   *
+   * @generated from field: string id = 2;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderSelectCommand.
+ * Use `create(ProviderSelectCommandSchema)` to create a new message.
+ */
+export const ProviderSelectCommandSchema: GenMessage<ProviderSelectCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 6);
+
+/**
+ * DEC-18: params of `project0.provider.qualify`.
+ *
+ * @generated from message darkbot.project0.v1.ProviderQualifyCommand
+ */
+export type ProviderQualifyCommand = Message<"darkbot.project0.v1.ProviderQualifyCommand"> & {
+  /**
+   * Provider id.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * The stored provider evidence record id (16 hex), or "-" to clear the qualification.
+   *
+   * @generated from field: string evidence = 2;
+   */
+  evidence: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderQualifyCommand.
+ * Use `create(ProviderQualifyCommandSchema)` to create a new message.
+ */
+export const ProviderQualifyCommandSchema: GenMessage<ProviderQualifyCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 7);
+
+/**
+ * DEC-18: params of `project0.provider.credential.set` and `…credential.rotate`. The gateway
+ * separates the secret before any durable record (its command ledger holds the request without
+ * it) and hands it to the native controller's standard input only.
+ *
+ * @generated from message darkbot.project0.v1.ProviderCredentialCommand
+ */
+export type ProviderCredentialCommand = Message<"darkbot.project0.v1.ProviderCredentialCommand"> & {
+  /**
+   * Credential id.
+   *
+   * @generated from field: string credential = 1;
+   */
+  credential: string;
+
+  /**
+   * The secret (in transit only).
+   *
+   * @generated from field: bytes secret = 2;
+   */
+  secret: Uint8Array;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.ProviderCredentialCommand.
+ * Use `create(ProviderCredentialCommandSchema)` to create a new message.
+ */
+export const ProviderCredentialCommandSchema: GenMessage<ProviderCredentialCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 8);
 
 /**
  * DEC-16: unbounded runs (RunHorizon::UntilStopped) as the stores hold them. Expiry and
@@ -148,7 +570,7 @@ export type UntilStopped = Message<"darkbot.project0.v1.UntilStopped"> & {
  * Use `create(UntilStoppedSchema)` to create a new message.
  */
 export const UntilStoppedSchema: GenMessage<UntilStopped> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 1);
+  messageDesc(file_darkbot_project0_v1_analytics, 9);
 
 /**
  * DEC-16: a standing autostart approval ("Dauerfreigabe") and the binding it was given for.
@@ -281,7 +703,7 @@ export type AutostartGrant = Message<"darkbot.project0.v1.AutostartGrant"> & {
  * Use `create(AutostartGrantSchema)` to create a new message.
  */
 export const AutostartGrantSchema: GenMessage<AutostartGrant> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 2);
+  messageDesc(file_darkbot_project0_v1_analytics, 10);
 
 /**
  * DEC-16: a qualification of an unbounded run and the parts that did not pass.
@@ -358,7 +780,7 @@ export type UntilStoppedQualification = Message<"darkbot.project0.v1.UntilStoppe
  * Use `create(UntilStoppedQualificationSchema)` to create a new message.
  */
 export const UntilStoppedQualificationSchema: GenMessage<UntilStoppedQualification> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 3);
+  messageDesc(file_darkbot_project0_v1_analytics, 11);
 
 /**
  * DEC-16: an unbounded raw capture's windows journal as far as it is written.
@@ -449,7 +871,7 @@ export type UntilStoppedRun = Message<"darkbot.project0.v1.UntilStoppedRun"> & {
  * Use `create(UntilStoppedRunSchema)` to create a new message.
  */
 export const UntilStoppedRunSchema: GenMessage<UntilStoppedRun> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 4);
+  messageDesc(file_darkbot_project0_v1_analytics, 12);
 
 /**
  * DEC-07 (N7): one boot flow — offline preflight, the operator's network approval, the network
@@ -579,7 +1001,7 @@ export type BootFlow = Message<"darkbot.project0.v1.BootFlow"> & {
  * Use `create(BootFlowSchema)` to create a new message.
  */
 export const BootFlowSchema: GenMessage<BootFlow> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 5);
+  messageDesc(file_darkbot_project0_v1_analytics, 13);
 
 /**
  * One step of a boot flow.
@@ -628,7 +1050,7 @@ export type BootStep = Message<"darkbot.project0.v1.BootStep"> & {
  * Use `create(BootStepSchema)` to create a new message.
  */
 export const BootStepSchema: GenMessage<BootStep> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 6);
+  messageDesc(file_darkbot_project0_v1_analytics, 14);
 
 /**
  * One run directory under the project's run roots.
@@ -699,7 +1121,7 @@ export type AnalyticsRun = Message<"darkbot.project0.v1.AnalyticsRun"> & {
  * Use `create(AnalyticsRunSchema)` to create a new message.
  */
 export const AnalyticsRunSchema: GenMessage<AnalyticsRun> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 7);
+  messageDesc(file_darkbot_project0_v1_analytics, 15);
 
 /**
  * DEC-08 (ENTSCHEIDUNGEN §8.6): one chain verification method of a run, its spec with the
@@ -894,7 +1316,7 @@ export type VerificationMethod = Message<"darkbot.project0.v1.VerificationMethod
  * Use `create(VerificationMethodSchema)` to create a new message.
  */
 export const VerificationMethodSchema: GenMessage<VerificationMethod> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 8);
+  messageDesc(file_darkbot_project0_v1_analytics, 16);
 
 /**
  * A count under a bounded name.
@@ -922,7 +1344,7 @@ export type NamedCount = Message<"darkbot.project0.v1.NamedCount"> & {
  * Use `create(NamedCountSchema)` to create a new message.
  */
 export const NamedCountSchema: GenMessage<NamedCount> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 9);
+  messageDesc(file_darkbot_project0_v1_analytics, 17);
 
 /**
  * The newest C0-E1 master qualification record of a run.
@@ -971,7 +1393,7 @@ export type RunQualification = Message<"darkbot.project0.v1.RunQualification"> &
  * Use `create(RunQualificationSchema)` to create a new message.
  */
 export const RunQualificationSchema: GenMessage<RunQualification> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 10);
+  messageDesc(file_darkbot_project0_v1_analytics, 18);
 
 /**
  * One analytics job of the controller's store.
@@ -1129,7 +1551,7 @@ export type AnalyticsJob = Message<"darkbot.project0.v1.AnalyticsJob"> & {
  * Use `create(AnalyticsJobSchema)` to create a new message.
  */
 export const AnalyticsJobSchema: GenMessage<AnalyticsJob> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 11);
+  messageDesc(file_darkbot_project0_v1_analytics, 19);
 
 /**
  * H0 (Track H0): the window of a historical liquidation report over every saved run.
@@ -1164,7 +1586,7 @@ export type H0Spec = Message<"darkbot.project0.v1.H0Spec"> & {
  * Use `create(H0SpecSchema)` to create a new message.
  */
 export const H0SpecSchema: GenMessage<H0Spec> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 12);
+  messageDesc(file_darkbot_project0_v1_analytics, 20);
 
 /**
  * A completed H0 report's headline (the full report is the job's typed H0 journal and render).
@@ -1312,7 +1734,7 @@ export type H0Result = Message<"darkbot.project0.v1.H0Result"> & {
  * Use `create(H0ResultSchema)` to create a new message.
  */
 export const H0ResultSchema: GenMessage<H0Result> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 13);
+  messageDesc(file_darkbot_project0_v1_analytics, 21);
 
 /**
  * The verification request of a post-capture job (A08/F-02).
@@ -1354,7 +1776,7 @@ export type PostCaptureSpec = Message<"darkbot.project0.v1.PostCaptureSpec"> & {
  * Use `create(PostCaptureSpecSchema)` to create a new message.
  */
 export const PostCaptureSpecSchema: GenMessage<PostCaptureSpec> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 14);
+  messageDesc(file_darkbot_project0_v1_analytics, 22);
 
 /**
  * A completed post-capture chain: each stage's outcome (the qualification record is the run's).
@@ -1389,7 +1811,7 @@ export type PostCaptureResult = Message<"darkbot.project0.v1.PostCaptureResult">
  * Use `create(PostCaptureResultSchema)` to create a new message.
  */
 export const PostCaptureResultSchema: GenMessage<PostCaptureResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 15);
+  messageDesc(file_darkbot_project0_v1_analytics, 23);
 
 /**
  * Economic parameters of a backtest point.
@@ -1424,7 +1846,7 @@ export type JobParams = Message<"darkbot.project0.v1.JobParams"> & {
  * Use `create(JobParamsSchema)` to create a new message.
  */
 export const JobParamsSchema: GenMessage<JobParams> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 16);
+  messageDesc(file_darkbot_project0_v1_analytics, 24);
 
 /**
  * The bounded explicit grid of an optimization.
@@ -1473,7 +1895,7 @@ export type JobGrid = Message<"darkbot.project0.v1.JobGrid"> & {
  * Use `create(JobGridSchema)` to create a new message.
  */
 export const JobGridSchema: GenMessage<JobGrid> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 17);
+  messageDesc(file_darkbot_project0_v1_analytics, 25);
 
 /**
  * Admitted funding classes; empty: every class.
@@ -1494,7 +1916,7 @@ export type FundingSet = Message<"darkbot.project0.v1.FundingSet"> & {
  * Use `create(FundingSetSchema)` to create a new message.
  */
 export const FundingSetSchema: GenMessage<FundingSet> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 18);
+  messageDesc(file_darkbot_project0_v1_analytics, 26);
 
 /**
  * A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
@@ -1564,7 +1986,7 @@ export type BacktestResult = Message<"darkbot.project0.v1.BacktestResult"> & {
  * Use `create(BacktestResultSchema)` to create a new message.
  */
 export const BacktestResultSchema: GenMessage<BacktestResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 19);
+  messageDesc(file_darkbot_project0_v1_analytics, 27);
 
 /**
  * Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVALUATED.
@@ -1648,7 +2070,7 @@ export type ShadowCounterfactual = Message<"darkbot.project0.v1.ShadowCounterfac
  * Use `create(ShadowCounterfactualSchema)` to create a new message.
  */
 export const ShadowCounterfactualSchema: GenMessage<ShadowCounterfactual> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 20);
+  messageDesc(file_darkbot_project0_v1_analytics, 28);
 
 /**
  * One capital scenario of the counterfactual.
@@ -1718,7 +2140,7 @@ export type CapitalScenario = Message<"darkbot.project0.v1.CapitalScenario"> & {
  * Use `create(CapitalScenarioSchema)` to create a new message.
  */
 export const CapitalScenarioSchema: GenMessage<CapitalScenario> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 21);
+  messageDesc(file_darkbot_project0_v1_analytics, 29);
 
 /**
  * A completed optimization: the point chosen on the training part and its holdout score.
@@ -1788,7 +2210,7 @@ export type OptimizeResult = Message<"darkbot.project0.v1.OptimizeResult"> & {
  * Use `create(OptimizeResultSchema)` to create a new message.
  */
 export const OptimizeResultSchema: GenMessage<OptimizeResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 22);
+  messageDesc(file_darkbot_project0_v1_analytics, 30);
 
 /**
  * The score of one point on one part of the window.
@@ -1816,7 +2238,7 @@ export type OptimizeScore = Message<"darkbot.project0.v1.OptimizeScore"> & {
  * Use `create(OptimizeScoreSchema)` to create a new message.
  */
 export const OptimizeScoreSchema: GenMessage<OptimizeScore> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 23);
+  messageDesc(file_darkbot_project0_v1_analytics, 31);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.backtest.start: the options of
@@ -1881,7 +2303,7 @@ export type BacktestJobCommand = Message<"darkbot.project0.v1.BacktestJobCommand
  * Use `create(BacktestJobCommandSchema)` to create a new message.
  */
 export const BacktestJobCommandSchema: GenMessage<BacktestJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 24);
+  messageDesc(file_darkbot_project0_v1_analytics, 32);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.h0.start: the options of
@@ -1917,7 +2339,7 @@ export type H0JobCommand = Message<"darkbot.project0.v1.H0JobCommand"> & {
  * Use `create(H0JobCommandSchema)` to create a new message.
  */
 export const H0JobCommandSchema: GenMessage<H0JobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 25);
+  messageDesc(file_darkbot_project0_v1_analytics, 33);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of
@@ -1974,7 +2396,7 @@ export type OptimizeJobCommand = Message<"darkbot.project0.v1.OptimizeJobCommand
  * Use `create(OptimizeJobCommandSchema)` to create a new message.
  */
 export const OptimizeJobCommandSchema: GenMessage<OptimizeJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 26);
+  messageDesc(file_darkbot_project0_v1_analytics, 34);
 
 /**
  * Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
@@ -2010,7 +2432,7 @@ export type BootOfflineCommand = Message<"darkbot.project0.v1.BootOfflineCommand
  * Use `create(BootOfflineCommandSchema)` to create a new message.
  */
 export const BootOfflineCommandSchema: GenMessage<BootOfflineCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 27);
+  messageDesc(file_darkbot_project0_v1_analytics, 35);
 
 /**
  * Parameters of project0.boot.network: the operator's approval of exactly this offline token;
@@ -2062,7 +2484,7 @@ export type BootNetworkCommand = Message<"darkbot.project0.v1.BootNetworkCommand
  * Use `create(BootNetworkCommandSchema)` to create a new message.
  */
 export const BootNetworkCommandSchema: GenMessage<BootNetworkCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 28);
+  messageDesc(file_darkbot_project0_v1_analytics, 36);
 
 /**
  * Parameters of project0.boot.start: the operator's approval of exactly this network token.
@@ -2119,7 +2541,7 @@ export type BootStartCommand = Message<"darkbot.project0.v1.BootStartCommand"> &
  * Use `create(BootStartCommandSchema)` to create a new message.
  */
 export const BootStartCommandSchema: GenMessage<BootStartCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 29);
+  messageDesc(file_darkbot_project0_v1_analytics, 37);
 
 /**
  * DEC-16: parameters of project0.autostart.preview — the terms of a standing autostart
@@ -2184,7 +2606,7 @@ export type AutostartPreviewCommand = Message<"darkbot.project0.v1.AutostartPrev
  * Use `create(AutostartPreviewCommandSchema)` to create a new message.
  */
 export const AutostartPreviewCommandSchema: GenMessage<AutostartPreviewCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 30);
+  messageDesc(file_darkbot_project0_v1_analytics, 38);
 
 /**
  * DEC-16: parameters of project0.autostart.grant — the operator confirms exactly the previewed
@@ -2206,7 +2628,7 @@ export type AutostartGrantCommand = Message<"darkbot.project0.v1.AutostartGrantC
  * Use `create(AutostartGrantCommandSchema)` to create a new message.
  */
 export const AutostartGrantCommandSchema: GenMessage<AutostartGrantCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 31);
+  messageDesc(file_darkbot_project0_v1_analytics, 39);
 
 /**
  * Parameters (CommandRequest.params) of project0.capture.verify.start: the options of
@@ -2265,4 +2687,4 @@ export type PostCaptureJobCommand = Message<"darkbot.project0.v1.PostCaptureJobC
  * Use `create(PostCaptureJobCommandSchema)` to create a new message.
  */
 export const PostCaptureJobCommandSchema: GenMessage<PostCaptureJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 32);
+  messageDesc(file_darkbot_project0_v1_analytics, 40);

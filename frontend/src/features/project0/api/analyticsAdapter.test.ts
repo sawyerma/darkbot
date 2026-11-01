@@ -154,6 +154,25 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(untilStoppedStopAction(flow("econ4h", "RUNNING"), null)).toBeNull();
   });
 
+  it("DEC-18: maps the provider registry secret-free (hosts, names, revisions; an unset optional is null)", () => {
+    const r = view.providers!;
+    expect(view.providersError).toBe("");
+    expect(r.version).toBe(7n);
+    expect(r.restartRule).toBe("next_controlled_start");
+    expect(r.providers).toEqual([
+      { id: "helius-rpc", kind: "rpc", host: "mainnet.helius-rpc.com", auth: "query:api-key", credential: "helius", priority: 0,
+        capacityRps: 10n, plan: "free", entitlement: "helius-free", qualification: "0123456789abcdef", enabled: true, selected: true,
+        binding: "b".repeat(64), selectionBlock: null },
+      { id: "public-wss", kind: "wss", host: "api.mainnet-beta.solana.com", auth: "none", credential: "", priority: 5,
+        capacityRps: null, plan: "free", entitlement: "public", qualification: null, enabled: false, selected: false,
+        binding: "c".repeat(64), selectionBlock: "PROVIDER_DISABLED: public-wss" },
+    ]);
+    expect(r.credentials).toEqual([
+      { id: "helius", revision: 3n, state: "active", origin: "input", createdUnixS: 1_760_000_000n },
+      { id: "old", revision: 1n, state: "revoked", origin: "env:HELIUS_API_KEY", createdUnixS: 1_750_000_000n },
+    ]);
+  });
+
   it("rejects malformed wire bytes", () => {
     expect(() => decodeAnalyticsJobs(Uint8Array.from([0xff, 0xff, 0xff]))).toThrow();
   });

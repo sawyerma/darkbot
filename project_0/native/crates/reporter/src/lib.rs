@@ -744,6 +744,24 @@ fn operational_config(o: &OperationalSnapshot) -> OperationalConfig {
             c0_census: e.c0_census,
             source_geyser: e.source_geyser.clone(),
             source_geyser_provider: e.source_geyser_provider.clone(),
+            // DEC-18: the run's providers (secret-free, no endpoint).
+            providers: e
+                .providers
+                .iter()
+                .map(|p| crate::proto::project0::RunProvider {
+                    kind: p.kind.name().to_owned(),
+                    id: p.id.clone(),
+                    binding: p.binding.clone(),
+                    registry_version: p.registry_version,
+                    credential_id: p
+                        .credential
+                        .as_ref()
+                        .map(|(id, _)| id.clone())
+                        .unwrap_or_default(),
+                    credential_revision: p.credential.as_ref().map_or(0, |(_, r)| *r),
+                    plan: p.plan.name().to_owned(),
+                })
+                .collect(),
         }),
     }
 }
@@ -1648,11 +1666,74 @@ mod contract_tests {
             }),
             boot_error: None,
             until_stopped: golden_until_stopped(),
+            providers: Some(golden_providers()),
+            providers_error: None,
         }
     }
 
     /// DEC-16: a standing approval in force, a newer preview awaiting its digest, a raw-capture
     /// qualification with an open part and an unbounded run that ended in order.
+    /// DEC-18: a registry with a selected keyed RPC provider, a disabled WSS one without a
+    /// credential and a revoked credential (secret-free: hosts, names, revisions).
+    fn golden_providers() -> darkbot_runner::orchestration::provider_registry::RegistryView {
+        use darkbot_runner::orchestration::provider_registry::{
+            CredentialView, ProviderView, RegistryView,
+        };
+        RegistryView {
+            version: 7,
+            providers: vec![
+                ProviderView {
+                    id: "helius-rpc".into(),
+                    kind: "rpc",
+                    host: "mainnet.helius-rpc.com".into(),
+                    auth: "query:api-key".into(),
+                    credential: Some("helius".into()),
+                    priority: 0,
+                    capacity_rps: Some(10),
+                    plan: "free",
+                    entitlement: "helius-free".into(),
+                    qualification: Some("0123456789abcdef".into()),
+                    enabled: true,
+                    selected: true,
+                    binding: Some("b".repeat(64)),
+                    selection_block: None,
+                },
+                ProviderView {
+                    id: "public-wss".into(),
+                    kind: "wss",
+                    host: "api.mainnet-beta.solana.com".into(),
+                    auth: "none".into(),
+                    credential: None,
+                    priority: 5,
+                    capacity_rps: None,
+                    plan: "free",
+                    entitlement: "public".into(),
+                    qualification: None,
+                    enabled: false,
+                    selected: false,
+                    binding: Some("c".repeat(64)),
+                    selection_block: Some("PROVIDER_DISABLED: public-wss".into()),
+                },
+            ],
+            credentials: vec![
+                CredentialView {
+                    id: "helius".into(),
+                    revision: 3,
+                    state: "active",
+                    origin: "input".into(),
+                    created_unix_s: 1_760_000_000,
+                },
+                CredentialView {
+                    id: "old".into(),
+                    revision: 1,
+                    state: "revoked",
+                    origin: "env:HELIUS_API_KEY".into(),
+                    created_unix_s: 1_750_000_000,
+                },
+            ],
+        }
+    }
+
     fn golden_until_stopped() -> darkbot_runner::orchestration::until_stopped_view::UntilStoppedView
     {
         use darkbot_runner::orchestration::autostart::{Grant, WindowBudget};
@@ -2627,7 +2708,17 @@ mod contract_tests {
             c0_census: true,
             source_geyser: "observe".into(),
             source_geyser_provider: "p".repeat(64),
-            providers: vec![],
+            // DEC-18: every kind's provider, a fallback list of RPC providers.
+            providers: (0..8)
+                .map(|n| darkbot_runner::status_tap::ProviderBinding {
+                    kind: darkbot_runner::status_tap::PROVIDER_KINDS[n % 5],
+                    id: format!("{n}").repeat(32),
+                    binding: "b".repeat(64),
+                    registry_version: u64::MAX,
+                    credential: Some(("c".repeat(32), u64::MAX)),
+                    plan: darkbot_runner::status_tap::Plan::Free,
+                })
+                .collect(),
         };
         let mut s = golden_snapshot();
         s.operational = Some(Arc::new(operational_snapshot_of(&limits, Some(&effective))));

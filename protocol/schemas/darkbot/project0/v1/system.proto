@@ -80,6 +80,27 @@ message EffectiveRecord {
   string source_geyser = 20;
   // Provider of the Geyser source unit.
   string source_geyser_provider = 21;
+  // DEC-18: the providers the run is bound to (runtime_config::ProviderBinding), secret-free and
+  // without their endpoints; empty in a record of an earlier revision.
+  repeated RunProvider providers = 22;
+}
+
+// DEC-18: one provider a run is bound to.
+message RunProvider {
+  // rpc | wss | geyser | jupiter | jito.
+  string kind = 1;
+  // Provider id (local: a named loopback endpoint; jupiter-default: the contract's profile).
+  string id = 2;
+  // Its secret-free binding (hex SHA-256).
+  string binding = 3;
+  // The registry version it was bound from; 0 for a local endpoint or a default profile.
+  uint64 registry_version = 4;
+  // The credential id it authenticates with; empty without.
+  string credential_id = 5;
+  // The credential revision bound.
+  uint64 credential_revision = 6;
+  // free | paid | unknown.
+  string plan = 7;
 }
 
 // Operational configuration of the process.

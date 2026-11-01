@@ -132,6 +132,22 @@ export interface SystemView {
   settings: ReadonlyMap<string, { value: string; source: string }>;
   liveAuthorized: boolean | null;
   submissionAuthorized: boolean | null;
+  /** DEC-18: the providers the running process is bound to (effective; empty without an
+   *  effective record or before PROVIDERS_REVISION). */
+  runProviders: readonly RunProviderView[];
+}
+
+/** DEC-18: one provider a running process is bound to — its secret-free binding, no endpoint. */
+export interface RunProviderView {
+  kind: string;
+  /** local: a named loopback endpoint; jupiter-default: the contract's profile. */
+  id: string;
+  binding: string;
+  /** 0: a local endpoint or the default profile. */
+  registryVersion: bigint;
+  credentialId: string;
+  credentialRevision: bigint;
+  plan: string;
 }
 
 /** Engine counter names the GUI reads (MarketStats::counters). The contract test checks each

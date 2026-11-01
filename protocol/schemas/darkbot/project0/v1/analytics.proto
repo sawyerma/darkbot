@@ -32,6 +32,133 @@ message AnalyticsJobs {
   // DEC-16: unbounded runs beside the boot flow — the standing autostart approval, the newest
   // raw-capture qualification and the newest unbounded raw capture.
   UntilStopped until_stopped = 9;
+  // DEC-18: the provider registry (data/providers, `p0ctl provider …`) as its store holds it —
+  // staged: a change is effective at the next controlled start (the running run's providers:
+  // project0.status EffectiveRecord.providers). Unset when the store is unreadable.
+  ProviderRegistryView providers = 10;
+  // DEC-18: why the provider registry was not readable (providers is then unset); empty when
+  // read.
+  string providers_error = 11;
+}
+
+// DEC-18: one committed version of the provider registry — secret-free (hosts, credential ids
+// and revisions; never an endpoint's path, a key or a keychain account).
+message ProviderRegistryView {
+  // The committed version (0: no provider yet); the expected version of every change (CAS).
+  uint64 version = 1;
+  // Every provider, by kind, priority and id.
+  repeated RegistryProvider providers = 2;
+  // Every credential's newest revision.
+  repeated RegistryCredential credentials = 3;
+  // When a change takes effect: next_controlled_start (DEC-05).
+  string restart_rule = 4;
+}
+
+// DEC-18: one provider of the registry.
+message RegistryProvider {
+  // Provider id ([a-z0-9_-]{1,32}).
+  string id = 1;
+  // rpc | wss | geyser | jupiter | jito.
+  string kind = 2;
+  // The endpoint's host (its path and scheme stay in the engine).
+  string host = 3;
+  // How it authenticates: none | query:NAME | header:NAME | path (a name, never a value).
+  string auth = 4;
+  // The credential it authenticates with (its id); empty without authentication.
+  string credential = 5;
+  // Lower first among the providers of its kind.
+  uint32 priority = 6;
+  // Configured capacity in requests per second; unset when not configured.
+  optional uint64 capacity_rps = 7;
+  // free | unknown (FREE_ONLY: paid is refused, unknown never selected).
+  string plan = 8;
+  // The plan's name as the provider publishes it.
+  string entitlement = 9;
+  // The provider evidence record that qualified its binding; unset when not qualified.
+  optional string qualification = 10;
+  // Enabled (a disabled provider is never selected).
+  bool enabled = 11;
+  // The selected provider of its kind.
+  bool selected = 12;
+  // Its secret-free binding (hex SHA-256) with the active credential revision; unset when its
+  // credential is revoked or unknown.
+  optional string binding = 13;
+  // Why it cannot be the selected one of its kind now; unset when it can.
+  optional string selection_block = 14;
+}
+
+// DEC-18: a credential's newest revision (the secret is the macOS keychain's alone).
+message RegistryCredential {
+  // Credential id.
+  string id = 1;
+  // Its newest revision (a rotation is a new one, never reused).
+  uint64 revision = 2;
+  // active | revoked.
+  string state = 3;
+  // input | env:NAME (the one-time .env import).
+  string origin = 4;
+  // When the revision was created.
+  uint64 created_unix_s = 5;
+}
+
+// DEC-18: params of `project0.provider.add` and `project0.provider.update` (the registry's
+// rules decide: a canonical endpoint without a credential in it, FREE_ONLY, a known kind). An
+// update changes only the fields it sets.
+message ProviderDescriptorCommand {
+  // Provider id.
+  string id = 1;
+  // rpc | wss | geyser | jupiter | jito (add: required).
+  optional string kind = 2;
+  // The endpoint (add: required); refused with a credential in it, never echoed.
+  optional string endpoint = 3;
+  // none | query:NAME | header:NAME | path.
+  optional string auth = 4;
+  // The credential id it authenticates with.
+  optional string credential = 5;
+  // Priority among its kind.
+  optional uint32 priority = 6;
+  // Configured capacity in requests per second.
+  optional uint64 capacity_rps = 7;
+  // free | unknown.
+  optional string plan = 8;
+  // The plan's name.
+  optional string entitlement = 9;
+  // Added disabled (add only).
+  bool disabled = 10;
+}
+
+// DEC-18: params of `project0.provider.priority`.
+message ProviderPriorityCommand {
+  // Provider id.
+  string id = 1;
+  // The new priority.
+  uint32 priority = 2;
+}
+
+// DEC-18: params of `project0.provider.select`.
+message ProviderSelectCommand {
+  // rpc | wss | jupiter | jito.
+  string kind = 1;
+  // Provider id.
+  string id = 2;
+}
+
+// DEC-18: params of `project0.provider.qualify`.
+message ProviderQualifyCommand {
+  // Provider id.
+  string id = 1;
+  // The stored provider evidence record id (16 hex), or "-" to clear the qualification.
+  string evidence = 2;
+}
+
+// DEC-18: params of `project0.provider.credential.set` and `…credential.rotate`. The gateway
+// separates the secret before any durable record (its command ledger holds the request without
+// it) and hands it to the native controller's standard input only.
+message ProviderCredentialCommand {
+  // Credential id.
+  string credential = 1;
+  // The secret (in transit only).
+  bytes secret = 2;
 }
 
 // DEC-16: unbounded runs (RunHorizon::UntilStopped) as the stores hold them. Expiry and

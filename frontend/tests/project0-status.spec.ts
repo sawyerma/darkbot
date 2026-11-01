@@ -5,7 +5,7 @@ import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import {
   AnalyticsJobsSchema, AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, H0JobCommandSchema,
-  PostCaptureJobCommandSchema, type AnalyticsJobs,
+  PostCaptureJobCommandSchema, ProviderCredentialCommandSchema, ProviderDescriptorCommandSchema, type AnalyticsJobs,
 } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
@@ -690,4 +690,66 @@ test("DEC-16: a complete qualification unlocks Until stopped — the offline pre
   const p = fromBinary(AutostartPreviewCommandSchema, sent[1]!.params);
   expect([sent[1]!.action, p.qualification, p.checkpoint, p.minimumRunway, p.maxRuntime, p.validFor, p.captureSource])
     .toEqual(["project0.autostart.preview", "0123456789abcdef", "1h", "1d", "7d", "12h", "logs"]);
+});
+
+test("DEC-18: the provider registry reaches Capture and Liquidator; a change and a credential's key take the one command path, the key kept nowhere", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await feed(page, true, true);
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    sent.push(req);
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED,
+      commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED, detail: "PROVIDER_RECEIPT applied=true version=8" }))));
+  });
+  await tab(page, "Capture");
+  await expect(page.getByText("registry v7 · LIVE")).toBeVisible();
+  await expect(page.getByText("rpc · helius-rpc · selected", { exact: true })).toBeVisible();
+  await expect(page.getByText(/mainnet\.helius-rpc\.com · query:api-key · credential helius · free \(helius-free\)/)).toBeVisible();
+  await expect(page.getByText(/PROVIDER_DISABLED: public-wss/)).toBeVisible();
+  await expect(page.getByText("revision 3 · active · input")).toBeVisible();
+  // A new provider: typed, with the registry version the view showed.
+  await page.getByLabel("Id", { exact: true }).fill("public-rpc");
+  await page.getByLabel("Endpoint", { exact: true }).fill("https://api.mainnet-beta.solana.com");
+  await page.getByLabel("Authentication", { exact: true }).fill("none");
+  await page.getByRole("combobox", { name: /^Plan/ }).selectOption("free");
+  await page.getByLabel("Plan name", { exact: true }).fill("public");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByTestId("p0-provider-command-receipt")).toContainText("COMPLETED · PROVIDER_RECEIPT");
+  const add = sent.at(-1)!;
+  expect(add.action).toBe("project0.provider.add");
+  expect(add.expected?.version).toEqual({ case: "configVersion", value: 7n });
+  const d = fromBinary(ProviderDescriptorCommandSchema, add.params);
+  expect([d.id, d.kind, d.endpoint, d.auth, d.plan, d.entitlement]).toEqual(["public-rpc", "rpc", "https://api.mainnet-beta.solana.com", "none", "free", "public"]);
+  // A key typed into the endpoint is refused before anything is sent.
+  await page.getByLabel("Endpoint", { exact: true }).fill("https://mainnet.helius-rpc.com/?api-key=TYPED-KEY");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText(/a key is the credential's, never the endpoint's/)).toBeVisible();
+  expect(sent).toHaveLength(1);
+  // Enabling the disabled WSS provider names it.
+  await page.getByRole("combobox", { name: /^Provider/ }).selectOption("public-wss");
+  await page.getByRole("button", { name: "Enable", exact: true }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect([sent[1]!.action, sent[1]!.resourceId]).toEqual(["project0.provider.enable", "public-wss"]);
+  // A credential's key: sent once in the command's parameters, the field cleared, kept nowhere.
+  await page.getByLabel("Credential", { exact: true }).fill("helius");
+  await page.getByTestId("p0-provider-key").fill("PLAYWRIGHT-KEY-1");
+  await page.getByRole("button", { name: "Set key" }).click();
+  await expect.poll(() => sent.length).toBe(3);
+  const set = sent[2]!;
+  expect(set.action).toBe("project0.provider.credential.set");
+  const k = fromBinary(ProviderCredentialCommandSchema, set.params);
+  expect([k.credential, new TextDecoder().decode(k.secret)]).toEqual(["helius", "PLAYWRIGHT-KEY-1"]);
+  await expect(page.getByTestId("p0-provider-key")).toHaveValue("");
+  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+  expect(stored).not.toContain("PLAYWRIGHT-KEY-1");
+  await expect(page.locator("body")).not.toContainText("PLAYWRIGHT-KEY-1");
+  // Liquidator: the Jupiter/Jito providers of the same registry.
+  await tab(page, "Liquidator");
+  await expect(page.getByText("Providers · Jupiter, Jito")).toBeVisible();
+  await expect(page.getByText("No jupiter/jito provider in the registry.")).toBeVisible();
+  expect(errors).toEqual([]);
 });

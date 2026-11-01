@@ -1012,6 +1012,10 @@ pub struct AnalyticsSnapshot {
     /// DEC-16: the standing autostart approval, the newest raw-capture qualification and the
     /// newest unbounded raw capture.
     pub until_stopped: crate::orchestration::until_stopped_view::UntilStoppedView,
+    /// DEC-18: the provider registry (staged: effective at the next controlled start).
+    pub providers: Option<crate::orchestration::provider_registry::RegistryView>,
+    /// DEC-18: why the provider registry was not readable; `None` when read.
+    pub providers_error: Option<String>,
 }
 
 fn layout_of(run: &Path) -> &'static str {
@@ -1066,6 +1070,7 @@ pub fn projection(
         Err(e) => (false, Some(e)),
     };
     let (boot, boot_error) = crate::orchestration::boot_control::projection(project);
+    let (providers, providers_error) = crate::orchestration::provider_registry::projection(project);
     AnalyticsSnapshot {
         at_unix_ms: 0,
         runner_busy,
@@ -1076,6 +1081,8 @@ pub fn projection(
         boot,
         boot_error,
         until_stopped: crate::orchestration::until_stopped_view::projection(project),
+        providers,
+        providers_error,
     }
 }
 

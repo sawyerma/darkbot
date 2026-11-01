@@ -164,6 +164,52 @@ export interface AnalyticsView {
   bootError: string;
   /** DEC-16: the standing autostart approval, the newest raw-capture qualification and run. */
   untilStopped: UntilStoppedView;
+  /** DEC-18: the provider registry (staged: effective at the next controlled start); null when
+   *  unreadable (providersError says why). */
+  providers: ProviderRegistryView | null;
+  /** DEC-18: why the provider registry was not readable; empty when read. */
+  providersError: string;
+}
+
+/** DEC-18: the provider kinds. */
+export type ProviderKind = "rpc" | "wss" | "geyser" | "jupiter" | "jito";
+
+/** DEC-18: one committed registry version — secret-free (hosts, names, credential revisions). */
+export interface ProviderRegistryView {
+  /** The version every change states (CAS). */
+  version: bigint;
+  providers: readonly RegistryProviderView[];
+  credentials: readonly RegistryCredentialView[];
+  /** When a change takes effect (next_controlled_start). */
+  restartRule: string;
+}
+
+/** DEC-18: one provider of the registry. */
+export interface RegistryProviderView {
+  id: string;
+  kind: string;
+  host: string;
+  /** none | query:NAME | header:NAME | path. */
+  auth: string;
+  credential: string;
+  priority: number;
+  capacityRps: bigint | null;
+  plan: string;
+  entitlement: string;
+  qualification: string | null;
+  enabled: boolean;
+  selected: boolean;
+  binding: string | null;
+  selectionBlock: string | null;
+}
+
+/** DEC-18: a credential's newest revision (its secret is the macOS keychain's alone). */
+export interface RegistryCredentialView {
+  id: string;
+  revision: bigint;
+  state: string;
+  origin: string;
+  createdUnixS: bigint;
 }
 
 /** DEC-16: a standing autostart approval (in force or previewed) and the binding it was given for. */

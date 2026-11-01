@@ -8,8 +8,22 @@ import {
   type JobParams,
   type ShadowCounterfactual,
 } from "@/core/generated/darkbot/project0/v1/analytics_pb";
-import type { UntilStopped } from "@/core/generated/darkbot/project0/v1/analytics_pb";
-import type { AutostartGrantView, BootFlowView, BootStepView, CounterfactualView, JobParamsView, AnalyticsView, UntilStoppedView } from "../model/analytics";
+import type { ProviderRegistryView as ProviderRegistryWire, UntilStopped } from "@/core/generated/darkbot/project0/v1/analytics_pb";
+import type { AutostartGrantView, BootFlowView, BootStepView, CounterfactualView, JobParamsView, AnalyticsView, ProviderRegistryView, UntilStoppedView } from "../model/analytics";
+
+/** DEC-18: the provider registry as its store holds it (secret-free; an unset optional is null). */
+function providers(r: ProviderRegistryWire): ProviderRegistryView {
+  return {
+    version: r.version,
+    restartRule: r.restartRule,
+    providers: r.providers.map((p) => ({
+      id: p.id, kind: p.kind, host: p.host, auth: p.auth, credential: p.credential, priority: p.priority,
+      capacityRps: p.capacityRps ?? null, plan: p.plan, entitlement: p.entitlement, qualification: p.qualification ?? null,
+      enabled: p.enabled, selected: p.selected, binding: p.binding ?? null, selectionBlock: p.selectionBlock ?? null,
+    })),
+    credentials: r.credentials.map((c) => ({ id: c.id, revision: c.revision, state: c.state, origin: c.origin, createdUnixS: c.createdUnixS })),
+  };
+}
 
 /** Throws on invalid bytes, so the registry never acknowledges a broken state. */
 export function decodeAnalyticsJobs(bytes: Uint8Array): AnalyticsJobs {
@@ -142,6 +156,8 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
     boot: m.boot ? boot(m.boot) : null,
     bootError: m.bootError,
     untilStopped: untilStopped(m.untilStopped),
+    providers: m.providers ? providers(m.providers) : null,
+    providersError: m.providersError,
   };
 }
 

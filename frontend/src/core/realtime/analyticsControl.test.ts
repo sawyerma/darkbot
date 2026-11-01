@@ -163,3 +163,55 @@ describe("DEC-16 unbounded boot and the standing autostart approval", () => {
     expect("problem" in autostartGrantCommand("")).toBe(true);
   });
 });
+
+describe("DEC-18 provider registry commands", () => {
+  beforeEach(() => useAnalyticsControl.setState({ busy: false, receipt: null }));
+  const input = { id: "helius-rpc", kind: "rpc", endpoint: "https://mainnet.helius-rpc.com", auth: "query:api-key", credential: "helius",
+    priority: "0", capacityRps: "10", plan: "free", entitlement: "helius-free", disabled: false };
+
+  it("types a provider, refusing a key in an endpoint or a name before anything is sent", async () => {
+    const { ProviderDescriptorCommandSchema, ProviderSelectCommandSchema } = await import("../generated/darkbot/project0/v1/analytics_pb");
+    const { providerDescriptorCommand, providerSelectCommand, providerPriorityCommand, providerQualifyCommand } = await import("./analyticsControl");
+    const ok = providerDescriptorCommand(input, true);
+    if (!("params" in ok)) throw new Error(ok.problem);
+    const c = fromBinary(ProviderDescriptorCommandSchema, ok.params);
+    expect([c.id, c.kind, c.endpoint, c.auth, c.credential, c.priority, c.capacityRps, c.plan, c.entitlement])
+      .toEqual(["helius-rpc", "rpc", "https://mainnet.helius-rpc.com", "query:api-key", "helius", 0, 10n, "free", "helius-free"]);
+    // An update sets only what it names.
+    const update = providerDescriptorCommand({ ...input, kind: "", endpoint: "", auth: "", credential: "", priority: "3", capacityRps: "", plan: "", entitlement: "" }, false);
+    if (!("params" in update)) throw new Error(update.problem);
+    const u = fromBinary(ProviderDescriptorCommandSchema, update.params);
+    expect([u.kind, u.endpoint, u.priority, u.capacityRps]).toEqual([undefined, undefined, 3, undefined]);
+    for (const bad of [{ endpoint: "https://mainnet.helius-rpc.com/?api-key=KEY" }, { endpoint: "https://user:KEY@rpc.example" }, { id: "0123456789abcdef0123" },
+      { credential: "0123456789abcdef0123456789abcdef" }, { auth: "header:" }, { plan: "paid" }, { kind: "ftp" }, { capacityRps: "0" }]) {
+      expect("problem" in providerDescriptorCommand({ ...input, ...bad }, true)).toBe(true);
+    }
+    expect("problem" in providerDescriptorCommand({ ...input, endpoint: "" }, true)).toBe(true);
+    const sel = providerSelectCommand("rpc", "helius-rpc");
+    if (!("params" in sel)) throw new Error(sel.problem);
+    expect(fromBinary(ProviderSelectCommandSchema, sel.params)).toMatchObject({ kind: "rpc", id: "helius-rpc" });
+    expect("problem" in providerSelectCommand("geyser", "publicnode")).toBe(true);
+    expect("problem" in providerPriorityCommand("helius-rpc", "x")).toBe(true);
+    expect("problem" in providerQualifyCommand("helius-rpc", "123")).toBe(true);
+    expect("params" in providerQualifyCommand("helius-rpc", "-")).toBe(true);
+  });
+
+  it("sends a credential's key once in the request with the registry version, and keeps it nowhere", async () => {
+    const { ProviderCredentialCommandSchema } = await import("../generated/darkbot/project0/v1/analytics_pb");
+    const { providerCredentialCommand } = await import("./analyticsControl");
+    const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(accepted(CommandPhase.COMPLETED, "Provider change recorded: PROVIDER_RECEIPT applied=true"));
+    vi.stubGlobal("fetch", fetch);
+    const typed = providerCredentialCommand("helius", "KEY-ONE-SECRET");
+    if (!("params" in typed)) throw new Error(typed.problem);
+    await analyticsCommand("project0.provider.credential.set", { params: typed.params, configVersion: 7n });
+    const req = fromBinary(CommandRequestSchema, (fetch.mock.calls[1]?.[1] as RequestInit).body as Uint8Array);
+    const c = fromBinary(ProviderCredentialCommandSchema, req.params);
+    expect([req.action, c.credential, new TextDecoder().decode(c.secret)]).toEqual(["project0.provider.credential.set", "helius", "KEY-ONE-SECRET"]);
+    expect(req.expected?.version).toEqual({ case: "configVersion", value: 7n });
+    const state = JSON.stringify(useAnalyticsControl.getState(), (_, v) => (typeof v === "bigint" ? v.toString() : v));
+    expect(state).not.toContain("KEY-ONE-SECRET");
+    expect(useAnalyticsControl.getState().receipt).toMatchObject({ phase: "COMPLETED", action: "project0.provider.credential.set" });
+    for (const bad of ["", "two\nlines"]) expect("problem" in providerCredentialCommand("helius", bad)).toBe(true);
+    expect("problem" in providerCredentialCommand("0123456789abcdef0123", "k")).toBe(true);
+  });
+});

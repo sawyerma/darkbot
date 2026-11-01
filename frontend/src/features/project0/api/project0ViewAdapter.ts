@@ -152,6 +152,10 @@ export function toSystemView(m: SystemMessage): SystemView {
     ] : []),
     liveAuthorized: effective ? effective.liveAuthorized : null,
     submissionAuthorized: effective ? effective.submissionAuthorized : null,
+    runProviders: (effective?.providers ?? []).map((p) => ({
+      kind: p.kind, id: p.id, binding: p.binding, registryVersion: p.registryVersion,
+      credentialId: p.credentialId, credentialRevision: p.credentialRevision, plan: p.plan,
+    })),
   };
 }
 

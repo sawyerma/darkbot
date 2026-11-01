@@ -887,6 +887,97 @@ pub fn touches_credentials(action: &ProviderAction) -> bool {
     )
 }
 
+/// DEC-18 (P0-020): the registry's secret-free projection (topic project0.analytics.jobs): every
+/// provider with its host (never the endpoint's path), authentication name, credential id,
+/// binding and selection block, every credential's newest revision.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegistryView {
+    pub version: u64,
+    pub providers: Vec<ProviderView>,
+    pub credentials: Vec<CredentialView>,
+}
+
+/// One provider of [`RegistryView`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderView {
+    pub id: String,
+    pub kind: &'static str,
+    pub host: String,
+    pub auth: String,
+    pub credential: Option<String>,
+    pub priority: u32,
+    pub capacity_rps: Option<u64>,
+    pub plan: &'static str,
+    pub entitlement: String,
+    pub qualification: Option<String>,
+    pub enabled: bool,
+    pub selected: bool,
+    /// `None` while its credential is revoked or unknown.
+    pub binding: Option<String>,
+    pub selection_block: Option<String>,
+}
+
+/// One credential of [`RegistryView`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CredentialView {
+    pub id: String,
+    pub revision: u64,
+    pub state: &'static str,
+    pub origin: String,
+    pub created_unix_s: u64,
+}
+
+/// The registry's view of `project`, or why it is not readable (a copied store included).
+pub fn projection(project: &Path) -> (Option<RegistryView>, Option<String>) {
+    let registry = match current(project).and_then(|r| owned(project, &r).map(|()| r)) {
+        Ok(r) => r,
+        Err(e) => return (None, Some(e)),
+    };
+    let mut providers: Vec<ProviderView> = registry
+        .providers
+        .iter()
+        .map(|p| ProviderView {
+            id: p.id.clone(),
+            kind: p.kind.name(),
+            host: p.host(),
+            auth: p.auth.text(),
+            credential: p.credential.clone(),
+            priority: p.priority,
+            capacity_rps: p.capacity_rps,
+            plan: p.plan.name(),
+            entitlement: p.entitlement.clone(),
+            qualification: p.qualification.clone(),
+            enabled: p.enabled,
+            selected: registry.selected(p.kind).is_some_and(|s| s.id == p.id),
+            binding: registry.binding_of(p).ok(),
+            selection_block: registry.selection_block(p),
+        })
+        .collect();
+    providers.sort_by(|a, b| (a.kind, a.priority, &a.id).cmp(&(b.kind, b.priority, &b.id)));
+    let credentials = registry
+        .credentials
+        .iter()
+        .map(|c| CredentialView {
+            id: c.id.clone(),
+            revision: c.revision,
+            state: match c.state {
+                CredentialState::Active => "active",
+                CredentialState::Revoked => "revoked",
+            },
+            origin: c.origin.clone(),
+            created_unix_s: c.created_unix_s,
+        })
+        .collect();
+    (
+        Some(RegistryView {
+            version: registry.version,
+            providers,
+            credentials,
+        }),
+        None,
+    )
+}
+
 /// The operator's view of the current version: one line per provider (host only, never a path
 /// or a credential) with its binding and why it cannot be selected, and one per credential (id,
 /// revision, state, origin).
@@ -1174,6 +1265,73 @@ mod tests {
         assert!(bind(&copy, &mut r)
             .unwrap_err()
             .starts_with("PROVIDER_REGISTRY_FOREIGN"));
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&copy);
+    }
+
+    /// DEC-18 (P0-020): the registry's projection is secret-free — every provider with its host
+    /// (never the endpoint's path), authentication name, credential id, binding, selection and why
+    /// it cannot be selected, every credential's revision; an empty store is version 0, a copied
+    /// one is refused with its reason (nothing projected).
+    #[test]
+    fn the_projection_names_hosts_and_revisions_never_a_secret() {
+        let d = project("projection");
+        let store = DirectoryStore(d.join("keychain"));
+        let (empty, error) = projection(&d);
+        assert_eq!((empty.unwrap().version, error), (0, None));
+        let mut p = helius();
+        p.endpoint = "https://mainnet.helius-rpc.com/v0/archive".into();
+        for (n, action, secret) in [
+            (1, ProviderAction::Add(p), None),
+            (2, set(), Some(&b"PROJECTED-KEY"[..])),
+            (
+                3,
+                ProviderAction::Select(ProviderKind::Rpc, "helius-rpc".into()),
+                None,
+            ),
+        ] {
+            let r = decide(&d, &format!("p{n}"), None, &action, secret, &store, n).unwrap();
+            assert!(r.applied, "{r:?}");
+        }
+        let (view, error) = projection(&d);
+        let view = view.unwrap();
+        assert_eq!((view.version, error), (3, None));
+        let p = &view.providers[0];
+        assert_eq!(
+            (
+                p.id.as_str(),
+                p.kind,
+                p.host.as_str(),
+                p.auth.as_str(),
+                p.selected
+            ),
+            (
+                "helius-rpc",
+                "rpc",
+                "mainnet.helius-rpc.com",
+                "query:api-key",
+                true
+            )
+        );
+        assert_eq!(p.binding.as_ref().map(String::len), Some(64));
+        assert_eq!(p.selection_block, None);
+        assert_eq!(
+            (view.credentials[0].revision, view.credentials[0].state),
+            (1, "active")
+        );
+        let shown = format!("{view:?}");
+        assert!(
+            !shown.contains("PROJECTED-KEY") && !shown.contains("/v0/archive"),
+            "{shown}"
+        );
+        let copy = project("projection_copy");
+        std::fs::create_dir_all(copy.join(STORE)).unwrap();
+        for e in std::fs::read_dir(d.join(STORE)).unwrap() {
+            let e = e.unwrap();
+            std::fs::copy(e.path(), copy.join(STORE).join(e.file_name())).unwrap();
+        }
+        let (none, error) = projection(&copy);
+        assert!(none.is_none() && error.unwrap().starts_with("PROVIDER_REGISTRY_FOREIGN"));
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(&copy);
     }

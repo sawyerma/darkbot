@@ -2,7 +2,7 @@ import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
-import { AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, H0JobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import { AutostartGrantCommandSchema, AutostartPreviewCommandSchema, BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, H0JobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema, ProviderCredentialCommandSchema, ProviderDescriptorCommandSchema, ProviderPriorityCommandSchema, ProviderQualifyCommandSchema, ProviderSelectCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 
 /**
@@ -14,7 +14,13 @@ import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../g
 export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.h0.start" | "project0.analytics.job.cancel"
   | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set"
   | "project0.boot.offline" | "project0.boot.network" | "project0.boot.start" | "project0.boot.cancel"
-  | "project0.autostart.preview" | "project0.autostart.grant" | "project0.autostart.revoke";
+  | "project0.autostart.preview" | "project0.autostart.grant" | "project0.autostart.revoke"
+  | ProviderAction;
+/** DEC-18: the provider registry's changes (`p0ctl provider …`), effective at the next controlled start. */
+export type ProviderAction = "project0.provider.add" | "project0.provider.update" | "project0.provider.remove"
+  | "project0.provider.enable" | "project0.provider.disable" | "project0.provider.priority" | "project0.provider.select"
+  | "project0.provider.unselect" | "project0.provider.qualify" | "project0.provider.credential.set"
+  | "project0.provider.credential.rotate" | "project0.provider.credential.revoke";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -175,6 +181,66 @@ export function autostartPreviewCommand(v: { qualification: string; window: stri
 export function autostartGrantCommand(digest: string): { params: Uint8Array } | { problem: string } {
   if (!TOKEN.test(digest)) return { problem: "No previewed binding to confirm." };
   return { params: toBinary(AutostartGrantCommandSchema, message(AutostartGrantCommandSchema, { confirmDigest: digest })) };
+}
+
+const PROVIDER_ID = /^(?![0-9a-fA-F]{16,}$)[a-z0-9_-]{1,32}$/;
+const PROVIDER_KINDS = ["rpc", "wss", "geyser", "jupiter", "jito"] as const;
+/** The provider form as the operator entered it (empty: not set; an update changes only what it sets). */
+export interface ProviderInput {
+  id: string; kind: string; endpoint: string; auth: string; credential: string;
+  priority: string; capacityRps: string; plan: string; entitlement: string; disabled: boolean;
+}
+
+/** DEC-18: an add or an update of a provider. A key never belongs in an endpoint (its credential
+ *  is set separately): an endpoint with user info, a query or a fragment is refused here as by the
+ *  gateway and the native registry, which decide every rule. */
+export function providerDescriptorCommand(v: ProviderInput, add: boolean): { params: Uint8Array } | { problem: string } {
+  const t = (s: string) => s.trim();
+  if (!PROVIDER_ID.test(t(v.id))) return { problem: "Id: 1–32 of a-z, 0-9, _ or - (never a key)." };
+  if (add && (!t(v.kind) || !t(v.endpoint) || !t(v.plan) || !t(v.entitlement))) return { problem: "A new provider needs its kind, endpoint, plan and entitlement." };
+  if (t(v.kind) && !(PROVIDER_KINDS as readonly string[]).includes(t(v.kind))) return { problem: "Kind: rpc, wss, geyser, jupiter or jito." };
+  if (t(v.endpoint) && (!/^(?:https?|wss?):\/\/[^/@?#\s]+(?:\/[^?#\s]*)?$/.test(t(v.endpoint)))) return { problem: "Endpoint: a URL without user info, query or fragment — a key is the credential's, never the endpoint's." };
+  if (t(v.auth) && !/^(?:none|path|(?:query|header):[A-Za-z0-9_-]{1,64})$/.test(t(v.auth))) return { problem: "Authentication: none, path, query:NAME or header:NAME (a name, never a key)." };
+  if (t(v.credential) && !PROVIDER_ID.test(t(v.credential))) return { problem: "Credential: its id (never the key itself)." };
+  if (t(v.plan) && !["free", "unknown"].includes(t(v.plan))) return { problem: "Plan: free or unknown (FREE_ONLY)." };
+  if (t(v.priority) && !/^\d{1,9}$/.test(t(v.priority))) return { problem: "Priority: a whole number." };
+  if (t(v.capacityRps) && !/^[1-9]\d{0,8}$/.test(t(v.capacityRps))) return { problem: "Capacity: requests per second, at least 1." };
+  if (!add && v.disabled) return { problem: "Disabling is its own request." };
+  const opt = (s: string) => (t(s) ? t(s) : undefined);
+  return {
+    params: toBinary(ProviderDescriptorCommandSchema, message(ProviderDescriptorCommandSchema, {
+      id: t(v.id), kind: opt(v.kind), endpoint: opt(v.endpoint), auth: opt(v.auth), credential: opt(v.credential),
+      priority: t(v.priority) ? Number(t(v.priority)) : undefined, capacityRps: t(v.capacityRps) ? BigInt(t(v.capacityRps)) : undefined,
+      plan: opt(v.plan), entitlement: opt(v.entitlement), disabled: add && v.disabled,
+    })),
+  };
+}
+
+/** DEC-18: a provider's priority among its kind. */
+export function providerPriorityCommand(id: string, priority: string): { params: Uint8Array } | { problem: string } {
+  if (!PROVIDER_ID.test(id) || !/^\d{1,9}$/.test(priority.trim())) return { problem: "Priority: a whole number." };
+  return { params: toBinary(ProviderPriorityCommandSchema, message(ProviderPriorityCommandSchema, { id, priority: Number(priority.trim()) })) };
+}
+
+/** DEC-18: the selected provider of a kind (the Geyser source unit names its own). */
+export function providerSelectCommand(kind: string, id: string): { params: Uint8Array } | { problem: string } {
+  if (!["rpc", "wss", "jupiter", "jito"].includes(kind) || !PROVIDER_ID.test(id)) return { problem: "Select a provider of rpc, wss, jupiter or jito." };
+  return { params: toBinary(ProviderSelectCommandSchema, message(ProviderSelectCommandSchema, { kind, id })) };
+}
+
+/** DEC-18: a provider's qualification by a stored provider evidence record (or "-" to clear it). */
+export function providerQualifyCommand(id: string, evidence: string): { params: Uint8Array } | { problem: string } {
+  if (!PROVIDER_ID.test(id) || !(evidence === "-" || /^[0-9a-f]{16}$/.test(evidence.trim()))) return { problem: "Evidence: a record id (16 hex digits) or - to clear." };
+  return { params: toBinary(ProviderQualifyCommandSchema, message(ProviderQualifyCommandSchema, { id, evidence: evidence.trim() })) };
+}
+
+/** DEC-18 (P0-019): a credential's secret, set or rotated — carried in the request's parameters
+ *  only (the gateway separates it before any record and hands it to the native controller's
+ *  standard input); never kept in a store, the receipt or the browser's storage. */
+export function providerCredentialCommand(credential: string, secret: string): { params: Uint8Array } | { problem: string } {
+  if (!PROVIDER_ID.test(credential)) return { problem: "Credential: its id." };
+  if (secret === "" || /[\u0000-\u001f\u007f]/.test(secret)) return { problem: "Key: the provider's key, one line." };
+  return { params: toBinary(ProviderCredentialCommandSchema, message(ProviderCredentialCommandSchema, { credential, secret: new TextEncoder().encode(secret) })) };
 }
 
 /** The capabilities of mode OFF|OBSERVE|ACTIVE (`capabilityCommand`). */

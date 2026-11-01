@@ -6,8 +6,9 @@ use crate::proto::project0::{
     analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, AutostartGrant, BacktestResult,
     BootFlow, BootStep, CapitalScenario, FundingSet, H0Result, H0Spec, JobGrid, JobParams,
     NamedCount, OptimizeResult, OptimizeScore, PostCaptureResult, PostCaptureSpec,
-    RunQualification, ShadowCounterfactual, UntilStopped, UntilStoppedQualification,
-    UntilStoppedRun, VerificationMethod,
+    ProviderRegistryView, RegistryCredential, RegistryProvider, RunQualification,
+    ShadowCounterfactual, UntilStopped, UntilStoppedQualification, UntilStoppedRun,
+    VerificationMethod,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
@@ -353,6 +354,50 @@ pub fn analytics_jobs(s: &AnalyticsSnapshot) -> AnalyticsJobs {
         boot: s.boot.as_ref().map(boot),
         boot_error: s.boot_error.clone().unwrap_or_default(),
         until_stopped: Some(until_stopped(&s.until_stopped)),
+        providers: s.providers.as_ref().map(providers),
+        providers_error: s.providers_error.clone().unwrap_or_default(),
+    }
+}
+
+/// DEC-18: the provider registry, values copied as the store holds them (secret-free: hosts,
+/// authentication names, credential ids and revisions).
+fn providers(
+    v: &darkbot_runner::orchestration::provider_registry::RegistryView,
+) -> ProviderRegistryView {
+    ProviderRegistryView {
+        version: v.version,
+        providers: v
+            .providers
+            .iter()
+            .map(|p| RegistryProvider {
+                id: p.id.clone(),
+                kind: p.kind.to_owned(),
+                host: p.host.clone(),
+                auth: p.auth.clone(),
+                credential: p.credential.clone().unwrap_or_default(),
+                priority: p.priority,
+                capacity_rps: p.capacity_rps,
+                plan: p.plan.to_owned(),
+                entitlement: p.entitlement.clone(),
+                qualification: p.qualification.clone(),
+                enabled: p.enabled,
+                selected: p.selected,
+                binding: p.binding.clone(),
+                selection_block: p.selection_block.clone(),
+            })
+            .collect(),
+        credentials: v
+            .credentials
+            .iter()
+            .map(|c| RegistryCredential {
+                id: c.id.clone(),
+                revision: c.revision,
+                state: c.state.to_owned(),
+                origin: c.origin.clone(),
+                created_unix_s: c.created_unix_s,
+            })
+            .collect(),
+        restart_rule: "next_controlled_start".into(),
     }
 }
 

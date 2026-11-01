@@ -7,6 +7,7 @@ use crate::storage::writer::StorageStatus;
 pub use darkbot_solana::provider::{
     CooldownCause, CooldownStatus, ProviderSnapshot, RetryAfterHeader,
 };
+pub use darkbot_solana::providers::{Plan, ProviderBinding, ProviderKind, PROVIDER_KINDS};
 use darkbot_solana::runtime_config;
 pub use darkbot_solana::runtime_config::{defaults, EffectiveConfig, Limits, Profile};
 pub use darkbot_solana::state::StateCounters;
