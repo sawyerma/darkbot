@@ -230,6 +230,29 @@ fn dec18_a_provider_and_its_credential_through_the_cli() {
         "{}",
         stray.text
     );
+    // A number or an id that is no request is never echoed; a non-credential receipt carries
+    // no sweep note.
+    let bad_number = run(
+        &["priority", "--id", "helius-rpc", "--priority", "SECRET-NUM"],
+        None,
+    );
+    assert!(
+        !bad_number.ok && !bad_number.text.contains("SECRET-NUM"),
+        "{}",
+        bad_number.text
+    );
+    let hex_key = "0123456789abcdef0123456789abcdef";
+    let bad_update = run(&["update", "--id", hex_key], None);
+    assert!(
+        !bad_update.ok && !bad_update.text.contains(hex_key),
+        "{}",
+        bad_update.text
+    );
+    assert!(
+        !added.text.contains("sweep") && !selected.text.contains("sweep"),
+        "{}",
+        selected.text
+    );
     assert!(
         std::fs::read_to_string(&env).unwrap().contains("ENV-KEY"),
         "the original is kept"

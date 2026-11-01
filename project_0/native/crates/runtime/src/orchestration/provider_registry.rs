@@ -87,6 +87,10 @@ pub enum ProviderAction {
     /// A new revision of an active credential.
     CredentialRotate(String),
     CredentialRevoke(String),
+    /// Takes over a registry recorded for another project directory (a moved project, or a
+    /// copied store): a new uid, this directory, every credential revoked — its secrets live
+    /// under the old uid, so each is set again; nothing of the other project's items is touched.
+    Adopt,
 }
 
 impl ProviderAction {
@@ -107,6 +111,7 @@ impl ProviderAction {
             }
             Self::CredentialRotate(c) => format!("credential rotate {c}"),
             Self::CredentialRevoke(c) => format!("credential revoke {c}"),
+            Self::Adopt => "adopt".into(),
         }
     }
 
@@ -149,6 +154,7 @@ impl ProviderAction {
                 origin_ok(origin)
             }
             Self::CredentialRotate(c) | Self::CredentialRevoke(c) => id(c, "CREDENTIAL"),
+            Self::Adopt => Ok(()),
         }
     }
 }
@@ -447,6 +453,16 @@ pub fn apply(
             }
             unqualify_users(&mut next, credential);
         }
+        A::Adopt => {
+            // The new uid and project are the decision's (`decide`); the secrets stay with the
+            // other project's uid.
+            for c in &mut next.credentials {
+                c.state = CredentialState::Revoked;
+            }
+            for p in &mut next.providers {
+                p.qualification = None;
+            }
+        }
     }
     next.validate()?;
     Ok(next)
@@ -574,6 +590,25 @@ pub fn decide(
         }
     }
     let current = current(project)?;
+    let here = canonical_project(project)?;
+    let foreign = current.version > 0 && current.project != here;
+    // A copied store never decides over this project's items; only an adoption takes it over.
+    match (foreign, matches!(action, ProviderAction::Adopt)) {
+        (false, false) | (true, true) => {}
+        (false, true) => {
+            return write(receipt_of(
+                false,
+                current.version,
+                "PROVIDER_REGISTRY_OWN: the registry is this project's; nothing to adopt".into(),
+            ))
+        }
+        (true, false) => {
+            return Err(format!(
+                "PROVIDER_REGISTRY_FOREIGN: recorded for another project directory ({}); `p0ctl provider adopt` takes it over",
+                current.project
+            ))
+        }
+    }
     if let Some(e) = expected.filter(|e| *e != current.version) {
         return write(receipt_of(
             false,
@@ -584,15 +619,24 @@ pub fn decide(
             ),
         ));
     }
+    if let ProviderAction::Qualify(id, Some(evidence)) = action {
+        // An evidence id the store does not hold is no request (nothing persisted: a mistyped
+        // value may be a key); a stored record of another binding is a refusal.
+        let path = crate::orchestration::provider_evidence::resolve(project, evidence)?;
+        if let Err(e) = qualifies(&current, id, &path, evidence) {
+            return write(receipt_of(false, current.version, e));
+        }
+    }
     let nonce = fresh_nonce()?;
     let mut next = match apply(&current, action, &nonce, now) {
         Ok(n) => n,
         Err(e) => return write(receipt_of(false, current.version, e)),
     };
     next.version = current.version + 1;
-    if next.uid.is_empty() {
+    if next.uid.is_empty() || matches!(action, ProviderAction::Adopt) {
         next.uid = fresh_nonce()?;
     }
+    next.project = here;
     let stored = new_account(&next, action);
     if let (Some(account), Some(s)) = (&stored, secret) {
         store.put(account, s)?;
@@ -612,17 +656,65 @@ pub fn decide(
         ));
     }
     let mut detail = "committed (effective at the next controlled start)".to_string();
-    match sweep(&next, store) {
-        Ok(failed) if failed.is_empty() => {}
-        Ok(failed) => {
-            detail = format!(
-                "{detail}; {} obsolete item(s) not deleted (swept again at the next decision)",
-                failed.len()
-            )
+    if touches_credentials(action) {
+        match sweep(&next, store) {
+            Ok(failed) if failed.is_empty() => {}
+            Ok(failed) => {
+                detail = format!(
+                    "{detail}; {} obsolete item(s) not deleted (swept again at the next credential decision)",
+                    failed.len()
+                )
+            }
+            Err(e) => detail = format!("{detail}; sweep: {e}"),
         }
-        Err(e) => detail = format!("{detail}; sweep: {e}"),
     }
     write(receipt_of(true, next.version, detail))
+}
+
+/// The canonical directory of a project: what a registry is recorded for.
+pub fn canonical_project(project: &Path) -> Result<String, String> {
+    std::fs::canonicalize(project)
+        .map(|p| p.display().to_string())
+        .map_err(io)
+}
+
+/// Whether a registry may be decided over or used from `project`: it is recorded for this
+/// project's directory (a copied store fails closed).
+pub fn owned(project: &Path, registry: &ProviderRegistry) -> Result<(), String> {
+    if registry.version > 0 && registry.project != canonical_project(project)? {
+        return Err("PROVIDER_REGISTRY_FOREIGN: recorded for another project directory; `p0ctl provider adopt` takes it over".into());
+    }
+    Ok(())
+}
+
+/// DEC-18 §3.7: a qualification names provider evidence of exactly this provider's binding —
+/// a stored record (its bytes the id's) one of whose proofs (or its WSS proof) binds
+/// `binding_of` the provider with its active revision. Evidence bound to a URL hash, another
+/// provider or an older revision never qualifies.
+fn qualifies(
+    current: &ProviderRegistry,
+    id: &str,
+    path: &Path,
+    evidence: &str,
+) -> Result<(), String> {
+    let p = current
+        .provider(id)
+        .ok_or_else(|| format!("PROVIDER_UNKNOWN: {id}"))?;
+    let binding = current.binding_of(p)?;
+    let record: crate::orchestration::provider_evidence::ProviderEvidence =
+        journal::read_typed_value(path).map_err(|_| "PROVIDER_EVIDENCE_FORMAT".to_string())?;
+    let bound = record
+        .providers
+        .iter()
+        .any(|proof| proof.provider_binding == binding)
+        || record.wss_provider_binding.as_deref() == Some(binding.as_str());
+    if bound {
+        Ok(())
+    } else {
+        Err(format!(
+            "PROVIDER_EVIDENCE_BINDING_MISMATCH: {evidence} does not bind provider {id}'s binding"
+        ))
+    }
 }
 
 /// Publishes `record` as its version (create-new: the compare-and-swap). `false`: another
@@ -740,7 +832,8 @@ pub fn status_lines(registry: &ProviderRegistry) -> Vec<String> {
     out
 }
 
-#[cfg(test)]
+// The tests use the directory store, which exists in a debug build only.
+#[cfg(all(test, debug_assertions))]
 mod tests {
     use super::*;
     use darkbot_solana::providers::{AuthKind, DirectoryStore, Plan};
@@ -777,6 +870,33 @@ mod tests {
 
     fn items(store: &DirectoryStore, registry: &ProviderRegistry) -> Vec<String> {
         store.list(&registry.account_prefix()).unwrap()
+    }
+
+    /// A stored provider evidence record with one proof of `provider_binding`; its id.
+    fn evidence_for(d: &Path, tag: &str, provider_binding: &str) -> String {
+        use crate::orchestration::provider_evidence::{self, ProviderEvidence, ProviderProof};
+        let file = d.join(format!("{tag}.p0j"));
+        journal::create_typed_value(
+            &file,
+            journal::source::BOOT_CONTROL,
+            &ProviderEvidence {
+                providers: vec![ProviderProof {
+                    policy: "FREE_ONLY".into(),
+                    passed: true,
+                    provider_binding: provider_binding.into(),
+                    measured_at_unix_s: 1.0,
+                    evidence_sha256: Some("0".repeat(64)),
+                    allowed_rps: 1.0,
+                    available_calls: 1,
+                }],
+                wss_provider_binding: None,
+                wss_free_only: true,
+                archive_qualified: false,
+                source_sha256: "0".repeat(64),
+            },
+        )
+        .unwrap();
+        provider_evidence::import(d, &file).unwrap()
     }
 
     /// DEC-18: a provider and its credential through the store — the secret is stored under its
@@ -1036,6 +1156,122 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
+    /// Re-check L3/L5/L6: a decision that touches no credential carries no sweep note; a
+    /// qualification names stored evidence of exactly this provider's binding (an evidence id the
+    /// store does not hold is no request; a record of another binding is refused); a copied store
+    /// never decides over another project's registry — only an adoption takes it over, with a
+    /// new uid and every credential revoked, the original project's items untouched.
+    #[test]
+    fn a_qualification_is_the_binding_s_and_a_copy_is_never_this_project_s() {
+        let d = project("qualify");
+        let store = DirectoryStore(d.join("keychain"));
+        let add = decide(
+            &d,
+            "a",
+            None,
+            &ProviderAction::Add(helius()),
+            None,
+            &store,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            add.detail,
+            "committed (effective at the next controlled start)"
+        );
+        decide(&d, "s", None, &set(), Some(b"KEY"), &store, 2).unwrap();
+        let reg = current(&d).unwrap();
+        let binding = reg.binding_of(reg.provider("helius-rpc").unwrap()).unwrap();
+        let evidence = |tag: &str, provider_binding: &str| evidence_for(&d, tag, provider_binding);
+        let qualify = |rid: &str, e: &str| {
+            decide(
+                &d,
+                rid,
+                None,
+                &ProviderAction::Qualify("helius-rpc".into(), Some(e.into())),
+                None,
+                &store,
+                3,
+            )
+        };
+        let url_hash =
+            journal::hex(&solana_sdk::hash::hash(b"https://mainnet.helius-rpc.com").to_bytes());
+        let old = qualify("q1", &evidence("old", &url_hash)).unwrap();
+        assert!(
+            !old.applied && old.detail.starts_with("PROVIDER_EVIDENCE_BINDING_MISMATCH"),
+            "{old:?}"
+        );
+        assert!(
+            qualify("q2", "0123456789abcdef").is_err(),
+            "an unknown evidence id is no request"
+        );
+        assert!(receipt(&d, "q2").unwrap().is_none());
+        let good = evidence("good", &binding);
+        assert!(qualify("q3", &good).unwrap().applied);
+        assert_eq!(
+            current(&d)
+                .unwrap()
+                .provider("helius-rpc")
+                .unwrap()
+                .qualification
+                .as_deref(),
+            Some(good.as_str())
+        );
+        // A copied store in another project directory.
+        let copy = project("qualify_copy");
+        std::fs::create_dir_all(copy.join("data")).unwrap();
+        assert!(std::process::Command::new("cp")
+            .arg("-R")
+            .arg(d.join(STORE))
+            .arg(copy.join(STORE))
+            .status()
+            .unwrap()
+            .success());
+        let foreign = decide(
+            &copy,
+            "x",
+            None,
+            &ProviderAction::Enable("helius-rpc".into()),
+            None,
+            &store,
+            4,
+        )
+        .unwrap_err();
+        assert!(
+            foreign.starts_with("PROVIDER_REGISTRY_FOREIGN"),
+            "{foreign}"
+        );
+        assert!(owned(&copy, &current(&copy).unwrap()).is_err());
+        let own = decide(&d, "o", None, &ProviderAction::Adopt, None, &store, 4).unwrap();
+        assert!(!own.applied && own.detail.starts_with("PROVIDER_REGISTRY_OWN"));
+        let adopted = decide(
+            &copy,
+            "adopt",
+            None,
+            &ProviderAction::Adopt,
+            None,
+            &NoCredentialStore,
+            5,
+        )
+        .unwrap();
+        assert!(adopted.applied, "{adopted:?}");
+        let theirs = current(&copy).unwrap();
+        assert_ne!(theirs.uid, reg.uid);
+        assert!(theirs
+            .credentials
+            .iter()
+            .all(|c| c.state == CredentialState::Revoked));
+        assert_eq!(theirs.provider("helius-rpc").unwrap().qualification, None);
+        assert!(owned(&copy, &theirs).is_ok());
+        assert_eq!(
+            items(&store, &current(&d).unwrap()).len(),
+            1,
+            "the original project's item untouched"
+        );
+        let _ = std::fs::remove_dir_all(copy);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
     /// Review L2/L3: every rule lives in `apply` (the GUI decides through the same path) and a
     /// refused value is never persisted: an invalid credential id (a key typed into it) is no
     /// receipt; the kind of a provider is immutable; an edit never sets a qualification and a
@@ -1090,16 +1326,26 @@ mod tests {
             !r.applied && r.detail.starts_with("PROVIDER_KIND_IMMUTABLE"),
             "{r:?}"
         );
-        decide(
+        decide(&d, "s0", None, &set(), Some(b"KEY"), &store, 3).unwrap();
+        let reg = current(&d).unwrap();
+        let qualified = evidence_for(
             &d,
             "q",
-            None,
-            &ProviderAction::Qualify("helius-rpc".into(), Some("0123456789abcdef".into())),
-            None,
-            &store,
-            3,
-        )
-        .unwrap();
+            &reg.binding_of(reg.provider("helius-rpc").unwrap()).unwrap(),
+        );
+        assert!(
+            decide(
+                &d,
+                "q",
+                None,
+                &ProviderAction::Qualify("helius-rpc".into(), Some(qualified.clone())),
+                None,
+                &store,
+                3,
+            )
+            .unwrap()
+            .applied
+        );
         let mut same = helius();
         same.priority = 4;
         same.qualification = Some("fedcba9876543210".into());
@@ -1120,7 +1366,7 @@ mod tests {
                 .unwrap()
                 .qualification
                 .as_deref(),
-            Some("0123456789abcdef"),
+            Some(qualified.as_str()),
             "kept, never set by an edit"
         );
         let mut moved = helius();
@@ -1148,8 +1394,13 @@ mod tests {
             credential: credential.into(),
             origin: "env:HELIUS_API_KEY".into(),
         };
+        let over = decide(&d, "i0", None, &import("helius"), Some(b"E"), &store, 6).unwrap();
         assert!(
-            decide(&d, "i1", None, &import("helius"), Some(b"E"), &store, 6)
+            !over.applied && over.detail.starts_with("CREDENTIAL_EXISTS"),
+            "{over:?}"
+        );
+        assert!(
+            decide(&d, "i1", None, &import("helius-env"), Some(b"E"), &store, 6)
                 .unwrap()
                 .applied
         );

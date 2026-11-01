@@ -17,7 +17,7 @@
 //! revision's random nonce make every revision globally unique and never reusable (a wiped
 //! registry starts a new uid), and confine a store's sweep to its own registry's items.
 use serde::{Deserialize, Serialize};
-pub use zeroize::Zeroizing;
+pub use zeroize::{Zeroize, Zeroizing};
 
 /// The kinds of provider DEC-18 names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -181,21 +181,33 @@ pub struct ProviderDescriptor {
     pub enabled: bool,
 }
 
-/// An identifier: 1–32 of `[a-z0-9_-]` (never a UUID-shaped key: 36 characters).
+/// A key-shaped value: 16 or more hex digits and nothing else (the form of many providers' API
+/// keys) — never accepted as a name, so a key typed into a name field is never persisted.
+fn key_shaped(s: &str) -> bool {
+    s.len() >= 16 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// An identifier: 1–32 of `[a-z0-9_-]`, never key-shaped (a UUID-shaped key has 36 characters,
+/// a hex key is refused by its form).
 pub fn id_ok(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 32
+        && !key_shaped(id)
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
-/// A path segment that looks like a token: 20+ characters of letters and digits mixed. A
-/// provider that carries its credential in the path uses `AuthKind::PathSegment`.
+/// A path segment that looks like a token: a word of it (split at `-`, `_`, `.`) of 16 or more
+/// characters mixing letters and digits — a hyphenated name (`solana-mainnet-archive-v2`) is no
+/// token. A provider that carries its credential in the path uses `AuthKind::PathSegment`. (A
+/// short or digit-free token cannot be told from a name; it stays the operator's to keep out.)
 fn token_like(segment: &str) -> bool {
-    segment.len() >= 20
-        && segment.bytes().any(|b| b.is_ascii_digit())
-        && segment.bytes().any(|b| b.is_ascii_alphabetic())
+    segment.split(['-', '_', '.']).any(|word| {
+        word.len() >= 16
+            && word.bytes().any(|b| b.is_ascii_digit())
+            && word.bytes().any(|b| b.is_ascii_alphabetic())
+    })
 }
 
 /// The canonical endpoint of `raw` for `kind`: TLS (`https`/`wss`), a plain scheme only for a
@@ -259,6 +271,7 @@ impl ProviderDescriptor {
         }
         let entitlement_ok = !self.entitlement.is_empty()
             && self.entitlement.len() <= 32
+            && !key_shaped(&self.entitlement)
             && self.entitlement.bytes().all(|b| {
                 b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
             });
@@ -383,6 +396,10 @@ pub struct ProviderRegistry {
     /// The registry's random uid (16 lowercase hex digits), fixed at its first version: the
     /// namespace of its keychain items.
     pub uid: String,
+    /// The canonical directory of the project the registry belongs to, fixed at its first
+    /// version: a copied store (another project's directory) never decides over this one's
+    /// keychain items (`p0ctl provider adopt` takes a moved project over with a new uid).
+    pub project: String,
     pub providers: Vec<ProviderDescriptor>,
     /// At most one provider per kind; selection only, never a fallback.
     pub selected: Vec<(ProviderKind, String)>,
@@ -395,6 +412,7 @@ impl ProviderRegistry {
         Self {
             version: 0,
             uid: String::new(),
+            project: String::new(),
             providers: vec![],
             selected: vec![],
             credentials: vec![],
@@ -469,6 +487,9 @@ impl ProviderRegistry {
     pub fn validate(&self) -> Result<(), String> {
         if self.version > 0 && !nonce_ok(&self.uid) {
             return Err("PROVIDER_REGISTRY_UID_INVALID".into());
+        }
+        if self.version > 0 && self.project.is_empty() {
+            return Err("PROVIDER_REGISTRY_PROJECT_MISSING".into());
         }
         let mut ids = std::collections::BTreeSet::new();
         for p in &self.providers {
@@ -701,6 +722,12 @@ mod tests {
             canonical_endpoint(Rpc, "http://[::1]:8899").unwrap(),
             "http://[::1]:8899"
         );
+        // A hyphenated name is no token.
+        assert_eq!(
+            canonical_endpoint(Rpc, "https://rpc.example/solana-mainnet-archive-v2").unwrap(),
+            "https://rpc.example/solana-mainnet-archive-v2"
+        );
+        assert!(canonical_endpoint(Jito, "https://mainnet.block-engine.jito.wtf/api/v1").is_ok());
         for (kind, url, code) in [
             (
                 Rpc,
@@ -721,6 +748,11 @@ mod tests {
             (Rpc, "http://rpc.example", "PROVIDER_URL_SCHEME"),
             (Wss, "https://rpc.example", "PROVIDER_URL_SCHEME"),
             (Rpc, "not a url SECRET0", "PROVIDER_URL_INVALID"),
+            (
+                Rpc,
+                "https://rpc.example/0123456789abcdef0123456789abcdef",
+                "PROVIDER_URL_PATH_SECRET",
+            ),
         ] {
             let e = canonical_endpoint(kind, url).unwrap_err();
             assert!(e.starts_with(code), "{url}: {e}");
@@ -738,6 +770,7 @@ mod tests {
         let mut r = ProviderRegistry::empty();
         r.version = 1;
         r.uid = "0123456789abcdef".into();
+        r.project = "/p".into();
         r.providers.push(p.clone());
         r.credentials.push(meta(1, "aaaaaaaaaaaaaaaa"));
         let base = r.binding_of(&p).unwrap();
@@ -817,11 +850,26 @@ mod tests {
             "{e}"
         );
         let mut p = helius();
+        p.credential = Some("0123456789abcdef0123456789abcdef".into());
+        assert!(
+            p.validate()
+                .unwrap_err()
+                .starts_with("CREDENTIAL_ID_INVALID"),
+            "a hex key is no id"
+        );
+        let mut p = helius();
+        p.entitlement = "0123456789abcdef".into();
+        assert!(p
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_ENTITLEMENT_INVALID"));
+        let mut p = helius();
         p.endpoint = "https://mainnet.helius-rpc.com/".into();
         assert_eq!(p.validate().unwrap_err(), "PROVIDER_URL_NOT_CANONICAL");
         let mut r = ProviderRegistry::empty();
         r.version = 1;
         r.uid = "0123456789abcdef".into();
+        r.project = "/p".into();
         r.providers.push(helius());
         r.selected.push((ProviderKind::Rpc, "helius-rpc".into()));
         assert!(r.validate().unwrap_err().starts_with("CREDENTIAL_UNKNOWN"));
@@ -858,6 +906,12 @@ mod tests {
         let mut bad = r.clone();
         bad.uid = String::new();
         assert_eq!(bad.validate().unwrap_err(), "PROVIDER_REGISTRY_UID_INVALID");
+        let mut bad = r.clone();
+        bad.project = String::new();
+        assert_eq!(
+            bad.validate().unwrap_err(),
+            "PROVIDER_REGISTRY_PROJECT_MISSING"
+        );
     }
 
     /// The store keeps one item per account; a missing one is unavailable (fail closed), a

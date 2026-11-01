@@ -34,7 +34,7 @@
 //! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
-//! p0ctl [--project DIR] provider status|add|update|remove|enable|disable|priority|select|unselect|qualify|credential … (DEC-18: the provider registry)
+//! p0ctl [--project DIR] provider status|add|update|remove|enable|disable|priority|select|unselect|qualify|credential …|adopt (DEC-18: the provider registry)
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fee-parity [--seal]   (P6-MT.10: the local fee model's parity per class over every saved run; --seal: sealed as what an owner's ACTIVE rests on)
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
@@ -2009,12 +2009,13 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const PROVIDER_USAGE: &str = "usage: p0ctl provider status
-  | p0ctl provider add|update --id ID [--kind rpc|wss|geyser|jupiter|jito] [--endpoint URL] [--plan free|unknown] [--entitlement NAME] [--auth none|query:NAME|header:NAME] [--credential CID] [--priority N] [--capacity-rps N] [--disabled]
+  | p0ctl provider add|update --id ID [--kind rpc|wss|geyser|jupiter|jito] [--endpoint URL] [--plan free|unknown] [--entitlement NAME] [--auth none|query:NAME|header:NAME|path] [--credential CID] [--priority N] [--capacity-rps N] [--disabled]
   | p0ctl provider remove|enable|disable --id ID | p0ctl provider priority --id ID --priority N
   | p0ctl provider select --kind KIND --id ID | p0ctl provider unselect --kind KIND | p0ctl provider qualify --id ID --evidence RECORD_ID|-
   | p0ctl provider credential set|rotate --credential CID   (the secret from a hidden prompt or the standard input, never an argument)
   | p0ctl provider credential revoke --credential CID
   | p0ctl provider credential import-env --credential CID --variable NAME [--env-file FILE]   (the one-time import of an existing .env key)
+  | p0ctl provider adopt   (a registry recorded for another project directory: a new uid, every credential set again)
   every change: [--request-id ID] [--expect-version N]; effective at the next controlled start (DEC-05)";
 
 /// The value of `flag` once at most among `allowed` flags; any other flag is refused (a secret is
@@ -2056,7 +2057,7 @@ fn provider_options(
     Ok(out)
 }
 
-/// The terminal settings a hidden prompt restores — on return, and on SIGINT/SIGTERM/SIGHUP.
+/// The terminal settings a hidden prompt restores — on return, and on SIGINT/SIGTERM/SIGHUP/SIGQUIT.
 static PROMPT_TERMIOS: std::sync::OnceLock<libc::termios> = std::sync::OnceLock::new();
 
 extern "C" fn restore_prompt_and_reraise(signal: libc::c_int) {
@@ -2075,7 +2076,7 @@ extern "C" fn restore_prompt_and_reraise(signal: libc::c_int) {
 /// signal handler on an interrupt.
 struct HiddenPrompt {
     old: libc::termios,
-    handlers: [(libc::c_int, libc::sighandler_t); 3],
+    handlers: Vec<(libc::c_int, libc::sighandler_t)>,
 }
 
 impl HiddenPrompt {
@@ -2089,8 +2090,15 @@ impl HiddenPrompt {
             let _ = PROMPT_TERMIOS.set(old);
             let handler =
                 restore_prompt_and_reraise as extern "C" fn(libc::c_int) as libc::sighandler_t;
-            let handlers =
-                [libc::SIGINT, libc::SIGTERM, libc::SIGHUP].map(|s| (s, libc::signal(s, handler)));
+            // An inherited "ignore" (SIGHUP under nohup) stays ignored.
+            let mut handlers = vec![];
+            for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
+                let before = libc::signal(s, handler);
+                if before == libc::SIG_IGN {
+                    libc::signal(s, libc::SIG_IGN);
+                }
+                handlers.push((s, before));
+            }
             let prompt = Self { old, handlers };
             let mut quiet = old;
             quiet.c_lflag &= !libc::ECHO;
@@ -2107,7 +2115,7 @@ impl Drop for HiddenPrompt {
         // SAFETY: restores what `start` changed.
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &self.old);
-            for (s, h) in self.handlers {
+            for &(s, h) in &self.handlers {
                 libc::signal(s, h);
             }
         }
@@ -2194,7 +2202,7 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         };
     let number = |v: &str, f: &str| -> Result<u64, String> {
         v.parse::<u64>()
-            .map_err(|_| format!("PROVIDER_NUMBER_INVALID: {f} {v}"))
+            .map_err(|_| format!("PROVIDER_NUMBER_INVALID: {f} (not echoed)"))
     };
     let current = reg::current(project)?;
     let (action, opts, secret) = match (verb, rest) {
@@ -2215,6 +2223,9 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 &["--disabled"],
             )?;
             let id = need(&o, "--id")?;
+            if !darkbot_solana::providers::id_ok(&id) {
+                return Err("PROVIDER_ID_INVALID ([a-z0-9_-]{1,32}; not echoed)".into());
+            }
             let base = match (verb, current.provider(&id)) {
                 ("update", Some(p)) => p.clone(),
                 ("update", None) => return Err(format!("PROVIDER_UNKNOWN: {id}")),
@@ -2311,16 +2322,18 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         ("qualify", _) => {
             let o = provider_options(rest, &with(&["--id", "--evidence"]), &[])?;
             let evidence = need(&o, "--evidence")?;
+            // The evidence's existence and binding are the store's checks (`decide`).
             let evidence = (evidence != "-").then_some(evidence);
-            if let Some(e) = &evidence {
-                darkbot_runner::orchestration::provider_evidence::resolve(project, e)?;
-            }
             (A::Qualify(need(&o, "--id")?, evidence), o, None)
         }
         ("credential", [sub, more @ ..]) => match sub.as_str() {
             "set" | "rotate" => {
                 let o = provider_options(more, &with(&["--credential"]), &[])?;
                 let credential = need(&o, "--credential")?;
+                // The request is checked before its secret is asked for.
+                if !darkbot_solana::providers::id_ok(&credential) {
+                    return Err("CREDENTIAL_ID_INVALID ([a-z0-9_-]{1,32}; not echoed)".into());
+                }
                 let action = if sub == "set" {
                     A::CredentialSet {
                         credential,
@@ -2353,30 +2366,45 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                         .unwrap_or_else(|| project.join(".env")),
                 };
                 let text = darkbot_solana::providers::Zeroizing::new(
-                    std::fs::read_to_string(&file)
-                        .map_err(|e| format!("CREDENTIAL_ENV_FILE: {}: {e}", file.display()))?,
+                    std::fs::read_to_string(&file).map_err(|_| {
+                        "CREDENTIAL_ENV_FILE: the env file is unreadable (not echoed)".to_string()
+                    })?,
                 );
-                let pairs = darkbot_runner::env_file::parse(&text)
-                    .map_err(|e| format!("CREDENTIAL_ENV_FILE: {}: {e}", file.display()))?;
+                let mut pairs = darkbot_runner::env_file::parse(&text).map_err(|_| {
+                    "CREDENTIAL_ENV_FILE: the env file is malformed (not echoed)".to_string()
+                })?;
                 let secret = pairs
-                    .into_iter()
+                    .iter()
                     .find(|(k, _)| *k == variable)
-                    .map(|(_, v)| darkbot_solana::providers::Zeroizing::new(v.into_bytes()))
-                    .ok_or_else(|| format!("CREDENTIAL_ENV_VARIABLE: not in {}", file.display()))?;
+                    .map(|(_, v)| darkbot_solana::providers::Zeroizing::new(v.as_bytes().to_vec()));
+                // The file's other values never outlive the read.
+                for (_, v) in pairs.iter_mut() {
+                    darkbot_solana::providers::Zeroize::zeroize(v);
+                }
+                let secret = secret
+                    .ok_or_else(|| "CREDENTIAL_ENV_VARIABLE: not in the env file".to_string())?;
                 (A::CredentialSet { credential, origin }, o, Some(secret))
             }
             _ => return Err(PROVIDER_USAGE.into()),
         },
+        ("adopt", _) => {
+            let o = provider_options(rest, &with(&[]), &[])?;
+            (A::Adopt, o, None)
+        }
         _ => return Err(PROVIDER_USAGE.into()),
     };
     let request_id = match opts.get("--request-id") {
         Some(id) => id.clone(),
         None => darkbot_runner::analytics::jobs::new_id()?,
     };
-    let expected = opts
+    let mut expected = opts
         .get("--expect-version")
         .map(|v| number(v, "--expect-version"))
         .transpose()?;
+    // An update is built from the version it read: never over a change made in between.
+    if matches!(action, A::Update(_)) && expected.is_none() {
+        expected = Some(current.version);
+    }
     let store: Box<dyn darkbot_solana::providers::CredentialStore> =
         if reg::touches_credentials(&action) {
             darkbot_solana::providers::system_store()?
