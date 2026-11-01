@@ -2115,6 +2115,15 @@ pub mod p0 {
                 }
             }
 
+            // P6-MT.7 (re-check L3): a candidate without a plan whose route the router's quota
+            // refused was not judged — deferred before every other cause of an empty plan.
+            if out.is_empty()
+                && route_errors
+                    .iter()
+                    .any(|e| crate::execution::route::budget_refusal(e))
+            {
+                return Err(routing_error(&route_errors));
+            }
             // Z12: without any plan, the first pair error ends planning exactly as it did before
             // (same text, same classification); otherwise it stays a diagnostic.
             if out.is_empty() {

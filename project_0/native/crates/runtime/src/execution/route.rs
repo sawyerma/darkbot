@@ -159,7 +159,8 @@ pub enum JupiterClass {
     Exit,
     /// A candidate's routes: it leaves the exits' reserve (`jupiter_exit_reserve`).
     Candidate,
-    /// An observation (rebalancing OBSERVE): it also leaves one request for a candidate.
+    /// An observation (rebalancing OBSERVE): it also leaves a candidate's JIT solve (its reverse
+    /// and forward quote) and one slot in flight.
     Observe,
 }
 
@@ -263,7 +264,7 @@ impl JupiterBudget {
         match class {
             JupiterClass::Exit => 0,
             JupiterClass::Candidate => self.exit_reserve,
-            JupiterClass::Observe => self.exit_reserve.saturating_add(1),
+            JupiterClass::Observe => self.exit_reserve.saturating_add(2),
         }
     }
 
@@ -320,7 +321,12 @@ impl JupiterBudget {
             return Err(JUPITER_RATE_LIMITED);
         }
         self.refill(&mut s, now);
-        if s.inflight >= self.inflight_max {
+        // An observation never takes the last slot (a slow one never holds up an exit).
+        let slots = match class {
+            JupiterClass::Observe => self.inflight_max.saturating_sub(1),
+            JupiterClass::Exit | JupiterClass::Candidate => self.inflight_max,
+        };
+        if s.inflight >= slots {
             return Err(JUPITER_INFLIGHT);
         }
         if s.tokens <= self.floor(class) {
@@ -1612,21 +1618,31 @@ pub(crate) mod tests {
         );
         assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_RATE_BUDGET));
         drop((x, y));
-        // Floors: an observation leaves the exits' reserve and one request for a candidate, a
+        // Floors: an observation leaves the exits' reserve and a candidate's JIT solve (two), a
         // candidate the exits' reserve, an exit nothing.
-        let b = Arc::new(JupiterBudget::new(s(2), 3, 8, 1));
+        let b = Arc::new(JupiterBudget::new(s(2), 4, 8, 1));
         let t = Instant::now();
         assert_eq!(
             [Observe, Candidate, Exit].map(|c| b.available_at(c, t)),
-            [1, 2, 3]
+            [1, 3, 4]
         );
         let o = b.admit_at(Observe, t).unwrap();
         assert_eq!(b.admit_at(Observe, t).err(), Some(JUPITER_RATE_BUDGET));
-        let c = b.admit_at(Candidate, t).unwrap();
+        let c = (
+            b.admit_at(Candidate, t).unwrap(),
+            b.admit_at(Candidate, t).unwrap(),
+        );
         assert_eq!(b.admit_at(Candidate, t).err(), Some(JUPITER_RATE_BUDGET));
         let e = b.admit_at(Exit, t).unwrap();
         assert_eq!(b.admit_at(Exit, t).err(), Some(JUPITER_RATE_BUDGET));
         drop((o, c, e));
+        // An observation never takes the last slot in flight; an exit may.
+        let b = Arc::new(JupiterBudget::new(s(2), 4, 2, 0));
+        let t = Instant::now();
+        let first = b.admit_at(Candidate, t).unwrap();
+        assert_eq!(b.admit_at(Observe, t).err(), Some(JUPITER_INFLIGHT));
+        let exit = b.admit_at(Exit, t).unwrap();
+        drop((first, exit));
         // A 429: its Retry-After, a shorter one later never shortens it, then one interval to
         // the first token.
         let b = Arc::new(JupiterBudget::new(s(2), 1, 4, 0));

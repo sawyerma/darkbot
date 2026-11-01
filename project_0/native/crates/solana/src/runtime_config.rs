@@ -252,13 +252,14 @@ parameters! {
     // P6-MT.7: Jupiter's quota is one bucket per account, every credential and endpoint of it
     // (`/swap/v2/build` draws from the general one): the spacing of its requests authenticated
     // and anonymous (the published free tier, 1 and 0.5 requests/s); the requests one burst may
-    // take — one search of a funding class (`route_attempts_max`) — and the requests in flight;
+    // take — one search of a funding class (`route_attempts_max`) — and the requests in flight
+    // (P6-MT.7: rate × latency p95 × safety, here one, and a small reserve);
     // the tokens only an exit may take (an exit ranks above a candidate, a candidate above an
     // observation) (revision 19).
     jupiter_authenticated_interval_ms = 1000, "ms", "P0_JUPITER_AUTHENTICATED_INTERVAL_MS";
     jupiter_anonymous_interval_ms = 2000, "ms", "P0_JUPITER_ANONYMOUS_INTERVAL_MS";
     jupiter_burst = 6, "requests", "P0_JUPITER_BURST";
-    jupiter_inflight = 1, "requests", "P0_JUPITER_INFLIGHT";
+    jupiter_inflight = 2, "requests", "P0_JUPITER_INFLIGHT";
     jupiter_exit_reserve = 1, "requests", "P0_JUPITER_EXIT_RESERVE";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
