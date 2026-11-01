@@ -1814,6 +1814,8 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         by_tx: None,
         response: None,
         origin: None,
+        launcher: None,
+        placement: None,
     };
     Ledger::open(&dir).append(&buy, now).unwrap();
     let config = super::live::runtime_config(&root);

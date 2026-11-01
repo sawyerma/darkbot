@@ -486,6 +486,9 @@ pub struct Counters {
 pub enum StrategyAction {
     Buy {
         token: [u8; 20],
+        /// The creator of the token's launch (REV.1.0 R2: its LIVE lot's
+        /// exit keeps the creator rule after a restart).
+        creator: [u8; 20],
         curve: StrategyCurve,
         input_wei: U256,
         decided_ns: u64,
@@ -636,6 +639,7 @@ impl StrategyRuntime {
                 Pending::Buy(token, decided_ns) => {
                     self.curve(&token).map(|curve| StrategyAction::Buy {
                         token,
+                        creator: self.engine.creator_of(&token).unwrap_or_default(),
                         curve,
                         input_wei: self.input_wei,
                         decided_ns,

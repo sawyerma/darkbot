@@ -753,6 +753,9 @@ pub struct Handover<'a> {
     /// A BUY: the most the exits of the sender's open positions and of its
     /// own may still cost (BSC3-057); an exit step: zero.
     pub exit_reserve_wei: U256,
+    /// REV.1.0 R2: a Strategy C BUY's launch creator (the end keeps it with
+    /// the release); none for C3 (its block names it) and the exits.
+    pub launcher: Option<[u8; 20]>,
 }
 
 /// What an end made of one hand-over.
@@ -911,6 +914,7 @@ impl End for PaperEnd {
             submission,
             config,
             exit_reserve_wei: _,
+            launcher: _,
         } = h;
         let (adapter, mode, launch, merge) = match submission {
             Submission::LaunchBundle(launch_raw) => (
@@ -1053,6 +1057,7 @@ fn to_end<E: End>(
     clock: &dyn Clock,
     start_ns: u64,
     submission: Submission<'_>,
+    launcher: Option<[u8; 20]>,
 ) -> (Result<E::Handoff, Refusal>, u64, u64, (bool, bool)) {
     let Parts {
         end,
@@ -1079,6 +1084,7 @@ fn to_end<E: End>(
         submission,
         config,
         exit_reserve_wei,
+        launcher,
     });
     (
         handed.result,
@@ -1424,6 +1430,7 @@ impl<E: End> Executor<E> {
             clock,
             ingress_ns,
             Submission::LaunchBundle(launch_raw),
+            None,
         );
         // The exposure is the session's once the economic admission was
         // consumed (`begin_send`), whatever followed.
@@ -1455,9 +1462,11 @@ impl<E: End> Executor<E> {
     /// next strategy lane and the single-raw plan to the sink. The
     /// transport start deadline runs from now, when the decision is
     /// processed (gate H1), not from the record.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_strategy_buy(
         &mut self,
         token: [u8; 20],
+        creator: [u8; 20],
         curve: StrategyCurve,
         input_wei: U256,
         c2: &CanonicalContext<'_>,
@@ -1466,7 +1475,9 @@ impl<E: End> Executor<E> {
     ) -> Result<ExecIntent<E::Handoff>, Refusal> {
         self.strategy_counters.launches += 1;
         let start_ns = clock.now_ns();
-        let result = self.strategy_buy(token, curve, input_wei, c2, clock, decided_ns, start_ns);
+        let result = self.strategy_buy(
+            token, creator, curve, input_wei, c2, clock, decided_ns, start_ns,
+        );
         match &result {
             Ok(_) => self.strategy_counters.handoffs += 1,
             Err(r) => self.strategy_counters.refuse(*r),
@@ -1663,6 +1674,7 @@ impl<E: End> Executor<E> {
     fn strategy_buy(
         &mut self,
         token: [u8; 20],
+        creator: [u8; 20],
         curve: StrategyCurve,
         input_wei: U256,
         c2: &CanonicalContext<'_>,
@@ -1771,6 +1783,7 @@ impl<E: End> Executor<E> {
             clock,
             start_ns,
             Submission::Single,
+            (creator != [0; 20]).then_some(creator),
         );
         // Gate L2: the exposure counts once the BUY may be out; a nonce
         // taken again (nothing disclosed) spends nothing.
@@ -1973,6 +1986,7 @@ impl<E: End> Executor<E> {
                 clock,
                 start_ns,
                 Submission::Single,
+                None,
             );
             // Gate L2: gas counts once something may be out; a nonce taken
             // again spends nothing.
@@ -2824,6 +2838,7 @@ pub(crate) mod tests {
         let buy = exec
             .on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -2847,6 +2862,7 @@ pub(crate) mod tests {
         assert_eq!(
             exec.on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -2955,11 +2971,19 @@ pub(crate) mod tests {
             exit_reserve_wei: None,
         };
         assert_eq!(
-            exec.on_strategy_buy([1; 20], curve, input, &none, &clock(1, 1), 1),
+            exec.on_strategy_buy([1; 20], [0; 20], curve, input, &none, &clock(1, 1), 1),
             Err(Refusal::NoSnapshot)
         );
         assert_eq!(
-            exec.on_strategy_buy([1; 20], curve, input, &strategy_c2(None), &clock(1, 1), 1),
+            exec.on_strategy_buy(
+                [1; 20],
+                [0; 20],
+                curve,
+                input,
+                &strategy_c2(None),
+                &clock(1, 1),
+                1
+            ),
             Err(Refusal::NoSnapshot)
         );
         // Gate L-a: a head older than the bound (30 s) is not acted on; a
@@ -2972,13 +2996,14 @@ pub(crate) mod tests {
             exit_reserve_wei: None,
         };
         assert_eq!(
-            exec.on_strategy_buy([1; 20], curve, input, &late, &clock(1, 1), 1),
+            exec.on_strategy_buy([1; 20], [0; 20], curve, input, &late, &clock(1, 1), 1),
             Err(Refusal::StaleHead)
         );
         // Input plus gas is above the cap.
         assert_eq!(
             exec.on_strategy_buy(
                 [1; 20],
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3017,6 +3042,7 @@ pub(crate) mod tests {
         let (mut exec, d) = armed("strategy-exit-room", at(buy + exit - U256::from(1u8)));
         let bought = exec.on_strategy_buy(
             token,
+            [0; 20],
             curve,
             input,
             &strategy_c2(Some(HEAD)),
@@ -3032,6 +3058,7 @@ pub(crate) mod tests {
         let bought = exec
             .on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3122,6 +3149,7 @@ pub(crate) mod tests {
         let buy = exec
             .on_strategy_buy(
                 [0xAB; 20],
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3140,6 +3168,7 @@ pub(crate) mod tests {
         let buy = exec
             .on_strategy_buy(
                 [0xAB; 20],
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3168,6 +3197,7 @@ pub(crate) mod tests {
         assert_eq!(
             exec.on_strategy_buy(
                 [1; 20],
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3221,7 +3251,7 @@ pub(crate) mod tests {
         let c2 = strategy_c2(Some(HEAD));
         let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
         let buy = exec
-            .on_strategy_buy([1; 20], curve, input, &c2, &clock(1, 1), 1)
+            .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1)
             .unwrap();
         let after_buy = exec.strategy_lanes().3;
         let tokens = decode_swap_exact_input_native(decode_signed(&buy.raw).unwrap().tx.input)
@@ -3296,12 +3326,20 @@ pub(crate) mod tests {
         let c2 = strategy_c2(Some(HEAD));
         let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
         let a = exec
-            .on_strategy_buy([1; 20], curve, input, &c2, &clock(1, 1), 1)
+            .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1)
             .unwrap();
         assert_eq!(nonce(&a.raw), 0);
         let late = 2_000_000;
         assert_eq!(
-            exec.on_strategy_buy([2; 20], curve, input, &c2, &clock_jump(1, 1, 7, late), 1),
+            exec.on_strategy_buy(
+                [2; 20],
+                [0; 20],
+                curve,
+                input,
+                &c2,
+                &clock_jump(1, 1, 7, late),
+                1
+            ),
             Err(Refusal::Deadline)
         );
         let (_, _, next_nonce, _, gap) = exec.strategy_lanes();
@@ -3330,11 +3368,19 @@ pub(crate) mod tests {
         assert_eq!(nonces, [1, 2]);
         // C: late at the write check, after its permit: a hole.
         assert_eq!(
-            exec.on_strategy_buy([3; 20], curve, input, &c2, &clock_jump(1, 1, 8, late), 1),
+            exec.on_strategy_buy(
+                [3; 20],
+                [0; 20],
+                curve,
+                input,
+                &c2,
+                &clock_jump(1, 1, 8, late),
+                1
+            ),
             Err(Refusal::Dispatch)
         );
         assert_eq!(
-            exec.on_strategy_buy([4; 20], curve, input, &c2, &clock(1, 1), 1),
+            exec.on_strategy_buy([4; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1),
             Err(Refusal::NonceGap)
         );
         let (_, left, next_nonce, _, gap) = exec.strategy_lanes();
@@ -3480,6 +3526,7 @@ pub(crate) mod tests {
         let intent = other
             .on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),
@@ -3511,6 +3558,7 @@ pub(crate) mod tests {
         let buy = |e: &mut Executor<RecordingEnd>, t: [u8; 20]| {
             e.on_strategy_buy(
                 t,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2(Some(HEAD)),

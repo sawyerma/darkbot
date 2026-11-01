@@ -307,6 +307,10 @@ pub const LIVE_EXIT_OUT_OF_GAS: &str = "LIVE_EXIT_OUT_OF_GAS";
 /// or not a Portal token): no strategy exit can sell it; no new BUY until
 /// it ends.
 pub const LIVE_POSITION_OFF_CURVE: &str = "LIVE_POSITION_OFF_CURVE";
+/// REV.1.0 R2: a C3 BUY of the grant landed behind another trader's BUY,
+/// outside its launch's block or without tokens (the ledger's `PLACED`):
+/// no new BUY until the operator grants anew; the exits go on.
+pub const LIVE_PLACEMENT_VIOLATED: &str = "LIVE_PLACEMENT_VIOLATED";
 /// 01.11. (R1 review): an open lot whose curve read fails for a reason a
 /// retry does not change (an ABI violation, no Portal state): no exit
 /// prices it; no new BUY until it ends.

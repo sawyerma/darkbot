@@ -228,20 +228,23 @@ pub struct VenueInputs {
 /// One canonical launch record (`b'C'`); class 0 marks an orphaned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LaunchRecord {
-    venue: Venue,
-    block_hash: [u8; 32],
+    pub(crate) venue: Venue,
+    /// REV.1.0 R2: its block's number and header time (ms).
+    pub(crate) block_number: u64,
+    pub(crate) block_ms: u64,
+    pub(crate) block_hash: [u8; 32],
     /// The launch's index in its block; `None` for an orphaned one.
-    tx_index: Option<u64>,
+    pub(crate) tx_index: Option<u64>,
     /// The created token, where known.
-    token: Option<[u8; 20]>,
+    pub(crate) token: Option<[u8; 20]>,
     pub(crate) tx_hash: [u8; 32],
     external_buys: Option<u32>,
     pub(crate) class: u8,
     source: Option<usize>,
     delta_us: u64,
     pub(crate) c1_scope: bool,
-    tx_unverifiable: bool,
-    tx_answer_refused: bool,
+    pub(crate) tx_unverifiable: bool,
+    pub(crate) tx_answer_refused: bool,
     fetch_lag_ms: Option<i64>,
     /// `None` in a record of an older build.
     four: Option<FourToken>,
@@ -311,6 +314,8 @@ pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     }
     Some(LaunchRecord {
         venue,
+        block_number: u64_at(p, 2)?,
+        block_ms: u64_at(p, 118)?,
         block_hash: hash_at(p, 10)?,
         tx_index: Some(u64_at(p, 42)?),
         token: if flag(p[82])? {
@@ -670,9 +675,12 @@ fn replay(
                 }
             }
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
-                let (Some(block), Some(tx), Some(venue)) =
-                    (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
-                else {
+                let (Some(number), Some(block), Some(tx), Some(venue)) = (
+                    u64_at(p, 2),
+                    hash_at(p, 10),
+                    hash_at(p, 42),
+                    venue_of_byte(p[1]),
+                ) else {
                     window.unparsed_records += 1;
                     continue;
                 };
@@ -686,6 +694,8 @@ fn replay(
                     // Counted as orphaned (class 0), joined or not.
                     launches.push(LaunchRecord {
                         venue,
+                        block_number: number,
+                        block_ms: 0,
                         block_hash: block,
                         tx_index: None,
                         token: None,

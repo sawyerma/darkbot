@@ -134,14 +134,24 @@ pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
     out
 }
 
-/// One LIVE transaction the release took (plan 28.10.), a `Runtime`
-/// record: `l | kind u8 (0 C3 BUY, 1 BUY, 2 approval, 3 SELL) | builders
-/// u8 | tx_hash [32] | launch hash [32] (zero for Strategy C) | token [20]
-/// | head block u64 (0 for C3) | ingress or decision, admitted, signed,
-/// handoff ns u64 | the signed bytes`.
+/// One LIVE transaction the release took (plan 28.10.; REV.1.0 R2: the
+/// attempt's record, master plan §8–§9), a `Runtime` record: `l | layout u8
+/// ([`LIVE_RELEASE_LAYOUT`]; the layout before it had the kind here and is
+/// refused) | kind u8 (0 C3 BUY, 1 BUY, 2 approval, 3 SELL) | trigger u8 (the sighting's
+/// source; [`NO_TRIGGER`] for a decision on a block) | tx_hash [32] |
+/// attempt [32] | launch hash [32] (zero for Strategy C) | token [20] |
+/// head block u64 (0 for C3) | clock id u32 | ingress or decision,
+/// decoded, admitted, signed, prepared, planned, select, handoff ns u64 |
+/// deadline misses u8 | adapters n u8 | n × (adapter u8 | builder u8 (an
+/// index of `LiveAdapter::ALL`, [`NO_BUILDER`] unknown) | outcome u8 |
+/// boundary u8 | qualified u8 (bit 0 the adapter's record qualifies the
+/// boundary, bit 1 the transport) | set u8 (bit i: time i read) |
+/// pre-permit check, write check, boundary, queue commit ns u64) | the
+/// signed bytes`. A time not read is written 0 with its bit clear.
 #[allow(clippy::too_many_arguments)]
 pub fn live_release_payload(
     kind: u8,
+    trigger: Option<SourceId>,
     handoff: &crate::live_end::LiveHandoff,
     launch_hash: [u8; 32],
     token: [u8; 20],
@@ -149,24 +159,315 @@ pub fn live_release_payload(
     times: &crate::paper_exec::StageTimes,
     raw: &[u8],
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + 1 + 1 + 32 + 32 + 20 + 8 + 4 * 8 + raw.len());
+    use darkbot_bsc_trading::intent::{AdapterId, MAX_ADAPTERS};
+    let report = &handoff.report;
+    let adapters: Vec<_> = (0..MAX_ADAPTERS as u8)
+        .filter_map(AdapterId::new)
+        .filter_map(|a| report.adapter(a))
+        .collect();
+    let mut out =
+        Vec::with_capacity(LIVE_RELEASE_HEAD + adapters.len() * LIVE_ADAPTER_LEN + raw.len());
     out.push(b'l');
+    out.push(LIVE_RELEASE_LAYOUT);
     out.push(kind);
-    out.push(handoff.adapters);
+    out.push(trigger.map_or(NO_TRIGGER, source_byte));
     out.extend_from_slice(&handoff.tx_hash);
+    out.extend_from_slice(&handoff.attempt);
     out.extend_from_slice(&launch_hash);
     out.extend_from_slice(&token);
     out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(&report.clock_id.to_le_bytes());
     for ns in [
         times.ingress_ns,
+        times.decoded_ns,
         times.admitted_ns,
         times.signed_ns,
-        times.sink_ns,
+        times.prepared_ns,
+        times.planned_ns,
+        report.t_select_ns,
+        handoff.at_ns,
     ] {
         out.extend_from_slice(&ns.to_le_bytes());
     }
+    out.push(report.deadline_misses);
+    out.push(adapters.len() as u8);
+    for a in adapters {
+        out.push(a.adapter.index() as u8);
+        out.push(
+            handoff.builders[a.adapter.index()]
+                .and_then(|b| {
+                    crate::sources::LiveAdapter::ALL
+                        .iter()
+                        .position(|x| *x == b)
+                })
+                .map_or(NO_BUILDER, |i| i as u8),
+        );
+        out.push(send_outcome_code(&a.outcome));
+        out.push(boundary_code(a.boundary));
+        out.push(u8::from(a.record_qualifies_boundary) | (u8::from(a.transport_qualified) << 1));
+        let read = [
+            a.t_prepermit_check_ns,
+            a.t_write_check_ns,
+            a.t_boundary_ns,
+            a.t_queue_ns,
+        ];
+        out.push(
+            read.iter()
+                .enumerate()
+                .fold(0u8, |m, (i, t)| m | (u8::from(t.is_some()) << i)),
+        );
+        for t in read {
+            out.extend_from_slice(&t.unwrap_or(0).to_le_bytes());
+        }
+    }
     out.extend_from_slice(raw);
     out
+}
+
+/// The trigger byte of a LIVE transaction decided on a block.
+pub const NO_TRIGGER: u8 = 0xFF;
+/// The builder byte of an adapter the dispatch did not name.
+pub const NO_BUILDER: u8 = 0xFF;
+/// The `l` layout this build writes (REV.1.0 R2): never a kind byte (0–3)
+/// of the layout before, so a record of that layout is refused.
+pub const LIVE_RELEASE_LAYOUT: u8 = 0xA2;
+/// An `l` record's bytes before its adapters.
+pub const LIVE_RELEASE_HEAD: usize = 1 + 1 + 1 + 1 + 32 + 32 + 32 + 20 + 8 + 4 + 8 * 8 + 1 + 1;
+/// One adapter's bytes in an `l` record.
+pub const LIVE_ADAPTER_LEN: usize = 6 + 4 * 8;
+
+/// The outcomes of an adapter's dispatch, by their record code.
+pub const SEND_OUTCOMES: [&str; 6] = [
+    "HANDED_OFF",
+    "SKIPPED_CONNECTION",
+    "SKIPPED_DEADLINE",
+    "PERMIT_REFUSED",
+    "SUPPRESSED",
+    "UNKNOWN",
+];
+
+fn send_outcome_code(o: &crate::submission::send::SendOutcome) -> u8 {
+    use crate::submission::send::SendOutcome as O;
+    match o {
+        O::HandedOff => 0,
+        O::SkippedConnection(_) => 1,
+        O::SkippedDeadline(_) => 2,
+        O::PermitRefused(_) => 3,
+        O::Suppressed => 4,
+        O::Unknown { .. } => 5,
+    }
+}
+
+/// The handoff boundaries, by their record code.
+pub const BOUNDARIES: [&str; 3] = [
+    "TLS_USERSPACE_WRITE_FLUSH_RETURNED",
+    "DEFERRED_TO_NATIVE_GETH",
+    "NOT_DEFINED",
+];
+
+fn boundary_code(b: darkbot_bsc_trading::submission_policy::capability::HandoffBoundary) -> u8 {
+    use darkbot_bsc_trading::submission_policy::capability::HandoffBoundary as B;
+    match b {
+        B::TlsUserspaceWriteFlushReturned => 0,
+        B::DeferredToNativeGeth => 1,
+        B::NotDefined => 2,
+    }
+}
+
+/// One adapter of a journaled LIVE release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReleasedAdapter {
+    pub adapter: u8,
+    /// The granted builder (an index of `LiveAdapter::ALL`), if named.
+    pub builder: Option<u8>,
+    /// An index of [`SEND_OUTCOMES`].
+    pub outcome: u8,
+    /// An index of [`BOUNDARIES`].
+    pub boundary: u8,
+    pub record_qualifies: bool,
+    pub transport_qualified: bool,
+    pub prepermit_ns: Option<u64>,
+    pub write_check_ns: Option<u64>,
+    pub boundary_ns: Option<u64>,
+    pub queue_ns: Option<u64>,
+}
+
+impl ReleasedAdapter {
+    /// The qualified send time (master plan §8): the boundary reached,
+    /// the adapter's record and its transport qualifying it; no other
+    /// time stands in for it.
+    pub fn t_send_ns(&self) -> Option<u64> {
+        let handed = SEND_OUTCOMES.get(usize::from(self.outcome)) == Some(&"HANDED_OFF");
+        let native = BOUNDARIES.get(usize::from(self.boundary)) == Some(&"DEFERRED_TO_NATIVE_GETH");
+        (handed && !native && self.record_qualifies && self.transport_qualified)
+            .then_some(self.boundary_ns)
+            .flatten()
+    }
+}
+
+/// A journaled LIVE release (`l`), decoded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveRelease {
+    pub kind: u8,
+    pub trigger: Option<SourceId>,
+    pub tx_hash: [u8; 32],
+    pub attempt: [u8; 32],
+    pub launch_hash: [u8; 32],
+    pub token: [u8; 20],
+    pub block: u64,
+    pub clock_id: u32,
+    /// Ingress (or decision), decoded, admitted, signed, prepared,
+    /// planned, select, handoff.
+    pub times: [u64; 8],
+    pub deadline_misses: u8,
+    pub adapters: Vec<ReleasedAdapter>,
+    pub raw: Vec<u8>,
+}
+
+/// Why an `l` record is not read.
+pub const LIVE_RELEASE_OTHER_LAYOUT: &str = "LIVE_RELEASE_LAYOUT_BEFORE_R2";
+pub const LIVE_RELEASE_MALFORMED: &str = "LIVE_RELEASE_MALFORMED";
+
+/// The `l` record `p` whole, or why not: a record of the layout before
+/// [`LIVE_RELEASE_LAYOUT`] is refused as such, never misread.
+pub fn live_release_of(p: &[u8]) -> Result<LiveRelease, &'static str> {
+    let bad = LIVE_RELEASE_MALFORMED;
+    match (p.first(), p.get(1)) {
+        (Some(b'l'), Some(&LIVE_RELEASE_LAYOUT)) => {}
+        (Some(b'l'), Some(0..=3)) => return Err(LIVE_RELEASE_OTHER_LAYOUT),
+        _ => return Err(bad),
+    }
+    if p.len() < LIVE_RELEASE_HEAD {
+        return Err(bad);
+    }
+    let u64_at = |at: usize| -> Result<u64, &'static str> {
+        Ok(u64::from_le_bytes(
+            p.get(at..at + 8).ok_or(bad)?.try_into().map_err(|_| bad)?,
+        ))
+    };
+    let fixed = |at: usize| -> Result<[u8; 32], &'static str> {
+        p.get(at..at + 32).ok_or(bad)?.try_into().map_err(|_| bad)
+    };
+    let kind = p[2];
+    if kind > 3 {
+        return Err(bad);
+    }
+    let trigger = match p[3] {
+        NO_TRIGGER => None,
+        b => Some(*SourceId::ALL.get(usize::from(b)).ok_or(bad)?),
+    };
+    let times_at = 4 + 32 + 32 + 32 + 20 + 8 + 4;
+    let mut times = [0u64; 8];
+    for (i, t) in times.iter_mut().enumerate() {
+        *t = u64_at(times_at + 8 * i)?;
+    }
+    let n = usize::from(p[LIVE_RELEASE_HEAD - 1]);
+    let mut adapters = Vec::with_capacity(n);
+    let mut at = LIVE_RELEASE_HEAD;
+    for _ in 0..n {
+        let a = p.get(at..at + LIVE_ADAPTER_LEN).ok_or(bad)?;
+        let set = a[5];
+        let read = |i: usize| -> Result<Option<u64>, &'static str> {
+            let t = u64::from_le_bytes(
+                a.get(6 + 8 * i..14 + 8 * i)
+                    .ok_or(bad)?
+                    .try_into()
+                    .map_err(|_| bad)?,
+            );
+            Ok((set & (1 << i) != 0).then_some(t))
+        };
+        let builder = match a[1] {
+            NO_BUILDER => None,
+            b if usize::from(b) < crate::sources::LiveAdapter::ALL.len() => Some(b),
+            _ => return Err(bad),
+        };
+        if usize::from(a[2]) >= SEND_OUTCOMES.len()
+            || usize::from(a[3]) >= BOUNDARIES.len()
+            || a[4] > 3
+            || set > 0x0F
+        {
+            return Err(bad);
+        }
+        adapters.push(ReleasedAdapter {
+            adapter: a[0],
+            builder,
+            outcome: a[2],
+            boundary: a[3],
+            record_qualifies: a[4] & 1 != 0,
+            transport_qualified: a[4] & 2 != 0,
+            prepermit_ns: read(0)?,
+            write_check_ns: read(1)?,
+            boundary_ns: read(2)?,
+            queue_ns: read(3)?,
+        });
+        at += LIVE_ADAPTER_LEN;
+    }
+    Ok(LiveRelease {
+        kind,
+        trigger,
+        tx_hash: fixed(4)?,
+        attempt: fixed(36)?,
+        launch_hash: fixed(68)?,
+        token: p.get(100..120).ok_or(bad)?.try_into().map_err(|_| bad)?,
+        block: u64_at(120)?,
+        clock_id: u32::from_le_bytes(p.get(128..132).ok_or(bad)?.try_into().map_err(|_| bad)?),
+        times,
+        deadline_misses: p[LIVE_RELEASE_HEAD - 2],
+        adapters,
+        raw: p[at..].to_vec(),
+    })
+}
+
+/// The answers a provider can give, by their record code (NO_RESPONSE:
+/// the connection gave the request up).
+pub const ANSWERS: [&str; 6] = [
+    "ACK",
+    "REJECT",
+    "RATE_LIMITED",
+    "PROTOCOL",
+    "CONNECTION",
+    "NO_RESPONSE",
+];
+
+/// REV.1.0 R2: one provider's answer to a LIVE release, a `Runtime` record:
+/// `a | tx_hash [32] | adapter u8 | answer u8 (an index of [`ANSWERS`]) |
+/// set u8 (1: the time was read) | classified ns u64`.
+pub fn live_answer_payload(a: &crate::live_end::Answer) -> Vec<u8> {
+    let mut out = Vec::with_capacity(LIVE_ANSWER_LEN);
+    out.push(b'a');
+    out.extend_from_slice(&a.tx_hash);
+    out.push(a.adapter.index() as u8);
+    out.push(
+        ANSWERS
+            .iter()
+            .position(|n| *n == a.outcome)
+            .unwrap_or(ANSWERS.len() - 1) as u8,
+    );
+    out.push(u8::from(a.at_ns.is_some()));
+    out.extend_from_slice(&a.at_ns.unwrap_or(0).to_le_bytes());
+    out
+}
+
+/// The length of an `a` record.
+pub const LIVE_ANSWER_LEN: usize = 1 + 32 + 1 + 1 + 1 + 8;
+
+/// The `a` record `p`: the transaction, the adapter, the answer (an index
+/// of [`ANSWERS`]) and when it was classified.
+pub fn live_answer_of(p: &[u8]) -> Option<([u8; 32], u8, u8, Option<u64>)> {
+    if p.len() != LIVE_ANSWER_LEN
+        || p[0] != b'a'
+        || usize::from(p[34]) >= ANSWERS.len()
+        || p[35] > 1
+    {
+        return None;
+    }
+    let at = u64::from_le_bytes(p[36..44].try_into().ok()?);
+    Some((
+        p[1..33].try_into().ok()?,
+        p[33],
+        p[34],
+        (p[35] == 1).then_some(at),
+    ))
 }
 
 /// C2's evidence about the LIVE buyer's nonce and what it did to the
@@ -197,6 +498,111 @@ pub fn lane_evidence_payload(
         Some(IntentState::Replaced) => 3,
         _ => 0,
     });
+    out
+}
+
+/// REV.1.0 R2: a canonical block the follower caught up on before the
+/// run's window (a `Runtime` record, outside every G0.4 count): `b |
+/// number u64 | hash [32] | header ms u64`.
+pub fn catchup_block_payload(number: u64, hash: &[u8; 32], time_ms: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CATCHUP_BLOCK_LEN);
+    out.push(b'b');
+    out.extend_from_slice(&number.to_le_bytes());
+    out.extend_from_slice(hash);
+    out.extend_from_slice(&time_ms.to_le_bytes());
+    out
+}
+
+pub const CATCHUP_BLOCK_LEN: usize = 1 + 8 + 32 + 8;
+
+/// The `b` record `p`: number, hash, header ms.
+pub fn catchup_block_of(p: &[u8]) -> Option<(u64, [u8; 32], u64)> {
+    if p.len() != CATCHUP_BLOCK_LEN || p[0] != b'b' {
+        return None;
+    }
+    Some((
+        u64::from_le_bytes(p[1..9].try_into().ok()?),
+        p[9..41].try_into().ok()?,
+        u64::from_le_bytes(p[41..49].try_into().ok()?),
+    ))
+}
+
+/// REV.1.0 R2: a canonical launch of a caught-up block (a `Runtime`
+/// record): `c | venue u8 | block u64 | block hash [32] | header ms u64 |
+/// tx index u64 | tx hash [32] | token set u8 | token [20] | C1 scope u8 |
+/// unverifiable u8`.
+pub fn catchup_launch_payload(
+    l: &crate::chain_follower::CanonicalLaunch,
+    block_ms: u64,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CATCHUP_LAUNCH_LEN);
+    out.push(b'c');
+    out.push(venue_byte(l.venue));
+    out.extend_from_slice(&l.block_number.to_le_bytes());
+    out.extend_from_slice(&l.block_hash);
+    out.extend_from_slice(&block_ms.to_le_bytes());
+    out.extend_from_slice(&l.tx_index.to_le_bytes());
+    out.extend_from_slice(&l.tx_hash);
+    out.push(u8::from(l.token.is_some()));
+    out.extend_from_slice(&l.token.unwrap_or([0; 20]));
+    out.push(u8::from(l.c1_scope));
+    out.push(u8::from(l.unverifiable.is_some()));
+    out
+}
+
+pub const CATCHUP_LAUNCH_LEN: usize = 1 + 1 + 8 + 32 + 8 + 8 + 32 + 1 + 20 + 1 + 1;
+
+/// A decoded `c` record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CatchupLaunch {
+    pub venue: Venue,
+    pub block: u64,
+    pub block_hash: [u8; 32],
+    pub block_ms: u64,
+    pub tx_index: u64,
+    pub tx_hash: [u8; 32],
+    pub token: Option<[u8; 20]>,
+    pub c1_scope: bool,
+    pub unverifiable: bool,
+}
+
+/// The `c` record `p`, whole.
+pub fn catchup_launch_of(p: &[u8]) -> Option<CatchupLaunch> {
+    if p.len() != CATCHUP_LAUNCH_LEN || p[0] != b'c' || p[90] > 1 || p[111] > 1 || p[112] > 1 {
+        return None;
+    }
+    let u64_at = |at: usize| Some(u64::from_le_bytes(p.get(at..at + 8)?.try_into().ok()?));
+    Some(CatchupLaunch {
+        venue: venue_of_byte(p[1])?,
+        block: u64_at(2)?,
+        block_hash: p[10..42].try_into().ok()?,
+        block_ms: u64_at(42)?,
+        tx_index: u64_at(50)?,
+        tx_hash: p[58..90].try_into().ok()?,
+        token: (p[90] == 1).then(|| p[91..111].try_into().ok()).flatten(),
+        c1_scope: p[111] == 1,
+        unverifiable: p[112] == 1,
+    })
+}
+
+/// REV.1.0 R2 (review Q1): a Portal trade of a caught-up block, the `T`
+/// layout under the runtime tag `d` (no G0.4 count reads it).
+pub fn catchup_trade_payload(t: &crate::chain_follower::CanonicalTrade) -> Vec<u8> {
+    let mut out = flap_trade_payload(t);
+    out[0] = b'd';
+    out
+}
+
+/// A refused Portal trade log of a caught-up block, the `W` layout under
+/// the runtime tag `e`.
+pub fn catchup_trade_gap_payload(
+    block: u64,
+    block_hash: &[u8; 32],
+    tx_index: u64,
+    log_index: u64,
+) -> Vec<u8> {
+    let mut out = trade_gap_payload(block, block_hash, tx_index, log_index);
+    out[0] = b'e';
     out
 }
 
@@ -1256,6 +1662,21 @@ mod tests {
         assert_eq!(pending_launch_payload(&launch)[..2], [b'P', 1]);
         assert_eq!(pending_launch_payload(&launch).len(), 74);
         assert_eq!(reorg_payload(2, 9, &[3; 32])[..5], [b'R', 2, 0, 0, 0]);
+        // REV.1.0 R2 review P2: the catch-up records read back whole; a
+        // record of another length or flag is none.
+        let b = catchup_block_payload(7, &[9; 32], 11);
+        assert_eq!(catchup_block_of(&b), Some((7, [9; 32], 11)));
+        assert_eq!(catchup_block_of(&b[..48]), None);
+        // REV.1.0 R2 review M1: an `l` record of the layout before R2 (its
+        // kind at byte 1) is refused as such, never misread.
+        let mut old = vec![b'l', 0, 1];
+        old.resize(LIVE_RELEASE_HEAD + 120, 0);
+        assert_eq!(
+            live_release_of(&old).unwrap_err(),
+            LIVE_RELEASE_OTHER_LAYOUT
+        );
+        old[1] = 9;
+        assert_eq!(live_release_of(&old).unwrap_err(), LIVE_RELEASE_MALFORMED);
         assert_eq!(resync_payload(1, 2).len(), 17);
         assert_eq!(window_payload(b'K', 1, &[0; 32])[0], b'K');
     }

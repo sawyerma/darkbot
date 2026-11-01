@@ -618,7 +618,60 @@ pub mod live_ledger {
     pub const SENDER: u16 = 21;
     pub const CHAIN_ID: u16 = 22;
 
+    /// v3 (01.11., REV.1.0 R2): the launch's creator of a BUY's token
+    /// (Strategy C's at its release; a C3 BUY's from its block), and where
+    /// an included C3 BUY landed against its launch (`PLACED`): `FIRST`,
+    /// `LATE` (another trader's BUY of the token between), `OTHER_BLOCK`
+    /// (the launch not in its block), `NO_TOKENS` (included, no token
+    /// received); the launch's and its own transaction index, the other
+    /// traders' BUYs between them.
+    pub const LAUNCHER: u16 = 23;
+    pub const PLACEMENT: u16 = 24;
+    pub const LAUNCH_INDEX: u16 = 25;
+    pub const OWN_INDEX: u16 = 26;
+    pub const BUYS_BEFORE: u16 = 27;
+
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 3,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
+            Field::opt(SENDER, "sender", Address),
+            Field::opt(CHAIN_ID, "chain_id", U64),
+            Field::opt(LAUNCHER, "launcher", Address),
+            Field::opt(PLACEMENT, "placement", Text),
+            Field::opt(LAUNCH_INDEX, "launch_index", U64),
+            Field::opt(OWN_INDEX, "own_index", U64),
+            Field::opt(BUYS_BEFORE, "buys_before", U64),
+        ],
+    };
+
+    /// v2 (no launcher, placement), kept readable.
+    pub const V2: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
         record_type: 68,
         schema_version: 2,
@@ -1952,6 +2005,373 @@ pub mod strategy_replay {
     }
 }
 
+/// REV.1.0 R2 (master plan §11, §13 J): one LIVE BUY the runtime released,
+/// evaluated offline by `bsc_runtime live attempts` from its journal (the
+/// `l` and `a` records, the canonical blocks, launches and trades) and the
+/// LIVE ledger: its identity, outcome, placement, costs, local timing, the
+/// market window from its launch's block and each component's verdict
+/// (`PASS`, `FAIL`, `UNKNOWN`, `NOT_APPLICABLE`), with the counters of
+/// every attempt up to it (each rate with its denominator).
+pub mod live_attempt {
+    use super::*;
+
+    /// One adapter of the attempt's dispatch.
+    pub mod adapter {
+        use super::*;
+
+        pub const ADAPTER: u16 = 1;
+        pub const OUTCOME: u16 = 2;
+        pub const BOUNDARY: u16 = 3;
+        /// The adapter's record and its transport qualify the boundary as
+        /// the send time.
+        pub const QUALIFIED: u16 = 4;
+        pub const T_WRITE_CHECK_NS: u16 = 5;
+        pub const T_BOUNDARY_NS: u16 = 6;
+        pub const T_QUEUE_NS: u16 = 7;
+        pub const ANSWER: u16 = 8;
+        pub const T_ANSWER_NS: u16 = 9;
+        /// The granted builder the adapter was (review H2).
+        pub const BUILDER: u16 = 10;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-attempt.adapter",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(ADAPTER, "adapter", U64),
+                Field::req(OUTCOME, "outcome", Text),
+                Field::req(BOUNDARY, "boundary", Text),
+                Field::req(QUALIFIED, "qualified", Bool),
+                Field::opt(T_WRITE_CHECK_NS, "t_write_check_ns", U64),
+                Field::opt(T_BOUNDARY_NS, "t_boundary_ns", U64),
+                Field::opt(T_QUEUE_NS, "t_queue_ns", U64),
+                Field::opt(ANSWER, "answer", Text),
+                Field::opt(T_ANSWER_NS, "t_answer_ns", U64),
+                Field::opt(BUILDER, "builder", Text),
+            ],
+        };
+    }
+
+    pub const ATTEMPT: u16 = 1;
+    pub const TX_HASH: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// Its place among the evaluated BUYs, from 1.
+    pub const ORDINAL: u16 = 5;
+    /// `C3_BUY` (a launch's) or `STRATEGY_BUY`.
+    pub const KIND: u16 = 6;
+    /// `EXTERNAL_FULL_LAUNCH`, `SELF_LAUNCH` (the launch's creator is the
+    /// buyer) or `STRATEGY_ENTRY`.
+    pub const CELL: u16 = 7;
+    pub const TOKEN: u16 = 8;
+    pub const LAUNCH_HASH: u16 = 9;
+    /// The source whose sighting triggered it (a C3 BUY).
+    pub const TRIGGER: u16 = 10;
+    /// `RELEASED`, `UNKNOWN`, `INCLUDED`, `REVERTED`, `REPLACED` or
+    /// `DROPPED` (its window over, never included).
+    pub const STATE: u16 = 11;
+    pub const BLOCK_NUMBER: u16 = 12;
+    pub const BLOCK_HASH: u16 = 13;
+    pub const BLOCK_MS: u16 = 14;
+    pub const TOKENS: u16 = 15;
+    pub const ETH_WEI: u16 = 16;
+    pub const GAS_WEI: u16 = 17;
+    pub const PLACEMENT: u16 = 18;
+    pub const LAUNCH_INDEX: u16 = 19;
+    pub const OWN_INDEX: u16 = 20;
+    pub const BUYS_BEFORE: u16 = 21;
+    pub const CLOCK_ID: u16 = 22;
+    /// Ingress (C3) or decision (Strategy C) on the runtime's clock.
+    pub const T_INGRESS_NS: u16 = 23;
+    pub const T_SELECT_NS: u16 = 24;
+    /// The first qualified send time among the adapters (§8).
+    pub const T_SEND_NS: u16 = 25;
+    pub const T_ACK_NS: u16 = 26;
+    pub const INGRESS_TO_SEND_NS: u16 = 27;
+    pub const SELECT_TO_SEND_NS: u16 = 28;
+    pub const SEND_TO_ACK_NS: u16 = 29;
+    pub const DEADLINE_MISSES: u16 = 30;
+    pub const ADAPTERS: u16 = 31;
+    /// The market window from the launch's block's header time: `COMPLETE`
+    /// or `INCOMPLETE` (and why); T0 is never the producer's here.
+    pub const WINDOW: u16 = 32;
+    pub const WINDOW_WHY: u16 = 33;
+    pub const WINDOW_MS: u16 = 34;
+    pub const LAUNCH_BLOCK: u16 = 35;
+    pub const LAUNCH_MS: u16 = 36;
+    pub const WINDOW_END_BLOCK: u16 = 37;
+    pub const T0_EXACT: u16 = 38;
+    pub const TRADES: u16 = 39;
+    pub const BUYS: u16 = 40;
+    pub const SELLS: u16 = 41;
+    pub const BUY_WEI: u16 = 42;
+    pub const SELL_WEI: u16 = 43;
+    pub const FIRST_EXTERNAL_BUY_TX: u16 = 44;
+    pub const FIRST_EXTERNAL_BUY_BLOCK: u16 = 45;
+    pub const FIRST_EXTERNAL_BUY_INDEX: u16 = 46;
+    /// Native wei per 10^18 token units, of the first other trader's BUY
+    /// and of its own (both from the Portal's trades).
+    pub const FIRST_EXTERNAL_PRICE: u16 = 47;
+    pub const OWN_PRICE: u16 = 48;
+    /// Its price per token against the first other trader's, ppm.
+    pub const PRICE_VS_FIRST_EXTERNAL_PPM: u16 = 49;
+    pub const ACQUISITION: u16 = 50;
+    pub const CANONICAL: u16 = 51;
+    /// The producer's T0→T_buy (§9): `UNKNOWN` without its witness.
+    pub const TIMING: u16 = 52;
+    pub const PLACEMENT_VERDICT: u16 = 53;
+    pub const CAPTURE: u16 = 54;
+    /// The local start deadline and a qualified send time.
+    pub const LOCAL: u16 = 55;
+    pub const ECONOMICS: u16 = 56;
+    pub const VERDICT: u16 = 57;
+    pub const REASONS: u16 = 58;
+    pub const ATTEMPTS: u16 = 60;
+    pub const ACQUIRED: u16 = 61;
+    pub const PASSED: u16 = 62;
+    pub const FAILED: u16 = 63;
+    pub const UNDECIDED: u16 = 64;
+    /// The run whose journal holds its release (`l`).
+    pub const RUN: u16 = 65;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-attempt.v1",
+        record_type: 71,
+        schema_version: 1,
+        fields: &[
+            Field::req(ATTEMPT, "attempt", B256),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(ORDINAL, "ordinal", U64),
+            Field::req(KIND, "kind", Text),
+            Field::req(CELL, "cell", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::opt(LAUNCH_HASH, "launch_hash", B256),
+            Field::opt(TRIGGER, "trigger", Text),
+            Field::req(STATE, "state", Text),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(PLACEMENT, "placement", Text),
+            Field::opt(LAUNCH_INDEX, "launch_index", U64),
+            Field::opt(OWN_INDEX, "own_index", U64),
+            Field::opt(BUYS_BEFORE, "buys_before", U64),
+            Field::opt(CLOCK_ID, "clock_id", U64),
+            Field::opt(T_INGRESS_NS, "t_ingress_ns", U64),
+            Field::opt(T_SELECT_NS, "t_select_ns", U64),
+            Field::opt(T_SEND_NS, "t_send_ns", U64),
+            Field::opt(T_ACK_NS, "t_ack_ns", U64),
+            Field::opt(INGRESS_TO_SEND_NS, "ingress_to_send_ns", U64),
+            Field::opt(SELECT_TO_SEND_NS, "select_to_send_ns", U64),
+            Field::opt(SEND_TO_ACK_NS, "send_to_ack_ns", U64),
+            Field::opt(DEADLINE_MISSES, "deadline_misses", U64),
+            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
+            Field::req(WINDOW, "window", Text),
+            Field::opt(WINDOW_WHY, "window_why", Text),
+            Field::req(WINDOW_MS, "window_ms", U64),
+            Field::opt(LAUNCH_BLOCK, "launch_block", U64),
+            Field::opt(LAUNCH_MS, "launch_ms", U64),
+            Field::opt(WINDOW_END_BLOCK, "window_end_block", U64),
+            Field::req(T0_EXACT, "t0_exact", Bool),
+            Field::req(TRADES, "trades", U64),
+            Field::req(BUYS, "buys", U64),
+            Field::req(SELLS, "sells", U64),
+            Field::req(BUY_WEI, "buy_wei", U256),
+            Field::req(SELL_WEI, "sell_wei", U256),
+            Field::opt(FIRST_EXTERNAL_BUY_TX, "first_external_buy_tx", B256),
+            Field::opt(FIRST_EXTERNAL_BUY_BLOCK, "first_external_buy_block", U64),
+            Field::opt(FIRST_EXTERNAL_BUY_INDEX, "first_external_buy_index", U64),
+            Field::opt(FIRST_EXTERNAL_PRICE, "first_external_price", U256),
+            Field::opt(OWN_PRICE, "own_price", U256),
+            Field::opt(
+                PRICE_VS_FIRST_EXTERNAL_PPM,
+                "price_vs_first_external_ppm",
+                U64,
+            ),
+            Field::req(ACQUISITION, "acquisition", Text),
+            Field::req(CANONICAL, "canonical", Text),
+            Field::req(TIMING, "timing", Text),
+            Field::req(PLACEMENT_VERDICT, "placement_verdict", Text),
+            Field::req(CAPTURE, "capture", Text),
+            Field::req(LOCAL, "local", Text),
+            Field::req(ECONOMICS, "economics", Text),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(ATTEMPTS, "attempts", U64),
+            Field::req(ACQUIRED, "acquired", U64),
+            Field::req(PASSED, "passed", U64),
+            Field::req(FAILED, "failed", U64),
+            Field::req(UNDECIDED, "undecided", U64),
+            Field::opt(RUN, "run", U64),
+        ],
+    };
+}
+
+/// REV.1.0 R2: the LIVE campaign manifest's hash, committed before its
+/// first attempt (`bsc_runtime live campaign-precommit`): a manifest
+/// changed after it rates nothing.
+pub mod live_campaign_precommit {
+    use super::*;
+
+    pub const MANIFEST_SHA256: u16 = 1;
+    pub const SCOPE: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const DECIDED_BY: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-campaign-precommit.v1",
+        record_type: 72,
+        schema_version: 1,
+        fields: &[
+            Field::req(MANIFEST_SHA256, "manifest_sha256", B256),
+            Field::req(SCOPE, "scope", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(DECIDED_BY, "decided_by", Text),
+        ],
+    };
+}
+
+/// REV.1.0 R2 (master plan §13 J): the campaign and release verdicts of
+/// the evaluated attempts against the manifest: `CAMPAIGN_NOT_READY`
+/// (no reviewed, complete, pre-committed manifest of this build and
+/// configuration), `CAMPAIGN_FAIL` (an attempt failed), `CAMPAIGN_OPEN`
+/// (evidence, samples, coverage or duration still missing) or
+/// `CAMPAIGN_PASS`; the release evidence `RELEASE_EVIDENCE_PASS` only on a
+/// passed campaign of its claimed cell (the release itself also needs the
+/// implementation matrix, runtime enforcement and LIVE authorization).
+pub mod live_campaign_verdict {
+    use super::*;
+
+    /// One cell of the campaign.
+    pub mod cell {
+        use super::*;
+
+        pub const CELL: u16 = 1;
+        pub const ENABLED: u16 = 2;
+        pub const MIN_ATTEMPTS: u16 = 3;
+        pub const ATTEMPTS: u16 = 4;
+        pub const PASSED: u16 = 5;
+        pub const FAILED: u16 = 6;
+        pub const UNDECIDED: u16 = 7;
+        pub const MIN_DURATION_S: u16 = 8;
+        pub const DURATION_S: u16 = 9;
+        pub const VERDICT: u16 = 10;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.live-campaign-verdict.cell",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(CELL, "cell", Text),
+                Field::req(ENABLED, "enabled", Bool),
+                Field::opt(MIN_ATTEMPTS, "min_attempts", U64),
+                Field::req(ATTEMPTS, "attempts", U64),
+                Field::req(PASSED, "passed", U64),
+                Field::req(FAILED, "failed", U64),
+                Field::req(UNDECIDED, "undecided", U64),
+                Field::opt(MIN_DURATION_S, "min_duration_s", U64),
+                Field::req(DURATION_S, "duration_s", U64),
+                Field::req(VERDICT, "verdict", Text),
+            ],
+        };
+    }
+
+    pub const VERDICT: u16 = 1;
+    pub const REASONS: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const RELEASE: u16 = 5;
+    pub const MANIFEST_SHA256: u16 = 6;
+    pub const PRECOMMIT_SHA256: u16 = 7;
+    pub const BUILD_SHA256: u16 = 8;
+    pub const OBSERVED: u16 = 9;
+    pub const ADMITTED: u16 = 10;
+    pub const SKIPPED: u16 = 11;
+    pub const WRITTEN: u16 = 12;
+    pub const ACQUIRED: u16 = 13;
+    pub const REVERTED: u16 = 14;
+    pub const DROPPED: u16 = 15;
+    pub const LATE: u16 = 16;
+    pub const UNRESOLVED: u16 = 17;
+    pub const PASSED: u16 = 18;
+    pub const FAILED: u16 = 19;
+    pub const UNDECIDED: u16 = 20;
+    pub const CONSECUTIVE_MISSES: u16 = 21;
+    pub const CELLS: u16 = 22;
+    /// The enabled cells' minimum attempts, summed.
+    pub const PLANNED: u16 = 23;
+    /// The observed launches a granted source saw in full before their
+    /// block (actionable).
+    pub const SELECTED: u16 = 24;
+    /// C3 BUYs written before the commitment (not the campaign's).
+    pub const BEFORE_PRECOMMIT: u16 = 25;
+    /// Launches whose transaction could not be verified (coverage unknown).
+    pub const UNVERIFIABLE: u16 = 26;
+    /// The skipped launches by how they were seen, `CLASS=count`.
+    pub const SKIP_REASONS: u16 = 27;
+    /// The time the campaign's sealed runs cover since the commitment, and
+    /// the rest of its span (s).
+    pub const COVERED_S: u16 = 28;
+    pub const UNCOVERED_S: u16 = 29;
+    pub const COVERED_PPM: u16 = 30;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-campaign-verdict.v1",
+        record_type: 73,
+        schema_version: 1,
+        fields: &[
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(RELEASE, "release_evidence", Text),
+            Field::opt(MANIFEST_SHA256, "manifest_sha256", B256),
+            Field::opt(PRECOMMIT_SHA256, "precommit_sha256", B256),
+            Field::req(BUILD_SHA256, "build_sha256", B256),
+            Field::req(OBSERVED, "observed", U64),
+            Field::req(ADMITTED, "admitted", U64),
+            Field::req(SKIPPED, "skipped", U64),
+            Field::req(WRITTEN, "written", U64),
+            Field::req(ACQUIRED, "acquired", U64),
+            Field::req(REVERTED, "reverted", U64),
+            Field::req(DROPPED, "dropped", U64),
+            Field::req(LATE, "late", U64),
+            Field::req(UNRESOLVED, "unresolved", U64),
+            Field::req(PASSED, "passed", U64),
+            Field::req(FAILED, "failed", U64),
+            Field::req(UNDECIDED, "undecided", U64),
+            Field::req(CONSECUTIVE_MISSES, "consecutive_misses", U64),
+            Field::nested(CELLS, "cells", Presence::Repeated, &cell::SCHEMA),
+            Field::req(PLANNED, "planned", U64),
+            Field::req(SELECTED, "selected", U64),
+            Field::req(BEFORE_PRECOMMIT, "before_precommit", U64),
+            Field::req(UNVERIFIABLE, "unverifiable", U64),
+            Field::rep(SKIP_REASONS, "skip_reasons", Text),
+            Field::req(COVERED_S, "covered_s", U64),
+            Field::req(UNCOVERED_S, "uncovered_s", U64),
+            Field::req(COVERED_PPM, "covered_ppm", U64),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA,
     &source_modes::SCHEMA_V4,
@@ -1964,10 +2384,14 @@ pub const ALL: &[&Schema] = &[
     &live_spend::SCHEMA,
     &live_spend::V1,
     &live_ledger::SCHEMA,
+    &live_ledger::V2,
     &live_ledger::V1,
     &live_qualification::SCHEMA,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,
     &strategy_replay::V3,
+    &live_attempt::SCHEMA,
+    &live_campaign_precommit::SCHEMA,
+    &live_campaign_verdict::SCHEMA,
 ];

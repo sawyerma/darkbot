@@ -71,6 +71,9 @@ pub mod live_end;
 /// net result (plan 28.10.).
 #[cfg(feature = "runtime")]
 pub mod live_ledger;
+/// REV.1.0 R2: the LIVE attempts' evaluator and the campaign verdict.
+#[cfg(feature = "runtime")]
+pub mod live_attempts;
 /// The native WSS pending-transaction source adapter (verified full txs).
 #[cfg(feature = "runtime")]
 pub mod wss;

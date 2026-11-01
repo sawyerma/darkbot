@@ -720,3 +720,62 @@ fn a_held_position_on_an_untracked_curve_is_not_held() {
         "not held on a curve it no longer tracks"
     );
 }
+
+/// R1 re-check (LOW 4): the creator's sale while a gap-untracked position
+/// waits for its curve read is not lost: held again, its exit triggers by
+/// the creator rule.
+#[test]
+fn a_creator_sale_while_a_position_waits_to_be_held_again_still_counts() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    let input = 10_000_000_000_000_000u64;
+    let q = quote_native_buy(&c.book(TOKEN).buy_inputs(U256::from(input)).unwrap()).unwrap();
+    c.buy(TOKEN, [0xEE; 20], input);
+    let spent = U256::from(input + 30_000_000_000_000);
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    });
+    c.feed(Input::Incomplete);
+    c.next_block();
+    assert!(!c.engine.holds(&TOKEN));
+    // Not followed now: the creator sells.
+    c.sell(TOKEN, CREATOR, 1_000);
+    c.next_block();
+    let book = c.book(TOKEN).clone();
+    c.feed(Input::Reheld(Reheld {
+        token: TOKEN,
+        creator: [0; 20],
+        terms: read_terms(&book),
+        reserve: book.reserve,
+        circulating: book.circulating,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    }));
+    c.out.clear();
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 102 CreatorSell"], "{:?}", c.kinds());
+}
+
+/// R1 re-check (LOW 3): a held position counts as decided only on a curve
+/// the engine prices: one whose terms are incomplete is not held.
+#[test]
+fn a_held_position_without_its_terms_is_not_held() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    // Launched, but no terms reached the engine.
+    c.feed(Input::Launch {
+        token: TOKEN,
+        creator: CREATOR,
+        tx_index: 1,
+    });
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: U256::from(1_000u64),
+        spent_wei: U256::from(10_000u64),
+        filled_ms: 0,
+    });
+    assert!(!c.engine.holds(&TOKEN), "no priced curve, no decided exit");
+}

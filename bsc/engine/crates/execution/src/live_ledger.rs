@@ -49,6 +49,50 @@ pub enum FactKind {
     Orphaned,
     /// A provider answered the release (BSC3-051): no word on the chain.
     Responded,
+    /// 01.11. (REV.1.0 R2): where an included C3 BUY landed against its
+    /// launch, from its block (`Fact::placement`).
+    Placed,
+}
+
+/// 01.11. (REV.1.0 R2): where an included C3 BUY landed against its launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub verdict: PlacementVerdict,
+    /// The launch's transaction index in the BUY's block (none: the launch
+    /// is not in it).
+    pub launch_index: Option<u64>,
+    pub own_index: u64,
+    /// Other traders' BUYs of the token between the launch and it.
+    pub buys_before: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlacementVerdict {
+    /// Right behind its launch: no other trader's BUY between.
+    First,
+    /// Another trader's BUY of the token came between.
+    Late,
+    /// Its block holds no launch of its token.
+    OtherBlock,
+    /// Included, but no token reached the buyer.
+    NoTokens,
+}
+
+impl PlacementVerdict {
+    pub const ALL: [Self; 4] = [Self::First, Self::Late, Self::OtherBlock, Self::NoTokens];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::First => "FIRST",
+            Self::Late => "LATE",
+            Self::OtherBlock => "OTHER_BLOCK",
+            Self::NoTokens => "NO_TOKENS",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.name() == text)
+    }
 }
 
 impl FactKind {
@@ -62,6 +106,7 @@ impl FactKind {
             Self::Replaced => "REPLACED",
             Self::Orphaned => "ORPHANED",
             Self::Responded => "RESPONDED",
+            Self::Placed => "PLACED",
         }
     }
 
@@ -75,6 +120,7 @@ impl FactKind {
             Self::Replaced,
             Self::Orphaned,
             Self::Responded,
+            Self::Placed,
         ]
         .into_iter()
         .find(|k| k.name() == text)
@@ -130,6 +176,12 @@ pub struct Fact {
     /// The sender and chain of its nonce (absent in a fact written before
     /// them: its transaction is grouped with no other).
     pub origin: Option<NonceOrigin>,
+    /// v3 (REV.1.0 R2): the creator of the launch of a BUY's token (a
+    /// Strategy C BUY's at its release, a C3 BUY's in its `Placed` fact):
+    /// the creator rule of its exit after a restart.
+    pub launcher: Option<[u8; 20]>,
+    /// v3: `Placed`: where the C3 BUY landed.
+    pub placement: Option<Placement>,
 }
 
 impl Fact {
@@ -180,6 +232,8 @@ impl Fact {
             by_tx: None,
             response: None,
             origin: a.origin,
+            launcher: None,
+            placement: None,
         })
     }
 }
@@ -200,6 +254,8 @@ pub struct Recovered {
 struct Read {
     seqs: Vec<u64>,
     facts: Vec<Fact>,
+    /// When each was written (its provenance, Unix ms).
+    stamps: Vec<u64>,
 }
 
 /// The ledger under an owner state directory.
@@ -272,7 +328,12 @@ impl Ledger {
             .set_opt(k::BY_TX_HASH, fact.by_tx.map(Value::B256))
             .set_opt(k::RESPONSE, fact.response.as_deref())
             .set_opt(k::CHAIN_ID, fact.origin.map(|o| o.chain_id))
-            .set_opt(k::SENDER, fact.origin.map(|o| Value::Address(o.sender)));
+            .set_opt(k::SENDER, fact.origin.map(|o| Value::Address(o.sender)))
+            .set_opt(k::LAUNCHER, fact.launcher.map(Value::Address))
+            .set_opt(k::PLACEMENT, fact.placement.map(|p| p.verdict.name()))
+            .set_opt(k::LAUNCH_INDEX, fact.placement.and_then(|p| p.launch_index))
+            .set_opt(k::OWN_INDEX, fact.placement.map(|p| p.own_index))
+            .set_opt(k::BUYS_BEFORE, fact.placement.map(|p| p.buys_before));
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -383,6 +444,23 @@ impl Ledger {
     /// when the entries on disk are not the ones it read followed by new
     /// ones (one appeared before them, or went), it reads all of them.
     pub fn facts(&self) -> Result<Vec<Fact>, String> {
+        Ok(self.read()?.facts.clone())
+    }
+
+    /// REV.1.0 R2: each fact with the time it was written (Unix ms), in
+    /// ledger order.
+    pub fn stamped(&self) -> Result<Vec<(Fact, u64)>, String> {
+        let read = self.read()?;
+        Ok(read
+            .facts
+            .iter()
+            .cloned()
+            .zip(read.stamps.iter().copied())
+            .collect())
+    }
+
+    /// The entries decoded so far, the ones published since added.
+    fn read(&self) -> Result<std::sync::MutexGuard<'_, Read>, String> {
         let names = self.names()?;
         let mut read = self
             .read
@@ -399,18 +477,20 @@ impl Ledger {
         }
         let from = read.seqs.len();
         for (seq, path) in &names[from..] {
-            let fact = Self::entry(path)?;
+            let (fact, stamp) = Self::entry(path)?;
             read.seqs.push(*seq);
             read.facts.push(fact);
+            read.stamps.push(stamp);
         }
-        Ok(read.facts.clone())
+        Ok(read)
     }
 
-    /// One published entry's fact.
-    fn entry(path: &Path) -> Result<Fact, String> {
+    /// One published entry's fact and when it was written.
+    fn entry(path: &Path) -> Result<(Fact, u64), String> {
         let bad = |why: &str| format!("{}: {why}", path.display());
         let bytes = fs::read(path).map_err(|e| bad(&e.to_string()))?;
         let r = decode(&k::SCHEMA, &bytes)
+            .or_else(|_| decode(&k::V2, &bytes))
             .or_else(|_| decode(&k::V1, &bytes))
             .map_err(|e| bad(&e.0))?;
         let e = |x: darkbot_bsc_record::RecordError| bad(&x.0);
@@ -434,8 +514,27 @@ impl Ledger {
             (None, None) => None,
             _ => return Err(bad("a nonce's sender and chain are named together")),
         };
-        Ok(Fact {
-            kind: FactKind::parse(r.text(k::KIND).map_err(e)?).ok_or_else(|| bad("kind"))?,
+        let placement = match (
+            r.opt_text(k::PLACEMENT).map_err(e)?,
+            r.opt_u64(k::OWN_INDEX).map_err(e)?,
+            r.opt_u64(k::BUYS_BEFORE).map_err(e)?,
+        ) {
+            (Some(v), Some(own_index), Some(buys_before)) => Some(Placement {
+                verdict: PlacementVerdict::parse(v).ok_or_else(|| bad("placement"))?,
+                launch_index: r.opt_u64(k::LAUNCH_INDEX).map_err(e)?,
+                own_index,
+                buys_before,
+            }),
+            (None, None, None) if r.opt_u64(k::LAUNCH_INDEX).map_err(e)?.is_none() => None,
+            _ => return Err(bad("a placement is named whole or not at all")),
+        };
+        let kind = FactKind::parse(r.text(k::KIND).map_err(e)?).ok_or_else(|| bad("kind"))?;
+        // Review L9: a placement exactly in a PLACED fact.
+        if (kind == FactKind::Placed) != placement.is_some() {
+            return Err(bad("a placement is named exactly in a PLACED fact"));
+        }
+        let fact = Fact {
+            kind,
             tx_hash: r.b256(k::TX_HASH).map_err(e)?,
             intent: intent_of(r.text(k::INTENT).map_err(e)?).ok_or_else(|| bad("intent"))?,
             component: ComponentId::parse(r.text(k::COMPONENT).map_err(e)?)
@@ -453,7 +552,10 @@ impl Ledger {
             by_tx: r.opt_b256(k::BY_TX_HASH).map_err(e)?,
             response: r.opt_text(k::RESPONSE).map_err(e)?.map(str::to_string),
             origin,
-        })
+            launcher: r.opt_address(k::LAUNCHER).map_err(e)?,
+            placement,
+        };
+        Ok((fact, r.u64(k::PROVENANCE_OBSERVED_UNIX_MS).map_err(e)?))
     }
 }
 
@@ -475,6 +577,10 @@ pub struct Tx {
     /// What the providers answered to its release (BSC3-051): never an
     /// inclusion.
     pub responses: Vec<String>,
+    /// REV.1.0 R2: where its inclusion landed against its launch (a C3
+    /// BUY), and its token's launch creator.
+    pub placement: Option<Placement>,
+    pub launcher: Option<[u8; 20]>,
 }
 
 impl Tx {
@@ -556,6 +662,9 @@ pub struct Book {
     pub positions: Vec<Position>,
     pub realized_pnl_wei: i128,
     pub gas_wei: U256,
+    /// REV.1.0 R2: the grant generations with a C3 BUY placed other than
+    /// first (what the BUY path asks, in place of every transaction).
+    pub misplaced: std::collections::BTreeSet<u64>,
 }
 
 impl Book {
@@ -606,6 +715,8 @@ pub fn fold(facts: &[Fact]) -> Book {
                         orphaned: false,
                         lot: None,
                         responses: Vec::new(),
+                        placement: None,
+                        launcher: f.launcher,
                     });
                 }
             }
@@ -615,12 +726,17 @@ pub fn fold(facts: &[Fact]) -> Book {
                 };
                 match kind {
                     FactKind::Responded => t.responses.extend(f.response.clone()),
+                    FactKind::Placed => {
+                        t.placement = f.placement;
+                        t.launcher = f.launcher.or(t.launcher);
+                    }
                     FactKind::Orphaned => {
                         // Its own inclusion left the chain (not one that
                         // replaced it): its bytes were public.
                         t.orphaned |= matches!(t.state, FactKind::Included | FactKind::Reverted);
                         t.state = t.released.kind;
                         t.inclusion = None;
+                        t.placement = None;
                     }
                     // Included, reverted, or replaced: the fact names the
                     // block (and, replaced, the transaction that took the
@@ -712,6 +828,17 @@ pub fn fold(facts: &[Fact]) -> Book {
         };
         book.realized_pnl_wei = book.realized_pnl_wei.saturating_add(p.pnl_wei.unwrap_or(0));
     }
+    // Review L2: from every PLACED fact, also one whose block left the
+    // chain later (re-enabling is the operator's new grant, never a reorg).
+    book.misplaced = facts
+        .iter()
+        .filter(|f| {
+            f.kind == FactKind::Placed
+                && f.placement
+                    .is_some_and(|p| p.verdict != PlacementVerdict::First)
+        })
+        .map(|f| f.grant_generation)
+        .collect();
     book.txs = txs;
     book
 }
@@ -739,6 +866,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: Some(crate::sources::tests::ORIGIN),
+            launcher: None,
+            placement: None,
         }
     }
 
@@ -796,6 +925,129 @@ mod tests {
         let path = dir.join("live-ledger").join(format!("{:020}.dbrec", 2));
         fs::write(path, d.encode().unwrap()).unwrap();
         assert!(ledger.facts().unwrap_err().contains("sender and chain"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// REV.1.0 R2: a `PLACED` fact keeps the placement and the launch's
+    /// creator and reads them back; the fold puts them on its transaction
+    /// (an orphaned inclusion takes the placement back); a v2 entry (before
+    /// them) reads without them; a placement named in part refuses the
+    /// ledger.
+    #[test]
+    fn a_placement_and_its_launcher_read_back_and_fold() {
+        let dir = std::env::temp_dir().join(format!("bsc-live-placed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let ledger = Ledger::open(&dir);
+        let buy = Fact {
+            component: ComponentId::ExecC3,
+            ..released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300)
+        };
+        ledger.append(&buy, 1).unwrap();
+        let block = Some((100, [0x10; 32], 5));
+        let included = Fact {
+            block,
+            tokens: Some(U256::from(7u8)),
+            eth_wei: Some(U256::from(1_000u64)),
+            gas_wei: Some(U256::ZERO),
+            ..Fact::about(&buy, FactKind::Included)
+        };
+        let placed = Fact {
+            block,
+            launcher: Some([0xC1; 20]),
+            placement: Some(Placement {
+                verdict: PlacementVerdict::Late,
+                launch_index: Some(0),
+                own_index: 2,
+                buys_before: 1,
+            }),
+            ..Fact::about(&buy, FactKind::Placed)
+        };
+        ledger.append(&included, 2).unwrap();
+        ledger.append(&placed, 3).unwrap();
+        let facts = ledger.facts().unwrap();
+        assert_eq!(facts[2], placed);
+        let book = fold(&facts);
+        let t = book.tx(&buy.tx_hash).unwrap();
+        assert_eq!(t.placement, placed.placement);
+        // The BUY path's question: this grant has a misplaced BUY.
+        assert_eq!(book.misplaced, [buy.grant_generation].into());
+        assert_eq!(t.launcher, Some([0xC1; 20]));
+        assert_eq!(t.state, FactKind::Included);
+        let orphaned = Fact {
+            block,
+            ..Fact::about(&buy, FactKind::Orphaned)
+        };
+        let mut again = facts.clone();
+        again.push(orphaned);
+        let again = fold(&again);
+        assert_eq!(again.tx(&buy.tx_hash).unwrap().placement, None);
+        // The halt stays: re-enabling is the operator's new grant (L2).
+        assert_eq!(again.misplaced, [buy.grant_generation].into());
+        // A v2 entry (no launcher, no placement) still reads.
+        let mut d = Draft::new(&k::V2);
+        d.set(k::KIND, "RELEASED")
+            .set(k::TX_HASH, Value::B256([9; 32]))
+            .set(k::PROVENANCE_TOOL, "test")
+            .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(k::INTENT, "BUY")
+            .set(k::COMPONENT, "BSC_EXEC")
+            .set(k::TOKEN, Value::Address([0xB; 20]))
+            .set(k::NONCE, 2u64)
+            .set(k::GRANT_GENERATION, 7u64);
+        fs::write(
+            dir.join("live-ledger").join(format!("{:020}.dbrec", 4)),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        let facts = ledger.facts().unwrap();
+        assert_eq!((facts[3].launcher, facts[3].placement), (None, None));
+        // A placement named in part refuses the ledger.
+        let mut d = Draft::new(&k::SCHEMA);
+        d.set(k::KIND, "PLACED")
+            .set(k::TX_HASH, Value::B256([1; 32]))
+            .set(k::PROVENANCE_TOOL, "test")
+            .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(k::INTENT, "BUY")
+            .set(k::COMPONENT, "BSC_EXEC")
+            .set(k::TOKEN, Value::Address([0xA; 20]))
+            .set(k::NONCE, 1u64)
+            .set(k::GRANT_GENERATION, 7u64)
+            .set(k::PLACEMENT, "LATE");
+        fs::write(
+            dir.join("live-ledger").join(format!("{:020}.dbrec", 5)),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        assert!(ledger.facts().unwrap_err().contains("placement"));
+        // A PLACED fact without its placement, or a placement in another
+        // fact, refuses the ledger too (review L9).
+        for (kind, placed) in [("PLACED", false), ("INCLUDED", true)] {
+            let mut d = Draft::new(&k::SCHEMA);
+            d.set(k::KIND, kind)
+                .set(k::TX_HASH, Value::B256([1; 32]))
+                .set(k::PROVENANCE_TOOL, "test")
+                .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+                .set(k::INTENT, "BUY")
+                .set(k::COMPONENT, "BSC_EXEC")
+                .set(k::TOKEN, Value::Address([0xA; 20]))
+                .set(k::NONCE, 1u64)
+                .set(k::GRANT_GENERATION, 7u64);
+            if placed {
+                d.set(k::PLACEMENT, "FIRST")
+                    .set(k::OWN_INDEX, 1u64)
+                    .set(k::BUYS_BEFORE, 0u64);
+            }
+            fs::write(
+                dir.join("live-ledger").join(format!("{:020}.dbrec", 5)),
+                d.encode().unwrap(),
+            )
+            .unwrap();
+            let read = Ledger::open(&dir).facts();
+            assert!(
+                read.unwrap_err().contains("exactly in a PLACED fact"),
+                "{kind}"
+            );
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -28,7 +28,8 @@ use wire::{Block, Receipt, Tx};
 
 const CHAIN_ID: u64 = 56;
 const PORTAL: Address = address!("0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0");
-const MARKET_WINDOW_SECS: u64 = 15;
+/// The plan's market window (master plan §11), the runtime evaluator's too.
+const MARKET_WINDOW_SECS: u64 = darkbot_bsc_execution::live_attempts::MARKET_WINDOW_MS / 1_000;
 /// `budget_wei.max_total_per_attempt` of the frozen v4 attempt-1 contract,
 /// the same bound `g06a_requal_check` and the guard enforce. A cost above it
 /// means a limit failed: STOP (E2-9, read-only second check). Another
@@ -73,6 +74,70 @@ struct ChainCaptureSummary {
     /// blocks, which are complete and contiguous from before the launch. A
     /// scan error is kept here and does not abort the chain journal.
     first_external_buy: Result<Option<ExternalBuy>, String>,
+    /// REV.1.0 R2: the token's Portal trades in the window's blocks; a scan
+    /// error is kept here.
+    market: Result<Market, String>,
+}
+
+/// The token's Portal trades in the captured blocks whose header second
+/// is within the market window of the launch's (whole seconds: a superset
+/// of `[T0, T0+15 s]`); every trade counts, ours and the launch's too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Market {
+    trades: u64,
+    buys: u64,
+    sells: u64,
+    buy_wei: U256,
+    sell_wei: U256,
+    last_block: Option<u64>,
+    /// Our BUY's Portal event: native in and tokens out.
+    own: Option<(U256, U256)>,
+}
+
+impl Market {
+    /// Adds the token's trades of one block's validated receipts (the
+    /// Portal decoder the runtime follows the chain with; a reverted
+    /// receipt has no effects).
+    fn add(
+        &mut self,
+        receipts: &[Receipt],
+        block: u64,
+        token: Address,
+        ours: B256,
+    ) -> Result<(), String> {
+        use darkbot_bsc_trading::venues::flap::events::{
+            PortalEvent, PortalLog, decode_portal_log,
+        };
+        for receipt in receipts.iter().filter(|r| r.status == 1) {
+            for log in &receipt.logs {
+                let topics: Vec<[u8; 32]> = log.topics.iter().map(|t| t.0).collect();
+                let (sell, t) = match decode_portal_log(PORTAL, log.address, &topics, &log.data) {
+                    PortalLog::Event(PortalEvent::TokenBought(t)) => (false, t),
+                    PortalLog::Event(PortalEvent::TokenSold(t)) => (true, t),
+                    PortalLog::Malformed(kind, e) => {
+                        return Err(format!("block {block}: malformed {kind:?}: {e:?}"));
+                    }
+                    _ => continue,
+                };
+                if t.token != token {
+                    continue;
+                }
+                self.trades += 1;
+                if sell {
+                    self.sells += 1;
+                    self.sell_wei = self.sell_wei.saturating_add(t.eth);
+                } else {
+                    self.buys += 1;
+                    self.buy_wei = self.buy_wei.saturating_add(t.eth);
+                    if receipt.transaction_hash == ours {
+                        self.own.get_or_insert((t.eth, t.amount));
+                    }
+                }
+            }
+        }
+        self.last_block = Some(block);
+        Ok(())
+    }
 }
 
 /// A successful external BUY of the token: a Portal `TokenBought` in a
@@ -140,6 +205,35 @@ fn first_external_scan(
         Some(Ok(Some(buy))) => ("FOUND_IN_CAPTURED_WINDOW", Some(buy)),
         Some(Ok(None)) => ("NONE_IN_CAPTURED_WINDOW", None),
     }
+}
+
+/// `market.scan`: the window's trades are reported only from a complete
+/// capture still canonical after the window (as the first external BUY).
+fn market_scan(
+    scan: Option<&Result<Market, String>>,
+    complete: bool,
+    canonical: bool,
+) -> (&'static str, Option<&Market>) {
+    match scan {
+        None => ("CAPTURE_FAILED", None),
+        Some(Err(_)) => ("SCAN_FAILED", None),
+        Some(Ok(_)) if !complete => ("CAPTURE_INCOMPLETE", None),
+        Some(Ok(_)) if !canonical => ("NOT_CANONICAL", None),
+        Some(Ok(m)) => ("COMPLETE", Some(m)),
+    }
+}
+
+/// Our BUY's price per token, the first external BUY's and ours against
+/// it (ppm), by the runtime evaluator's arithmetic.
+fn prices(m: &Market, first: Option<&ExternalBuy>) -> (Option<U256>, Option<U256>, Option<u64>) {
+    use darkbot_bsc_execution::live_attempts::{price, price_ppm};
+    let own = m.own.and_then(|(eth, amount)| price(eth, amount));
+    let external = first.and_then(|b| price(b.value, b.amount));
+    let ppm = m
+        .own
+        .zip(first)
+        .and_then(|((eth, amount), b)| price_ppm(eth, amount, b.value, b.amount));
+    (own, external, ppm)
 }
 
 /// The facts the G0.8 verdict is decided from (all observed or derived
@@ -1436,6 +1530,7 @@ fn capture_chain_window(
     let mut crossed_horizon = false;
     let mut captured = Vec::new();
     let mut first_external_buy = Ok(None);
+    let mut market = Ok(Market::default());
     let last_block;
     let capture_deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -1492,6 +1587,13 @@ fn capture_chain_window(
                 .map(|buys| buys.into_iter().next())
                 .map_err(|e| format!("block {number}: {e}"));
         }
+        if number >= launch_block
+            && timestamp <= launch_timestamp.saturating_add(MARKET_WINDOW_SECS)
+            && let Ok(m) = market.as_mut()
+            && let Err(e) = m.add(&receipts, number, token, buy_hash)
+        {
+            market = Err(e);
+        }
         for receipt in &receipts {
             append_record(
                 &mut writer,
@@ -1538,6 +1640,7 @@ fn capture_chain_window(
         horizon_timestamp,
         boundary_block_included: last_block > launch_block,
         first_external_buy,
+        market,
     })
 }
 
@@ -1888,6 +1991,24 @@ fn main() {
             .set(result::FIRST_EXTERNAL_BUY_BUYER, addr(b.buyer))
             .set(result::FIRST_EXTERNAL_BUY_VALUE_WEI, wei(b.value))
             .set(result::FIRST_EXTERNAL_BUY_TOKEN_AMOUNT, wei(b.amount));
+    }
+    let (market_scan, market) = market_scan(
+        chain_capture.as_ref().ok().map(|c| &c.market),
+        chain_capture_complete,
+        canonical,
+    );
+    r.set(result::MARKET_SCAN, market_scan);
+    if let Some(m) = market {
+        r.set(result::MARKET_TRADES, m.trades)
+            .set(result::MARKET_BUYS, m.buys)
+            .set(result::MARKET_SELLS, m.sells)
+            .set(result::MARKET_BUY_WEI, wei(m.buy_wei))
+            .set(result::MARKET_SELL_WEI, wei(m.sell_wei))
+            .set_opt(result::MARKET_LAST_BLOCK, m.last_block);
+        let (own, external, ppm) = prices(m, first_external);
+        r.set_opt(result::OWN_PRICE, own.map(wei))
+            .set_opt(result::FIRST_EXTERNAL_PRICE, external.map(wei))
+            .set_opt(result::PRICE_VS_FIRST_EXTERNAL_PPM, ppm);
     }
     if let Ok((amount, fee)) = acquisition {
         r.set(result::BUY_RECEIPT_TOKEN_NET, wei(amount))
@@ -2286,6 +2407,91 @@ mod tests {
             first_external_scan(Some(&Ok(None)), false, true),
             ("CAPTURE_INCOMPLETE", None)
         );
+    }
+
+    /// REV.1.0 R2 (master plan §11): the window's trades of the token by
+    /// the runtime's Portal decoder: a real v5.26 BUY receipt, a SELL, a
+    /// reverted receipt (no effects) and another token's trade; our BUY's
+    /// price against the first external BUY's; a malformed Portal trade
+    /// fails the scan, and only a complete canonical capture reports it.
+    #[test]
+    fn the_market_window_counts_the_tokens_trades() {
+        let real = real_v5_26_tax_token_buy_receipt();
+        let token =
+            Address::from_slice(&hex::decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777").unwrap());
+        let trade = |sell: bool, of: Address, amount: u64, value: u64| {
+            let mut log = buy_log(of, Address::repeat_byte(7), amount, value, 0);
+            if sell {
+                log.topics = vec![keccak256(
+                    "TokenSold(uint256,address,address,uint256,uint256,uint256,uint256)",
+                )];
+            }
+            log
+        };
+        let with = |hash: u8, status: u64, logs: Vec<wire::Log>| Receipt {
+            transaction_hash: B256::repeat_byte(hash),
+            status,
+            logs,
+            ..receipt(21_000, Some(1))
+        };
+        let ours = B256::repeat_byte(0x0b);
+        let receipts = [
+            real.clone(),
+            with(0x0b, 1, vec![trade(false, token, 1_000, 2_000_000)]),
+            with(0x0c, 1, vec![trade(true, token, 500, 300_000)]),
+            with(0x0d, 0, vec![trade(false, token, 1, 1)]),
+            with(0x0e, 1, vec![trade(false, Address::repeat_byte(9), 1, 1)]),
+        ];
+        let mut m = Market::default();
+        m.add(&receipts, 7, token, ours).unwrap();
+        assert_eq!(
+            (m.trades, m.buys, m.sells, m.last_block),
+            (3, 2, 1, Some(7))
+        );
+        assert_eq!(m.sell_wei, U256::from(300_000u64));
+        assert_eq!(
+            m.own,
+            Some((U256::from(2_000_000u64), U256::from(1_000u64)))
+        );
+        let first = external_buys_in(&[real], 7, token, B256::ZERO, ours)
+            .unwrap()
+            .remove(0);
+        assert_eq!(m.buy_wei, U256::from(2_000_000u64) + first.value);
+        let (own, external, ppm) = prices(&m, Some(&first));
+        let e18 = U256::from(1_000_000_000_000_000_000u64);
+        assert_eq!(own, Some(U256::from(2_000u64) * e18));
+        assert_eq!(external, Some(first.value * e18 / first.amount));
+        assert_eq!(
+            ppm,
+            Some(
+                u64::try_from(
+                    U256::from(2_000_000u64) * first.amount * U256::from(1_000_000u64)
+                        / (U256::from(1_000u64) * first.value)
+                )
+                .unwrap()
+            )
+        );
+        assert_eq!(prices(&m, None), (own, None, None));
+        let mut torn = trade(true, token, 1, 1);
+        torn.data.truncate(64);
+        assert!(
+            Market::default()
+                .add(&[with(0x0f, 1, vec![torn])], 8, token, ours)
+                .is_err()
+        );
+        let ok = Ok(m.clone());
+        assert_eq!(market_scan(Some(&ok), true, true), ("COMPLETE", Some(&m)));
+        assert_eq!(
+            market_scan(Some(&ok), false, true),
+            ("CAPTURE_INCOMPLETE", None)
+        );
+        assert_eq!(market_scan(Some(&ok), true, false), ("NOT_CANONICAL", None));
+        assert_eq!(
+            market_scan(Some(&Err("x".into())), true, true),
+            ("SCAN_FAILED", None)
+        );
+        assert_eq!(market_scan(None, true, true), ("CAPTURE_FAILED", None));
+        assert_eq!(MARKET_WINDOW_SECS, 15);
     }
 
     #[test]

@@ -264,6 +264,21 @@ pub mod result {
     pub const FIRST_EXTERNAL_BUY_BUYER: u16 = 94;
     pub const FIRST_EXTERNAL_BUY_VALUE_WEI: u16 = 95;
     pub const FIRST_EXTERNAL_BUY_TOKEN_AMOUNT: u16 = 96;
+    /// v7 (REV.1.0 R2, master plan §11): the token's Portal trades in the
+    /// captured blocks whose header second is within the market window of
+    /// the launch's (whole seconds: a superset of `[T0, T0+15 s]`), the
+    /// last such block, and the price per token (wei per 10^18 units, from
+    /// the Portal events) of our BUY against the first external BUY's.
+    pub const MARKET_SCAN: u16 = 100;
+    pub const MARKET_TRADES: u16 = 101;
+    pub const MARKET_BUYS: u16 = 102;
+    pub const MARKET_SELLS: u16 = 103;
+    pub const MARKET_BUY_WEI: u16 = 104;
+    pub const MARKET_SELL_WEI: u16 = 105;
+    pub const MARKET_LAST_BLOCK: u16 = 106;
+    pub const OWN_PRICE: u16 = 107;
+    pub const FIRST_EXTERNAL_PRICE: u16 = 108;
+    pub const PRICE_VS_FIRST_EXTERNAL_PPM: u16 = 109;
 
     /// The chain capture journal after it was closed; absent, with
     /// `capture.chain_journal_error` instead, when the capture failed.
@@ -305,9 +320,9 @@ pub mod result {
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g08.mainnet-acquisition-ordering.v6",
+        name: "darkbot.g08.mainnet-acquisition-ordering.v7",
         record_type: 14,
-        schema_version: 6,
+        schema_version: 7,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(ATTEMPT_ID, "attempt_id", Text),
@@ -449,6 +464,20 @@ pub mod result {
                 FIRST_EXTERNAL_BUY_TOKEN_AMOUNT,
                 "pricing.first_external_buy_token_amount",
                 U256,
+            ),
+            Field::req(MARKET_SCAN, "market.scan", Text),
+            Field::opt(MARKET_TRADES, "market.trades", U64),
+            Field::opt(MARKET_BUYS, "market.buys", U64),
+            Field::opt(MARKET_SELLS, "market.sells", U64),
+            Field::opt(MARKET_BUY_WEI, "market.buy_wei", U256),
+            Field::opt(MARKET_SELL_WEI, "market.sell_wei", U256),
+            Field::opt(MARKET_LAST_BLOCK, "market.last_block", U64),
+            Field::opt(OWN_PRICE, "pricing.own_price", U256),
+            Field::opt(FIRST_EXTERNAL_PRICE, "pricing.first_external_price", U256),
+            Field::opt(
+                PRICE_VS_FIRST_EXTERNAL_PPM,
+                "pricing.price_vs_first_external_ppm",
+                U64,
             ),
         ],
     };

@@ -6,8 +6,8 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 
 | Paket | Inhalt | REV.1.0-Status | Commit |
 |---|---|---|---|
-| R1 | LIVE-Betriebsblocker (BSC3-080..084) | FERTIG | dieser Commit |
-| R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | OFFEN | – |
+| R1 | LIVE-Betriebsblocker (BSC3-080..084) | FERTIG | `0159c1a7` |
+| R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | FERTIG (LIVE-Tab-Projektion der Versuche: R2b offen) | dieser Commit |
 | R3 | Recovery/Betreiber (Receipt-Recovery, EXIT_STOPPED, Nonce-Burn gesperrt, Ledger-Reparatur, Slot-Rückgabe, G0.7-Lot) | OFFEN | – |
 | R4 | Grant-Varianten gesperrt (069, 059, 029, 042, Kampagnen-Spend, §20, Builder-Frische/Fee) | OFFEN | – |
 | R5 | Exit-Routen gesperrt (030 Mempool, Re-Price, DEX-Exit migrierter Lots) | OFFEN | – |
@@ -20,56 +20,58 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | OFFEN | – |
 | R13 | FOREIGN_AUTO-Profile | OFFEN | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | OFFEN | – |
+| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A fertig, Rest offen) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
 | Paket | Gate | Ergebnis | CI |
 |---|---|---|---|
-| R1 | GR1 (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | dieser Commit |
+| R1 | GR1 (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | `0159c1a7`: bsc + Project 0 status contract success |
+| E-A | EA3 (Workspace, bsc_tools, Clippy, F0-VAR, Gateway, Frontend) | GATE_OK | `f6156fa0`: bsc (macOS, ubuntu, frontend) + Project 0 status contract success |
+| R2 | GR2 (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | dieser Commit |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
 | Befund | Pflichtstatus | Paket | Abschluss |
 |---|---|---|---|
-| 1.1 Overview `live_authorized` konstant | FIX | E4 | E-A dieser Commit (Gate aus `bsc.live.state`; Test bsc_live_authorization_is_the_owners_gate_in_bsc_live_state) |
-| 1.2 Platzhalter-Topic `bsc.execution.events` | FIX | E2 | E-A dieser Commit (überall entfernt, 40 + Name reserviert; the_bsc_event_placeholder_is_gone, event_topics_and_state_cursors_are_refused) |
-| 1.3 Wallet-Status aus Handdatei | FIX+REPIN | E4 | E-A dieser Commit (LIVE-Buyer der Runtime-Konfiguration, sonst UNKNOWN; the_wallets_and_the_grant_follow_the_runtime_configuration) |
-| 1.4 Projektions-Fallbacks `working-tree`/0 | FIX+REPIN | E4 | E-A dieser Commit (UNKNOWN/0 mit Warnung; an_unreadable_snapshot_identity_is_unknown) |
+| 1.1 Overview `live_authorized` konstant | FIX | E4 | E-A `8a9584d9` (Gate aus `bsc.live.state`; Test bsc_live_authorization_is_the_owners_gate_in_bsc_live_state) |
+| 1.2 Platzhalter-Topic `bsc.execution.events` | FIX | E2 | E-A `8a9584d9` (überall entfernt, 40 + Name reserviert; the_bsc_event_placeholder_is_gone, event_topics_and_state_cursors_are_refused) |
+| 1.3 Wallet-Status aus Handdatei | FIX+REPIN | E4 | E-A `8a9584d9` (LIVE-Buyer der Runtime-Konfiguration, sonst UNKNOWN; the_wallets_and_the_grant_follow_the_runtime_configuration) |
+| 1.4 Projektions-Fallbacks `working-tree`/0 | FIX+REPIN | E4 | E-A `8a9584d9` (UNKNOWN/0 mit Warnung; an_unreadable_snapshot_identity_is_unknown) |
 | 1.5 LOOPBACK-Stand-in | KEEP: BSC3-026, freigegebene isolierte Testidentität, fail-closed | – | – |
-| 1.6 Grant-Formular bietet nicht anschließbare Quellen | FIX | E4 | E-A dieser Commit (`BscLiveState.grantable_sources` = Quellen mit Adapter-Endpunkt; live.test.ts, bsc.spec.ts) |
+| 1.6 Grant-Formular bietet nicht anschließbare Quellen | FIX | E4 | E-A `8a9584d9` (`BscLiveState.grantable_sources` = Quellen mit Adapter-Endpunkt; live.test.ts, bsc.spec.ts) |
 | 1.7 produktive Gas-Evidence unter `fixtures/` | FIX+REFREEZE | E10 | – |
 | 2.1–2.2 falsche „read-only“-Doku/Usage (Rust) | FIX | E1 | – |
-| 2.3–2.5 dieselben Aussagen in proto/Gateway/bsc-control.sh | FIX+REPIN | E1 | E-A dieser Commit |
-| 2.6 Frontend-Hinweise „read-only“/„fünf Panels“ | FIX | E1 | E-A dieser Commit |
-| 2.7 `frontend/tests/bsc.spec.ts` veraltet | FIX | E2 | E-A dieser Commit (sechs Reiter, `npm run test:bsc`, CI-Job `bsc/frontend`) |
-| 2.8 `bsc-fields.json` decisions veraltet | FIX | E1 | E-A dieser Commit |
-| 2.9–2.10 tote Tool-Skripte (V2-Guard, SUPERSEDED) | FIX | E2 | E-A dieser Commit (entfernt; test_g07_tools_stop_before_credentials_or_network, weiter 7 Tests) |
-| 2.11 Python-C1-JSON-Tools | FIX (ohne Referenz entfernen); `c14a_*` KEEP: C1.4a-Evidence nennt sie | E2 | E-A dieser Commit (zwei entfernt) |
+| 2.3–2.5 dieselben Aussagen in proto/Gateway/bsc-control.sh | FIX+REPIN | E1 | E-A `8a9584d9` |
+| 2.6 Frontend-Hinweise „read-only“/„fünf Panels“ | FIX | E1 | E-A `8a9584d9` |
+| 2.7 `frontend/tests/bsc.spec.ts` veraltet | FIX | E2 | E-A `8a9584d9` (sechs Reiter, `npm run test:bsc`, CI-Job `bsc/frontend`) |
+| 2.8 `bsc-fields.json` decisions veraltet | FIX | E1 | E-A `8a9584d9` |
+| 2.9–2.10 tote Tool-Skripte (V2-Guard, SUPERSEDED) | FIX | E2 | E-A `8a9584d9` (entfernt; test_g07_tools_stop_before_credentials_or_network, weiter 7 Tests) |
+| 2.11 Python-C1-JSON-Tools | FIX (ohne Referenz entfernen); `c14a_*` KEEP: C1.4a-Evidence nennt sie | E2 | E-A `8a9584d9` (zwei entfernt) |
 | 2.12 Q5A-TLS-Evidence als JSON | FIX (Schreiber DBREC); bestehende Evidence KEEP bis Requalifikation (braucht BSC_ECON_SEND) | E10 | – |
 | 2.13 `legacy_import` | KEEP: einziger Leser der eingefrorenen G0.7-Legacy-Evidence | – | – |
 | 2.14, 5.9 toter Code in eingefrorenen G0.7-Dateien | FIX+REFREEZE (PROBE_SOURCES/PLAN_SHA256) | E10 | – |
 | 2.15 LIVE-Qualifikation V1–V3-Leser | FIX+REPIN | R1 | dieser Commit (Leser/Schemas entfernt, Verifier+Lister verweigern alte Layouts; Test a_record_of_an_earlier_layout_is_refused) |
 | 2.16 Owner-Generation V1–V5-Decoder | KEEP: 64 gehaltene Owner-Generationen des Betreibers bleiben lesbar (sonst alle Schalter fail-closed) | – | – |
-| 2.17 `startup.rs`-Doku | FIX | E2 | E-A dieser Commit (Modul entfernt) |
-| 2.18 Submission/TLS-Doku | FIX | E1 | E-A dieser Commit (mod.rs, tls/config.rs; `send.rs` Kopf ebenso falsch, offen) |
+| 2.17 `startup.rs`-Doku | FIX | E2 | E-A `8a9584d9` (Modul entfernt) |
+| 2.18 Submission/TLS-Doku | FIX | E1 | E-A `8a9584d9` (mod.rs, tls/config.rs; `send.rs` Kopf ebenso falsch, offen) |
 | 2.19 `flap_gas_20261026.txt` | KEEP: p8-Recovery-Evidence nennt sie (mit 1.7 verschoben) | E10 | – |
 | 2.20 `__pycache__`; `runtime_live.rs.orig` | FIX (pycache); `.orig` KEEP: Nutzer-Vorgabe „nicht anfassen“ | E2 | E-A: schon git-ignoriert (`.gitignore` `__pycache__/`), nichts versioniert; lokal nur im Hauptcheckout |
 | 3.1–3.4 Kampagnenmax., Paritätsminimum, Stale-Faktor, KEEP_GENERATIONS | FIX+REPIN | E3 | – |
-| 3.5–3.6 Socket/Label, launchd-Zahlen | FIX+REPIN | E3/E8 | E-A dieser Commit (Socket aus `$SOCK`-Verzeichnis, Reporter ohne Default; BSC_LAUNCHD_*/BSC_STOP_BUDGET_S) |
-| 3.7–3.8 Gateway-/Frontend-Timeouts | FIX | E3 | E-A dieser Commit (`Limits`; `COMMAND_TIMEOUT_MS`/VITE_COMMAND_TIMEOUT_MS) |
+| 3.5–3.6 Socket/Label, launchd-Zahlen | FIX+REPIN | E3/E8 | E-A `8a9584d9` (Socket aus `$SOCK`-Verzeichnis, Reporter ohne Default; BSC_LAUNCHD_*/BSC_STOP_BUDGET_S) |
+| 3.7–3.8 Gateway-/Frontend-Timeouts | FIX | E3 | E-A `8a9584d9` (`Limits`; `COMMAND_TIMEOUT_MS`/VITE_COMMAND_TIMEOUT_MS) |
 | 3.9–3.11, 3.13 Q5A-Hosts, Deployment-Pins, Owner-Pfad, Protokollkonstanten | KEEP: eingefrorene Pins / Sicherheitsanker / Protokoll | – | – |
 | 3.12 abgelehnte Konten doppelt | FIX | E3 | – |
-| 4.1, 4.14, 5.1 `startup.rs` toter Parallelpfad | FIX | E2 | E-A dieser Commit (entfernt, kein Aufrufer) |
+| 4.1, 4.14, 5.1 `startup.rs` toter Parallelpfad | FIX | E2 | E-A `8a9584d9` (entfernt, kein Aufrufer) |
 | 4.2 PaperEnd/LiveEnd-Planung doppelt | FIX | E7 | – |
 | 4.3–4.5, 5.14 JSON-RPC-Hex, HTTP-Framer, TLS-Builder, https-Prüfung | FIX | E6 | – |
 | 4.6–4.7 G0.7/G0.6a-Eigenpfade | KEEP: eingefrorene Evidence-Erzeuger; Konsolidierung = V5-Refreeze mit Echtgeld-Requalifikation | – | – |
-| 4.8–4.12 Grant-Regeln, ID-Listen, LIVE-Indikatoren, Doppelprojektion, Frontend-Clients | FIX(+REPIN) | E4 | 4.10 (`BscStatus.live_state` entfernt, eine LIVE-Quelle), 4.12 (`bscControl.ts`) E-A dieser Commit; 4.8/4.9/4.11 offen |
+| 4.8–4.12 Grant-Regeln, ID-Listen, LIVE-Indikatoren, Doppelprojektion, Frontend-Clients | FIX(+REPIN) | E4 | 4.10 (`BscStatus.live_state` entfernt, eine LIVE-Quelle), 4.12 (`bscControl.ts`) E-A `8a9584d9`; 4.8/4.9/4.11 offen |
 | 4.13 Readiness-Job Python/Shell/Text | FIX+REPIN | E8 | – |
 | 4.15, 5.5 zwei secp256k1-Recovery-Pfade | FIX (gemessen) | E5 | – |
 | 4.16 drei RLP-Decoder | FIX (C1-Freeze geprüft) | E9 | – |
 | 5.2–5.4, 5.6 Hotpath-Mehrfachdecode, Dedup-Reihenfolge, Polling vor BUY, lineare Suche | FIX (Latenz/Speicher vorher/nachher) | E5 | – |
-| 5.7, 5.8, 5.10–5.12 Testpfad-Module, test-only pub fns, Store-Reste, Konstanten, Doku | FIX | E2 | 5.10, 5.11 E-A dieser Commit; 5.7/5.8/5.12 offen |
+| 5.7, 5.8, 5.10–5.12 Testpfad-Module, test-only pub fns, Store-Reste, Konstanten, Doku | FIX | E2 | 5.10, 5.11 E-A `8a9584d9`; 5.7/5.8/5.12 offen |
 | 5.13 Gott-Module | FIX+REPIN | E11 | – |
 
 ## Verbindliches Messregister (27.10.2026)

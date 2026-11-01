@@ -41,7 +41,7 @@ use crate::submission::tls::{
 use crate::submission::transport::{Clock, TransportQualifications};
 use crate::submission::{blockrazor, club48};
 use alloy_primitives::U256;
-use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, IntentLane};
+use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, IntentLane, MAX_ADAPTERS};
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterTable, SubmissionMode,
@@ -127,6 +127,26 @@ pub struct LiveHandoff {
     pub tx_hash: [u8; 32],
     pub at_ns: u64,
     pub adapters: u8,
+    /// REV.1.0 R2: the owner's attempt this transaction is (a launch's
+    /// BUY its lease's, any other its admission's: the hash).
+    pub attempt: [u8; 32],
+    /// REV.1.0 R2: the dispatch's record (its clock, the frame selection,
+    /// each adapter's outcome and boundaries), for the attempt's record.
+    pub report: FanoutReport,
+    /// REV.1.0 R2 review H2: the granted builder each adapter of the
+    /// dispatch is (by its index), for the campaign's adapter scope.
+    pub builders: [Option<LiveAdapter>; MAX_ADAPTERS],
+}
+
+/// REV.1.0 R2: one provider's answer to a released transaction, as read:
+/// the adapter, the outcome and when it was classified (`None`: the
+/// connection gave the request up, NO_RESPONSE).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Answer {
+    pub tx_hash: [u8; 32],
+    pub adapter: AdapterId,
+    pub outcome: &'static str,
+    pub at_ns: Option<u64>,
 }
 
 impl HandoffTime for LiveHandoff {
@@ -222,6 +242,8 @@ pub struct LiveEnd {
     /// The answers read and not yet written to the ledger: a poll only
     /// reads, the write waits until no hand-over is near.
     answered: Vec<Fact>,
+    /// REV.1.0 R2: the answers read and not yet journaled, with their times.
+    timed: Vec<Answer>,
     /// The chain this end signs for.
     chain_id: u64,
     /// BSC3-076: the next C3 BUY the owner admitted before its launch.
@@ -418,6 +440,7 @@ impl LiveEnd {
             responses: Responses::default(),
             buy_refused: None,
             answered: Vec::new(),
+            timed: Vec::new(),
             chain_id,
             lease: None,
             confirmation: None,
@@ -721,6 +744,12 @@ impl LiveEnd {
         self.buy_refused.as_deref()
     }
 
+    /// REV.1.0 R2: the answers read since the last call, with their times
+    /// (the runtime journals them as the attempts' records).
+    pub fn take_answers(&mut self) -> Vec<Answer> {
+        std::mem::take(&mut self.timed)
+    }
+
     /// Writes the answers read since the last call as ledger facts
     /// (BSC3-051): outside any hand-over (file and directory syncs).
     pub fn record_responses(&mut self) {
@@ -798,6 +827,8 @@ impl End for LiveEnd {
                 by_tx: None,
                 response: Some(format!("{}:{what}", slot.live.name())),
                 origin: Some(released.origin),
+                launcher: None,
+                placement: None,
             };
             let (Some(transport), Some(buffer), Some(frame)) =
                 (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
@@ -810,6 +841,12 @@ impl End for LiveEnd {
                 }
                 self.responses.no_response += 1;
                 self.answered.push(fact);
+                self.timed.push(Answer {
+                    tx_hash: released.tx_hash,
+                    adapter: slot.adapter,
+                    outcome: "NO_RESPONSE",
+                    at_ns: None,
+                });
                 continue;
             };
             let mut armed = ReleaseArmed { transport, frame };
@@ -841,6 +878,12 @@ impl End for LiveEnd {
             }
             let fact = answered(outcome_name(outcome));
             self.answered.push(fact);
+            self.timed.push(Answer {
+                tx_hash: released.tx_hash,
+                adapter: slot.adapter,
+                outcome: outcome_name(outcome),
+                at_ns: report.adapter(slot.adapter).and_then(|r| r.t_response_ns),
+            });
         }
     }
 
@@ -859,6 +902,7 @@ impl End for LiveEnd {
             submission,
             config,
             exit_reserve_wei,
+            launcher,
         } = h;
         // BSC3-045: a fact the ledger did not take may be missing from the
         // book: nothing more is handed over (before the owner's admission:
@@ -1155,6 +1199,15 @@ impl End for LiveEnd {
                         tx_hash,
                         at_ns: *at_ns,
                         adapters: handed.len() as u8,
+                        attempt: lease.as_ref().map_or(tx_hash, |l| l.attempt),
+                        report: *report,
+                        builders: {
+                            let mut b = [None; MAX_ADAPTERS];
+                            for s in &self.slots {
+                                b[s.adapter.index()] = Some(s.live);
+                            }
+                            b
+                        },
                     }),
                     None if late && !disclosed => Err((
                         Refusal::Deadline,
@@ -1188,6 +1241,8 @@ impl End for LiveEnd {
             by_tx: None,
             response: None,
             origin: Some(origin),
+            launcher,
+            placement: None,
         };
         let written = match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => {
@@ -1691,6 +1746,7 @@ pub(crate) mod tests {
         let entry = exec
             .on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2_next(Some(HEAD), 1),
@@ -1756,6 +1812,7 @@ pub(crate) mod tests {
         reconnect(&mut exec);
         let refused = exec.on_strategy_buy(
             [0xCD; 20],
+            [0; 20],
             curve,
             input,
             &strategy_c2_next(Some(HEAD), 4),
@@ -1906,6 +1963,7 @@ pub(crate) mod tests {
         let buy = |exec: &mut Executor<LiveEnd>, next: u64| {
             exec.on_strategy_buy(
                 token,
+                [0; 20],
                 curve,
                 input,
                 &strategy_c2_next(Some(HEAD), next),
@@ -2075,6 +2133,7 @@ pub(crate) mod tests {
         };
         let refused = exec.on_strategy_buy(
             [0xAB; 20],
+            [0; 20],
             curve_after(1_000_000_000_000_000_000),
             U256::from(10_000_000_000_000_000u64),
             &strategy_c2_next(Some(HEAD), 0),
@@ -2273,6 +2332,7 @@ pub(crate) mod tests {
         // of the same token is still not a second purchase.
         let again = exec.on_strategy_buy(
             buy.token,
+            [0; 20],
             curve_after(1_000_000_000_000_000_000),
             U256::from(10_000_000_000_000_000u64),
             &strategy_c2_next(Some(HEAD), 1),
@@ -2344,6 +2404,33 @@ pub(crate) mod tests {
             let facts = || Ledger::open(&state).facts().unwrap();
             assert!(facts().iter().all(|f| f.kind != FactKind::Responded));
             exec.end_mut().record_responses();
+            // REV.1.0 R2: the answer with its adapter and time, once, as the
+            // attempt's `a` record reads it back.
+            let timed = exec.end_mut().take_answers();
+            assert_eq!(timed.len(), 1, "{answer:?}");
+            assert_eq!(
+                (timed[0].tx_hash, timed[0].outcome),
+                (buy.handoff.tx_hash, outcome)
+            );
+            assert_eq!(
+                timed[0].at_ns.is_some(),
+                outcome != "NO_RESPONSE",
+                "{answer:?}"
+            );
+            let (tx, adapter, code, at) = crate::runtime_journal::live_answer_of(
+                &crate::runtime_journal::live_answer_payload(&timed[0]),
+            )
+            .unwrap();
+            assert_eq!(
+                (tx, usize::from(adapter), at),
+                (
+                    buy.handoff.tx_hash,
+                    timed[0].adapter.index(),
+                    timed[0].at_ns
+                )
+            );
+            assert_eq!(crate::runtime_journal::ANSWERS[usize::from(code)], outcome);
+            assert!(exec.end_mut().take_answers().is_empty());
             let book = fold(&facts());
             let tx = book.tx(&buy.handoff.tx_hash).unwrap();
             assert_eq!(tx.state, FactKind::Released, "{answer:?}");
@@ -2354,6 +2441,7 @@ pub(crate) mod tests {
                 // The connection is ready again: the next request goes on it.
                 let next = exec.on_strategy_buy(
                     [0x5A; 20],
+                    [0; 20],
                     curve_after(1_000_000_000_000_000_000),
                     U256::from(10_000_000_000_000_000u64),
                     &strategy_c2_next(Some(HEAD), 1),
@@ -2411,6 +2499,7 @@ pub(crate) mod tests {
         reconnect(&mut exec);
         let next = exec.on_strategy_buy(
             [0x5A; 20],
+            [0; 20],
             curve_after(1_000_000_000_000_000_000),
             U256::from(10_000_000_000_000_000u64),
             &strategy_c2_next(Some(HEAD), 1),

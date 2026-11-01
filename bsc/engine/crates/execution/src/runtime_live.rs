@@ -217,6 +217,8 @@ pub enum PositionChange {
 #[derive(Clone, Debug)]
 struct Seen {
     tx_hash: [u8; 32],
+    /// Its transaction index in the block (REV.1.0 R2: its placement).
+    index: u64,
     succeeded: bool,
     gas_wei: Option<U256>,
     tokens: Option<U256>,
@@ -229,6 +231,40 @@ struct Seen {
     /// The Portal traded in it a BUY of the buyer's own (not a SELL, not
     /// another trader's).
     bought: bool,
+}
+
+/// REV.1.0 R2: where an included C3 BUY at `own_index` landed against its
+/// token's launch (at `launch_index` in its block, none: not in it): no
+/// token received NO_TOKENS, its launch not in its block OTHER_BLOCK,
+/// another trader's BUY of the token between them LATE, else FIRST.
+fn placement_of(
+    launch_index: Option<u64>,
+    own_index: u64,
+    buys: &[([u8; 20], u64, [u8; 20])],
+    token: [u8; 20],
+    buyer: [u8; 20],
+    received: bool,
+) -> crate::live_ledger::Placement {
+    use crate::live_ledger::{Placement, PlacementVerdict};
+    let buys_before = launch_index.map_or(0, |launch| {
+        buys.iter()
+            .filter(|(t, i, trader)| {
+                *t == token && *i > launch && *i < own_index && *trader != buyer
+            })
+            .count() as u64
+    });
+    let verdict = match (received, launch_index, buys_before) {
+        (false, _, _) => PlacementVerdict::NoTokens,
+        (true, None, _) => PlacementVerdict::OtherBlock,
+        (true, Some(_), 0) => PlacementVerdict::First,
+        (true, Some(_), _) => PlacementVerdict::Late,
+    };
+    Placement {
+        verdict,
+        launch_index,
+        own_index,
+        buys_before,
+    }
 }
 
 /// The components a grant of `strategies` arms
@@ -341,6 +377,15 @@ pub struct LiveRuntime {
     exit_deciders: Option<ExitDeciders>,
     /// Strategy C BUYs refused because the grant names no STRATEGY_C.
     strategy_buys_refused: u64,
+    /// REV.1.0 R2: the providers' answers read and not yet journaled (here,
+    /// not in the end: a disarm between a poll and the runtime's take drops
+    /// none).
+    answers: Vec<crate::live_end::Answer>,
+    /// REV.1.0 R2: this block's launches (token, transaction index,
+    /// creator) and other traders' BUYs of their tokens (token, index,
+    /// trader): a C3 BUY's placement at the block's end.
+    block_launches: Vec<([u8; 20], u64, Option<[u8; 20]>)>,
+    block_buys: Vec<([u8; 20], u64, [u8; 20])>,
     /// BSC3-075: those launches, until a granted source sees them (at most
     /// as many as the ingress remembers, `BSC_RUNTIME_DEDUP_HASHES`: a later
     /// sighting comes only of a launch it still holds; the oldest first out).
@@ -478,6 +523,9 @@ impl LiveRuntime {
             sources_live: Vec::new(),
             exit_deciders: None,
             strategy_buys_refused: 0,
+            answers: Vec::new(),
+            block_launches: Vec::new(),
+            block_buys: Vec::new(),
             awaiting_granted: std::collections::VecDeque::new(),
             awaiting_bound: 0,
             lease_attempt: None,
@@ -654,6 +702,14 @@ impl LiveRuntime {
         });
     }
 
+    /// REV.1.0 R2: the creator of the launch of `token`'s open lot (its
+    /// BUY's, from the ledger): the creator rule of its exit after a
+    /// restart.
+    pub fn launcher_of(&self, token: &[u8; 20]) -> Option<[u8; 20]> {
+        let lot = self.book.open_lot(token)?.lot;
+        self.book.tx(&lot)?.launcher
+    }
+
     /// The Portal of the armed path's validated deployment (the curve
     /// reads of its open lots go there); none unarmed.
     pub fn portal(&self) -> Option<alloy_primitives::Address> {
@@ -791,6 +847,8 @@ impl LiveRuntime {
                 ..
             } => {
                 self.block = Some((*number, *hash, *timestamp_ms));
+                self.block_launches.clear();
+                self.block_buys.clear();
                 self.nonces_taken = txs
                     .iter()
                     .filter(|t| t.sender == buyer)
@@ -820,6 +878,7 @@ impl LiveRuntime {
                         };
                         Some(Seen {
                             tx_hash: t.hash,
+                            index: t.index,
                             succeeded: t.succeeded,
                             gas_wei: t.cost.map(|c| U256::from(c.wei())),
                             tokens: None,
@@ -838,6 +897,20 @@ impl LiveRuntime {
                     s.eth_wei = Some(U256::from_be_bytes(t.eth));
                     s.token = Some(t.token);
                     s.bought = !t.sell && t.trader == buyer;
+                }
+                Vec::new()
+            }
+            // REV.1.0 R2: another trader's BUY of a token launched in this
+            // block (a C3 BUY's placement counts it, when it came first).
+            CanonicalEvent::FlapTrade(t)
+                if !t.sell && self.block_launches.iter().any(|l| l.0 == t.token) =>
+            {
+                self.block_buys.push((t.token, t.tx_index, t.trader));
+                Vec::new()
+            }
+            CanonicalEvent::Launch(l) => {
+                if let Some(token) = l.token {
+                    self.block_launches.push((token, l.tx_index, l.creator));
                 }
                 Vec::new()
             }
@@ -889,13 +962,47 @@ impl LiveRuntime {
                     } else {
                         FactKind::Reverted
                     };
+                    // REV.1.0 R2 review M2: an included BUY acquired only
+                    // what the buyer's own Portal BUY of its token received;
+                    // any other trade of the transaction acquired nothing.
+                    let own_buy = s.bought
+                        && s.token.is_some()
+                        && (released.token == [0; 20] || s.token == Some(released.token));
+                    let tokens = match (released.intent, s.succeeded) {
+                        (LiveIntentKind::Buy, true) if own_buy => s.tokens,
+                        (LiveIntentKind::Buy, true) => Some(U256::ZERO),
+                        _ => s.tokens,
+                    };
                     facts.push(Fact {
                         block: Some(block),
                         gas_wei: s.gas_wei,
-                        tokens: s.tokens,
+                        tokens,
                         eth_wei: s.eth_wei,
                         ..Fact::about(&released, kind)
                     });
+                    // REV.1.0 R2: where an included C3 BUY landed against
+                    // its launch, a durable fact of its own.
+                    if s.succeeded
+                        && released.intent == LiveIntentKind::Buy
+                        && released.component == ComponentId::ExecC3
+                    {
+                        let token = s.token.unwrap_or(released.token);
+                        let launch = self.block_launches.iter().find(|l| l.0 == token);
+                        let placement = placement_of(
+                            launch.map(|l| l.1),
+                            s.index,
+                            &self.block_buys,
+                            token,
+                            buyer,
+                            own_buy && s.tokens.is_some_and(|n| !n.is_zero()),
+                        );
+                        facts.push(Fact {
+                            block: Some(block),
+                            placement: Some(placement),
+                            launcher: launch.and_then(|l| l.2),
+                            ..Fact::about(&released, FactKind::Placed)
+                        });
+                    }
                 }
                 // Another transaction of the buyer took an unresolved one's
                 // nonce: it never happened. The fact names which one, and
@@ -1987,7 +2094,8 @@ impl LiveRuntime {
                 FactKind::Withdrawn
                 | FactKind::Replaced
                 | FactKind::Orphaned
-                | FactKind::Responded => false,
+                | FactKind::Responded
+                | FactKind::Placed => false,
             };
             let key = t.released.key();
             if !counts || key.is_some_and(|k| settled.contains(&k)) {
@@ -2152,6 +2260,24 @@ impl LiveRuntime {
         owner: Option<&StateOwner>,
         next: Option<u64>,
     ) -> Option<(Refusal, Option<&'static str>)> {
+        // REV.1.0 R2 (PHASENPLAN 27.10.: stop after a bad placement): a C3
+        // BUY of this grant that landed behind another trader's BUY,
+        // outside its launch's block or without tokens stops new BUYs
+        // until the operator grants anew (from the ledger: across arms and
+        // restarts, an orphaned placement too); the exits go on. Before
+        // any other reason (review L3: the status names it, not a passing
+        // limit).
+        let misplaced = self.executor.as_ref().is_some_and(|x| {
+            self.book
+                .misplaced
+                .contains(&x.end().armed().grant_generation())
+        });
+        if misplaced {
+            return Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_PLACEMENT_VIOLATED),
+            ));
+        }
         // BSC3-030 review: while an open position's exits wait for the
         // operator, no new BUY (an exit failing for good would strand
         // every new position too).
@@ -2234,7 +2360,13 @@ impl LiveRuntime {
             // as soon as it is established.
             x.end_mut().install_ready();
             x.poll_responses(clock);
+            self.answers.extend(x.end_mut().take_answers());
         }
+    }
+
+    /// REV.1.0 R2: the answers read since the last call, with their times.
+    pub fn take_answers(&mut self) -> Vec<crate::live_end::Answer> {
+        std::mem::take(&mut self.answers)
     }
 
     /// The answers read so far as ledger facts, folded: after a hand-over
@@ -3289,14 +3421,24 @@ mod tests {
             timestamp_ms: 1_793_000_001_000,
             observed: Instant::now(),
             observed_unix_ms: None,
-            txs: vec![CanonicalTx {
-                hash: buy.handoff.tx_hash,
-                index: 0,
-                sender: buyer,
-                nonce: 5,
-                succeeded: true,
-                cost: None,
-            }],
+            txs: vec![
+                CanonicalTx {
+                    hash: [0x1a; 32],
+                    index: 0,
+                    sender: launcher,
+                    nonce: 3,
+                    succeeded: true,
+                    cost: None,
+                },
+                CanonicalTx {
+                    hash: buy.handoff.tx_hash,
+                    index: 1,
+                    sender: buyer,
+                    nonce: 5,
+                    succeeded: true,
+                    cost: None,
+                },
+            ],
         };
         c2.canonical(&included);
         let evidence = c2.take_evidence();
@@ -3304,7 +3446,17 @@ mod tests {
             x.apply_evidence(&evidence),
             vec![Some(IntentState::Included)]
         );
+        // Right behind its launch in the block (R2: placed FIRST).
         let _ = x.on_canonical(&included);
+        let _ = x.on_canonical(&launch_event(HEAD + 1, 0xb2, 0, buy.token, launcher));
+        let _ = x.on_canonical(&buy_trade(
+            HEAD + 1,
+            0xb2,
+            1,
+            buy.handoff.tx_hash,
+            buy.token,
+            buyer,
+        ));
         let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
             number: HEAD + 1,
             hash: [0xb2; 32],
@@ -3443,6 +3595,7 @@ mod tests {
         };
         let buy = StrategyAction::Buy {
             token,
+            creator: [0; 20],
             curve,
             input_wei: input,
             decided_ns: 0,
@@ -3782,6 +3935,7 @@ mod tests {
         };
         let buy = StrategyAction::Buy {
             token,
+            creator: [0; 20],
             curve,
             input_wei: input,
             decided_ns: 0,
@@ -3984,6 +4138,7 @@ mod tests {
             // Review MEDIUM: no new BUY while its exits wait for the operator.
             let other = StrategyAction::Buy {
                 token: [0xCD; 20],
+                creator: [0; 20],
                 curve,
                 input_wei: input,
                 decided_ns: 0,
@@ -4302,6 +4457,63 @@ mod tests {
             fs::remove_dir_all(self.root).unwrap();
             fs::remove_dir_all(self.state).unwrap();
         }
+    }
+
+    /// REV.1.0 R2: the canonical launch of `token` by `creator` at `index`
+    /// of block `n` (hash `[h; 32]`).
+    fn launch_event(
+        n: u64,
+        h: u8,
+        index: u64,
+        token: [u8; 20],
+        creator: [u8; 20],
+    ) -> CanonicalEvent {
+        use crate::canonical_join::Venue;
+        use crate::chain_follower::CanonicalLaunch;
+        CanonicalEvent::Launch(CanonicalLaunch {
+            venue: Venue::Flap,
+            block_number: n,
+            block_hash: [h; 32],
+            tx_index: index,
+            tx_hash: [0x1a; 32],
+            token: Some(token),
+            creator: Some(creator),
+            external_buys_after: None,
+            first_external_buy_index: None,
+            sender: Some(creator),
+            nonce: Some(0),
+            c1_scope: true,
+            venue_target: true,
+            four_token: crate::canonical_join::FourToken::NotApplicable,
+            unverifiable: None,
+        })
+    }
+
+    /// REV.1.0 R2: a Portal BUY of `token` by `trader` in transaction
+    /// `tx` at `index` of block `n`.
+    fn buy_trade(
+        n: u64,
+        h: u8,
+        index: u64,
+        tx: [u8; 32],
+        token: [u8; 20],
+        trader: [u8; 20],
+    ) -> CanonicalEvent {
+        CanonicalEvent::FlapTrade(crate::chain_follower::CanonicalTrade {
+            block_number: n,
+            block_hash: [h; 32],
+            tx_index: index,
+            tx_hash: tx,
+            log_index: 0,
+            origin: trader,
+            sell: false,
+            token,
+            trader,
+            amount: U256::from(1_000_000u64).to_be_bytes(),
+            eth: U256::from(1_000u64).to_be_bytes(),
+            fee: [0; 32],
+            post_price: [0; 32],
+        })
     }
 
     /// C2 at `HEAD` with the buyer's next nonce `next`.
@@ -4722,6 +4934,7 @@ mod tests {
         };
         let buy = |token| StrategyAction::Buy {
             token,
+            creator: [0; 20],
             curve,
             input_wei: input,
             decided_ns: 0,
@@ -4915,6 +5128,7 @@ mod tests {
         fn buy(&self, token: [u8; 20]) -> crate::runtime_strategy::StrategyAction {
             crate::runtime_strategy::StrategyAction::Buy {
                 token,
+                creator: [0; 20],
                 curve: self.curve,
                 input_wei: self.input,
                 decided_ns: 0,
@@ -5529,6 +5743,8 @@ mod tests {
                     by_tx: None,
                     response: None,
                     origin: None,
+                    launcher: None,
+                    placement: None,
                 },
                 1,
             )
@@ -5706,6 +5922,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -5772,6 +5990,122 @@ mod tests {
         r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
         // A's approval is out: its SELL and B's exit are left to reserve.
         assert_eq!(x.exit_reserve(), sell + approval + sell);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R2 review L6: a provider's answer read before a disarm is
+    /// kept for the attempt's `a` record (the end that read it is gone).
+    #[test]
+    fn an_answer_read_before_a_disarm_is_kept_for_its_record() {
+        let r = Rig::answering(
+            "live-answer-disarm",
+            LiveStrategies::StrategyC,
+            vec![crate::live_end::tests::Answer::Ack],
+        );
+        let sc = Sc::new(r.buyer);
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let (out, _) = x
+            .on_strategy(&sc.buy([0xA1; 20]), &c2, &clock, 1_793_000_000_500)
+            .unwrap();
+        let tx = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while x.answers.is_empty() && Instant::now() < deadline {
+            x.poll_responses(&clock);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        x.disarm();
+        let answers = x.take_answers();
+        assert_eq!(answers.len(), 1);
+        assert_eq!((answers[0].tx_hash, answers[0].outcome), (tx, "ACK"));
+        assert!(answers[0].at_ns.is_some());
+        std::mem::forget(x);
+        r.clean();
+    }
+
+    /// REV.1.0 R2 review M2: an included BUY whose Portal trade went to
+    /// another trader acquired nothing: no tokens in its inclusion or its
+    /// lot, its placement NO_TOKENS (the halt follows).
+    #[test]
+    fn a_buy_whose_trade_went_to_another_trader_acquired_nothing() {
+        use crate::live_ledger::PlacementVerdict;
+        let r = Rig::new("live-buy-other-recipient", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .expect("the BUY");
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let tx = |hash, index, sender, nonce| CanonicalTx {
+            hash,
+            index,
+            sender,
+            nonce,
+            succeeded: true,
+            cost: None,
+        };
+        let block = CanonicalEvent::Block {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+            parent_hash: [0xb1; 32],
+            timestamp_s: 1_793_000_001,
+            timestamp_ms: 1_793_000_001_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: vec![
+                tx([0x1a; 32], 0, launcher, 3),
+                tx(buy.handoff.tx_hash, 1, r.buyer, 5),
+            ],
+        };
+        c2.canonical(&block);
+        let _ = x.apply_evidence(&c2.take_evidence());
+        let _ = x.on_canonical(&block);
+        let _ = x.on_canonical(&launch_event(HEAD + 1, 0xb2, 0, buy.token, launcher));
+        // The buyer's transaction, its Portal BUY's trader another one.
+        let mut other = buy_trade(
+            HEAD + 1,
+            0xb2,
+            1,
+            buy.handoff.tx_hash,
+            buy.token,
+            [0x77; 20],
+        );
+        if let CanonicalEvent::FlapTrade(t) = &mut other {
+            t.origin = r.buyer;
+        }
+        let _ = x.on_canonical(&other);
+        let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+        });
+        let t = x.book.tx(&buy.handoff.tx_hash).unwrap();
+        assert_eq!(
+            t.inclusion.as_ref().and_then(|f| f.tokens),
+            Some(U256::ZERO)
+        );
+        assert_eq!(t.placement.unwrap().verdict, PlacementVerdict::NoTokens);
+        assert!(
+            x.book
+                .open_lot(&buy.token)
+                .is_none_or(|p| p.tokens.is_zero())
+        );
         x.shutdown();
         r.clean();
     }
@@ -5914,6 +6248,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -6026,6 +6362,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         ledger.append(&buy, 1).unwrap();
         let included = crate::live_ledger::Fact {
@@ -6355,6 +6693,8 @@ mod tests {
                 chain_id: 56,
                 sender: buyer,
             }),
+            launcher: None,
+            placement: None,
         }
     }
 
@@ -7193,6 +7533,7 @@ mod tests {
             .unwrap();
             let buy = StrategyAction::Buy {
                 token: [0xAB; 20],
+                creator: [0; 20],
                 curve: StrategyCurve {
                     terms,
                     reserve: fresh.reserve_after,
@@ -7341,6 +7682,7 @@ mod tests {
         .unwrap();
         let buy = StrategyAction::Buy {
             token: [0xAB; 20],
+            creator: [0; 20],
             curve: StrategyCurve {
                 terms,
                 reserve: fresh.reserve_after,
@@ -7683,6 +8025,7 @@ mod tests {
         .unwrap();
         crate::runtime_strategy::StrategyAction::Buy {
             token,
+            creator: [0; 20],
             curve: StrategyCurve {
                 terms,
                 reserve: fresh.reserve_after,
@@ -7723,6 +8066,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         let b = released(buy, LiveIntentKind::Buy, 1);
         let s = released(sell, LiveIntentKind::Sell, 2);
@@ -7850,6 +8195,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         let ledger = Ledger::open(&r.state);
         ledger.append(&buy, NOW).unwrap();
@@ -8240,6 +8587,347 @@ mod tests {
         r.clean();
     }
 
+    /// REV.1.0 R2: the placement verdicts: no token received NO_TOKENS
+    /// (first), no launch in the block OTHER_BLOCK, another trader's BUY
+    /// between LATE, the buyer's own and the creator's in the launch never
+    /// count, else FIRST.
+    #[test]
+    fn a_c3_buys_placement_is_judged_against_its_launch() {
+        use crate::live_ledger::PlacementVerdict::*;
+        let (token, other, buyer, trader) = ([0xA1; 20], [0xA2; 20], [0xB0; 20], [0x77; 20]);
+        let buys = [(token, 2, buyer), (other, 3, trader), (token, 9, trader)];
+        let verdict =
+            |launch, own, received| placement_of(launch, own, &buys, token, buyer, received);
+        assert_eq!(verdict(Some(1), 4, true).verdict, First);
+        assert_eq!(verdict(Some(1), 4, true).buys_before, 0);
+        assert_eq!(verdict(Some(1), 10, true).verdict, Late);
+        assert_eq!(verdict(Some(1), 10, true).buys_before, 1);
+        assert_eq!(verdict(None, 4, true).verdict, OtherBlock);
+        assert_eq!(verdict(Some(1), 10, false).verdict, NoTokens);
+        assert_eq!(verdict(Some(1), 10, true).launch_index, Some(1));
+    }
+
+    /// REV.1.0 R2 (PHASENPLAN 27.10.): a C3 BUY that landed behind another
+    /// trader's BUY of its token is a durable LATE placement in the ledger
+    /// (with its launch's creator): no new BUY under the grant, also after
+    /// a restart; its lot keeps its exit.
+    #[test]
+    fn a_c3_buy_behind_another_traders_buy_stops_new_buys() {
+        use crate::live_ledger::PlacementVerdict;
+        let r = Rig::new("live-placed-late", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .expect("the BUY");
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let trader = [0x77; 20];
+        let tx = |hash, index, sender, nonce| CanonicalTx {
+            hash,
+            index,
+            sender,
+            nonce,
+            succeeded: true,
+            cost: None,
+        };
+        let block = CanonicalEvent::Block {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+            parent_hash: [0xb1; 32],
+            timestamp_s: 1_793_000_001,
+            timestamp_ms: 1_793_000_001_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: vec![
+                tx([0x1a; 32], 0, launcher, 3),
+                tx([0x2b; 32], 1, trader, 0),
+                tx(buy.handoff.tx_hash, 2, r.buyer, 5),
+            ],
+        };
+        c2.canonical(&block);
+        let _ = x.apply_evidence(&c2.take_evidence());
+        let _ = x.on_canonical(&block);
+        let _ = x.on_canonical(&launch_event(HEAD + 1, 0xb2, 0, buy.token, launcher));
+        let _ = x.on_canonical(&buy_trade(HEAD + 1, 0xb2, 1, [0x2b; 32], buy.token, trader));
+        let _ = x.on_canonical(&buy_trade(
+            HEAD + 1,
+            0xb2,
+            2,
+            buy.handoff.tx_hash,
+            buy.token,
+            r.buyer,
+        ));
+        let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+        });
+        let placed = x.book.tx(&buy.handoff.tx_hash).unwrap().placement.unwrap();
+        assert_eq!(placed.verdict, PlacementVerdict::Late);
+        assert_eq!(
+            (placed.launch_index, placed.own_index, placed.buys_before),
+            (Some(0), 2, 1)
+        );
+        assert_eq!(x.launcher_of(&buy.token), Some(launcher));
+        let refused = |x: &LiveRuntime| x.buy_refusal(U256::ZERO, Some(&c2), Some(6));
+        // Before any other reason: unfunded too, the halt is what it names
+        // (review L3).
+        assert_eq!(
+            x.buy_refusal(U256::MAX, Some(&c2), Some(6)),
+            Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_PLACEMENT_VIOLATED)
+            ))
+        );
+        assert_eq!(
+            refused(&x),
+            Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_PLACEMENT_VIOLATED)
+            ))
+        );
+        // Its lot keeps its exit (exits are no BUY).
+        assert!(x.book.open_lot(&buy.token).is_some());
+        x.shutdown();
+        // A restart reads the placement from the ledger.
+        let mut y = r.runtime("boot-1");
+        settle(&mut y, &c2);
+        assert!(y.armed(), "{:?}", reason(&y));
+        assert_eq!(
+            refused(&y),
+            Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_PLACEMENT_VIOLATED)
+            ))
+        );
+        assert_eq!(y.launcher_of(&buy.token), Some(launcher));
+        y.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R2: a C3 BUY's release is journaled as its attempt (`l`:
+    /// the attempt, trigger, clock, frame selection and each adapter's
+    /// outcome and boundaries, from the dispatch's own report) and
+    /// evaluated with the ledger and the canonical journal: its placement,
+    /// acquisition and market window; no producer witness, so its timing
+    /// is UNKNOWN, and without a manifest the campaign is not ready.
+    #[test]
+    fn a_live_release_is_journaled_and_evaluated_as_its_attempt() {
+        use crate::live_attempts::{CAMPAIGN_NOT_READY, PASS, UNKNOWN, evaluate};
+        use crate::runtime_journal::{
+            JournalSetup, RuntimeJournal, live_release_of, live_release_payload,
+        };
+        use darkbot_bsc_journal::RecordKind;
+        let r = Rig::new("live-attempt-record", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        let buy = x
+            .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+            .expect("the BUY");
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let tx = |hash, index, sender, nonce| CanonicalTx {
+            hash,
+            index,
+            sender,
+            nonce,
+            succeeded: true,
+            cost: None,
+        };
+        let t0_ms = 1_793_000_001_000;
+        let block = CanonicalEvent::Block {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+            parent_hash: [0xb1; 32],
+            timestamp_s: t0_ms / 1_000,
+            timestamp_ms: t0_ms,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: vec![
+                tx(hash, 0, launcher, 3),
+                tx(buy.handoff.tx_hash, 1, r.buyer, 5),
+            ],
+        };
+        c2.canonical(&block);
+        let _ = x.apply_evidence(&c2.take_evidence());
+        let _ = x.on_canonical(&block);
+        let _ = x.on_canonical(&launch_event(HEAD + 1, 0xb2, 0, buy.token, launcher));
+        let own = buy_trade(HEAD + 1, 0xb2, 1, buy.handoff.tx_hash, buy.token, r.buyer);
+        let _ = x.on_canonical(&own);
+        let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
+            number: HEAD + 1,
+            hash: [0xb2; 32],
+        });
+        x.shutdown();
+        // The runtime's records of it, as `run` journals them.
+        let l = live_release_payload(
+            0,
+            Some(SourceId::PublicNode),
+            &buy.handoff,
+            buy.launch_hash,
+            buy.token,
+            0,
+            &buy.times,
+            &buy.raw,
+        );
+        let back = live_release_of(&l).unwrap();
+        assert_eq!(
+            (back.tx_hash, back.attempt, back.trigger),
+            (
+                buy.handoff.tx_hash,
+                buy.handoff.attempt,
+                Some(SourceId::PublicNode)
+            )
+        );
+        assert_eq!(back.clock_id, buy.handoff.report.clock_id);
+        assert_eq!(
+            (back.times[6], back.raw.as_slice()),
+            (buy.handoff.report.t_select_ns, buy.raw.as_slice())
+        );
+        let reported = back
+            .adapters
+            .iter()
+            .map(|a| {
+                darkbot_bsc_trading::intent::AdapterId::new(a.adapter)
+                    .and_then(|id| buy.handoff.report.adapter(id))
+                    .map(|r| r.t_boundary_ns)
+                    == Some(a.boundary_ns)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reported, vec![true; buy.handoff.adapters as usize]);
+        let rundir = r.d.join("rundir");
+        let mut j = RuntimeJournal::open(
+            &rundir.join("bsc-runtime/journal"),
+            t0_ms - 60_000,
+            1,
+            JournalSetup::whole(1024, 1 << 16),
+        )
+        .unwrap();
+        let mut launch_ref = crate::canonical_join::LaunchRef {
+            venue: crate::canonical_join::Venue::Flap,
+            block_number: HEAD + 1,
+            block_hash: [0xb2; 32],
+            tx_index: 0,
+            tx_hash: buy.launch_hash,
+            token: Some(buy.token),
+            external_buys: None,
+            c1_scope: true,
+            venue_target: true,
+            four_token: crate::canonical_join::FourToken::NotApplicable,
+            tx: crate::canonical_join::LaunchTx::Verified,
+            block_ms: t0_ms,
+            block_seen_ns: 0,
+            block_seen_unix_ms: None,
+        };
+        for k in 0..40u64 {
+            let mut h = [0xc0; 32];
+            h[..8].copy_from_slice(&k.to_le_bytes());
+            if k == 0 {
+                h = [0xb2; 32];
+            }
+            assert!(j.record(
+                RecordKind::Canonical,
+                k,
+                crate::runtime_strategy::block_payload(HEAD + 1 + k, &h, t0_ms + k * 450),
+            ));
+        }
+        launch_ref.block_ms = t0_ms;
+        assert!(j.record(
+            RecordKind::Canonical,
+            41,
+            crate::runtime_journal::canonical_launch_payload(&crate::canonical_join::Joined {
+                launch: launch_ref,
+                visibility: crate::canonical_join::Visibility::Missed,
+            }),
+        ));
+        let CanonicalEvent::FlapTrade(own) = own else {
+            unreachable!()
+        };
+        assert!(j.record(
+            RecordKind::Canonical,
+            42,
+            crate::runtime_journal::flap_trade_payload(&own)
+        ));
+        assert!(j.record(RecordKind::Runtime, buy.times.sink_ns, l));
+        j.finish().unwrap();
+        let e = evaluate(
+            &rundir,
+            &r.state,
+            1 << 16,
+            None,
+            None,
+            &[],
+            0,
+            Some([1; 32]),
+            [2; 32],
+            t0_ms + 60_000,
+        )
+        .unwrap();
+        assert_eq!(e.attempts.len(), 1);
+        let a = &e.attempts[0];
+        assert_eq!(
+            (a.kind, a.cell, a.state),
+            (
+                "C3_BUY",
+                // No manifest names the operator's launchers: not known to
+                // be another's (review H3).
+                crate::live_attempts::CELL_UNKNOWN,
+                "INCLUDED"
+            )
+        );
+        assert_eq!(
+            (a.attempt, a.trigger, a.run),
+            (
+                buy.handoff.attempt,
+                Some(SourceId::PublicNode),
+                Some(t0_ms - 60_000)
+            )
+        );
+        // Each adapter names the granted builder it was (review H2).
+        assert_eq!(a.adapters[0].builder, Some(LiveAdapter::Club48BuilderV1));
+        assert_eq!(a.local.unwrap().clock_id, buy.handoff.report.clock_id);
+        assert_eq!(a.adapters.len(), buy.handoff.adapters as usize);
+        assert_eq!(a.adapters[0].outcome, "HANDED_OFF");
+        assert_eq!(
+            (
+                a.verdicts.acquisition,
+                a.verdicts.placement,
+                a.verdicts.capture,
+                a.verdicts.timing
+            ),
+            (PASS, PASS, PASS, UNKNOWN)
+        );
+        assert_eq!(
+            (a.window.trades, a.window.buys, a.window.end_block),
+            (1, 1, Some(HEAD + 34))
+        );
+        assert_eq!(e.campaign.verdict, CAMPAIGN_NOT_READY);
+        let file = rundir.join(format!(
+            "bsc-runtime/live-attempts/0x{}.dbrec",
+            alloy_primitives::hex::encode(buy.handoff.tx_hash)
+        ));
+        let rec = darkbot_bsc_record::decode(
+            &darkbot_bsc_record::schema::bsc_runtime::live_attempt::SCHEMA,
+            &std::fs::read(file).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            rec.text(darkbot_bsc_record::schema::bsc_runtime::live_attempt::TIMING)
+                .unwrap(),
+            UNKNOWN
+        );
+        assert!(rundir.join(crate::live_attempts::VERDICT_PATH).is_file());
+        r.clean();
+    }
+
     /// 01.11. (R1): under a C3-only grant Strategy C decides the exits of
     /// the grant's lots (before: LIVE_NOT_IN_SCOPE, a C3 lot could never be
     /// sold): its exit goes to the builders; its own BUY stays refused
@@ -8268,6 +8956,8 @@ mod tests {
             by_tx: None,
             response: None,
             origin: None,
+            launcher: None,
+            placement: None,
         };
         let ledger = Ledger::open(&r.state);
         ledger.append(&buy, NOW).unwrap();
@@ -8363,6 +9053,7 @@ mod tests {
         ));
         c.lot.config.lot_reads_max = 2;
         c.lot.config.lot_read_retry_ms = 0;
+        c.lot.config.lot_read_refused_max = 2;
         const KEPT: [u8; 20] = [0xE1; 20];
         const OFF: [u8; 20] = [0xE2; 20];
         const UNPRICED: [u8; 20] = [0xE3; 20];
@@ -8433,6 +9124,8 @@ mod tests {
                 by_tx: None,
                 response: None,
                 origin: None,
+                launcher: None,
+                placement: None,
             };
             ledger.append(&buy, NOW).unwrap();
             let included = Fact {
@@ -8503,6 +9196,9 @@ mod tests {
         apply(&mut c, &mut live, &mut journal, complete(HEAD));
         assert_eq!(c.lot.reads.len(), 5, "each lot read once, none twice");
         c.lot.settle();
+        // R1 re-check LOW 1: an overtaken read takes no backoff; with one
+        // set, only the failed reads wait for it.
+        c.lot.config.lot_read_retry_ms = 600_000;
         // A trade of KEPT after the block it was read at: its curve moved,
         // the read is overtaken (read again); the others are answered.
         let trade = CanonicalEvent::FlapTrade(CanonicalTrade {
@@ -8524,6 +9220,22 @@ mod tests {
         apply(&mut c, &mut live, &mut journal, block(HEAD + 1));
         let s = c.strategy.as_ref().unwrap();
         assert!(!s.holds(&KEPT), "never a moved curve");
+        apply(&mut c, &mut live, &mut journal, complete(HEAD + 1));
+        // One refused answer is read again, not stranded yet; the overtaken
+        // read is asked again at once.
+        let d = live.as_ref().unwrap().exit_deciders.clone().unwrap();
+        assert!(d.undecided.contains(&REFUSED), "{d:?}");
+        assert!(c.lot.reads.iter().any(|r| r.token == KEPT));
+        assert!(
+            !c.lot
+                .reads
+                .iter()
+                .any(|r| r.token == REFUSED || r.token == FLAKY),
+            "the failed reads wait for the backoff"
+        );
+        // The backoff over, the failed ones are read again.
+        c.lot.config.lot_read_retry_ms = 0;
+        c.lot.retry_at.clear();
         apply(&mut c, &mut live, &mut journal, complete(HEAD + 1));
         c.lot.settle();
         apply(&mut c, &mut live, &mut journal, block(HEAD + 2));
@@ -8564,6 +9276,131 @@ mod tests {
         assert!(d.undecided.contains(&KEPT) && d.undecided.contains(&FLAKY));
         live.take().unwrap().shutdown();
         r.clean();
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// R2 review L7: a lot is stranded only by refused answers in a row:
+    /// any other outcome in between (an answer, a failure in transit, an
+    /// overtaken read) starts the count again.
+    #[test]
+    fn refused_answers_count_only_in_a_row() {
+        let config = crate::runtime::RuntimeConfig::parse(include_str!(
+            "../../../../config/ingress.public.env"
+        ))
+        .unwrap();
+        let mut c = crate::runtime::Canonical::new(&config.canonical.clone().unwrap(), 0);
+        let t = [0xE4; 20];
+        assert_eq!(c.lot.refused_in_a_row(t, true), 1);
+        assert_eq!(c.lot.refused_in_a_row(t, true), 2);
+        assert_eq!(c.lot.refused_in_a_row(t, false), 0);
+        assert_eq!(c.lot.refused_in_a_row(t, true), 1);
+        assert_eq!(c.lot.refused_in_a_row([0xE5; 20], true), 1, "per lot");
+    }
+
+    /// REV.1.0 R2 review P2: the blocks and launches the follower catches
+    /// up on before a run's window are journaled as runtime records (no
+    /// G0.4 count reads them): the LIVE campaign's chain while no run was
+    /// up; the window's own blocks stay canonical records.
+    #[test]
+    fn the_catch_up_before_a_runs_window_is_journaled_for_the_campaign() {
+        use crate::runtime::{
+            Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload,
+        };
+        use crate::runtime_journal::{
+            JournalSetup, RuntimeJournal, catchup_block_of, catchup_launch_of,
+        };
+        use darkbot_bsc_journal::RecordKind;
+        use darkbot_bsc_journal::storage::run::RunReader;
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let now = darkbot_bsc_record::observed_now().unwrap();
+        // The window starts one second after the first block.
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), now + 1_000);
+        let base = std::env::temp_dir().join(format!("bsc-runtime-catchup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let block = |number: u64, at_ms: u64| CanonicalEvent::Block {
+            number,
+            hash: [number as u8; 32],
+            parent_hash: [(number - 1) as u8; 32],
+            timestamp_s: at_ms / 1_000,
+            timestamp_ms: at_ms,
+            txs: Vec::new(),
+            observed: Instant::now(),
+            observed_unix_ms: Some(at_ms),
+        };
+        let mut launch = launch_event(HEAD, HEAD as u8, 2, [0xAA; 20], [0xC1; 20]);
+        if let CanonicalEvent::Launch(l) = &mut launch {
+            l.block_number = HEAD;
+        }
+        let trade = buy_trade(HEAD, HEAD as u8, 3, [0x3b; 32], [0xAA; 20], [0x77; 20]);
+        let refused = CanonicalEvent::FlapTradeUndecodable {
+            block_number: HEAD,
+            block_hash: [HEAD as u8; 32],
+            tx_index: 4,
+            log_index: 1,
+        };
+        for event in [
+            block(HEAD, now),
+            launch,
+            trade,
+            refused,
+            block(HEAD + 1, now + 2_000),
+        ] {
+            apply_canonical(
+                &mut c,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            );
+        }
+        journal.finish().unwrap();
+        let run = fs::read_dir(&base).unwrap().next().unwrap().unwrap().path();
+        let mut reader = RunReader::open(&run, journal_max_payload(&config)).unwrap();
+        let (mut blocks, mut launches, mut canonical) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut trades, mut gaps) = (Vec::new(), Vec::new());
+        while let Some(r) = reader.next_record().unwrap() {
+            match (r.kind, r.payload.first()) {
+                (RecordKind::Runtime, Some(b'b')) => {
+                    blocks.push(catchup_block_of(&r.payload).unwrap())
+                }
+                (RecordKind::Runtime, Some(b'c')) => {
+                    launches.push(catchup_launch_of(&r.payload).unwrap())
+                }
+                (RecordKind::Canonical, Some(b'B')) => canonical.push(r.payload.to_vec()),
+                // Review Q1: the catch-up's trades and refused logs, the `T`
+                // and `W` layouts under runtime tags.
+                (RecordKind::Runtime, Some(b'd')) => {
+                    let mut t = r.payload.to_vec();
+                    t[0] = b'T';
+                    trades.push(crate::runtime_journal::flap_trade_of(&t).unwrap());
+                }
+                (RecordKind::Runtime, Some(b'e')) => gaps.push(r.payload.len()),
+                _ => {}
+            }
+        }
+        assert_eq!(blocks, [(HEAD, [HEAD as u8; 32], now)]);
+        assert_eq!(launches.len(), 1);
+        let l = launches[0];
+        assert_eq!(
+            (l.block, l.block_ms, l.tx_index, l.token),
+            (HEAD, now, 2, Some([0xAA; 20]))
+        );
+        assert!(l.c1_scope && !l.unverifiable);
+        assert_eq!(canonical.len(), 1, "the window's block stays canonical");
+        assert_eq!(trades.len(), 1);
+        assert_eq!((trades[0].block_number, trades[0].tx_index), (HEAD, 3));
+        assert_eq!(gaps, [57]);
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -8701,6 +9538,8 @@ mod tests {
                 by_tx: None,
                 response: None,
                 origin: None,
+                launcher: None,
+                placement: None,
             };
             Ledger::open(&r.state).append(&lost, NOW).unwrap();
             let c2 = c2_at(&r.d, r.buyer, 5);

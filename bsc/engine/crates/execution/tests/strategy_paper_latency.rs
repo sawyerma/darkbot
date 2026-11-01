@@ -288,7 +288,7 @@ fn strategy_paper_path_latency() {
         let before = allocations();
         let decided = now();
         let buy = exec
-            .on_strategy_buy(token, curve, input, &c2, &clock, decided)
+            .on_strategy_buy(token, [0; 20], curve, input, &c2, &clock, decided)
             .unwrap();
         journal.record(
             JournalKind::Runtime,

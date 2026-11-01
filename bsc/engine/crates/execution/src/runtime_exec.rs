@@ -650,10 +650,13 @@ pub fn strategy_to<E: End>(
     match *action {
         StrategyAction::Buy {
             token,
+            creator,
             curve,
             input_wei,
             decided_ns,
-        } => match executor.on_strategy_buy(token, curve, input_wei, &c2, clock, decided_ns) {
+        } => match executor
+            .on_strategy_buy(token, creator, curve, input_wei, &c2, clock, decided_ns)
+        {
             Ok(i) => (vec![i], None),
             Err(r) => (Vec::new(), Some(r)),
         },
@@ -994,6 +997,7 @@ pub(crate) mod tests {
         now.set(5_000_000_000);
         let buy = StrategyAction::Buy {
             token: [0xAB; 20],
+            creator: [0; 20],
             curve,
             input_wei: U256::from(10_000_000_000_000_000u64),
             decided_ns: 0,

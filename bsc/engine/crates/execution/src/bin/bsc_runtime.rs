@@ -9,6 +9,8 @@
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
+//! bsc_runtime live attempts --rundir <dir> --state <dir> --config <ingress.public.env> [--manifest <live_campaign.env>] [--witness-dir <dir>]
+//! bsc_runtime live campaign-precommit --rundir <dir> --manifest <live_campaign.env> --decided-by <who>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime g04-precommit --rundir <dir> --criteria <g04_criteria.env> --decided-by <who>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
@@ -67,6 +69,21 @@
 //! `live idle` exits 0 only while no grant, held position or unresolved
 //! transaction exists (what `darkbotctl deploy` checks before it restarts
 //! a running runtime).
+//!
+//! `live attempts` (REV.1.0 R2, master plan §11/§13 J) evaluates every
+//! written LIVE BUY of the ledger under `--state` against the journals of
+//! `--rundir`: its outcome, placement, costs, local timing, the market
+//! window from its launch's block (master plan §11: 15 s) and
+//! each component's verdict, with the counters up to it, into
+//! `bsc-runtime/live-attempts/<tx>.dbrec`; the campaign and release verdict
+//! against the manifest into `bsc-runtime/live-campaign-verdict.dbrec`
+//! (`CAMPAIGN_NOT_READY` without a reviewed, complete manifest of this
+//! build and configuration committed before the campaign's attempts). A
+//! producer timing verdict `<attempt id>.dbrec` in `--witness-dir` (from
+//! `g08_producer_timing`) gives an attempt's timing; without one it is
+//! UNKNOWN. Exit 0 unless the campaign is not ready. `live
+//! campaign-precommit` commits a reviewed manifest's hash once, before the
+//! campaign's first attempt.
 //!
 //! `control require` is the check a Mainnet signing or sending path runs
 //! before it touches a wallet key: exit 0 only if every named switch is
@@ -450,6 +467,61 @@ fn run(args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         // Plan 28.10.: the LIVE ledger's positions and net result.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "attempts" => {
+            use darkbot_bsc_execution::live_attempts::{CAMPAIGN_NOT_READY, Manifest, evaluate};
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let manifest = flags(rest, "--manifest").first().map(|m| {
+                std::fs::read(m)
+                    .map_err(|e| format!("{m}: {e}"))
+                    .and_then(|b| Manifest::parse(&b))
+            });
+            let witness_dir = flags(rest, "--witness-dir").first().copied().map(std::path::Path::new);
+            let e = evaluate(
+                std::path::Path::new(flag(rest, "--rundir")?),
+                std::path::Path::new(flag(rest, "--state")?),
+                journal_max_payload(&config),
+                manifest.as_ref(),
+                witness_dir,
+                &config
+                    .exec
+                    .as_ref()
+                    .map(|e| e.refused_accounts.clone())
+                    .unwrap_or_default(),
+                config
+                    .canonical
+                    .as_ref()
+                    .map_or(0, |c| c.limits.stall_after.as_millis() as u64)
+                    .saturating_add(config.stop_timeout_ms),
+                darkbot_bsc_execution::runtime_journal::own_binary_sha256(),
+                config.source_sha256,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            for a in &e.attempts {
+                println!("{}", a.line());
+            }
+            print!("{}", e.campaign.summary());
+            Ok(e.campaign.verdict != CAMPAIGN_NOT_READY)
+        }
+        [area, cmd, rest @ ..] if area == "live" && cmd == "campaign-precommit" => {
+            use darkbot_bsc_execution::live_attempts::{Manifest, Precommit};
+            let path = flag(rest, "--manifest")?;
+            let manifest = Manifest::parse(&std::fs::read(path).map_err(|e| format!("{path}: {e}"))?)?;
+            let p = Precommit::write(
+                std::path::Path::new(flag(rest, "--rundir")?),
+                &manifest,
+                flag(rest, "--decided-by")?,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!(
+                "LIVE campaign manifest sha256 {} committed by {} at {} ms",
+                darkbot_bsc_record::hex(&p.manifest_sha256),
+                p.decided_by,
+                p.committed_unix_ms
+            );
+            Ok(true)
+        }
         [area, cmd, rest @ ..] if area == "live" && cmd == "positions" => {
             use darkbot_bsc_execution::live_ledger::{Ledger, fold};
             let dir = std::path::Path::new(flag(rest, "--state")?);

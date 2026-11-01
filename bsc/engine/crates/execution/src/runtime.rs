@@ -293,6 +293,11 @@ pub struct CanonicalConfig {
     /// (`BSC_CANONICAL_LOT_READ_RETRY_MS`).
     pub lot_reads_max: usize,
     pub lot_read_retry_ms: u64,
+    /// A lot whose curve read is refused (an answer outside its ABI or no
+    /// Portal state) this many times in a row is stranded
+    /// (`BSC_CANONICAL_LOT_READ_REFUSED_MAX`): one bad answer, maybe from
+    /// one endpoint, is read again.
+    pub lot_read_refused_max: u32,
 }
 
 /// BSC3-056: the second source and how close it must be.
@@ -509,6 +514,12 @@ impl RuntimeConfig {
                     lot_reads_max: usize::try_from(take("BSC_CANONICAL_LOT_READS_MAX", 1, 64)?)
                         .map_err(|_| "BSC_CANONICAL_LOT_READS_MAX")?,
                     lot_read_retry_ms: take("BSC_CANONICAL_LOT_READ_RETRY_MS", 100, 600_000)?,
+                    lot_read_refused_max: u32::try_from(take(
+                        "BSC_CANONICAL_LOT_READ_REFUSED_MAX",
+                        1,
+                        64,
+                    )?)
+                    .map_err(|_| "BSC_CANONICAL_LOT_READ_REFUSED_MAX")?,
                     state,
                 })
             }
@@ -846,6 +857,7 @@ fn journal_live(
             i.times.sink_ns,
             crate::runtime_journal::live_release_payload(
                 i.kind.code(),
+                None,
                 &i.handoff,
                 [0; 32],
                 i.token,
@@ -972,6 +984,7 @@ fn refresh_lot_deciders(c: &mut Canonical, live: &mut Option<LiveRuntime>) {
     let lot = &mut c.lot;
     lot.stranded.retain(|(t, _)| lot.open.contains(t));
     lot.retry_at.retain(|(t, _)| lot.open.contains(t));
+    lot.refused.retain(|(t, _)| lot.open.contains(t));
     let strategy = c.strategy.as_ref();
     let undecided = lot
         .open
@@ -993,7 +1006,8 @@ fn refresh_lot_deciders(c: &mut Canonical, live: &mut Option<LiveRuntime>) {
 /// lot not read yet: once the observation window began (the strategy sees
 /// the blocks), with a strategy to hold it and an armed path (its Portal),
 /// at most `BSC_CANONICAL_LOT_READS_MAX` at a time, a lot whose read
-/// failed or was overtaken not before `BSC_CANONICAL_LOT_READ_RETRY_MS`.
+/// failed not before `BSC_CANONICAL_LOT_READ_RETRY_MS` (an overtaken one at
+/// once: the curve moved, nothing failed).
 fn ask_lot_reads(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
     let (Some(l), Some(_), Some((number, hash))) = (live.as_ref(), c.strategy.as_ref(), c.head)
     else {
@@ -1067,8 +1081,9 @@ fn ask_lot_reads(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
 /// one not overtaken holds its lot again (still open, not held; journaled
 /// first, so a replay steps the same engine), or strands it off the curve
 /// or outside the priced scope; a failed one counts and is asked again
-/// later, or strands its lot when no retry changes it; an overtaken one is
-/// dropped (asked again later). One still out stays.
+/// after the backoff, a refused answer strands its lot only the
+/// `BSC_CANONICAL_LOT_READ_REFUSED_MAX`-th time in a row; an overtaken one
+/// is dropped (asked again at the next block's end). One still out stays.
 fn hold_read_lots(
     c: &mut Canonical,
     live: &mut Option<LiveRuntime>,
@@ -1096,10 +1111,13 @@ fn hold_read_lots(
         };
         let curve = match answer {
             Ok(_) if r.overtaken => {
-                lot.retry_later(r.token);
+                lot.refused_in_a_row(r.token, false);
                 continue;
             }
-            Ok(curve) => curve,
+            Ok(curve) => {
+                lot.refused_in_a_row(r.token, false);
+                curve
+            }
             Err(fault) => {
                 lot.faults += 1;
                 lot.fault = Some(format!(
@@ -1107,11 +1125,12 @@ fn hold_read_lots(
                     alloy_primitives::hex::encode(r.token),
                     fault.why
                 ));
-                match fault.again {
-                    true => lot.retry_later(r.token),
-                    false => lot
-                        .stranded
-                        .push((r.token, crate::sources::LIVE_POSITION_UNREADABLE)),
+                let refused = lot.refused_in_a_row(r.token, !fault.again);
+                if !fault.again && refused >= lot.config.lot_read_refused_max {
+                    lot.stranded
+                        .push((r.token, crate::sources::LIVE_POSITION_UNREADABLE));
+                } else {
+                    lot.retry_later(r.token);
                 }
                 continue;
             }
@@ -1143,7 +1162,7 @@ fn hold_read_lots(
         s.reheld(
             &crate::runtime_strategy::Reheld {
                 token: r.token,
-                creator: [0; 20],
+                creator: l.launcher_of(&r.token).unwrap_or_default(),
                 terms: curve.terms,
                 reserve: curve.reserve,
                 circulating: curve.circulating,
@@ -1593,9 +1612,10 @@ struct LotDeciders {
     /// The tokens of the open lots at the last refresh.
     open: Vec<[u8; 20]>,
     stranded: Vec<([u8; 20], &'static str)>,
-    /// A token read again no earlier than this (after a failed or
-    /// overtaken read).
+    /// A token read again no earlier than this (after a failed read), and
+    /// its refused answers in a row.
     retry_at: Vec<([u8; 20], Instant)>,
+    refused: Vec<([u8; 20], u32)>,
     faults: u64,
     fault: Option<String>,
 }
@@ -1628,6 +1648,7 @@ impl LotDeciders {
             open: Vec::new(),
             stranded: Vec::new(),
             retry_at: Vec::new(),
+            refused: Vec::new(),
             faults: 0,
             fault: None,
         }
@@ -1691,6 +1712,26 @@ impl LotDeciders {
         for r in &mut self.reads {
             if let Some(h) = r.handle.take() {
                 let _ = h.join();
+            }
+        }
+    }
+
+    /// How many of `token`'s last reads in a row were refused answers, this
+    /// one counted (`refused`): any other outcome, an answer or a failure
+    /// in transit, ends the run (review L7).
+    fn refused_in_a_row(&mut self, token: [u8; 20], refused: bool) -> u32 {
+        if !refused {
+            self.refused.retain(|(t, _)| *t != token);
+            return 0;
+        }
+        match self.refused.iter_mut().find(|(t, _)| *t == token) {
+            Some((_, n)) => {
+                *n += 1;
+                *n
+            }
+            None => {
+                self.refused.push((token, 1));
+                1
             }
         }
     }
@@ -1871,6 +1912,18 @@ impl Canonical {
                 if !self.first_journaled {
                     if timestamp_ms < self.window_from_ms {
                         self.backfill_blocks += 1;
+                        // REV.1.0 R2 (review P2): the catch-up before the
+                        // window, a runtime record no G0.4 count reads: the
+                        // LIVE campaign's chain while no run was up.
+                        journal.record(
+                            RecordKind::Runtime,
+                            at,
+                            crate::runtime_journal::catchup_block_payload(
+                                number,
+                                &hash,
+                                timestamp_ms,
+                            ),
+                        );
                         return;
                     }
                     self.first_journaled = true;
@@ -1891,11 +1944,50 @@ impl Canonical {
             }
             // Before the window: not part of the G0.4 counts (the C2 owner
             // has applied them already).
-            CanonicalEvent::Launch(_) if !self.first_journaled => self.backfill_launches += 1,
-            CanonicalEvent::FlapTrade(_)
-            | CanonicalEvent::FlapTerm(_)
-            | CanonicalEvent::FlapMigrated { .. }
-            | CanonicalEvent::FlapTradeUndecodable { .. }
+            CanonicalEvent::Launch(l) if !self.first_journaled => {
+                self.backfill_launches += 1;
+                // REV.1.0 R2 (review P2): a launch while no run was up, for
+                // the LIVE campaign's skips (no sighting could see it).
+                if let Some(block_ms) = self
+                    .head_block_ms
+                    .filter(|_| self.head.is_some_and(|(_, h)| h == l.block_hash))
+                {
+                    journal.record(
+                        RecordKind::Runtime,
+                        at,
+                        crate::runtime_journal::catchup_launch_payload(&l, block_ms),
+                    );
+                }
+            }
+            // REV.1.0 R2 (review Q1): the catch-up's Portal trades and
+            // refused trade logs too (runtime records), so a market window
+            // reaching into it is complete only with them; terms and
+            // migrations before the window stay unjournaled.
+            CanonicalEvent::FlapTrade(t) if !self.first_journaled => {
+                journal.record(
+                    RecordKind::Runtime,
+                    at,
+                    crate::runtime_journal::catchup_trade_payload(&t),
+                );
+            }
+            CanonicalEvent::FlapTradeUndecodable {
+                block_number,
+                block_hash,
+                tx_index,
+                log_index,
+            } if !self.first_journaled => {
+                journal.record(
+                    RecordKind::Runtime,
+                    at,
+                    crate::runtime_journal::catchup_trade_gap_payload(
+                        block_number,
+                        &block_hash,
+                        tx_index,
+                        log_index,
+                    ),
+                );
+            }
+            CanonicalEvent::FlapTerm(_) | CanonicalEvent::FlapMigrated { .. }
                 if !self.first_journaled => {}
             CanonicalEvent::FlapTerm(t) => {
                 self.put(RecordKind::Canonical, at, flap_term_payload(&t), journal);
@@ -2930,6 +3022,15 @@ pub fn run(
                         id: CLOCK_ID_MONOTONIC,
                         now: || clock.now_ns(),
                     });
+                    // REV.1.0 R2: each answer with its time, the attempts'
+                    // record.
+                    for a in l.take_answers() {
+                        journal.record(
+                            RecordKind::Runtime,
+                            a.at_ns.unwrap_or_else(|| clock.now_ns()),
+                            crate::runtime_journal::live_answer_payload(&a),
+                        );
+                    }
                     l.record_responses();
                     match &qualified {
                         Some(q) => l.tick_with(q, owner.as_ref(), follower, started_ms, now_ms),
@@ -3075,6 +3176,7 @@ pub fn run(
                         buy.times.sink_ns,
                         crate::runtime_journal::live_release_payload(
                             0,
+                            Some(by),
                             &buy.handoff,
                             buy.launch_hash,
                             buy.token,
