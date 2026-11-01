@@ -1739,6 +1739,126 @@ mod http_tests {
         served.join().unwrap();
         assert_eq!(budget.snapshot().requests, 1);
     }
+    /// A keep-alive JSON-RPC endpoint answering every request with `result` on every connection
+    /// it accepts; it returns the requests and connections it served once `stop` is set.
+    fn keepalive_server(
+        result: u64,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+    ) -> (String, std::thread::JoinHandle<(u64, u64)>) {
+        use std::sync::atomic::Ordering;
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let t = std::thread::spawn(move || {
+            let served = Arc::new(AtomicU64::new(0));
+            let mut connections = Vec::new();
+            while !stop.load(Ordering::Acquire) {
+                let Ok((mut c, _)) = socket.accept() else {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                };
+                c.set_nonblocking(false).unwrap();
+                let (served, stop) = (served.clone(), stop.clone());
+                connections.push(std::thread::spawn(move || {
+                    c.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+                    let body = format!(r#"{{"jsonrpc":"2.0","id":1,"result":{result}}}"#);
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let mut data = Vec::new();
+                    let mut b = [0u8; 4096];
+                    while !stop.load(Ordering::Acquire) {
+                        let n = match c.read(&mut b) {
+                            Ok(0) => return,
+                            Ok(n) => n,
+                            Err(_) => continue,
+                        };
+                        data.extend_from_slice(&b[..n]);
+                        while let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let len = String::from_utf8_lossy(&data[..end])
+                                .lines()
+                                .find_map(|l| {
+                                    l.to_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .and_then(|v| v.trim().parse::<usize>().ok())
+                                })
+                                .unwrap_or(0);
+                            if data.len() < end + 4 + len {
+                                break;
+                            }
+                            data.drain(..end + 4 + len);
+                            served.fetch_add(1, Ordering::AcqRel);
+                            c.write_all(reply.as_bytes()).unwrap();
+                        }
+                    }
+                }));
+            }
+            let opened = connections.len() as u64;
+            for c in connections {
+                c.join().unwrap();
+            }
+            (served.load(Ordering::Acquire), opened)
+        });
+        (url, t)
+    }
+    /// P6-MT.14 #14: the shared HTTP client (the process's one RPC transport, one connection
+    /// pool per host) does not change a request's mapping. Clients of two endpoints and two
+    /// workloads call interleaved from four threads over the same transport: every answer is its
+    /// own endpoint's, each endpoint served exactly its clients' requests, and the pool kept its
+    /// connections alive (fewer connections than requests) — shared, never crossed.
+    #[test]
+    fn p6_mt14_the_shared_http_client_keeps_every_request_on_its_endpoint() {
+        use std::sync::atomic::Ordering;
+        const THREADS: u64 = 4;
+        const CALLS: u64 = 25;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (a_url, a) = keepalive_server(1, stop.clone());
+        let (b_url, b) = keepalive_server(2, stop.clone());
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.limits.rpc_rps = 10_000;
+        config.limits.rpc_burst = 10_000;
+        config.limits.hotpath_rps = 10_000;
+        config.limits.bootstrap_rps = 10_000;
+        let budget = Arc::new(Budget::configured(&config));
+        let callers: Vec<_> = (0..THREADS)
+            .map(|i| {
+                let (a_url, b_url, budget) = (a_url.clone(), b_url.clone(), budget.clone());
+                std::thread::spawn(move || {
+                    let client = |url: String, work| {
+                        rpc_client_with(
+                            url,
+                            Duration::from_secs(2),
+                            CommitmentConfig::processed(),
+                            work,
+                            budget.clone(),
+                        )
+                    };
+                    let a = client(a_url, Workload::LiveRead);
+                    let b = client(b_url, Workload::Bootstrap);
+                    for n in 0..CALLS {
+                        let (rpc, expected) = if (n + i) % 2 == 0 { (&a, 1) } else { (&b, 2) };
+                        assert_eq!(rpc.get_slot().unwrap(), expected, "thread {i} call {n}");
+                    }
+                })
+            })
+            .collect();
+        for c in callers {
+            c.join().unwrap();
+        }
+        stop.store(true, Ordering::Release);
+        let ((a_served, a_opened), (b_served, b_opened)) = (a.join().unwrap(), b.join().unwrap());
+        let each = THREADS * CALLS / 2;
+        assert_eq!(
+            (a_served, b_served),
+            (each, each),
+            "each endpoint served its own"
+        );
+        assert!(
+            a_opened < a_served && b_opened < b_served,
+            "kept alive and shared: {a_opened}/{a_served} {b_opened}/{b_served}"
+        );
+    }
     /// DEC-03: a transport counts the bytes it sent (the JSON-RPC request) and read (the
     /// response body).
     #[test]

@@ -10,11 +10,16 @@ use darkbot_common::mt0::TriggerClass;
 use darkbot_project0::readset::{EpochSource, ReadSet, ReadSetOverflow};
 use solana_sdk::pubkey::Pubkey;
 
-/// The policy generation of a run. Nothing changes the owner's policy at runtime today (the
-/// economics, Safety limits, allowlist and freshness are read once at setup), so it is fixed;
-/// a runtime policy change must increment it (test #40 proves the invalidation).
+/// The policy generation of a run, fixed. The owner's runtime controls (P8-CTRL capabilities and
+/// grants, the DEC-06 threshold mode, `LOCAL_FEE_MODEL`, the CTRL-03 source configuration)
+/// change what an evaluation decides, never what a result of candidate work holds: every
+/// decision they enter is taken on the owner thread by the evaluation after the result's
+/// judgement, under the gates in force then (a projection result holds Health only). Work that
+/// holds a decision across a later control change (MT7–MT9: prepared candidates, SignedIntents)
+/// must bind the owner's control version here (test #40 proves the invalidation).
 pub const POLICY_GENERATION: u64 = 0;
-/// The configuration generation of a run: the same — configuration is read once at setup.
+/// The configuration generation of a run: the same — the economics, Safety limits, allowlist
+/// and freshness are read once at setup.
 pub const CONFIG_GENERATION: u64 = 0;
 
 /// P6-MT.2: the readset bound of one candidate preparation, derived from the protocol: the

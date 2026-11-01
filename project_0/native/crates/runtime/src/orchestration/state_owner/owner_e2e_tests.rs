@@ -3413,6 +3413,183 @@ fn p2_accounts(
     (state, account, asset_bank, liab_bank)
 }
 
+/// P6-MT.14 #29 on the wired path: a threshold crossing raises priority. The collateral bank is
+/// priced by a Pyth push oracle; the account (100 units at maintenance weight 0.9 against 85 USD
+/// debt) waits in L2 from a bank-wide re-check. An oracle write that moves the price but crosses
+/// no threshold admits nothing (the account stays in L2); the write that crosses the account's
+/// maintenance threshold is a threshold-index hit and promotes it to L0, its first receive time
+/// kept — fails if the hit were admitted as a re-check.
+#[test]
+fn p6_mt14_a_threshold_crossing_raises_an_account_to_l0() {
+    use super::candidates::Lane;
+    use marginfi_type_crate::types::{Bank, OracleSetup};
+    use std::str::FromStr;
+    let mut f = fixture("p6_mt14_29");
+    let t0 = 1_700_000_000u64;
+    let (mut state, account, asset_bank, _) = p2_accounts(&f, 85.0, t0, false);
+    let oracle = Pubkey::new_unique();
+    let pyth = Pubkey::from_str(protocol::PYTH_PUSH_ORACLE_ID).unwrap();
+    // PriceUpdateV2 (pyth-solana-receiver-sdk), exponent -8, no confidence, EMA = spot.
+    let price_update = |price: f64, slot: u64, t_rx_ns: u64| {
+        let price = (price * 1e8) as i64;
+        let mut d = solana_sdk::hash::hash(b"account:PriceUpdateV2").to_bytes()[..8].to_vec();
+        d.extend_from_slice(&[7u8; 32]);
+        d.push(1);
+        d.extend_from_slice(&[9u8; 32]);
+        d.extend_from_slice(&price.to_le_bytes());
+        d.extend_from_slice(&0u64.to_le_bytes());
+        d.extend_from_slice(&(-8i32).to_le_bytes());
+        d.extend_from_slice(&(t0 as i64).to_le_bytes());
+        d.extend_from_slice(&(t0 as i64).to_le_bytes());
+        d.extend_from_slice(&price.to_le_bytes());
+        d.extend_from_slice(&0u64.to_le_bytes());
+        d.extend_from_slice(&slot.to_le_bytes());
+        AccountUpdate {
+            pubkey: oracle,
+            owner: pyth,
+            lamports: 1,
+            data: d,
+            slot,
+            write_version: None,
+            source: if slot == 100 {
+                SourceKind::Snapshot
+            } else {
+                SourceKind::WsRpcControl
+            },
+            t_rx_ns,
+        }
+    };
+    let collateral = state.iter_mut().find(|u| u.pubkey == asset_bank).unwrap();
+    let mut b: Bank = bytemuck::pod_read_unaligned(&collateral.data[8..]);
+    b.config.oracle_setup = OracleSetup::PythPushOracle;
+    b.config.oracle_keys[0] = oracle;
+    collateral.data = [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&b)].concat();
+    state.push(price_update(1.0, 100, 0));
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    f.owner.st.confirm_ready();
+    assert!(f.owner.st.run_state().is_tradable());
+    f.owner.reverse_index =
+        rebuild_reverse_index(&f.owner.st, &f.owner.program, &f.owner.group, None).0;
+    assert_eq!(
+        f.owner
+            .reverse_index
+            .banks_for_oracle(&oracle)
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![asset_bank]
+    );
+    f.owner.threshold_test_active();
+    f.owner.threshold_index_reset();
+    assert!(f.owner.lifecycle());
+    f.owner.threshold_test_active();
+    assert_eq!(
+        (
+            f.owner.threshold_index.tracked_accounts(),
+            f.owner.threshold_fallback.len()
+        ),
+        (1, 0),
+        "the account's thresholds are known"
+    );
+    f.owner.ingress_burst_before_detect = usize::MAX;
+    f.owner
+        .admit_oracle_accounts(HashSet::new(), HashSet::from([account]), (5, 100), 1);
+    let lane = |f: &Fixture| {
+        f.owner
+            .oracle_lanes
+            .get(&account)
+            .map(|e| (e.lane, e.t_rx_first))
+    };
+    assert_eq!(lane(&f), Some((Lane::L2, 5)));
+    let tick = |f: &mut Fixture, price: f64, slot: u64, t_rx_ns: u64| {
+        let hits = f.owner.metrics.oracle_candidate_hits;
+        f.producer
+            .try_push(IngressEvent::Account(price_update(price, slot, t_rx_ns)))
+            .unwrap();
+        f.owner.events(&mut || unreachable!(), &f.ingress).unwrap();
+        f.owner.metrics.oracle_candidate_hits - hits
+    };
+    // 100 × 0.99 × 0.9 = 89.1 > 85: the price moved, no threshold crossed.
+    assert_eq!(tick(&mut f, 0.99, 101, 10), 0);
+    assert_eq!(
+        lane(&f),
+        Some((Lane::L2, 5)),
+        "nothing crossed, nothing raised"
+    );
+    let promotions = f.owner.oracle_lanes.stats.promotions;
+    // 100 × 0.90 × 0.9 = 81 < 85: the maintenance threshold is crossed.
+    assert_eq!(tick(&mut f, 0.90, 102, 20), 1);
+    assert_eq!(
+        lane(&f),
+        Some((Lane::L0, 5)),
+        "the crossing raises it, t_rx_first kept"
+    );
+    assert_eq!(f.owner.oracle_lanes.stats.promotions, promotions + 1);
+    assert_eq!(f.owner.oracle_lanes.len(), 1, "one entry per account");
+    cleanup(f);
+}
+
+/// P6-MT.14 #4 on the wired path: older pending revisions create no full remote work. A full
+/// candidate's evaluation asks the node its fee quotes and one simulation (`one`). Three newer
+/// revisions of it wait coalesced in its lane: the one detection that takes the entry asks
+/// exactly `one` again and nothing is left to evaluate. While a candidate owns the account, two
+/// more revisions ask the node nothing; the owner's release re-arms only the newest, whose one
+/// evaluation asks `one` once more — fails if a revision were evaluated on its own.
+#[test]
+fn p6_mt14_older_pending_revisions_create_no_remote_work() {
+    let (mut f, target, calls) = dec13b_fixture_with("p6_mt14_4", false, true, 0, None);
+    f.owner.ingress_burst_before_detect = usize::MAX;
+    let taken = |calls: &Arc<Mutex<Vec<String>>>| std::mem::take(&mut *calls.lock().unwrap());
+    let next = |f: &mut Fixture| match f.owner.events(&mut || unreachable!(), &f.ingress).unwrap() {
+        OwnerStep::Next(work) => work,
+        OwnerStep::Continue => None,
+    };
+    let admit = |f: &mut Fixture, revision: u64| {
+        let now = f.owner.clock.now_ns();
+        f.owner.admit_oracle_accounts(
+            HashSet::from([target]),
+            HashSet::new(),
+            (now, 100),
+            revision,
+        );
+    };
+    let now = f.owner.clock.now_ns();
+    f.owner
+        .detect(Some((target, now, 100, "account_update")))
+        .unwrap();
+    let one = taken(&calls);
+    assert!(one.iter().any(|m| m == "simulateTransaction"), "{one:?}");
+    for revision in 1..=3 {
+        admit(&mut f, revision);
+    }
+    assert_eq!(f.owner.oracle_lanes.len(), 1, "coalesced");
+    let work = next(&mut f);
+    assert!(work.is_some());
+    f.owner.detect(work).unwrap();
+    assert_eq!(taken(&calls), one, "one evaluation for three revisions");
+    assert!(next(&mut f).is_none(), "no older revision left to evaluate");
+    // Owned: the revisions are deferred, nothing is asked.
+    f.owner.ownership.acquire(target, 99).unwrap();
+    for revision in 4..=5 {
+        admit(&mut f, revision);
+    }
+    while let Some(work) = next(&mut f) {
+        assert!(!f.owner.detect(Some(work)).unwrap(), "deferred while owned");
+    }
+    assert_eq!(
+        taken(&calls),
+        Vec::<String>::new(),
+        "no remote work while owned"
+    );
+    f.owner.release_candidate(target, 99);
+    let work = next(&mut f);
+    assert!(work.is_some(), "the newest is re-armed");
+    f.owner.detect(work).unwrap();
+    assert_eq!(taken(&calls), one, "one evaluation after the release");
+    assert!(next(&mut f).is_none());
+    cleanup(f);
+}
+
 /// V2-13 (P4-03/P5b-02): a bank-wide re-check without a new cause is not admitted again — a
 /// second failed price projection of the same bank input revision, after the detection consumed
 /// the first admission, admits nothing (counted suppressed); a newer bank revision admits the
