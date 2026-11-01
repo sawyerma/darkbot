@@ -1,5 +1,77 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## REV.1.0-Fertigstellung (Auftrag 01.11.2026) — Code-Status, getrennt vom BSC-Gate
+
+Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI auf dem genannten Commit.
+
+| Paket | Inhalt | REV.1.0-Status | Commit |
+|---|---|---|---|
+| R1 | LIVE-Betriebsblocker (BSC3-080..084) | FERTIG | dieser Commit |
+| R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | OFFEN | – |
+| R3 | Recovery/Betreiber (Receipt-Recovery, EXIT_STOPPED, Nonce-Burn gesperrt, Ledger-Reparatur, Slot-Rückgabe, G0.7-Lot) | OFFEN | – |
+| R4 | Grant-Varianten gesperrt (069, 059, 029, 042, Kampagnen-Spend, §20, Builder-Frische/Fee) | OFFEN | – |
+| R5 | Exit-Routen gesperrt (030 Mempool, Re-Price, DEX-Exit migrierter Lots) | OFFEN | – |
+| R6 | Quellen (GETH-Adapter, Health-Gating, Queues, CONFLICT, Census je Quelle, 48Club synthetisch) | OFFEN | – |
+| R7 | Ketten-Integrität 056 (Header-Hash, Roots, Divergenz) | OFFEN | – |
+| R8 | Qualifikation (049, 066, 064, G0.4-10-min, 035, Q5A-DBREC, 018, Release-Identität) | OFFEN | – |
+| R9 | 001 Präsenzsignatur (aus per Default) | OFFEN | – |
+| R10 | Ops/Terminal/Frontend (Provisionierung, Wrapper, LIVE-Tab, Wallets) | OFFEN | – |
+| R11 | Test-Harnesses (Mock-WSS, run()-Matrix, G0.7-Runner, Prozess-E2E, Kill/Crash, Disk-full, C10/R5, Mutationen, §3b-D/§9.5) | OFFEN | – |
+| R12 | Four Classic/OpenFour Economics + Ausführung | OFFEN | – |
+| R13 | FOREIGN_AUTO-Profile | OFFEN | – |
+| R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
+| E1–E11 | Audit E (Pflichtstatus unten) | OFFEN | – |
+
+**BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
+
+| Paket | Gate | Ergebnis | CI |
+|---|---|---|---|
+| R1 | GR1 (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | dieser Commit |
+
+**Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
+
+| Befund | Pflichtstatus | Paket | Abschluss |
+|---|---|---|---|
+| 1.1 Overview `live_authorized` konstant | FIX | E4 | – |
+| 1.2 Platzhalter-Topic `bsc.execution.events` | FIX | E2 | – |
+| 1.3 Wallet-Status aus Handdatei | FIX+REPIN | E4 | – |
+| 1.4 Projektions-Fallbacks `working-tree`/0 | FIX+REPIN | E4 | – |
+| 1.5 LOOPBACK-Stand-in | KEEP: BSC3-026, freigegebene isolierte Testidentität, fail-closed | – | – |
+| 1.6 Grant-Formular bietet nicht anschließbare Quellen | FIX | E4 | – |
+| 1.7 produktive Gas-Evidence unter `fixtures/` | FIX+REFREEZE | E10 | – |
+| 2.1–2.2 falsche „read-only“-Doku/Usage (Rust) | FIX | E1 | – |
+| 2.3–2.5 dieselben Aussagen in proto/Gateway/bsc-control.sh | FIX+REPIN | E1 | – |
+| 2.6 Frontend-Hinweise „read-only“/„fünf Panels“ | FIX | E1 | – |
+| 2.7 `frontend/tests/bsc.spec.ts` veraltet | FIX | E2 | – |
+| 2.8 `bsc-fields.json` decisions veraltet | FIX | E1 | – |
+| 2.9–2.10 tote Tool-Skripte (V2-Guard, SUPERSEDED) | FIX | E2 | – |
+| 2.11 Python-C1-JSON-Tools | FIX (ohne Referenz entfernen); `c14a_*` KEEP: C1.4a-Evidence nennt sie | E2 | – |
+| 2.12 Q5A-TLS-Evidence als JSON | FIX (Schreiber DBREC); bestehende Evidence KEEP bis Requalifikation (braucht BSC_ECON_SEND) | E10 | – |
+| 2.13 `legacy_import` | KEEP: einziger Leser der eingefrorenen G0.7-Legacy-Evidence | – | – |
+| 2.14, 5.9 toter Code in eingefrorenen G0.7-Dateien | FIX+REFREEZE (PROBE_SOURCES/PLAN_SHA256) | E10 | – |
+| 2.15 LIVE-Qualifikation V1–V3-Leser | FIX+REPIN | R1 | dieser Commit (Leser/Schemas entfernt, Verifier+Lister verweigern alte Layouts; Test a_record_of_an_earlier_layout_is_refused) |
+| 2.16 Owner-Generation V1–V5-Decoder | KEEP: 64 gehaltene Owner-Generationen des Betreibers bleiben lesbar (sonst alle Schalter fail-closed) | – | – |
+| 2.17 `startup.rs`-Doku | FIX | E2 | – |
+| 2.18 Submission/TLS-Doku | FIX | E1 | – |
+| 2.19 `flap_gas_20261026.txt` | KEEP: p8-Recovery-Evidence nennt sie (mit 1.7 verschoben) | E10 | – |
+| 2.20 `__pycache__`; `runtime_live.rs.orig` | FIX (pycache); `.orig` KEEP: Nutzer-Vorgabe „nicht anfassen“ | E2 | – |
+| 3.1–3.4 Kampagnenmax., Paritätsminimum, Stale-Faktor, KEEP_GENERATIONS | FIX+REPIN | E3 | – |
+| 3.5–3.6 Socket/Label, launchd-Zahlen | FIX+REPIN | E3/E8 | – |
+| 3.7–3.8 Gateway-/Frontend-Timeouts | FIX | E3 | – |
+| 3.9–3.11, 3.13 Q5A-Hosts, Deployment-Pins, Owner-Pfad, Protokollkonstanten | KEEP: eingefrorene Pins / Sicherheitsanker / Protokoll | – | – |
+| 3.12 abgelehnte Konten doppelt | FIX | E3 | – |
+| 4.1, 4.14, 5.1 `startup.rs` toter Parallelpfad | FIX | E2 | – |
+| 4.2 PaperEnd/LiveEnd-Planung doppelt | FIX | E7 | – |
+| 4.3–4.5, 5.14 JSON-RPC-Hex, HTTP-Framer, TLS-Builder, https-Prüfung | FIX | E6 | – |
+| 4.6–4.7 G0.7/G0.6a-Eigenpfade | KEEP: eingefrorene Evidence-Erzeuger; Konsolidierung = V5-Refreeze mit Echtgeld-Requalifikation | – | – |
+| 4.8–4.12 Grant-Regeln, ID-Listen, LIVE-Indikatoren, Doppelprojektion, Frontend-Clients | FIX(+REPIN) | E4 | – |
+| 4.13 Readiness-Job Python/Shell/Text | FIX+REPIN | E8 | – |
+| 4.15, 5.5 zwei secp256k1-Recovery-Pfade | FIX (gemessen) | E5 | – |
+| 4.16 drei RLP-Decoder | FIX (C1-Freeze geprüft) | E9 | – |
+| 5.2–5.4, 5.6 Hotpath-Mehrfachdecode, Dedup-Reihenfolge, Polling vor BUY, lineare Suche | FIX (Latenz/Speicher vorher/nachher) | E5 | – |
+| 5.7, 5.8, 5.10–5.12 Testpfad-Module, test-only pub fns, Store-Reste, Konstanten, Doku | FIX | E2 | – |
+| 5.13 Gott-Module | FIX+REPIN | E11 | – |
+
 ## Verbindliches Messregister (27.10.2026)
 
 **Eine zentrale PASS/FAIL/OPEN-Matrix:** [BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md](BSC_MESSPLAN_PASS_FAIL_OPEN_20261027.md). Enthält historische Teilmessungen, konkrete Belegpfade, tatsächlich fehlende BUY-/SELL-/Timing-/Kosten-/Safety-Qualifikationen sowie den ereignisgesteuerten 1+bis-zu-10-Versuchsplan. Dieser Verweis ersetzt keine einzelnen Originalbelege und erteilt keine Mainnet-Freigabe.
@@ -86,7 +158,12 @@
 | BSC3-076 (neu: jeder echte LIVE-BUY/Exit verfehlte sein 1-ms-Startlimit, die Owner-Zulassung lag dazwischen; RED auf echter Uhr: DEADLINE=1) | FIX_VERIFIED (C3-BUY per Lease vor dem Launch zugelassen: Nonce, Budget, Exit-Reserve, Fenster BSC_EXEC_LIVE_LEASE_BLOCKS=200, eigener UTC-Tag; Eintrittspfad ohne Datei-I/O (RAM + ein lstat); Strategie-C-BUY und Exits starten ihr Limit nach der dauerhaften Zulassung; Gate des LIVE-Pfads und Runtime-Reconcile lesen die Nutzung ohne den gehaltenen Versuch; Rückgabe per Rename; Crash: Adoption nur des eigenen BUY; Release-Tests als CI-Schritt; Regel: bleibt genau ein Slot, hält ihn der C3-Lease; Grenze: vom selben Schlüssel unbemerkt belegte Lease-Nonce blockiert das nächste Armen bis zur Auflösung; 3 Reviews, zuletzt PASS) | `7aa0f4bc` | GUI-Anzeige → BSC3-078 |
 | BSC3-078 (neu, Review 076: Tab/Owner-Quittung zeigen LIVE-Gate BLOCKED und „1 von 1“, während der Lease des letzten Versuchs ARMED hält) | FIX_VERIFIED (Runtime-Status v24 meldet den gehaltenen Versuch; Tab, Projektion, `live status` und Quittung lesen das Gate ohne ihn, nur bei frischem Status, ARMED, gleichem Grant) | `5ae6502f` | – |
 | BSC3-077 (neu, Auftrag 31.10.: Risikolimits je Grant) | FIX_VERIFIED (max_open_positions, max_realized_loss_wei je Grant und je UTC-Tag, min_buy_interval_ms: im Grant, Scope-Text/Digest, Gateway, GUI-Formular und Tab; vor jedem BUY (C3 und Strategie C) aus dem Ledger geprüft, neustartfest; verlorenes Bündel an der nächsten Nonce ist Alternative, blockiert nie; Grant ohne Limits armt keinen BUY, Exits laufen; Validierung nativ = Gateway = GUI; Review-Befunde behoben) | `5ae6502f` | – |
-| BSC3-079 (neu, Parität 065: Gas über dem Sample) | FIX_VERIFIED (Gas-Evidence in drei Fenstern der v5.27.2-Ära, je Implementation an 2 Pins: BUY max 974673 (Kopf-Fenster allein 737900), BUY im Launch-Block eigene Klasse aus echten Receipts max 788083 (32 + 21), SELL 784359; Strategie-C-Gebühr = Maximum über alle Fenster; Runtime-Start verweigert ein Gas-Limit unter dem Maximum seiner Klasse in der einkompilierten Evidence (BUY inkl. Launch-Block, SELL, APPROVE); C3-Budget weiter mit dem Gas-Limit) | dieser Commit | Maximum = Stichprobe der Ära, keine Schranke; simulierter C3-BUY 827216 > Launch-Block-Max 788083, ≤ BUY-Max; der SELL 958311 ist ein zur DEX gerouteter Verkauf (migrierter Token, kein LIVE-Exit), außerhalb der Klassen, SELL-Limit 1500000 deckt ihn |
+| BSC3-079 (neu, Parität 065: Gas über dem Sample) | FIX_VERIFIED (Gas-Evidence in drei Fenstern der v5.27.2-Ära, je Implementation an 2 Pins: BUY max 974673 (Kopf-Fenster allein 737900), BUY im Launch-Block eigene Klasse aus echten Receipts max 788083 (32 + 21), SELL 784359; Strategie-C-Gebühr = Maximum über alle Fenster; Runtime-Start verweigert ein Gas-Limit unter dem Maximum seiner Klasse in der einkompilierten Evidence (BUY inkl. Launch-Block, SELL, APPROVE); C3-Budget weiter mit dem Gas-Limit) | `70eeb0c5` | Maximum = Stichprobe der Ära, keine Schranke; simulierter C3-BUY 827216 > Launch-Block-Max 788083, ≤ BUY-Max; der SELL 958311 ist ein zur DEX gerouteter Verkauf (migrierter Token, kein LIVE-Exit), außerhalb der Klassen, SELL-Limit 1500000 deckt ihn |
+| BSC3-080 (neu, REV.1.0 R1: C3-Grant ohne Exit-Entscheider, C3-Lot nie verkaufbar) | FIX_VERIFIED (Strategy C entscheidet die Exits jedes Grants (Scope, Arming, Tab); eigene BUYs nur mit STRATEGY_C, sonst LIVE_NOT_IN_SCOPE bzw. STRATEGY_BUYS_NOT_GRANTED) | dieser Commit | – |
+| BSC3-081 (neu, REV.1.0 R1: freigegebene Quelle in SHADOW löste LIVE-BUY aus) | FIX_VERIFIED (nur effektiv LIVE geschaltete Grant-Quellen lösen aus, SOURCE_NOT_LIVE gezählt) | dieser Commit | – |
+| BSC3-082 (neu, REV.1.0 R1: offene LIVE-Lots ohne Exit nach Neustart/Gap/Reorg) | FIX_VERIFIED (Kurve blockgebunden gelesen (getTokenV8Safe, nftGate), erneut gehalten solange nicht überholt, journalisiert `k`; bis dahin und vor der ersten Meldung EXIT_FIRST; je Lot ein Read, begrenzt/Backoff per Config; off-curve/unpriced/unlesbar: gestrandet, kein neuer BUY; Status live v5; Phantom-Exits ohne Lot vor Lease-Rückgabe abgelehnt; LIVE ohne STRATEGY_C-Senderpfad verweigert) | dieser Commit | Betreiber-Auflösung gestrandeter Lots: R3; DEX-Exit: R5 |
+| BSC3-083 (neu, REV.1.0 R1: Snapshot ohne LIVE-Qualifikation, deployter LIVE-Pfad nie armbar) | FIX_VERIFIED (`live bound-inputs`, status_sync kopiert genau die gebundenen Dateien; `-dirty` nur bei echter Abweichung) | dieser Commit | – |
+| BSC3-084 (neu, REV.1.0 R1: `up`/App widerriefen laufendes LIVE, Deploy startete es neu) | FIX_VERIFIED (`source init` nur Anlage, `source reset` beim Stopp; `live idle`; Deploy verweigert bei aktivem LIVE ohne `--stop-live`) | dieser Commit | – |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).
@@ -99,7 +176,7 @@ Belege `bf871fa9`: CI bsc 40766234326 + Project-0-Contract 40766234293 grün; lo
 
 `PHASENPLAN.md` verlangt jetzt die vollständige technische Schaltbarkeit einschließlich **LAUNCHER** und **BUYER** mit zwei voneinander unabhängigen nativen `ENABLE/DISABLE`-Controls, Initial-/Recovery-Default jeweils `DISABLED`, identischer Terminal-/Frontend-Autorität und vollständigem Native→Protobuf→Gateway→BSC-Wallets-Panel-Rundweg. Alle wirtschaftlichen Controls initial `DISABLED/OFF`, keine automatische Freigabe anderer Modi. Technische Implementierung und nichtwirtschaftliche E2E-Abnahme sind vor G0.7/G0.8 erlaubt; deren reale Erwerbs-/Timing-Evidence bleibt ausstehend.
 
-**IST (27.10., `b72bf2ed` ff.):** umgesetzt und durchgängig verdrahtet. Native Owner `sources.rs` (source-modes v4): `BSC_WALLET_LAUNCHER`, `BSC_WALLET_BUYER`, `BSC_ECON_SIGN|ARM|SEND|ATTEMPT|LIVE` (`DISABLED/ENABLED`), Venues `BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR` (`OFF/SHADOW/LIVE`; Flap SHADOW lässt C3/Strategy C zu, Four `FOUR_EXECUTION_PATH_MISSING`), globaler Runtime-Modus `BSC_RUNTIME_MODE` (`OFF/SHADOW/PAPER/LIVE`, initial OFF; SHADOW = Strategy-C-Ledger, PAPER zusätzlich C3 bis zur PAPER-Senke, LIVE BLOCKED; REPLAY = Offline-Jobs) und das Tageslimit `BSC_BUY_ATTEMPTS_PER_DAY` (Plan `8b4721bb`: initial 0, UTC-Tag, jeder sendefähige Versuch nimmt vor dem Attempt-Verbrauch einen create-new-Slot; Wiederholung idempotent, Neustart persistent, Race nie über dem Limit); Quellen-/Komponenten-/Kandidatenschalter wiederverwendet. Initial, bei fehlendem/fehlerhaftem Zustand und nach jedem Neustart DISABLED (`source init`/Runtime-Start/`down` setzen zurück; ENABLED gilt nur in seiner Boot-Session). Runner lesen nur den Owner-Zustand unter dem Konto-Home aus der Benutzerdatenbank; ein abweichendes `HOME` wird verweigert (Review M1). Durchsetzung nativ: G0.7-Runner (beide Wallets, SIGN, ARM, SEND, ATTEMPT vor Signatur, vor Tageslimit und Attempt-Verbrauch und byte-frei vor dem Send-Head), DRY-Signer, DRY-Skript und lokaler DRY-Simulator (Wallets, SIGN), Live-Builder-Probe und Q5A-Probe (SEND), `darkbotctl down` setzt die Schalter zurück; requested LIVE bleibt BLOCKED (`ECONOMIC_LIVE_DISABLED`, mit LIVE-Schalter `ECONOMIC_LIVE_NOT_AUTHORIZED`). Ein Weg: `darkbotctl bsc source request|show` = Gateway `bsc.wallet.set` (CAS `wallet_policy_version`), `bsc.economic.set`, `bsc.venue.mode.set`, `bsc.runtime.mode.set`, `bsc.attempt.limit.set` → derselbe Owner; `ControlSwitch`/`BuyAttemptLimit` in `BscWalletsState`/`BscLaunchState`; Wallets §1/§2, Launch §5/§7, Monitoring §2, Overview §3. Abschluss-Gate auf finalem Code-SHA `0ac597ca` (Messregister 2a.4, Evidence `native/evidence/controls/gate_0ac597ca_20261028/`): BSC-Regression 88 Suites / 1382 / 0 Fehler / 22 ignored inkl. der sieben `bsc/tools`-Tests (`cargo test bsc_tools`, 50 Tests, SKIP 0), Clippy, Gateway 75, Vitest 124, F0-VAR 2765/116, Release-Build + Manifest PASS, Browser-E2E release PASS, GitHub-CI `bsc` macOS + Linux PASS; Reviewer Pass 1 FAIL (M1 `$HOME`) → 2 PASS → 3 FAIL (F0-VAR-Pins) → 4/5/6 PASS. Korrektur: BSC-002-Lücke stammt aus `86de25c9` (Simulator-Schalterprüfung vor dem Block-Pin, state_pin seitdem rot, von keinem Gate ausgeführt), `4b0139ee` hat sie nur verdeckt, die Meldung „Tests bestanden“ zu `c2e1f7da` war unvollständig; behoben `5d53f026`/`0ac597ca` (`simulatePrepared`, Tests A–E mit Mutationsnachweis). Offene LOW: Linux-Home nur `/etc/passwd`. **Alle Schalter DISABLED, Limit 0; kein SIGN/ARM/SEND.** Offen bleibt nur die reale Mainnet-/Wettbewerbsqualifikation (G0.7/G0.8).
+**IST (27.10., `b72bf2ed` ff.):** umgesetzt und durchgängig verdrahtet. Native Owner `sources.rs` (source-modes v4): `BSC_WALLET_LAUNCHER`, `BSC_WALLET_BUYER`, `BSC_ECON_SIGN|ARM|SEND|ATTEMPT|LIVE` (`DISABLED/ENABLED`), Venues `BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR` (`OFF/SHADOW/LIVE`; Flap SHADOW lässt C3/Strategy C zu, Four `FOUR_EXECUTION_PATH_MISSING`), globaler Runtime-Modus `BSC_RUNTIME_MODE` (`OFF/SHADOW/PAPER/LIVE`, initial OFF; SHADOW = Strategy-C-Ledger, PAPER zusätzlich C3 bis zur PAPER-Senke, LIVE BLOCKED; REPLAY = Offline-Jobs) und das Tageslimit `BSC_BUY_ATTEMPTS_PER_DAY` (Plan `8b4721bb`: initial 0, UTC-Tag, jeder sendefähige Versuch nimmt vor dem Attempt-Verbrauch einen create-new-Slot; Wiederholung idempotent, Neustart persistent, Race nie über dem Limit); Quellen-/Komponenten-/Kandidatenschalter wiederverwendet. Initial, bei fehlendem/fehlerhaftem Zustand und nach jedem Neustart DISABLED (Runtime-Start und `down` (`source reset`) setzen zurück, `source init` legt nur an (REV.1.0 R1); ENABLED gilt nur in seiner Boot-Session). Runner lesen nur den Owner-Zustand unter dem Konto-Home aus der Benutzerdatenbank; ein abweichendes `HOME` wird verweigert (Review M1). Durchsetzung nativ: G0.7-Runner (beide Wallets, SIGN, ARM, SEND, ATTEMPT vor Signatur, vor Tageslimit und Attempt-Verbrauch und byte-frei vor dem Send-Head), DRY-Signer, DRY-Skript und lokaler DRY-Simulator (Wallets, SIGN), Live-Builder-Probe und Q5A-Probe (SEND), `darkbotctl down` setzt die Schalter zurück; requested LIVE bleibt BLOCKED (`ECONOMIC_LIVE_DISABLED`, mit LIVE-Schalter `ECONOMIC_LIVE_NOT_AUTHORIZED`). Ein Weg: `darkbotctl bsc source request|show` = Gateway `bsc.wallet.set` (CAS `wallet_policy_version`), `bsc.economic.set`, `bsc.venue.mode.set`, `bsc.runtime.mode.set`, `bsc.attempt.limit.set` → derselbe Owner; `ControlSwitch`/`BuyAttemptLimit` in `BscWalletsState`/`BscLaunchState`; Wallets §1/§2, Launch §5/§7, Monitoring §2, Overview §3. Abschluss-Gate auf finalem Code-SHA `0ac597ca` (Messregister 2a.4, Evidence `native/evidence/controls/gate_0ac597ca_20261028/`): BSC-Regression 88 Suites / 1382 / 0 Fehler / 22 ignored inkl. der sieben `bsc/tools`-Tests (`cargo test bsc_tools`, 50 Tests, SKIP 0), Clippy, Gateway 75, Vitest 124, F0-VAR 2765/116, Release-Build + Manifest PASS, Browser-E2E release PASS, GitHub-CI `bsc` macOS + Linux PASS; Reviewer Pass 1 FAIL (M1 `$HOME`) → 2 PASS → 3 FAIL (F0-VAR-Pins) → 4/5/6 PASS. Korrektur: BSC-002-Lücke stammt aus `86de25c9` (Simulator-Schalterprüfung vor dem Block-Pin, state_pin seitdem rot, von keinem Gate ausgeführt), `4b0139ee` hat sie nur verdeckt, die Meldung „Tests bestanden“ zu `c2e1f7da` war unvollständig; behoben `5d53f026`/`0ac597ca` (`simulatePrepared`, Tests A–E mit Mutationsnachweis). Offene LOW: Linux-Home nur `/etc/passwd`. **Alle Schalter DISABLED, Limit 0; kein SIGN/ARM/SEND.** Offen bleibt nur die reale Mainnet-/Wettbewerbsqualifikation (G0.7/G0.8).
 
 ---
 
@@ -153,10 +230,10 @@ Nur READ_ONLY/SHADOW/PAPER. Guard `FROZEN_APPROVED_V5_SHA256="UNARMED"` (`bsc/en
 |---|---|---|
 | Release-Build | `ops/darkbotctl build` (Frontend-Lint + Build; Gateway, P0-Reporter, BSC Reporter/Readiness/Kandidat/Runtime, je `--release --locked --offline`) | `build ok – weiter mit: darkbotctl deploy`; `gateway/target/darkbot-release.json` = Schema-ID + SHA-256 jedes Artefakts |
 | Identität | `python3 ops/release_manifest.py` | `Coordinated release manifest: PASS` (Binaries enthalten absolute Quellpfade: bit-identisch nur aus demselben Checkout-Pfad; die Identität ist das Manifest) |
-| Deploy | `ops/darkbotctl deploy` (verweigert: fremdes Manifest, laufende Readiness, Schemawechsel bei laufender Capture; synchronisiert den BSC-Snapshot) | `~/Library/Application Support/DarkBot/releases/<ts>`, `current` |
+| Deploy | `ops/darkbotctl deploy [--stop-live]` (verweigert: fremdes Manifest, laufende Readiness, Schemawechsel bei laufender Capture, laufendes BSC-LIVE (Grant/Positionen, `bsc_runtime live idle`) ohne `--stop-live`; synchronisiert den BSC-Snapshot samt LIVE-Qualifikation) | `~/Library/Application Support/DarkBot/releases/<ts>`, `current` |
 | Start/Stopp | `ops/darkbotctl up [--no-open]`, `down`, `restart-gateway` | `up` meldet `gateway: ok …`; Gateway, BSC-Reporter, BSC-Runtime unter launchd; Runtime-Neustart durch launchd nur nach Crash (E2E: SIGKILL → neuer Run, C2 RESTORED); Stopp über Stopp-Datei binnen `BSC_RUNTIME_STOP_TIMEOUT_MS`, die Runtime entfernt sie |
 | Health | `ops/darkbotctl status` | `gateway: läuft (launchd)`, `healthz: …`, `reporter-socket: vorhanden`; `is-healthy` nur Exitcode; `status-short` → `Gateway läuft · …` |
-| Frontend | `ops/darkbotctl open` → `http://127.0.0.1:8787/` | fünf Tabs; BSC per Reporter-Push, kein Polling |
+| Frontend | `ops/darkbotctl open` → `http://127.0.0.1:8787/` | sechs Tabs (mit LIVE); BSC per Reporter-Push, kein Polling |
 | Modi | `ops/darkbotctl bsc source request <ID> OFF\|SHADOW\|PAPER\|LIVE\|DISABLED\|ENABLED\|<Versuche/UTC-Tag> <generation> <request_id>`, `ops/darkbotctl bsc source show` (request_id: Buchstaben, Ziffern, `-`); Quellen `BSC_INGRESS_GETH`, `_PUBLICNODE`, `_DRPC`, `_BLOCKREQ`, `_48CLUB` (SHADOW ⇒ BLOCKED `SOURCE_ACCESS_UNQUALIFIED`); Komponenten `BSC_STATE_C2`, `BSC_EXEC`, `BSC_STRATEGY_C`; Venues `BSC_VENUE_*`; `BSC_RUNTIME_MODE`; Schalter `BSC_WALLET_*`, `BSC_ECON_*` (`DISABLED\|ENABLED`); `BSC_BUY_ATTEMPTS_PER_DAY` | `outcome=APPLIED … generation=n`; LIVE ⇒ BLOCKED `ECONOMIC_LIVE_DISABLED` (mit `BSC_ECON_LIVE` `…_NOT_AUTHORIZED`) |
 | Readiness | `ops/darkbotctl bsc readiness start\|stop\|status` (read-only; Stopp per SIGTERM, kein SIGKILL) | Verdict `BLOCKED` ohne V5 |
 | Snapshot | `ops/darkbotctl bsc sync` (im Original-Repository) | Snapshot mit Konfiguration, Gas-Evidence, Records |
@@ -187,12 +264,12 @@ Kein Schritt sendet ohne alle: effektive Schalter (Wallet, `BSC_ECON_*`), verifi
 
 | Schritt | Befehl | Erwartet / fail-closed |
 |---|---|---|
-| Konfiguration | `bsc/config/ingress.public.env`: `BSC_LIVE_KEY`, `BSC_LIVE_BUYER` (in `BSC_STATE_WATCHED`), `BSC_LIVE_ROUTE=BUILDERS\|LOOPBACK:<port>`, `BSC_LIVE_BLOCKRAZOR_TOKEN_FILE`, `BSC_LIVE_CONNECT_TIMEOUT_MS`; kanonisch `BSC_CANONICAL_RPC` + `_RPC_FALLBACK` (Failover, `_FAILOVER_AFTER`, `_STALL_MS`), `BSC_CANONICAL_CONFIRM_RPC` (unabhängige Zweitquelle, `_MAX_AGE_MS`, `_MAX_LAG_BLOCKS`) | Start verweigert: LIVE ohne Zweitquelle, Zweitquelle = gefolgter Host, ein Gas-Limit unter dem Maximum seiner Klasse in der eingefrorenen Gas-Evidence |
+| Konfiguration | `bsc/config/ingress.public.env`: `BSC_LIVE_KEY`, `BSC_LIVE_BUYER` (in `BSC_STATE_WATCHED`), `BSC_LIVE_ROUTE=BUILDERS\|LOOPBACK:<port>`, `BSC_LIVE_BLOCKRAZOR_TOKEN_FILE`, `BSC_LIVE_CONNECT_TIMEOUT_MS`; kanonisch `BSC_CANONICAL_RPC` + `_RPC_FALLBACK` (Failover, `_FAILOVER_AFTER`, `_STALL_MS`), `BSC_CANONICAL_CONFIRM_RPC` (unabhängige Zweitquelle, `_MAX_AGE_MS`, `_MAX_LAG_BLOCKS`) | Start verweigert: LIVE ohne Zweitquelle, Zweitquelle = gefolgter Host, `BSC_EXEC_SENDER_PATHS` ohne STRATEGY_C, ein Gas-Limit unter dem Maximum seiner Klasse in der eingefrorenen Gas-Evidence; Kurven-Reads offener Lots `BSC_CANONICAL_LOT_READS_MAX`/`_LOT_READ_RETRY_MS` |
 | Testidentität | `bsc_runtime live loopback-identity init\|show --state <dir> --root <repo>` | nur `LOOPBACK`, nie Mainnet-Key |
 | Scope | `ops/darkbotctl bsc live scope <19 Werte>` (9. Wert `ALL\|EXIT_ONLY`) | `scope_sha256`, `risk_scope_sha256` (Eingabe der Qualifikation) |
 | Qualifikation | `bsc_runtime live qualify --root <repo> --runtime-binary <release bsc_runtime> --venue BSC_VENUE_FLAP@<freeze>,<parity> --source <ID>@<g04-verdict> --adapter <ADAPTER>@<FINDING,…>@<g07-attempt> --acquisition <g08>@<g07> --risk-by <wer> --risk-statement <text> --risk-scope-sha256 <risk_scope_sha256> --risk-evidence <g08,…> [--out <path>]` | `written=… sha256=…`; ohne passende Evidence keine Rolle qualifiziert |
-| Grant | `ops/darkbotctl bsc live grant <dieselben 19> <scope_sha256> <generation> <request_id>` | Receipt; ohne Risikoentscheid armt nichts (auch kein Exit); ohne Limits armt kein BUY, Exits offener Positionen laufen |
-| Status | `ops/darkbotctl bsc live status` | Generation, Grant, Spend, Versuche je UTC-Tag neben dem Versuch, den der laufende Pfad per Lease hält |
+| Grant | `ops/darkbotctl bsc live grant <dieselben 19> <scope_sha256> <generation> <request_id>` | Receipt; `BSC_STRATEGY_C` muss LIVE angefordert sein (Exit-Entscheider jedes Grants; eigene BUYs nur mit STRATEGY_C im Scope); ohne Risikoentscheid armt nichts (auch kein Exit); ohne Limits armt kein BUY, Exits offener Positionen laufen |
+| Status | `ops/darkbotctl bsc live status` | Generation, Grant, Spend, Versuche je UTC-Tag neben dem Versuch, den der laufende Pfad per Lease hält; Runtime-Status: unentschiedene/gestrandete Lots (`exit_undecided`, `stranded`, `lot_read_faults`) |
 | Abbau | `live scope` + `live grant` mit `EXIT_ONLY` | kein BUY; Exits offener Positionen laufen (BSC3-058); erst danach widerrufen |
 | Widerruf | `ops/darkbotctl bsc live revoke <generation> <request_id>` | beendet den ganzen LIVE-Pfad, auch die Exits offener Positionen (`LIVE_GRANT_MISSING`) |
 | Abbruchgründe | `STALE_HEAD`, `UNCONFIRMED` (Zweitquelle), `GRANT_LIMIT`, `EXIT_FIRST`, `UNFUNDED`, `SENDER_NONCE`, `EXIT_STOPPED`, `OWNER`, `UNQUALIFIED` | gezählt im Runtime-Status und Tab LIVE, kein Spend |

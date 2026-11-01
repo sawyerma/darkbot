@@ -321,6 +321,36 @@ impl TokenBook {
         self.untrack(Untracked::Migrated);
     }
 
+    /// A token's curve as the Portal holds it at a block (`getTokenV8Safe`,
+    /// `nftGate`): its terms set and validated as the launch receipt's
+    /// would be, off the curve (`tradable` false) migrated, its reserve and
+    /// circulating supply the read ones. For a real position the engine no
+    /// longer follows (a restart, a gap, a reorg ended its tracking);
+    /// tracked from the next block on.
+    pub fn seeded(terms: &TokenTerms, reserve: U256, circulating: U256) -> Self {
+        let mut book = Self::new();
+        let Curve { r, h, k } = terms.curve;
+        for term in [
+            Term::Version(terms.version),
+            Term::QuoteToken(terms.quote_token),
+            Term::Curve { r, h, k },
+            Term::DexThreshold(terms.dex_supply_threshold),
+            Term::Tax {
+                buy: U256::from(terms.buy_tax_bps),
+                sell: U256::from(terms.sell_tax_bps),
+            },
+            Term::NftGate(terms.nft_gate),
+        ] {
+            book.term(term);
+        }
+        if !terms.tradable {
+            book.migrated();
+        }
+        book.reserve = reserve;
+        book.circulating = circulating;
+        book
+    }
+
     pub fn gap(&mut self) {
         self.untrack(Untracked::Gap);
     }

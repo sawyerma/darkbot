@@ -93,9 +93,82 @@ pub fn unhold_payload(token: [u8; 20]) -> Vec<u8> {
     out
 }
 
+/// 01.11. (R1): a real LIVE position held again on its curve as read at
+/// the end of the last block applied, a `Runtime` record: `k | token [20] |
+/// creator [20] | tradable u8 | version u8 | quote token [20] | NFT gate
+/// [20] | r, h, k [32 each] | DEX threshold [32] | buy, sell tax bps u16 |
+/// reserve [32] | circulating [32] | tokens [32] | spent wei [32] | filled
+/// ms u64`.
+pub fn reheld_payload(r: &Reheld) -> Vec<u8> {
+    let t = &r.terms;
+    let mut out = Vec::with_capacity(REHELD_LEN);
+    out.push(b'k');
+    out.extend_from_slice(&r.token);
+    out.extend_from_slice(&r.creator);
+    out.push(u8::from(t.tradable));
+    out.push(t.version);
+    out.extend_from_slice(&t.quote_token);
+    out.extend_from_slice(&t.nft_gate);
+    for w in [t.curve.r, t.curve.h, t.curve.k, t.dex_supply_threshold] {
+        out.extend_from_slice(&w.to_be_bytes::<32>());
+    }
+    out.extend_from_slice(&t.buy_tax_bps.to_le_bytes());
+    out.extend_from_slice(&t.sell_tax_bps.to_le_bytes());
+    for w in [r.reserve, r.circulating, r.tokens, r.spent_wei] {
+        out.extend_from_slice(&w.to_be_bytes::<32>());
+    }
+    out.extend_from_slice(&r.filled_ms.to_le_bytes());
+    out
+}
+
+const REHELD_LEN: usize = 1 + 20 + 20 + 1 + 1 + 20 + 20 + 4 * 32 + 2 + 2 + 4 * 32 + 8;
+
+pub use darkbot_bsc_trading::strategy::engine::Reheld;
+
+fn reheld_of(p: &[u8]) -> Option<Reheld> {
+    use darkbot_bsc_trading::economics::flap::curve::Curve;
+    use darkbot_bsc_trading::economics::flap::native_curve20::TokenTerms;
+    if p.len() != REHELD_LEN {
+        return None;
+    }
+    let w = |at: usize| p.get(at..at + 32).map(U256::from_be_slice);
+    let bps = |at: usize| Some(u16::from_le_bytes(p.get(at..at + 2)?.try_into().ok()?));
+    let tradable = match p[41] {
+        0 => false,
+        1 => true,
+        _ => return None,
+    };
+    let words = 83;
+    let after = words + 4 * 32;
+    Some(Reheld {
+        token: p.get(1..21)?.try_into().ok()?,
+        creator: p.get(21..41)?.try_into().ok()?,
+        terms: TokenTerms {
+            tradable,
+            version: p[42],
+            quote_token: p.get(43..63)?.try_into().ok()?,
+            nft_gate: p.get(63..83)?.try_into().ok()?,
+            curve: Curve {
+                r: w(words)?,
+                h: w(words + 32)?,
+                k: w(words + 64)?,
+            },
+            dex_supply_threshold: w(words + 96)?,
+            buy_tax_bps: bps(after)?,
+            sell_tax_bps: bps(after + 2)?,
+        },
+        reserve: w(after + 4)?,
+        circulating: w(after + 36)?,
+        tokens: w(after + 68)?,
+        spent_wei: w(after + 100)?,
+        filled_ms: u64_at(p, after + 132)?,
+    })
+}
+
 /// The strategy input of one journaled canonical record, if it is one.
 pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
     match (kind, p.first()?) {
+        (RecordKind::Runtime, b'k') => reheld_of(p).map(Input::Reheld),
         (RecordKind::Runtime, b'h') if p.len() == HOLD_LEN => Some(Input::Hold {
             token: p.get(1..21)?.try_into().ok()?,
             tokens: U256::from_be_slice(p.get(21..53)?),
@@ -624,6 +697,20 @@ impl StrategyRuntime {
         self.record(RecordKind::Runtime, &p, at, Some(journal));
     }
 
+    /// 01.11. (R1): a real LIVE position the engine does not hold, held
+    /// again on its curve as read (journaled first, as `hold`).
+    pub fn reheld(&mut self, r: &Reheld, at: u64, journal: &mut RuntimeJournal) {
+        let p = reheld_payload(r);
+        journal.record(RecordKind::Runtime, at, p.clone());
+        self.record(RecordKind::Runtime, &p, at, Some(journal));
+    }
+
+    /// Whether the strategy holds the real LIVE position on `token`: its
+    /// exit is decided.
+    pub fn holds(&self, token: &[u8; 20]) -> bool {
+        self.engine.holds(token)
+    }
+
     /// The real position ended (its SELL included).
     pub fn unhold(&mut self, token: [u8; 20], at: u64, journal: &mut RuntimeJournal) {
         let p = unhold_payload(token);
@@ -660,7 +747,7 @@ impl StrategyRuntime {
             Input::Term { .. } => c.terms += 1,
             Input::Migrated { .. } => c.migrations += 1,
             Input::Incomplete => c.incomplete += 1,
-            Input::Block { .. } | Input::Hold { .. } | Input::Unhold { .. } => {}
+            Input::Block { .. } | Input::Hold { .. } | Input::Unhold { .. } | Input::Reheld(_) => {}
         }
         let typed = self.engine.step(input);
         let outputs: Vec<Vec<u8>> = typed
@@ -1193,6 +1280,38 @@ pub fn creator_sold_policy(text: &str) -> Result<CreatorSoldBeforeFill, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 01.11. (R1): the re-held position's record reads back as the input
+    /// it was journaled for (a replay steps the same engine); any other
+    /// length or a flag other than 0/1 is no input.
+    #[test]
+    fn a_reheld_record_reads_back_as_its_input() {
+        use darkbot_bsc_trading::economics::flap::native_curve20::profile_terms;
+        let r = Reheld {
+            token: [0xE1; 20],
+            creator: [0xC1; 20],
+            terms: profile_terms(100, 200),
+            reserve: U256::from(7u8),
+            circulating: U256::from(8u8),
+            tokens: U256::from(9u8),
+            spent_wei: U256::from(10u8),
+            filled_ms: 11,
+        };
+        let p = reheld_payload(&r);
+        assert_eq!(p.len(), REHELD_LEN);
+        assert_eq!(
+            input_of_record(RecordKind::Runtime, &p),
+            Some(Input::Reheld(r))
+        );
+        assert_eq!(input_of_record(RecordKind::Canonical, &p), None);
+        assert_eq!(
+            input_of_record(RecordKind::Runtime, &p[..p.len() - 1]),
+            None
+        );
+        let mut flag = p.clone();
+        flag[41] = 2;
+        assert_eq!(input_of_record(RecordKind::Runtime, &flag), None);
+    }
     use crate::chain_follower::{CanonicalTerm, CanonicalTrade};
     use crate::runtime_journal::{flap_term_payload, flap_trade_payload, trade_gap_payload};
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status::strategy as st;
@@ -1574,6 +1693,62 @@ mod tests {
             r.get(st::REASON),
             Some(&darkbot_bsc_record::Value::Text("no gas evidence".into()))
         );
+    }
+
+    /// R1: a LIVE position held again on its read curve (`k`, journaled
+    /// before its step as the runtime does) replays as it ran: held on the
+    /// same curve, its exit triggers at the same block.
+    #[test]
+    fn a_reheld_position_replays_exactly() {
+        use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RunIdentity};
+        use darkbot_bsc_trading::economics::flap::native_curve20::profile_terms;
+        let base = std::env::temp_dir().join(format!("bsc-strategy-reheld-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let max = 16_384;
+        let mut j = RuntimeJournal::open(&base, 7, 1, JournalSetup::whole(1024, max)).unwrap();
+        j.set_identity(RunIdentity {
+            host: "test".into(),
+            build: "test".into(),
+            config_sha256: [0xC0; 32],
+            build_sha256: None,
+            build_dirty: None,
+            capture_pending: "VENUES",
+        });
+        assert!(j.record(RecordKind::Runtime, 2, switch_payload(true)));
+        let mut s = runtime();
+        let (k, p) = block(100);
+        assert!(j.record(k, 3, p.clone()));
+        s.record(k, &p, 3, Some(&mut j));
+        let held = Reheld {
+            token: [0xAB; 20],
+            creator: [0; 20],
+            terms: profile_terms(100, 100),
+            reserve: U256::from(2_000_000_000_000_000_000u128),
+            circulating: U256::from(300_000_000_000_000_000_000_000u128),
+            tokens: U256::from(1_000_000_000_000_000_000u128),
+            spent_wei: U256::from(10_000_000_000_000_000u128),
+            filled_ms: 0,
+        };
+        s.reheld(&held, 4, &mut j);
+        assert!(s.holds(&held.token));
+        for n in 101..=185 {
+            let (k, p) = block(n);
+            assert!(j.record(k, 5, p.clone()));
+            s.record(k, &p, 5, Some(&mut j));
+        }
+        assert!(s.has_pending(), "the held position's timeout exit");
+        assert!(j.record(RecordKind::Runtime, 6, switch_payload(false)));
+        assert!(j.record(RecordKind::Runtime, 7, EXIT_PAYLOAD.to_vec()));
+        j.finish().unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        assert_eq!(r.verdict(), "PASS", "{}", r.summary());
+        assert!(
+            r.journaled > 0 && r.journaled == r.replayed,
+            "{}",
+            r.summary()
+        );
+        assert_eq!(r.counters, s.counters);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// A run journaled as the runtime does (a record, then its outputs;

@@ -387,30 +387,10 @@ fn acquisition_binds(
 
 /// Verifies the qualification record `bytes` against the evidence in `root`.
 pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
-    // A v1 record names no G0.7 attempt: its acquisition verifies nothing;
-    // a v1 or v2 record names no runtime build: it qualifies none; before
-    // v4 a risk decision names no grant scope: it decides for none.
-    let (r, v1, runtime_sha256, scoped) = match decode(&lq::SCHEMA, bytes) {
-        Ok(r) => {
-            let build = r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?;
-            (r, false, Some(build), true)
-        }
-        Err(e4) => match decode(&lq::V3, bytes) {
-            Ok(r) => {
-                let build = r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?;
-                (r, false, Some(build), false)
-            }
-            Err(_) => match decode(&lq::V2, bytes) {
-                Ok(r) => (r, false, None, false),
-                Err(_) => (
-                    decode(&lq::V1, bytes).map_err(|_| e4.to_string())?,
-                    true,
-                    None,
-                    false,
-                ),
-            },
-        },
-    };
+    // Only the current layout (Audit E 2.15: no record of an earlier one
+    // was ever written; it is refused, never read with less).
+    let r = decode(&lq::SCHEMA, bytes).map_err(|e| e.to_string())?;
+    let runtime_sha256 = Some(r.b256(lq::RUNTIME_SHA256).map_err(|x| x.0)?);
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let pin = bsc_mainnet_v5_27_2();
     let mut view = LiveQualification::default();
@@ -501,11 +481,10 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
     if let Some(row) = r.opt_nested(lq::ACQUISITION).map_err(e)? {
         let result = verified_evidence(root, &row, Some(ACQUISITION_EVIDENCE))?;
         acquisition_sha256 = Some(row.b256(lq::evidence::SHA256).map_err(e)?);
-        let attempt_ref = match v1 {
-            true => None,
-            false => r.opt_nested(lq::ACQUISITION_ATTEMPT).map_err(e)?,
-        }
-        .ok_or("the acquisition names no G0.7 attempt: qualify again")?;
+        let attempt_ref = r
+            .opt_nested(lq::ACQUISITION_ATTEMPT)
+            .map_err(e)?
+            .ok_or("the acquisition names no G0.7 attempt: qualify again")?;
         let attempt = verified_evidence(root, &attempt_ref, Some(ATTEMPT_EVIDENCE))?;
         let attempt_sha256 = attempt_ref.b256(lq::evidence::SHA256).map_err(e)?;
         let (buyer, sent) = acquisition_binds(&result, &attempt, attempt_sha256, &pin)?;
@@ -544,10 +523,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
             }
         }
         view.risk_decision = true;
-        view.risk_scope_sha256 = match scoped {
-            true => Some(row.b256(k::SCOPE_SHA256).map_err(e)?),
-            false => None,
-        };
+        view.risk_scope_sha256 = Some(row.b256(k::SCOPE_SHA256).map_err(e)?);
     }
     Ok(Verified {
         view,
@@ -598,6 +574,43 @@ pub fn load(root: &Path) -> Result<Option<Verified>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{LIVE_QUALIFICATION_PATH}: {e}")),
     }
+}
+
+/// 01.11. (R1): the files the LIVE qualification in `root` binds, the
+/// record first, then every evidence path it names (as recorded, sorted,
+/// once each): what a runtime snapshot must carry so the runtime reads the
+/// same qualification. Empty without a record; a record of another layout
+/// is refused, as [`verify`] refuses it.
+pub fn bound_inputs(root: &Path) -> Result<Vec<String>, String> {
+    let bytes = match fs::read(root.join(LIVE_QUALIFICATION_PATH)) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{LIVE_QUALIFICATION_PATH}: {e}")),
+    };
+    let r = decode(&lq::SCHEMA, &bytes).map_err(|e| e.to_string())?;
+    let mut paths = Vec::new();
+    let mut add = |refs: Vec<Record>| -> Result<(), String> {
+        for ev in refs {
+            paths.push(ev.text(lq::evidence::PATH).map_err(re)?.to_string());
+        }
+        Ok(())
+    };
+    for row in r.nested_all(lq::ITEMS).map_err(re)? {
+        add(row.nested_all(lq::item::EVIDENCE).map_err(re)?)?;
+    }
+    for row in r.nested_all(lq::ADAPTERS).map_err(re)? {
+        add(row.nested_all(lq::adapter::EVIDENCE).map_err(re)?)?;
+    }
+    for tag in [lq::ACQUISITION, lq::ACQUISITION_ATTEMPT] {
+        add(r.opt_nested(tag).map_err(re)?.into_iter().collect())?;
+    }
+    if let Some(risk) = r.opt_nested(lq::RISK).map_err(re)? {
+        add(risk.nested_all(lq::risk::EVIDENCE).map_err(re)?)?;
+    }
+    paths.sort();
+    paths.dedup();
+    paths.insert(0, LIVE_QUALIFICATION_PATH.to_string());
+    Ok(paths)
 }
 
 /// What the LIVE gate counts in `root`, and why it counts nothing when the
@@ -1278,28 +1291,78 @@ pub(crate) mod tests {
             let e = build(&root, &s, 1).unwrap_err();
             assert!(e.contains("other than the acquisition's"), "{e}");
         }
-        // A v3 record's risk decision names no scope: it decides for none.
-        let economics = fs::read(root.join("ev/economics.dbrec")).unwrap();
-        let mut ev = Draft::new(&lq::evidence::SCHEMA);
-        ev.set(lq::evidence::PATH, "ev/economics.dbrec")
-            .set(
-                lq::evidence::SHA256,
-                Value::B256(darkbot_bsc_record::sha256(&economics)),
-            )
-            .set(lq::evidence::SCHEMA_NAME, economics_snapshot::SCHEMA.name);
-        let mut row = Draft::new(&lq::risk::V1);
-        row.set(lq::risk::DECIDED_BY, "operator")
-            .set(lq::risk::DECIDED_UNIX_MS, 1u64)
-            .set(lq::risk::STATEMENT, "accepts")
-            .push(lq::risk::EVIDENCE, ev.into_nested());
-        let mut d = Draft::new(&lq::V3);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Audit E 2.15: a record of an earlier layout (same name, an earlier
+    /// version) is refused by the verifier and by the snapshot's lister,
+    /// never read with less than it names.
+    #[test]
+    fn a_record_of_an_earlier_layout_is_refused() {
+        const EARLIER: Schema = Schema {
+            name: lq::SCHEMA.name,
+            record_type: lq::SCHEMA.record_type,
+            schema_version: lq::SCHEMA.schema_version - 1,
+            fields: &[
+                darkbot_bsc_record::Field::req(lq::PROVENANCE_TOOL, "_provenance.tool", Kind::Text),
+                darkbot_bsc_record::Field::req(
+                    lq::PROVENANCE_OBSERVED_UNIX_MS,
+                    "_provenance.observed_unix_ms",
+                    Kind::U64,
+                ),
+            ],
+        };
+        let root = fixture("lq-earlier", "PASS");
+        let mut d = Draft::new(&EARLIER);
         d.set(lq::PROVENANCE_TOOL, "test")
-            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
-            .set(lq::RUNTIME_SHA256, Value::B256([0x12; 32]))
-            .set(lq::RISK, row.into_nested());
-        let v3 = verify(&root, &d.encode().unwrap()).unwrap();
-        assert!(v3.view.risk_decision);
-        assert_eq!(v3.view.risk_scope_sha256, None);
+            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+        let bytes = d.encode().unwrap();
+        assert!(verify(&root, &bytes).is_err());
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(root.join(LIVE_QUALIFICATION_PATH), &bytes).unwrap();
+        assert!(bound_inputs(&root).is_err());
+        let (none, why) = view(&root);
+        assert_eq!(none.view, LiveQualification::default());
+        assert!(why.is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// R1: the snapshot carries exactly what the qualification binds: the
+    /// record first, then each evidence path it names once, sorted; no
+    /// record, nothing.
+    #[test]
+    fn the_bound_inputs_are_the_record_and_every_evidence_it_names() {
+        let root = fixture("lq-bound", "PASS");
+        assert_eq!(bound_inputs(&root).unwrap(), Vec::<String>::new());
+        let bytes = build(&root, &spec(), 1).unwrap();
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(root.join(LIVE_QUALIFICATION_PATH), &bytes).unwrap();
+        let listed = bound_inputs(&root).unwrap();
+        assert_eq!(listed[0], LIVE_QUALIFICATION_PATH);
+        let mut named: Vec<String> = Vec::new();
+        let s = spec();
+        for (_, ev) in &s.venues {
+            named.extend(ev.iter().cloned());
+        }
+        for (_, ev) in &s.sources {
+            named.extend(ev.iter().cloned());
+        }
+        for (_, _, ev) in &s.adapters {
+            named.extend(ev.iter().cloned());
+        }
+        if let Some((g08, g07)) = &s.acquisition {
+            named.push(g08.clone());
+            named.push(g07.clone());
+        }
+        if let Some(r) = &s.risk {
+            named.extend(r.evidence.iter().cloned());
+        }
+        named.sort();
+        named.dedup();
+        assert_eq!(listed[1..], named[..]);
+        for path in &listed {
+            assert!(root.join(path).is_file(), "{path}");
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1443,13 +1506,8 @@ pub(crate) mod tests {
             .unwrap_err()
             .contains("runtime build")
         );
-        // A v2 record (before the build was named) qualifies no build.
-        let mut d = Draft::new(&lq::V2);
-        d.set(lq::PROVENANCE_TOOL, "test")
-            .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64);
-        let v2 = verify(&root, &d.encode().unwrap()).unwrap();
-        assert_eq!(v2.runtime_sha256, None);
-        let none = build_refusal(&Ok(own), &v2).unwrap();
+        // Nothing on file qualifies no build.
+        let none = build_refusal(&Ok(own), &view(&root).0).unwrap();
         assert!(none.contains("names no runtime build"), "{none}");
         fs::remove_dir_all(root).unwrap();
     }
@@ -1719,9 +1777,10 @@ pub(crate) mod tests {
                 )),
             )
             .set(lq::evidence::SCHEMA_NAME, g08::result::SCHEMA.name);
-        let mut d = Draft::new(&lq::V1);
+        let mut d = Draft::new(&lq::SCHEMA);
         d.set(lq::PROVENANCE_TOOL, "test")
             .set(lq::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(lq::RUNTIME_SHA256, Value::B256([0x12; 32]))
             .set(lq::ACQUISITION, g08_ref.into_nested());
         let e = verify(&root, &d.encode().unwrap()).unwrap_err();
         assert!(e.contains("names no G0.7 attempt"), "{e}");

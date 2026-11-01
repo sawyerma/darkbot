@@ -782,19 +782,6 @@ pub mod live_qualification {
                 Field::req(SCOPE_SHA256, "scope_sha256", B256),
             ],
         };
-
-        /// v1 (no scope), kept readable; it decides for no grant.
-        pub const V1: Schema = Schema {
-            name: "darkbot.bsc.live-qualification.risk",
-            record_type: 0,
-            schema_version: 1,
-            fields: &[
-                Field::req(DECIDED_BY, "decided_by", Text),
-                Field::req(DECIDED_UNIX_MS, "decided_unix_ms", U64),
-                Field::req(STATEMENT, "statement", Text),
-                Field::nested(EVIDENCE, "evidence", Presence::Repeated, &evidence::SCHEMA),
-            ],
-        };
     }
 
     pub const ITEMS: u16 = 1;
@@ -838,93 +825,6 @@ pub mod live_qualification {
                 &evidence::SCHEMA,
             ),
             Field::req(RUNTIME_SHA256, "runtime_sha256", B256),
-        ],
-    };
-
-    /// v3 (a risk decision without its scope), kept readable; its risk
-    /// decision decides for no grant.
-    pub const V3: Schema = Schema {
-        name: "darkbot.bsc.live-qualification.v1",
-        record_type: 66,
-        schema_version: 3,
-        fields: &[
-            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
-            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
-            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
-            Field::req(
-                PROVENANCE_OBSERVED_UNIX_MS,
-                "_provenance.observed_unix_ms",
-                U64,
-            ),
-            Field::nested(
-                ACQUISITION,
-                "acquisition",
-                Presence::Optional,
-                &evidence::SCHEMA,
-            ),
-            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
-            Field::nested(
-                ACQUISITION_ATTEMPT,
-                "acquisition_attempt",
-                Presence::Optional,
-                &evidence::SCHEMA,
-            ),
-            Field::req(RUNTIME_SHA256, "runtime_sha256", B256),
-        ],
-    };
-
-    /// v2 (no runtime build), kept readable; it qualifies no build.
-    pub const V2: Schema = Schema {
-        name: "darkbot.bsc.live-qualification.v1",
-        record_type: 66,
-        schema_version: 2,
-        fields: &[
-            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
-            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
-            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
-            Field::req(
-                PROVENANCE_OBSERVED_UNIX_MS,
-                "_provenance.observed_unix_ms",
-                U64,
-            ),
-            Field::nested(
-                ACQUISITION,
-                "acquisition",
-                Presence::Optional,
-                &evidence::SCHEMA,
-            ),
-            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
-            Field::nested(
-                ACQUISITION_ATTEMPT,
-                "acquisition_attempt",
-                Presence::Optional,
-                &evidence::SCHEMA,
-            ),
-        ],
-    };
-
-    /// v1 (an acquisition without its attempt), kept readable; it verifies
-    /// no acquisition.
-    pub const V1: Schema = Schema {
-        name: "darkbot.bsc.live-qualification.v1",
-        record_type: 66,
-        schema_version: 1,
-        fields: &[
-            Field::nested(ITEMS, "items", Presence::Repeated, &item::SCHEMA),
-            Field::nested(ADAPTERS, "adapters", Presence::Repeated, &adapter::SCHEMA),
-            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
-            Field::req(
-                PROVENANCE_OBSERVED_UNIX_MS,
-                "_provenance.observed_unix_ms",
-                U64,
-            ),
-            Field::nested(
-                ACQUISITION,
-                "acquisition",
-                Presence::Optional,
-                &evidence::SCHEMA,
-            ),
-            Field::nested(RISK, "risk", Presence::Optional, &risk::V1),
         ],
     };
 }
@@ -1653,11 +1553,19 @@ pub mod runtime_status {
         /// holds it, or it was kept from a returned one), hex: the owner's
         /// gate reads the grant's usage besides it, as the LIVE path does.
         pub const LEASE_ATTEMPT: u16 = 29;
+        /// v5 (01.11., R1): the open lots no strategy holds yet (their curve
+        /// being read), `0x` token; those no strategy exit can take,
+        /// `0x<token> <REASON>`; the curve reads that failed, and the last
+        /// failure.
+        pub const EXIT_UNDECIDED: u16 = 30;
+        pub const STRANDED: u16 = 31;
+        pub const LOT_READ_FAULTS: u16 = 32;
+        pub const LOT_READ_FAULT: u16 = 33;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
             record_type: 0,
-            schema_version: 4,
+            schema_version: 5,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1688,6 +1596,10 @@ pub mod runtime_status {
                 Field::opt(LATENCY_P99_NS, "latency_p99_ns", U64),
                 Field::opt(LATENCY_MAX_NS, "latency_max_ns", U64),
                 Field::opt(LEASE_ATTEMPT, "lease_attempt", B256),
+                Field::rep(EXIT_UNDECIDED, "exit_undecided", Text),
+                Field::rep(STRANDED, "stranded", Text),
+                Field::req(LOT_READ_FAULTS, "lot_read_faults", U64),
+                Field::opt(LOT_READ_FAULT, "lot_read_fault", Text),
             ],
         };
     }
@@ -2054,9 +1966,6 @@ pub const ALL: &[&Schema] = &[
     &live_ledger::SCHEMA,
     &live_ledger::V1,
     &live_qualification::SCHEMA,
-    &live_qualification::V3,
-    &live_qualification::V2,
-    &live_qualification::V1,
     &runtime_status::SCHEMA,
     &strategy_replay::SCHEMA,
     &strategy_replay::V2,

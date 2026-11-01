@@ -1286,3 +1286,38 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         fs::remove_dir_all(d).unwrap();
     }
 }
+
+/// 01.11. (R1): `source init` (darkbotctl up, the desktop app) only puts
+/// the owner state on file: a running owner's switches and LIVE grant stay
+/// (before, it was the owner's reset and revoked a running LIVE path, its
+/// exits included). `source reset` (a stop) ends them; `live idle` refuses
+/// while a grant holds (what `darkbotctl deploy` checks before it restarts
+/// the runtime) and passes once nothing LIVE holds.
+#[test]
+fn source_init_keeps_a_running_live_grant_and_a_reset_ends_it() {
+    let state = scratch("owner-cli");
+    activate(&state, &[], now_ms() + 3_600_000);
+    let s = state.to_str().unwrap();
+    let idle = || cli(&["live", "idle", "--state", s]);
+    let live_switch = || cli(&["control", "require", "--state", s, "BSC_ECON_LIVE"]).0;
+    let (code, out) = idle();
+    assert_ne!(code, 0, "{out}");
+    assert!(
+        out.contains("LIVE_ACTIVE: grant=true positions_held=0 unresolved=0"),
+        "{out}"
+    );
+    let (code, out) = cli(&["source", "init", "--state", s]);
+    assert_eq!(code, 0, "{out}");
+    assert!(idle().1.contains("live_grant=true"), "the grant stays");
+    assert_eq!(live_switch(), 0, "the switches stay");
+    let (code, out) = cli(&["source", "reset", "--state", s]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = idle();
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("live_grant=false positions_held=0 unresolved=0"),
+        "{out}"
+    );
+    assert_ne!(live_switch(), 0, "a reset leaves every switch DISABLED");
+    fs::remove_dir_all(state).unwrap();
+}

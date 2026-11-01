@@ -1758,6 +1758,8 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     }
     req(Entity::Runtime, Mode::Live);
     req(ComponentId::ExecC3.into(), Mode::Live);
+    // The exit decider of the grant's lots (R1).
+    req(ComponentId::StrategyC.into(), Mode::Live);
     req(ComponentId::StateC2.into(), Mode::Live);
     req(VenueId::Flap.into(), Mode::Live);
     req(SourceId::PublicNode.into(), Mode::Live);
@@ -1863,6 +1865,8 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
             "BSC_RUNTIME_MODE",
             "BSC_STATE_C2",
             "BSC_EXEC",
+            // 01.11. (R1): the exit decider of every grant's lots.
+            "BSC_STRATEGY_C",
             "BSC_VENUE_FLAP",
             "BSC_INGRESS_PUBLICNODE"
         ]

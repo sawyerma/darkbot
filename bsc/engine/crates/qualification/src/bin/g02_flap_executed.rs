@@ -74,7 +74,7 @@ sol! {
 }
 
 /// `TokenStatus.Tradable`: on the bonding curve.
-const TRADABLE: u8 = 1;
+use darkbot_bsc_trading::venues::flap::TOKEN_STATUS_TRADABLE as TRADABLE;
 
 /// Every tunable bound and its default (each overridable by its flag).
 mod defaults {

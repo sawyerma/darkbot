@@ -40,5 +40,9 @@ pub mod events;
 pub mod profile;
 pub mod recognize;
 
+/// `getTokenV8Safe`'s `TokenStatus.Tradable`: the token is on its bonding
+/// curve (the only status a curve read or a qualification tool prices).
+pub const TOKEN_STATUS_TRADABLE: u8 = 1;
+
 #[cfg(test)]
 mod decoder_tests;

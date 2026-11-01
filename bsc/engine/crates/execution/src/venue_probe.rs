@@ -69,6 +69,13 @@ const GET_QUOTE_TOKEN_CONFIGURATION_SELECTOR: [u8; 4] = [0x26, 0xef, 0x20, 0xd5]
 const GET_FEE_RATE_SELECTOR: [u8; 4] = [0x84, 0xe5, 0xee, 0xd0];
 /// `enableTaxOnBondingCurve()`.
 const ENABLE_TAX_ON_BONDING_CURVE_SELECTOR: [u8; 4] = [0x1d, 0x31, 0xe1, 0x53];
+/// `getTokenV8Safe(address)`: a token's curve and terms (01.11., R1: the
+/// curve a real position is held again on).
+const GET_TOKEN_V8_SAFE_SELECTOR: [u8; 4] = [0x62, 0xfa, 0xfc, 0xca];
+/// `nftGate(address)`.
+const NFT_GATE_SELECTOR: [u8; 4] = [0x9b, 0x95, 0xf8, 0xdc];
+/// The words of `getTokenV8Safe`'s static return struct.
+const TOKEN_STATE_WORDS: usize = 18;
 /// Every Portal selector the probe calls (BSC3-065: a behaviour parity
 /// requires each in the observed dispatcher).
 pub const PROBED_SELECTORS: [[u8; 4]; 4] = [
@@ -130,6 +137,9 @@ pub enum ProbeRead {
     /// and a frozen proxy's EIP-1967 implementation slot.
     FourCode,
     FourImplementationSlot,
+    /// 01.11. (R1): a held token's `getTokenV8Safe` and `nftGate`.
+    TokenState,
+    NftGate,
 }
 
 /// How a well-formed hex answer violates its ABI or storage type.
@@ -283,23 +293,46 @@ pub fn probe_flap(
     deployment: &FlapDeployment,
     caller: Address,
 ) -> Result<VenueObservation, ProbeError> {
-    let config = ProbeError::Config;
-    let rest = endpoint
-        .strip_prefix("https://")
-        .ok_or_else(|| config(FollowerConfigError::NotHttps))?;
-    // `https://` and `wss://` share the authority and path rules and the
-    // default port 443 (as the follower connects).
-    let target = Endpoint::parse(&format!("wss://{rest}"))
-        .map_err(|e| config(FollowerConfigError::Url(e)))?;
-    limits
-        .validate()
-        .map_err(|e| config(FollowerConfigError::Limits(e)))?;
-    let tls = tls_config().map_err(|_| config(FollowerConfigError::Tls))?;
-    let (authority, path) = authority_and_path(target.url());
-    let bounds = connect_bounds(limits);
-    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
-    let mut client = Client::new(connect, authority, path, limits);
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
     probe_with(&mut client, deployment, caller)
+}
+
+/// The HTTPS JSON-RPC target of the probe's reads: `endpoint`
+/// (`https://host[:port][/path]`; `https://` and `wss://` share the
+/// authority and path rules and the default port 443, as the follower
+/// connects), validated with `limits` and the connect bounds they set.
+struct Target {
+    endpoint: Endpoint,
+    tls: std::sync::Arc<rustls::ClientConfig>,
+    authority: String,
+    path: String,
+    bounds: crate::wss::WssLimits,
+}
+
+impl Target {
+    fn of(endpoint: &str, limits: &FollowerLimits) -> Result<Self, ProbeError> {
+        let config = ProbeError::Config;
+        let rest = endpoint
+            .strip_prefix("https://")
+            .ok_or_else(|| config(FollowerConfigError::NotHttps))?;
+        let target = Endpoint::parse(&format!("wss://{rest}"))
+            .map_err(|e| config(FollowerConfigError::Url(e)))?;
+        limits
+            .validate()
+            .map_err(|e| config(FollowerConfigError::Limits(e)))?;
+        let tls = tls_config().map_err(|_| config(FollowerConfigError::Tls))?;
+        let (authority, path) = authority_and_path(target.url());
+        Ok(Target {
+            endpoint: target,
+            tls,
+            authority,
+            path,
+            bounds: connect_bounds(limits),
+        })
+    }
 }
 
 /// [`probe_flap`] over a connected client (plain TCP in the tests).
@@ -371,6 +404,96 @@ where
     })
 }
 
+/// 01.11. (R1): a Flap token's curve as the Portal held it at the end of
+/// one canonical block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlapCurve {
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    pub terms: darkbot_bsc_trading::economics::flap::native_curve20::TokenTerms,
+    pub reserve: U256,
+    pub circulating: U256,
+}
+
+/// 01.11. (R1): the curve of `token` as the Portal `portal` held it at the
+/// block `number` whose hash is `hash` (`getTokenV8Safe`, `nftGate`, both
+/// pinned to that hash), read-only over `endpoint` as [`probe_flap`] reads:
+/// the curve a real LIVE position the strategy no longer follows is held
+/// again on. The block must still be the one at its height after the
+/// reads (otherwise [`ProbeError::Reorg`]); no other block stands in.
+pub fn read_flap_curve(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    portal: Address,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<FlapCurve, ProbeError> {
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
+    curve_with(&mut client, portal, token, number, hash)
+}
+
+/// [`read_flap_curve`] over a connected client (plain TCP in the tests).
+fn curve_with<S, C>(
+    client: &mut Client<S, C>,
+    portal: Address,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<FlapCurve, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    use darkbot_bsc_trading::economics::flap::curve::Curve;
+    use darkbot_bsc_trading::economics::flap::native_curve20::TokenTerms;
+    let mut wire = Wire {
+        client,
+        stop: AtomicBool::new(false),
+        id: 0,
+    };
+    let at = pinned(&hash);
+    let mut calldata = GET_TOKEN_V8_SAFE_SELECTOR.to_vec();
+    calldata.extend_from_slice(&address_word(token));
+    let read = ProbeRead::TokenState;
+    let w = abi_words::<TOKEN_STATE_WORDS>(&wire.call(&at, read, portal, &calldata)?)
+        .map_err(abi(read))?;
+    let fault = |f| abi(read)(f);
+    let status = word_u8(&w[0]).map_err(fault)?;
+    let terms = TokenTerms {
+        tradable: status == darkbot_bsc_trading::venues::flap::TOKEN_STATUS_TRADABLE,
+        version: word_u8(&w[4]).map_err(fault)?,
+        quote_token: word_address(&w[9]).map_err(fault)?.into_array(),
+        nft_gate: [0; 20],
+        curve: Curve {
+            r: U256::from_be_bytes(w[5]),
+            h: U256::from_be_bytes(w[6]),
+            k: U256::from_be_bytes(w[7]),
+        },
+        dex_supply_threshold: U256::from_be_bytes(w[8]),
+        buy_tax_bps: word_bps(&w[12]).map_err(fault)?,
+        sell_tax_bps: word_bps(&w[13]).map_err(fault)?,
+    };
+    let mut calldata = NFT_GATE_SELECTOR.to_vec();
+    calldata.extend_from_slice(&address_word(token));
+    let read = ProbeRead::NftGate;
+    let [gate] = abi_words::<1>(&wire.call(&at, read, portal, &calldata)?).map_err(abi(read))?;
+    let nft_gate = word_address(&gate).map_err(abi(read))?.into_array();
+    if wire.block_hash(ProbeRead::BlockRecheck, number)? != hash {
+        return Err(ProbeError::Reorg { number });
+    }
+    Ok(FlapCurve {
+        block_number: number,
+        block_hash: hash,
+        terms: TokenTerms { nft_gate, ..terms },
+        reserve: U256::from_be_bytes(w[1]),
+        circulating: U256::from_be_bytes(w[2]),
+    })
+}
+
 /// The live Four.meme deployment against the frozen one at one canonical
 /// block (Phase E review L3, the drift guard): each frozen proxy's EIP-1967
 /// implementation and the keccak of every frozen runtime code. `drift`
@@ -392,20 +515,10 @@ pub fn probe_four(
     limits: &FollowerLimits,
     deployment: &FourDeployment,
 ) -> Result<FourObservation, ProbeError> {
-    let config = ProbeError::Config;
-    let rest = endpoint
-        .strip_prefix("https://")
-        .ok_or_else(|| config(FollowerConfigError::NotHttps))?;
-    let target = Endpoint::parse(&format!("wss://{rest}"))
-        .map_err(|e| config(FollowerConfigError::Url(e)))?;
-    limits
-        .validate()
-        .map_err(|e| config(FollowerConfigError::Limits(e)))?;
-    let tls = tls_config().map_err(|_| config(FollowerConfigError::Tls))?;
-    let (authority, path) = authority_and_path(target.url());
-    let bounds = connect_bounds(limits);
-    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
-    let mut client = Client::new(connect, authority, path, limits);
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
     probe_four_with(&mut client, deployment)
 }
 
@@ -1182,6 +1295,118 @@ mod tests {
         (result, server.handle.join().unwrap())
     }
 
+    /// 01.11. (R1): a held token's curve is read at its pinned block into
+    /// the production terms (`TokenBook::seeded` takes them); off the curve
+    /// it reads as not tradable; a reorg between the reads, a tax outside
+    /// its range or a short answer refuse it, never another block's state.
+    #[test]
+    fn a_held_tokens_curve_is_read_at_its_block() {
+        use darkbot_bsc_trading::economics::flap::native_curve20::curve20;
+        let d = bsc_mainnet_v5_27_2();
+        let token = Address::repeat_byte(0x77);
+        let gate = Address::repeat_byte(0x99);
+        let curve = curve20();
+        let state = |status: u64, buy_tax: u64, words: usize| {
+            let big = |v: U256| v.to_be_bytes::<32>().to_vec();
+            let mut out = Vec::new();
+            for w in [
+                u64_word(status).to_vec(),
+                big(U256::from(3_000_000_000_000_000_000u128)),
+                big(U256::from(100_000_000_000_000_000_000_000u128)),
+                u64_word(7).to_vec(),
+                u64_word(6).to_vec(),
+                big(curve.r),
+                big(curve.h),
+                big(curve.k),
+                big(U256::from(800_000_000_000_000_000_000_000_000u128)),
+                address_word(Address::ZERO).to_vec(),
+                u64_word(0).to_vec(),
+                [0u8; 32].to_vec(),
+                u64_word(buy_tax).to_vec(),
+                u64_word(100).to_vec(),
+                address_word(Address::ZERO).to_vec(),
+                u64_word(40).to_vec(),
+                u64_word(0).to_vec(),
+                u64_word(0).to_vec(),
+            ]
+            .into_iter()
+            .take(words)
+            {
+                out.extend(w);
+            }
+            out
+        };
+        let call = |selector: [u8; 4]| {
+            let mut c = selector.to_vec();
+            c.extend_from_slice(&address_word(token));
+            c
+        };
+        let node = |state: Vec<u8>| {
+            let mut n = Node::mainnet();
+            n.set_call(d.portal, call(GET_TOKEN_V8_SAFE_SELECTOR), state);
+            n.set_call(
+                d.portal,
+                call(NFT_GATE_SELECTOR),
+                address_word(gate).to_vec(),
+            );
+            n
+        };
+        let read = |n: Node| {
+            let server = serve(n);
+            let limits = limits();
+            let mut client = Client::new(
+                connector(server.addr, limits),
+                server.addr.to_string(),
+                "/rpc".to_owned(),
+                &limits,
+            );
+            let result = curve_with(&mut client, d.portal, token, HEAD, HASH);
+            drop(client);
+            server.done.store(true, Ordering::Release);
+            (result, server.handle.join().unwrap())
+        };
+        let (result, seen) = read(node(state(1, 100, 18)));
+        let c = result.unwrap();
+        assert_eq!((c.block_number, c.block_hash), (HEAD, HASH));
+        assert!(c.terms.tradable);
+        assert_eq!(c.terms.version, 6);
+        assert_eq!(c.terms.curve, curve);
+        assert_eq!((c.terms.buy_tax_bps, c.terms.sell_tax_bps), (100, 100));
+        assert_eq!(c.terms.nft_gate, gate.into_array());
+        assert_eq!(c.reserve, U256::from(3_000_000_000_000_000_000u128));
+        assert_eq!(
+            c.circulating,
+            U256::from(100_000_000_000_000_000_000_000u128)
+        );
+        let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(methods, ["eth_call", "eth_call", "eth_getBlockByNumber"]);
+        // Migrated: off the curve.
+        assert!(!read(node(state(4, 100, 18))).0.unwrap().terms.tradable);
+        // A reorg between the reads.
+        let mut moved = node(state(1, 100, 18));
+        moved.hashes = [HASH, [0x44; 32]];
+        moved.blocks_served = 1;
+        assert_eq!(
+            read(moved).0.unwrap_err(),
+            ProbeError::Reorg { number: HEAD }
+        );
+        // A tax at the denominator, a short answer.
+        assert!(matches!(
+            read(node(state(1, 10_000, 18))).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::TokenState,
+                ..
+            })
+        ));
+        assert!(matches!(
+            read(node(state(1, 100, 17))).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::TokenState,
+                fault: AbiFault::Length
+            })
+        ));
+    }
+
     #[test]
     fn a_matching_deployment_validates_with_the_witnessed_terms() {
         let deployment = served_deployment();
@@ -1556,6 +1781,8 @@ mod tests {
                 ENABLE_TAX_ON_BONDING_CURVE_SELECTOR,
                 "enableTaxOnBondingCurve()",
             ),
+            (GET_TOKEN_V8_SAFE_SELECTOR, "getTokenV8Safe(address)"),
+            (NFT_GATE_SELECTOR, "nftGate(address)"),
         ] {
             assert_eq!(selector[..], keccak256(signature)[..4], "{signature}");
         }

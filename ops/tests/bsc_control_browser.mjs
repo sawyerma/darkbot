@@ -326,7 +326,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  // Effective LIVE: every condition holds, every entity of the scope is LIVE now.
  await until(async()=> (await liveLine('LIVE gate').innerText()).includes('CLEAR'),'LIVE gate CLEAR through the GUI');
  assert.equal(await unmet(),0,'every condition met');
- {const rows=await p.getByTestId('bsc-live-scope').locator('tr').all();assert.equal(rows.length,5,'runtime, C2, BSC_EXEC, Flap, PublicNode');for(const row of rows)assert.equal((await row.locator('td').nth(2).innerText()).trim(),'LIVE','scope effective LIVE: '+(await row.innerText()));}
+ {const rows=await p.getByTestId('bsc-live-scope').locator('tr').all();assert.equal(rows.length,6,'runtime, C2, BSC_EXEC, BSC_STRATEGY_C (the exit decider), Flap, PublicNode');for(const row of rows)assert.equal((await row.locator('td').nth(2).innerText()).trim(),'LIVE','scope effective LIVE: '+(await row.innerText()));}
  {const out=execFileSync(`${dir}/app/current/bsc_runtime`,['live','status','--state',`${dir}/run/bsc-sources`,'--root',`${dir}/app/bsc-source`],{encoding:'utf8'});assert(out.includes('qualification=VERIFIED')&&out.includes('live=CLEAR'),'the CLI sees the same effective LIVE: '+out);}
  await p.screenshot({path:`${dir}/bsc-live-clear.png`,fullPage:true});
  // Deactivate: the grant is revoked; stop: the economic LIVE switch off.

@@ -33,7 +33,7 @@ fn test_status_sync_py() {
     same_binary("bsc-status-reporter", REPORTER);
     run(
         "test_status_sync.py",
-        4,
+        5,
         &[("DARKBOT_TEST_REPORTER", REPORTER)],
     );
 }

@@ -38,7 +38,8 @@ EOF
 }
 bsc_reporter_up() {
   [ -x "$APP_HOME/current/bsc-status-reporter" ] || return 0
-  # The source owner's state is on file before the reporter projects it.
+  # The source owner's state is on file before the reporter projects it
+  # (`source init` only creates it: a running LIVE path keeps its grant).
   if [ -x "$APP_HOME/current/bsc_runtime" ]; then
     /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source init --state "$RUNDIR/bsc-sources" >/dev/null
   fi
@@ -82,7 +83,15 @@ bsc_runtime_down() {
 bsc_switches_reset() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
   [ -d "$RUNDIR/bsc-sources" ] || return 0
-  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source init --state "$RUNDIR/bsc-sources" >/dev/null
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source reset --state "$RUNDIR/bsc-sources" >/dev/null
+}
+# 01.11. (R1): nothing LIVE holds (no grant, no position held, nothing
+# unresolved): a runtime restart ends nothing. Asked with the build about to
+# be deployed (`$1`; it knows `live idle` even over an older running one).
+# Without owner state there is nothing to end.
+bsc_live_idle() {
+  [ -d "$RUNDIR/bsc-sources" ] || return 0
+  /usr/bin/env -i PATH=/usr/bin:/bin "$1" live idle --state "$RUNDIR/bsc-sources"
 }
 bsc_readiness_start() {
   assert_not_down

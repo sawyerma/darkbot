@@ -107,6 +107,27 @@ pub enum Input {
     Unhold {
         token: [u8; 20],
     },
+    /// A real LIVE position the engine does not hold (a restart, a gap or
+    /// a reorg ended its tracking, or its token was never followed), held
+    /// again on its curve as read (`TokenBook::seeded`).
+    Reheld(Reheld),
+}
+
+/// [`Input::Reheld`]: the position (as [`Input::Hold`]) and its curve as
+/// read at the end of the last block applied, valued and exited by the same
+/// rules from the next block on. `creator` zero when unknown: the creator
+/// the engine knew of a position a gap untracked stands in; without one no
+/// creator sale is seen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reheld {
+    pub token: [u8; 20],
+    pub creator: [u8; 20],
+    pub terms: crate::economics::flap::native_curve20::TokenTerms,
+    pub reserve: U256,
+    pub circulating: U256,
+    pub tokens: U256,
+    pub spent_wei: U256,
+    pub filled_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +247,9 @@ pub struct Engine {
     /// By launch order (block, transaction).
     tokens: BTreeMap<(u64, u64), Token>,
     block: Option<(u64, u64)>,
+    /// The creators of held real positions whose tracking ended (a gap, a
+    /// reorg): an [`Input::Reheld`] of the token keeps its creator rule.
+    held_creators: BTreeMap<[u8; 20], [u8; 20]>,
 }
 
 impl Engine {
@@ -235,6 +259,7 @@ impl Engine {
             gas,
             tokens: BTreeMap::new(),
             block: None,
+            held_creators: BTreeMap::new(),
         }
     }
 
@@ -272,6 +297,14 @@ impl Engine {
             | Stage::Held { entry, .. } => Some(entry.tokens),
             Stage::Observing(_) | Stage::Entering { .. } => None,
         }
+    }
+
+    /// Whether the engine holds a real LIVE position on `token` on a curve
+    /// it still tracks: its exit is decided here.
+    pub fn holds(&self, token: &[u8; 20]) -> bool {
+        self.tokens.values().any(|t| {
+            t.token == *token && matches!(t.stage, Stage::Held { .. }) && t.book.tracking()
+        })
     }
 
     /// Real LIVE positions held (plan 28.10.).
@@ -396,6 +429,58 @@ impl Engine {
             }
             Input::Unhold { token } => {
                 self.tokens.retain(|_, t| t.token != token);
+                self.held_creators.remove(&token);
+            }
+            Input::Reheld(Reheld {
+                token,
+                creator,
+                terms,
+                reserve,
+                circulating,
+                tokens,
+                spent_wei,
+                filled_ms,
+            }) => {
+                let known = self.held_creators.remove(&token);
+                let creator = match known {
+                    Some(known) if creator == [0; 20] => known,
+                    _ => creator,
+                };
+                let book = TokenBook::seeded(&terms, reserve, circulating);
+                let stage = Stage::Held {
+                    entry: Entry {
+                        tokens,
+                        input_wei: spent_wei,
+                        network_fee_wei: U256::ZERO,
+                        spent_wei,
+                    },
+                    filled_ms,
+                    triggered: false,
+                };
+                match self.token_mut(&token) {
+                    Some(t) => {
+                        t.book = book;
+                        t.stage = stage;
+                    }
+                    None => {
+                        // Not launched in this run: after every launch key.
+                        let next = self
+                            .tokens
+                            .range((u64::MAX, 0)..)
+                            .next_back()
+                            .map_or(0, |((_, i), _)| i + 1);
+                        self.tokens.insert(
+                            (u64::MAX, next),
+                            Token {
+                                token,
+                                creator,
+                                book,
+                                creator_sold: None,
+                                stage,
+                            },
+                        );
+                    }
+                }
             }
         }
         out
@@ -598,6 +683,7 @@ impl Engine {
                             block: number,
                             reason: why,
                         });
+                        self.held_creators.insert(t.token, t.creator);
                         self.tokens.remove(&key);
                         continue;
                     }

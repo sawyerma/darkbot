@@ -287,6 +287,12 @@ pub struct CanonicalConfig {
     /// Phase E review L3: how often the Four.meme drift guard reads the
     /// live deployment against the freeze (`BSC_CANONICAL_FOUR_PROBE_MS`).
     pub four_probe_ms: u64,
+    /// 01.11. (R1): at most this many curve reads of open LIVE lots at a
+    /// time (`BSC_CANONICAL_LOT_READS_MAX`), and a lot read again no
+    /// earlier than this after a failed or overtaken read
+    /// (`BSC_CANONICAL_LOT_READ_RETRY_MS`).
+    pub lot_reads_max: usize,
+    pub lot_read_retry_ms: u64,
 }
 
 /// BSC3-056: the second source and how close it must be.
@@ -500,6 +506,9 @@ impl RuntimeConfig {
                     join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
                     join_horizon_ms: take("BSC_CANONICAL_JOIN_HORIZON_MS", 1_000, 86_400_000)?,
                     four_probe_ms: take("BSC_CANONICAL_FOUR_PROBE_MS", 60_000, 86_400_000)?,
+                    lot_reads_max: usize::try_from(take("BSC_CANONICAL_LOT_READS_MAX", 1, 64)?)
+                        .map_err(|_| "BSC_CANONICAL_LOT_READS_MAX")?,
+                    lot_read_retry_ms: take("BSC_CANONICAL_LOT_READ_RETRY_MS", 100, 600_000)?,
                     state,
                 })
             }
@@ -617,6 +626,14 @@ impl RuntimeConfig {
             (Some(key), Some(buyer), Some(route)) => {
                 if exec.is_none() {
                     return Err("BSC_LIVE_* needs the executor's BSC_EXEC_* keys".into());
+                }
+                // R1 review: every LIVE lot's exit goes Strategy C's path; a
+                // sender without it could buy and never sell.
+                if exec
+                    .as_ref()
+                    .is_some_and(|x| !x.exec.sender_paths.strategy())
+                {
+                    return Err("BSC_LIVE_* needs BSC_EXEC_SENDER_PATHS with STRATEGY_C: every LIVE lot's exit goes its path".into());
                 }
                 let [buyer] = <[[u8; 20]; 1]>::try_from(
                     StateConfig::parse_watched(buyer)
@@ -937,6 +954,209 @@ fn strategy_to_paper(
     }
 }
 
+/// 01.11. (R1): tells the LIVE path who decides its open lots' exits now:
+/// those the strategy holds on a tracked curve are decided, the stranded
+/// ones are named, every other open lot is undecided (no strategy: all).
+fn refresh_lot_deciders(c: &mut Canonical, live: &mut Option<LiveRuntime>) {
+    let Some(l) = live.as_mut() else {
+        return;
+    };
+    c.lot.open = l
+        .open_positions()
+        .into_iter()
+        .filter_map(|p| match p {
+            live::PositionChange::Opened { token, .. } => Some(token),
+            live::PositionChange::Ended { .. } => None,
+        })
+        .collect();
+    let lot = &mut c.lot;
+    lot.stranded.retain(|(t, _)| lot.open.contains(t));
+    lot.retry_at.retain(|(t, _)| lot.open.contains(t));
+    let strategy = c.strategy.as_ref();
+    let undecided = lot
+        .open
+        .iter()
+        .copied()
+        .filter(|t| {
+            !strategy.is_some_and(|s| s.holds(t)) && !lot.stranded.iter().any(|(s, _)| s == t)
+        })
+        .collect();
+    l.set_exit_deciders(
+        undecided,
+        lot.stranded.clone(),
+        lot.faults,
+        lot.fault.clone(),
+    );
+}
+
+/// 01.11. (R1): at the end of block `block`, a curve read of each undecided
+/// lot not read yet: once the observation window began (the strategy sees
+/// the blocks), with a strategy to hold it and an armed path (its Portal),
+/// at most `BSC_CANONICAL_LOT_READS_MAX` at a time, a lot whose read
+/// failed or was overtaken not before `BSC_CANONICAL_LOT_READ_RETRY_MS`.
+fn ask_lot_reads(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
+    let (Some(l), Some(_), Some((number, hash))) = (live.as_ref(), c.strategy.as_ref(), c.head)
+    else {
+        return;
+    };
+    let Some(portal) = l.portal() else {
+        return;
+    };
+    if number != block || !c.first_journaled {
+        return;
+    }
+    let endpoint = c.lot.config.endpoint_at(c.active).to_string();
+    let strategy = c.strategy.as_ref();
+    let lot = &mut c.lot;
+    let now = Instant::now();
+    let wanted: Vec<[u8; 20]> = lot
+        .open
+        .iter()
+        .copied()
+        .filter(|t| {
+            !strategy.is_some_and(|s| s.holds(t))
+                && !lot.stranded.iter().any(|(s, _)| s == t)
+                && !lot.reads.iter().any(|r| r.token == *t)
+                && !lot.retry_at.iter().any(|(r, at)| r == t && *at > now)
+        })
+        .collect();
+    for token in wanted {
+        if lot.reads.len() >= lot.config.lot_reads_max {
+            break;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (read, endpoint, limits) = (lot.reader, endpoint.clone(), lot.config.limits);
+        let spawned = std::thread::Builder::new()
+            .name("bsc-lot-curve".into())
+            .spawn(move || {
+                use crate::venue_probe::ProbeError;
+                let result = read(
+                    &endpoint,
+                    &limits,
+                    portal,
+                    alloy_primitives::Address::from(token),
+                    number,
+                    hash,
+                )
+                .map_err(|e| LotFault {
+                    again: !matches!(e, ProbeError::Abi { .. } | ProbeError::Config(_)),
+                    why: e.to_string(),
+                });
+                let _ = tx.send(result);
+            });
+        match spawned {
+            Ok(_handle) => lot.reads.push(LotRead {
+                token,
+                block,
+                hash,
+                rx,
+                overtaken: false,
+                #[cfg(test)]
+                handle: Some(_handle),
+            }),
+            Err(e) => {
+                lot.faults += 1;
+                lot.fault = Some(format!("curve read not started: {e}"));
+                lot.retry_later(token);
+            }
+        }
+    }
+}
+
+/// 01.11. (R1): before a block's events, the curve reads that came back:
+/// one not overtaken holds its lot again (still open, not held; journaled
+/// first, so a replay steps the same engine), or strands it off the curve
+/// or outside the priced scope; a failed one counts and is asked again
+/// later, or strands its lot when no retry changes it; an overtaken one is
+/// dropped (asked again later). One still out stays.
+fn hold_read_lots(
+    c: &mut Canonical,
+    live: &mut Option<LiveRuntime>,
+    journal: &mut RuntimeJournal,
+    at: u64,
+) {
+    use darkbot_bsc_trading::economics::flap::native_curve20::PricedToken;
+    let (Some(l), Some(s)) = (live.as_ref(), c.strategy.as_mut()) else {
+        return;
+    };
+    let lot = &mut c.lot;
+    let reads = std::mem::take(&mut lot.reads);
+    let open = l.open_positions();
+    for r in reads {
+        let answer = match r.rx.try_recv() {
+            Ok(answer) => answer,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                lot.reads.push(r);
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(LotFault {
+                again: true,
+                why: "curve read ended without an answer".into(),
+            }),
+        };
+        let curve = match answer {
+            Ok(_) if r.overtaken => {
+                lot.retry_later(r.token);
+                continue;
+            }
+            Ok(curve) => curve,
+            Err(fault) => {
+                lot.faults += 1;
+                lot.fault = Some(format!(
+                    "0x{}: {}",
+                    alloy_primitives::hex::encode(r.token),
+                    fault.why
+                ));
+                match fault.again {
+                    true => lot.retry_later(r.token),
+                    false => lot
+                        .stranded
+                        .push((r.token, crate::sources::LIVE_POSITION_UNREADABLE)),
+                }
+                continue;
+            }
+        };
+        let Some((tokens, spent_wei, filled_ms)) = open.iter().find_map(|p| match *p {
+            live::PositionChange::Opened {
+                token,
+                tokens,
+                spent_wei,
+                filled_ms,
+            } if token == r.token => Some((tokens, spent_wei, filled_ms)),
+            _ => None,
+        }) else {
+            continue;
+        };
+        if s.holds(&r.token) {
+            continue;
+        }
+        if !curve.terms.tradable {
+            lot.stranded
+                .push((r.token, crate::sources::LIVE_POSITION_OFF_CURVE));
+            continue;
+        }
+        if PricedToken::new(&curve.terms).is_err() {
+            lot.stranded
+                .push((r.token, crate::sources::LIVE_POSITION_UNPRICED));
+            continue;
+        }
+        s.reheld(
+            &crate::runtime_strategy::Reheld {
+                token: r.token,
+                creator: [0; 20],
+                terms: curve.terms,
+                reserve: curve.reserve,
+                circulating: curve.circulating,
+                tokens,
+                spent_wei,
+                filled_ms,
+            },
+            at,
+            journal,
+        );
+    }
+}
+
 /// One canonical event: the C2 owner first, then the follower's records
 /// (and the strategy fed from them); once the block's events are all
 /// applied (`BlockComplete`), the strategy's decisions go to the PAPER
@@ -956,6 +1176,14 @@ fn apply_canonical(
         CanonicalEvent::BlockComplete { number, .. } => Some(number),
         _ => None,
     };
+    // 01.11. (R1): the curve reads this event overtakes; before a block's
+    // events, the reads that came back hold their lots again (so they see
+    // every later trade).
+    c.lot.overtake(&event);
+    let concerns = c.lot.concerns(&event);
+    if let CanonicalEvent::Block { .. } = event {
+        hold_read_lots(c, live, journal, at);
+    }
     if let Some(o) = owner.as_mut() {
         o.canonical(&event);
         // Plan 28.10.: C2's evidence about the LIVE buyer resolves the
@@ -976,8 +1204,10 @@ fn apply_canonical(
     // Plan 28.10.: the buyer's receipts and reorgs become ledger facts;
     // a position opened or ended is held or released by Strategy C (a
     // journaled input, so a replay steps the same engine).
+    let mut changed = false;
     if let Some(l) = live.as_mut() {
         for change in l.on_canonical(&event) {
+            changed = true;
             let Some(s) = c.strategy.as_mut() else {
                 continue;
             };
@@ -993,11 +1223,17 @@ fn apply_canonical(
         }
     }
     c.event(at, event, journal);
+    // R1: who decides the open lots' exits, as the event left it (a BUY of
+    // this event's block, from the ingress or the strategy, reads it).
+    if concerns || changed {
+        refresh_lot_deciders(c, live);
+    }
     // BSC3-056: the verdict including this event (a block's header), before
     // a BUY is planned on it.
     c.refresh_confirmation(live, wall_or_expired(observed_now()));
     if let Some(block) = complete {
         strategy_to_paper(c, exec, live, owner, clock, journal, block);
+        ask_lot_reads(c, live, block);
     }
 }
 
@@ -1327,6 +1563,143 @@ struct Canonical {
     ledger: Ledger,
     /// BSC3-062: [`CanonicalConfig::join_horizon_ms`] in µs.
     join_horizon_us: u64,
+    /// 01.11. (R1): the exit deciders of the open LIVE lots.
+    lot: LotDeciders,
+}
+
+/// 01.11. (R1): reads a token's curve at one block (production:
+/// [`crate::venue_probe::read_flap_curve`]).
+type CurveReader = fn(
+    &str,
+    &FollowerLimits,
+    alloy_primitives::Address,
+    alloy_primitives::Address,
+    u64,
+    [u8; 32],
+) -> Result<crate::venue_probe::FlapCurve, crate::venue_probe::ProbeError>;
+
+/// 01.11. (R1): who decides the open LIVE lots' exits. A lot the strategy
+/// does not hold (a restart, a gap or a reorg ended its tracking, or its
+/// token was never followed) is read (its curve at a block's end, off the
+/// loop, pinned to the block's hash) and held again on that curve before
+/// the next block's events, while nothing moved the curve since (no trade,
+/// term or migration of the token, no reorg or gap). Off the curve, outside
+/// the priced scope or unreadable for good it is stranded. The LIVE path
+/// refuses new BUYs while a lot is undecided or stranded.
+struct LotDeciders {
+    config: CanonicalConfig,
+    reader: CurveReader,
+    reads: Vec<LotRead>,
+    /// The tokens of the open lots at the last refresh.
+    open: Vec<[u8; 20]>,
+    stranded: Vec<([u8; 20], &'static str)>,
+    /// A token read again no earlier than this (after a failed or
+    /// overtaken read).
+    retry_at: Vec<([u8; 20], Instant)>,
+    faults: u64,
+    fault: Option<String>,
+}
+
+/// One curve read: the lot's token, the block it reads, its answer;
+/// `overtaken` once the curve moved after that block.
+struct LotRead {
+    token: [u8; 20],
+    block: u64,
+    hash: [u8; 32],
+    rx: std::sync::mpsc::Receiver<Result<crate::venue_probe::FlapCurve, LotFault>>,
+    overtaken: bool,
+    #[cfg(test)]
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+/// A failed curve read: `again` when a later read may succeed (transport,
+/// a reorg between its reads), not when the answer itself is refused.
+struct LotFault {
+    again: bool,
+    why: String,
+}
+
+impl LotDeciders {
+    fn new(config: &CanonicalConfig) -> Self {
+        LotDeciders {
+            config: config.clone(),
+            reader: crate::venue_probe::read_flap_curve,
+            reads: Vec::new(),
+            open: Vec::new(),
+            stranded: Vec::new(),
+            retry_at: Vec::new(),
+            faults: 0,
+            fault: None,
+        }
+    }
+
+    /// The reads `event` overtakes: a trade, term or migration of their
+    /// token, or any reorg, gap or refused Flap log; a block whose parent is
+    /// not the block a read was of, for that read.
+    fn overtake(&mut self, event: &CanonicalEvent) {
+        let token = match event {
+            CanonicalEvent::FlapTrade(t) => Some(t.token),
+            CanonicalEvent::FlapTerm(t) => Some(t.token),
+            CanonicalEvent::FlapMigrated { token, .. } => Some(*token),
+            CanonicalEvent::Reorg { .. }
+            | CanonicalEvent::ReorgTooDeep { .. }
+            | CanonicalEvent::Gap { .. }
+            | CanonicalEvent::FlapTradeUndecodable { .. } => {
+                self.reads.iter_mut().for_each(|r| r.overtaken = true);
+                None
+            }
+            CanonicalEvent::Block {
+                number,
+                parent_hash,
+                ..
+            } => {
+                for r in &mut self.reads {
+                    if r.block.checked_add(1) == Some(*number) && r.hash != *parent_hash {
+                        r.overtaken = true;
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+        if let Some(token) = token {
+            for r in self.reads.iter_mut().filter(|r| r.token == token) {
+                r.overtaken = true;
+            }
+        }
+    }
+
+    /// Whether `event` can change who decides an open lot's exit.
+    fn concerns(&self, event: &CanonicalEvent) -> bool {
+        match event {
+            CanonicalEvent::FlapTrade(t) => self.open.contains(&t.token),
+            CanonicalEvent::FlapTerm(t) => self.open.contains(&t.token),
+            CanonicalEvent::FlapMigrated { token, .. } => self.open.contains(token),
+            CanonicalEvent::Block { .. }
+            | CanonicalEvent::BlockComplete { .. }
+            | CanonicalEvent::Reorg { .. }
+            | CanonicalEvent::ReorgTooDeep { .. }
+            | CanonicalEvent::Gap { .. }
+            | CanonicalEvent::FlapTradeUndecodable { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Tests: waits until every read out has answered.
+    #[cfg(test)]
+    fn settle(&mut self) {
+        for r in &mut self.reads {
+            if let Some(h) = r.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+
+    fn retry_later(&mut self, token: [u8; 20]) {
+        let at = Instant::now() + Duration::from_millis(self.config.lot_read_retry_ms);
+        self.retry_at.retain(|(t, _)| *t != token);
+        self.retry_at.push((token, at));
+    }
 }
 
 impl Canonical {
@@ -1386,6 +1759,7 @@ impl Canonical {
                 config.limits.reorg_depth,
             ),
             join_horizon_us: config.join_horizon_ms.saturating_mul(1_000),
+            lot: LotDeciders::new(config),
         }
     }
 
@@ -2520,6 +2894,9 @@ pub fn run(
                         _ => {}
                     }
                     c.strategy_config = strategy_on.then(|| config.strategy.engine.clone());
+                    // R1: a strategy switched on or off changes who decides
+                    // the open lots' exits.
+                    refresh_lot_deciders(c, &mut live);
                 }
                 if let (Some(c), Some(w)) = (&canonical_config, &checkpoints) {
                     // Switched off, the last window is written here, after
@@ -3226,6 +3603,14 @@ mod tests {
         );
         let e = RuntimeConfig::parse(&no_confirm).unwrap_err();
         assert!(e.contains("BSC_CANONICAL_CONFIRM_RPC"), "{e}");
+        // R1 review: a sender whose paths leave out Strategy C's could buy
+        // and never sell.
+        let no_exits = format!("{watched}{}", keys("BUILDERS")).replace(
+            "BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C\n",
+            "BSC_EXEC_SENDER_PATHS=C3\n",
+        );
+        let e = RuntimeConfig::parse(&no_exits).unwrap_err();
+        assert!(e.contains("BSC_EXEC_SENDER_PATHS with STRATEGY_C"), "{e}");
     }
 
     /// Messplan §3b B (offline, at the reconcile's gate): which paths the

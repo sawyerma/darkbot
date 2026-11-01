@@ -302,6 +302,19 @@ pub const LIVE_QUALIFICATION_CHANGED: &str = "LIVE_QUALIFICATION_CHANGED";
 pub const LIVE_EXIT_REVERTS_EXHAUSTED: &str = "LIVE_EXIT_REVERTS_EXHAUSTED";
 /// BSC3-030 review: the position's last reverted exit step used all its gas.
 pub const LIVE_EXIT_OUT_OF_GAS: &str = "LIVE_EXIT_OUT_OF_GAS";
+/// 01.11. (R1): an open lot whose token is not on the bonding curve as
+/// read (`getTokenV8Safe` status other than Tradable: migrated to the DEX,
+/// or not a Portal token): no strategy exit can sell it; no new BUY until
+/// it ends.
+pub const LIVE_POSITION_OFF_CURVE: &str = "LIVE_POSITION_OFF_CURVE";
+/// 01.11. (R1 review): an open lot whose curve read fails for a reason a
+/// retry does not change (an ABI violation, no Portal state): no exit
+/// prices it; no new BUY until it ends.
+pub const LIVE_POSITION_UNREADABLE: &str = "LIVE_POSITION_UNREADABLE";
+/// 01.11. (R1): an open lot whose curve is outside the priced scope as
+/// read (another version, an NFT gate, a tax or threshold out of range):
+/// no strategy exit prices it; no new BUY until it ends.
+pub const LIVE_POSITION_UNPRICED: &str = "LIVE_POSITION_UNPRICED";
 /// BSC3-012: the running `bsc_runtime` is not the build the LIVE
 /// qualification names (or it names none, or this one is unreadable).
 pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";
@@ -829,6 +842,20 @@ impl LiveStrategies {
     pub fn strategy_c(self) -> bool {
         self != Self::C3
     }
+
+    /// The components a grant of these paths arms and names: C3 when its
+    /// BUYs are granted, and Strategy C always, which decides the exits of
+    /// every lot the grant's BUYs open (01.11., R1: a C3-only grant had no
+    /// exit decider); its own BUYs only with STRATEGY_C in the scope
+    /// ([`Store::admit_live`]).
+    pub fn components(self) -> Vec<ComponentId> {
+        let mut out = Vec::with_capacity(2);
+        if self.c3() {
+            out.push(ComponentId::ExecC3);
+        }
+        out.push(ComponentId::StrategyC);
+        out
+    }
 }
 
 /// The inclusion adapters a LIVE grant may send through (the frozen
@@ -1228,7 +1255,10 @@ impl LiveGrant {
         match entity {
             Entity::Runtime | Entity::Component(ComponentId::StateC2) => true,
             Entity::Component(ComponentId::ExecC3) => self.strategies.c3(),
-            Entity::Component(ComponentId::StrategyC) => self.strategies.strategy_c(),
+            // 01.11. (R1): Strategy C decides the exits of every lot the
+            // grant's BUYs open; its own BUYs only with STRATEGY_C in the
+            // scope ([`Store::admit_live`]).
+            Entity::Component(ComponentId::StrategyC) => true,
             Entity::Venue(v) => v == self.venue,
             Entity::Source(s) => self.sources.contains(&s),
             _ => false,
@@ -3486,11 +3516,20 @@ pub struct LiveNow {
     grant: LiveGrant,
     grant_generation: u64,
     at_ms: u64,
+    sources_live: Vec<SourceId>,
 }
 
 impl LiveNow {
     pub fn grant(&self) -> &LiveGrant {
         &self.grant
+    }
+
+    /// The grant's sources effective LIVE now (requested LIVE and in the
+    /// scope, the gate clear but for what only a BUY needs): only their
+    /// sighting may trigger a LIVE BUY (PHASENPLAN v9 §2.3; a granted
+    /// source the operator holds in SHADOW triggers nothing).
+    pub fn sources_live(&self) -> &[SourceId] {
+        &self.sources_live
     }
 
     /// The owner generation that wrote the grant.
@@ -3845,6 +3884,11 @@ impl Store {
             Entity::Component(intent.component),
             Entity::Venue(grant.venue),
         ];
+        // 01.11. (R1): Strategy C decides every lot's exits; its own BUYs
+        // only under a grant naming STRATEGY_C.
+        if !exit && intent.component == ComponentId::StrategyC && !grant.strategies.strategy_c() {
+            return Err(LIVE_NOT_IN_SCOPE.into());
+        }
         g.live_clear(&entities, &ctx, exit)?;
         if !exit && intent.input_wei > grant.max_input_wei {
             return Err(LIVE_INPUT_ABOVE_GRANT.into());
@@ -4020,10 +4064,17 @@ impl Store {
             .chain(components.iter().map(|c| Entity::Component(*c)))
             .collect();
         g.live_clear(&entities, &ctx, exit)?;
+        let sources_live = grant
+            .sources
+            .iter()
+            .copied()
+            .filter(|s| g.live_effective(Entity::Source(*s), &ctx, true) == Effective::Live)
+            .collect();
         Ok(LiveNow {
             grant: grant.clone(),
             grant_generation: by.generation,
             at_ms: now_ms,
+            sources_live,
         })
     }
 
@@ -5693,9 +5744,8 @@ pub(crate) mod tests {
         if strategies.c3() {
             req(ComponentId::ExecC3.into(), Mode::Live);
         }
-        if strategies.strategy_c() {
-            req(ComponentId::StrategyC.into(), Mode::Live);
-        }
+        // Strategy C decides every grant's exits (R1).
+        req(ComponentId::StrategyC.into(), Mode::Live);
         req(ComponentId::StateC2.into(), Mode::Live);
         req(VenueId::Flap.into(), Mode::Live);
         req(SourceId::PublicNode.into(), Mode::Live);
@@ -5748,7 +5798,9 @@ pub(crate) mod tests {
             g.effective_live_now(SwitchId::Sign.into(), &ctx),
             Effective::Enabled
         );
-        // Outside the scope: Strategy C (a C3 grant), dRPC, Four.
+        // Outside the scope: dRPC, Four. Strategy C is LIVE under a C3 grant
+        // (01.11., R1: it decides every lot's exits; the owner refuses its
+        // BUYs, `each_live_intent_is_admitted_by_the_owner_as_it_holds_now`).
         let mut wider = g.clone();
         let by = SetBy {
             request_id: "w".into(),
@@ -5763,7 +5815,7 @@ pub(crate) mod tests {
         }
         assert_eq!(
             wider.effective_live_now(ComponentId::StrategyC.into(), &ctx),
-            Effective::Blocked(LIVE_NOT_IN_SCOPE)
+            Effective::Live
         );
         assert_eq!(
             wider.effective_live_now(SourceId::Drpc.into(), &ctx),
@@ -6873,10 +6925,8 @@ pub(crate) mod tests {
     fn each_live_intent_is_admitted_by_the_owner_as_it_holds_now() {
         let (dir, s, now) = live_ready("live-admit");
         let q = qualified();
-        assert_eq!(
-            s.live_now(&[ComponentId::StrategyC], &q, now).unwrap_err(),
-            "BSC_STRATEGY_C_OFF"
-        );
+        // Strategy C, the exit decider of the C3 grant's lots (R1).
+        assert!(s.live_now(&[ComponentId::StrategyC], &q, now).is_ok());
         assert_eq!(
             s.live_now(&[ComponentId::ExecC3], &LiveQualification::default(), now)
                 .unwrap_err(),
@@ -6968,14 +7018,20 @@ pub(crate) mod tests {
             s.admit_live(&other, &exit, &q, now).unwrap_err(),
             LIVE_GRANT_CHANGED
         );
-        let strategy = LiveIntent {
+        // 01.11. (R1): Strategy C decides the C3 grant's exits (admitted);
+        // its BUY is outside the scope.
+        let strategy_exit = LiveIntent {
             component: ComponentId::StrategyC,
-            ..exit
+            ..intent(5, LiveIntentKind::Sell, 0, 1)
         };
-        assert!(
-            s.admit_live(&armed, &strategy, &q, now)
-                .unwrap_err()
-                .starts_with("BSC_STRATEGY_C_")
+        assert!(s.admit_live(&armed, &strategy_exit, &q, now).is_ok());
+        let strategy_buy = LiveIntent {
+            component: ComponentId::StrategyC,
+            ..intent(6, LiveIntentKind::Buy, 1, 1)
+        };
+        assert_eq!(
+            s.admit_live(&armed, &strategy_buy, &q, now).unwrap_err(),
+            LIVE_NOT_IN_SCOPE
         );
         let none = LiveQualification::default();
         assert_eq!(
@@ -6994,7 +7050,7 @@ pub(crate) mod tests {
                 .unwrap_err(),
             ECONOMIC_LIVE_DISABLED
         );
-        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 4_500);
+        assert_eq!(spent_by_grant(&dir, generation).unwrap(), 4_501);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -546,3 +546,177 @@ fn a_held_real_position_exits_by_the_same_rules_once() {
     c.feed(Input::Unhold { token: TOKEN });
     assert_eq!((c.engine.held_positions(), c.engine.followed()), (0, 0));
 }
+
+/// The terms the test chain's tokens carry, as `getTokenV8Safe` would read
+/// them.
+fn read_terms(book: &TokenBook) -> crate::economics::flap::native_curve20::TokenTerms {
+    crate::economics::flap::native_curve20::TokenTerms {
+        tradable: true,
+        version: book.terms.version.unwrap(),
+        quote_token: book.terms.quote_token.unwrap(),
+        nft_gate: [0; 20],
+        curve: book.terms.curve.unwrap(),
+        dex_supply_threshold: book.terms.dex_threshold.unwrap(),
+        buy_tax_bps: book.terms.buy_tax_bps.unwrap(),
+        sell_tax_bps: book.terms.sell_tax_bps.unwrap(),
+    }
+}
+
+/// 01.11. (R1): a held real position whose tracking a gap ended is
+/// unresolved and no longer held; held again on its curve as read
+/// (`Reheld`), it is valued on that curve and every later trade, and its
+/// exit triggers by the same rules. A token this engine never followed (a
+/// restart) is held the same; one off the curve (migrated) is held but
+/// never valued: unresolved at the next block, not exited.
+#[test]
+fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    let input = 10_000_000_000_000_000u64;
+    let q = quote_native_buy(&c.book(TOKEN).buy_inputs(U256::from(input)).unwrap()).unwrap();
+    c.buy(TOKEN, [0xEE; 20], input);
+    let spent = U256::from(input + 30_000_000_000_000);
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    });
+    assert!(c.engine.holds(&TOKEN));
+    c.feed(Input::Incomplete);
+    c.next_block();
+    assert_eq!(c.kinds(), ["unresolved 100 Gap"], "{:?}", c.kinds());
+    assert!(!c.engine.holds(&TOKEN));
+    let held = |c: &mut Chain, token: [u8; 20], creator: [u8; 20]| {
+        let book = c.book(token).clone();
+        c.feed(Input::Reheld(Reheld {
+            token,
+            creator,
+            terms: read_terms(&book),
+            reserve: book.reserve,
+            circulating: book.circulating,
+            tokens: q.output_amount,
+            spent_wei: spent,
+            filled_ms: 0,
+        }));
+    };
+    held(&mut c, TOKEN, CREATOR);
+    assert!(c.engine.holds(&TOKEN));
+    assert_eq!(c.engine.position_tokens(&TOKEN), Some(q.output_amount));
+    c.out.clear();
+    for i in 10..30u8 {
+        c.buy(TOKEN, [i; 20], 200_000_000_000_000_000);
+    }
+    c.next_block();
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 101 Target"]);
+    let (_, reserve, _) = c.engine.curve_of(&TOKEN).unwrap();
+    assert_eq!(reserve, c.book(TOKEN).reserve, "the real curve");
+    // A token this engine never followed: held on its read curve alone.
+    let other = [0xAB; 20];
+    let mut fresh = Chain::new(config("buy_count:100:"));
+    fresh.launch(other, 5_000_000_000_000_000);
+    let mut unknown = Chain::new(config("buy_count:100:"));
+    unknown.books = fresh.books.clone();
+    held(&mut unknown, other, [0; 20]);
+    assert!(unknown.engine.holds(&other));
+    assert_eq!(unknown.engine.followed(), 1);
+    for i in 10..30u8 {
+        unknown.buy(other, [i; 20], 200_000_000_000_000_000);
+    }
+    unknown.next_block();
+    unknown.next_block();
+    assert_eq!(unknown.kinds(), ["trigger 100 Target"]);
+    // Off the curve: held, never valued, unresolved at the next block.
+    let mut migrated = Chain::new(config("buy_count:100:"));
+    migrated.books = fresh.books.clone();
+    let book = migrated.book(other).clone();
+    migrated.feed(Input::Reheld(Reheld {
+        token: other,
+        creator: [0; 20],
+        terms: crate::economics::flap::native_curve20::TokenTerms {
+            tradable: false,
+            ..read_terms(&book)
+        },
+        reserve: book.reserve,
+        circulating: book.circulating,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    }));
+    assert!(migrated.engine.curve_of(&other).is_none());
+    migrated.next_block();
+    assert_eq!(migrated.kinds(), ["unresolved 100 Migrated"]);
+}
+
+/// 01.11. (R1 review): a held position a gap untracked keeps its creator
+/// when held again without one: the creator's sale still triggers its exit.
+#[test]
+fn a_position_held_again_after_a_gap_keeps_its_creator_rule() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    let input = 10_000_000_000_000_000u64;
+    let q = quote_native_buy(&c.book(TOKEN).buy_inputs(U256::from(input)).unwrap()).unwrap();
+    c.buy(TOKEN, [0xEE; 20], input);
+    let spent = U256::from(input + 30_000_000_000_000);
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    });
+    c.feed(Input::Incomplete);
+    c.next_block();
+    assert!(!c.engine.holds(&TOKEN));
+    let book = c.book(TOKEN).clone();
+    c.feed(Input::Reheld(Reheld {
+        token: TOKEN,
+        creator: [0; 20],
+        terms: read_terms(&book),
+        reserve: book.reserve,
+        circulating: book.circulating,
+        tokens: q.output_amount,
+        spent_wei: spent,
+        filled_ms: 0,
+    }));
+    assert!(c.engine.holds(&TOKEN));
+    c.out.clear();
+    c.sell(TOKEN, CREATOR, 1_000);
+    c.next_block();
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 101 CreatorSell"], "{:?}", c.kinds());
+}
+
+/// R1 review: a held position whose curve a real trade no longer
+/// reproduces is not held for its exit any more (the runtime reads its
+/// curve again), even before the block ends.
+#[test]
+fn a_held_position_on_an_untracked_curve_is_not_held() {
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: U256::from(1_000u64),
+        spent_wei: U256::from(10_000u64),
+        filled_ms: 0,
+    });
+    assert!(c.engine.holds(&TOKEN));
+    // A BUY whose amounts the quote does not reproduce: TradeMismatch.
+    c.feed(Input::Trade {
+        token: TOKEN,
+        trade: Trade {
+            block_number: 100,
+            tx_index: 9,
+            log_index: 0,
+            sell: false,
+            trader: [0x51; 20],
+            amount: U256::from(1u8),
+            eth: U256::from(1_000_000_000_000_000u64),
+            fee: U256::ZERO,
+        },
+    });
+    assert!(
+        !c.engine.holds(&TOKEN),
+        "not held on a curve it no longer tracks"
+    );
+}

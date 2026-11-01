@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # darkbotctl – lokale Steuerung von DarkBot auf macOS.
 #
-# darkbotctl build | deploy             bauen (nur explizit) | Release nach ~/Library/Application Support/DarkBot
+# darkbotctl build | deploy [--stop-live] bauen (nur explizit) | Release nach ~/Library/Application Support/DarkBot (laufendes BSC-LIVE nur mit --stop-live)
 # darkbotctl app                        ein Klick: Gateway sicherstellen, ggf. konfigurierte Capture, Cockpit öffnen
 # darkbotctl up [--no-open] | down      Gateway starten | Capture geordnet stoppen, dann Gateway stoppen
 # darkbotctl restart-gateway            nur Gateway neu (Capture läuft weiter, Reporter verbindet neu)
@@ -323,6 +323,13 @@ cmd_build() {
 }
 
 cmd_deploy() {
+  # 01.11. (R1): a deploy restarts a running BSC runtime, and its restart
+  # ends the LIVE grant (and with it every exit): refused while LIVE holds,
+  # unless the operator stops LIVE knowingly (--stop-live).
+  if launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1 && [ "${1:-}" != "--stop-live" ]; then
+    [ -x "$ROOT/bsc/engine/target/release/bsc_runtime" ] || die "BSC Runtime nicht gebaut"
+    bsc_live_idle "$ROOT/bsc/engine/target/release/bsc_runtime" || die "BSC LIVE aktiv (Grant/Positionen): erst mit EXIT_ONLY abwickeln und widerrufen; 'darkbotctl deploy --stop-live' beendet LIVE bewusst"
+  fi
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" || die "Kein kohärenter Release-Build"
   [ -x "$GATEWAY_BUILD" ] || die "Gateway nicht gebaut: darkbotctl build"
   [ -f "$DIST_BUILD/index.html" ] || die "Frontend nicht gebaut: darkbotctl build"
@@ -760,7 +767,7 @@ case "${1:-status}" in
   bsc) shift; cmd_bsc "$@" ;;
   p0) shift; cmd_p0 "$@" ;;
   build) cmd_build ;;
-  deploy) locked cmd_deploy ;;
+  deploy) shift; locked cmd_deploy "${1:-}" ;;
   app) cmd_app ;;
   up) shift; cmd_up "${1:-}" ;;
   down) cmd_down ;;

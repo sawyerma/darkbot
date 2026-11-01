@@ -119,4 +119,48 @@ class SyncTests(unittest.TestCase):
    for unsafe in ['../outside.txt','/etc/hosts','bsc/missing.txt','']:
     config(unsafe)
     with self.assertRaises(ValueError,msg=unsafe):mod.sync(root,app,run)
+ def test_the_snapshot_carries_the_live_qualification_and_exactly_its_bound_evidence(self):
+  # 01.11. (R1): the launchd runtime reads its LIVE qualification from the snapshot; before, it was never copied, so the deployed LIVE path could never arm.
+  with tempfile.TemporaryDirectory(prefix='darkbot-sync-') as folder:
+   base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
+   subprocess.run(['git','init','-q',str(root)],check=True)
+   (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
+   (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
+   subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
+   (root/'bsc/config/live_qualification.dbrec').write_bytes(b'qualification')
+   g01=root/'bsc/native/evidence/g01/flap_freeze_x';g01.mkdir(parents=True);(g01/'freeze.dbrec').write_bytes(b'freeze')
+   econ=root/'bsc/native/evidence/g/economics_snapshot_x';econ.mkdir(parents=True);(econ/'snapshot.dbrec').write_bytes(b'snapshot')
+   (root/'bsc/native/evidence/g01/unbound.dbrec').write_bytes(b'not bound')
+   release=root/'bsc/engine/target/release';release.mkdir(parents=True)
+   lister=release/'bsc_runtime'
+   def bound(*paths):
+    lister.write_text('#!/bin/sh\n[ "$1 $2 $3" = "live bound-inputs --root" ] || exit 9\nprintf "%s\\n" '+' '.join(repr(p) for p in paths)+'\n');lister.chmod(0o755)
+   bound('bsc/config/live_qualification.dbrec','bsc/native/evidence/g01/flap_freeze_x/freeze.dbrec','bsc/native/evidence/g/economics_snapshot_x/snapshot.dbrec')
+   mod.sync(root,app,run)
+   snapshot=(app/'bsc-source').resolve()
+   self.assertEqual((snapshot/'bsc/config/live_qualification.dbrec').read_bytes(),b'qualification')
+   self.assertEqual((snapshot/'bsc/native/evidence/g01/flap_freeze_x/freeze.dbrec').read_bytes(),b'freeze')
+   self.assertEqual((snapshot/'bsc/native/evidence/g/economics_snapshot_x/snapshot.dbrec').read_bytes(),b'snapshot')
+   self.assertFalse((snapshot/'bsc/native/evidence/g01/unbound.dbrec').exists())
+   self.assertIn('./bsc/config/live_qualification.dbrec',(snapshot/'SOURCES.SHA256SUMS').read_text())
+   for escape in ['../outside','/etc/hosts','bsc/missing.dbrec']:
+    bound(escape)
+    with self.assertRaises(ValueError,msg=escape):mod.sync(root,app,run)
+   lister.unlink()
+   with self.assertRaises(ValueError):mod.sync(root,app,run)
+   # Without a qualification nothing is listed and nothing needs the lister.
+   (root/'bsc/config/live_qualification.dbrec').unlink();mod.sync(root,app,run)
+   # Clean: an untracked file nobody copies leaves the commit clean; a copied untracked one, or a tracked change, does not.
+   commit=lambda:((app/'bsc-source').resolve()/'COMMIT').read_text().strip()
+   self.assertFalse(commit().endswith('-dirty'),commit())
+   (root/'bsc/engine/stray.orig').write_text('local')
+   mod.sync(root,app,run);self.assertFalse(commit().endswith('-dirty'),commit())
+   (root/'bsc/config/g04_criteria.env').write_text('BSC_G04_CRITERIA_STATE=PROPOSED\n')
+   mod.sync(root,app,run);self.assertTrue(commit().endswith('-dirty'))
+   subprocess.run(['git','-C',str(root),'add','bsc/config/g04_criteria.env'],check=True)
+   subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','criteria'],check=True)
+   mod.sync(root,app,run);self.assertFalse(commit().endswith('-dirty'),commit())
+   (root/'bsc/tools/readiness_job.py').write_text('# changed\n')
+   mod.sync(root,app,run);self.assertTrue(commit().endswith('-dirty'))
 if __name__=='__main__':unittest.main()

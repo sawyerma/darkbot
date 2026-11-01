@@ -82,6 +82,14 @@ def sync(root, app, run):
         if listed.returncode!=0: raise ValueError('the v5-bound inputs cannot be listed: '+listed.stderr.strip()[-300:])
         for name in listed.stdout.splitlines():
             files.append(repo_file(root,name,'bound input'))
+    # 01.11. (R1): the LIVE qualification and exactly the evidence it binds, as the native lister names them (the runtime reads them from the snapshot).
+    if (root/'bsc/config/live_qualification.dbrec').exists():
+        lister=root/'bsc/engine/target/release/bsc_runtime'
+        if not lister.is_file(): raise ValueError('a LIVE qualification exists but bsc_runtime is not built')
+        listed=subprocess.run([str(lister),'live','bound-inputs','--root',str(root)],cwd=root,env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,timeout=60)
+        if listed.returncode!=0: raise ValueError('the LIVE-qualification inputs cannot be listed: '+listed.stderr.strip()[-300:])
+        for name in listed.stdout.splitlines():
+            files.append(repo_file(root,name,'LIVE-qualification input'))
     files=list(dict.fromkeys(files))
     manifest={}
     for path in files:
@@ -95,7 +103,10 @@ def sync(root, app, run):
         target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
         manifest[CANDIDATE_MIRROR+'/'+name]=digest(data)
     commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
-    if subprocess.check_output(['git','-C',str(root),'status','--porcelain','--','bsc'],text=True).strip(): commit+='-dirty'
+    # Dirty: a tracked change under bsc/ (staged or not), or a copied file the commit does not hold (an untracked file nobody copies is no part of the snapshot).
+    committed=set(subprocess.check_output(['git','-C',str(root),'ls-tree','-r','-z','--name-only','HEAD'],text=True).split('\0'))
+    changed=subprocess.check_output(['git','-C',str(root),'status','--porcelain','-z','--untracked-files=no','--','bsc'],text=True).strip('\0')
+    if changed or any(not name.startswith(CANDIDATE_MIRROR+'/') and name not in committed for name in manifest): commit+='-dirty'
     (dest/'COMMIT').write_text(commit+'\n'); (dest/'SYNCED_AT').write_text(str(int(time.time())))
     # The main checkout whose attempt latch and shared authority the GUI readiness reads.
     (dest/'CHECKOUT').write_text(str(root)+'\n')

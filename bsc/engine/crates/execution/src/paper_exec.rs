@@ -118,7 +118,8 @@ impl SenderPaths {
         self != Self::StrategyC
     }
 
-    fn strategy(self) -> bool {
+    /// Whether Strategy C's intents (its BUYs and every exit) go this way.
+    pub fn strategy(self) -> bool {
         self != Self::C3
     }
 }
@@ -2131,6 +2132,11 @@ impl<E: End> Executor<E> {
 
     pub fn sender(&self) -> [u8; 20] {
         self.end.address()
+    }
+
+    /// The Portal of the validated deployment this path is armed on.
+    pub fn portal(&self) -> Address {
+        self.deployment.deployment().portal
     }
 
     /// The end the path hands over to.

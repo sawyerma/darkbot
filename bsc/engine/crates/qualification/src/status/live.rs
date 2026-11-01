@@ -256,12 +256,8 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
             }),
         });
         let mut scope = vec![Entity::Runtime, ComponentId::StateC2.into()];
-        if grant.strategies.c3() {
-            scope.push(ComponentId::ExecC3.into());
-        }
-        if grant.strategies.strategy_c() {
-            scope.push(ComponentId::StrategyC.into());
-        }
+        // 01.11. (R1): Strategy C with every grant (it decides the exits).
+        scope.extend(grant.strategies.components().into_iter().map(Entity::from));
         scope.push(grant.venue.into());
         scope.extend(grant.sources.iter().map(|s| Entity::from(*s)));
         out.scope = scope.into_iter().map(|e| scope_row(&g, e, &ctx)).collect();

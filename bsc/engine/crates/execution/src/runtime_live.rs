@@ -231,16 +231,10 @@ struct Seen {
     bought: bool,
 }
 
-/// The components a grant of `strategies` arms.
+/// The components a grant of `strategies` arms
+/// ([`LiveStrategies::components`]).
 fn components(strategies: LiveStrategies) -> Vec<ComponentId> {
-    let mut out = Vec::with_capacity(2);
-    if strategies.c3() {
-        out.push(ComponentId::ExecC3);
-    }
-    if strategies.strategy_c() {
-        out.push(ComponentId::StrategyC);
-    }
-    out
+    strategies.components()
 }
 
 /// The BlockRazor authorization from an owner-only file.
@@ -293,6 +287,16 @@ fn rearm_due(free: u64, cursor: u64, gap: bool, unresolved_at_free: bool) -> boo
 }
 
 /// The runtime's LIVE path controller.
+/// 01.11. (R1): who decides the open lots' exits, as the runtime last told.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ExitDeciders {
+    undecided: Vec<[u8; 20]>,
+    stranded: Vec<([u8; 20], &'static str)>,
+    /// The curve reads that failed, and the last failure.
+    faults: u64,
+    fault: Option<String>,
+}
+
 pub struct LiveRuntime {
     setup: LiveSetup,
     exec: ExecSetup,
@@ -325,6 +329,18 @@ pub struct LiveRuntime {
     next_nonce: Option<u64>,
     /// Launches first seen by a source the grant does not name.
     source_refused: u64,
+    /// Launches first seen by a granted source that is not effective LIVE
+    /// (the operator holds it in SHADOW, say).
+    source_not_live: u64,
+    /// The grant's sources effective LIVE at the last tick (the owner's
+    /// [`crate::sources::LiveNow::sources_live`]); none before a tick.
+    sources_live: Vec<SourceId>,
+    /// 01.11. (R1): who decides the open lots' exits (the runtime tells;
+    /// none yet: every open lot undecided). No new BUY while an open lot is
+    /// undecided or stranded (an exit-less position would grow).
+    exit_deciders: Option<ExitDeciders>,
+    /// Strategy C BUYs refused because the grant names no STRATEGY_C.
+    strategy_buys_refused: u64,
     /// BSC3-075: those launches, until a granted source sees them (at most
     /// as many as the ingress remembers, `BSC_RUNTIME_DEDUP_HASHES`: a later
     /// sighting comes only of a launch it still holds; the oldest first out).
@@ -458,6 +474,10 @@ impl LiveRuntime {
             disarm_errors: 0,
             next_nonce: None,
             source_refused: 0,
+            source_not_live: 0,
+            sources_live: Vec::new(),
+            exit_deciders: None,
+            strategy_buys_refused: 0,
             awaiting_granted: std::collections::VecDeque::new(),
             awaiting_bound: 0,
             lease_attempt: None,
@@ -589,6 +609,55 @@ impl LiveRuntime {
         self.book.positions.iter().any(|p| {
             p.token == *token && matches!(p.state, PositionState::Open | PositionState::Exiting)
         })
+    }
+
+    /// 01.11. (R1): every token's open lot (its last lot open or exiting,
+    /// as [`crate::live_ledger::Book::open_lot`]) as a position change:
+    /// what its exit is held with. One pass over the ledger's positions.
+    pub fn open_positions(&self) -> Vec<PositionChange> {
+        let mut seen: Vec<[u8; 20]> = Vec::new();
+        let mut out = Vec::new();
+        for p in self.book.positions.iter().rev() {
+            if seen.contains(&p.token) {
+                continue;
+            }
+            if matches!(p.state, PositionState::Open | PositionState::Exiting) {
+                seen.push(p.token);
+                out.push(PositionChange::Opened {
+                    token: p.token,
+                    tokens: p.tokens,
+                    spent_wei: p.input_wei + p.gas_wei,
+                    filled_ms: p.opened_ms.unwrap_or_default(),
+                });
+            }
+        }
+        out
+    }
+
+    /// 01.11. (R1): the runtime's view of who decides the open lots' exits:
+    /// `undecided` not held by the strategy yet (their curve being read),
+    /// `stranded` never exitable by it (with why), and the curve reads'
+    /// failures (`faults`, the last one). Until the runtime first tells it,
+    /// every open lot counts undecided.
+    pub fn set_exit_deciders(
+        &mut self,
+        undecided: Vec<[u8; 20]>,
+        stranded: Vec<([u8; 20], &'static str)>,
+        faults: u64,
+        fault: Option<String>,
+    ) {
+        self.exit_deciders = Some(ExitDeciders {
+            undecided,
+            stranded,
+            faults,
+            fault,
+        });
+    }
+
+    /// The Portal of the armed path's validated deployment (the curve
+    /// reads of its open lots go there); none unarmed.
+    pub fn portal(&self) -> Option<alloy_primitives::Address> {
+        self.executor.as_ref().map(|x| x.portal())
     }
 
     /// Whether the path holds positions whose exits may still be needed:
@@ -1420,6 +1489,7 @@ impl LiveRuntime {
                 }
                 Err(why) => return self.close(why),
             };
+        self.sources_live = live_now.sources_live().to_vec();
         if self.executor.is_some()
             && let Some(why) = self.ledger_fault()
         {
@@ -1795,9 +1865,32 @@ impl LiveRuntime {
     }
 
     /// BSC3-075: a later verified full sighting of a launch whose first
-    /// sighting came from a source the grant does not name: the first such
-    /// sighting from a granted source triggers its BUY, once.
+    /// sighting came from a source the grant does not name (or that is not
+    /// effective LIVE): the first such sighting from a granted source
+    /// effective LIVE triggers its BUY, once.
     pub fn on_later(
+        &mut self,
+        source: SourceId,
+        hash: [u8; 32],
+        raw: &[u8],
+        ingress_ns: u64,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+    ) -> Option<ExecBuy<LiveHandoff>> {
+        self.executor.as_ref()?;
+        let granted = self.sources_live.contains(&source);
+        let at = self.awaiting_granted.iter().position(|h| *h == hash);
+        let (true, Some(at)) = (granted, at) else {
+            return None;
+        };
+        self.awaiting_granted.remove(at);
+        self.on_launch(source, hash, raw, ingress_ns, owner, clock)
+    }
+
+    /// A verified full pending C1-scope launch first seen by `source`,
+    /// when armed: only a source the grant names and the owner makes
+    /// effective LIVE triggers a LIVE BUY.
+    pub fn on_launch(
         &mut self,
         source: SourceId,
         hash: [u8; 32],
@@ -1814,37 +1907,13 @@ impl LiveRuntime {
             .grant()
             .sources
             .contains(&source);
-        let at = self.awaiting_granted.iter().position(|h| *h == hash);
-        let (true, Some(at)) = (granted, at) else {
-            return None;
-        };
-        self.awaiting_granted.remove(at);
-        self.on_launch(source, hash, raw, ingress_ns, owner, clock)
-    }
-
-    /// A verified full pending C1-scope launch first seen by `source`,
-    /// when armed: only a source the grant names triggers a LIVE BUY.
-    pub fn on_launch(
-        &mut self,
-        source: SourceId,
-        hash: [u8; 32],
-        raw: &[u8],
-        ingress_ns: u64,
-        owner: &StateOwner,
-        clock: &dyn Clock,
-    ) -> Option<ExecBuy<LiveHandoff>> {
-        if !self
-            .executor
-            .as_ref()?
-            .end()
-            .armed()
-            .grant()
-            .sources
-            .contains(&source)
-        {
+        if !self.sources_live.contains(&source) {
             // BSC3-075: neither its BUY nor a block for the granted
             // sources: the first of them that sees it still triggers.
-            self.source_refused += 1;
+            match granted {
+                true => self.source_not_live += 1,
+                false => self.source_refused += 1,
+            }
             if !self.awaiting_granted.contains(&hash) {
                 if self.awaiting_granted.len() >= self.awaiting_bound.max(1) {
                     self.awaiting_granted.pop_front();
@@ -2095,6 +2164,28 @@ impl LiveRuntime {
         if let Some(why) = stopped {
             return Some((Refusal::ExitStopped, Some(why)));
         }
+        // 01.11. (R1): a lot no strategy can exit (off the curve, outside
+        // the priced scope, unreadable) waits for the operator; one not
+        // held yet waits for its curve read (a restart, a gap, a reorg);
+        // before the runtime told, every open lot is one of those.
+        match &self.exit_deciders {
+            Some(d) => {
+                if let Some((_, why)) = d
+                    .stranded
+                    .iter()
+                    .find(|(t, _)| self.book.open_lot(t).is_some())
+                {
+                    return Some((Refusal::ExitStopped, Some(why)));
+                }
+                if d.undecided.iter().any(|t| self.book.open_lot(t).is_some()) {
+                    return Some((Refusal::ExitFirst, None));
+                }
+            }
+            None if !self.open_positions().is_empty() => {
+                return Some((Refusal::ExitFirst, None));
+            }
+            None => {}
+        }
         let exit_out = self
             .book
             .unresolved()
@@ -2163,15 +2254,36 @@ impl LiveRuntime {
         clock: &dyn Clock,
         now_unix_ms: u64,
     ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
-        self.executor.as_ref()?;
+        let granted = self
+            .executor
+            .as_ref()?
+            .end()
+            .armed()
+            .grant()
+            .strategies
+            .strategy_c();
         self.poll_responses(clock);
         let next = self.free_nonce(owner);
         if let crate::runtime_strategy::StrategyAction::Buy { input_wei, .. } = *action {
+            // 01.11. (R1): Strategy C decides every lot's exits; its own
+            // BUYs only under a grant naming it.
+            if !granted {
+                self.strategy_buys_refused += 1;
+                return Some((Vec::new(), Some(Refusal::Owner)));
+            }
             let x = &self.exec.exec;
             let most = input_wei + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
             if let Some(refusal) = self.buy_refused(most, Some(owner), next) {
                 return Some((Vec::new(), Some(refusal)));
             }
+        }
+        // R1 review: an exit of a token without an open lot (a position the
+        // strategy entered in its own PAPER book while the LIVE BUY was
+        // refused) is no LIVE exit: refused before anything is given back.
+        if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action
+            && self.book.open_lot(&token).is_none()
+        {
+            return Some((Vec::new(), Some(Refusal::NotHeld)));
         }
         // BSC3-030 review: a stopped exit waits for the operator.
         if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action
@@ -2356,6 +2468,35 @@ impl LiveRuntime {
                 d.set(l::LAST_REFUSAL, r);
             }
         }
+        // R1: who decides the open lots' exits (before the runtime told:
+        // every open lot undecided).
+        let deciders = self.exit_deciders.clone().unwrap_or_else(|| ExitDeciders {
+            undecided: self
+                .open_positions()
+                .iter()
+                .filter_map(|p| match p {
+                    PositionChange::Opened { token, .. } => Some(*token),
+                    PositionChange::Ended { .. } => None,
+                })
+                .collect(),
+            ..ExitDeciders::default()
+        });
+        for t in &deciders.undecided {
+            d.push(
+                l::EXIT_UNDECIDED,
+                format!("0x{}", alloy_primitives::hex::encode(t)).as_str(),
+            );
+        }
+        for (t, why) in &deciders.stranded {
+            d.push(
+                l::STRANDED,
+                format!("0x{} {why}", alloy_primitives::hex::encode(t)).as_str(),
+            );
+        }
+        d.set(l::LOT_READ_FAULTS, deciders.faults);
+        if let Some(f) = &deciders.fault {
+            d.set(l::LOT_READ_FAULT, f.as_str());
+        }
         let released = x.map_or(&[][..], |x| x.end().released());
         let ev = x.map(|x| x.evidence()).unwrap_or_default();
         d.set(l::RELEASED, released.len() as u64)
@@ -2387,6 +2528,8 @@ impl LiveRuntime {
         }
         for (name, n) in [
             ("SOURCE_NOT_GRANTED", self.source_refused),
+            ("SOURCE_NOT_LIVE", self.source_not_live),
+            ("STRATEGY_BUYS_NOT_GRANTED", self.strategy_buys_refused),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
             ("BUYS_UNFUNDED", self.unfunded_refused),
@@ -3117,6 +3260,8 @@ mod tests {
             block_hash: [0xb1; 32],
         });
         let _ = c2.take_evidence();
+        // As the runtime tells once its strategy holds the lots (R1).
+        x.set_exit_deciders(Vec::new(), Vec::new(), 0, None);
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         let t = Cell::new(10u64);
@@ -4089,9 +4234,11 @@ mod tests {
             self.probed(boot, funded)
         }
 
-        /// [`Rig::runtime`] whose probe sees what `prober` answers.
+        /// [`Rig::runtime`] whose probe sees what `prober` answers. As the
+        /// runtime tells once its strategy holds every open lot (R1; a test
+        /// of the deciders themselves resets them).
         fn probed(&self, boot: &str, prober: Prober) -> LiveRuntime {
-            LiveRuntime::with_prober(
+            let mut x = LiveRuntime::with_prober(
                 self.live.clone(),
                 self.exec.clone(),
                 &self.root,
@@ -4100,7 +4247,9 @@ mod tests {
                 None,
                 prober,
             )
-            .in_session(boot, fixed)
+            .in_session(boot, fixed);
+            x.set_exit_deciders(Vec::new(), Vec::new(), 0, None);
+            x
         }
 
         /// The operator authorizes LIVE again in `boot` (after a restart
@@ -8091,6 +8240,333 @@ mod tests {
         r.clean();
     }
 
+    /// 01.11. (R1): under a C3-only grant Strategy C decides the exits of
+    /// the grant's lots (before: LIVE_NOT_IN_SCOPE, a C3 lot could never be
+    /// sold): its exit goes to the builders; its own BUY stays refused
+    /// (STRATEGY_BUYS_NOT_GRANTED), nothing of it reaches the owner.
+    #[test]
+    fn a_c3_grants_lots_are_exited_by_strategy_c_and_its_buys_refused() {
+        use crate::runtime_strategy::StrategyAction;
+        let r = Rig::new("live-c3-exits", LiveStrategies::C3);
+        let g = granted_generation(&r.state);
+        let token = [0xE1; 20];
+        let buy = Fact {
+            kind: FactKind::Released,
+            tx_hash: [0xe1; 32],
+            intent: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            token,
+            nonce: 4,
+            grant_generation: g,
+            input_wei: Some(U256::from(10_000u64)),
+            max_wei: Some(U256::from(10_000u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD - 10),
+            by_tx: None,
+            response: None,
+            origin: None,
+        };
+        let ledger = Ledger::open(&r.state);
+        ledger.append(&buy, NOW).unwrap();
+        let tokens = U256::from(1_000_000_000_000_000_000u128);
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 20, [0x91; 32], NOW - 60_000)),
+                    gas_wei: Some(U256::ZERO),
+                    tokens: Some(tokens),
+                    eth_wei: Some(U256::from(10_000u64)),
+                    ..Fact::about(&buy, FactKind::Included)
+                },
+                NOW,
+            )
+            .unwrap();
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let StrategyAction::Buy { curve, .. } = fresh_buy([0xE3; 20]) else {
+            unreachable!()
+        };
+        let exit = StrategyAction::Exit {
+            token,
+            tokens,
+            curve,
+            decided_ns: 0,
+        };
+        // R1 review: an exit of a token without a LIVE lot (the strategy's
+        // own PAPER entry) gives nothing back: the C3 BUY's lease stays.
+        let leased = |x: &LiveRuntime| x.executor.as_ref().unwrap().end().lease().is_some();
+        assert!(leased(&x), "the arm leases its C3 BUY");
+        let phantom = StrategyAction::Exit {
+            token: [0xE9; 20],
+            tokens,
+            curve,
+            decided_ns: 0,
+        };
+        let (handed, refusal) = x.on_strategy(&phantom, &c2, &clock, DECIDED_MS).unwrap();
+        assert!(handed.is_empty());
+        assert_eq!(refusal, Some(Refusal::NotHeld));
+        assert!(leased(&x), "the lease stays");
+        let (handed, refusal) = x.on_strategy(&exit, &c2, &clock, DECIDED_MS).unwrap();
+        assert_eq!(refusal, None, "{:?}", reason(&x));
+        assert!(!handed.is_empty(), "the exit's first step went");
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let admitted = crate::sources::admitted_intents(&r.state).unwrap().len();
+        let (handed, refusal) = x
+            .on_strategy(&fresh_buy([0xE3; 20]), &c2, &clock, DECIDED_MS)
+            .unwrap();
+        assert!(handed.is_empty());
+        assert_eq!(refusal, Some(Refusal::Owner));
+        assert!(refused_for(&x, "STRATEGY_BUYS_NOT_GRANTED"));
+        assert_eq!(
+            crate::sources::admitted_intents(&r.state).unwrap().len(),
+            admitted
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// 01.11. (R1): the open lots of an earlier process get their exit
+    /// decider again through the runtime's canonical events. Before the
+    /// runtime told, every open lot is undecided (no new BUY, EXIT_FIRST).
+    /// At a block's end each lot the strategy does not hold is read (its
+    /// curve at that block); before the next block's events it is held
+    /// again (journaled `k`), unless a trade of its token overtook the read
+    /// (read again later). Off the curve, outside the priced scope or
+    /// refused by its answer a lot is stranded (no new BUY, named); a read
+    /// that failed in transit counts and is read again. All of it shows in
+    /// the status.
+    #[test]
+    fn the_runtime_holds_an_earlier_processs_open_lots_again() {
+        use crate::chain_follower::CanonicalTrade;
+        use crate::runtime::{
+            Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload,
+        };
+        use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+        use crate::sources::{
+            LIVE_POSITION_OFF_CURVE, LIVE_POSITION_UNPRICED, LIVE_POSITION_UNREADABLE,
+        };
+        use crate::venue_probe::{AbiFault, FlapCurve, ProbeError, ProbeRead};
+        use darkbot_bsc_trading::economics::flap::native_curve20::{TokenTerms, profile_terms};
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), 0);
+        c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
+            config.strategy.engine.clone(),
+            config.strategy.gas(&repo).unwrap(),
+        ));
+        c.lot.config.lot_reads_max = 2;
+        c.lot.config.lot_read_retry_ms = 0;
+        const KEPT: [u8; 20] = [0xE1; 20];
+        const OFF: [u8; 20] = [0xE2; 20];
+        const UNPRICED: [u8; 20] = [0xE3; 20];
+        const REFUSED: [u8; 20] = [0xE4; 20];
+        const FLAKY: [u8; 20] = [0xE5; 20];
+        c.lot.reader = |_, _, _, token, number, hash| {
+            let curve = |terms: TokenTerms| {
+                Ok(FlapCurve {
+                    block_number: number,
+                    block_hash: hash,
+                    terms,
+                    reserve: U256::from(2_000_000_000_000_000_000u128),
+                    circulating: U256::from(300_000_000_000_000_000_000_000u128),
+                })
+            };
+            match token.into_array() {
+                KEPT => curve(profile_terms(100, 100)),
+                OFF => curve(TokenTerms {
+                    tradable: false,
+                    ..profile_terms(100, 100)
+                }),
+                UNPRICED => curve(TokenTerms {
+                    version: 7,
+                    ..profile_terms(100, 100)
+                }),
+                REFUSED => Err(ProbeError::Abi {
+                    read: ProbeRead::TokenState,
+                    fault: AbiFault::FeeBps,
+                }),
+                _ => Err(ProbeError::Reorg { number }),
+            }
+        };
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-rehold-journal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let r = limited("live-rehold", crate::sources::tests::TEST_LIMITS);
+        let g = granted_generation(&r.state);
+        let ledger = Ledger::open(&r.state);
+        for (n, token) in [
+            (1u64, KEPT),
+            (2, OFF),
+            (3, UNPRICED),
+            (4, REFUSED),
+            (5, FLAKY),
+        ] {
+            let buy = Fact {
+                kind: FactKind::Released,
+                tx_hash: [0xe0 + n as u8; 32],
+                intent: LiveIntentKind::Buy,
+                component: ComponentId::ExecC3,
+                token,
+                nonce: n,
+                grant_generation: g,
+                input_wei: Some(U256::from(10_000u64)),
+                max_wei: Some(U256::from(10_000u64)),
+                block: None,
+                gas_wei: None,
+                tokens: None,
+                eth_wei: None,
+                max_block: Some(HEAD - 10),
+                by_tx: None,
+                response: None,
+                origin: None,
+            };
+            ledger.append(&buy, NOW).unwrap();
+            let included = Fact {
+                block: Some((HEAD - 20, [0x91; 32], NOW - 60_000)),
+                gas_wei: Some(U256::ZERO),
+                tokens: Some(U256::from(1_000_000u64)),
+                eth_wei: Some(U256::from(10_000u64)),
+                ..Fact::about(&buy, FactKind::Included)
+            };
+            ledger.append(&included, NOW).unwrap();
+        }
+        let c2 = c2_at(&r.d, r.buyer, 6);
+        let mut live = Some(r.runtime("boot-1"));
+        // A fresh process: the runtime has not told who decides yet.
+        live.as_mut().unwrap().exit_deciders = None;
+        settle(live.as_mut().unwrap(), &c2);
+        assert!(
+            live.as_ref().unwrap().armed(),
+            "{:?}",
+            reason(live.as_ref().unwrap())
+        );
+        let refusal = |live: &Option<LiveRuntime>| {
+            live.as_ref()
+                .unwrap()
+                .buy_refusal(U256::ZERO, Some(&c2), Some(6))
+        };
+        // Armed, before any canonical event: undecided, no new BUY.
+        assert_eq!(refusal(&live), Some((Refusal::ExitFirst, None)));
+        let now = darkbot_bsc_record::observed_now().unwrap();
+        let apply = |c: &mut Canonical,
+                     live: &mut Option<LiveRuntime>,
+                     journal: &mut RuntimeJournal,
+                     event| {
+            apply_canonical(
+                c,
+                &mut None,
+                &mut None,
+                live,
+                journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            )
+        };
+        let block = |number: u64| CanonicalEvent::Block {
+            number,
+            hash: [number as u8; 32],
+            parent_hash: [(number - 1) as u8; 32],
+            timestamp_s: now / 1_000,
+            timestamp_ms: now,
+            txs: Vec::new(),
+            observed: Instant::now(),
+            observed_unix_ms: Some(now),
+        };
+        let complete = |number: u64| CanonicalEvent::BlockComplete {
+            number,
+            hash: [number as u8; 32],
+        };
+        apply(&mut c, &mut live, &mut journal, block(HEAD));
+        apply(&mut c, &mut live, &mut journal, complete(HEAD));
+        assert_eq!(refusal(&live), Some((Refusal::ExitFirst, None)));
+        assert_eq!(
+            c.lot.reads.len(),
+            2,
+            "at most BSC_CANONICAL_LOT_READS_MAX at a time"
+        );
+        c.lot.config.lot_reads_max = 8;
+        apply(&mut c, &mut live, &mut journal, complete(HEAD));
+        assert_eq!(c.lot.reads.len(), 5, "each lot read once, none twice");
+        c.lot.settle();
+        // A trade of KEPT after the block it was read at: its curve moved,
+        // the read is overtaken (read again); the others are answered.
+        let trade = CanonicalEvent::FlapTrade(CanonicalTrade {
+            block_number: HEAD + 1,
+            block_hash: [(HEAD + 1) as u8; 32],
+            tx_index: 0,
+            tx_hash: [0x77; 32],
+            log_index: 0,
+            origin: [0x99; 20],
+            sell: false,
+            token: KEPT,
+            trader: [0x99; 20],
+            amount: [0; 32],
+            eth: [0; 32],
+            fee: [0; 32],
+            post_price: [0; 32],
+        });
+        apply(&mut c, &mut live, &mut journal, trade);
+        apply(&mut c, &mut live, &mut journal, block(HEAD + 1));
+        let s = c.strategy.as_ref().unwrap();
+        assert!(!s.holds(&KEPT), "never a moved curve");
+        apply(&mut c, &mut live, &mut journal, complete(HEAD + 1));
+        c.lot.settle();
+        apply(&mut c, &mut live, &mut journal, block(HEAD + 2));
+        let s = c.strategy.as_ref().unwrap();
+        assert!(s.holds(&KEPT), "held again on its read curve");
+        for t in [OFF, UNPRICED, REFUSED, FLAKY] {
+            assert!(!s.holds(&t));
+        }
+        apply(&mut c, &mut live, &mut journal, complete(HEAD + 2));
+        let x = live.as_ref().unwrap();
+        let d = x.exit_deciders.as_ref().unwrap();
+        assert_eq!(d.undecided, [FLAKY], "a transport failure is read again");
+        let first = d.stranded[0].1;
+        let mut stranded = d.stranded.clone();
+        stranded.sort();
+        assert_eq!(
+            stranded,
+            [
+                (OFF, LIVE_POSITION_OFF_CURVE),
+                (UNPRICED, LIVE_POSITION_UNPRICED),
+                (REFUSED, LIVE_POSITION_UNREADABLE)
+            ]
+        );
+        assert!(d.faults >= 3, "{}", d.faults);
+        assert_eq!(refusal(&live), Some((Refusal::ExitStopped, Some(first))));
+        let status = record(x);
+        assert_eq!(
+            status.texts(l::EXIT_UNDECIDED).unwrap(),
+            [format!("0x{}", alloy_primitives::hex::encode(FLAKY))]
+        );
+        assert_eq!(status.texts(l::STRANDED).unwrap().len(), 3);
+        assert!(status.u64(l::LOT_READ_FAULTS).unwrap() >= 3);
+        assert!(status.opt_text(l::LOT_READ_FAULT).unwrap().is_some());
+        // Without a strategy no lot has its exit decider.
+        c.strategy = None;
+        apply(&mut c, &mut live, &mut journal, block(HEAD + 3));
+        let d = live.as_ref().unwrap().exit_deciders.clone().unwrap();
+        assert!(d.undecided.contains(&KEPT) && d.undecided.contains(&FLAKY));
+        live.take().unwrap().shutdown();
+        r.clean();
+        let _ = fs::remove_dir_all(&base);
+    }
+
     /// BSC3-056 (review M-3): the runtime hands the second source's verdict
     /// to the LIVE path with every canonical event, before a block's BUY
     /// is planned: a head the second source has not confirmed refuses the
@@ -8269,6 +8745,98 @@ mod tests {
             why.contains(crate::sources::LIVE_GRANT_LIMITS_MISSING),
             "{why}"
         );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// PHASENPLAN v9 §2.3: a granted source the operator holds in SHADOW
+    /// triggers no LIVE BUY (counted SOURCE_NOT_LIVE); LIVE again, its next
+    /// launch does.
+    #[test]
+    fn a_granted_source_the_operator_holds_in_shadow_triggers_no_buy() {
+        use crate::ingress::{IngressCore, Observation};
+        let r = Rig::new("live-granted-shadow", LiveStrategies::C3);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        // The operator holds the granted PublicNode in SHADOW: the grant
+        // still names it, the path stays armed (its exits need no source).
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let g = s.current().unwrap().generation;
+        let shadow = s
+            .request("pn-shadow", SourceId::PublicNode, Mode::Shadow, g, NOW)
+            .unwrap();
+        assert!(shadow.applied(), "{}", shadow.line());
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let mut core = IngressCore::new(64, 16_384);
+        let mut sighted = |x: &mut LiveRuntime, c2: &StateOwner, raw: &[u8], at: u64| {
+            let hash = alloy_primitives::keccak256(raw).0;
+            let decided = core.observe(
+                SourceId::PublicNode,
+                Observation::Full { hash, raw },
+                at,
+                None,
+            );
+            let (by, h, first) = crate::runtime::live_sighting(decided)?;
+            x.on_sighting(by, h, first, raw, at, c2, &clock)
+        };
+        let refused = |x: &LiveRuntime, name: &str| {
+            record(x)
+                .texts(l::REFUSALS)
+                .unwrap()
+                .iter()
+                .find_map(|t| t.strip_prefix(&format!("{name}=")).map(str::to_string))
+        };
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        // (The arm's lease holds its attempt already, BSC3-076.)
+        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let admitted = crate::sources::admitted_intents(&r.state).unwrap();
+        assert!(sighted(&mut x, &c2, &raw, 10).is_none());
+        assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
+        assert_eq!(refused(&x, "SOURCE_NOT_LIVE").as_deref(), Some("1"));
+        assert_eq!(refused(&x, "SOURCE_NOT_GRANTED"), None);
+        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert_eq!(
+            crate::sources::admitted_intents(&r.state).unwrap(),
+            admitted
+        );
+        // A launch an ungranted source saw first, later seen by the granted
+        // one while it is held in SHADOW: no BUY (BSC3-075's later path too).
+        let (hash, raw, launcher) = crate::runtime::exec::tests::launch_n(1);
+        c2.pending(hash, launcher, 4, 0, 20);
+        assert!(
+            x.on_launch(SourceId::Drpc, hash, &raw, 20, &c2, &clock)
+                .is_none()
+        );
+        assert!(
+            x.on_later(SourceId::PublicNode, hash, &raw, 21, &c2, &clock)
+                .is_none()
+        );
+        assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
+        // LIVE again: its later sighting triggers the BUY.
+        let g = s.current().unwrap().generation;
+        let live = s
+            .request("pn-live", SourceId::PublicNode, Mode::Live, g, NOW)
+            .unwrap();
+        assert!(live.applied(), "{}", live.line());
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let buy = x
+            .on_later(SourceId::PublicNode, hash, &raw, 22, &c2, &clock)
+            .expect("the BUY");
+        assert_eq!(buy.launch_hash, hash);
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
         x.shutdown();
         r.clean();
     }

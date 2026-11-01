@@ -1,13 +1,14 @@
-//! The BSC runtime (C0/C1): the read-only observation process and the
-//! native owner of the source modes.
+//! The BSC runtime: the observation process, its PAPER and (under an
+//! operator's verified grant) LIVE paths, and the native owner of the
+//! source modes, switches and the LIVE grant.
 //!
 //! ```text
 //! bsc_runtime run --sources <dir> --rundir <dir> --config <ingress.public.env>
-//! bsc_runtime source init --state <dir>
-//! bsc_runtime source show --state <dir>
+//! bsc_runtime source init|reset|show --state <dir>
 //! bsc_runtime source request <SOURCE_COMPONENT_OR_VENUE_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
+//! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime g04-precommit --rundir <dir> --criteria <g04_criteria.env> --decided-by <who>
 //! bsc_runtime g04-verdict --rundir <dir> --config <ingress.public.env> --criteria <g04_criteria.env>
@@ -54,12 +55,18 @@
 //!
 //! `request` applies one user request with its generation as the CAS and
 //! prints its receipt as one line; the same request again prints the same
-//! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
-//! authorization exists). Exit 0 when applied, 2 when refused or stale.
+//! receipt. A requested LIVE is effective only while every condition of
+//! the LIVE gate holds under the operator's grant (`live status` names
+//! each). Exit 0 when applied, 2 when refused or stale.
 //!
-//! `source init` is the owner's start (darkbotctl start and restart): it
-//! writes generation 0 once and DISABLES every ENABLED wallet and economic
-//! switch (plan 27.10.); `run` does the same at its start.
+//! `source init` puts the owner state on file (generation 0 once) and
+//! leaves a running owner's switches and grant as they are (01.11., R1:
+//! `darkbotctl up` and the app run it). `source reset` is the owner's
+//! reset (a stop, plan 27.10.): every ENABLED wallet and economic switch
+//! DISABLED and the LIVE grant ended; `run` resets at its start too.
+//! `live idle` exits 0 only while no grant, held position or unresolved
+//! transaction exists (what `darkbotctl deploy` checks before it restarts
+//! a running runtime).
 //!
 //! `control require` is the check a Mainnet signing or sending path runs
 //! before it touches a wallet key: exit 0 only if every named switch is
@@ -379,6 +386,15 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("written={} sha256={}", out.display(), hex(&darkbot_bsc_record::sha256(&bytes)));
             Ok(true)
         }
+        // 01.11. (R1): the files the LIVE qualification in `--root` binds
+        // (the record first): what a runtime snapshot carries, one per line.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "bound-inputs" => {
+            let root = std::path::Path::new(flag(rest, "--root")?);
+            for path in darkbot_bsc_execution::live_qualification::bound_inputs(root)? {
+                println!("{path}");
+            }
+            Ok(true)
+        }
         // BSC3-026: the loopback stand-in's own test identity, drawn in a
         // test's owner state (never the account's), outside `--root`.
         // Prints its address only.
@@ -403,6 +419,34 @@ fn run(args: &[String]) -> Result<bool, String> {
                     .address()
             };
             println!("loopback_identity=0x{}", hex(&address));
+            Ok(true)
+        }
+        // 01.11. (R1): whether nothing LIVE holds in `--state`: no grant, no
+        // position pending, open or exiting, no transaction unresolved (a
+        // restart of the runtime then ends nothing); refused with why.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "idle" => {
+            use darkbot_bsc_execution::live_ledger::{Ledger, PositionState, fold};
+            let dir = std::path::Path::new(flag(rest, "--state")?);
+            let g = Store::open(dir, KEEP_GENERATIONS)?.current()?;
+            let book = fold(&Ledger::open(dir).facts()?);
+            let held = book
+                .positions
+                .iter()
+                .filter(|p| {
+                    matches!(
+                        p.state,
+                        PositionState::Pending | PositionState::Open | PositionState::Exiting
+                    )
+                })
+                .count();
+            let unresolved = book.unresolved().count();
+            let grant = g.live.is_some();
+            println!("live_grant={grant} positions_held={held} unresolved={unresolved}");
+            if grant || held > 0 || unresolved > 0 {
+                return Err(format!(
+                    "LIVE_ACTIVE: grant={grant} positions_held={held} unresolved={unresolved}"
+                ));
+            }
             Ok(true)
         }
         // Plan 28.10.: the LIVE ledger's positions and net result.
@@ -704,7 +748,18 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("paper_sender=0x{}", alloy_primitives::hex::encode(address));
             Ok(true)
         }
+        // The owner state on file (generation 0 if none): a running owner's
+        // switches and grant stay (01.11., R1: `darkbotctl up` and the app
+        // ran a reset here and revoked a running LIVE path).
         [area, cmd, rest @ ..] if area == "source" && cmd == "init" => {
+            let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
+            let g = store.init(darkbot_bsc_record::observed_now()?)?;
+            println!("generation={}", g.generation);
+            Ok(true)
+        }
+        // The owner's reset (a stop, plan 27.10.): every switch DISABLED,
+        // the grant ended.
+        [area, cmd, rest @ ..] if area == "source" && cmd == "reset" => {
             let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
             let g = store.restart(darkbot_bsc_record::observed_now()?)?;
             println!("generation={}", g.generation);
@@ -870,7 +925,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
