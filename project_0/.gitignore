@@ -24,3 +24,22 @@
 
 # Local shell environment file with private settings. The root rule env/ matches directories only.
 /env
+# P0-026: runtime state the owner, p0ctl and the boot controller keep under the project. The boot
+# audit binds `git status --porcelain` (BOOT-01), so this state must never change the identity.
+# orchestration/boot_control.rs BOOT_DIR
+/data/boot/
+# orchestration/provider_evidence.rs STORE
+/data/provider_evidence/
+# orchestration/until_stopped.rs STORE (qualifications, autostart)
+/data/until_stopped/
+# orchestration/fe06.rs STORE
+/data/fe06/
+# orchestration/capability_control.rs, source_control.rs request_dir
+/data/capability-control/
+/data/source-control/
+# analytics/jobs.rs JOB_DIR, analytics/h0.rs output_dir, analytics/backtest.rs PROFILE_DIR
+/data/analytics-jobs/
+/data/h0/
+/data/profiles/
+# execution/fee_parity.rs seal_dir
+/data/fee-parity/
