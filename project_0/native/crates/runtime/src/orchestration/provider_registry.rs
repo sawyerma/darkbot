@@ -254,7 +254,11 @@ pub fn current(project: &Path) -> Result<ProviderRegistry, String> {
         None => Ok(ProviderRegistry::empty()),
         Some(v) => {
             let r = read_version(project, *v)?;
-            r.registry.validate()?;
+            // A registry a stricter rule refuses fails closed, with its recovery named (the
+            // keychain items stay; nothing is repaired in place).
+            r.registry.validate().map_err(|e| {
+                format!("PROVIDER_REGISTRY_INVALID: {e}; recovery: archive {STORE}/ and add the providers again")
+            })?;
             Ok(r.registry)
         }
     }

@@ -201,10 +201,14 @@ pub fn id_ok(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
-/// A path segment that looks like a token: a word of it (split at `-`, `_`, `.`) of 16 or more
-/// characters mixing letters and digits — a hyphenated name (`solana-mainnet-archive-v2`) is no
-/// token. A provider that carries its credential in the path uses `AuthKind::PathSegment`. (A
-/// short or digit-free token cannot be told from a name; it stays the operator's to keep out.)
+/// A path segment that looks like a token, by three rules: a word of it (split at `-`, `_`, `.`)
+/// of 16 or more characters mixing letters and digits; its characters without separators being
+/// 16 or more hex digits mixing digits and letters (a UUID, hyphenated hex); 20 or more
+/// characters mixing upper case, lower case and digits (a base64url key). A hyphenated name
+/// (`solana-mainnet-archive-v2`) is no token. A provider that carries its credential in the path
+/// uses `AuthKind::PathSegment`. Limits: a short token (fewer than 16 characters), a digit-free
+/// one, or a lowercase hyphenated non-hex one cannot be told from a name — keeping such a token
+/// out of an endpoint stays the operator's.
 fn token_like(segment: &str) -> bool {
     let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
     let word = segment.split(['-', '_', '.']).any(|word| {
@@ -298,6 +302,10 @@ impl ProviderDescriptor {
         }
         if self.capacity_rps == Some(0) {
             return Err("PROVIDER_CAPACITY_ZERO".into());
+        }
+        // A stored authentication name passes the same rule as an entered one.
+        if AuthKind::parse(&self.auth.text())? != self.auth {
+            return Err("PROVIDER_AUTH_NAME ([A-Za-z0-9_-]{1,64})".into());
         }
         if self.qualification.as_ref().is_some_and(|q| !nonce_ok(q)) {
             return Err("PROVIDER_QUALIFICATION_INVALID".into());
