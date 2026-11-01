@@ -4,6 +4,7 @@
 //! redirect (a credential never reaches a host the run did not bind). The one credential
 //! installation of this test binary (a run's credentials are installed once).
 use super::*;
+#[cfg(feature = "crate_health")]
 use crate::execution::builder::p0::RouteProvider;
 use darkbot_solana::providers::{
     activate_credentials, ActiveCredential, AuthKind, Secret, Zeroizing,
@@ -94,25 +95,34 @@ fn dec18_every_blocking_transport_applies_the_bound_credential_and_follows_no_re
         fetcher.gap_request_metered("getSlot", serde_json::json!([]), deadline(), 2_000, 1 << 20);
     assert!(first(&history_seen)[0].starts_with("POST /?api-key=HIST-SECRET "));
 
-    // Jupiter: the header, never the URL or an error.
-    let (from, to) = (Pubkey::new_unique(), Pubkey::new_unique());
-    let router =
-        crate::execution::route::JupiterV2RouteProvider::new(Pubkey::new_unique(), 50, 64, false)
-            .unwrap()
-            .with_base_url(jupiter)
-            .unpaced();
-    let err = router
-        .quote_exact_in(&from, &to, 500, &[], deadline())
-        .unwrap_err();
-    assert!(!err.contains("JUP-SECRET"), "{err}");
-    let request = first(&jupiter_seen);
-    assert!(request[0].starts_with("GET /build?") && !request[0].contains("JUP-SECRET"));
-    assert!(
-        request
-            .iter()
-            .any(|l| l.eq_ignore_ascii_case("x-api-key: JUP-SECRET")),
-        "{request:?}"
-    );
+    // Jupiter (a crate_health build): the header, never the URL or an error.
+    #[cfg(feature = "crate_health")]
+    {
+        let (from, to) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let router = crate::execution::route::JupiterV2RouteProvider::new(
+            Pubkey::new_unique(),
+            50,
+            64,
+            false,
+        )
+        .unwrap()
+        .with_base_url(jupiter)
+        .unpaced();
+        let err = router
+            .quote_exact_in(&from, &to, 500, &[], deadline())
+            .unwrap_err();
+        assert!(!err.contains("JUP-SECRET"), "{err}");
+        let request = first(&jupiter_seen);
+        assert!(request[0].starts_with("GET /build?") && !request[0].contains("JUP-SECRET"));
+        assert!(
+            request
+                .iter()
+                .any(|l| l.eq_ignore_ascii_case("x-api-key: JUP-SECRET")),
+            "{request:?}"
+        );
+    }
+    #[cfg(not(feature = "crate_health"))]
+    let _ = (jupiter, jupiter_seen);
 
     // A redirect is not followed: the credential never reaches the other host.
     let redirected = RpcFetcher::new(redirecting, 2_000, "finalized").unwrap();

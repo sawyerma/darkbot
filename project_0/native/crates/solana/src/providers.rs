@@ -817,7 +817,9 @@ static ACTIVE_CREDENTIALS: std::sync::OnceLock<Vec<ActiveCredential>> = std::syn
 /// Installs the run's credentials, once, before any transport is used: a run never changes its
 /// credentials (DEC-05; a rotation is effective at the next controlled start). Every entry
 /// authenticates (`AuthKind` not `None`), one per endpoint, its secret applicable as its
-/// authentication needs ([`authorize_with`]).
+/// authentication needs ([`authorize_with`]). Credentials are keyed by endpoint: two
+/// authenticating providers of one endpoint (of different kinds) refuse the start
+/// (`CREDENTIAL_ENDPOINT_DUPLICATE`, fail closed).
 pub fn activate_credentials(credentials: Vec<ActiveCredential>) -> Result<(), String> {
     let mut endpoints = std::collections::BTreeSet::new();
     for c in &credentials {

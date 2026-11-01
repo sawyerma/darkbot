@@ -1684,44 +1684,6 @@ impl Resolved {
                 );
             }
         }
-        // An auxiliary RPC named by its registry id: that provider, selectable now.
-        let auxiliary = |id: &str, providers: &mut Vec<crate::providers::BoundProvider>| {
-            let p = registry
-                .provider(id)
-                .filter(|p| p.kind == ProviderKind::Rpc)
-                .ok_or_else(|| {
-                    format!("PROVIDER_UNKNOWN: {id} is no RPC provider of the registry")
-                })?;
-            if let Some(block) = registry.selection_block(p) {
-                return Err(block);
-            }
-            if !providers
-                .iter()
-                .any(|q| q.kind == ProviderKind::Rpc && q.endpoint == p.endpoint)
-            {
-                providers.push(registry.bound(p)?);
-            }
-            Ok::<_, String>(p.endpoint.clone())
-        };
-        if let Some(id) = self
-            .config
-            .bundle_sim_rpc_url
-            .clone()
-            .filter(|v| is_provider_ref(v))
-        {
-            self.config.bundle_sim_rpc_url = Some(auxiliary(&id, &mut self.config.providers)?);
-        }
-        let mut entries = std::mem::take(&mut self.config.non_landing_sources);
-        for entry in entries.iter_mut() {
-            if let Some((operator, id)) = entry
-                .split_once('=')
-                .filter(|(_, v)| is_provider_ref(v))
-                .map(|(o, v)| (o.to_string(), v.to_string()))
-            {
-                *entry = format!("{operator}={}", auxiliary(&id, &mut self.config.providers)?);
-            }
-        }
-        self.config.non_landing_sources = entries;
         // The Geyser source unit's provider: the registry's Geyser provider it names, bound
         // whenever the registry has it (a hot `p0ctl source set` may start it); a start that
         // requests the source refuses an unknown or unselectable one.
@@ -1785,6 +1747,45 @@ impl Resolved {
                 format!("provider_registry:v{}", registry.version),
             );
         }
+        // After the run's own endpoints: an auxiliary that is one of them is bound once.
+        // An auxiliary RPC named by its registry id: that provider, selectable now.
+        let auxiliary = |id: &str, providers: &mut Vec<crate::providers::BoundProvider>| {
+            let p = registry
+                .provider(id)
+                .filter(|p| p.kind == ProviderKind::Rpc)
+                .ok_or_else(|| {
+                    format!("PROVIDER_UNKNOWN: {id} is no RPC provider of the registry")
+                })?;
+            if let Some(block) = registry.selection_block(p) {
+                return Err(block);
+            }
+            if !providers
+                .iter()
+                .any(|q| q.kind == ProviderKind::Rpc && q.endpoint == p.endpoint)
+            {
+                providers.push(registry.bound(p)?);
+            }
+            Ok::<_, String>(p.endpoint.clone())
+        };
+        if let Some(id) = self
+            .config
+            .bundle_sim_rpc_url
+            .clone()
+            .filter(|v| is_provider_ref(v))
+        {
+            self.config.bundle_sim_rpc_url = Some(auxiliary(&id, &mut self.config.providers)?);
+        }
+        let mut entries = std::mem::take(&mut self.config.non_landing_sources);
+        for entry in entries.iter_mut() {
+            if let Some((operator, id)) = entry
+                .split_once('=')
+                .filter(|(_, v)| is_provider_ref(v))
+                .map(|(o, v)| (o.to_string(), v.to_string()))
+            {
+                *entry = format!("{operator}={}", auxiliary(&id, &mut self.config.providers)?);
+            }
+        }
+        self.config.non_landing_sources = entries;
         self.config.validate()
     }
     pub fn activate(self) -> Result<(), String> {
@@ -2823,6 +2824,28 @@ mod tests {
                 .count(),
             1
         );
+        // Review L1: an auxiliary that is one of the run's own RPC providers is bound once.
+        let mut own = parse(&[
+            "--fallback",
+            "on",
+            "--bundle-sim-rpc-url",
+            "helius-rpc",
+            "--non-landing-sources",
+            "op-b=backup-rpc",
+        ])
+        .unwrap();
+        own.bind_registry(&more).unwrap();
+        for endpoint in ["https://mainnet.helius-rpc.com", "https://backup.example"] {
+            assert_eq!(
+                own.config
+                    .providers
+                    .iter()
+                    .filter(|p| p.endpoint == endpoint)
+                    .count(),
+                1,
+                "{endpoint}"
+            );
+        }
         assert!(parse(&["--bundle-sim-rpc-url", "nobody"])
             .unwrap()
             .bind_registry(&more)

@@ -216,8 +216,15 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
             )
         })
     };
+    // DEC-18 §1.2 (TOCTOU, review M1): the active configuration is exactly the admitted one.
+    let admitted = |record: &Option<super::boot_audit::NetworkAudit>| {
+        record.as_ref().map_or(Ok(()), |r| {
+            super::boot_audit::activated_is_admitted(r, darkbot_solana::runtime_config::active())
+        })
+    };
     if mode == "econ4h" {
-        if admission.is_ok() {
+        if let Ok(record) = &admission {
+            admitted(record).map_err(OperationalConfigError)?;
             credentials(&bound_registry).map_err(OperationalConfigError)?;
         }
         let code = admission.as_ref().err().copied();
@@ -227,6 +234,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         });
     }
     let admission = admission.map_err(refused)?;
+    admitted(&admission).map_err(OperationalConfigError)?;
     credentials(&bound_registry).map_err(OperationalConfigError)?;
     let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
     let rolling = admit_unbounded("shadow", &args, now_s)?;

@@ -1734,6 +1734,61 @@ pub fn admission_record(
     Ok(record)
 }
 
+/// DEC-18 §1.2 (TOCTOU, review M1): the configuration a start activates is exactly the one its
+/// admission validated — its digest the audited one (providers, endpoints and credential
+/// revisions included): a registry change between the admission and the activation refuses the
+/// start before any read.
+pub fn activated_is_admitted(
+    record: &NetworkAudit,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> Result<(), String> {
+    if runtime_config_sha256(config)? != record.audit.identity.runtime_config_sha256 {
+        return Err(
+            "BOOT_IDENTITY_DRIFT: runtime_config (the activated configuration is not the admitted one)"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Test fixture: an admitted network record of `config` (its identity's configuration digest;
+/// every other field a fixture).
+#[cfg(test)]
+pub(crate) fn record_of_config(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> NetworkAudit {
+    NetworkAudit {
+        audit: BootAudit {
+            scope: "network".into(),
+            checks: vec![],
+            identity: AuditedIdentity {
+                source_head: None,
+                source_dirty_sha256: None,
+                runtime_config_sha256: runtime_config_sha256(config).unwrap(),
+                journal_version: journal::VERSION,
+                discriminator_table_sha256: "fixture".into(),
+                live_enabled: false,
+                submission_enabled: false,
+            },
+            verdict: AuditVerdict::Ready,
+            readiness_token: "fixture".into(),
+        },
+        observed_at: 0,
+        expires_at: 0,
+        slot: 0,
+        genesis: "fixture".into(),
+        rpc_binding: "fixture".into(),
+        wss_binding: "fixture".into(),
+        binary_sha256: "fixture".into(),
+        provider_proof_sha256: "fixture".into(),
+        capture_source: "logs".into(),
+        accounts: vec![],
+        state_hash: "fixture".into(),
+        ttl_seconds: 0,
+        ttl_source: "fixture".into(),
+    }
+}
+
 /// The capture source a Shadow run is audited with: its owner subscribes to accounts and
 /// captures no market stream of its own choice (`p0ctl boot` and `run start` refuse another).
 pub const SHADOW_CAPTURE_SOURCE: &str = "logs";

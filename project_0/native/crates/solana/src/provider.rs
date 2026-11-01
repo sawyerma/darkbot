@@ -1777,6 +1777,31 @@ mod http_tests {
         served.join().unwrap();
         assert_eq!(budget.snapshot().requests, 1);
     }
+    /// DEC-18 (review L1/N2): the RPC transport follows no redirect — a credential never reaches a
+    /// host the run did not bind; the redirect's target sees no request.
+    #[test]
+    fn dec18_the_rpc_transport_follows_no_redirect() {
+        let sink = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        sink.set_nonblocking(true).unwrap();
+        let target = format!("http://{}/", sink.local_addr().unwrap());
+        let (url, served) = server(format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nlocation: {target}\r\ncontent-length: 0\r\n\r\n"
+        ));
+        let rpc = rpc_client_with(
+            url,
+            Duration::from_secs(2),
+            CommitmentConfig::finalized(),
+            Workload::Bootstrap,
+            Arc::new(Budget::default()),
+        );
+        assert!(rpc.get_slot().is_err());
+        served.join().unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            sink.accept().is_err(),
+            "the redirect's target saw a request"
+        );
+    }
     /// A keep-alive JSON-RPC endpoint answering every request with `result` on every connection
     /// it accepts; it returns the requests and connections it served once `stop` is set.
     fn keepalive_server(

@@ -338,11 +338,21 @@ pub fn operational_lookup(key: &str) -> Option<String> {
 /// (`start_config`: the registry's providers bound) and activated, unless its process activated
 /// one already (`p0-longtail --mode market`) — and its providers' credentials, read once after
 /// the admission and before any read.
-fn admitted_network(get: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
-    use crate::orchestration::provider_registry;
+fn admitted_network(
+    get: &dyn Fn(&str) -> Option<String>,
+    record: &crate::orchestration::boot_audit::NetworkAudit,
+) -> Result<(), String> {
+    use crate::orchestration::{boot_audit, provider_registry};
     let (project, resolved) = admitted_config(get, darkbot_solana::runtime_config::configured())?;
-    if let Some(resolved) = resolved {
-        resolved.activate()?;
+    // Exactly the admitted configuration (a registry change since refuses), then activated.
+    match resolved {
+        Some(resolved) => {
+            boot_audit::activated_is_admitted(record, &resolved.config)?;
+            resolved.activate()?;
+        }
+        None => {
+            boot_audit::activated_is_admitted(record, darkbot_solana::runtime_config::active())?
+        }
     }
     provider_registry::install_credentials(
         &provider_registry::current(&project)?,
@@ -351,8 +361,8 @@ fn admitted_network(get: &dyn Fn(&str) -> Option<String>) -> Result<(), String> 
 }
 
 /// The project of an admitted capture and — unless its process is `configured` already — its
-/// operational configuration exactly as its admission resolved it (`start_config` of mode
-/// market: the registry's providers bound).
+/// operational configuration resolved as its admission resolves it (`start_config` of mode
+/// market: the registry's providers bound); `activated_is_admitted` proves it the admitted one.
 fn admitted_config(
     get: &dyn Fn(&str) -> Option<String>,
     configured: bool,
@@ -393,7 +403,7 @@ pub fn run_from_env_with(
             Ok(admitted) => admitted,
             Err(code) => return refuse_start(code, status_tap.as_ref()),
         };
-    if let Err(e) = admitted_network(&|k| std::env::var(k).ok()) {
+    if let Err(e) = admitted_network(&|k| std::env::var(k).ok(), &admitted.record) {
         crate::console::line(format!("capture configuration refused: {e}"));
         return refuse_start("CAPTURE_PROVIDER_REFUSED", status_tap.as_ref());
     }
@@ -1422,6 +1432,28 @@ mod status_tests {
         .unwrap()
         .config;
         assert_eq!(c, admitted);
+        // Review M1 (TOCTOU): the configuration activated is proven the admitted one — a
+        // credential rotated between the admission and the activation refuses the start.
+        let record = crate::orchestration::boot_audit::record_of_config(&admitted);
+        assert!(crate::orchestration::boot_audit::activated_is_admitted(&record, &c).is_ok());
+        let r = decide(
+            &d,
+            "h4-rotate",
+            None,
+            &ProviderAction::CredentialRotate("node".into()),
+            Some(&b"NODE-KEY-2"[..]),
+            &store,
+            2,
+        )
+        .unwrap();
+        assert!(r.applied, "{r:?}");
+        let (_, rotated) = admitted_config(&env, false).unwrap();
+        assert!(crate::orchestration::boot_audit::activated_is_admitted(
+            &record,
+            &rotated.unwrap().config
+        )
+        .unwrap_err()
+        .starts_with("BOOT_IDENTITY_DRIFT"));
         assert!(admitted_config(&env, true).unwrap().1.is_none());
         let none = |k: &str| (k == "P0_MEASUREMENT_DURATION").then(|| "1m".to_string());
         assert!(admitted_config(&none, false)

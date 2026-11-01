@@ -495,6 +495,19 @@ fn x1_a_registry_bound_start_is_the_audited_one_after_its_activation() {
     assert!(!activated.contains_key("P0_RPC_URL") && !activated.contains_key("P0_WS_URL"));
     let get = |k: &str| activated.get(k).cloned();
     assert_eq!(launched_identity(&d, flags, &[], &get).unwrap(), audited);
+    // Review M1: the configuration the runtime activates itself (`operational_config` of its
+    // mode, bound) is the admitted one — its start's `activated_is_admitted` holds.
+    #[cfg(feature = "crate_health")]
+    {
+        let launcher_get = |k: &str| launcher.get(k).cloned();
+        let mut own =
+            crate::orchestration::startup::operational_config("econ4h", &[], &launcher_get)
+                .unwrap()
+                .unwrap();
+        crate::orchestration::provider_registry::bind(&d, &mut own).unwrap();
+        let record = super::record_of_config(&audited_config);
+        assert!(super::activated_is_admitted(&record, &own.config).is_ok());
+    }
 }
 
 /// The config p0ctl audits (operational args + `--duration D`, operator environment, the mode's
@@ -562,6 +575,19 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
                     audited,
                     "{mode} {op:?} {duration}"
                 );
+                // Review M1: the configuration the runtime activates itself has the audited
+                // digest (its start checks exactly this, `activated_is_admitted`).
+                #[cfg(feature = "crate_health")]
+                {
+                    let own = crate::orchestration::startup::operational_config(mode, &op, &get)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        runtime_config_sha256(&own.config).unwrap(),
+                        audited.runtime_config_sha256,
+                        "{mode} {op:?} {duration}: the runtime's own activation"
+                    );
+                }
                 // The runtime's own activation (`startup::operational_config` of an operating
                 // mode) exports its config into the environment first.
                 let mut activated = env.clone();

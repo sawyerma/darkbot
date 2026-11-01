@@ -19,9 +19,11 @@ use solana_sdk::transaction::VersionedTransaction;
 pub const JITO_BUNDLE: &str = "JITO_BUNDLE";
 /// The values JITO_BUNDLE may be requested with (OFF at every start).
 pub const JITO_BUNDLE_VALUES: [&str; 3] = ["OFF", "OBSERVE", "ACTIVE"];
-/// The bundle path is not configured.
+/// The bundle path is not configured: no block engine (a named loopback one or the registry's
+/// Jito selection, DEC-18), no tip account or amount, or a bundle simulator named by a registry
+/// id that is not bound.
 pub const JITO_UNCONFIGURED: &str =
-    "P0_JITO_BLOCK_ENGINE_URL, P0_JITO_TIP_ACCOUNT or P0_JITO_TIP_LAMPORTS unset";
+    "no block engine (P0_JITO_BLOCK_ENGINE_URL or the registry's Jito selection), P0_JITO_TIP_ACCOUNT or P0_JITO_TIP_LAMPORTS unset, or the bundle simulator's registry provider not bound";
 /// Bundles are not admitted: no qualified bundle simulator.
 pub const BUNDLE_SIMULATOR_UNQUALIFIED: &str =
     "bundle simulator not qualified (B02/B05: no provider qualification)";
