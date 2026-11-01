@@ -111,10 +111,21 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         crate::console::line(format!("{code}: a Shadow run starts only through `p0ctl run start --mode shadow` (capture.sh shadow)"));
         return Err(Box::new(super::state_owner::OwnerTerminal(code)));
     }
-    if let Some(resolved) = operational_config(&requested_mode, &args, &|k| std::env::var(k).ok())
-        .map_err(OperationalConfigError)?
+    // DEC-18: the registry the operational configuration was bound to (its credentials are read
+    // after the owner lock and the admission, before any read).
+    let mut bound_registry = None;
+    if let Some(mut resolved) =
+        operational_config(&requested_mode, &args, &|k| std::env::var(k).ok())
+            .map_err(OperationalConfigError)?
     {
+        // DEC-18: the project's provider registry (`P0_PROJECT_DIR`, set by `p0ctl run start`)
+        // supplies every kind without a named loopback endpoint.
+        let project = std::env::var_os("P0_PROJECT_DIR").map(std::path::PathBuf::from);
         if resolved.print {
+            if let Some(project) = &project {
+                super::provider_registry::bind(project, &mut resolved)
+                    .map_err(OperationalConfigError)?;
+            }
             print!("{}", resolved.text());
             return Ok(());
         }
@@ -122,6 +133,12 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
             && std::env::var_os("P0_MEASUREMENT_PLAN").is_none()
         {
             return Err("verification requires capture.sh/verify.sh post-capture lifecycle".into());
+        }
+        if let Some(project) = &project {
+            bound_registry = Some(
+                super::provider_registry::bind(project, &mut resolved)
+                    .map_err(OperationalConfigError)?,
+            );
         }
         // Single-threaded startup only. Existing constructors keep their typed
         // gates while obtaining operational values from the shared contract.
@@ -189,7 +206,20 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         |code| Box::new(super::state_owner::OwnerTerminal(code)) as Box<dyn std::error::Error>;
     // D08: no owner starts without a wall clock (CLOCK_UNAVAILABLE, never time 0).
     let clock = Clock::try_new().map_err(refused)?;
+    // DEC-18 §1.3.6: the bound providers' credentials, read once after the admission and before
+    // any read (a refused start reads none).
+    let credentials = |registry: &Option<darkbot_solana::providers::ProviderRegistry>| {
+        registry.as_ref().map_or(Ok(()), |r| {
+            super::provider_registry::install_credentials(
+                r,
+                darkbot_solana::runtime_config::active(),
+            )
+        })
+    };
     if mode == "econ4h" {
+        if admission.is_ok() {
+            credentials(&bound_registry).map_err(OperationalConfigError)?;
+        }
         let code = admission.as_ref().err().copied();
         return run_econ4h(admission, clock, &args).map_err(|e| match code {
             Some(code) => refused(code),
@@ -197,6 +227,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         });
     }
     let admission = admission.map_err(refused)?;
+    credentials(&bound_registry).map_err(OperationalConfigError)?;
     let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
     let rolling = admit_unbounded("shadow", &args, now_s)?;
     run_shadow(clock, None, admission, rolling)
@@ -298,9 +329,16 @@ fn run_econ4h(
     if cfg.unbounded && admission.is_ok() {
         cfg.rolling = admit_unbounded("econ4h", args, now_s)?;
     }
-    let mut market = market_observer::MarketConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
+    let mut market =
+        market_observer::MarketConfig::from_lookup(&market_observer::operational_lookup, now_s)?;
+    // The controlled-gap smoke's loopback proxy (`smoke.sh`): a named market endpoint is a local
+    // one only (DEC-18; the proxy's upstream is the registry's WSS provider).
     if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
-        market.ws_url = url;
+        market.ws_url = darkbot_solana::providers::BoundProvider::local(
+            darkbot_solana::providers::ProviderKind::Wss,
+            &url,
+        )?
+        .endpoint;
     }
     let owner = admission.map(|admission| {
         move |handle: econ::Handle| {
@@ -897,15 +935,16 @@ mod supervise_tests {
         let mut cfg = crate::analytics::econ::EconConfig::from_lookup(&get, now_s).unwrap();
         let config = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
+            providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                "https://rpc.invalid",
+            ]),
             ..Default::default()
         };
         let evidence = ProviderEvidence {
             providers: vec![ProviderProof {
                 policy: "FREE_ONLY".into(),
                 passed: true,
-                provider_binding: crate::analytics::journal::hex(
-                    &solana_sdk::hash::hash(b"https://rpc.invalid").to_bytes(),
-                ),
+                provider_binding: config.providers[0].binding.clone(),
                 measured_at_unix_s: now_s as f64,
                 evidence_sha256: Some("a".repeat(64)),
                 allowed_rps: config.limits.rpc_rps as f64,
@@ -1261,20 +1300,21 @@ mod supervise_tests {
                 // suppresses the report or the qualification.
                 use crate::analytics::post_capture::post_capture;
                 let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                let off = post_capture(&run, "off", &[]).unwrap();
+                let off = post_capture(&run, &run, "off", &[]).unwrap();
                 assert!(off.verification_ok && off.report_ok, "{}", off.text);
                 assert!(off.text.contains("status=NOT_RUN reason=VERIFICATION_OFF"));
                 assert_eq!(off.verdict.as_deref(), Some("C0_E1_NOT_QUALIFIED"));
                 assert!(off.text.contains("verdict=C0_E1_NOT_QUALIFIED"));
                 // Strict offline with the configured budgets (its own spec): incomplete without
                 // chain data, report and qualification still run; the same spec again needs resume.
-                let first = post_capture(&run, "strict", &args(&["--offline"])).unwrap();
+                let first = post_capture(&run, &run, "strict", &args(&["--offline"])).unwrap();
                 assert!(!first.verification_ok && first.report_ok, "{}", first.text);
                 assert!(first.text.contains("status=HISTORICAL_INCOMPLETE"));
-                let again = post_capture(&run, "strict", &args(&["--offline"])).unwrap();
+                let again = post_capture(&run, &run, "strict", &args(&["--offline"])).unwrap();
                 assert!(!again.verification_ok && again.report_ok);
                 assert!(again.text.contains("SPEC_EXISTS_USE_RESUME_VERIFICATION"));
                 let resumed = post_capture(
+                    &run,
                     &run,
                     "strict",
                     &args(&["--offline", "--resume-verification"]),
@@ -1284,20 +1324,21 @@ mod supervise_tests {
                 assert!(resumed.text.contains("status=HISTORICAL_INCOMPLETE"));
                 assert!(resumed.verdict.is_some());
                 // Online strict without provider evidence: refused before any chain RPC.
-                let online = post_capture(&run, "strict", &[]).unwrap();
+                let online = post_capture(&run, &run, "strict", &[]).unwrap();
                 assert!(!online.verification_ok && online.report_ok);
                 assert!(online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"));
                 assert!(online.verdict.is_some());
                 // DEC-08: index and crosscheck run natively — online likewise only with the
                 // provider evidence, offline from the cache (none here: never verified).
                 for mode in ["index", "crosscheck"] {
-                    let online = post_capture(&run, mode, &[]).unwrap();
+                    let online = post_capture(&run, &run, mode, &[]).unwrap();
                     assert!(!online.verification_ok && online.report_ok, "{mode}");
                     assert!(
                         online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"),
                         "{mode}"
                     );
                     let cached = post_capture(
+                        &run,
                         &run,
                         mode,
                         &["--offline".into(), "--verify-max-pages".into(), "3".into()],
@@ -1314,6 +1355,7 @@ mod supervise_tests {
                 assert_eq!(
                     crate::analytics::post_capture::post_capture_with(
                         &run,
+                        &run,
                         "index",
                         &["--offline".into(), "--resume-verification".into()],
                         Some(|| true),
@@ -1322,7 +1364,7 @@ mod supervise_tests {
                     .as_deref(),
                     Some(crate::analytics::backtest::CANCELLED)
                 );
-                assert!(post_capture(&run, "full", &[])
+                assert!(post_capture(&run, &run, "full", &[])
                     .err()
                     .is_some_and(|e| e.starts_with("CHAIN_VERIFY_full_INVALID")));
             }

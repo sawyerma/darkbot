@@ -253,7 +253,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         ),
         bundle_config: None,
         failed_costs: FailedCostMatrix::default(),
-        routes: JupiterV2RouteProvider::new(liquidator, None, 0, 64, true).unwrap(),
+        routes: JupiterV2RouteProvider::new(liquidator, 0, 64, true).unwrap(),
         resources: Resources {
             compute_unit_limit: 1_400_000,
             priority_micro_lamports_per_cu: 0,
@@ -7042,7 +7042,7 @@ fn dec13b_fixture_with(
     let sol_mint: Pubkey = protocol::NATIVE_SOL_MINT.parse().unwrap();
     let (asset_mint, liab_mint) = (Pubkey::new_unique(), Pubkey::new_unique());
     // A loopback Jupiter `/build`: the collateral sold 1:1 for the liability at 50 bps.
-    f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
+    f.owner.routes = JupiterV2RouteProvider::new(liquidator, 50, 64, false)
         .unwrap()
         .with_base_url(dec13b_jupiter(
             liquidator,
@@ -7800,7 +7800,7 @@ fn dec13b_exit_fixture_of(
             context_slot: Some(100),
         });
     f.owner.network = NetworkBudget::new(4, 5_000_000_000);
-    f.owner.routes = JupiterV2RouteProvider::new(liquidator, None, 50, 64, false)
+    f.owner.routes = JupiterV2RouteProvider::new(liquidator, 50, 64, false)
         .unwrap()
         .with_base_url(match wsol_units {
             None => dec13b_exit_jupiter(liquidator, mint),

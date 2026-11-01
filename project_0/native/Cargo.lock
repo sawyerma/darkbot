@@ -1076,6 +1076,7 @@ dependencies = [
  "darkbot-project0",
  "darkbot-solana",
  "drift-mocks",
+ "futures-util",
  "juplend-mocks",
  "kamino-mocks",
  "libc",
@@ -1096,6 +1097,8 @@ dependencies = [
  "spl-associated-token-account",
  "spl-token-2022-interface 2.1.0",
  "spl-token-interface",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
  "tungstenite 0.24.0",
 ]
 

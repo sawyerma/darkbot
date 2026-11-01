@@ -239,6 +239,34 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
         limited.clone(),
         limited_body.clone(),
     );
+    // DEC-18: the loopback endpoint is the project's selected RPC provider (a free registry
+    // provider: a named local endpoint is never qualified by evidence).
+    for args in [
+        vec![
+            "provider",
+            "add",
+            "--id",
+            "node-rpc",
+            "--kind",
+            "rpc",
+            "--endpoint",
+            &url,
+            "--auth",
+            "none",
+            "--plan",
+            "free",
+            "--entitlement",
+            "loopback-free",
+        ],
+        vec!["provider", "select", "--kind", "rpc", "--id", "node-rpc"],
+    ] {
+        let (code, out, err) = p0ctl(&d, &[], &args);
+        assert_eq!(code, 0, "{out}{err}");
+    }
+    let registry = darkbot_runner::orchestration::provider_registry::current(&d).unwrap();
+    let binding = registry
+        .binding_of(registry.provider("node-rpc").unwrap())
+        .unwrap();
     let sha = |b: &[u8]| journal::hex(&solana_sdk::hash::hash(b).to_bytes());
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -253,7 +281,7 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),
                     passed: true,
-                    provider_binding: sha(url.as_bytes()),
+                    provider_binding: binding.clone(),
                     measured_at_unix_s: now - 1.0,
                     evidence_sha256: Some(sha(b"loopback")),
                     allowed_rps: 1_000.0,
@@ -273,7 +301,7 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
     let small = proof("small.p0j", 10);
     let (code, _, err) = p0ctl(
         &d,
-        &[("P0_RPC_URL", url.as_str())],
+        &[],
         &[
             "verify",
             "--run",
@@ -289,7 +317,7 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
         err.contains("PROVIDER_CAPACITY_BELOW_METHOD_BUDGET"),
         "{err}"
     );
-    let env = [("P0_RPC_URL", url.as_str())];
+    let env: [(&str, &str); 0] = [];
     let online = |resume: bool| {
         let mut a = vec![
             "verify",

@@ -31,7 +31,8 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let rpc_url = need("P0_RPC_URL")?;
+    // DEC-18: the registry's RPC provider, its credential applied by the transport.
+    let rpc_url = darkbot_runner::orchestration::provider_registry::activate_tool()?;
     let keypair_path = need("P0_KEYPAIR_PATH")?;
     let expected_pubkey = Pubkey::from_str(&need("P0_EXPECTED_PUBKEY")?)?;
     let payer = tx::load_keypair_json(&keypair_path)?;

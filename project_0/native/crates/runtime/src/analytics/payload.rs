@@ -141,7 +141,8 @@ struct EffectiveOwner {
 
 /// An `EffectiveConfig` of `Limits` layout `revision` from the front of `bytes`. A record before
 /// `OWNER_SETTINGS_REVISION` has no owner settings: they read as the built-in defaults, like the
-/// `Limits` fields its layout did not have.
+/// `Limits` fields its layout did not have; one before `PROVIDERS_REVISION` has no provider
+/// bindings (DEC-18: a historical record, never a provider binding of a new audit).
 pub(crate) fn effective_of_revision(
     revision: u16,
     bytes: &mut &[u8],
@@ -161,6 +162,11 @@ pub(crate) fn effective_of_revision(
             source_geyser: d.source_geyser,
             source_geyser_provider: d.source_geyser_provider,
         }
+    };
+    let providers = if revision >= darkbot_solana::runtime_config::PROVIDERS_REVISION {
+        decode_prefix(bytes)?
+    } else {
+        vec![]
     };
     Ok(darkbot_solana::runtime_config::EffectiveConfig {
         schema: head.schema,
@@ -185,12 +191,14 @@ pub(crate) fn effective_of_revision(
         c0_census: owner.c0_census,
         source_geyser: owner.source_geyser,
         source_geyser_provider: owner.source_geyser_provider,
+        providers,
     })
 }
 
 /// Test fixture: `value`'s payload with the `Limits` of `effective` re-encoded in layout
-/// `revision` and, before `OWNER_SETTINGS_REVISION`, without its owner settings (what that
-/// revision's writer produced); the limits must occur exactly once in the payload.
+/// `revision` and, before `OWNER_SETTINGS_REVISION`, without its owner settings, before
+/// `PROVIDERS_REVISION` without its provider bindings (what that revision's writer produced); the
+/// limits must occur exactly once in the payload.
 #[cfg(test)]
 pub(crate) fn encode_with_limits_revision<T: Serialize>(
     value: &T,
@@ -199,18 +207,25 @@ pub(crate) fn encode_with_limits_revision<T: Serialize>(
 ) -> Vec<u8> {
     let limits = &effective.limits;
     let mut bytes = encode_wire(value).unwrap();
+    let owner = encode_wire(&(
+        effective.threshold_trigger,
+        effective.c0_census,
+        &effective.source_geyser,
+        &effective.source_geyser_provider,
+    ))
+    .unwrap();
+    let at = bytes
+        .windows(owner.len())
+        .position(|w| w == owner.as_slice())
+        .expect("owner settings inside the payload");
+    // The provider bindings follow the owner settings.
+    if revision < darkbot_solana::runtime_config::PROVIDERS_REVISION {
+        let providers = encode_wire(&effective.providers).unwrap();
+        let after = at + owner.len();
+        assert_eq!(&bytes[after..after + providers.len()], providers.as_slice());
+        bytes.drain(after..after + providers.len());
+    }
     if revision < darkbot_solana::runtime_config::OWNER_SETTINGS_REVISION {
-        let owner = encode_wire(&(
-            effective.threshold_trigger,
-            effective.c0_census,
-            &effective.source_geyser,
-            &effective.source_geyser_provider,
-        ))
-        .unwrap();
-        let at = bytes
-            .windows(owner.len())
-            .position(|w| w == owner.as_slice())
-            .expect("owner settings inside the payload");
         bytes.drain(at..at + owner.len());
     }
     let current = encode_wire(limits).unwrap();

@@ -8,8 +8,14 @@ use std::{env, error::Error, str::FromStr};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // F-01/C07: through the process provider budget like every other client (no plain client).
+    // DEC-18: a local node only (a remote provider is the registry's; its measurement is
+    // `p0ctl provider measure`, C-11).
+    let local = darkbot_solana::providers::BoundProvider::local(
+        darkbot_solana::providers::ProviderKind::Rpc,
+        &env::var("P0_RPC_URL")?,
+    )?;
     let rpc = darkbot_solana::provider::rpc_client(
-        env::var("P0_RPC_URL")?,
+        local.endpoint,
         std::time::Duration::from_millis(
             darkbot_solana::runtime_config::active()
                 .limits

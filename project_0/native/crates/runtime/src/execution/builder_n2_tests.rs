@@ -520,7 +520,6 @@ fn n2_hanging_jupiter_ends_planning_at_the_deadline() {
     });
     let routes = crate::execution::route::JupiterV2RouteProvider::new(
         f.liquidator,
-        None,
         50,
         64,
         true,
@@ -816,7 +815,7 @@ fn fe02_zero_prefund_end_to_end_through_the_real_adapters() {
         _ => Answer::Status(500),
     });
     let routes =
-        crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, None, 50, 64, false)
+        crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, 50, 64, false)
             .unwrap()
             .with_base_url(jupiter.url.clone())
             .unpaced();
@@ -1040,7 +1039,7 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
         "simulateTransaction" => simulation_ok(),
         _ => Answer::Status(500),
     });
-    let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+    let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, 50, 64, false)
         .unwrap()
         .with_base_url(jupiter.url.clone())
             .unpaced();
@@ -1105,7 +1104,7 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let route_of = |build: serde_json::Value| {
         let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
-        crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+        crate::execution::route::JupiterV2RouteProvider::new(taker, 50, 64, false)
             .unwrap()
             .with_base_url(jupiter.url.clone())
             .unpaced()
@@ -1226,7 +1225,6 @@ fn b01_the_quote_worker_skips_an_earlier_generations_job() {
         RemoteWorkers::start(rpc.url.clone(), Pubkey::new_unique(), &shutdown, 4, &wake).unwrap();
     let routes = crate::execution::route::JupiterV2RouteProvider::new(
         Pubkey::new_unique(),
-        None,
         50,
         64,
         false,

@@ -324,6 +324,57 @@ pub fn finish_capture(
 pub fn run_from_env() -> Result<(), String> {
     run_from_env_with(None, |_, _| Ok(()))
 }
+
+/// The capture's settings: its endpoints the active operational configuration's bound providers
+/// (DEC-18: never an environment URL), every other setting the environment's.
+pub fn operational_lookup(key: &str) -> Option<String> {
+    match key {
+        "P0_WS_URL" | "P0_RPC_URL" => darkbot_solana::runtime_config::active().endpoint_value(key),
+        _ => std::env::var(key).ok(),
+    }
+}
+
+/// DEC-18: the admitted capture's operational configuration — as its admission resolved it
+/// (`start_config`: the registry's providers bound) and activated, unless its process activated
+/// one already (`p0-longtail --mode market`) — and its providers' credentials, read once after
+/// the admission and before any read.
+fn admitted_network(get: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
+    use crate::orchestration::provider_registry;
+    let (project, resolved) = admitted_config(get, darkbot_solana::runtime_config::configured())?;
+    if let Some(resolved) = resolved {
+        resolved.activate()?;
+    }
+    provider_registry::install_credentials(
+        &provider_registry::current(&project)?,
+        darkbot_solana::runtime_config::active(),
+    )
+}
+
+/// The project of an admitted capture and — unless its process is `configured` already — its
+/// operational configuration exactly as its admission resolved it (`start_config` of mode
+/// market: the registry's providers bound).
+fn admitted_config(
+    get: &dyn Fn(&str) -> Option<String>,
+    configured: bool,
+) -> Result<
+    (
+        std::path::PathBuf,
+        Option<darkbot_solana::runtime_config::Resolved>,
+    ),
+    String,
+> {
+    use crate::orchestration::boot_audit;
+    let project = std::path::PathBuf::from(
+        get("P0_PROJECT_DIR").ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR")?,
+    );
+    if configured {
+        return Ok((project, None));
+    }
+    let horizon = get("P0_MEASUREMENT_DURATION")
+        .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?;
+    let resolved = boot_audit::start_config(&project, boot_audit::MARKET_MODE, &[], &horizon, get)?;
+    Ok((project, Some(resolved)))
+}
 pub fn run_from_env_with(
     status_tap: Option<StatusTap>,
     before_start: impl FnOnce(&str, &Path) -> Result<(), String>,
@@ -342,7 +393,11 @@ pub fn run_from_env_with(
             Ok(admitted) => admitted,
             Err(code) => return refuse_start(code, status_tap.as_ref()),
         };
-    let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), clock_unix_s(&clock))?;
+    if let Err(e) = admitted_network(&|k| std::env::var(k).ok()) {
+        crate::console::line(format!("capture configuration refused: {e}"));
+        return refuse_start("CAPTURE_PROVIDER_REFUSED", status_tap.as_ref());
+    }
+    let cfg = MarketConfig::from_lookup(&operational_lookup, clock_unix_s(&clock))?;
     before_start(&cfg.run_id, &cfg.run_dir)?;
     // DEC-16: an unbounded capture rolls its windows under its admission.
     run_published(cfg, clock, None, status_tap, admitted.rolling)
@@ -1272,6 +1327,108 @@ fn market_ingress_error_class(e: &darkbot_solana::ingress::IngressError) -> &'st
 #[cfg(test)]
 mod status_tests {
     use super::*;
+
+    /// DEC-18 (review H4): a standalone raw capture runs on the configuration its admission
+    /// resolved — the registry's selected providers with their credential revisions bound
+    /// (before: its own environment URLs, no registry, no credential) — and a process that
+    /// activated one already keeps its own.
+    #[test]
+    fn dec18_an_admitted_capture_runs_on_its_admitted_providers() {
+        use crate::orchestration::provider_registry::{decide, ProviderAction};
+        use darkbot_solana::providers::{
+            AuthKind, DirectoryStore, Plan, ProviderDescriptor, ProviderKind,
+        };
+        let d = std::env::temp_dir().join(format!("p0_capture_h4_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let store = DirectoryStore(d.join("keychain"));
+        let provider = |id: &str, kind, endpoint: &str| ProviderDescriptor {
+            id: id.into(),
+            kind,
+            endpoint: endpoint.into(),
+            auth: AuthKind::Query("api-key".into()),
+            credential: Some("node".into()),
+            priority: 0,
+            capacity_rps: None,
+            plan: Plan::Free,
+            entitlement: "loopback-free".into(),
+            qualification: None,
+            enabled: true,
+        };
+        let actions = [
+            (
+                ProviderAction::Add(provider(
+                    "node-rpc",
+                    ProviderKind::Rpc,
+                    "http://127.0.0.1:8899",
+                )),
+                None,
+            ),
+            (
+                ProviderAction::Add(provider(
+                    "node-wss",
+                    ProviderKind::Wss,
+                    "ws://127.0.0.1:8900",
+                )),
+                None,
+            ),
+            (
+                ProviderAction::CredentialSet {
+                    credential: "node".into(),
+                    origin: "input".into(),
+                },
+                Some(&b"NODE-KEY"[..]),
+            ),
+            (
+                ProviderAction::Select(ProviderKind::Rpc, "node-rpc".into()),
+                None,
+            ),
+            (
+                ProviderAction::Select(ProviderKind::Wss, "node-wss".into()),
+                None,
+            ),
+        ];
+        for (n, (action, secret)) in actions.into_iter().enumerate() {
+            let r = decide(&d, &format!("h4-{n}"), None, &action, secret, &store, 1).unwrap();
+            assert!(r.applied, "{r:?}");
+        }
+        let project = d.display().to_string();
+        let env = |k: &str| match k {
+            "P0_PROJECT_DIR" => Some(project.clone()),
+            "P0_MEASUREMENT_DURATION" => Some("1m".into()),
+            _ => None,
+        };
+        let (root, resolved) = admitted_config(&env, false).unwrap();
+        assert_eq!(root, d);
+        let c = resolved.unwrap().config;
+        assert_eq!(
+            c.endpoint_value("P0_WS_URL").as_deref(),
+            Some("ws://127.0.0.1:8900")
+        );
+        assert_eq!(
+            c.endpoint_value("P0_RPC_URL").as_deref(),
+            Some("http://127.0.0.1:8899")
+        );
+        let wss = c.bound(ProviderKind::Wss, "ws://127.0.0.1:8900").unwrap();
+        assert!(wss.registry_version > 0 && wss.credential.is_some());
+        // Exactly the admission's configuration (its identity is the audited one).
+        let admitted = crate::orchestration::boot_audit::start_config(
+            &d,
+            crate::orchestration::boot_audit::MARKET_MODE,
+            &[],
+            "1m",
+            &env,
+        )
+        .unwrap()
+        .config;
+        assert_eq!(c, admitted);
+        assert!(admitted_config(&env, true).unwrap().1.is_none());
+        let none = |k: &str| (k == "P0_MEASUREMENT_DURATION").then(|| "1m".to_string());
+        assert!(admitted_config(&none, false)
+            .unwrap_err()
+            .contains("P0_PROJECT_DIR"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn config() -> MarketConfig {
         MarketConfig::from_lookup(

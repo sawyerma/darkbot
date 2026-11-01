@@ -144,7 +144,8 @@ fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
         }
         Some(s) => return Err(format!("SCOPE_INVALID: {s}")),
     }
-    darkbot_solana::runtime_config::Resolved::for_mode(
+    boot_audit::mode_config(
+        project,
         mode.name(),
         args.split(|a| a == "--").nth(1).unwrap_or(&[]),
         &|k| std::env::var(k).ok(),
@@ -440,6 +441,7 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     }
     // X1: the same rule the launched runtime re-resolves its config with before admission.
     boot_audit::start_config(
+        project,
         mode.name(),
         args.split(|a| a == "--").nth(1).unwrap_or(&[]),
         &duration,
@@ -1324,7 +1326,7 @@ fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             request.push(a.clone());
         }
     }
-    let (text, verified) = strict_driver::cli(&request)?;
+    let (text, verified) = strict_driver::cli(&request, Some(project))?;
     print!("{text}");
     // `off` is a complete outcome (NOT_RUN); a history read passes only its own verified status
     // (CANONICAL_VERIFIED, INDEX_VERIFIED, CROSSCHECK_VERIFIED — never promoted).
@@ -1348,7 +1350,7 @@ fn post_capture_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             rest.push(a.clone());
         }
     }
-    let out = post_capture::post_capture(&run, &mode, &rest)?;
+    let out = post_capture::post_capture(project, &run, &mode, &rest)?;
     print!("{}", out.text);
     Ok(out.verification_ok && out.report_ok)
 }
@@ -1658,8 +1660,9 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             let given = need("--duration")?;
             let duration = darkbot_solana::runtime_config::canonical(&given)
                 .map_err(|e| format!("--duration {given}: {e}"))?;
-            let resolved =
-                boot_audit::start_config(mode, operational, &duration, &|k| std::env::var(k).ok())?;
+            let resolved = boot_audit::start_config(project, mode, operational, &duration, &|k| {
+                std::env::var(k).ok()
+            })?;
             // The TTL and its source, as the resolution names it.
             let ttl_source = resolved
                 .sources

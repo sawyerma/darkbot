@@ -2627,6 +2627,7 @@ mod contract_tests {
             c0_census: true,
             source_geyser: "observe".into(),
             source_geyser_provider: "p".repeat(64),
+            providers: vec![],
         };
         let mut s = golden_snapshot();
         s.operational = Some(Arc::new(operational_snapshot_of(&limits, Some(&effective))));

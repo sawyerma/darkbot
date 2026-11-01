@@ -95,12 +95,6 @@ pub const DEFAULT_INGRESS_BUFFER: usize = defaults::INGRESS_QUEUE as usize;
 pub const DEFAULT_HEARTBEAT_SECS: u64 = defaults::MARKET_HEARTBEAT_SECONDS;
 /// PROVISIONAL minimum number of liquidation events for distribution statistics.
 pub const DEFAULT_MIN_SAMPLE_LIQUIDATIONS: u64 = defaults::MARKET_MIN_SAMPLE;
-/// Helius endpoints used only when `HELIUS_API_KEY` is set and no explicit URL is given.
-/// `transactions` uses the Enhanced-WSS endpoint; acceptance of `transactionSubscribe` is never
-/// assumed and must be proven by the subscription ACK in the smoke run.
-pub const HELIUS_ENHANCED_WSS_MAINNET: &str = "wss://atlas-mainnet.helius-rpc.com/?api-key=";
-pub const HELIUS_STANDARD_WSS_MAINNET: &str = "wss://mainnet.helius-rpc.com/?api-key=";
-pub const HELIUS_RPC_MAINNET: &str = "https://mainnet.helius-rpc.com/?api-key=";
 pub const DEFAULT_OUT_DIR: &str = "project_0/data/market";
 
 /// The capture source `P0_MARKET_SOURCE` names (unset: transactions) — the one resolution the
@@ -116,10 +110,12 @@ pub fn source_name(value: Option<&str>) -> Result<&'static str, String> {
 }
 
 impl MarketConfig {
-    /// Pure parser (testable). Requires `P0_PROGRAM_ID` and either `P0_WS_URL` or `HELIUS_API_KEY`
-    /// (explicit URLs always win). `P0_RPC_URL` is optional: without it, `logs` enrichment is
-    /// unavailable and reported as such, but capture, summary and report still run.
-    /// No keypair or wallet setting is read.
+    /// Pure parser (testable). Requires `P0_PROGRAM_ID` and `P0_WS_URL`. `P0_RPC_URL` is
+    /// optional: without it, `logs` enrichment is unavailable and reported as such, but capture,
+    /// summary and report still run. DEC-18: both endpoints are the operational configuration's
+    /// (its export of the bound providers — the registry's selection or a named loopback one;
+    /// the credential is the transport's), never derived here from a key (§1.3.2: no URL
+    /// resolution of the capture's own). No keypair, wallet setting or credential is read.
     pub fn from_lookup(
         get: &dyn Fn(&str) -> Option<String>,
         now_unix_s: u64,
@@ -152,22 +148,10 @@ impl MarketConfig {
                 ))
             }
         };
-        let helius_key = opt("HELIUS_API_KEY");
-        let ws_url = match (opt("P0_WS_URL"), &helius_key) {
-            (Some(url), _) => url,
-            (None, Some(key)) => match source {
-                MarketSource::Transactions => format!("{HELIUS_ENHANCED_WSS_MAINNET}{key}"),
-                MarketSource::Logs => format!("{HELIUS_STANDARD_WSS_MAINNET}{key}"),
-            },
-            (None, None) => {
-                return Err("missing required env: P0_WS_URL (or HELIUS_API_KEY)".into())
-            }
-        };
-        let rpc_url = match (opt("P0_RPC_URL"), &helius_key, source) {
-            (Some(url), _, _) => Some(url),
-            (None, Some(key), MarketSource::Logs) => Some(format!("{HELIUS_RPC_MAINNET}{key}")),
-            _ => None,
-        };
+        let ws_url = opt("P0_WS_URL").ok_or(
+            "missing required env: P0_WS_URL (the selected WSS provider: p0ctl provider select)",
+        )?;
+        let rpc_url = opt("P0_RPC_URL");
         let min_sample_liquidations = num("P0_MARKET_MIN_SAMPLE", DEFAULT_MIN_SAMPLE_LIQUIDATIONS)?;
         let until_stopped = opt("P0_MARKET_DURATION_SECS").as_deref() == Some("until-stopped");
         // Zero is the status/record sentinel for an explicitly unbounded observation.

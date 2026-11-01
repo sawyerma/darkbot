@@ -694,7 +694,7 @@ fn execute(
             if let Some(wanted) = &r.verification_result {
                 args.extend(["--verification-result".into(), wanted.clone()]);
             }
-            super::post_capture::post_capture_with(&run, chain_verify, &args, cancelled)
+            super::post_capture::post_capture_with(project, &run, chain_verify, &args, cancelled)
                 .map(Executed::PostCapture)
         }
         JobSpec::H0 {

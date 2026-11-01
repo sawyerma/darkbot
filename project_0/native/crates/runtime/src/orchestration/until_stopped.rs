@@ -196,7 +196,7 @@ pub fn binding(
     else {
         return Err("UNTIL_STOPPED_HORIZON: a fixed duration is no unbounded run".into());
     };
-    let resolved = boot_audit::start_config(mode, operational, horizon, env)?;
+    let resolved = boot_audit::start_config(project, mode, operational, horizon, env)?;
     let identity = boot_audit::identity_with(project, SafetyFlags::from_env(), &resolved.config)?;
     Ok((
         Binding {
@@ -1365,6 +1365,9 @@ pub(crate) mod tests {
     fn dec16_provider_parts_need_fresh_evidence_that_covers_the_runway() {
         let c = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
+            providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                "https://rpc.invalid",
+            ]),
             ..Default::default()
         };
         let run = binding(3_600, 86_400);
@@ -1373,7 +1376,7 @@ pub(crate) mod tests {
             (e.state, b.state, until),
             (PartState::NotRun, PartState::NotRun, None)
         );
-        let binding = journal::hex(&solana_sdk::hash::hash(b"https://rpc.invalid").to_bytes());
+        let binding = c.providers[0].binding.clone();
         let proof = |rps: f64, calls: u64, measured: f64| ProviderEvidence {
             providers: vec![ProviderProof {
                 policy: "FREE_ONLY".into(),
@@ -1468,8 +1471,14 @@ pub(crate) mod tests {
         run: &Binding,
         measured: f64,
     ) -> ProviderEvidence {
-        let binding =
-            journal::hex(&solana_sdk::hash::hash(c.rpc_endpoints[0].as_bytes()).to_bytes());
+        let binding = c
+            .bound(
+                darkbot_solana::providers::ProviderKind::Rpc,
+                &c.rpc_endpoints[0],
+            )
+            .unwrap()
+            .binding
+            .clone();
         let windows = run
             .minimum_runway_seconds
             .div_ceil(run.checkpoint_seconds)
@@ -1500,6 +1509,9 @@ pub(crate) mod tests {
         let d = temp("window");
         let c = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
+            providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                "https://rpc.invalid",
+            ]),
             ..Default::default()
         };
         let b = binding(3_600, 86_400);
@@ -1659,6 +1671,9 @@ pub(crate) mod tests {
         let d = temp("newest");
         let c = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
+            providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                "https://rpc.invalid",
+            ]),
             ..Default::default()
         };
         let run = binding(3_600, 86_400);
@@ -1701,6 +1716,9 @@ pub(crate) mod tests {
                 dir: temp(tag),
                 config: darkbot_solana::runtime_config::RuntimeConfig {
                     rpc_endpoints: vec!["https://rpc.invalid".into()],
+                    providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                        "https://rpc.invalid",
+                    ]),
                     ..Default::default()
                 },
                 binding: binding(60, 3_600),

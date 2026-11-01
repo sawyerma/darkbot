@@ -43,11 +43,11 @@ pub struct BundleConfig {
 
 impl BundleConfig {
     /// From the runtime configuration: the block engine, the tip account and the tip amount,
-    /// else none.
+    /// else none (also with a bundle simulator named by a registry id not bound: DEC-18).
     pub fn of(c: &darkbot_solana::runtime_config::RuntimeConfig) -> Option<Self> {
         Some(Self {
             block_engine_url: c.jito_block_engine_url.clone()?,
-            bundle_sim_rpc_url: c.bundle_sim_rpc_url.clone(),
+            bundle_sim_rpc_url: c.bundle_sim_endpoint().ok()?.map(str::to_string),
             tip: BundleTip {
                 account: c.jito_tip_account.as_deref()?.parse().ok()?,
                 lamports: c.jito_tip_lamports?,

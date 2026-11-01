@@ -13,7 +13,11 @@ use solana_sdk::{
 };
 use std::{env, error::Error, str::FromStr};
 fn main() -> Result<(), Box<dyn Error>> {
-    let adapter = RpcSubmitter::for_candidates(env::var("P0_RPC_URL")?, false)?;
+    // DEC-18: the registry's RPC provider, its credential applied by the transport.
+    let adapter = RpcSubmitter::for_candidates(
+        darkbot_runner::orchestration::provider_registry::activate_tool()?,
+        false,
+    )?;
     let payer = tx::load_keypair_json(&env::var("P0_KEYPAIR_PATH")?)?;
     if payer.pubkey() != Pubkey::from_str(&env::var("P0_EXPECTED_PUBKEY")?)? {
         return Err("signer identity mismatch".into());

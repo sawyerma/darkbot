@@ -679,12 +679,21 @@ pub(crate) mod tests {
     use bytemuck::Zeroable;
     #[test]
     fn provider_evidence_requires_fresh_free_capacity_for_every_fallback() {
-        let mut c = RuntimeConfig::default();
-        let primary = "http://primary.invalid";
+        let (primary, backup) = ("https://primary.invalid", "https://backup.invalid");
+        let mut c = RuntimeConfig {
+            rpc_endpoints: vec![primary.into(), backup.into()],
+            ..RuntimeConfig::default()
+        };
+        crate::orchestration::provider_registry::bind_endpoints(&mut c);
+        let bound = c.clone();
         let proof = |url: &str| ProviderProof {
             policy: "FREE_ONLY".into(),
             passed: true,
-            provider_binding: sha(url.as_bytes()),
+            provider_binding: bound
+                .bound(darkbot_solana::providers::ProviderKind::Rpc, url)
+                .unwrap()
+                .binding
+                .clone(),
             measured_at_unix_s: 1000.0,
             evidence_sha256: Some(sha(b"fixture")),
             allowed_rps: 5.0,
@@ -699,6 +708,35 @@ pub(crate) mod tests {
         };
         let p = evidence(vec![proof(primary)]);
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());
+        // DEC-18 (FREE_ONLY): a named local endpoint or a registry provider of an unproven plan
+        // is never qualified, a proof bound to it notwithstanding.
+        let local = darkbot_solana::providers::BoundProvider::local(
+            darkbot_solana::providers::ProviderKind::Rpc,
+            "http://127.0.0.1:8899",
+        )
+        .unwrap();
+        let mut named = c.clone();
+        named.rpc_endpoints = vec![local.endpoint.clone()];
+        named.providers = vec![local.clone()];
+        let mut forwarded = p.clone();
+        forwarded.providers[0].provider_binding = local.binding.clone();
+        assert!(
+            validate_provider_evidence(&named, &local.endpoint, &forwarded, 1001.0)
+                .unwrap_err()
+                .starts_with("FREE_ONLY_PROVIDER_UNREGISTERED")
+        );
+        let mut unproven = c.clone();
+        unproven.providers[0].plan = darkbot_solana::providers::Plan::Unknown;
+        assert!(validate_provider_evidence(&unproven, primary, &p, 1001.0)
+            .unwrap_err()
+            .starts_with("FREE_ONLY_PROVIDER_UNREGISTERED"));
+        // DEC-18 §1.2: a proof bound to the URL's hash (an earlier build's binding) is no proof.
+        let mut url_hash = p.clone();
+        url_hash.providers[0].provider_binding = sha(primary.as_bytes());
+        assert_eq!(
+            validate_provider_evidence(&c, primary, &url_hash, 1001.0).unwrap_err(),
+            "FE_PROVIDER_EVIDENCE_MISSING"
+        );
         type Mutation = (&'static str, fn(&mut ProviderProof));
         let mutations: [Mutation; 9] = [
             ("policy", |p| p.policy = "PAID".into()),
@@ -728,10 +766,9 @@ pub(crate) mod tests {
             1001.0 + c.limits.fe_qualification_age_seconds as f64
         )
         .is_err());
-        c.rpc_endpoints = vec![primary.into(), "http://backup.invalid".into()];
         c.fallback = true;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_err());
-        let proofs = evidence(vec![proof(primary), proof("http://backup.invalid")]);
+        let proofs = evidence(vec![proof(primary), proof(backup)]);
         assert!(validate_provider_evidence(&c, primary, &proofs, 1001.0).is_ok());
         c.fallback = false;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());

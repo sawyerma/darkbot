@@ -632,9 +632,12 @@ impl WsRpcControlSource {
         // message of `wss_message_mib` on top of the write buffer; beyond it the newest Pong
         // replaces the queued one (tungstenite) and the reader goes on.
         wire.max_write_buffer_size = wire.write_buffer_size.saturating_add(message_bytes);
+        // DEC-18: the endpoint's credential, applied after the endpoint comparisons above.
+        let request = crate::providers::ws_client_request(endpoint)
+            .map_err(|code| IngressError::Connect(code.into()))?;
         let (ws, _) = tokio::time::timeout(
             connect_budget,
-            tokio_tungstenite::connect_async_with_config(endpoint, Some(wire), false),
+            tokio_tungstenite::connect_async_with_config(request, Some(wire), false),
         )
         .await
         .map_err(|_| IngressError::Connect("WSS_CONNECT_TIMEOUT".into()))?

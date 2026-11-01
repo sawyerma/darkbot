@@ -20,7 +20,9 @@ use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-pub const SPEC_SCHEMA: &str = "Project0/StrictVerificationSpec/1";
+/// 2: `provider_binding_sha256` is the provider's binding (DEC-18), no longer the endpoint's
+/// SHA-256 — a schema-1 spec stays readable and is never continued by a new attempt.
+pub const SPEC_SCHEMA: &str = "Project0/StrictVerificationSpec/2";
 /// Directory prefix of native specs under `verification/` (Python specs use bare ids).
 pub const NATIVE_PREFIX: &str = "native-";
 
@@ -166,7 +168,9 @@ pub struct VerificationSpec {
     pub protocol_pin: String,
     pub journal_version: u16,
     pub provider_policy: String,
-    /// SHA-256 of the RPC endpoint (never the endpoint); `None` offline.
+    /// The RPC provider's binding (DEC-18 §1.2, secret-free; a CROSSCHECK binds both
+    /// providers'); `None` offline. A spec of an earlier build bound the endpoint's SHA-256 — it
+    /// stays readable, never the binding of a new attempt.
     pub provider_binding_sha256: Option<[u8; 32]>,
     pub budget: StrictBudget,
 }
@@ -491,24 +495,23 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
             .as_deref()
             .ok_or("STRICT_PROVIDER_EVIDENCE_REQUIRED")?;
         let config = darkbot_solana::runtime_config::active();
-        let url = config
-            .rpc_url(&|k| std::env::var(k).ok())
-            .ok_or("RPC_URL_MISSING")?;
+        let url = config.rpc_url().ok_or("RPC_URL_MISSING")?;
         let now = now_unix_ns()? as f64 / 1e9;
         strict_provider_gate(config, &url, evidence, now)?;
         if let VerifyMode::Index { .. } | VerifyMode::Crosscheck { .. } = req.mode {
-            method_capacity(evidence, &url, &req.budget)?;
+            method_capacity(config, evidence, &url, &req.budget)?;
         }
         if let VerifyMode::Crosscheck { .. } = req.mode {
             second = crosscheck_source(config, &url, evidence, now)?.map(Some);
             if let Ok(Some(s)) = &second {
-                method_capacity(evidence, s, &req.budget)?;
+                method_capacity(config, evidence, s, &req.budget)?;
             }
         }
         Some(provider_binding(
+            config,
             &url,
             second.as_ref().ok().and_then(|s| s.as_deref()),
-        ))
+        )?)
     };
     let spec = VerificationSpec {
         schema: SPEC_SCHEMA.into(),
@@ -678,8 +681,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     {
         if record.status.as_deref() == Some("CANONICAL_VERIFIED") {
             if let Some(end_slot) = result.scope.as_ref().map(|s| s.hi) {
-                let url =
-                    darkbot_solana::runtime_config::active().rpc_url(&|k| std::env::var(k).ok());
+                let url = darkbot_solana::runtime_config::active().rpc_url();
                 prove_deployment(&run, &spec_id, rid, end_slot, url.as_deref())?;
             }
         }
@@ -698,15 +700,32 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     })
 }
 
-/// The spec's provider binding: SHA-256 of the endpoint, and of both a CROSSCHECK reads (never
-/// the endpoint itself).
-fn provider_binding(primary: &str, second: Option<&str>) -> [u8; 32] {
-    let mut bound = primary.to_string();
-    if let Some(second) = second {
-        bound.push('\n');
-        bound.push_str(second);
-    }
-    solana_sdk::hash::hash(bound.as_bytes()).to_bytes()
+/// The spec's provider binding (DEC-18 §1.2): the RPC provider's binding, and for a CROSSCHECK
+/// the SHA-256 of both providers' bindings (never an endpoint).
+fn provider_binding(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    primary: &str,
+    second: Option<&str>,
+) -> Result<[u8; 32], String> {
+    let binding = |endpoint: &str| {
+        config
+            .bound(darkbot_solana::providers::ProviderKind::Rpc, endpoint)
+            .map(|p| p.binding.clone())
+    };
+    let first = binding(primary)?;
+    Ok(match second {
+        None => {
+            let mut out = [0u8; 32];
+            for (i, b) in out.iter_mut().enumerate() {
+                *b = u8::from_str_radix(&first[2 * i..2 * i + 2], 16)
+                    .map_err(|_| "PROVIDER_BINDING_INVALID")?;
+            }
+            out
+        }
+        Some(second) => {
+            solana_sdk::hash::hash(format!("{first}\n{}", binding(second)?).as_bytes()).to_bytes()
+        }
+    })
 }
 
 /// DEC-08: the newest spec of `run` that equals `offline` but for its provider binding and
@@ -754,16 +773,23 @@ fn online_spec(run: &Path, offline: &VerificationSpec) -> Option<VerificationSpe
         .map(|(_, spec)| spec)
 }
 
-/// DEC-08: a history read plans no more than its provider proved — the endpoint's measured
-/// FREE_ONLY proof covers the method's typed RPS and requests.
-fn method_capacity(evidence: &Path, url: &str, budget: &StrictBudget) -> Result<(), String> {
+/// DEC-08: a history read plans no more than its provider proved — the provider's measured
+/// FREE_ONLY proof (bound to its binding, DEC-18) covers the method's typed RPS and requests.
+fn method_capacity(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    evidence: &Path,
+    url: &str,
+    budget: &StrictBudget,
+) -> Result<(), String> {
     let proof: crate::orchestration::provider_evidence::ProviderEvidence =
         journal::read_typed_value(evidence).map_err(|_| "STRICT_PROVIDER_EVIDENCE_INVALID")?;
-    let binding = hex(&solana_sdk::hash::hash(url.as_bytes()).to_bytes());
+    let binding = &config
+        .bound(darkbot_solana::providers::ProviderKind::Rpc, url)?
+        .binding;
     let p = proof
         .providers
         .iter()
-        .find(|p| p.provider_binding == binding)
+        .find(|p| p.provider_binding == *binding)
         .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
     if p.allowed_rps < budget.rps as f64 || p.available_calls < budget.max_calls {
         return Err(format!(
@@ -823,7 +849,7 @@ fn drive_history(
     } else {
         Some(
             darkbot_solana::runtime_config::active()
-                .rpc_url(&|k| std::env::var(k).ok())
+                .rpc_url()
                 .ok_or("RPC_URL_MISSING")?,
         )
     };
@@ -902,20 +928,38 @@ fn drive_history(
 /// A3/C0E1-P5-CLI: the one typed request of a native verification (`p0-strict-verify --run`,
 /// `p0ctl verify`): budgets default to the mode's typed budget of the operational config
 /// (DEC-08: per method); every online history read needs `--provider-evidence`.
-pub fn cli(args: &[String]) -> Result<(String, bool), String> {
-    cli_with(args, None)
+/// The verifier of `project` (its provider registry, DEC-18; `None`: named loopback endpoints
+/// only).
+pub fn cli(args: &[String], project: Option<&Path>) -> Result<(String, bool), String> {
+    cli_with(args, project, None)
 }
 
 /// `cli` under the job controller's cancellation (`job cancel` of a post-capture job).
 pub fn cli_with(
     args: &[String],
+    project: Option<&Path>,
     cancelled: Option<fn() -> bool>,
 ) -> Result<(String, bool), String> {
-    if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
-        || std::env::var_os("P0_PROFILE").is_some()
+    // DEC-05/DEC-18: an online verification runs on its resolved operational configuration —
+    // its RPC the registry's selected provider (or a named loopback node) of the caller's
+    // project, its credential installed before the first read; an offline one only with a
+    // selected configuration.
+    let offline_request = args.iter().any(|a| a == "--offline")
+        || args.windows(2).any(|w| w[0] == "--mode" && w[1] == "off");
+    let mut registry = None;
+    if !darkbot_solana::runtime_config::configured()
+        && (!offline_request
+            || std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
+            || std::env::var_os("P0_PROFILE").is_some())
     {
-        let resolved =
+        let mut resolved =
             darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?;
+        if let Some(project) = project {
+            registry = Some(crate::orchestration::provider_registry::bind(
+                project,
+                &mut resolved,
+            )?);
+        }
         for (k, v) in resolved.config.environment() {
             std::env::set_var(k, v);
         }
@@ -997,6 +1041,12 @@ pub fn cli_with(
             _ => &mut budget.min_free_bytes,
         } = n;
     }
+    if let (Some(registry), false, false) = (&registry, offline, mode == VerifyMode::Off) {
+        crate::orchestration::provider_registry::install_credentials(
+            registry,
+            darkbot_solana::runtime_config::active(),
+        )?;
+    }
     let outcome = drive(&DriverRequest {
         run: run.ok_or("--run required")?.into(),
         budget,
@@ -1033,14 +1083,23 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("p0_gate_{}_{}", std::process::id(), line!()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let config = darkbot_solana::runtime_config::RuntimeConfig::default();
-        let url = "http://archive.invalid";
+        let url = "https://archive.invalid";
+        let mut config = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![url.into()],
+            ..Default::default()
+        };
+        crate::orchestration::provider_registry::bind_endpoints(&mut config);
+        let bound = config
+            .bound(darkbot_solana::providers::ProviderKind::Rpc, url)
+            .unwrap()
+            .binding
+            .clone();
         let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
         let evidence = |archive_qualified| ProviderEvidence {
             providers: vec![ProviderProof {
                 policy: "FREE_ONLY".into(),
                 passed: true,
-                provider_binding: sha(url.as_bytes()),
+                provider_binding: bound.clone(),
                 measured_at_unix_s: 1000.0,
                 evidence_sha256: Some(sha(b"fixture")),
                 allowed_rps: 5.0,
@@ -1066,7 +1125,24 @@ mod tests {
             strict_provider_gate(&config, url, &unqualified, 1001.0),
             Err("STRICT_ARCHIVE_UNQUALIFIED".into())
         );
-        assert!(strict_provider_gate(&config, "http://other.invalid", &qualified, 1001.0).is_err());
+        assert!(
+            strict_provider_gate(&config, "https://other.invalid", &qualified, 1001.0).is_err()
+        );
+        // DEC-18: a proof bound to the URL's hash (an earlier build's binding) never qualifies.
+        let url_hash = write(
+            "url_hash.p0j",
+            &ProviderEvidence {
+                providers: vec![ProviderProof {
+                    provider_binding: sha(url.as_bytes()),
+                    ..evidence(true).providers[0].clone()
+                }],
+                ..evidence(true)
+            },
+        );
+        assert_eq!(
+            strict_provider_gate(&config, url, &url_hash, 1001.0),
+            Err("FE_PROVIDER_EVIDENCE_MISSING".into())
+        );
         let stale = 1001.0 + config.limits.fe_qualification_age_seconds as f64;
         assert!(strict_provider_gate(&config, url, &qualified, stale).is_err());
         assert_eq!(
@@ -1076,23 +1152,42 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// DEC-08: a crosscheck's spec binds both endpoints (never one alone, never the endpoints).
+    /// DEC-08/DEC-18: a spec binds its provider's binding, a crosscheck's both providers'
+    /// (never one alone, never an endpoint or its hash); an unbound endpoint binds nothing.
     #[test]
     fn dec08_the_provider_binding_holds_both_crosscheck_endpoints() {
-        let (a, b) = ("http://a.invalid", "http://b.invalid");
-        assert_eq!(
-            provider_binding(a, None),
-            solana_sdk::hash::hash(a.as_bytes()).to_bytes()
+        let (a, b, c) = (
+            "https://a.invalid",
+            "https://b.invalid",
+            "https://c.invalid",
         );
-        let both = provider_binding(a, Some(b));
+        let mut config = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![a.into(), b.into(), c.into()],
+            ..Default::default()
+        };
+        crate::orchestration::provider_registry::bind_endpoints(&mut config);
+        let binding = |e: &str| {
+            config
+                .bound(darkbot_solana::providers::ProviderKind::Rpc, e)
+                .unwrap()
+                .binding
+                .clone()
+        };
+        let one = provider_binding(&config, a, None).unwrap();
+        assert_eq!(hex(&one), binding(a));
+        assert_ne!(one, solana_sdk::hash::hash(a.as_bytes()).to_bytes());
+        let both = provider_binding(&config, a, Some(b)).unwrap();
         for other in [
-            provider_binding(a, None),
-            provider_binding(b, None),
-            provider_binding(b, Some(a)),
-            provider_binding(a, Some("http://c.invalid")),
+            one,
+            provider_binding(&config, b, None).unwrap(),
+            provider_binding(&config, b, Some(a)).unwrap(),
+            provider_binding(&config, a, Some(c)).unwrap(),
         ] {
             assert_ne!(both, other);
         }
+        assert!(provider_binding(&config, "https://d.invalid", None)
+            .unwrap_err()
+            .starts_with("PROVIDER_UNBOUND"));
     }
 
     /// DEC-08 (review): a history read plans no more than its provider proved — the measured
@@ -1103,7 +1198,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("p0_cap_{}_{}", std::process::id(), line!()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let url = "http://archive.invalid";
+        let url = "https://archive.invalid";
+        let mut config = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![url.into(), "https://other.invalid".into()],
+            ..Default::default()
+        };
+        crate::orchestration::provider_registry::bind_endpoints(&mut config);
         let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
         let path = dir.join("evidence.p0j");
         journal::write_typed_value(
@@ -1113,7 +1213,11 @@ mod tests {
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),
                     passed: true,
-                    provider_binding: sha(url.as_bytes()),
+                    provider_binding: config
+                        .bound(darkbot_solana::providers::ProviderKind::Rpc, url)
+                        .unwrap()
+                        .binding
+                        .clone(),
                     measured_at_unix_s: 1000.0,
                     evidence_sha256: Some(sha(b"fixture")),
                     allowed_rps: 5.0,
@@ -1135,14 +1239,17 @@ mod tests {
             max_ram_bytes: 1,
             min_free_bytes: 1,
         };
-        assert_eq!(method_capacity(&path, url, &budget(5, 300)), Ok(()));
+        assert_eq!(
+            method_capacity(&config, &path, url, &budget(5, 300)),
+            Ok(())
+        );
         for over in [budget(6, 300), budget(5, 301)] {
-            assert!(method_capacity(&path, url, &over)
+            assert!(method_capacity(&config, &path, url, &over)
                 .unwrap_err()
                 .starts_with("PROVIDER_CAPACITY_BELOW_METHOD_BUDGET"));
         }
         assert_eq!(
-            method_capacity(&path, "http://other.invalid", &budget(1, 1)).unwrap_err(),
+            method_capacity(&config, &path, "https://other.invalid", &budget(1, 1)).unwrap_err(),
             "FE_PROVIDER_EVIDENCE_MISSING"
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1201,11 +1308,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
-        let (primary, second) = ("http://archive-a.invalid", "http://archive-b.invalid");
+        let (primary, second) = ("https://archive-a.invalid", "https://archive-b.invalid");
+        let config = |endpoints: &[&str]| {
+            let mut c = darkbot_solana::runtime_config::RuntimeConfig {
+                rpc_endpoints: endpoints.iter().map(|s| s.to_string()).collect(),
+                fallback: false,
+                ..Default::default()
+            };
+            crate::orchestration::provider_registry::bind_endpoints(&mut c);
+            c
+        };
+        let bound = config(&[primary, second]);
         let proof = |url: &str| ProviderProof {
             policy: "FREE_ONLY".into(),
             passed: true,
-            provider_binding: sha(url.as_bytes()),
+            provider_binding: bound
+                .bound(darkbot_solana::providers::ProviderKind::Rpc, url)
+                .unwrap()
+                .binding
+                .clone(),
             measured_at_unix_s: 1000.0,
             evidence_sha256: Some(sha(b"fixture")),
             allowed_rps: 5.0,
@@ -1224,11 +1345,6 @@ mod tests {
             path
         };
         let both = evidence(&[primary, second]);
-        let config = |endpoints: &[&str]| darkbot_solana::runtime_config::RuntimeConfig {
-            rpc_endpoints: endpoints.iter().map(|s| s.to_string()).collect(),
-            fallback: false,
-            ..Default::default()
-        };
         let check = |endpoints: &[&str], evidence: &Path| {
             crosscheck_source(&config(endpoints), primary, evidence, 1001.0)
         };
@@ -1241,7 +1357,7 @@ mod tests {
             Ok(Err("CROSSCHECK_SECOND_PROVIDER_MISSING"))
         );
         assert_eq!(
-            check(&[primary, "http://archive-a.invalid/other"], &both),
+            check(&[primary, "https://archive-a.invalid/other"], &both),
             Ok(Err("CROSSCHECK_PROVIDER_NOT_INDEPENDENT"))
         );
         assert_eq!(check(&[primary, second], &both), Ok(Ok(second.to_string())));

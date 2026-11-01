@@ -418,6 +418,85 @@ fn x1_bind_state_binds_runtime_scope_and_reports_drift_per_field_class() {
     assert_eq!(s.bind(false).unwrap_err(), "BOOT_IDENTITY_RECORD_INVALID");
 }
 
+/// DEC-18 (review H1): with the registry's selection the launched runtime binds what p0ctl
+/// audited, also after its own activation exported its configuration into its environment — a
+/// bound provider is never exported back as a named endpoint (before: `P0_RPC_URL` re-resolved
+/// as a local provider, the digest drifted, every registry-bound start was refused).
+#[test]
+fn x1_a_registry_bound_start_is_the_audited_one_after_its_activation() {
+    use crate::orchestration::provider_registry::{decide, NoCredentialStore, ProviderAction};
+    use darkbot_solana::providers::{AuthKind, Plan, ProviderDescriptor, ProviderKind};
+    let d = temp("registry");
+    let flags = SafetyFlags {
+        live_enabled: false,
+        submission_enabled: false,
+    };
+    let provider = |id: &str, kind, endpoint: &str| ProviderDescriptor {
+        id: id.into(),
+        kind,
+        endpoint: endpoint.into(),
+        auth: AuthKind::None,
+        credential: None,
+        priority: 0,
+        capacity_rps: None,
+        plan: Plan::Free,
+        entitlement: "loopback-free".into(),
+        qualification: None,
+        enabled: true,
+    };
+    for (n, action) in [
+        ProviderAction::Add(provider(
+            "node-rpc",
+            ProviderKind::Rpc,
+            "http://127.0.0.1:8899",
+        )),
+        ProviderAction::Add(provider(
+            "node-wss",
+            ProviderKind::Wss,
+            "ws://127.0.0.1:8900",
+        )),
+        ProviderAction::Select(ProviderKind::Rpc, "node-rpc".into()),
+        ProviderAction::Select(ProviderKind::Wss, "node-wss".into()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = decide(
+            &d,
+            &format!("x1-{n}"),
+            None,
+            &action,
+            None,
+            &NoCredentialStore,
+            1,
+        )
+        .unwrap();
+        assert!(r.applied, "{r:?}");
+    }
+    let launcher: HashMap<String, String> = [
+        ("P0_MEASUREMENT_DURATION", "10m"),
+        ("P0_ECON_DURATION_SECS", "600"),
+        ("P0_MODE", "econ4h"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let get = |k: &str| launcher.get(k).cloned();
+    let audited_config = start_config(&d, "econ4h", &[], "10m", &get).unwrap().config;
+    assert!(audited_config
+        .providers
+        .iter()
+        .filter(|p| matches!(p.kind, ProviderKind::Rpc | ProviderKind::Wss))
+        .all(|p| p.registry_version > 0));
+    let audited = identity_with(&d, flags, &audited_config).unwrap();
+    assert_eq!(launched_identity(&d, flags, &[], &get).unwrap(), audited);
+    let mut activated = launcher.clone();
+    activated.extend(audited_config.environment());
+    assert!(!activated.contains_key("P0_RPC_URL") && !activated.contains_key("P0_WS_URL"));
+    let get = |k: &str| activated.get(k).cloned();
+    assert_eq!(launched_identity(&d, flags, &[], &get).unwrap(), audited);
+}
+
 /// The config p0ctl audits (operational args + `--duration D`, operator environment, the mode's
 /// profile) and the config the launched runtime re-resolves (same args, launcher environment with
 /// `P0_MEASUREMENT_DURATION=D`, `P0_MODE` and its fixed exports, also after the runtime's own
@@ -459,7 +538,7 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
     };
     let ctl_config = |mode: &str, op: &[String], duration: &str| {
         let get = |k: &str| operator.get(k).cloned();
-        start_config(mode, op, duration, &get).unwrap().config
+        start_config(&d, mode, op, duration, &get).unwrap().config
     };
     let ctl_identity = |mode: &str, op: &[String], duration: &str| {
         identity_with(&d, flags, &ctl_config(mode, op, duration)).unwrap()
@@ -512,7 +591,7 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
     // Operational values the launcher environment changes are drift, never admitted.
     let audited = ctl_identity("econ4h", &[], "10m");
     for (k, v) in [
-        ("P0_RPC_URL", "http://127.0.0.2:8899"),
+        ("P0_RPC_URL", "http://127.0.0.1:8898"),
         ("P0_RPC_RPS", "9"),
         ("P0_PROFILE", "smoke"),
         ("P0_MAX_SLIPPAGE_BPS", "50"),

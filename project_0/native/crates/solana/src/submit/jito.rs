@@ -57,10 +57,12 @@ impl JitoAdapter {
             .timeout(timeout)
             .build()
             .map_err(|e| SubmitError::Transport(super::rpc::safe_http_error(&e).into()))?;
+        // DEC-18: the bound endpoints as configured (canonical), so the transport finds their
+        // credentials (`authorize_path`).
         Ok(JitoAdapter {
             http,
-            block_engine: block_engine_url.trim_end_matches('/').to_string(),
-            bundle_sim_rpc: bundle_sim_rpc.map(|u| u.trim_end_matches('/').to_string()),
+            block_engine: block_engine_url,
+            bundle_sim_rpc,
             path: SubmissionPath::JitoSingle,
             timeout,
         })
@@ -77,10 +79,14 @@ impl JitoAdapter {
         deadline: Option<std::time::Instant>,
     ) -> Result<Value, SubmitError> {
         let body = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
-        let mut request = self
-            .http
-            .post(format!("{}{}", self.block_engine, route))
-            .json(&body);
+        let mut request = crate::provider::authorized_blocking(
+            &self.http,
+            reqwest::Method::POST,
+            &self.block_engine,
+            route,
+        )
+        .map_err(|code| SubmitError::Transport(code.into()))?
+        .json(&body);
         if let Some(deadline) = deadline {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
@@ -275,9 +281,12 @@ impl SubmissionAdapter for JitoAdapter {
             return super::SimResult::Deadline;
         }
         let body = json!({"jsonrpc":"2.0","id":1,"method":"simulateBundle","params":[{"encodedTransactions": encoded}]});
-        let call: Result<Value, String> = self
-            .http
-            .post(sim)
+        let Ok(post) =
+            crate::provider::authorized_blocking(&self.http, reqwest::Method::POST, sim, "")
+        else {
+            return super::SimResult::Unavailable("bundle simulator credential".into());
+        };
+        let call: Result<Value, String> = post
             .timeout(remaining)
             .json(&body)
             .send()

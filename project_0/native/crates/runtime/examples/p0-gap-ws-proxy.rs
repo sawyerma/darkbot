@@ -1,5 +1,10 @@
 //! Qualification-only loopback proxy. Closes the first market WebSocket once,
 //! after a real slot notification. Does not alter production ingress defaults.
+//!
+//! DEC-18: its upstream is the project's selected WSS provider (`P0_PROJECT_DIR`, the provider
+//! registry) with its credential read once from the credential store and applied by the
+//! transport — never a URL with a key from the environment; `P0_GAP_UPSTREAM_WS_URL` names only a
+//! loopback upstream (the proxy's own probe through itself).
 use futures_util::{SinkExt, StreamExt};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -28,7 +33,8 @@ async fn probe_session(url: &str, wait_for_drop: bool) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::Message;
     tokio::time::timeout(Duration::from_secs(if wait_for_drop { 150 } else { 20 }), async {
         let started = std::time::Instant::now();
-        let (mut ws, _) = connect_async(url).await.map_err(|e| ws_error(&e))?;
+        let request = darkbot_solana::providers::ws_client_request(url)?;
+        let (mut ws, _) = connect_async(request).await.map_err(|e| ws_error(&e))?;
         eprintln!("GAP_PROBE_CONNECTED elapsed_ms={}", started.elapsed().as_millis());
         for request in [
             serde_json::json!({"jsonrpc":"2.0","id":1,"method":"slotSubscribe"}),
@@ -67,8 +73,30 @@ async fn probe_session(url: &str, wait_for_drop: bool) -> Result<(), String> {
     }).await.map_err(|_|"PROBE_TIMEOUT".to_string())?
 }
 
+/// The upstream (see the module documentation); the provider's credential installed.
+fn upstream() -> Result<String, String> {
+    use darkbot_solana::providers::{BoundProvider, ProviderKind};
+    if let Ok(url) = std::env::var("P0_GAP_UPSTREAM_WS_URL") {
+        return Ok(BoundProvider::local(ProviderKind::Wss, &url)?.endpoint);
+    }
+    let project = std::env::var_os("P0_PROJECT_DIR").ok_or("MISSING_PROJECT")?;
+    let mut resolved = darkbot_solana::runtime_config::Resolved::for_mode("econ4h", &[], &|k| {
+        std::env::var(k).ok()
+    })?;
+    darkbot_runner::orchestration::provider_registry::network_config(
+        Some(std::path::Path::new(&project)),
+        &mut resolved,
+    )?;
+    resolved
+        .config
+        .wss_endpoints
+        .first()
+        .cloned()
+        .ok_or_else(|| "NO_WSS_PROVIDER: p0ctl provider select --kind wss".into())
+}
+
 async fn run() -> Result<(), String> {
-    let upstream = std::env::var("P0_GAP_UPSTREAM_WS_URL").map_err(|_| "MISSING_UPSTREAM")?;
+    let upstream = upstream()?;
     match std::env::args().nth(1).as_deref() {
         Some("--probe-direct") => return probe_session(&upstream, false).await,
         Some("--probe-proxy") => {
@@ -108,8 +136,9 @@ async fn run() -> Result<(), String> {
         let Ok(mut downstream) = accept_async(socket).await else {
             continue;
         };
+        let request = darkbot_solana::providers::ws_client_request(&upstream)?;
         let mut remote =
-            match tokio::time::timeout(Duration::from_secs(20), connect_async(&upstream)).await {
+            match tokio::time::timeout(Duration::from_secs(20), connect_async(request)).await {
                 Ok(Ok((remote, _))) => {
                     eprintln!("GAP_PROXY_UPSTREAM_CONNECTED");
                     remote

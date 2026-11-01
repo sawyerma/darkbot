@@ -13,8 +13,8 @@ impl RpcFetcher {
         commitment: &'static str,
     ) -> Result<Self, String> {
         let limits = &darkbot_solana::runtime_config::active().limits;
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
+        // The provider transport's settings (no redirect: DEC-18).
+        let client = darkbot_solana::provider::blocking_http()
             .timeout(Duration::from_millis(timeout_ms.min(limits.rpc_timeout_ms)))
             .build()
             .map_err(|e| format!("enrichment client: {}", e.without_url()))?;

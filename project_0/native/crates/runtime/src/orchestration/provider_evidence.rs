@@ -189,8 +189,23 @@ pub fn resolve(project: &std::path::Path, id: &str) -> Result<std::path::PathBuf
     Ok(path)
 }
 
-/// Validate the measured FREE_ONLY evidence for every usable endpoint (a proof per endpoint
-/// binding). This checks supplied evidence, not the provider's current quota availability.
+/// DEC-18 (FREE_ONLY): evidence qualifies a provider of the registry on a free plan only — never
+/// a named local endpoint (a loopback forwarder is no provider of the selected pair) or a plan
+/// not proven free.
+pub fn free_registry_provider(p: &darkbot_solana::providers::BoundProvider) -> Result<(), String> {
+    if p.registry_version == 0 || p.plan != darkbot_solana::providers::Plan::Free {
+        return Err(format!(
+            "FREE_ONLY_PROVIDER_UNREGISTERED: {} is no free registry provider (p0ctl provider add, select)",
+            p.id
+        ));
+    }
+    Ok(())
+}
+
+/// Validate the measured FREE_ONLY evidence for every usable endpoint: a proof per provider
+/// binding (DEC-18 §1.2 — the bound provider's secret-free identity; a proof bound to a URL hash,
+/// another provider or another credential revision never matches). This checks supplied
+/// evidence, not the provider's current quota availability.
 pub fn validate_provider_evidence(
     config: &darkbot_solana::runtime_config::RuntimeConfig,
     primary: &str,
@@ -207,11 +222,13 @@ pub fn validate_provider_evidence(
         )
         .collect();
     for endpoint in endpoints {
-        let binding = sha(endpoint.as_bytes());
+        let bound = config.bound(darkbot_solana::providers::ProviderKind::Rpc, endpoint)?;
+        free_registry_provider(bound)?;
+        let binding = &bound.binding;
         let p = proof
             .providers
             .iter()
-            .find(|p| p.provider_binding == binding)
+            .find(|p| p.provider_binding == *binding)
             .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
         let measured = p.measured_at_unix_s;
         let min_rps = config.limits.rpc_rps.min(config.limits.bootstrap_rps) as f64;

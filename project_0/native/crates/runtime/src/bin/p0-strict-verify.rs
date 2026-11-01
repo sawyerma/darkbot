@@ -24,7 +24,9 @@ fn main() {
             }
         }
         if args.first().map(String::as_str) == Some("--run") {
-            return darkbot_runner::market_observer::strict_driver::cli(&args);
+            // DEC-18: the providers of the project it is run for (`P0_PROJECT_DIR`).
+            let project = std::env::var_os("P0_PROJECT_DIR").map(std::path::PathBuf::from);
+            return darkbot_runner::market_observer::strict_driver::cli(&args, project.as_deref());
         }
         Err("USAGE: p0-strict-verify --run RUN … | --show DIR".into())
     })();

@@ -23,17 +23,6 @@ absolute_paths() {
   done
 }
 
-# Emit only scheme/hostname; credentials may be in userinfo, path, query or fragment.
-endpoint_host() {
-  python3 -c 'import os,sys
-from urllib.parse import urlsplit
-try:
-    u=urlsplit(os.environ[sys.argv[1]])
-    print(u.scheme + "://" + u.hostname if u.scheme and u.hostname else "INVALID_ENDPOINT")
-except ValueError:
-    print("INVALID_ENDPOINT")' "$1"
-}
-
 load_env() {
 # [SEC-02] Local secrets are loaded from project_0/.env when present.
 # The file is git-ignored and must be owner-only. Callers may still export values
@@ -69,14 +58,9 @@ need() {
   fi
 }
 
-if [[ -z "${P0_RPC_URL:-}" || -z "${P0_WS_URL:-}" ]]; then
-  if [[ -z "${HELIUS_API_KEY:-}" ]]; then
-    echo "missing endpoints: set P0_RPC_URL+P0_WS_URL or HELIUS_API_KEY" >&2
-    exit 2
-  fi
-  export P0_RPC_URL="${P0_RPC_URL:-https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}}"
-  export P0_WS_URL="${P0_WS_URL:-wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}}"
-fi
+# DEC-18: the RPC/WSS providers are the registry's selection (`p0ctl provider select`), their
+# credentials the macOS keychain's; the runtime binds them at its start. No endpoint or key is
+# derived here.
 
 export P0_GROUP_ID="${P0_GROUP_ID:-4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8}"
 
@@ -436,8 +420,7 @@ export P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.p0j"
 echo "Project_0 Mainnet Shadow (run $P0_SHADOW_RUN_ID, ${SHADOW_SECS}s from Ready)"
 echo "  program=$P0_PROGRAM_ID"
 echo "  group=$P0_GROUP_ID"
-echo "  rpc_host=$(endpoint_host P0_RPC_URL)"
-echo "  ws_host=$(endpoint_host P0_WS_URL)"
+echo "  providers=registry (p0ctl provider status)"
 echo "  mode=$P0_MODE"
 echo "  zero_prefund_qualified=$P0_ZERO_PREFUND_QUALIFIED"
 echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"

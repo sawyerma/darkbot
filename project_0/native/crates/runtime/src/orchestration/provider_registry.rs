@@ -691,6 +691,107 @@ pub fn owned(project: &Path, registry: &ProviderRegistry) -> Result<(), String> 
     Ok(())
 }
 
+/// DEC-18: `resolved` bound to the project's current registry
+/// ([`darkbot_solana::runtime_config::Resolved::bind_registry`]): every kind without a named
+/// loopback endpoint takes the registry's selection; a copied store fails closed. Returns the
+/// version it was bound to (its credentials' accounts). The one binding step of every start,
+/// audit and identity (so the audit and the run it admits bind the same providers).
+pub fn bind(
+    project: &Path,
+    resolved: &mut darkbot_solana::runtime_config::Resolved,
+) -> Result<ProviderRegistry, String> {
+    let registry = current(project)?;
+    owned(project, &registry)?;
+    resolved.bind_registry(&registry)?;
+    Ok(registry)
+}
+
+/// DEC-18 §1.2/§1.3.6: the credentials of `config`'s providers from `store` — exactly the item of
+/// each bound revision: the registry still binds each provider to the same identity and
+/// revision (a provider changed or a credential rotated or revoked since refuses the start,
+/// never another revision in its place; an unrelated change of the registry does not).
+pub fn credentials_of(
+    registry: &ProviderRegistry,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    store: &dyn CredentialStore,
+) -> Result<Vec<darkbot_solana::providers::ActiveCredential>, String> {
+    let mut out = vec![];
+    for p in &config.providers {
+        let Some(credential) = &p.credential else {
+            continue;
+        };
+        let now = registry
+            .provider(&p.id)
+            .map(|q| registry.binding_of(q))
+            .transpose()?;
+        if now.as_deref() != Some(p.binding.as_str()) {
+            return Err(format!(
+                "PROVIDER_BINDING_CHANGED: {} is no longer bound as the run was configured (a provider or credential change is effective at the next start)",
+                p.id
+            ));
+        }
+        out.push(darkbot_solana::providers::ActiveCredential {
+            endpoint: p.endpoint.clone(),
+            auth: p.auth.clone(),
+            secret: store.get(&registry.account(credential))?,
+        });
+    }
+    Ok(out)
+}
+
+/// DEC-18: the configuration of a process that reads from the network — bound to the project's
+/// registry ([`bind`]) and its providers' credentials read once from the system store (the
+/// macOS keychain) and installed for the transports, before any transport is used. Without a
+/// project only named loopback endpoints exist (nothing to bind, no credential). A configuration
+/// without an authenticating provider never opens the store.
+pub fn network_config(
+    project: Option<&Path>,
+    resolved: &mut darkbot_solana::runtime_config::Resolved,
+) -> Result<(), String> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+    let registry = bind(project, resolved)?;
+    install_credentials(&registry, &resolved.config)
+}
+
+/// The credentials of `config`'s providers (bound from `registry`) read once from the system
+/// store and installed for the transports; nothing to read leaves the store unopened.
+pub fn install_credentials(
+    registry: &ProviderRegistry,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> Result<(), String> {
+    if config.providers.iter().all(|p| p.credential.is_none()) {
+        return Ok(());
+    }
+    let store = darkbot_solana::providers::system_store()?;
+    darkbot_solana::providers::activate_credentials(credentials_of(
+        registry,
+        config,
+        store.as_ref(),
+    )?)
+}
+
+/// DEC-18: the operational configuration of a network tool (`p0-prewarm-atas`,
+/// `p0-probe-costs`): resolved from its environment, bound to the project's registry
+/// (`P0_PROJECT_DIR`), its credentials installed, activated. Returns the primary RPC endpoint.
+pub fn activate_tool() -> Result<String, String> {
+    let mut resolved =
+        darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?;
+    network_config(
+        std::env::var_os("P0_PROJECT_DIR")
+            .map(PathBuf::from)
+            .as_deref(),
+        &mut resolved,
+    )?;
+    let rpc = resolved
+        .config
+        .rpc_url()
+        .ok_or("RPC_URL_MISSING: the selected RPC provider (p0ctl provider select --kind rpc)")?;
+    resolved.activate()?;
+    Ok(rpc)
+}
+
 /// DEC-18 §3.7: a qualification names provider evidence of exactly this provider's binding —
 /// a stored record (its bytes the id's) one of whose proofs (or its WSS proof) binds
 /// `binding_of` the provider with its active revision. Evidence bound to a URL hash, another
@@ -840,6 +941,62 @@ pub fn status_lines(registry: &ProviderRegistry) -> Vec<String> {
     out
 }
 
+/// Test fixture: `config`'s endpoints bound through a registry of their own (version 1, one free
+/// provider without credential per remote endpoint, by priority; a loopback one local) — the
+/// production binding (`ProviderRegistry::bound`) of fixture endpoints. Returns the registry.
+#[cfg(test)]
+pub(crate) fn bind_endpoints(
+    config: &mut darkbot_solana::runtime_config::RuntimeConfig,
+) -> ProviderRegistry {
+    use darkbot_solana::providers::{canonical_endpoint, is_local, AuthKind, BoundProvider, Plan};
+    let mut registry = ProviderRegistry::empty();
+    registry.version = 1;
+    registry.uid = "f1f1f1f1f1f1f1f1".into();
+    registry.project = "/fixture".into();
+    let mut local = vec![];
+    for (kind, list) in [
+        (ProviderKind::Rpc, &mut config.rpc_endpoints),
+        (ProviderKind::Wss, &mut config.wss_endpoints),
+    ] {
+        for (i, endpoint) in list.iter_mut().enumerate() {
+            *endpoint = canonical_endpoint(kind, endpoint).expect("a canonical fixture endpoint");
+            if is_local(endpoint) {
+                local.push(BoundProvider::local(kind, endpoint).unwrap());
+                continue;
+            }
+            registry.providers.push(ProviderDescriptor {
+                id: format!("{}-{i}", kind.name()),
+                kind,
+                endpoint: endpoint.clone(),
+                auth: AuthKind::None,
+                credential: None,
+                priority: i as u32,
+                capacity_rps: None,
+                plan: Plan::Free,
+                entitlement: "fixture".into(),
+                qualification: None,
+                enabled: true,
+            });
+        }
+    }
+    config.providers = local;
+    for p in &registry.providers {
+        config.providers.push(registry.bound(p).unwrap());
+    }
+    registry
+}
+
+/// Test fixture: the bound providers of RPC `endpoints` ([`bind_endpoints`]).
+#[cfg(test)]
+pub(crate) fn fixture_rpc(endpoints: &[&str]) -> Vec<darkbot_solana::providers::BoundProvider> {
+    let mut c = darkbot_solana::runtime_config::RuntimeConfig {
+        rpc_endpoints: endpoints.iter().map(|e| e.to_string()).collect(),
+        ..Default::default()
+    };
+    bind_endpoints(&mut c);
+    c.providers
+}
+
 // The tests use the directory store, which exists in a debug build only.
 #[cfg(all(test, debug_assertions))]
 mod tests {
@@ -910,6 +1067,115 @@ mod tests {
         )
         .unwrap();
         provider_evidence::import(d, &file).unwrap()
+    }
+
+    /// DEC-18 §1.2: a run binds the credential revision active when it is configured — the
+    /// configuration's digest (the audit's and the run's identity) changes with a rotation; the
+    /// credentials a start reads are exactly the bound revision's (after a rotation the earlier
+    /// configuration is refused: the registry moved on, the superseded item is gone); a copied
+    /// store binds nothing; a named loopback endpoint wins over the selection (DEC-05).
+    #[test]
+    fn a_run_binds_its_revision_and_a_rotation_is_drift() {
+        let d = project("bind");
+        let store = DirectoryStore(d.join("keychain"));
+        let ok = |id: &str, action: ProviderAction, secret: Option<&[u8]>, now| {
+            let r = decide(&d, id, None, &action, secret, &store, now).unwrap();
+            assert!(r.applied, "{r:?}");
+        };
+        ok("b1", ProviderAction::Add(helius()), None, 1);
+        ok("b2", set(), Some(b"KEY-1"), 2);
+        ok(
+            "b3",
+            ProviderAction::Select(ProviderKind::Rpc, "helius-rpc".into()),
+            None,
+            3,
+        );
+        let resolve = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            let mut r =
+                darkbot_solana::runtime_config::Resolved::for_mode("econ4h", &args, &|_| None)
+                    .unwrap();
+            let registry = bind(&d, &mut r).unwrap();
+            (r, registry)
+        };
+        let (first, at_first) = resolve(&[]);
+        assert_eq!(
+            first.config.rpc_endpoints,
+            ["https://mainnet.helius-rpc.com"]
+        );
+        assert_eq!(first.sources["rpc_endpoints"], "provider_registry:v3");
+        let read = credentials_of(&at_first, &first.config, &store).unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].secret.expose(), b"KEY-1");
+        let digest = super::super::boot_audit::runtime_config_sha256;
+        let audited = digest(&first.config).unwrap();
+        assert_eq!(
+            digest(&resolve(&[]).0.config).unwrap(),
+            audited,
+            "unchanged: same identity"
+        );
+        // Review L5: a registry commit that leaves this provider's binding as it was (another
+        // provider added) is no drift, and its credential still installs.
+        let mut other = helius();
+        other.id = "other-rpc".into();
+        other.endpoint = "https://other.example".into();
+        ok("b3a", ProviderAction::Add(other), None, 3);
+        let (unrelated, at_unrelated) = resolve(&[]);
+        assert_eq!(digest(&unrelated.config).unwrap(), audited);
+        assert_eq!(
+            credentials_of(&at_unrelated, &first.config, &store).unwrap()[0]
+                .secret
+                .expose(),
+            b"KEY-1"
+        );
+
+        ok(
+            "b4",
+            ProviderAction::CredentialRotate("helius".into()),
+            Some(b"KEY-2"),
+            4,
+        );
+        let (second, at_second) = resolve(&[]);
+        assert_ne!(
+            digest(&second.config).unwrap(),
+            audited,
+            "a rotation is drift"
+        );
+        assert_eq!(
+            credentials_of(&at_second, &second.config, &store).unwrap()[0]
+                .secret
+                .expose(),
+            b"KEY-2"
+        );
+        assert!(credentials_of(&at_second, &first.config, &store)
+            .unwrap_err()
+            .starts_with("PROVIDER_BINDING_CHANGED"));
+        assert!(
+            credentials_of(&at_first, &first.config, &store)
+                .unwrap_err()
+                .starts_with("CREDENTIAL_UNAVAILABLE"),
+            "the superseded revision's item is gone"
+        );
+
+        let (named, _) = resolve(&["--rpc-endpoints", "http://127.0.0.1:8899"]);
+        assert_eq!(named.config.rpc_endpoints, ["http://127.0.0.1:8899"]);
+        assert!(credentials_of(&at_second, &named.config, &store)
+            .unwrap()
+            .is_empty());
+
+        let copy = project("bind_copy");
+        std::fs::create_dir_all(copy.join(STORE)).unwrap();
+        for e in std::fs::read_dir(d.join(STORE)).unwrap() {
+            let e = e.unwrap();
+            std::fs::copy(e.path(), copy.join(STORE).join(e.file_name())).unwrap();
+        }
+        let mut r =
+            darkbot_solana::runtime_config::Resolved::for_mode("econ4h", &[], &|_| None).unwrap();
+        assert!(bind(&copy, &mut r)
+            .unwrap_err()
+            .starts_with("PROVIDER_REGISTRY_FOREIGN"));
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&copy);
     }
 
     /// DEC-18: a provider and its credential through the store — the secret is stored under its
@@ -1427,6 +1693,23 @@ mod tests {
         let mut unknown = helius();
         unknown.id = "anon".into();
         unknown.plan = Plan::Unknown;
+        // DEC-18 §4.2: one provider per endpoint and kind — a second entry on the same endpoint
+        // (another credential, another plan) is refused and never persisted.
+        let same = decide(
+            &d,
+            "a1",
+            None,
+            &ProviderAction::Add(unknown.clone()),
+            None,
+            &store,
+            8,
+        )
+        .unwrap();
+        assert!(
+            !same.applied && same.detail.starts_with("PROVIDER_ENDPOINT_DUPLICATE"),
+            "{same:?}"
+        );
+        unknown.endpoint = "https://anon.example".into();
         decide(
             &d,
             "a2",

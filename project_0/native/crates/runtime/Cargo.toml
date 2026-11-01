@@ -67,6 +67,11 @@ marginfi = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.12-
 anchor-lang = { version = "1.0.2", optional = true }
 
 [dev-dependencies]
+# The controlled-gap qualification proxy (`examples/p0-gap-ws-proxy.rs`, DEC-18: its upstream the
+# registry's WSS provider): the versions the WSS adapter of `darkbot-solana` already builds.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
 # R1: loopback WebSocket peer for the capture end-to-end test (same version the WSS adapter uses).
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
 # S1-02: the loopback gRPC server of the owner's source E2E tests.

@@ -882,7 +882,10 @@ fn transport() -> Result<&'static Transport, &'static str> {
     TRANSPORT
         .get_or_init(|| {
             let limits = &crate::runtime_config::active().limits;
+            // DEC-18 (review L1): no redirect — a credential never follows one to a host the run
+            // did not bind.
             let http = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
                 .pool_idle_timeout(Duration::from_millis(limits.rpc_pool_idle_ms))
                 .tcp_keepalive(Duration::from_millis(limits.rpc_tcp_keepalive_ms))
@@ -897,11 +900,44 @@ fn transport() -> Result<&'static Transport, &'static str> {
         .map_err(|code| *code)
 }
 
+/// DEC-18: a request of `method` to `endpoint` + `suffix` (a bound provider's endpoint, a
+/// sub-path or `""`) with the run's credential for the endpoint applied
+/// ([`crate::providers::authorize_path`]: in the URL, or as a header marked sensitive) — the one
+/// way every blocking HTTP transport (Jupiter, Jito, deployment, history reads) addresses a
+/// provider. A failure is a fixed code (no URL).
+pub fn authorized_blocking(
+    client: &reqwest::blocking::Client,
+    method: reqwest::Method,
+    endpoint: &str,
+    suffix: &str,
+) -> Result<reqwest::blocking::RequestBuilder, &'static str> {
+    let target =
+        crate::providers::authorize_path(endpoint, suffix).map_err(|_| "PROVIDER_CREDENTIAL")?;
+    let mut request = client.request(method, target.url());
+    if let Some((name, value)) = target.header() {
+        let mut value =
+            reqwest::header::HeaderValue::from_str(value).map_err(|_| "PROVIDER_CREDENTIAL")?;
+        value.set_sensitive(true);
+        request = request.header(name, value);
+    }
+    Ok(request)
+}
+
+/// DEC-18: a credential as a header value, marked sensitive (never in a debug print).
+fn sensitive(value: &str) -> Result<reqwest::header::HeaderValue, CallError> {
+    let mut v = reqwest::header::HeaderValue::from_str(value)
+        .map_err(|_| CallError::Transport("RPC_CREDENTIAL"))?;
+    v.set_sensitive(true);
+    Ok(v)
+}
+
 /// V2-07: the blocking HTTP client settings of the other host classes (Jupiter, Jito): connect
 /// timeout, pool idle and TCP keepalive from `Limits`, like the RPC transport.
 pub fn blocking_http() -> reqwest::blocking::ClientBuilder {
     let limits = &crate::runtime_config::active().limits;
+    // DEC-18: no redirect (a credential never follows one to a host the run did not bind).
     reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
         .pool_idle_timeout(Duration::from_millis(limits.rpc_pool_idle_ms))
         .tcp_keepalive(Duration::from_millis(limits.rpc_tcp_keepalive_ms))
@@ -1035,12 +1071,14 @@ impl BudgetedSender {
             } else {
                 &self.url
             };
-            let response = http
-                .post(endpoint)
-                .timeout(remaining)
-                .json(&body)
-                .send()
-                .await;
+            // DEC-18: the endpoint's credential, applied after the endpoint comparisons above.
+            let target = crate::providers::authorize(endpoint)
+                .map_err(|_| CallError::Transport("RPC_CREDENTIAL"))?;
+            let mut post = http.post(target.url()).timeout(remaining).json(&body);
+            if let Some((name, value)) = target.header() {
+                post = post.header(name, sensitive(value)?);
+            }
+            let response = post.send().await;
             let mut response = match response {
                 Ok(r) => r,
                 Err(_) => {

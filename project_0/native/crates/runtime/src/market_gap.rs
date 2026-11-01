@@ -278,19 +278,23 @@ impl RpcFetcher {
         let body = json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params});
         darkbot_solana::provider::shared()
             .account_bytes(serde_json::to_vec(&body).map_err(|_| "RPC_ENCODE")?.len())?;
-        let response = self
-            .client
-            .post(&self.url)
-            .timeout(remaining.min(Duration::from_millis(timeout_ms)))
-            .json(&body)
-            .send()
-            .map_err(|e| {
-                if e.is_timeout() {
-                    "RPC_TIMEOUT"
-                } else {
-                    "RPC_TRANSPORT"
-                }
-            })?;
+        // DEC-18: the bound provider's credential, applied by the transport.
+        let response = darkbot_solana::provider::authorized_blocking(
+            &self.client,
+            reqwest::Method::POST,
+            &self.url,
+            "",
+        )?
+        .timeout(remaining.min(Duration::from_millis(timeout_ms)))
+        .json(&body)
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                "RPC_TIMEOUT"
+            } else {
+                "RPC_TRANSPORT"
+            }
+        })?;
         darkbot_solana::provider::observe_response(&response, method)?;
         let limit = response_limit
             .min(64 * 1024 * 1024)

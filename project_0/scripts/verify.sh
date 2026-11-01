@@ -2,6 +2,8 @@
 # Read-only historical verification. No signer, build, wallet or trading process.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# DEC-18: the providers are the project's registry selection (bound at the tool's start).
+export P0_PROJECT_DIR="$(cd "$DIR/.." && pwd)"
 if [[ " ${*} " != *" --help "* && " ${*} " != *" --self-test "* && " ${*} " != *" --offline "* ]]; then
   ENV_FILE="${P0_ENV_FILE:-$DIR/../.env}"
   if [[ -f "$ENV_FILE" ]]; then

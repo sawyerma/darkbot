@@ -209,9 +209,15 @@ pub(super) fn prepare(
             "admission: approved network audit verified; identities bind at the first Ready".into(),
         );
     }
-    let ws_url = config::require("P0_WS_URL")?;
+    // DEC-18: the bound providers' endpoints (the registry's selection or named loopback ones).
+    let endpoint = |key: &str| {
+        darkbot_solana::runtime_config::active()
+            .endpoint_value(key)
+            .ok_or_else(|| config::ConfigError::Missing(key.into()))
+    };
+    let ws_url = endpoint("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
-    let rpc_url = config::require("P0_RPC_URL")?;
+    let rpc_url = endpoint("P0_RPC_URL")?;
     let program = Pubkey::from_str(&config::require("P0_PROGRAM_ID")?)?;
     let mode = config::require("P0_MODE")?;
     if mode != "shadow" && mode != "live" && !(mode == "econ4h" && econ.is_some()) {
@@ -643,9 +649,6 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let routes = JupiterV2RouteProvider::new(
         liquidator,
-        std::env::var("P0_JUPITER_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
         operational.max_slippage_bps,
         u8::try_from(operational.jupiter_max_accounts)?,
         true,

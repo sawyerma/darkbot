@@ -56,11 +56,10 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
   set +a
 fi
-export P0_GAP_UPSTREAM_WS_URL="${P0_MARKET_WS_URL:-${P0_WS_URL:-}}"
-if [[ -z "$P0_GAP_UPSTREAM_WS_URL" && -n "${HELIUS_API_KEY:-}" ]]; then
-  export P0_GAP_UPSTREAM_WS_URL="wss://mainnet.helius-rpc.com/?api-key=$HELIUS_API_KEY"
-fi
-[[ -n "$P0_GAP_UPSTREAM_WS_URL" ]] || { echo 'missing market upstream endpoint' >&2; exit 2; }
+# DEC-18: the proxy's upstream is the project's selected WSS provider with its keychain
+# credential (the proxy binds the registry itself); no endpoint or key from the environment.
+export P0_PROJECT_DIR="$ROOT/project_0"
+unset P0_GAP_UPSTREAM_WS_URL
 case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   false:false|0:0|false:0|0:false) ;;
   *) echo 'LIVE and submission must be disabled' >&2; exit 2 ;;
@@ -82,7 +81,7 @@ cleanup() {
   if [[ -n "$proxy_pid" ]]; then kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
-cargo build --locked --manifest-path "$ROOT/project_0/native/Cargo.toml" -p darkbot-solana --example p0-gap-ws-proxy > "$scratch/build.log" 2>&1
+cargo build --locked --manifest-path "$ROOT/project_0/native/Cargo.toml" -p darkbot-runner --example p0-gap-ws-proxy > "$scratch/build.log" 2>&1
 "${CARGO_TARGET_DIR:-$ROOT/project_0/native/target}/debug/examples/p0-gap-ws-proxy" > "$scratch/proxy.stdout" 2> "$scratch/proxy.log" &
 proxy_pid=$!
 for _ in {1..300}; do

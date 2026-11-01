@@ -998,7 +998,7 @@ fn market_config_needs_no_keypair_and_validates_source_and_commitment() {
         (logs_no_rpc.source, logs_no_rpc.rpc_url.clone()),
         (MarketSource::Logs, None)
     );
-    assert!(MarketConfig::from_lookup(&env(&[base[1]]), 0).is_err()); // neither P0_WS_URL nor HELIUS_API_KEY
+    assert!(MarketConfig::from_lookup(&env(&[base[1]]), 0).is_err()); // no P0_WS_URL
     let logs = [
         base[0],
         base[1],
@@ -1084,8 +1084,8 @@ fn market_mode_has_no_signing_simulation_or_submission_path() {
         .expect("market branch present");
     let run_fn = main.find("fn run()").expect("run()");
     let rpc_url = main
-        .find(concat!("config::require(\"P0_", "RPC_URL\")"))
-        .expect("rpc url read");
+        .find(concat!("endpoint(\"P0_", "RPC_URL\")"))
+        .expect("rpc url read (the bound provider's endpoint, DEC-18)");
     assert!(run_fn < branch && branch < rpc_url);
 }
 
@@ -1233,48 +1233,37 @@ fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
     move |k: &str| m.get(k).cloned()
 }
 
-// [R4-A2]
+// [R4-A2] DEC-18 §1.3.2: the capture resolves no URL of its own — a key in the environment never
+// makes an endpoint (before: the Helius endpoints with the key in their query); the endpoints are
+// the operational configuration's export.
 #[test]
-fn transactions_with_helius_key_uses_enhanced_mainnet_endpoint() {
+fn a_key_in_the_environment_never_makes_a_capture_endpoint() {
     let pid = darkbot_project0::protocol::PROGRAM_ID_MAINNET;
-    let c = MarketConfig::from_lookup(
-        &env_of(&[("P0_PROGRAM_ID", pid), ("HELIUS_API_KEY", "K")]),
-        0,
-    )
-    .unwrap();
-    assert_eq!(c.ws_url, "wss://atlas-mainnet.helius-rpc.com/?api-key=K");
-    assert_eq!(c.rpc_url, None); // transactions needs no enrichment RPC
-    let l = MarketConfig::from_lookup(
-        &env_of(&[
-            ("P0_PROGRAM_ID", pid),
-            ("HELIUS_API_KEY", "K"),
-            ("P0_MARKET_SOURCE", "logs"),
-        ]),
-        0,
-    )
-    .unwrap();
-    assert_eq!(l.ws_url, "wss://mainnet.helius-rpc.com/?api-key=K");
-    assert_eq!(
-        l.rpc_url.as_deref(),
-        Some("https://mainnet.helius-rpc.com/?api-key=K")
-    );
-}
-
-#[test]
-fn explicit_ws_url_overrides_helius_derived_url() {
-    let pid = darkbot_project0::protocol::PROGRAM_ID_MAINNET;
+    for source in ["transactions", "logs"] {
+        let e = MarketConfig::from_lookup(
+            &env_of(&[
+                ("P0_PROGRAM_ID", pid),
+                ("HELIUS_API_KEY", "K"),
+                ("P0_MARKET_SOURCE", source),
+            ]),
+            0,
+        )
+        .unwrap_err();
+        assert!(e.starts_with("missing required env: P0_WS_URL"), "{e}");
+        assert!(!e.contains("api-key") && !e.contains("helius"), "{e}");
+    }
     let c = MarketConfig::from_lookup(
         &env_of(&[
             ("P0_PROGRAM_ID", pid),
             ("HELIUS_API_KEY", "K"),
-            ("P0_WS_URL", "wss://mine/?k=1"),
-            ("P0_RPC_URL", "https://mine-rpc"),
+            ("P0_WS_URL", "wss://mine.invalid"),
+            ("P0_RPC_URL", "https://mine-rpc.invalid"),
         ]),
         0,
     )
     .unwrap();
-    assert_eq!(c.ws_url, "wss://mine/?k=1");
-    assert_eq!(c.rpc_url.as_deref(), Some("https://mine-rpc"));
+    assert_eq!(c.ws_url, "wss://mine.invalid");
+    assert_eq!(c.rpc_url.as_deref(), Some("https://mine-rpc.invalid"));
 }
 
 // [R4-A1] Real entry path: env/config -> production finishing path (no test-only branch).
@@ -3085,6 +3074,7 @@ fn unbounded_capture(
     fs::create_dir_all(&project).unwrap();
     let config = darkbot_solana::runtime_config::RuntimeConfig {
         rpc_endpoints: vec!["https://rpc.invalid".into()],
+        providers: crate::orchestration::provider_registry::fixture_rpc(&["https://rpc.invalid"]),
         ..Default::default()
     };
     // Provider evidence covering the 2-s runway of 1-s windows, in the controller's store.
@@ -3092,9 +3082,7 @@ fn unbounded_capture(
         providers: vec![ProviderProof {
             policy: "FREE_ONLY".into(),
             passed: true,
-            provider_binding: crate::analytics::journal::hex(
-                &solana_sdk::hash::hash(b"https://rpc.invalid").to_bytes(),
-            ),
+            provider_binding: config.providers[0].binding.clone(),
             measured_at_unix_s: unix_now_s().unwrap() as f64,
             evidence_sha256: Some("a".repeat(64)),
             allowed_rps: config.limits.rpc_rps as f64,

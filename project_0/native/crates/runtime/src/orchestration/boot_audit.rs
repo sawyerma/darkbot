@@ -230,10 +230,11 @@ pub fn identity_with(
 }
 
 /// The operational config of a `p0ctl run start` of operating mode `mode` (DEC-05: through its
-/// profile): its operational arguments (after `--`) plus the run duration as CLI value. One rule
-/// for p0ctl and for the runtime it launches (X1), which re-resolves it from its own arguments
-/// and environment.
+/// profile): its operational arguments (after `--`) plus the run duration as CLI value, bound to
+/// the project's provider registry (DEC-18). One rule for p0ctl and for the runtime it launches
+/// (X1), which re-resolves it from its own arguments and environment.
 pub fn start_config(
+    project: &Path,
     mode: &str,
     operational: &[String],
     duration: &str,
@@ -241,7 +242,20 @@ pub fn start_config(
 ) -> Result<darkbot_solana::runtime_config::Resolved, String> {
     let mut args = operational.to_vec();
     args.extend(["--duration".into(), duration.into()]);
-    darkbot_solana::runtime_config::Resolved::for_mode(mode, &args, env)
+    mode_config(project, mode, &args, env)
+}
+
+/// The operational config of operating mode `mode` with `args`, bound to the project's provider
+/// registry (DEC-18): the one resolution of an audit, a doctor and a start.
+pub fn mode_config(
+    project: &Path,
+    mode: &str,
+    args: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<darkbot_solana::runtime_config::Resolved, String> {
+    let mut resolved = darkbot_solana::runtime_config::Resolved::for_mode(mode, args, env)?;
+    super::provider_registry::bind(project, &mut resolved)?;
+    Ok(resolved)
 }
 
 /// X1: the identity of a runtime launched by `p0ctl run start` (`args` = its operational
@@ -256,7 +270,7 @@ pub fn launched_identity(
     let duration = env("P0_MEASUREMENT_DURATION")
         .ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION")?;
     let mode = env("P0_MODE").ok_or("BOOT_NETWORK_AUDIT_MISSING: P0_MODE")?;
-    let resolved = start_config(&mode, args, &duration, env)
+    let resolved = start_config(project, &mode, args, &duration, env)
         .map_err(|e| format!("BOOT_IDENTITY_DRIFT: runtime_config ({e})"))?;
     identity_with(project, flags, &resolved.config)
 }
@@ -1784,7 +1798,9 @@ pub fn market_admission(
         &|| {
             let horizon = get("P0_MEASUREMENT_DURATION")
                 .ok_or_else(|| "BOOT_NETWORK_AUDIT_MISSING: P0_MEASUREMENT_DURATION".to_string())?;
-            start_config(MARKET_MODE, &[], &horizon, get).map(|r| r.config)
+            let project = get("P0_PROJECT_DIR")
+                .ok_or_else(|| "BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
+            start_config(Path::new(&project), MARKET_MODE, &[], &horizon, get).map(|r| r.config)
         },
         now,
     )

@@ -751,6 +751,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let config = darkbot_solana::runtime_config::RuntimeConfig {
             rpc_endpoints: vec!["https://rpc.invalid".into()],
+            providers: crate::orchestration::provider_registry::fixture_rpc(&[
+                "https://rpc.invalid",
+            ]),
             ..Default::default()
         };
         let mut b = binding(60, 120);

@@ -53,7 +53,10 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
                 }
             })?;
         response = (|| {
-            let resp=client.post(url).timeout(deadline.saturating_duration_since(Instant::now()).min(request))
+            // DEC-18: the bound provider's credential, applied by the transport.
+            let resp=darkbot_solana::provider::authorized_blocking(&client, reqwest::Method::POST, url, "")
+                .map_err(|_| "DEPLOYMENT_RPC_CREDENTIAL")?
+                .timeout(deadline.saturating_duration_since(Instant::now()).min(request))
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]}))
                 .send().map_err(|_| "DEPLOYMENT_RPC_TRANSPORT")?;
             darkbot_solana::provider::observe_response(&resp, "getAccountInfo").map_err(|e| {

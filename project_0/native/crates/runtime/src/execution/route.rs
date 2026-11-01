@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
 /// The native mint (wrapped SOL).
 pub use crate::execution::one_shot::exit::WSOL_MINT;
@@ -376,18 +375,37 @@ pub struct JupiterV2RouteProvider {
     /// D01: upper bound of one Jupiter request, also when the candidate deadline is further
     /// away (`jupiter_timeout_ms`).
     request_timeout: Duration,
+    /// DEC-18 (P0-021): the bound Jupiter provider's endpoint — the registry's selection or the
+    /// contract's default profile; its credential is the transport's (`authorize_path`).
     base_url: String,
     taker: Pubkey,
-    api_key: Option<String>,
     slippage_bps: u64,
     max_accounts: u8,
     fast: bool,
 }
 
 impl JupiterV2RouteProvider {
+    /// The router of the active operational configuration ([`Self::new_with`]).
     pub fn new(
         taker: Pubkey,
-        api_key: Option<String>,
+        slippage_bps: u64,
+        max_accounts: u8,
+        fast: bool,
+    ) -> Result<Self, String> {
+        Self::new_with(
+            darkbot_solana::runtime_config::active(),
+            taker,
+            slippage_bps,
+            max_accounts,
+            fast,
+        )
+    }
+
+    /// The router of `config`: its bound Jupiter provider (DEC-18: endpoint and, by its
+    /// credential, P6-MT.7's authenticated or anonymous bucket) and its `jupiter_timeout_ms`.
+    pub fn new_with(
+        config: &darkbot_solana::runtime_config::RuntimeConfig,
+        taker: Pubkey,
         slippage_bps: u64,
         max_accounts: u8,
         fast: bool,
@@ -396,19 +414,20 @@ impl JupiterV2RouteProvider {
         if max_accounts == 0 || u64::from(max_accounts) > most {
             return Err(format!("Jupiter max_accounts must be 1..={most}"));
         }
-        let limits = &darkbot_solana::runtime_config::active().limits;
-        let request_timeout = Duration::from_millis(limits.jupiter_timeout_ms);
+        let jupiter = config
+            .provider_of(darkbot_solana::providers::ProviderKind::Jupiter)
+            .ok_or("JUPITER_PROVIDER_UNBOUND: no Jupiter provider in the configuration")?;
+        let request_timeout = Duration::from_millis(config.limits.jupiter_timeout_ms);
         Ok(Self {
-            budget: JupiterBudget::shared(api_key.is_some()),
+            budget: JupiterBudget::shared(jupiter.credential.is_some()),
             class: JupiterClass::Candidate,
             client: darkbot_solana::provider::blocking_http()
                 .timeout(request_timeout)
                 .build()
                 .map_err(|e| format!("jupiter client: {e}"))?,
             request_timeout,
-            base_url: DEFAULT_BASE.into(),
+            base_url: jupiter.endpoint.clone(),
             taker,
-            api_key,
             slippage_bps,
             max_accounts,
             fast,
@@ -476,29 +495,30 @@ impl JupiterV2RouteProvider {
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::JupiterBudgetRefused, 1);
             format!("jupiter /build: {code}")
         })?;
-        let url = format!("{}/build", self.base_url.trim_end_matches('/'));
-        let mut req = self
-            .client
-            .get(url)
-            .timeout(remaining.min(self.request_timeout))
-            .query(&[
-                ("inputMint", from_mint.to_string()),
-                ("outputMint", to_mint.to_string()),
-                ("amount", amount.to_string()),
-                ("taker", self.taker.to_string()),
-                ("slippageBps", self.slippage_bps.to_string()),
-                (
-                    "maxAccounts",
-                    max_accounts.min(self.max_accounts).max(1).to_string(),
-                ),
-                ("wrapAndUnwrapSol", wrap_and_unwrap_sol.to_string()),
-                ("forJitoBundle", for_jito_bundle.to_string()),
-            ]);
+        // DEC-18: the provider's credential, applied by the transport (never logged).
+        let mut req = darkbot_solana::provider::authorized_blocking(
+            &self.client,
+            reqwest::Method::GET,
+            &self.base_url,
+            "/build",
+        )
+        .map_err(|code| format!("jupiter /build: {code}"))?
+        .timeout(remaining.min(self.request_timeout))
+        .query(&[
+            ("inputMint", from_mint.to_string()),
+            ("outputMint", to_mint.to_string()),
+            ("amount", amount.to_string()),
+            ("taker", self.taker.to_string()),
+            ("slippageBps", self.slippage_bps.to_string()),
+            (
+                "maxAccounts",
+                max_accounts.min(self.max_accounts).max(1).to_string(),
+            ),
+            ("wrapAndUnwrapSol", wrap_and_unwrap_sol.to_string()),
+            ("forJitoBundle", for_jito_bundle.to_string()),
+        ]);
         if self.fast {
             req = req.query(&[("mode", "fast")]);
-        }
-        if let Some(key) = self.api_key.as_deref() {
-            req = req.header("x-api-key", key);
         }
         // [MT0] latency + outcome per request (measurement only).
         let mt0_start = std::time::Instant::now();
@@ -1419,7 +1439,7 @@ pub(crate) mod tests {
             Pubkey::new_unique(),
         );
         let (url, requests) = serve_build_logged(serde_json::json!({}));
-        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+        let provider = JupiterV2RouteProvider::new(taker, 50, 64, false)
             .unwrap()
             .with_base_url(url)
             .unpaced();
@@ -1478,7 +1498,7 @@ pub(crate) mod tests {
             if let Some(t) = threshold {
                 body["otherAmountThreshold"] = t.into();
             }
-            let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+            let provider = JupiterV2RouteProvider::new(taker, 50, 64, false)
                 .unwrap()
                 .with_base_url(serve_build(body))
                 .unpaced();
@@ -1689,7 +1709,7 @@ pub(crate) mod tests {
         );
         let deadline = || Instant::now() + Duration::from_secs(5);
         let (url, requests) = serve_build_logged(serde_json::json!({}));
-        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+        let provider = JupiterV2RouteProvider::new(taker, 50, 64, false)
             .unwrap()
             .with_base_url(url)
             .with_budget(JupiterBudget::new(Duration::from_secs(3_600), 1, 1, 0));
@@ -1716,7 +1736,7 @@ pub(crate) mod tests {
         let (url, requests) = serve_raw(
             "HTTP/1.1 429 Too Many Requests\r\nretry-after: 30\r\ncontent-type: application/json",
         );
-        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+        let provider = JupiterV2RouteProvider::new(taker, 50, 64, false)
             .unwrap()
             .with_base_url(url)
             .unpaced();
@@ -1728,18 +1748,78 @@ pub(crate) mod tests {
             .unwrap_err();
         assert!(held.contains(JUPITER_RATE_LIMITED), "{held}");
         assert_eq!(requests.lock().unwrap().len(), 1);
-        // One bucket per tier in the process.
-        let new = |key: Option<&str>| {
-            JupiterV2RouteProvider::new(taker, key.map(str::to_string), 50, 64, false).unwrap()
+        // One bucket per tier in the process: the bound provider's credential is the tier.
+        let anonymous = darkbot_solana::runtime_config::RuntimeConfig::default();
+        let keyed = |revision| {
+            let mut c = anonymous.clone();
+            let mut r = darkbot_solana::providers::ProviderRegistry::empty();
+            (r.version, r.uid, r.project) = (1, "0123456789abcdef".into(), "/p".into());
+            r.providers
+                .push(darkbot_solana::providers::ProviderDescriptor {
+                    id: "jupiter-key".into(),
+                    kind: darkbot_solana::providers::ProviderKind::Jupiter,
+                    endpoint: "https://api.jup.ag/swap/v2".into(),
+                    auth: darkbot_solana::providers::AuthKind::Header("x-api-key".into()),
+                    credential: Some("jupiter".into()),
+                    priority: 0,
+                    capacity_rps: None,
+                    plan: darkbot_solana::providers::Plan::Free,
+                    entitlement: "jupiter-free".into(),
+                    qualification: None,
+                    enabled: true,
+                });
+            r.credentials
+                .push(darkbot_solana::providers::CredentialMeta {
+                    id: "jupiter".into(),
+                    revision,
+                    nonce: "aaaaaaaaaaaaaaaa".into(),
+                    state: darkbot_solana::providers::CredentialState::Active,
+                    created_unix_s: 1,
+                    origin: "input".into(),
+                });
+            c.providers = vec![r.bound(&r.providers[0]).unwrap()];
+            c
         };
-        assert!(std::sync::Arc::ptr_eq(&new(None).budget, &new(None).budget));
+        let new = |c: &darkbot_solana::runtime_config::RuntimeConfig| {
+            JupiterV2RouteProvider::new_with(c, taker, 50, 64, false).unwrap()
+        };
         assert!(std::sync::Arc::ptr_eq(
-            &new(Some("a")).budget,
-            &new(Some("b")).budget
+            &new(&anonymous).budget,
+            &new(&anonymous).budget
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &new(&keyed(1)).budget,
+            &new(&keyed(2)).budget
         ));
         assert!(!std::sync::Arc::ptr_eq(
-            &new(None).budget,
-            &new(Some("a")).budget
+            &new(&anonymous).budget,
+            &new(&keyed(1)).budget
         ));
+    }
+
+    /// DEC-18 (P0-021): the router takes its configuration's bound Jupiter provider — the
+    /// contract's default profile (the anonymous Swap API) until the registry selects one — and
+    /// its `jupiter_timeout_ms` (a value other than the registry default reaches the request
+    /// bound); without a Jupiter provider there is no router (no constructor constant).
+    #[test]
+    fn the_router_takes_its_bound_provider_and_its_configured_timeout() {
+        let taker = Pubkey::new_unique();
+        let mut c = darkbot_solana::runtime_config::RuntimeConfig::default();
+        let default = JupiterV2RouteProvider::new_with(&c, taker, 50, 64, false).unwrap();
+        assert_eq!(default.base_url, "https://api.jup.ag/swap/v2");
+        assert_eq!(
+            default.request_timeout,
+            Duration::from_millis(
+                darkbot_solana::runtime_config::Limits::default().jupiter_timeout_ms
+            )
+        );
+        c.limits.jupiter_timeout_ms = 777;
+        let configured = JupiterV2RouteProvider::new_with(&c, taker, 50, 64, false).unwrap();
+        assert_eq!(configured.request_timeout, Duration::from_millis(777));
+        c.providers.clear();
+        assert!(JupiterV2RouteProvider::new_with(&c, taker, 50, 64, false)
+            .err()
+            .unwrap()
+            .starts_with("JUPITER_PROVIDER_UNBOUND"));
     }
 }

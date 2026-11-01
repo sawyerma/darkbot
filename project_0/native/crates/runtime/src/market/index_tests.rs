@@ -1232,7 +1232,7 @@ fn dec08_the_driver_runs_and_resumes_the_index() {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    let (text, verified) = strict_driver::cli(&args).unwrap();
+    let (text, verified) = strict_driver::cli(&args, None).unwrap();
     assert!(verified, "{text}");
     assert!(text.contains("status=INDEX_VERIFIED reason=none"), "{text}");
     assert!(text.contains("CANONICAL_VERIFIED=false"), "{text}");
@@ -1666,7 +1666,7 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
         }
         a
     };
-    let (text, verified) = strict_driver::cli(&args(false)).unwrap();
+    let (text, verified) = strict_driver::cli(&args(false), None).unwrap();
     assert!(!verified);
     assert!(
         text.contains(
@@ -1696,7 +1696,7 @@ fn dec08_the_driver_runs_and_resumes_the_crosscheck() {
             end_s,
         );
     }
-    let (text, verified) = strict_driver::cli(&args(true)).unwrap();
+    let (text, verified) = strict_driver::cli(&args(true), None).unwrap();
     assert!(verified, "{text}");
     assert!(
         text.contains("status=CROSSCHECK_VERIFIED reason=none"),

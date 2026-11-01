@@ -10,7 +10,7 @@ use darkbot_project0::{
     health::{crate_impl::CrateHealth, HealthEngine},
     protocol,
 };
-use darkbot_solana::{provider, runtime_config::RuntimeConfig};
+use darkbot_solana::{provider, providers::ProviderKind, runtime_config::RuntimeConfig};
 use marginfi_type_crate::types::{Bank, MarginfiAccount};
 use solana_client::rpc_request::RpcRequest;
 use solana_commitment_config::CommitmentConfig;
@@ -572,16 +572,21 @@ fn run(
     } else {
         AuditVerdict::Ready
     };
+    // DEC-18 §1.2: the audited providers' secret-free bindings (never a hash of the URL).
     let rpc_binding = c
-        .rpc_endpoints
-        .first()
-        .map(|s| hash(s.as_bytes()))
-        .ok_or("BOOT_RPC_REQUIRED")?;
+        .bound(
+            ProviderKind::Rpc,
+            c.rpc_endpoints.first().ok_or("BOOT_RPC_REQUIRED")?,
+        )?
+        .binding
+        .clone();
     let wss_binding = c
-        .wss_endpoints
-        .first()
-        .map(|s| hash(s.as_bytes()))
-        .ok_or("BOOT_WSS_REQUIRED")?;
+        .bound(
+            ProviderKind::Wss,
+            c.wss_endpoints.first().ok_or("BOOT_WSS_REQUIRED")?,
+        )?
+        .binding
+        .clone();
     let mut result = NetworkAudit {
         audit,
         observed_at,
@@ -653,8 +658,8 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     // so the audited identity is the started one; without it the mode's profile default (valid
     // only for a start of that default duration).
     let resolved = match val("--duration") {
-        Some(duration) => boot_audit::start_config(mode, operational, &duration, &env)?,
-        None => darkbot_solana::runtime_config::Resolved::for_mode(mode, operational, &env)?,
+        Some(duration) => boot_audit::start_config(project, mode, operational, &duration, &env)?,
+        None => boot_audit::mode_config(project, mode, operational, &env)?,
     };
     let ttl_source = ttl_source(&resolved.sources);
     resolved.activate()?;
@@ -688,18 +693,18 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
         &proof,
         now()? as f64,
     )?;
-    if proof.wss_provider_binding.as_deref()
-        != c.wss_endpoints
-            .first()
-            .map(|s| hash(s.as_bytes()))
-            .as_deref()
-        || !proof.wss_free_only
-    {
+    let wss = c.wss_endpoints.first().ok_or("BOOT_WSS_REQUIRED")?;
+    let wss = c.bound(ProviderKind::Wss, wss)?;
+    super::provider_evidence::free_registry_provider(wss)?;
+    if proof.wss_provider_binding.as_deref() != Some(wss.binding.as_str()) || !proof.wss_free_only {
         return Err("BOOT_WSS_FREE_ONLY_UNQUALIFIED".into());
     }
     if c.verification != "off" && !proof.archive_qualified {
         return Err("BOOT_ARCHIVE_UNQUALIFIED".into());
     }
+    // DEC-18: the bound providers' credentials, read once after the approval and before the
+    // first read — exactly the audited revisions (a rotation since refuses the audit).
+    super::provider_registry::install_credentials(&super::provider_registry::current(project)?, c)?;
     let output = val("--output").ok_or("BOOT_OUTPUT_REQUIRED")?;
     let mut writer =
         journal::Writer::create(Path::new(&output)).map_err(|_| "BOOT_EVIDENCE_CREATE")?;
@@ -923,6 +928,7 @@ mod tests {
     fn endpoints(c: &mut RuntimeConfig) {
         c.rpc_endpoints = vec!["https://rpc.invalid".into()];
         c.wss_endpoints = vec!["wss://rpc.invalid".into()];
+        super::super::provider_registry::bind_endpoints(c);
     }
     /// N1: the audit has its own budget, derived from the reads it runs and checked before any
     /// network access; the FE-01 observation limits do not shape it.
@@ -1260,6 +1266,7 @@ mod tests {
         let (mut c, all) = fe::tests::fixture();
         c.rpc_endpoints = vec!["https://rpc.invalid".into()];
         c.wss_endpoints = vec!["wss://wss.invalid".into()];
+        super::super::provider_registry::bind_endpoints(&mut c);
         let io = || Fixture {
             genesis: spec().genesis,
             all: all.clone(),
@@ -1297,8 +1304,9 @@ mod tests {
     fn cluster_pin_and_slot_contradictions_block_without_followup_reads() {
         let s = spec();
         let (mut c, all) = fe::tests::fixture();
-        c.rpc_endpoints = vec!["https://private.invalid/?api-key=SECRET".into()];
-        c.wss_endpoints = vec!["wss://private.invalid/?api-key=SECRET".into()];
+        c.rpc_endpoints = vec!["https://private.invalid".into()];
+        c.wss_endpoints = vec!["wss://private.invalid".into()];
+        super::super::provider_registry::bind_endpoints(&mut c);
         let mut io = Fixture {
             genesis: "wrong".into(),
             all,
@@ -1319,7 +1327,16 @@ mod tests {
         assert_eq!(io.reads, 1);
         assert_eq!(out.audit.verdict, AuditVerdict::Blocked);
         assert_eq!(out.audit.checks.len(), 6);
-        assert!(!format!("{out:?}").contains("SECRET"));
+        // DEC-18 §1.2: the record binds the providers' bindings, never an endpoint or its hash.
+        assert!(!format!("{out:?}").contains("private.invalid"));
+        assert_eq!(
+            (out.rpc_binding.as_str(), out.wss_binding.as_str()),
+            (
+                c.providers[0].binding.as_str(),
+                c.providers[1].binding.as_str()
+            )
+        );
+        assert_ne!(out.rpc_binding, hash(b"https://private.invalid"));
         io.genesis = s.genesis.clone();
         io.wrong_slot = true;
         assert!(cluster(&mut io, &s).unwrap_err().contains("CONTRADICTION"));
@@ -1352,6 +1369,7 @@ mod tests {
         let (mut c, s) = state();
         c.rpc_endpoints = vec!["https://rpc.invalid".into()];
         c.wss_endpoints = vec!["wss://rpc.invalid".into()];
+        super::super::provider_registry::bind_endpoints(&mut c);
         let spec = spec();
         let mut io = Fixture {
             genesis: spec.genesis.clone(),

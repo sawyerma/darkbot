@@ -251,7 +251,7 @@ pub fn canonical_endpoint(kind: ProviderKind, raw: &str) -> Result<String, Strin
         return Err("PROVIDER_URL_PATH_SECRET: a credential in the path is the provider's auth (path), never part of its endpoint".into());
     }
     let host = url.host_str().ok_or("PROVIDER_URL_HOST")?;
-    let loopback = matches!(host, "127.0.0.1" | "localhost" | "[::1]");
+    let loopback = loopback_host(host);
     let (tls, plain) = kind.schemes();
     if url.scheme() != tls && !(loopback && url.scheme() == plain) {
         return Err(format!("PROVIDER_URL_SCHEME: {} needs {tls}", kind.name()));
@@ -493,6 +493,52 @@ impl ProviderRegistry {
         self.credential_of(p).err()
     }
 
+    /// The providers of `kind` a run uses: the selected one, then — only with `fallback` — every
+    /// other enabled provider of the kind that could be selected, by priority (then id). No
+    /// selection: none (never an implicit choice). A selected provider that cannot be selected
+    /// now (disabled, unproven plan, revoked credential) refuses the run.
+    pub fn run_providers(
+        &self,
+        kind: ProviderKind,
+        fallback: bool,
+    ) -> Result<Vec<&ProviderDescriptor>, String> {
+        let Some(selected) = self.selected(kind) else {
+            return Ok(vec![]);
+        };
+        if let Some(block) = self.selection_block(selected) {
+            return Err(block);
+        }
+        let mut out = vec![selected];
+        if fallback {
+            let mut others: Vec<&ProviderDescriptor> = self
+                .providers
+                .iter()
+                .filter(|p| p.kind == kind && p.id != selected.id)
+                .filter(|p| self.selection_block(p).is_none())
+                .collect();
+            others.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
+            out.extend(others);
+        }
+        Ok(out)
+    }
+
+    /// A provider of this version as a run binds it: its active credential revision and binding.
+    pub fn bound(&self, p: &ProviderDescriptor) -> Result<BoundProvider, String> {
+        let credential = self.credential_of(p)?;
+        Ok(BoundProvider {
+            kind: p.kind,
+            id: p.id.clone(),
+            endpoint: p.endpoint.clone(),
+            auth: p.auth.clone(),
+            binding: p.binding_with(credential.as_ref()),
+            credential,
+            plan: p.plan,
+            capacity_rps: p.capacity_rps,
+            qualification: p.qualification.clone(),
+            registry_version: self.version,
+        })
+    }
+
     /// The keychain account of a credential revision of this registry.
     pub fn account(&self, credential: &CredentialRef) -> String {
         format!(
@@ -518,10 +564,16 @@ impl ProviderRegistry {
             return Err("PROVIDER_REGISTRY_PROJECT_MISSING".into());
         }
         let mut ids = std::collections::BTreeSet::new();
+        let mut endpoints = std::collections::BTreeSet::new();
         for p in &self.providers {
             p.validate()?;
             if !ids.insert(p.id.as_str()) {
                 return Err(format!("PROVIDER_DUPLICATE: {}", p.id));
+            }
+            // One provider per endpoint and kind: a run's endpoint names exactly one provider,
+            // and a second credential on the same endpoint is no way around its plan (§4.2).
+            if !endpoints.insert((p.kind, p.endpoint.as_str())) {
+                return Err(format!("PROVIDER_ENDPOINT_DUPLICATE: {}", p.id));
             }
         }
         let mut creds = std::collections::BTreeSet::new();
@@ -557,6 +609,365 @@ impl ProviderRegistry {
         }
         Ok(())
     }
+}
+
+/// The loopback hosts (a local node, an offline test): the one list of the endpoint rules.
+fn loopback_host(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+}
+
+/// Whether `endpoint` (canonical) names a loopback host: a local node or an offline test.
+pub fn is_local(endpoint: &str) -> bool {
+    reqwest::Url::parse(endpoint)
+        .ok()
+        .and_then(|u| u.host_str().map(loopback_host))
+        .unwrap_or(false)
+}
+
+/// The id of a local endpoint's provider ([`BoundProvider::local`]).
+pub const LOCAL_PROVIDER_ID: &str = "local";
+
+/// The version of the registry contract's default profiles ([`default_profile`]).
+pub const DEFAULT_PROFILES_VERSION: u32 = 1;
+
+/// The registry contract's default profile of `kind` (DEC-18 §1.3.2: a validated, versioned
+/// default, never a constructor's constant): the provider a run of that kind uses while the
+/// registry selects none of it. Version 1: Jupiter's anonymous free Swap API (no credential: the
+/// free tier, P6-MT.7's unauthenticated bucket). RPC, WSS, Geyser and Jito have none — their
+/// provider is the operator's selection (no implicit choice).
+pub fn default_profile(kind: ProviderKind) -> Option<ProviderDescriptor> {
+    match kind {
+        ProviderKind::Jupiter => Some(ProviderDescriptor {
+            id: "jupiter-default".into(),
+            kind,
+            endpoint: "https://api.jup.ag/swap/v2".into(),
+            auth: AuthKind::None,
+            credential: None,
+            priority: 0,
+            capacity_rps: None,
+            plan: Plan::Free,
+            entitlement: "jupiter-anonymous".into(),
+            qualification: None,
+            enabled: true,
+        }),
+        ProviderKind::Rpc | ProviderKind::Wss | ProviderKind::Geyser | ProviderKind::Jito => None,
+    }
+}
+
+/// A provider as a run uses it (DEC-18): a registry provider with the credential revision
+/// active when the run was configured and its binding — or a loopback endpoint the operator
+/// named (a local node, an offline test; no credential, plan unknown, never qualified). A remote
+/// endpoint is never used outside the registry. Part of the run's configuration, so its digest
+/// (the audit's and the run's identity) changes with every provider, endpoint, plan, capacity or
+/// credential revision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundProvider {
+    pub kind: ProviderKind,
+    pub id: String,
+    pub endpoint: String,
+    pub auth: AuthKind,
+    pub credential: Option<CredentialRef>,
+    pub plan: Plan,
+    pub capacity_rps: Option<u64>,
+    /// The provider evidence that qualified this binding in the registry, if any. Not part of
+    /// the configuration's digest (an audit binds its evidence itself).
+    #[serde(skip)]
+    pub qualification: Option<String>,
+    /// The registry version it was bound from; 0 for a local endpoint or a default profile. Not
+    /// part of the configuration's digest (review L5: a registry change that leaves a provider's
+    /// binding as it was — another provider, a priority — invalidates no audit of this one).
+    #[serde(skip)]
+    pub registry_version: u64,
+    /// [`ProviderRegistry::binding_of`]: the secret-free identity audits, evidence and run
+    /// manifests bind.
+    pub binding: String,
+}
+
+impl BoundProvider {
+    /// A loopback endpoint the operator named; a remote endpoint is refused (it is a registry
+    /// provider, `p0ctl provider add` and `select`). A refusal never echoes the endpoint.
+    pub fn local(kind: ProviderKind, raw: &str) -> Result<Self, String> {
+        let endpoint = canonical_endpoint(kind, raw)?;
+        if !is_local(&endpoint) {
+            return Err(format!(
+                "PROVIDER_ENDPOINT_UNREGISTERED: a remote {} endpoint is a provider of the registry (p0ctl provider add, select)",
+                kind.name()
+            ));
+        }
+        let descriptor = ProviderDescriptor {
+            id: LOCAL_PROVIDER_ID.into(),
+            kind,
+            endpoint,
+            auth: AuthKind::None,
+            credential: None,
+            priority: 0,
+            capacity_rps: None,
+            plan: Plan::Unknown,
+            entitlement: LOCAL_PROVIDER_ID.into(),
+            qualification: None,
+            enabled: true,
+        };
+        Ok(Self {
+            kind,
+            binding: descriptor.binding_with(None),
+            id: descriptor.id,
+            endpoint: descriptor.endpoint,
+            auth: AuthKind::None,
+            credential: None,
+            plan: Plan::Unknown,
+            capacity_rps: None,
+            qualification: None,
+            registry_version: 0,
+        })
+    }
+
+    /// The contract's default profile of `kind`, bound ([`default_profile`]).
+    pub fn default_of(kind: ProviderKind) -> Option<Self> {
+        let p = default_profile(kind)?;
+        Some(Self {
+            kind,
+            binding: p.binding_with(None),
+            id: p.id,
+            endpoint: p.endpoint,
+            auth: p.auth,
+            credential: None,
+            plan: p.plan,
+            capacity_rps: p.capacity_rps,
+            qualification: None,
+            registry_version: 0,
+        })
+    }
+
+    /// The structural rule of a bound provider: a canonical endpoint; outside the registry only a
+    /// local one on loopback or exactly the contract's default profile; a credential exactly
+    /// when it authenticates.
+    pub fn validate(&self) -> Result<(), String> {
+        if canonical_endpoint(self.kind, &self.endpoint)? != self.endpoint {
+            return Err("PROVIDER_URL_NOT_CANONICAL".into());
+        }
+        if self.registry_version == 0 {
+            let local = self.id == LOCAL_PROVIDER_ID && is_local(&self.endpoint);
+            if !local && Self::default_of(self.kind).as_ref() != Some(self) {
+                return Err(format!(
+                    "PROVIDER_ENDPOINT_UNREGISTERED: a remote {} endpoint is a provider of the registry (p0ctl provider add, select)",
+                    self.kind.name()
+                ));
+            }
+        } else if !id_ok(&self.id) {
+            return Err("PROVIDER_ID_INVALID ([a-z0-9_-]{1,32})".into());
+        }
+        if matches!(self.auth, AuthKind::None) != self.credential.is_none() {
+            return Err("PROVIDER_AUTH_WITHOUT_CREDENTIAL".into());
+        }
+        if self.binding.len() != 64 || !self.binding.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("PROVIDER_BINDING_INVALID".into());
+        }
+        Ok(())
+    }
+}
+
+/// A bound provider as an effective configuration and a run manifest record it: secret-free and
+/// without its endpoint (the binding binds it).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderBinding {
+    pub kind: ProviderKind,
+    pub id: String,
+    pub binding: String,
+    pub registry_version: u64,
+    /// The credential's id and revision (its nonce is part of the binding).
+    pub credential: Option<(String, u64)>,
+    pub plan: Plan,
+}
+
+impl BoundProvider {
+    pub fn summary(&self) -> ProviderBinding {
+        ProviderBinding {
+            kind: self.kind,
+            id: self.id.clone(),
+            binding: self.binding.clone(),
+            registry_version: self.registry_version,
+            credential: self.credential.as_ref().map(|c| (c.id.clone(), c.revision)),
+            plan: self.plan,
+        }
+    }
+}
+
+/// One provider credential as the transport applies it (DEC-18 §1.3.6): the canonical endpoint
+/// it authorizes, how, and the secret — read from the credential store once at the run's start,
+/// held in memory only, zeroized on drop, never printed.
+pub struct ActiveCredential {
+    pub endpoint: String,
+    pub auth: AuthKind,
+    pub secret: Secret,
+}
+
+impl std::fmt::Debug for ActiveCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ActiveCredential({} {})",
+            self.endpoint,
+            self.auth.text()
+        )
+    }
+}
+
+static ACTIVE_CREDENTIALS: std::sync::OnceLock<Vec<ActiveCredential>> = std::sync::OnceLock::new();
+
+/// Installs the run's credentials, once, before any transport is used: a run never changes its
+/// credentials (DEC-05; a rotation is effective at the next controlled start). Every entry
+/// authenticates (`AuthKind` not `None`), one per endpoint, its secret applicable as its
+/// authentication needs ([`authorize_with`]).
+pub fn activate_credentials(credentials: Vec<ActiveCredential>) -> Result<(), String> {
+    let mut endpoints = std::collections::BTreeSet::new();
+    for c in &credentials {
+        if matches!(c.auth, AuthKind::None) {
+            return Err("CREDENTIAL_WITHOUT_AUTH".into());
+        }
+        if !endpoints.insert(c.endpoint.as_str()) {
+            return Err("CREDENTIAL_ENDPOINT_DUPLICATE".into());
+        }
+        authorize_with(&credentials, &c.endpoint, "")?;
+    }
+    ACTIVE_CREDENTIALS
+        .set(credentials)
+        .map_err(|_| "CREDENTIALS_ALREADY_ACTIVE: a run's credentials are installed once".into())
+}
+
+/// A request target with its credential applied — the URL (with the credential in its query or
+/// path) and an authentication header. Zeroized on drop, never printed (`Debug` is redacted).
+pub struct Authorized {
+    url: Zeroizing<String>,
+    header: Option<(String, Zeroizing<String>)>,
+}
+
+impl Authorized {
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+    /// The authentication header (name, value), if the provider authenticates by one.
+    pub fn header(&self) -> Option<(&str, &str)> {
+        self.header.as_ref().map(|(n, v)| (n.as_str(), v.as_str()))
+    }
+}
+
+impl std::fmt::Debug for Authorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Authorized(<redacted>)")
+    }
+}
+
+/// RFC 3986 percent-encoding of everything but the unreserved characters.
+fn percent_encoded(bytes: &[u8]) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(bytes.len() * 3));
+    for &b in bytes {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// `endpoint` + `suffix` (a sub-path of the endpoint, e.g. an API's `/build`; `""` for the
+/// endpoint itself) with the credential of `credentials` for the endpoint applied — the path
+/// segment between endpoint and suffix, the query parameter after both; an endpoint without one
+/// is unchanged. A header value must be a valid HTTP header value (visible ASCII and spaces).
+pub fn authorize_with(
+    credentials: &[ActiveCredential],
+    endpoint: &str,
+    suffix: &str,
+) -> Result<Authorized, String> {
+    // One `/` between a path and the sub-path.
+    let join = |url: &mut Zeroizing<String>| {
+        if url.ends_with('/') && suffix.starts_with('/') {
+            url.push_str(&suffix[1..]);
+        } else {
+            url.push_str(suffix);
+        }
+    };
+    let mut url = Zeroizing::new(endpoint.to_string());
+    // An endpoint without a path (its canonical form drops a lone `/`) is the root path `/`: a
+    // request target in origin form (`GET /?api-key=…`, never `GET ?api-key=…`).
+    if !url
+        .split_once("://")
+        .is_some_and(|(_, rest)| rest.contains('/'))
+    {
+        url.push('/');
+    }
+    let Some(c) = credentials.iter().find(|c| c.endpoint == endpoint) else {
+        join(&mut url);
+        return Ok(Authorized { url, header: None });
+    };
+    let secret = c.secret.expose();
+    let mut header = None;
+    match &c.auth {
+        AuthKind::None => return Err("CREDENTIAL_WITHOUT_AUTH".into()),
+        AuthKind::Query(name) => {
+            join(&mut url);
+            let separator = if url.contains('?') { '&' } else { '?' };
+            url.push(separator);
+            url.push_str(name);
+            url.push('=');
+            url.push_str(&percent_encoded(secret));
+        }
+        AuthKind::PathSegment => {
+            if !url.ends_with('/') {
+                url.push('/');
+            }
+            url.push_str(&percent_encoded(secret));
+            join(&mut url);
+        }
+        AuthKind::Header(name) => {
+            let value = std::str::from_utf8(secret)
+                .ok()
+                .filter(|v| v.bytes().all(|b| b == b' ' || b.is_ascii_graphic()))
+                .ok_or("CREDENTIAL_HEADER_FORMAT: a header credential is visible ASCII")?;
+            header = Some((name.clone(), Zeroizing::new(value.to_string())));
+            join(&mut url);
+        }
+    }
+    Ok(Authorized { url, header })
+}
+
+/// `endpoint` as its transport sends to it: with the run's credential for it, if any
+/// ([`activate_credentials`]). The credential is applied here, after every comparison of
+/// endpoints (fallback, budget drift), so no compared, logged or persisted URL ever holds it.
+pub fn authorize(endpoint: &str) -> Result<Authorized, String> {
+    authorize_path(endpoint, "")
+}
+
+/// [`authorize`] of the sub-path `suffix` of `endpoint` ([`authorize_with`]).
+pub fn authorize_path(endpoint: &str, suffix: &str) -> Result<Authorized, String> {
+    authorize_with(
+        ACTIVE_CREDENTIALS.get().map_or(&[][..], Vec::as_slice),
+        endpoint,
+        suffix,
+    )
+}
+
+/// The WebSocket handshake request of `endpoint` with the run's credential for it applied
+/// ([`authorize`]): in the URL, or as a header marked sensitive. A failure is a fixed code.
+pub fn ws_client_request(
+    endpoint: &str,
+) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, &'static str> {
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        http::{HeaderName, HeaderValue},
+    };
+    let target = authorize(endpoint).map_err(|_| "WSS_CREDENTIAL")?;
+    let mut request = target
+        .url()
+        .into_client_request()
+        .map_err(|_| "WSS_ENDPOINT_INVALID")?;
+    if let Some((name, value)) = target.header() {
+        let mut v = HeaderValue::from_str(value).map_err(|_| "WSS_CREDENTIAL")?;
+        v.set_sensitive(true);
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| "WSS_CREDENTIAL")?;
+        request.headers_mut().insert(name, v);
+    }
+    Ok(request)
 }
 
 /// The store of provider credentials: one item per account (the registry's
@@ -954,6 +1365,214 @@ mod tests {
             bad.validate().unwrap_err(),
             "PROVIDER_REGISTRY_PROJECT_MISSING"
         );
+    }
+
+    /// DEC-18 §1.3.6: the transport applies a credential only to its own endpoint — percent-
+    /// encoded into the query parameter or the last path segment, or as the header — and
+    /// nowhere else; an endpoint without one is unchanged; nothing of it prints.
+    #[test]
+    fn a_credential_is_applied_by_its_endpoint_s_authentication_only() {
+        let secret = |s: &str| Secret::new(Zeroizing::new(s.as_bytes().to_vec()));
+        let credentials = vec![
+            ActiveCredential {
+                endpoint: "https://mainnet.helius-rpc.com".into(),
+                auth: AuthKind::Query("api-key".into()),
+                secret: secret("K&Y/1 2"),
+            },
+            ActiveCredential {
+                endpoint: "https://rpc.example/v2".into(),
+                auth: AuthKind::PathSegment,
+                secret: secret("SECRET0"),
+            },
+            ActiveCredential {
+                endpoint: "https://grpc.example".into(),
+                auth: AuthKind::Header("x-token".into()),
+                secret: secret("SECRET1"),
+            },
+        ];
+        let q = authorize_with(&credentials, "https://mainnet.helius-rpc.com", "").unwrap();
+        assert_eq!(
+            q.url(),
+            "https://mainnet.helius-rpc.com/?api-key=K%26Y%2F1%202"
+        );
+        assert_eq!(q.header(), None);
+        let p = authorize_with(&credentials, "https://rpc.example/v2", "").unwrap();
+        assert_eq!(p.url(), "https://rpc.example/v2/SECRET0");
+        let h = authorize_with(&credentials, "https://grpc.example", "").unwrap();
+        assert_eq!(
+            (h.url(), h.header()),
+            ("https://grpc.example/", Some(("x-token", "SECRET1")))
+        );
+        // A sub-path: the path segment before it, the query parameter after it.
+        assert_eq!(
+            authorize_with(&credentials, "https://mainnet.helius-rpc.com", "/build?a=1")
+                .unwrap()
+                .url(),
+            "https://mainnet.helius-rpc.com/build?a=1&api-key=K%26Y%2F1%202"
+        );
+        assert_eq!(
+            authorize_with(&credentials, "https://rpc.example/v2", "/build")
+                .unwrap()
+                .url(),
+            "https://rpc.example/v2/SECRET0/build"
+        );
+        assert_eq!(
+            authorize_with(&credentials, "https://grpc.example", "/x")
+                .unwrap()
+                .url(),
+            "https://grpc.example/x"
+        );
+        assert_eq!(
+            authorize_with(&credentials, "https://other.example/", "/api")
+                .unwrap()
+                .url(),
+            "https://other.example/api"
+        );
+        let other = authorize_with(&credentials, "https://other.example", "").unwrap();
+        assert_eq!(
+            (other.url(), other.header()),
+            ("https://other.example/", None)
+        );
+        for shown in [
+            format!("{q:?}"),
+            format!("{h:?}"),
+            format!("{credentials:?}"),
+        ] {
+            assert!(
+                !shown.contains("SECRET") && !shown.contains("K&Y"),
+                "{shown}"
+            );
+        }
+        let bad = vec![ActiveCredential {
+            endpoint: "https://grpc.example".into(),
+            auth: AuthKind::Header("x-token".into()),
+            secret: secret("ä"),
+        }];
+        assert!(authorize_with(&bad, "https://grpc.example", "")
+            .unwrap_err()
+            .starts_with("CREDENTIAL_HEADER_FORMAT"));
+    }
+
+    /// DEC-18 (review H2): the WSS handshake of a provider authenticating by a query parameter at
+    /// a root endpoint carries its credential in an origin-form request target (`/?api-key=…`;
+    /// before: `?api-key=…`, refused by a server) — through the run's installed credentials, the
+    /// WSS transport's request builder and a real handshake. The one credential installation of
+    /// this test binary.
+    #[test]
+    fn a_wss_query_credential_is_an_origin_form_request_target() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut target = String::new();
+                let _ws =
+                    tokio_tungstenite::accept_hdr_async(socket, |r: &Request, w: Response| {
+                        target = r.uri().to_string();
+                        Ok(w)
+                    })
+                    .await
+                    .unwrap();
+                target
+            });
+            activate_credentials(vec![ActiveCredential {
+                endpoint: endpoint.clone(),
+                auth: AuthKind::Query("api-key".into()),
+                secret: Secret::new(Zeroizing::new(b"WSS-SECRET".to_vec())),
+            }])
+            .unwrap();
+            let request = ws_client_request(&endpoint).unwrap();
+            assert_eq!(
+                request.uri().path_and_query().unwrap().as_str(),
+                "/?api-key=WSS-SECRET"
+            );
+            let _client = tokio_tungstenite::connect_async(request).await.unwrap();
+            assert_eq!(server.await.unwrap(), "/?api-key=WSS-SECRET");
+            // An endpoint without a credential stays as it is (its root path).
+            let other = ws_client_request("ws://127.0.0.1:9").unwrap();
+            assert_eq!(other.uri().path_and_query().unwrap().as_str(), "/");
+        });
+    }
+
+    /// DEC-18: a named endpoint is a local provider only on loopback (a remote one is the
+    /// registry's); a bound provider validates whole; one provider per endpoint and kind; a run
+    /// takes the selection, with fallback the selectable others by priority, never an implicit
+    /// choice.
+    #[test]
+    fn a_run_binds_the_selection_or_a_local_endpoint() {
+        let local = BoundProvider::local(ProviderKind::Rpc, "http://127.0.0.1:8899/").unwrap();
+        assert_eq!(
+            (
+                local.id.as_str(),
+                local.endpoint.as_str(),
+                local.registry_version
+            ),
+            ("local", "http://127.0.0.1:8899", 0)
+        );
+        assert!(local.validate().is_ok());
+        for remote in ["https://rpc.example", "https://mainnet.helius-rpc.com"] {
+            assert!(BoundProvider::local(ProviderKind::Rpc, remote)
+                .unwrap_err()
+                .starts_with("PROVIDER_ENDPOINT_UNREGISTERED"));
+        }
+        let mut forged = local.clone();
+        forged.endpoint = "https://rpc.example".into();
+        assert!(forged
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_ENDPOINT_UNREGISTERED"));
+        let mut r = ProviderRegistry::empty();
+        r.version = 2;
+        r.uid = "0123456789abcdef".into();
+        r.project = "/p".into();
+        r.credentials.push(meta(1, "aaaaaaaaaaaaaaaa"));
+        let mut a = helius();
+        let mut b = helius();
+        b.id = "backup".into();
+        b.endpoint = "https://backup.example".into();
+        b.priority = 7;
+        let mut c = b.clone();
+        c.id = "alpha".into();
+        c.endpoint = "https://alpha.example".into();
+        c.priority = 3;
+        let mut off = b.clone();
+        off.id = "off".into();
+        off.endpoint = "https://off.example".into();
+        off.enabled = false;
+        a.priority = 9;
+        r.providers = vec![a, b, c, off];
+        assert!(r.run_providers(ProviderKind::Rpc, true).unwrap().is_empty());
+        r.selected.push((ProviderKind::Rpc, "helius-rpc".into()));
+        let ids = |fallback| {
+            r.run_providers(ProviderKind::Rpc, fallback)
+                .unwrap()
+                .iter()
+                .map(|p| p.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(false), ["helius-rpc"]);
+        assert_eq!(ids(true), ["helius-rpc", "alpha", "backup"]);
+        let bound = r.bound(&r.providers[0]).unwrap();
+        assert_eq!(bound.binding, r.binding_of(&r.providers[0]).unwrap());
+        assert_eq!(bound.registry_version, 2);
+        assert!(bound.validate().is_ok());
+        assert_eq!(bound.summary().credential, Some(("helius".into(), 1)));
+        let mut dup = r.clone();
+        dup.providers[1].endpoint = dup.providers[0].endpoint.clone();
+        assert!(dup
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_ENDPOINT_DUPLICATE"));
+        r.credentials[0].state = CredentialState::Revoked;
+        assert!(r
+            .run_providers(ProviderKind::Rpc, false)
+            .unwrap_err()
+            .starts_with("CREDENTIAL_REVOKED"));
     }
 
     /// The store keeps one item per account; a missing one is unavailable (fail closed), a

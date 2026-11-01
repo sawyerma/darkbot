@@ -689,7 +689,7 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
     } else {
         Some(
             darkbot_solana::runtime_config::active()
-                .rpc_url(&|k| std::env::var(k).ok())
+                .rpc_url()
                 .ok_or("RPC_URL_MISSING")?,
         )
     };

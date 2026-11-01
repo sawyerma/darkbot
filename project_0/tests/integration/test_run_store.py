@@ -275,16 +275,19 @@ class Launchers(unittest.TestCase):
             env['P0_KEYPAIR_PATH']='key.json'  # relative to the caller: the signer gate and the runtime must use this same file
             run=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'shadow-launcher','--duration','61s'],env={**env,**extra},
                                             capture_output=True,text=True,timeout=600,cwd=caller)
-            p=run({'P0_SHADOW_RUN_ID':'shadow_a','P0_RPC_URL':'http://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET',
+            # DEC-18: an endpoint carrying a credential is refused before any read, never echoed.
+            p=run({'P0_SHADOW_RUN_ID':'shadow_s','P0_RPC_URL':'http://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET',
                    'P0_WS_URL':'ws://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET'})
+            out=p.stdout+p.stderr
+            self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: OPERATIONAL_CONFIG: PROVIDER_URL_USERINFO',p.stderr)
+            for secret in ('private:','SECRET','PRIVATE_KEY'):
+                self.assertNotIn(secret,out)
+            p=run({'P0_SHADOW_RUN_ID':'shadow_a','P0_RPC_URL':'http://127.0.0.1:1','P0_WS_URL':'ws://127.0.0.1:1'})
             out=p.stdout+p.stderr
             self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: ',p.stderr)  # real binary started from the repository
             self.assertIn('p0-longtail: BOOT_NETWORK_AUDIT_MISSING',p.stderr)  # a controller child needs the approved network audit; its code is the terminal report
             self.assertNotIn('could not find `Cargo.toml`',out);self.assertNotIn('missing required env',out)
-            for secret in ('private:','SECRET','PRIVATE_KEY'):
-                self.assertNotIn(secret,out)
-            self.assertIn('rpc_host=http://127.0.0.1',p.stdout)
-            self.assertIn('ws_host=ws://127.0.0.1',p.stdout)
+            self.assertIn('providers=registry (p0ctl provider status)',p.stdout)
             record=Path(next(l.split('record=',1)[1] for l in p.stdout.splitlines() if 'record=' in l))
             run_dir=project/'data/shadow/shadow_a'
             self.assertEqual(record.resolve(),(run_dir/'opportunities.p0j').resolve())

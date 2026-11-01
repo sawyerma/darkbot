@@ -1123,9 +1123,11 @@ mod tests {
         use super::super::journal::kind;
         use super::super::payload::{decode, encode_with_limits_revision};
         use darkbot_solana::runtime_config::{Limits, Resolved};
-        let effective = Resolved::parse(&["--rpc-rps".into(), "9".into()], &|_| None)
+        let mut effective = Resolved::parse(&["--rpc-rps".into(), "9".into()], &|_| None)
             .unwrap()
             .effective();
+        // A record before PROVIDERS_REVISION binds no provider (the case of bindings: below).
+        effective.providers.clear();
         let manifest = RunManifest {
             schema: "C0-E1/MeasurementManifest/3".into(),
             layout: Some("v2".into()),
@@ -1150,7 +1152,7 @@ mod tests {
             phase_journal: "capture/measurement_phases.jsonl".into(),
             compatibility: "c".into(),
         };
-        for revision in [4u16, 7, 10, 11] {
+        for revision in [4u16, 7, 10, 11, 19] {
             let schema = revision + 1;
             let old = encode_with_limits_revision(&manifest, &effective, revision);
             let read: RunManifest = decode(kind::RUN_MANIFEST, schema, &old).unwrap();
@@ -1178,6 +1180,32 @@ mod tests {
         assert_eq!(read, effective);
         let older = encode_with_limits_revision(&manifest, &effective, 4);
         assert!(decode::<RunManifest>(kind::RUN_MANIFEST, 4, &older).is_err());
+        // DEC-18: a revision-19 record has no provider bindings — whatever the writer now binds,
+        // a historical record never names one (and so never stands for a new binding).
+        let mut bound = effective.clone();
+        bound
+            .providers
+            .push(darkbot_solana::providers::ProviderBinding {
+                kind: darkbot_solana::providers::ProviderKind::Rpc,
+                id: "helius-rpc".into(),
+                binding: "d".repeat(64),
+                registry_version: 3,
+                credential: Some(("helius".into(), 2)),
+                plan: darkbot_solana::providers::Plan::Free,
+            });
+        let mut with = manifest.clone();
+        with.operational_config = Some(bound.clone());
+        let old = encode_with_limits_revision(&with, &bound, 19);
+        let read: RunManifest = decode(kind::RUN_MANIFEST, 20, &old).unwrap();
+        assert_eq!(read, manifest);
+        let current = super::super::payload::encode_wire(&with).unwrap();
+        let read: RunManifest = decode(
+            kind::RUN_MANIFEST,
+            darkbot_solana::runtime_config::LIMITS_REVISION + 1,
+            &current,
+        )
+        .unwrap();
+        assert_eq!(read.operational_config.unwrap().providers, bound.providers);
     }
 
     /// JFI-04: the launcher's typed plan journal is the runtime input; conflicting legacy

@@ -28,7 +28,7 @@ fn run() -> Result<(), String> {
             "--replay" => {
                 replay = Some(
                     args.next()
-                        .map(PathBuf::from)
+                        .map(std::path::PathBuf::from)
                         .ok_or("FE_REPLAY_DIRECTORY_REQUIRED")?,
                 )
             }
@@ -36,7 +36,7 @@ fn run() -> Result<(), String> {
             "--against" => {
                 against = Some(
                     args.next()
-                        .map(PathBuf::from)
+                        .map(std::path::PathBuf::from)
                         .ok_or("FE_AGAINST_DIRECTORY_REQUIRED")?,
                 )
             }
@@ -51,6 +51,13 @@ fn run() -> Result<(), String> {
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
     if resolved.print {
+        // DEC-18: the configuration it would observe with (bound, no credential read).
+        if let Some(project) = std::env::var_os("P0_PROJECT_DIR") {
+            darkbot_runner::orchestration::provider_registry::bind(
+                std::path::Path::new(&project),
+                &mut resolved,
+            )?;
+        }
         print!("{}", resolved.text());
         return Ok(());
     }
@@ -99,10 +106,8 @@ fn run() -> Result<(), String> {
         }
         return Ok(());
     }
-    let url = resolved
-        .config
-        .rpc_url(&|k| std::env::var(k).ok())
-        .ok_or("RPC_URL_MISSING")?;
+    network(&mut resolved)?;
+    let url = resolved.config.rpc_url().ok_or("RPC_URL_MISSING")?;
     let requested = resolved.effective();
     let l = &mut resolved.config.limits;
     l.max_requests = l.max_requests.min(l.fe_calls);
@@ -241,15 +246,16 @@ fn smoke(
     if output.exists() {
         return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
     }
-    let url = resolved
-        .config
-        .rpc_url(&|k| std::env::var(k).ok())
-        .ok_or("RPC_URL_MISSING")?;
+    network(&mut resolved)?;
+    let url = resolved.config.rpc_url().ok_or("RPC_URL_MISSING")?;
     let requested = resolved.effective();
     let l = &mut resolved.config.limits;
     l.max_requests = l.max_requests.min(l.fe_calls);
     l.max_total_mib = l.max_total_mib.min(l.fe_max_mib);
     l.max_response_mib = l.max_response_mib.min(l.max_total_mib);
+    // Within the observation's byte budget, as in the full mode (else the default limits are
+    // refused at activation: `wss_message_mib` above `max_total_mib`).
+    l.wss_message_mib = l.wss_message_mib.min(l.max_total_mib);
     let config = resolved.config.clone();
     std::fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
     let mut evidence =
@@ -341,6 +347,18 @@ fn persist(path: &std::path::Path, text: &str) -> Result<(), String> {
         .and_then(|_| f.sync_all())
         .map_err(|_| "FE_EVIDENCE_SYNC".into())
 }
+/// DEC-18: an observation's configuration bound to the project's provider registry
+/// (`P0_PROJECT_DIR`) and its providers' credentials installed, before the first read.
+#[cfg(feature = "crate_health")]
+fn network(resolved: &mut darkbot_solana::runtime_config::Resolved) -> Result<(), String> {
+    darkbot_runner::orchestration::provider_registry::network_config(
+        std::env::var_os("P0_PROJECT_DIR")
+            .map(std::path::PathBuf::from)
+            .as_deref(),
+        resolved,
+    )
+}
+
 fn main() {
     #[cfg(feature = "crate_health")]
     if let Err(e) = run() {

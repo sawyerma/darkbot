@@ -280,8 +280,13 @@ parameters! {
 /// `crosscheck_mib` (DEC-08, the verifiers' budgets per method); 16: `h0_window_days`,
 /// `h0_extended_window_days`, `h0_recurring_min_wins` (H0); 17: `fe06_grant_max_lifetime_seconds`
 /// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01); 19: `jupiter_authenticated_interval_ms` …
-/// `jupiter_exit_reserve` (P6-MT.7, Jupiter's account bucket).
-pub const LIMITS_REVISION: u16 = 19;
+/// `jupiter_exit_reserve` (P6-MT.7, Jupiter's account bucket); 20: no new parameter — the run's
+/// provider bindings appended to [`EffectiveConfig`] (DEC-18, [`PROVIDERS_REVISION`]).
+pub const LIMITS_REVISION: u16 = 20;
+
+/// The first revision whose [`EffectiveConfig`] ends with the run's provider bindings (DEC-18);
+/// an earlier record has none.
+pub const PROVIDERS_REVISION: u16 = 20;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -485,6 +490,10 @@ pub struct RuntimeConfig {
     pub limits: Limits,
     pub rpc_endpoints: Vec<String>,
     pub wss_endpoints: Vec<String>,
+    /// DEC-18: the provider of every endpoint above — a registry provider with its credential
+    /// revision and binding ([`Resolved::bind_registry`]), or a loopback endpoint the operator
+    /// named ([`crate::providers::BoundProvider::local`]); part of the configuration's digest.
+    pub providers: Vec<crate::providers::BoundProvider>,
     pub fallback: bool,
     pub adaptive: bool,
     pub duration: String,
@@ -536,6 +545,11 @@ impl Default for RuntimeConfig {
             limits: Limits::default(),
             rpc_endpoints: vec![],
             wss_endpoints: vec![],
+            // DEC-18 §1.3.2: the contract's default Jupiter profile until the registry selects one.
+            providers: crate::providers::PROVIDER_KINDS
+                .into_iter()
+                .filter_map(crate::providers::BoundProvider::default_of)
+                .collect(),
             non_landing_sources: vec![],
             hold_b_min_attempts: None,
             threshold_min_ticks: None,
@@ -728,14 +742,107 @@ impl RuntimeConfig {
             _ => unreachable!("no text setting {field}"),
         }
     }
-    /// Explicit operational endpoint wins over legacy verifier aliases, so
-    /// provider qualification and the strict worker bind the same endpoint.
-    pub fn rpc_url(&self, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-        self.rpc_endpoints
-            .first()
-            .cloned()
-            .or_else(|| env("P0_AUDIT_RPC_URL"))
-            .or_else(|| env("P0_RPC_URL"))
+    /// The run's primary RPC endpoint (DEC-18: the selected registry provider's or a named
+    /// loopback one), so provider qualification and the strict worker bind the same endpoint.
+    pub fn rpc_url(&self) -> Option<String> {
+        self.rpc_endpoints.first().cloned()
+    }
+    /// DEC-18: the run's endpoint behind an endpoint variable's name — `P0_WS_URL` the primary
+    /// WSS, `P0_RPC_URL` the primary RPC endpoint of the bound providers (never the environment's
+    /// value: a named one is bound already, a registry one never exported).
+    pub fn endpoint_value(&self, key: &str) -> Option<String> {
+        match key {
+            "P0_WS_URL" => self.wss_endpoints.first().cloned(),
+            "P0_RPC_URL" => self.rpc_endpoints.first().cloned(),
+            _ => None,
+        }
+    }
+    /// DEC-18: the one bound provider of a kind without an endpoint list (Jupiter, Jito, Geyser):
+    /// the registry's selection or the contract's default profile; `None`: none.
+    pub fn provider_of(
+        &self,
+        kind: crate::providers::ProviderKind,
+    ) -> Option<&crate::providers::BoundProvider> {
+        self.providers.iter().find(|p| p.kind == kind)
+    }
+    /// DEC-18: the bound provider of `endpoint` of `kind` (never echoes the endpoint).
+    pub fn bound(
+        &self,
+        kind: crate::providers::ProviderKind,
+        endpoint: &str,
+    ) -> Result<&crate::providers::BoundProvider, String> {
+        self.providers
+            .iter()
+            .find(|p| p.kind == kind && p.endpoint == endpoint)
+            .ok_or_else(|| {
+                format!(
+                    "PROVIDER_UNBOUND: a {} endpoint without its provider",
+                    kind.name()
+                )
+            })
+    }
+    /// DEC-11/DEC-18: the bundle simulator's endpoint — `None` unconfigured; a registry id not
+    /// yet resolved is refused.
+    pub fn bundle_sim_endpoint(&self) -> Result<Option<&str>, String> {
+        match self.bundle_sim_rpc_url.as_deref() {
+            Some(id) if is_provider_ref(id) => Err(
+                "PROVIDER_UNBOUND: the bundle simulator names a registry provider without the registry"
+                    .into(),
+            ),
+            other => Ok(other),
+        }
+    }
+    /// DEC-18: the endpoints the operator named (environment, config file, CLI) — loopback only
+    /// (a local node, an offline test), each canonical with its local provider; a remote one is
+    /// refused (a remote provider is the registry's: `p0ctl provider add`, `select`; an auxiliary
+    /// RPC — bundle simulator, non-landing B source — is named by its registry id).
+    fn bind_named(&mut self) -> Result<(), String> {
+        use crate::providers::{BoundProvider, ProviderKind};
+        let local = |providers: &mut Vec<BoundProvider>, kind, raw: &str| {
+            let p = BoundProvider::local(kind, raw)?;
+            let endpoint = p.endpoint.clone();
+            if !providers
+                .iter()
+                .any(|q| q.kind == kind && q.endpoint == endpoint)
+            {
+                providers.push(p);
+            }
+            Ok::<_, String>(endpoint)
+        };
+        let Self {
+            rpc_endpoints,
+            wss_endpoints,
+            providers,
+            jito_block_engine_url,
+            bundle_sim_rpc_url,
+            non_landing_sources,
+            ..
+        } = self;
+        for (kind, endpoints) in [
+            (ProviderKind::Rpc, rpc_endpoints),
+            (ProviderKind::Wss, wss_endpoints),
+        ] {
+            for endpoint in endpoints.iter_mut() {
+                let p = BoundProvider::local(kind, endpoint)?;
+                *endpoint = p.endpoint.clone();
+                providers.push(p);
+            }
+        }
+        if let Some(url) = jito_block_engine_url.as_mut() {
+            *url = local(providers, ProviderKind::Jito, url)?;
+        }
+        if let Some(url) = bundle_sim_rpc_url.as_mut().filter(|u| !is_provider_ref(u)) {
+            *url = local(providers, ProviderKind::Rpc, url)?;
+        }
+        for entry in non_landing_sources.iter_mut() {
+            if let Some((operator, source)) = entry.split_once('=') {
+                if !is_provider_ref(source) {
+                    let endpoint = local(providers, ProviderKind::Rpc, source)?;
+                    *entry = format!("{operator}={endpoint}");
+                }
+            }
+        }
+        Ok(())
     }
     /// DEC-11: a bundle-path setting by its field name.
     fn bundle_field(&mut self, field: &str) -> &mut Option<String> {
@@ -746,21 +853,37 @@ impl RuntimeConfig {
             _ => unreachable!("no bundle setting {field}"),
         }
     }
-    /// DEC-03: the configured non-landing B sources as `(operator, URL)` — an operator label of
-    /// 1–32 lowercase letters, digits or `-`, an `http(s)` URL with a host. Independence is by
-    /// operator, so one URL is configured once and one host belongs to one operator.
-    pub fn non_landing_source_list(&self) -> Result<Vec<(String, String)>, String> {
-        let mut hosts: BTreeMap<String, String> = BTreeMap::new();
-        let mut urls = std::collections::BTreeSet::new();
+    /// DEC-03/DEC-18: the configured non-landing B sources as `(operator, source)` — an operator
+    /// label of 1–32 lowercase letters, digits or `-`; the source a loopback endpoint or the id of
+    /// a registry RPC provider ([`is_provider_ref`], bound by [`Resolved::bind_registry`]).
+    fn non_landing_entries(&self) -> Result<Vec<(&str, &str)>, String> {
         self.non_landing_sources
             .iter()
             .map(|entry| {
-                let (operator, url) = entry
+                let (operator, source) = entry
                     .split_once('=')
-                    .ok_or("non-landing source must be operator=URL")?;
+                    .ok_or("non-landing source must be operator=URL|PROVIDER_ID")?;
                 let label = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
                 if operator.is_empty() || operator.len() > 32 || !operator.chars().all(label) {
                     return Err("non-landing source operator invalid".to_string());
+                }
+                Ok((operator, source))
+            })
+            .collect()
+    }
+    /// DEC-03: the configured non-landing B sources as `(operator, URL)`, every one bound (a
+    /// registry id not yet resolved is refused). Independence is by operator, so one URL is
+    /// configured once and one host belongs to one operator.
+    pub fn non_landing_source_list(&self) -> Result<Vec<(String, String)>, String> {
+        let mut hosts: BTreeMap<String, String> = BTreeMap::new();
+        let mut urls = std::collections::BTreeSet::new();
+        self.non_landing_entries()?
+            .into_iter()
+            .map(|(operator, url)| {
+                if is_provider_ref(url) {
+                    return Err(format!(
+                        "PROVIDER_UNBOUND: non-landing source {operator} names a registry provider without the registry"
+                    ));
                 }
                 let u = reqwest::Url::parse(url).map_err(|_| "non-landing source URL invalid")?;
                 let Some(host) = u
@@ -831,34 +954,77 @@ impl RuntimeConfig {
         {
             return Err("response limit exceeds total byte budget".into());
         }
-        for (endpoints, schemes) in [
-            (&self.rpc_endpoints, ["http", "https"]),
-            (&self.wss_endpoints, ["ws", "wss"]),
-        ] {
-            for url in endpoints {
-                let u = reqwest::Url::parse(url).map_err(|_| "invalid endpoint URL")?;
-                if !schemes.contains(&u.scheme()) || u.host_str().is_none() {
-                    return Err("endpoint scheme/host invalid".into());
+        // DEC-18: every endpoint is one bound provider of its kind (canonical, secret-free, a
+        // remote one the registry's), every bound provider one endpoint of the run.
+        {
+            use crate::providers::ProviderKind;
+            let mut endpoints = std::collections::BTreeSet::new();
+            for (kind, list) in [
+                (ProviderKind::Rpc, &self.rpc_endpoints),
+                (ProviderKind::Wss, &self.wss_endpoints),
+            ] {
+                for endpoint in list {
+                    if !endpoints.insert((kind, endpoint.as_str())) {
+                        return Err(format!("{} endpoint repeated", kind.name()));
+                    }
+                    self.bound(kind, endpoint)?.validate()?;
+                }
+            }
+            // The auxiliary endpoints: the block engine, the bundle simulator, the B sources
+            // (one may be an endpoint above; a registry id is bound by `bind_registry`).
+            let auxiliary = self
+                .jito_block_engine_url
+                .iter()
+                .map(|u| (ProviderKind::Jito, u.as_str()))
+                .chain(
+                    self.bundle_sim_rpc_url
+                        .iter()
+                        .map(|u| (ProviderKind::Rpc, u.as_str())),
+                )
+                .chain(
+                    self.non_landing_entries()?
+                        .into_iter()
+                        .map(|(_, source)| (ProviderKind::Rpc, source)),
+                )
+                .filter(|(_, e)| !is_provider_ref(e))
+                .collect::<Vec<_>>();
+            for (kind, endpoint) in auxiliary {
+                self.bound(kind, endpoint)?.validate()?;
+                endpoints.insert((kind, endpoint));
+            }
+            let mut bound = std::collections::BTreeSet::new();
+            let mut single = std::collections::BTreeSet::new();
+            for p in &self.providers {
+                p.validate()?;
+                let listed = matches!(
+                    p.kind,
+                    ProviderKind::Rpc | ProviderKind::Wss | ProviderKind::Jito
+                );
+                if listed
+                    && (!endpoints.contains(&(p.kind, p.endpoint.as_str()))
+                        || !bound.insert((p.kind, p.endpoint.as_str())))
+                {
+                    return Err(format!("PROVIDER_BOUND_UNUSED: {}", p.id));
+                }
+                // A kind without an endpoint list has one provider.
+                if !listed && !single.insert(p.kind) {
+                    return Err(format!("PROVIDER_KIND_REPEATED: {}", p.kind.name()));
                 }
             }
         }
-        self.non_landing_source_list()?;
+        // B-source independence, once every source is bound.
+        if self
+            .non_landing_entries()?
+            .iter()
+            .all(|(_, source)| !is_provider_ref(source))
+        {
+            self.non_landing_source_list()?;
+        }
         if self.hold_b_min_attempts == Some(0) {
             return Err("hold_b_min_attempts must be at least 1 (B-8)".into());
         }
         if self.threshold_min_ticks == Some(0) {
             return Err("threshold_min_ticks must be at least 1 (B-8)".into());
-        }
-        for (name, url) in [
-            ("jito_block_engine_url", &self.jito_block_engine_url),
-            ("bundle_sim_rpc_url", &self.bundle_sim_rpc_url),
-        ] {
-            if let Some(url) = url {
-                let u = reqwest::Url::parse(url).map_err(|_| format!("{name} invalid"))?;
-                if !["http", "https"].contains(&u.scheme()) || u.host_str().is_none() {
-                    return Err(format!("{name} invalid"));
-                }
-            }
         }
         if let Some(tip) = &self.jito_tip_account {
             tip.parse::<solana_sdk::pubkey::Pubkey>()
@@ -909,12 +1075,9 @@ impl RuntimeConfig {
                 )
             })
             .collect();
-        if let Some(url) = self.rpc_endpoints.first() {
-            env.insert("P0_RPC_URL".into(), url.clone());
-        }
-        if let Some(url) = self.wss_endpoints.first() {
-            env.insert("P0_WS_URL".into(), url.clone());
-        }
+        // DEC-18: no endpoint is exported — `P0_RPC_URL`/`P0_WS_URL` are operator inputs (named
+        // loopback endpoints); a bound provider read back as one would re-resolve the run as
+        // another (its readers take `endpoint_value` of the active configuration).
         env.insert("P0_MEASUREMENT_DURATION".into(), self.duration.clone());
         // DEC-05: the market observer's horizon is its own (`P0_MARKET_DURATION_SECS`, also
         // `until-stopped`); an econ4h run binds its market to the measurement plan. DEC-16: an
@@ -926,6 +1089,12 @@ impl RuntimeConfig {
         env
     }
 }
+/// DEC-18: whether an auxiliary provider value (the bundle simulator, a non-landing B source)
+/// names a registry provider by its id — else it is an endpoint (a loopback one when named).
+pub fn is_provider_ref(value: &str) -> bool {
+    !value.contains("://") && crate::providers::id_ok(value)
+}
+
 /// DEC-16: a run's horizon as the operational config names it — a fixed duration, or an
 /// unbounded run `until-stopped:<checkpoint>:<minimum runway>` (two durations, the rolling
 /// window within the runway). Never a huge duration.
@@ -1470,6 +1639,14 @@ impl Resolved {
             }
             sources.insert(k, "cli".into());
         }
+        c.bind_named()?;
+        sources.insert(
+            "jupiter".into(),
+            format!(
+                "default_profile:v{}",
+                crate::providers::DEFAULT_PROFILES_VERSION
+            ),
+        );
         let config = c;
         config.validate()?;
         if fe_mode == "full" {
@@ -1485,6 +1662,107 @@ impl Resolved {
             print,
             help,
         })
+    }
+    /// DEC-18: the registry's providers for every kind the operator named no endpoint of — the
+    /// selected one and, with `fallback`, the others by priority
+    /// ([`crate::providers::ProviderRegistry::run_providers`]), each bound with its active
+    /// credential revision; the endpoints' source names the registry version. No selection
+    /// leaves the kind without endpoints (never an implicit choice).
+    pub fn bind_registry(
+        &mut self,
+        registry: &crate::providers::ProviderRegistry,
+    ) -> Result<(), String> {
+        use crate::providers::ProviderKind;
+        // The block engine: the registry's selected Jito provider unless one is named.
+        if self.config.jito_block_engine_url.is_none() {
+            if let Some(selected) = registry.run_providers(ProviderKind::Jito, false)?.first() {
+                self.config.jito_block_engine_url = Some(selected.endpoint.clone());
+                self.config.providers.push(registry.bound(selected)?);
+                self.sources.insert(
+                    "jito_block_engine_url".into(),
+                    format!("provider_registry:v{}", registry.version),
+                );
+            }
+        }
+        // An auxiliary RPC named by its registry id: that provider, selectable now.
+        let auxiliary = |id: &str, providers: &mut Vec<crate::providers::BoundProvider>| {
+            let p = registry
+                .provider(id)
+                .filter(|p| p.kind == ProviderKind::Rpc)
+                .ok_or_else(|| {
+                    format!("PROVIDER_UNKNOWN: {id} is no RPC provider of the registry")
+                })?;
+            if let Some(block) = registry.selection_block(p) {
+                return Err(block);
+            }
+            if !providers
+                .iter()
+                .any(|q| q.kind == ProviderKind::Rpc && q.endpoint == p.endpoint)
+            {
+                providers.push(registry.bound(p)?);
+            }
+            Ok::<_, String>(p.endpoint.clone())
+        };
+        if let Some(id) = self
+            .config
+            .bundle_sim_rpc_url
+            .clone()
+            .filter(|v| is_provider_ref(v))
+        {
+            self.config.bundle_sim_rpc_url = Some(auxiliary(&id, &mut self.config.providers)?);
+        }
+        let mut entries = std::mem::take(&mut self.config.non_landing_sources);
+        for entry in entries.iter_mut() {
+            if let Some((operator, id)) = entry
+                .split_once('=')
+                .filter(|(_, v)| is_provider_ref(v))
+                .map(|(o, v)| (o.to_string(), v.to_string()))
+            {
+                *entry = format!("{operator}={}", auxiliary(&id, &mut self.config.providers)?);
+            }
+        }
+        self.config.non_landing_sources = entries;
+        // The single-provider kinds: the registry's selection replaces the default profile.
+        for kind in [ProviderKind::Jupiter] {
+            if let Some(selected) = registry.run_providers(kind, false)?.first() {
+                let bound = registry.bound(selected)?;
+                self.config.providers.retain(|p| p.kind != kind);
+                self.config.providers.push(bound);
+                self.sources.insert(
+                    kind.name().into(),
+                    format!("provider_registry:v{}", registry.version),
+                );
+            }
+        }
+        for (kind, field) in [
+            (ProviderKind::Rpc, "rpc_endpoints"),
+            (ProviderKind::Wss, "wss_endpoints"),
+        ] {
+            if self
+                .sources
+                .get(field)
+                .is_some_and(|s| !s.starts_with("profile:"))
+            {
+                continue;
+            }
+            let chosen = registry.run_providers(kind, self.config.fallback)?;
+            if chosen.is_empty() {
+                continue;
+            }
+            let endpoints = chosen.iter().map(|p| p.endpoint.clone()).collect();
+            match kind {
+                ProviderKind::Rpc => self.config.rpc_endpoints = endpoints,
+                _ => self.config.wss_endpoints = endpoints,
+            }
+            for p in chosen {
+                self.config.providers.push(registry.bound(p)?);
+            }
+            self.sources.insert(
+                field.into(),
+                format!("provider_registry:v{}", registry.version),
+            );
+        }
+        self.config.validate()
     }
     pub fn activate(self) -> Result<(), String> {
         let effective = self.effective();
@@ -1519,10 +1797,11 @@ impl Resolved {
             c0_census: c.c0_census,
             source_geyser: c.source_geyser.clone(),
             source_geyser_provider: c.source_geyser_provider.clone(),
+            providers: c.providers.iter().map(|p| p.summary()).collect(),
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (loopback only: a local node or an offline test; a remote provider is the registry's, p0ctl provider add/select)\n--non-landing-sources OPERATOR=URL|PROVIDER_ID[,…] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources; a loopback URL or a registry RPC provider id)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL (loopback; else the registry's Jito selection) --bundle-sim-rpc-url URL|PROVIDER_ID --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1561,6 +1840,20 @@ impl Resolved {
             e.wss_endpoint_count,
             src("wss_endpoints")
         );
+        for p in &e.providers {
+            s += &format!(
+                "provider {} = {} binding {} registry v{} plan {}{}\n",
+                p.kind.name(),
+                p.id,
+                &p.binding[..16],
+                p.registry_version,
+                p.plan.name(),
+                p.credential
+                    .as_ref()
+                    .map(|(id, rev)| format!(" credential {id}@{rev}"))
+                    .unwrap_or_default()
+            );
+        }
         s += &format!(
             "non-landing-sources = {} configured (redacted) [source {}]\n",
             self.config.non_landing_sources.len(),
@@ -1689,6 +1982,9 @@ pub struct EffectiveConfig {
     pub c0_census: bool,
     pub source_geyser: String,
     pub source_geyser_provider: String,
+    /// DEC-18 (from [`PROVIDERS_REVISION`]): the run's providers with their bindings; an earlier
+    /// record has none.
+    pub providers: Vec<crate::providers::ProviderBinding>,
 }
 pub fn configured() -> bool {
     ACTIVE.get().is_some()
@@ -1809,10 +2105,10 @@ mod tests {
             if !(name.starts_with("operational_") && name.ends_with(".conf")) {
                 continue;
             }
-            let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+            let env = |k: &str| (k == "P0_RPC_URL").then(|| "http://127.0.0.1:8899".to_string());
             let r =
                 Resolved::parse(&["--config".into(), path.display().to_string()], &env).unwrap();
-            assert_eq!(r.config.rpc_endpoints, ["https://rpc.invalid/"], "{name}");
+            assert_eq!(r.config.rpc_endpoints, ["http://127.0.0.1:8899"], "{name}");
             assert_eq!(r.sources["rpc_endpoints"], "environment", "{name}");
             let e = r.effective();
             assert!(!(e.live_authorized || e.submission_authorized));
@@ -1824,35 +2120,51 @@ mod tests {
     /// host, a base58 tip account) and printed redacted (the tip account is public).
     #[test]
     fn dec11_bundle_settings_parse_validate_and_redact() {
+        // DEC-18: a named block engine is a loopback one; the simulator a loopback endpoint or a
+        // registry RPC provider's id (bound by the registry, refused at use before).
         let env = |k: &str| match k {
-            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
-            "P0_JITO_BLOCK_ENGINE_URL" => Some("https://jito.invalid/SECRET".to_string()),
-            "P0_BUNDLE_SIM_RPC_URL" => Some("https://sim.invalid/KEY".to_string()),
+            "P0_RPC_URL" => Some("http://127.0.0.1:8899".to_string()),
+            "P0_JITO_BLOCK_ENGINE_URL" => Some("http://127.0.0.1:9000/".to_string()),
+            "P0_BUNDLE_SIM_RPC_URL" => Some("jito-sim".to_string()),
             _ => None,
         };
         let tip = solana_sdk::pubkey::Pubkey::new_unique().to_string();
         let r = Resolved::parse(&["--jito-tip-account".into(), tip.clone()], &env).unwrap();
         assert_eq!(
             r.config.jito_block_engine_url.as_deref(),
-            Some("https://jito.invalid/SECRET")
+            Some("http://127.0.0.1:9000")
         );
-        assert_eq!(
-            r.config.bundle_sim_rpc_url.as_deref(),
-            Some("https://sim.invalid/KEY")
-        );
+        assert_eq!(r.config.bundle_sim_rpc_url.as_deref(), Some("jito-sim"));
+        assert!(r
+            .config
+            .bundle_sim_endpoint()
+            .unwrap_err()
+            .starts_with("PROVIDER_UNBOUND"));
         assert_eq!(r.config.jito_tip_account.as_deref(), Some(tip.as_str()));
         assert_eq!(r.sources["jito_tip_account"], "cli");
         let printed = r.text();
-        assert!(
-            !printed.contains("SECRET") && !printed.contains("KEY"),
-            "{printed}"
+        assert!(!printed.contains("127.0.0.1:9000"), "{printed}");
+        let sim = parse(&["--bundle-sim-rpc-url", "http://127.0.0.1:8999"]).unwrap();
+        assert_eq!(
+            sim.config.bundle_sim_endpoint().unwrap(),
+            Some("http://127.0.0.1:8999")
         );
+        for remote in [
+            ["--jito-block-engine-url", "https://jito.invalid/api"],
+            ["--bundle-sim-rpc-url", "https://sim.invalid"],
+        ] {
+            let e = parse(&remote).unwrap_err();
+            assert!(
+                e.starts_with("PROVIDER_ENDPOINT_UNREGISTERED") && !e.contains("invalid"),
+                "{e}"
+            );
+        }
         assert!(
             printed.contains("jito-block-engine-url = configured (redacted) [source environment]")
         );
         assert!(printed.contains(&format!("jito-tip-account = {tip} [source cli]")));
         let unset = Resolved::parse(&[], &|k: &str| {
-            (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string())
+            (k == "P0_RPC_URL").then(|| "http://127.0.0.1:8899".to_string())
         })
         .unwrap();
         assert!(unset.text().contains("bundle-sim-rpc-url = unset"));
@@ -1883,7 +2195,7 @@ mod tests {
         assert_eq!(r.config.jito_tip_lamports, Some(5000));
         assert!(r.text().contains("jito-tip-lamports = 5000 [source cli]"));
         let env_tip = |k: &str| match k {
-            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_RPC_URL" => Some("http://127.0.0.1:8899".to_string()),
             "P0_MAX_TIP" => Some("9000".to_string()),
             "P0_JITO_TIP_LAMPORTS" => Some("9000".to_string()),
             _ => None,
@@ -1923,7 +2235,7 @@ mod tests {
     /// file or CLI, is at least 1 and is printed with its source.
     #[test]
     fn dec04_hold_b_min_attempts_has_no_default() {
-        let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+        let env = |k: &str| (k == "P0_RPC_URL").then(|| "http://127.0.0.1:8899".to_string());
         let r = Resolved::parse(&[], &env).unwrap();
         assert_eq!(r.config.hold_b_min_attempts, None);
         assert!(r
@@ -1933,7 +2245,7 @@ mod tests {
         assert_eq!(r.config.hold_b_min_attempts, Some(5));
         assert!(r.text().contains("hold-b-min-attempts = 5 [source cli]"));
         let env7 = |k: &str| match k {
-            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_RPC_URL" => Some("http://127.0.0.1:8899".to_string()),
             "P0_HOLD_B_MIN_ATTEMPTS" => Some("7".to_string()),
             _ => None,
         };
@@ -1954,7 +2266,7 @@ mod tests {
     /// budget (B-9, provisional) and the cross-check accounts are typed parameters with bounds.
     #[test]
     fn dec06_threshold_min_ticks_has_no_default() {
-        let env = |k: &str| (k == "P0_RPC_URL").then(|| "https://rpc.invalid/".to_string());
+        let env = |k: &str| (k == "P0_RPC_URL").then(|| "http://127.0.0.1:8899".to_string());
         let r = Resolved::parse(&[], &env).unwrap();
         assert_eq!(r.config.threshold_min_ticks, None);
         assert!(r
@@ -1964,7 +2276,7 @@ mod tests {
         assert_eq!(r.config.threshold_min_ticks, Some(500));
         assert!(r.text().contains("threshold-min-ticks = 500 [source cli]"));
         let env9 = |k: &str| match k {
-            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_RPC_URL" => Some("http://127.0.0.1:8899".to_string()),
             "P0_THRESHOLD_MIN_TICKS" => Some("9".to_string()),
             _ => None,
         };
@@ -2006,10 +2318,12 @@ mod tests {
     /// host) and printed only as a count.
     #[test]
     fn dec03_non_landing_sources_parse_validate_and_redact() {
+        // DEC-18: a B source is a loopback endpoint (canonical, its local provider) or a registry
+        // RPC provider's id (bound by the registry; before, its source list is refused).
         let env = |k: &str| match k {
-            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_RPC_URL" => Some("http://127.0.0.1:8899".to_string()),
             "P0_NON_LANDING_SOURCES" => {
-                Some("op-a=https://a.invalid/KEY, op-b=http://b.invalid".to_string())
+                Some("op-a=http://127.0.0.1:8001/, op-b=http://localhost:8002".to_string())
             }
             _ => None,
         };
@@ -2017,43 +2331,49 @@ mod tests {
         assert_eq!(
             r.config.non_landing_source_list().unwrap(),
             [
-                ("op-a".to_string(), "https://a.invalid/KEY".to_string()),
-                ("op-b".to_string(), "http://b.invalid".to_string())
+                ("op-a".to_string(), "http://127.0.0.1:8001".to_string()),
+                ("op-b".to_string(), "http://localhost:8002".to_string())
             ]
         );
+        assert!(r
+            .config
+            .bound(crate::providers::ProviderKind::Rpc, "http://localhost:8002")
+            .is_ok());
         assert_eq!(r.sources["non_landing_sources"], "environment");
         let printed = r.text();
-        assert!(!printed.contains("KEY"), "{printed}");
+        assert!(!printed.contains("8001"), "{printed}");
         assert!(
             printed.contains("non-landing-sources = 2 configured (redacted) [source environment]")
         );
         let r = Resolved::parse(
-            &[
-                "--non-landing-sources".into(),
-                "op-c=https://c.invalid".into(),
-            ],
+            &["--non-landing-sources".into(), "op-c=backup-rpc".into()],
             &env,
         )
         .unwrap();
-        assert_eq!(r.config.non_landing_sources, ["op-c=https://c.invalid"]);
+        assert_eq!(r.config.non_landing_sources, ["op-c=backup-rpc"]);
         assert_eq!(r.sources["non_landing_sources"], "cli");
-        assert!(parse(&["--non-landing-sources", "op-1=https://a.invalid"]).is_ok());
+        assert!(r
+            .config
+            .non_landing_source_list()
+            .unwrap_err()
+            .starts_with("PROVIDER_UNBOUND"));
         // One operator may run several endpoints of one host.
         assert!(parse(&[
             "--non-landing-sources",
-            "op-a=https://a.invalid/1,op-a=https://a.invalid/2"
+            "op-a=http://127.0.0.1:8001,op-a=http://127.0.0.1:8002"
         ])
         .is_ok());
-        let long = format!("{}=https://a.invalid", "a".repeat(33));
+        let long = format!("{}=http://127.0.0.1:8001", "a".repeat(33));
         for bad in [
-            "https://a.invalid",
-            "OP=https://a.invalid",
-            "=https://a.invalid",
-            "op=ftp://a.invalid",
+            "http://127.0.0.1:8001",
+            "OP=http://127.0.0.1:8001",
+            "=http://127.0.0.1:8001",
+            "op=ftp://127.0.0.1",
             "op=not a url",
+            "op=https://remote.invalid",
             long.as_str(),
-            "op-a=https://a.invalid,op-a=https://a.invalid",
-            "op-a=https://a.invalid/1,op-b=https://A.invalid/2",
+            "op-a=http://127.0.0.1:8001,op-a=http://127.0.0.1:8001",
+            "op-a=http://127.0.0.1:8001,op-b=http://127.0.0.1:8002",
         ] {
             assert!(parse(&["--non-landing-sources", bad]).is_err(), "{bad}");
         }
@@ -2083,7 +2403,7 @@ mod tests {
         let path = dir.join("input.conf");
         std::fs::write(
             &path,
-            "# override\nprofile = smoke\nrpc-rps = 7\nrpc-endpoints = https://example.test/SECRET?key=PRIVATE\n",
+            "# override\nprofile = smoke\nrpc-rps = 7\nrpc-endpoints = http://127.0.0.1:8899\n",
         )
         .unwrap();
         let r = Resolved::parse(
@@ -2105,9 +2425,18 @@ mod tests {
         assert_eq!(r.config.limits.rpc_concurrency, 4);
         assert_eq!(r.sources["rpc_concurrency"], "environment");
         assert_eq!(r.config.limits.rpc_attempts, 1);
-        let printed = r.text();
-        assert!(!printed.contains("SECRET"));
-        assert!(!printed.contains("PRIVATE"));
+        assert_eq!(r.sources["rpc_endpoints"], "config_file");
+        // DEC-18: a key in a configured endpoint is refused, never echoed or redacted into use.
+        std::fs::write(
+            &path,
+            "rpc-endpoints = https://example.test/SECRET?key=PRIVATE\n",
+        )
+        .unwrap();
+        let e = parse(&["--config", path.to_str().unwrap()]).unwrap_err();
+        assert!(
+            e.starts_with("PROVIDER_URL_QUERY") && !e.contains("SECRET") && !e.contains("PRIVATE"),
+            "{e}"
+        );
         // JFI-01/P0-PROD-CTRL-02: no JSON configuration handoff exists; a JSON file is refused.
         std::fs::write(&path, br#"{"rpc_rps": 2}"#).unwrap();
         assert!(parse(&["--config", path.to_str().unwrap()])
@@ -2131,16 +2460,11 @@ mod tests {
     /// only as counts, no secret and no machine document.
     #[test]
     fn effective_config_text_is_redacted_and_complete() {
-        let r = parse(&[
-            "--rpc-endpoints",
-            "https://example.test/SECRET?key=PRIVATE",
-            "--rpc-rps",
-            "9",
-        ])
-        .unwrap();
+        let r = parse(&["--rpc-endpoints", "http://127.0.0.1:8899", "--rpc-rps", "9"]).unwrap();
         let t = r.text();
-        assert!(!t.contains("SECRET") && !t.contains("PRIVATE") && !t.contains('{'));
+        assert!(!t.contains("127.0.0.1") && !t.contains('{'));
         assert!(t.contains("rpc-endpoints = 1 configured (redacted) [source cli]"));
+        assert!(t.contains("provider rpc = local binding "));
         assert!(t.contains("--rpc-rps = 9 requests/s [default 5; 1..=4294967295; env P0_RPC_RPS; source cli; restart required]"));
         for p in PARAMETERS {
             assert!(t.contains(&format!("--{} = ", p.name())), "{}", p.field);
@@ -2163,7 +2487,7 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                19,
+                20,
                 160,
                 "EoSr9vdCZGKnPG4gTFXrpk8drZuH1meLgNJyRnvCSdu3".to_string()
             )
@@ -2251,20 +2575,243 @@ mod tests {
             defaults::STREAM_READY_SECONDS
         );
     }
+    /// DEC-18: an endpoint the operator names is a loopback one (a local node, an offline test),
+    /// canonical, with its local provider; a remote one is refused without echo (a remote
+    /// provider is the registry's) — before, any URL was taken, a key in its query included.
     #[test]
-    fn explicit_endpoint_beats_legacy_audit_alias() {
-        let r = parse(&["--rpc-endpoints", "https://explicit.invalid"]).unwrap();
+    fn a_named_endpoint_is_local_and_a_remote_one_the_registry_s() {
+        let r = parse(&["--rpc-endpoints", "http://127.0.0.1:8899/"]).unwrap();
+        assert_eq!(r.config.rpc_endpoints, ["http://127.0.0.1:8899"]);
+        assert_eq!(r.config.rpc_url().as_deref(), Some("http://127.0.0.1:8899"));
+        let p = r
+            .config
+            .bound(crate::providers::ProviderKind::Rpc, "http://127.0.0.1:8899")
+            .unwrap();
+        assert_eq!((p.id.as_str(), p.registry_version), ("local", 0));
+        for raw in [
+            "https://rpc.invalid",
+            "https://mainnet.helius-rpc.com/?api-key=SECRET0",
+            "http://rpc.invalid",
+        ] {
+            let e = parse(&["--rpc-endpoints", raw]).unwrap_err();
+            assert!(e.starts_with("PROVIDER_"), "{raw}: {e}");
+            assert!(!e.contains("SECRET0") && !e.contains("invalid"), "{e}");
+        }
+        let env = |k: &str| (k == "P0_WS_URL").then(|| "wss://wss.invalid".to_string());
+        assert!(Resolved::parse(&[], &env)
+            .unwrap_err()
+            .starts_with("PROVIDER_ENDPOINT_UNREGISTERED"));
+        // An endpoint without its provider, or a provider without its endpoint, never validates.
+        let mut c = r.config.clone();
+        c.providers.clear();
+        assert!(c.validate().unwrap_err().starts_with("PROVIDER_UNBOUND"));
+        let mut c = r.config.clone();
+        c.rpc_endpoints.clear();
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .starts_with("PROVIDER_BOUND_UNUSED"));
+        let mut c = r.config.clone();
+        c.rpc_endpoints.push(c.rpc_endpoints[0].clone());
+        assert!(c.validate().is_err(), "a repeated endpoint is no fallback");
+    }
+
+    fn registry() -> crate::providers::ProviderRegistry {
+        use crate::providers::*;
+        let p = |id: &str, kind, endpoint: &str, priority| ProviderDescriptor {
+            id: id.into(),
+            kind,
+            endpoint: endpoint.into(),
+            auth: AuthKind::Query("api-key".into()),
+            credential: Some("helius".into()),
+            priority,
+            capacity_rps: Some(10),
+            plan: Plan::Free,
+            entitlement: "helius-free".into(),
+            qualification: None,
+            enabled: true,
+        };
+        let mut r = ProviderRegistry::empty();
+        r.version = 4;
+        r.uid = "0123456789abcdef".into();
+        r.project = "/p".into();
+        r.providers = vec![
+            p(
+                "helius-rpc",
+                ProviderKind::Rpc,
+                "https://mainnet.helius-rpc.com",
+                0,
+            ),
+            p(
+                "helius-wss",
+                ProviderKind::Wss,
+                "wss://mainnet.helius-rpc.com",
+                0,
+            ),
+            p("backup-rpc", ProviderKind::Rpc, "https://backup.example", 5),
+        ];
+        r.providers[2].auth = AuthKind::None;
+        r.providers[2].credential = None;
+        r.selected = vec![
+            (ProviderKind::Rpc, "helius-rpc".into()),
+            (ProviderKind::Wss, "helius-wss".into()),
+        ];
+        r.credentials.push(CredentialMeta {
+            id: "helius".into(),
+            revision: 2,
+            nonce: "aaaaaaaaaaaaaaaa".into(),
+            state: CredentialState::Active,
+            created_unix_s: 1,
+            origin: "input".into(),
+        });
+        r.validate().unwrap();
+        r
+    }
+
+    /// DEC-18: without a named endpoint a kind takes the registry's selected provider — with
+    /// `fallback` the other selectable ones by priority — bound with its active credential
+    /// revision, the source the registry version; a named loopback endpoint wins (DEC-05
+    /// precedence); no selection leaves the kind empty; a selected provider that cannot be
+    /// selected now refuses the configuration. The effective record and its print name each
+    /// provider's binding, never its endpoint or a secret.
+    #[test]
+    fn the_registry_s_selection_is_the_run_s_providers() {
+        use crate::providers::ProviderKind;
+        let reg = registry();
+        let mut r = parse(&[]).unwrap();
+        r.bind_registry(&reg).unwrap();
+        assert_eq!(r.config.rpc_endpoints, ["https://mainnet.helius-rpc.com"]);
+        assert_eq!(r.config.wss_endpoints, ["wss://mainnet.helius-rpc.com"]);
+        assert_eq!(r.sources["rpc_endpoints"], "provider_registry:v4");
+        let p = r
+            .config
+            .bound(ProviderKind::Rpc, "https://mainnet.helius-rpc.com")
+            .unwrap();
+        assert_eq!(p.binding, reg.binding_of(&reg.providers[0]).unwrap());
+        assert_eq!(p.credential.as_ref().unwrap().revision, 2);
+        let mut f = parse(&["--fallback", "on"]).unwrap();
+        f.bind_registry(&reg).unwrap();
         assert_eq!(
-            r.config
-                .rpc_url(&|_| Some("https://legacy.invalid".into()))
-                .as_deref(),
-            Some("https://explicit.invalid")
+            f.config.rpc_endpoints,
+            ["https://mainnet.helius-rpc.com", "https://backup.example"]
+        );
+        let mut named = parse(&["--rpc-endpoints", "http://127.0.0.1:8899"]).unwrap();
+        named.bind_registry(&reg).unwrap();
+        assert_eq!(named.config.rpc_endpoints, ["http://127.0.0.1:8899"]);
+        assert_eq!(named.config.wss_endpoints, ["wss://mainnet.helius-rpc.com"]);
+        let mut none = reg.clone();
+        none.selected.clear();
+        let mut r0 = parse(&[]).unwrap();
+        r0.bind_registry(&none).unwrap();
+        assert!(r0.config.rpc_endpoints.is_empty());
+        assert!(r0
+            .config
+            .providers
+            .iter()
+            .all(|p| p.kind == ProviderKind::Jupiter && p.registry_version == 0));
+        let mut revoked = reg.clone();
+        revoked.credentials[0].state = crate::providers::CredentialState::Revoked;
+        assert!(parse(&[])
+            .unwrap()
+            .bind_registry(&revoked)
+            .unwrap_err()
+            .starts_with("CREDENTIAL_REVOKED"));
+        let e = r.effective();
+        assert_eq!(
+            e.providers.len(),
+            3,
+            "RPC, WSS and the default Jupiter profile"
+        );
+        assert_eq!(r.sources["jupiter"], "default_profile:v1");
+        let rpc = e
+            .providers
+            .iter()
+            .find(|p| p.kind == ProviderKind::Rpc)
+            .unwrap();
+        assert_eq!(rpc.credential, Some(("helius".into(), 2)));
+        let t = r.text();
+        assert!(t.contains(&format!(
+            "provider rpc = helius-rpc binding {} registry v4 plan free credential helius@2",
+            &p.binding[..16]
+        )));
+        assert!(
+            !t.contains("helius-rpc.com") && !t.contains("api-key"),
+            "{t}"
+        );
+
+        // The single-provider kinds and the auxiliary RPCs: Jupiter's selection replaces the
+        // default profile, Jito's is the block engine, a registry id names the bundle simulator and
+        // a B source (bound once, also beside the run's own endpoints); an unknown id is refused.
+        use crate::providers::{AuthKind, ProviderDescriptor};
+        let mut more = reg.clone();
+        let extra = |id: &str, kind, endpoint: &str| ProviderDescriptor {
+            id: id.into(),
+            kind,
+            endpoint: endpoint.into(),
+            auth: AuthKind::None,
+            credential: None,
+            priority: 0,
+            capacity_rps: None,
+            plan: crate::providers::Plan::Free,
+            entitlement: "fixture".into(),
+            qualification: None,
+            enabled: true,
+        };
+        more.providers.push(extra(
+            "jup",
+            ProviderKind::Jupiter,
+            "https://jup.example/swap/v2",
+        ));
+        more.providers.push(extra(
+            "jito",
+            ProviderKind::Jito,
+            "https://jito.example/api/v1",
+        ));
+        more.selected.push((ProviderKind::Jupiter, "jup".into()));
+        more.selected.push((ProviderKind::Jito, "jito".into()));
+        more.validate().unwrap();
+        let mut a = parse(&[
+            "--bundle-sim-rpc-url",
+            "backup-rpc",
+            "--non-landing-sources",
+            "op-b=backup-rpc",
+        ])
+        .unwrap();
+        a.bind_registry(&more).unwrap();
+        let c = &a.config;
+        assert_eq!(c.provider_of(ProviderKind::Jupiter).unwrap().id, "jup");
+        assert_eq!(a.sources["jupiter"], "provider_registry:v4");
+        assert_eq!(
+            c.jito_block_engine_url.as_deref(),
+            Some("https://jito.example/api/v1")
         );
         assert_eq!(
-            RuntimeConfig::default()
-                .rpc_url(&|k| (k == "P0_AUDIT_RPC_URL").then(|| "https://audit.invalid".into()))
-                .as_deref(),
-            Some("https://audit.invalid")
+            c.bundle_sim_endpoint().unwrap(),
+            Some("https://backup.example")
+        );
+        assert_eq!(
+            c.non_landing_source_list().unwrap(),
+            [("op-b".to_string(), "https://backup.example".to_string())]
+        );
+        assert_eq!(
+            c.providers
+                .iter()
+                .filter(|p| p.endpoint == "https://backup.example")
+                .count(),
+            1
+        );
+        assert!(parse(&["--bundle-sim-rpc-url", "nobody"])
+            .unwrap()
+            .bind_registry(&more)
+            .unwrap_err()
+            .starts_with("PROVIDER_UNKNOWN"));
+        assert!(
+            parse(&["--bundle-sim-rpc-url", "helius-wss"])
+                .unwrap()
+                .bind_registry(&more)
+                .unwrap_err()
+                .starts_with("PROVIDER_UNKNOWN"),
+            "a WSS provider is no RPC"
         );
     }
     #[test]

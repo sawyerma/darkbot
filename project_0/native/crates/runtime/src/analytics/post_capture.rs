@@ -32,14 +32,20 @@ pub struct Outcome {
     pub verdict: Option<String>,
 }
 
-pub fn post_capture(run: &Path, mode: &str, args: &[String]) -> Result<Outcome, String> {
-    post_capture_with(run, mode, args, None)
+pub fn post_capture(
+    project: &Path,
+    run: &Path,
+    mode: &str,
+    args: &[String],
+) -> Result<Outcome, String> {
+    post_capture_with(project, run, mode, args, None)
 }
 
 /// `post_capture` under the job controller's cancellation (DEC-08, `job cancel`): a cancelled
 /// verification ends its attempt resumable and the job is CANCELLED (no report, no
 /// qualification over a verification the operator stopped).
 pub fn post_capture_with(
+    project: &Path,
     run: &Path,
     mode: &str,
     args: &[String],
@@ -72,7 +78,7 @@ pub fn post_capture_with(
     }
     let inv = report::parse_args(&rest)?;
     let mut text = String::new();
-    let verification = strict_driver::cli_with(&verify, cancelled);
+    let verification = strict_driver::cli_with(&verify, Some(project), cancelled);
     if cancelled.is_some_and(|c| c()) {
         return Err(super::backtest::CANCELLED.into());
     }
@@ -229,7 +235,7 @@ mod tests {
         let before = std::fs::read_dir(journal.parent().unwrap())
             .unwrap()
             .count();
-        let out = super::post_capture(&run, "off", &[]).unwrap();
+        let out = super::post_capture(&run, &run, "off", &[]).unwrap();
         assert!(!out.verification_ok && !out.report_ok);
         assert_eq!(out.verdict.as_deref(), Some("NOT_QUALIFIED"));
         for line in [

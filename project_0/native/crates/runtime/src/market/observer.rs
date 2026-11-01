@@ -62,6 +62,10 @@ pub mod verification;
 pub use reconcile::ReconcileConfig;
 #[path = "deployment.rs"]
 mod paths;
+// DEC-18: every blocking provider transport applies the run's credential (one installation).
+#[cfg(test)]
+#[path = "dec18_transport_tests.rs"]
+mod dec18_transport_tests;
 #[path = "../market_truth.rs"]
 pub mod truth;
 
@@ -133,8 +137,8 @@ use fetch::RpcFetcher;
 #[path = "capture.rs"]
 mod capture;
 pub use capture::{
-    finish_capture, run, run_embedded, run_embedded_with, run_from_env, run_from_env_with,
-    CaptureOutcome,
+    finish_capture, operational_lookup, run, run_embedded, run_embedded_with, run_from_env,
+    run_from_env_with, CaptureOutcome,
 };
 
 // DEC-09: these tests assert every row through its historical JSONL render (`VecSink`), so they
@@ -146,6 +150,5 @@ mod tests;
 pub use configuration::{
     DEFAULT_DRAIN_TIMEOUT_SECS, DEFAULT_DURATION_SECS, DEFAULT_HEARTBEAT_SECS,
     DEFAULT_INGRESS_BUFFER, DEFAULT_MIN_SAMPLE_LIQUIDATIONS, DEFAULT_OUT_DIR,
-    DEFAULT_READY_TIMEOUT_SECS, HELIUS_ENHANCED_WSS_MAINNET, HELIUS_RPC_MAINNET,
-    HELIUS_STANDARD_WSS_MAINNET,
+    DEFAULT_READY_TIMEOUT_SECS,
 };
