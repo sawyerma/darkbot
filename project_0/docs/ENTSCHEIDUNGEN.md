@@ -1,6 +1,6 @@
 # Project_0 — ENTSCHEIDUNGEN.md
 
-**Version:** 1.3 · **Datum:** 2026-10-25
+**Version:** 1.4 · **Datum:** 2026-11-01 (DEC-17 und Freigaben C-01 Lese-Teile, C-04, C-05, C-10 vom Nutzer 01.11.2026)
 **Art des Dokuments:** Entscheidungsnachweis. Dieses Dokument ist **keine** Status- und **keine** Phasenplan-Autorität. Status: `BUGS.md`. Plan und Gates: `PHASENPLAN.md`.
 **Codebasis der Entscheidungsvorbereitung:** Docs `72a99cc2`, Code `865867af`; Gegenprüfung durch eine zweite Instanz an `87c064ba` und `746fdf29`. Vor jeder Umsetzung muss gegen den dann aktuellen HEAD neu gepinnt werden. Dateinamen in diesem Dokument zeigen nur, wo eine Änderung ansetzt; sie sind keine verbindlichen Zeilenangaben.
 
@@ -18,7 +18,7 @@
    - Echtgeld,
    - eine Lockerung von FREE_ONLY, ObserveOnly oder eines Phasenplan-Gates.
 
-   Freigaben stehen ausschließlich in §4. Dort sind sie alle **NICHT ERTEILT**.
+   Freigaben stehen ausschließlich in §4, jede einzeln mit Datum und Umfang; was dort nicht **ERTEILT** ist, ist nicht freigegeben.
 3. **ACTIVE heißt nicht LIVE.** Wenn eine Capability in diesem Dokument auf ACTIVE gehen darf, betrifft das nur ihre technische Wirkung. Werttragende Ausführung bleibt an FE-06 und P8 gebunden.
 4. **Messfragen (§3) sind nicht entschieden.** Bis zur genannten Messung gilt der heutige Wert unverändert. Kein Agent darf ihn vorläufig festschreiben.
 5. **Korrekturen nur als neue Entscheidung.** Erzwingt reale Evidence eine Änderung, wird sie hier als neue, datierte Entscheidung eingetragen. Nie wird still im Code abgewichen.
@@ -339,6 +339,17 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
 - **Nachtrag 27.10.2026 (Nutzer, Stufe 2):** econ4h-Fenster jetzt, Zulassung bleibt GATED bis Stufe 3 (Shadow-Owner-Fenster); geschlossene Fenster bleiben vorläufig, Nachzügler werden gezählt, nie zurückgerechnet (keine Gnadenfrist); der persistierte u64::MAX-Cutoff der unbegrenzten Rohdaten-Capture wird typisiert ersetzt (angehängte Variante, alte Frames lesbar); eine abgestürzte Rohdaten-Capture setzt beim nächsten zugelassenen Start denselben Lauf fort (SK-07-Recovery, unterbrochenes Fenster erneut geprüft, ein angehaltener Lauf bleibt angehalten).
 - **Nachtrag 28.10.2026 (Nutzer, Stufe 3):** D-5 A Autostart nur market, Fortsetzung aller Modi nach freigegebenem Boot-Start; D-3 A derselbe econ4h-Lauf, unterbrochenes Fenster PARTIAL/CRASH_RECOVERED; D-1 A kein Drain an normalen Fenstergrenzen, Erkennung ohne Unterbrechung; D-7 A offene Watches gezählt, geordneter Shutdown mit vollständigem Drain und Journal-Seal, finanzielle UNKNOWN-Zustände bleiben gesperrt; Vorgaben (ohne Widerspruch): D-2 Rotation je Fenster + econ_segment_mib, D-4 Fenster W ab erstem handelbaren READY, D-6 econ4h-Läufe als Kapazitätsbasis, D-8 keine Proto-Änderung.
 
+### 17 — Operator-Auth, Wallet-Modell, Jito, EXIT-WSOL, Journal, Operator-Tools, Safety-HALT (Nutzerentscheidung 01.11.2026)
+- **a) Operator-Authentifizierung (P8-CTRL-02):** B, Secure Enclave, Zugriffsregel userPresence (Touch ID, sonst Login-Passwort im Systemdialog). Pflicht für jeden FE-06-Grant und jedes ENABLE von `WALLET:*`, `ECON_ARM`, `ECON_SEND`, `ECON_LIVE`; DISABLE, REVOKE und STOP nie. Die Signatur bindet exakt Request-ID, Generation, Owner-Epoche, Scope-Hash bzw. Schalter und Wert, Zeitstempel; der Owner prüft sie gegen den einmalig registrierten öffentlichen Schlüssel, dessen Hash in der Konfigurationsidentität steckt, sonst `OPERATOR_AUTH_REQUIRED`. Bestätigung nur lokal über `p0ctl` (`p0ctl live grant --confirm <hash>`, `p0ctl capability set … --confirm`); die GUI bereitet vor, zeigt Scope, Hash und „wartet auf Bestätigung“ und kann selbst nicht bestätigen. Grant-Annahme: jede referenzierte Evidence ist ein typisierter Record, per SHA-256 des Inhalts gebunden; der Owner prüft die Hashes beim Grant und bei jeder Nutzung, Abweichung ⇒ Grant BLOCKED mit `EVIDENCE_CHANGED` (L04). Linux-CI: feature-gated Test-Signer, nicht im Produktionsbinary (Negativtest wie L18).
+- **b) Wallet-Modell:** ein Owner, mehrere Signer mit Rollen (`LIQUIDATOR`, `FEE_PAYER`, `TREASURY` nur lesend); je Signer eigener Schalter `WALLET:<Pubkey>`, eigene Holds, eigene Limits, eigene Journal-Lane im einen FE-04-Journal. Kein Kapitalfluss zwischen Wallets außer über einen expliziten Rebalance-Plan (P8-INV, bleibt OBSERVE). Wallet-Wahl je Kandidat deterministisch nach verfügbarem Bestand nach Holds und Exit-Reserve, kein Round-Robin. Fehler, UNKNOWN oder HALT einer Wallet sperrt nur diese Wallet, nie global. Der FE-06-Scope nennt die zugelassenen Wallets. Erster Pilot: genau eine Wallet, zugleich Fee-Payer.
+- **c) Jito S3-R01:** Block-Engine-Protos gepinnt im Repo vendoren (wie Yellowstone) und mit der vorhandenen Toolchain bauen, kein externes Jito-Crate, Golden-Tests. Standard ohne Auth-Keypair (FREE_ONLY); Keypair nur als optionales Feld nach gemessenem Vorteil, durch dieselben Schalter gedeckt. Jitos aktuelle Policy wird beim realen Zugriff geprüft, nie angenommen.
+- **d) EXIT-WSOL:** WSOL-Staub sperrt nur die eigene Position, nie Exits anderer Positionen. Beim vollständigen Exit wird das WSOL-ATA per Unwrap geschlossen; ein Rest unter einer typisierten Schwelle wird als `DUST`-Record gebucht und als Kosten verbucht, ein Rest darüber ist ein eigener Exit mit eigener Admission. Nachweis „Close + Re-Create in einer TX“ offline per litesvm mit dem im Lese-Smoke gelesenen Token-/ATA-Programm-Bytecode. M1/M2 werden diesem Text zugeordnet; weichen sie ab, gilt dieser Text.
+- **e) Korruptes Journal:** archivieren, nicht reparieren, nicht löschen: `p0ctl`-Befehl, Manifest mit Pfad, SHA-256, Grund, Datum; zählt nicht zur Qualifikation; Status ARCHIVED.
+- **f) Operator-Tools (P8-CTRL-03d: `p0-prewarm-atas`, `p0-probe-*`):** dieselben Permits (WALLET, SIGN, SEND, Operator-Bestätigung), kein zweiter Pfad; kein ATTEMPT/ARM, dafür ein typisiertes Kostenlimit je Werkzeug.
+- **g) Safety-HALT:** sperrt neue Versuche, nie Exits. Exits brauchen weiterhin ECON_LIVE, Wallet, SIGN, SEND und Budget; nur `ECON_LIVE=DISABLED` oder STOP sperrt auch Exits.
+- **Offen bleiben:** P8-INV ACTIVE (OBSERVE bis nach FE-07), V7-Voll-Hold, B-8 (N).
+- **Reihenfolge:** nach dem Lese-Smoke (§4 C-01 Lese-Teile, C-04, C-05, C-10); P8-CTRL-02 zuerst; jedes Paket mit `gate.sh` und CI auf dem exakten SHA.
+
 ---
 
 ## 3. Messfragen (nicht entschieden; bis zur Messung gilt der heutige Wert)
@@ -357,21 +368,24 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
 
 ---
 
-## 4. Freigaben (alle NICHT ERTEILT)
+## 4. Freigaben
 
 Jede Freigabe wird einzeln und ausdrücklich erteilt, mit Umfang, Provider, Budget und Dauer. Eine Freigabe umfasst nie mehr als ihren eingetragenen Umfang.
 
 | ID | Freigabe | Status | Hinweis |
 |---|---|---|---|
-| C-01 | P1B-Schritte 5–7 (Bank-Resize-Read, FE-01-Beobachtung, Promotion P1B → P1A) | NICHT ERTEILT | Voraussetzung für FE-01 und damit für den ganzen Profit-Pfad |
+| C-01 | P1B-Schritte 5–7 (Bank-Resize-Read, FE-01-Beobachtung, Promotion P1B → P1A) | **Lese-Teile ERTEILT 01.11.2026** (Schritte 5–6: Bank-Resize-Read, FE-01-Beobachtung inkl. P1A-01 ProgramData-/IDL-Read der neu deployten Programmversion); Schritt 7 (Promotion) NICHT ERTEILT | Voraussetzung für FE-01 und damit für den ganzen Profit-Pfad |
 | C-02 | FREE_ONLY-Provider-Qualifikation inkl. zweitem unabhängigen Endpunkt | NICHT ERTEILT | Dient Entscheidung 3 und 8 |
 | C-03 | S1-08 PublicNode-Capability-Smoke | NICHT ERTEILT | — |
-| C-04 | G-B Network-Boot-Audit | NICHT ERTEILT | — |
-| C-05 | 600-s-Kalibrierung | NICHT ERTEILT | — |
+| C-04 | G-B Network-Boot-Audit | **ERTEILT 01.11.2026** (nach DEC-07 über den Boot-Controller) | — |
+| C-05 | 600-s-Kalibrierung | **ERTEILT 01.11.2026** | — |
 | C-06 | C0-E1 4h-Master | NICHT ERTEILT | — |
 | C-07 | 72-h-P6-LT-Shadow | NICHT ERTEILT | — |
 | C-08 | FE-05 Read-only-Preflight | NICHT ERTEILT | — |
 | C-09 | FE-06 One-Shot und FE-07 | NICHT ERTEILT | einzelne, gesonderte Nutzerfreigabe |
+| C-10 | C0-MO-Beobachtung 30 min und Read des Token-/ATA-Programm-Bytecodes (litesvm, DEC-17 d) | **ERTEILT 01.11.2026** | Kalibrierung, **kein** C0-MO-PASS (verlangt 4 h, C-06); MT6–MT10 bleiben gesperrt (B-6) |
+
+**Umfang der Freigaben vom 01.11.2026 (C-01 Lese-Teile, C-04, C-05, C-10):** nur lesen, FREE_ONLY, nur die konfigurierten öffentlichen RPC/WSS-Endpunkte, kein Paid-Provider, kein Signieren, kein Send, kein 4h-Lauf; Ablauf über den Boot-Controller (Offline-Preflight → Netzwerkfreigabe → Audit → Startfreigabe → Start); Provider-Evidence als Record; Ergebnisse in `MEASUREMENT_LEDGER` und `STATUS`.
 
 ---
 
