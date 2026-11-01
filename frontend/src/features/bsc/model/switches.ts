@@ -4,10 +4,10 @@
 // the request that last set each. Nothing is inferred locally; without the
 // owner's state nothing can be requested.
 import type { BuyAttemptLimitView, ControlSwitchView } from "./types";
+import { BACKEND_UNAVAILABLE } from "./status";
 
 export const WALLET_SWITCHES = ["BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER"] as const;
 export const ECONOMIC_SWITCHES = ["BSC_ECON_SIGN", "BSC_ECON_ARM", "BSC_ECON_SEND", "BSC_ECON_ATTEMPT", "BSC_ECON_LIVE"] as const;
-export const SWITCHES_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
 /** What each switch permits; the Mainnet path still checks its own guard, V5, nonce, budget and attempt. */
 export const SWITCH_TEXT: Record<string, { label: string; hint: string }> = {
@@ -38,7 +38,7 @@ export interface SwitchRow {
 /** One switch row from the typed projection; absent or unreadable is never requestable. */
 export function switchRow(id: string, s: ControlSwitchView | undefined): SwitchRow {
   const text = SWITCH_TEXT[id] ?? { label: id, hint: "" };
-  if (!s) return { id, ...text, requested: SWITCHES_UNAVAILABLE, effective: SWITCHES_UNAVAILABLE, blockReason: "", generation: 0n, receipt: "—", available: false, reason: SWITCHES_UNAVAILABLE };
+  if (!s) return { id, ...text, requested: BACKEND_UNAVAILABLE, effective: BACKEND_UNAVAILABLE, blockReason: "", generation: 0n, receipt: "—", available: false, reason: BACKEND_UNAVAILABLE };
   const readable = s.requested === "DISABLED" || s.requested === "ENABLED" || (id === "BSC_RUNTIME_MODE" && (RUNTIME_MODES as readonly string[]).includes(s.requested));
   return {
     id, ...text, requested: s.requested, effective: s.effective, blockReason: s.blockReason, generation: s.generation,
@@ -60,7 +60,7 @@ export function summary(rows: readonly SwitchRow[]): string {
 /** The daily BUY attempt limit (UTC day) with its use; absent without the owner's state. */
 export interface BuyLimitRow { available: boolean; perDay: bigint; dayUtc: string; used: bigint; remaining: bigint; generation: bigint; receipt: string; summary: string }
 export function buyLimitRow(l: BuyAttemptLimitView | undefined): BuyLimitRow {
-  if (!l) return { available: false, perDay: 0n, dayUtc: "—", used: 0n, remaining: 0n, generation: 0n, receipt: "—", summary: SWITCHES_UNAVAILABLE };
+  if (!l) return { available: false, perDay: 0n, dayUtc: "—", used: 0n, remaining: 0n, generation: 0n, receipt: "—", summary: BACKEND_UNAVAILABLE };
   return {
     available: true, perDay: l.perDay, dayUtc: l.dayUtc, used: l.used, remaining: l.remaining, generation: l.generation,
     receipt: l.requestId ? `${l.requestId} @ generation ${l.setGeneration?.toString() ?? "?"}` : "never set",

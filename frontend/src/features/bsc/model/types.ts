@@ -1,4 +1,4 @@
-// Read-only domain projection. Amounts remain exact decimal wei; absent means unknown.
+// The decoded BSC projections; nothing here decides or permits. Amounts remain exact decimal wei; absent means unknown.
 export interface PublicField { name:string; value:string; hint?:string }
 /** One public native leaf: DBREC name, kind (NativeKind), canonical value and native unit. */
 export interface NativeFieldView { name:string; kind:number; value:string; unit:string }
@@ -6,7 +6,7 @@ export interface NativeRecordView { schema:string; evidence?:Evidence; provenanc
 export interface Evidence { path:string; sha256:string; observedUnixS:bigint }
 export interface Guard { guardState:string; frozenApprovedSha256:string; contractPresent:boolean; contractPath:string; contractSha256:string; approved?:boolean; executionReady?:boolean; attemptId:string; maxAttempts?:bigint }
 export interface BscStatusView {
- sourceCommit:string; evaluatedUnixS:bigint; dataAsOfUnixS:bigint; liveState:string;
+ sourceCommit:string; evaluatedUnixS:bigint; dataAsOfUnixS:bigint;
  guard?:Guard; gates:{gateId:string;state:string;evidence?:Evidence;reasonCodes:string[]}[];
  readiness?:{verdict:string; mode:string; candidateBinding:string; evidence?:Evidence; fundingVerdict:string; checks:PublicField[]; portalVersionBound:string;portalVersionObserved:string;portalImplBound:string;portalImplObserved:string;codeHashChanged?:boolean;headBlock?:bigint;reasons:string[]};
  builder?:{refreshObservedUnixS:bigint;refreshExpiresUnixS:bigint;floors:PublicField[];probe?:Evidence;price:string;noMerge:string;positionFirst:string;inclusion:string};
@@ -29,5 +29,5 @@ export interface LiveGrantLimitsView {maxOpenPositions:number;maxRealizedLossWei
 export interface LiveGrantRiskView {maxBuySlippageBps:number;maxExitSlippageBps:number;maxGasPriceWei:bigint;maxBuyGasLimit:bigint;maxApproveGasLimit:bigint;maxSellGasLimit:bigint}
 export interface LivePositionView {lot:string;token:string;component:string;state:string;tokens:string;inputWei:string;proceedsWei:string;gasWei:string;pnlWei?:string}
 export interface LiveTransactionView {txHash:string;intent:string;token:string;nonce:bigint;state:string;blockNumber?:bigint}
-export interface BscLiveView {gate:string;blockers:string[];preconditions:LivePreconditionView[];grant?:LiveGrantView;generation:bigint;runtimeMode?:ControlSwitchView;economicLive?:ControlSwitchView;daily?:BuyAttemptLimitView;totalLimit:bigint;totalUsed:bigint;grantAttemptsUsed:bigint;spentWei:string;qualification:string;qualificationDetail:string;pathState:string;pathReason:string;route:string;buyer:string;buyerBalanceWei?:string;released:bigint;unknown:bigint;lastRefusal:string;positions:LivePositionView[];transactions:LiveTransactionView[];realizedPnlWei:string;gasWei:string;warnings:string[];scope:ControlSwitchView[]}
+export interface BscLiveView {gate:string;blockers:string[];preconditions:LivePreconditionView[];grant?:LiveGrantView;generation:bigint;runtimeMode?:ControlSwitchView;economicLive?:ControlSwitchView;daily?:BuyAttemptLimitView;totalLimit:bigint;totalUsed:bigint;grantAttemptsUsed:bigint;spentWei:string;qualification:string;qualificationDetail:string;pathState:string;pathReason:string;route:string;buyer:string;buyerBalanceWei?:string;released:bigint;unknown:bigint;lastRefusal:string;positions:LivePositionView[];transactions:LiveTransactionView[];realizedPnlWei:string;gasWei:string;warnings:string[];scope:ControlSwitchView[];grantableSources:string[]}
 export interface BscWalletsView {expectedAddress:string;walletStatus:string;launcherAddress:string;buyerAddress:string;chainId?:bigint;launcherBalanceWei?:string;buyerBalanceWei?:string;observedBlock?:bigint;observedUnixS:bigint;source:string;requiredLauncherWei?:string;requiredBuyerWei?:string;evidence?:Evidence;launcherControl?:ControlSwitchView;buyerControl?:ControlSwitchView}

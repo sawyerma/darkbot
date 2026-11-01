@@ -16,7 +16,8 @@ import { LivePanel } from "./pages/LivePanel";
 
 /**
  * BSC Birth Entry – Feature-Komposition.
- * - Read-only projections and a separate readiness job; no BUY controller or signer.
+ * - Six tabs over the native projections; every control is a request the native owner applies
+ *   or refuses. LIVE (its own tab) is the owner's decision under its gate; the browser signs nothing.
  * - Die BSC-Engine (bsc/engine) ist alleinige Autorität für G0.7/G0.8, Guard und Wallets.
  * - bsc.status ist über die Route gebunden (projectRegistry); Panels binden ihre Topics selbst.
  */

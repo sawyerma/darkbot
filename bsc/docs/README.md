@@ -185,7 +185,7 @@ Status: **V** = verbindlich · **N** = Nachweis (unveränderlich) · **H** = his
 
 Kandidaten zum Entfernen, nur nach Nutzerfreigabe und nur per `git mv` nach `prestudy/bsc/`, danach `cargo check` (§8) und `cargo test -p darkbot-bsc-execution --test acceptance_guard`:
 
-- `tools/g06a_final_dry_legacy_v2.sh`, `tools/g07_pre_live_readiness_legacy_v2.sh` (nur „historical only"-Kommentare)
+- ~~`tools/g06a_final_dry_legacy_v2.sh`, `tools/g07_pre_live_readiness_legacy_v2.sh`~~ entfernt (Audit E 2.9, Git-Historie)
 - `native/evidence/c1/c1-9-native-latency-20261008T221120*`, `…20261010T230358*` (keine Referenz)
 - `native/evidence/c1/*run2-burst-invalid*` (als ungültig markiert, keine Referenz)
 - byteidentische Duplikate von `native/evidence/c1/rev2-c14a-rerun-20261008/` auf Ordnerebene

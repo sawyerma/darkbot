@@ -345,16 +345,6 @@ fn split_drift(detail: &str, key: &str) -> Option<(String, String)> {
     let (a, b) = rest.split_once(" -> ")?;
     Some((a.trim().into(), b.trim().into()))
 }
-fn env_value(path: &Path, key: &str) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .find_map(|l| {
-            l.strip_prefix(&format!("{key}="))
-                .map(|v| safe_text(v.trim()))
-        })
-        .unwrap_or_default()
-}
 fn optional_u64(r: &Record, name: &str) -> Option<u64> {
     field(r, name)?.parse().ok()
 }
@@ -914,15 +904,17 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             ],
         );
     }
+    // Audit E 1.3: the LIVE buyer the runtime configuration names (it must be one C2 watches,
+    // or the runtime refuses the configuration); UNKNOWN without a readable LIVE configuration.
+    let config = super::live::runtime_config(root);
+    let (expected_address, wallet_status) = match config.as_ref().ok().and_then(|c| c.live.as_ref())
+    {
+        Some(live) => (format!("0x{}", record::hex(&live.buyer)), "WATCHED"),
+        None => (String::new(), "UNKNOWN"),
+    };
     let mut wallets = BscWalletsState {
-        expected_address: env_value(
-            &root.join("bsc/config/wallet.public.env"),
-            "BSC_EXPECTED_ADDRESS",
-        ),
-        wallet_status: env_value(
-            &root.join("bsc/config/wallet.public.env"),
-            "BSC_WALLET_STATUS",
-        ),
+        expected_address,
+        wallet_status: wallet_status.into(),
         ..Default::default()
     };
     if let Some((p, r)) = latest(&records, &[schema::g06a::preflight::SCHEMA.name]) {
@@ -1405,22 +1397,36 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         g04_gate(root, rundir),
     ];
     gates.extend(c1_gates(root, &records));
-    let live = super::live::live_state(root, rundir, clock_s().map(|s| s * 1_000));
+    let live = super::live::live_state(
+        root,
+        rundir,
+        config.as_ref().map_err(|why| *why),
+        clock_s().map(|s| s * 1_000),
+    );
+    if let Err(why) = &config {
+        warnings.push((*why).into());
+    }
+    // Audit E 1.4: an unreadable snapshot identity is UNKNOWN, never a stand-in value.
+    let source_commit = fs::read_to_string(root.join("COMMIT"))
+        .ok()
+        .map(|s| safe_text(s.trim()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            warnings.push("SOURCE_COMMIT_UNKNOWN".into());
+            "UNKNOWN".into()
+        });
+    let data_as_of_unix_s = fs::read_to_string(root.join("SYNCED_AT"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or_else(|| {
+            warnings.push("SNAPSHOT_SYNC_TIME_UNKNOWN".into());
+            0
+        });
     Snapshot {
         status: BscStatus {
-            source_commit: fs::read_to_string(root.join("COMMIT"))
-                .unwrap_or_else(|_| "working-tree".into())
-                .trim()
-                .into(),
+            source_commit,
             evaluated_unix_s: now(),
-            // Plan 28.10.: LIVE only while the owner's gate is clear and
-            // the runtime's LIVE path is armed.
-            live_state: if super::live::trading(&live) {
-                "LIVE"
-            } else {
-                "BLOCKED"
-            }
-            .into(),
             guard: Some(guard),
             gates,
             readiness: Some(readiness),
@@ -1429,10 +1435,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             dry: Some(dry),
             jobs: vec![],
             warnings,
-            data_as_of_unix_s: fs::read_to_string(root.join("SYNCED_AT"))
-                .ok()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(0),
+            data_as_of_unix_s,
         },
         launch,
         monitoring,

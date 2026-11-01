@@ -1,5 +1,6 @@
-import {bindingOf} from "@/core/realtime/topicTable";
-import {TopicId} from "@/core/realtime";
+import {TOPIC_TABLE,bindingOf} from "@/core/realtime/topicTable";
+import {ProjectId,TopicClass,TopicId} from "@/core/realtime";
+import {useBscStore} from "../store/bscStore";
 import {describe,it,expect} from "vitest";
 import {readFileSync} from "node:fs";
 import {decodeStatus,decodeLaunch,decodeMonitoring,decodeWallets,decodeLive} from "./bscAdapter";
@@ -9,13 +10,19 @@ const golden=(name:string)=>Uint8Array.from(Buffer.from(readFileSync(new URL(`..
 describe("native BSC reporter contract",()=>{
  it("decodes the Rust golden projections without granting readiness or live authority",()=>{
   expect(bindingOf(TopicId.BSC_STATUS)?.payloadType).toBe("darkbot.bsc.v1.BscStatus");
-  const s=decodeStatus(golden("status"));expect(s.sourceCommit).toBe("fixture-source");expect(s.guard?.guardState).toBe("UNARMED");expect(s.readiness?.verdict).toBe("BLOCKED");expect(s.readiness?.mode).toBe("OFFLINE_ZERO_EGRESS");expect(s.readiness?.candidateBinding).toBe("NO_SELECTION");expect(s.liveState).toBe("BLOCKED");expect(s.dataAsOfUnixS).toBe(1792232000n);expect(s.readiness?.checks[0]?.value).toContain("[redacted]");
+  const s=decodeStatus(golden("status"));expect(s.sourceCommit).toBe("fixture-source");expect(s.guard?.guardState).toBe("UNARMED");expect(s.readiness?.verdict).toBe("BLOCKED");expect(s.readiness?.mode).toBe("OFFLINE_ZERO_EGRESS");expect(s.readiness?.candidateBinding).toBe("NO_SELECTION");expect("liveState" in s).toBe(false);expect(s.dataAsOfUnixS).toBe(1792232000n);expect(s.readiness?.checks[0]?.value).toContain("[redacted]");
   expect(decodeLaunch(golden("launch")).contractPresent).toBe(false);
   expect(decodeMonitoring(golden("monitoring")).state).toBe("NOT_EXECUTED");
-  expect(decodeWallets(golden("wallets")).launcherBalanceWei).toBeUndefined();
+  const w=decodeWallets(golden("wallets"));expect(w.launcherBalanceWei).toBeUndefined();expect([w.expectedAddress,w.walletStatus]).toEqual(["","UNKNOWN"]);
   // Plan 28.10.: without the owner's state the LIVE gate is UNKNOWN, never CLEAR.
   expect(bindingOf(TopicId.BSC_LIVE_STATE)?.payloadType).toBe("darkbot.bsc.v1.BscLiveState");
-  const l=decodeLive(golden("live"));expect(l.gate).toBe("UNKNOWN");expect(l.warnings).toContain("OWNER_STATE_ABSENT");expect(l.qualification).toBe("NONE");expect(l.pathState).toBe("NOT_RUNNING");expect(l.grant).toBeUndefined();
+  const l=decodeLive(golden("live"));expect(l.gate).toBe("UNKNOWN");expect(l.warnings).toContain("OWNER_STATE_ABSENT");expect(l.qualification).toBe("NONE");expect(l.pathState).toBe("NOT_RUNNING");expect(l.grant).toBeUndefined();expect(l.grantableSources).toEqual([]);expect(l.warnings).toContain("RUNTIME_CONFIG_UNREADABLE");
+ });
+ it("binds only the five BSC STATE topics into one store (Audit E 1.2, 5.10)",()=>{
+  // The placeholder bsc.execution.events (40) is gone: no binding, no event slice, no reset.
+  expect(bindingOf(40 as TopicId)).toBeUndefined();
+  expect(TOPIC_TABLE.filter(t=>t.project===ProjectId.BSC).map(t=>[t.wireName,t.cls])).toEqual(["bsc.status","bsc.launch.state","bsc.monitoring.state","bsc.wallets.state","bsc.live.state"].map(n=>[n,TopicClass.STATE]));
+  expect(Object.keys(useBscStore.getState()).sort()).toEqual(["applyState","launch","live","monitoring","setTopicStatus","status","wallets"]);
  });
  it("shows the readiness record leaves without a typed field once, in Launch / BUY section 8",()=>{
   const records=decodeLaunch(golden("launch")).records;

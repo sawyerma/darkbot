@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BACKEND_UNAVAILABLE, candidateControlView } from "./candidate";
+import { candidateControlView } from "./candidate";
+import { BACKEND_UNAVAILABLE } from "./status";
 
 const mirror = (extra: Record<string, string> = {}) =>
   Object.entries({

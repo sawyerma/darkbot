@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conditionRows, grantScope, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -42,7 +42,8 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     const form = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "1000", maxSpendWei: "5000", maxAttempts: "2", hours: "4", exitOnly: false,
       buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000",
       maxOpenPositions: "3", maxRealizedLossWei: "5000", maxDailyRealizedLossWei: "2000", minBuyIntervalMs: "0" };
-    const ok = grantScope(form, 1_000);
+    const grantable = ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"];
+    const ok = grantScope(form, 1_000, grantable);
     expect("scope" in ok && ok.scope.expiresUnixMs).toBe(1_000n + 4n * 3_600_000n);
     expect("scope" in ok && ok.scope.venue).toBe("BSC_VENUE_FLAP");
     for (const bad of [
@@ -72,7 +73,15 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       { ...form, maxDailyRealizedLossWei: "5001" },
       { ...form, minBuyIntervalMs: "1e3" },
       { ...form, minBuyIntervalMs: "" },
-    ]) expect("error" in grantScope(bad, 1_000)).toBe(true);
+      // Audit E 1.6: a source the projection does not name grantable (no adapter endpoint).
+      { ...form, sources: ["BSC_INGRESS_GETH"] },
+      { ...form, sources: ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_48CLUB"] },
+    ]) expect("error" in grantScope(bad, 1_000, grantable)).toBe(true);
+    // Before a choice the form names the first grantable source; without any it offers none.
+    const unchosen = grantScope({ ...form, sources: null }, 1_000, grantable);
+    expect("scope" in unchosen && unchosen.scope.sources).toEqual(["BSC_INGRESS_PUBLICNODE"]);
+    expect("error" in grantScope(form, 1_000, [])).toBe(true);
+    expect("error" in grantScope({ ...form, sources: null }, 1_000, [])).toBe(true);
     expect(weiOk("340282366920938463463374607431768211455")).toBe(true);
     expect(weiOk("340282366920938463463374607431768211456")).toBe(false);
     expect([totalInputOk("10"), totalInputOk("0"), totalInputOk("11"), totalInputOk("01")]).toEqual([true, true, false, false]);
@@ -89,5 +98,15 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     expect(liveRequestOf(row("BSC_EXEC")).action).toBe("bsc.source.mode.set");
     expect(signedBnb("-1500000000000000")).toBe("−0.0015 BNB");
     expect(signedBnb("2000000000000000000")).toBe("2 BNB");
+  });
+
+  it("is the one LIVE indicator: the owner's gate and the LIVE path from bsc.live.state (Audit E 4.10)", () => {
+    const live = (gate: string, pathState: string, blockers: string[] = []) => ({ gate, pathState, blockers }) as unknown as BscLiveView;
+    expect(liveIndicator(null).state).toBe("UNKNOWN");
+    expect(liveIndicator(live("UNKNOWN", "NOT_RUNNING")).state).toBe("UNKNOWN");
+    expect(liveIndicator(live("CLEAR", "ARMED")).state).toBe("LIVE");
+    expect(liveIndicator(live("CLEAR", "PROBING")).state).toBe("BLOCKED");
+    const blocked = liveIndicator(live("BLOCKED", "ARMED", ["LIVE_GRANT_MISSING"]));
+    expect([blocked.state, blocked.detail]).toEqual(["BLOCKED", "gate BLOCKED (first: LIVE_GRANT_MISSING) · LIVE path ARMED"]);
   });
 });

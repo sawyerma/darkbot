@@ -10,5 +10,14 @@ lint:
     COMMENTS:
       - schemas/darkbot/control
 breaking:
+  # README §3: a field or enum value is removed only with its number and name reserved (never
+  # reused); removing it without both stays breaking.
   use:
     - FILE
+    - ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED
+    - ENUM_VALUE_NO_DELETE_UNLESS_NAME_RESERVED
+    - FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED
+    - FIELD_NO_DELETE_UNLESS_NAME_RESERVED
+  except:
+    - ENUM_VALUE_NO_DELETE
+    - FIELD_NO_DELETE

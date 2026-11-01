@@ -2,8 +2,22 @@
 BSC_REPORTER_LABEL="${LABEL%.gateway}.bsc.reporter"
 BSC_READINESS_LABEL="${LABEL%.gateway}.bsc.readiness"
 BSC_RUNTIME_LABEL="${LABEL%.gateway}.bsc.runtime"
-BSC_SOCKET="/tmp/darkbot/bsc.sock"
-if [ -n "${DARKBOT_TEST_DIR:-}" ]; then BSC_SOCKET="$DARKBOT_TEST_DIR/b.sock"; fi
+# Audit E 3.5: the reporter's socket lies beside the controller's other feed sockets (the
+# directory of $SOCK, the test directory in an isolated run). The reporter and the gateway feed
+# take it, like the readiness label, only from here.
+BSC_SOCKET="$(dirname "$SOCK")/bsc.sock"
+# Audit E 3.6: the launchd timing of the BSC jobs, each named once (app.conf may set it): launchd
+# restarts a crashed job no sooner than BSC_LAUNCHD_THROTTLE_S and kills a job still running
+# BSC_STOP_BUDGET_S after its stop signal (default: the controller's own stop budget); a readiness
+# stop waits that long, and at most BSC_READINESS_ARM_WAIT_S for the job's stop handler.
+BSC_LAUNCHD_THROTTLE_S="$(app_conf BSC_LAUNCHD_THROTTLE_S 5)"
+BSC_STOP_BUDGET_S="$(app_conf BSC_STOP_BUDGET_S "$STOP_BUDGET_S")"
+BSC_READINESS_ARM_WAIT_S="$(app_conf BSC_READINESS_ARM_WAIT_S 5)"
+bsc_launchd_conf() {
+  for v in "$BSC_LAUNCHD_THROTTLE_S" "$BSC_STOP_BUDGET_S" "$BSC_READINESS_ARM_WAIT_S"; do
+    case "$v" in ''|*[!0-9]*|0*) die "app.conf: BSC_LAUNCHD_THROTTLE_S, BSC_STOP_BUDGET_S and BSC_READINESS_ARM_WAIT_S are positive whole seconds" ;; esac
+  done
+}
 BSC_JOB_PLIST="$RUNDIR/$BSC_READINESS_LABEL.plist"
 BSC_REPORTER_PLIST="$RUNDIR/$BSC_REPORTER_LABEL.plist"
 BSC_RUNTIME_PLIST="$RUNDIR/$BSC_RUNTIME_LABEL.plist"
@@ -13,6 +27,7 @@ bsc_pid() { launchctl list "$BSC_READINESS_LABEL" 2>/dev/null | sed -n 's/.*"PID
 bsc_result_field() { sed -n "s/^$1=//p" "$RUNDIR/bsc.readiness.result" 2>/dev/null || true; }
 bsc_plist() {
   local label="$1" program="$2" extra="$3" log="$4" keep="$5"
+  bsc_launchd_conf
   cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,8 +44,8 @@ $(plist_env DARKBOT_BSC_LAUNCH_ID "${BSC_LAUNCH:-}")
 $(plist_env DARKBOT_BSC_READINESS_BIN "$APP_HOME/current/g07_pre_live_readiness")
 </dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key>$(if [ "$keep" = crash ]; then printf '<dict><key>SuccessfulExit</key><false/></dict>'; else printf '<%s/>' "$keep"; fi)
-<key>ThrottleInterval</key><integer>5</integer>
-<key>ExitTimeOut</key><integer>330</integer>
+<key>ThrottleInterval</key><integer>$BSC_LAUNCHD_THROTTLE_S</integer>
+<key>ExitTimeOut</key><integer>$BSC_STOP_BUDGET_S</integer>
 <key>StandardOutPath</key><string>$(printf '%s' "$log" | xml_escape)</string>
 <key>StandardErrorPath</key><string>$(printf '%s' "$log" | xml_escape)</string>
 </dict></plist>
@@ -47,9 +62,11 @@ bsc_reporter_up() {
   bsc_plist "$BSC_REPORTER_LABEL" "$APP_HOME/current/bsc-status-reporter" "" "$LOGDIR/bsc-reporter.log" true > "$BSC_REPORTER_PLIST"
   launchctl bootstrap "$DOMAIN" "$BSC_REPORTER_PLIST"
 }
-# The read-only BSC runtime (C1, order V2 §5): observes the sources the native
-# owner made effective SHADOW; idle while all are OFF. Restarted by launchd only
-# after a crash; a stop is a stop file it answers by committing its journal.
+# The BSC runtime (C1, order V2 §5, plan 28.10.): observes the sources the native
+# owner made effective and runs the PAPER paths; its LIVE path signs and sends only
+# while the owner's LIVE gate holds for the granted scope. Idle while all are OFF.
+# Restarted by launchd only after a crash; a stop is a stop file it answers by
+# committing its journal.
 bsc_runtime_pid() { launchctl list "$BSC_RUNTIME_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
 bsc_runtime_up() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
@@ -114,18 +131,21 @@ bsc_readiness_stop() {
   [ -n "$pid" ] || { say "kein BSC readiness Job aktiv"; return 0; }
   local launch; launch="$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.launch")"
   printf 'launch_id=%s\n' "$launch" > "$RUNDIR/bsc.readiness.stopping"
-  # Signal only once the job armed its stop handler (at most 5 s): a TERM
-  # before would end it without a result (Paket 8 review L6).
+  # Signal only once the job armed its stop handler (at most
+  # BSC_READINESS_ARM_WAIT_S): a TERM before would end it without a result
+  # (Paket 8 review L6).
+  bsc_launchd_conf
   local i=0
-  while [ "$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.armed" 2>/dev/null)" != "$launch" ] && [ "$i" -lt 50 ] && [ "$(bsc_pid)" = "$pid" ]; do sleep 0.1; i=$((i+1)); done
+  while [ "$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.armed" 2>/dev/null)" != "$launch" ] && [ "$i" -lt $((BSC_READINESS_ARM_WAIT_S * 10)) ] && [ "$(bsc_pid)" = "$pid" ]; do sleep 0.1; i=$((i+1)); done
   launchctl kill SIGTERM "$DOMAIN/$BSC_READINESS_LABEL" || { [ "$(bsc_pid)" != "$pid" ] || die "BSC readiness konnte nicht signalisiert werden"; }
   say "BSC readiness: geordneter Stopp angefordert"
 }
 bsc_wait_stopped() {
   local pid i=0; pid="$(bsc_pid)"
   [ -n "$pid" ] || return 0
+  bsc_launchd_conf
   while [ "$(bsc_pid)" = "$pid" ]; do
-    sleep 1; i=$((i+1)); [ "$i" -lt 330 ] || die "BSC readiness stoppt noch; kein SIGKILL, Gateway bleibt aktiv"
+    sleep 1; i=$((i+1)); [ "$i" -lt "$BSC_STOP_BUDGET_S" ] || die "BSC readiness stoppt noch; kein SIGKILL, Gateway bleibt aktiv"
   done
 }
 # GUI A/B selection, offline only: records a typed native request against the
@@ -142,8 +162,9 @@ bsc_candidate_request() {
 # Source, component and venue modes (plan §5a.2, v9 §2, order V2 §5) and the
 # wallet and economic switches (plan 27.10.): the native owner applies or
 # refuses one request with its generation as the CAS and prints the receipt;
-# a requested LIVE is recorded and stays BLOCKED, an ENABLED switch is a
-# permission only. Nothing here signs or sends. The same command the GUI uses.
+# a requested LIVE is effective only while the owner's LIVE gate holds (plan
+# 28.10.), an ENABLED switch is a permission only. This controller signs and
+# sends nothing itself. The same command the GUI uses.
 BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLED|<attempts per UTC day or in the campaign> <generation> <request_id>; bsc source show"
 # The LIVE grant (plan 28.10.): the operator's one economic approval of a
 # LIVE scope. `scope` prints the canonical scope text and its SHA-256, the

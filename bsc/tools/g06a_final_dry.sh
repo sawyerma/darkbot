@@ -5,7 +5,7 @@
 # `dbrec_show --get`; the verdict is the typed `g06a_requal_check`. DRY-1
 # signs locally; nothing is sent (read-only RPC and public documentation
 # reads only, no builder), and the guard must be UNARMED. The previous JSON
-# chain is kept unchanged as g06a_final_dry_legacy_v2.sh (historical only).
+# chain is retired (Audit E 2.9; it remains in the Git history).
 #
 # R0 needs no eth_getLogs: it verifies every header from the frozen DRY's
 # block on (hash chain, logs bloom, receipts against receiptsRoot) on the

@@ -55,8 +55,10 @@ enum TopicId {
   TOPIC_ID_BSC_WALLETS_STATE = 33;
   // bsc.live.state                 STATE   LIVE-Gate, Grant, Positionen (Plan 28.10.)
   TOPIC_ID_BSC_LIVE_STATE = 34;
-  // bsc.execution.events           EVENT
-  TOPIC_ID_BSC_EXECUTION_EVENTS = 40;
+  // 40 was bsc.execution.events (EVENT): a placeholder that never had a publisher or decoder;
+  // removed, its number and name never reused.
+  reserved 40;
+  reserved "TOPIC_ID_BSC_EXECUTION_EVENTS";
 
   // solana.status                  STATE   erst mit qualifiziertem Adapter
   TOPIC_ID_SOLANA_STATUS = 50;

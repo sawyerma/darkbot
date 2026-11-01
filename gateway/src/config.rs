@@ -24,6 +24,13 @@ pub struct Limits {
     pub command_retention_ms: u64,
     /// Command records kept before the oldest receipts move to the archive; also the archive size.
     pub command_ledger_records: usize,
+    /// Longest wait for one read-only `launchctl list` of a managed job; a timeout reads UNKNOWN,
+    /// never STOPPED.
+    pub launchd_query_timeout_ms: u64,
+    /// Longest wait for one `darkbotctl` dispatch of a command (its lifecycle lock wait included);
+    /// past it the outcome is unknown and the command stays PENDING_RECONCILE. The browser waits
+    /// longer (frontend `COMMAND_TIMEOUT_MS`), so this answer comes first.
+    pub controller_timeout_ms: u64,
 }
 
 /// A request stamped within the window and forgotten no earlier than this after its receipt can
@@ -51,6 +58,8 @@ impl Default for Limits {
             command_clock_window_ms,
             command_retention_ms: min_command_retention_ms(command_clock_window_ms),
             command_ledger_records: 1024,
+            launchd_query_timeout_ms: 2_000,
+            controller_timeout_ms: 50_000,
         }
     }
 }
@@ -78,6 +87,27 @@ impl Limits {
         }
         if self.command_ledger_records == 0 {
             return Err(invalid(RECORDS, 0));
+        }
+        Ok(self)
+    }
+
+    /// DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS / DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS
+    /// overrides of the control bounds; zero is refused.
+    fn with_control_env(mut self) -> Result<Self, ConfigError> {
+        const QUERY: &str = "DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS";
+        const CONTROLLER: &str = "DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS";
+        self.launchd_query_timeout_ms = parse_u64(QUERY, self.launchd_query_timeout_ms)?;
+        self.controller_timeout_ms = parse_u64(CONTROLLER, self.controller_timeout_ms)?;
+        for (key, value) in [
+            (QUERY, self.launchd_query_timeout_ms),
+            (CONTROLLER, self.controller_timeout_ms),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Invalid {
+                    key,
+                    value: value.to_string(),
+                });
+            }
         }
         Ok(self)
     }
@@ -139,7 +169,7 @@ impl GatewayConfig {
             allowed_origins: csv(&env_or("DARKBOT_GATEWAY_ALLOWED_ORIGINS", &default_origins)),
             allowed_hosts: csv(&env_or("DARKBOT_GATEWAY_ALLOWED_HOSTS", &default_hosts)),
             session_cookie: env_or("DARKBOT_GATEWAY_SESSION_COOKIE", "darkbot_session"),
-            limits: Limits::default().with_command_env()?,
+            limits: Limits::default().with_command_env()?.with_control_env()?,
             source_stale_after_ms: parse_u64("DARKBOT_GATEWAY_SOURCE_STALE_MS", 10_000)?,
             source_detach_after_ms: parse_u64("DARKBOT_GATEWAY_SOURCE_DETACH_MS", 30_000)?,
             source_reattach_backoff_ms: parse_u64("DARKBOT_GATEWAY_SOURCE_BACKOFF_MS", 2_000)?,
@@ -314,6 +344,26 @@ mod tests {
             );
             std::env::remove_var(key);
         }
+    }
+    /// Audit E 3.7: the control bounds are configuration with their defaults, zero refused.
+    #[test]
+    fn the_control_bounds_are_configured() {
+        let l = Limits::default();
+        assert_eq!(
+            (l.launchd_query_timeout_ms, l.controller_timeout_ms),
+            (2_000, 50_000)
+        );
+        std::env::set_var("DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS", "250");
+        std::env::set_var("DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS", "7000");
+        let o = Limits::default().with_control_env().unwrap();
+        assert_eq!(
+            (o.launchd_query_timeout_ms, o.controller_timeout_ms),
+            (250, 7000)
+        );
+        std::env::set_var("DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS", "0");
+        assert!(Limits::default().with_control_env().is_err());
+        std::env::remove_var("DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS");
+        std::env::remove_var("DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS");
     }
     #[test]
     fn a_non_loopback_bind_needs_the_explicit_opt_in() {

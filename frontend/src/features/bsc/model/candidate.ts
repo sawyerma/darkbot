@@ -4,10 +4,9 @@
 // selector stays disabled (BACKEND_UNAVAILABLE). A request only becomes
 // effective after the native apply at the next desktop sync.
 import type { PublicField } from "./types";
+import { BACKEND_UNAVAILABLE } from "./status";
 
 export type CandidateProfile = "SELF_A" | "SELF_B";
-
-export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
 export const MISSING_INTEGRATION =
   "No public candidate mirror in the runtime snapshot: create candidates with g07_candidate and run darkbotctl bsc sync on the desktop.";

@@ -1,8 +1,9 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { ownerCommand, useSourceControl } from "@/core/realtime/sourceControl";
+import { ownerCommand, useSourceControl } from "@/core/realtime/bscControl";
 import { limitInputOk, type BuyLimitRow } from "./model/switches";
+import { BACKEND_UNAVAILABLE } from "./model/status";
 // The persisted daily BUY attempt limit of the native bsc_runtime owner (plan
 // 27.10.), the same request as `darkbotctl bsc source request
 // BSC_BUY_ATTEMPTS_PER_DAY <n>`. A limit is never a permission to execute.
@@ -17,7 +18,7 @@ export function BuyLimitActions({ row }: { row: BuyLimitRow }) {
       <input inputMode="numeric" aria-label="BUY attempts per UTC day" placeholder="attempts / UTC day" value={text}
         onChange={e => setText(e.target.value.trim())} disabled={!row.available || busy} data-testid={`${TEST_ID}-input`} />
       <button className="g-secondary" disabled={!row.available || busy || !ok || (ok && BigInt(text) === row.perDay)}
-        title={row.available ? "Set the daily limit" : "BACKEND_UNAVAILABLE"} data-testid={`${TEST_ID}-set`} onClick={() => setOpen(true)}>Set daily limit</button>
+        title={row.available ? "Set the daily limit" : BACKEND_UNAVAILABLE} data-testid={`${TEST_ID}-set`} onClick={() => setOpen(true)}>Set daily limit</button>
     </div>
     <AlertDialog.Root open={open} onOpenChange={setOpen}>
       <AlertDialog.Portal><AlertDialog.Overlay className="ov-log-overlay" /><AlertDialog.Content className="ov-confirm-view">

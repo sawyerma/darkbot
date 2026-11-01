@@ -20,13 +20,15 @@ use crate::submission::frame::Endpoint;
 pub const HTTPS_PORT: u16 = 443;
 
 /// Host of the 48Club Puissant builder as its documentation names it
-/// (`https://puissant-builder.48.club/`). A reference for the operator's
-/// configuration, which is what is actually used.
+/// (`https://puissant-builder.48.club/`): the host the LIVE end, the PAPER
+/// path and the Q5A qualification connect to. The Q5A profile binds it; another
+/// host needs a new qualification.
 pub const CLUB48_DOCUMENTED_HOST: &str = "puissant-builder.48.club";
 
 /// Host of the BlockRazor block builder (Virginia) as its frozen reference
-/// names it (`https://virginia.builder.blockrazor.io`). A reference for the
-/// operator's configuration, which is what is actually used.
+/// names it (`https://virginia.builder.blockrazor.io`): the host the LIVE end
+/// and the Q5A qualification connect to. The Q5A profile binds it; another host
+/// needs a new qualification.
 pub const BLOCKRAZOR_DOCUMENTED_HOST: &str = "virginia.builder.blockrazor.io";
 
 /// ALPN protocol id of HTTP/1.1, the only protocol offered.

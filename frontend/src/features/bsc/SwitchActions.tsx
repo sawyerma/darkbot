@@ -1,7 +1,7 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { ownerCommand, useSourceControl, type OwnerAction, type SwitchMode } from "@/core/realtime/sourceControl";
+import { ownerCommand, useSourceControl, type OwnerAction, type SwitchMode } from "@/core/realtime/bscControl";
 import { modeHeld, type SwitchRow } from "./model/switches";
 // ENABLE/DISABLE requests for the wallet and economic switches of the one
 // native bsc_runtime owner (plan 27.10.), the same request a terminal sends

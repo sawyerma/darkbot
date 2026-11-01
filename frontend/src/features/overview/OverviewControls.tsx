@@ -1,5 +1,5 @@
 import "@/shared/ui/graphite/control-dialog.css";
-import { readinessCommand,useReadinessControl } from "@/core/realtime/readinessControl";
+import { readinessCommand,useReadinessControl } from "@/core/realtime/bscControl";
 import { captureCommand, captureLogs, useCaptureControl, type LogPart } from "@/core/realtime/captureControl";
 import { useEffect, useId, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";

@@ -11,7 +11,7 @@ import {
 import { ProjectId, TopicId, topics, type StateMeta } from "@/core/realtime";
 import type { FinanceView, OverviewView, ProjectReadSummary } from "@/core/projects/readSummary";
 import { useOverviewStore } from "../overviewStore";
-import { applyReadinessJob } from "@/core/realtime/readinessControl";
+import { applyReadinessJob } from "@/core/realtime/bscControl";
 
 // Einzige Brücke Transport -> Overview-Store und einziger Ort mit generierten Overview-Typen.
 

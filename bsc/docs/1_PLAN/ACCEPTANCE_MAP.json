@@ -895,7 +895,7 @@
       "matrix_id": "C0-U6",
       "adoption": "SN08/SN12",
       "unit": "Unit 6 (typed startup config/secrets/authorization and durable fence)",
-      "status": "IMPLEMENTED_TESTED and FROZEN for the declared startup-boundary scope at 57e7dbbdf83c0c479c0e0a7c5365044914e181e3; LIVE BLOCKED",
+      "status": "RETIRED (REV.1.0 Audit E 2.17/4.1/5.1: no production caller, a parallel arming path beside the LIVE end; execution/src/startup.rs removed). Was: IMPLEMENTED_TESTED and FROZEN for the declared startup-boundary scope at 57e7dbbdf83c0c479c0e0a7c5365044914e181e3; LIVE BLOCKED",
       "symbols": [
         "darkbot_runner::startup::StartupConfig",
         "darkbot_runner::startup::StartupFacts",

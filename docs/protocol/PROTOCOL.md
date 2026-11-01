@@ -220,7 +220,7 @@ Bound launch plan, without signatures, raw transactions or execution authority.
 | records | [NativeRecord](#darkbot-bsc-v1-NativeRecord) | repeated | Latest public qualification records: DRY, preflight, quote, economics, simulation, launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract. |
 | economic_controls | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | The economic switches SIGN, ARM, SEND, ATTEMPT and LIVE of the native owner; absent before its state exists. |
 | buy_attempt_limit | [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit) |  | The daily BUY attempt limit and today&#39;s use; absent before the owner state exists. |
-| runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The global runtime mode BSC_RUNTIME_MODE (OFF, SHADOW, PAPER; LIVE stays BLOCKED) in the ControlSwitch shape; absent before the owner state exists. |
+| runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The global runtime mode BSC_RUNTIME_MODE (OFF, SHADOW, PAPER or LIVE; a requested LIVE is effective only while the owner&#39;s LIVE gate holds, BscLiveState) in the ControlSwitch shape; absent before the owner state exists. |
 
 
 
@@ -291,6 +291,7 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | gas_wei | [string](#string) |  | All gas the ledger&#39;s transactions paid, decimal wei. |
 | warnings | [string](#string) | repeated | Unreadable inputs, made explicit. |
 | scope | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | Every entity the grant names (runtime, components, venue, sources) as requested and as it holds now under the gate: LIVE only while the gate is clear and the scope names it. |
+| grantable_sources | [string](#string) | repeated | The ingress sources a grant can name: those the runtime configuration gives an adapter endpoint (BSC_INGRESS_&lt;ID&gt;_WSS); a source without one never sights a launch and can never be qualified. In source order; empty without a readable runtime configuration. |
 
 
 
@@ -318,14 +319,14 @@ Read-only G0.8 results; submission acknowledgement is not acquisition.
 <a name="darkbot-bsc-v1-BscStatus"></a>
 
 ### BscStatus
-Read-only BSC evidence projection.
+The BSC evidence projection: guard, gates, readiness, builder, witness, DRY and jobs. LIVE is
+not projected here: bsc.live.state (BscLiveState) is its one source.
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| source_commit | [string](#string) |  | Source revision deployed with this reporter. |
+| source_commit | [string](#string) |  | Source revision of the deployed snapshot (its COMMIT); UNKNOWN without a readable one. |
 | evaluated_unix_s | [uint64](#uint64) |  | Projection evaluation time, not qualification freshness. |
-| live_state | [string](#string) |  | BLOCKED: the GUI never enables trading. |
 | guard | [GuardStatus](#darkbot-bsc-v1-GuardStatus) |  | Compiled guard and current contract observation. |
 | gates | [GateStatus](#darkbot-bsc-v1-GateStatus) | repeated | Separate qualification gates. |
 | readiness | [ReadinessStatus](#darkbot-bsc-v1-ReadinessStatus) |  | Latest native readiness evidence. |
@@ -334,7 +335,7 @@ Read-only BSC evidence projection.
 | dry | [DryStatus](#darkbot-bsc-v1-DryStatus) |  | Historical DRY status and exact values. |
 | jobs | [JobStatus](#darkbot-bsc-v1-JobStatus) | repeated | Read-only jobs observed by launchd. |
 | warnings | [string](#string) | repeated | Missing or invalid data is made explicit. |
-| data_as_of_unix_s | [uint64](#uint64) |  | Time of the explicit source snapshot sync, never evidence freshness. |
+| data_as_of_unix_s | [uint64](#uint64) |  | Time of the explicit source snapshot sync (its SYNCED_AT), never evidence freshness; 0 is UNKNOWN (no readable sync time, warning SNAPSHOT_SYNC_TIME_UNKNOWN). |
 
 
 
@@ -349,8 +350,8 @@ Public wallet identity and timestamped evidence balances, never keys.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| expected_address | [string](#string) |  | Optional configured public identity. |
-| wallet_status | [string](#string) |  | Public wallet configuration state. |
+| expected_address | [string](#string) |  | The configured LIVE buyer (BSC_LIVE_BUYER of the runtime configuration), 0x hex; empty without one. |
+| wallet_status | [string](#string) |  | WATCHED: the runtime configuration names that LIVE buyer and C2 watches it; UNKNOWN without a readable LIVE configuration. |
 | launcher_address | [string](#string) |  | Launcher address from bound evidence. |
 | buyer_address | [string](#string) |  | Buyer address from bound evidence. |
 | chain_id | [uint64](#uint64) | optional | Chain identity when recorded. |
@@ -873,7 +874,6 @@ verbindlich in der TopicDescriptor-Tabelle, die das Gateway im Welcome liefert.
 | TOPIC_ID_BSC_MONITORING_STATE | 32 | bsc.monitoring.state STATE |
 | TOPIC_ID_BSC_WALLETS_STATE | 33 | bsc.wallets.state STATE |
 | TOPIC_ID_BSC_LIVE_STATE | 34 | bsc.live.state STATE LIVE-Gate, Grant, Positionen (Plan 28.10.) |
-| TOPIC_ID_BSC_EXECUTION_EVENTS | 40 | bsc.execution.events EVENT |
 | TOPIC_ID_SOLANA_STATUS | 50 | solana.status STATE erst mit qualifiziertem Adapter |
 
 

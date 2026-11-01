@@ -11,7 +11,7 @@
 | Protobuf-Namespace | `darkbot.project0.v1` | `darkbot.bsc.v1` |
 | Topics / Nummernraum | `project0.*` / 10–29 | `bsc.*` / 30–49 |
 | React-Domäne | `frontend/src/features/project0/` | `frontend/src/features/bsc/` |
-| Bestehende fünf Reiter | Overview, Liquidator, Capture, Analytics, Wallets | Overview, Launch / BUY, Monitoring, Analytics, Wallets |
+| Bestehende Reiter | fünf: Overview, Liquidator, Capture, Analytics, Wallets | sechs: Overview, Launch / BUY, Monitoring, Analytics, Wallets, LIVE (Plan 28.10.) |
 
 Die **globale Overview** unter `/` ist getrennt von den Projekt-Overviews und verwendet nur nachweislich verfügbare Aggregate. `/solana` bleibt eigenständig. Keine neue SPA, kein neues Reiterkonzept, keine getrennten Gateways. Die kanonischen Projekt-/Topic-IDs sind in [topics.proto](../protocol/schemas/darkbot/control/v1/topics.proto), [Gateway-Registry](../gateway/src/topics.rs) und [Frontend-Topic-Tabelle](src/core/realtime/topicTable.ts) vorhanden. Keine neue Nummerierung oder zweite Feldautorität.
 
@@ -26,7 +26,7 @@ Project_0 Rust / BSC Rust  (jeweils alleiniger fachlicher Owner)
     → gemeinsames Gateway: Topics, Source-Liveness, STATE / EVENT
     → ein same-origin Protobuf-WebSocket
     → projektspezifischer React-Adapter / Zustand-Store
-    → fünf bereits vorhandene Reiter je Projekt
+    → die bestehenden Reiter je Projekt (Project_0 fünf, BSC sechs)
 ```
 
 **Rückweg bei Steuerung:** Reiter → typisierter Command via separatem Gateway-POST → explizite Gateway-Allowlist/Authentisierung/Idempotenz → nativer Controller mit fachlichen Gates → Receipt + neue öffentliche Zustandsprojektion. Ein angenommenes Kommando ist **keine** ausgeführte Transaktion. GUI/REST/WS liegen niemals im Trading-Hot-Path. Der Browser ist kein zweiter Risk-/Signer-/Wallet-/Trading-Owner.
@@ -146,7 +146,7 @@ Diese gezielte Project_0-Freigabe **präzisiert §4 Nr. 4**: Sie hebt die reine 
 
 ## 5. Fachliche Trennung und Sicherheit
 
-- **Genau fünf Reiter pro Projekt bleiben bestehen**, Feinsortierung später. Keine neue UI-Architektur oder Basic/Advanced-Doppelansicht.
+- **Die bestehenden Reiter bleiben** (Project_0 fünf; BSC sechs, der LIVE-Reiter seit Plan 28.10.), Feinsortierung später. Keine neue UI-Architektur oder Basic/Advanced-Doppelansicht.
 - Backend-Originalwerte, Typen und Einheiten bewahren; große/negative Geldwerte niemals unpräzise per JavaScript-Float interpretieren.
 - Gemeinsamer Gateway bedeutet **keinen** gemeinsamen BSC-/Project_0-Trading-State, keine projektübergreifenden Wallet-Gates und keine übertragene LIVE-Freigabe.
 - Unbekannte/stale/detached finanzielle oder wirtschaftliche Daten nicht als `0`, `PASS` oder verfügbare Quelle darstellen. Global Finance nur bei belastbarer Herkunft und Qualität.
@@ -156,7 +156,7 @@ Diese gezielte Project_0-Freigabe **präzisiert §4 Nr. 4**: Sie hebt die reine 
 
 ## 6. Aktueller struktureller IST-Stand, keine pauschale Freigabe
 
-Gemeinsamer Gateway, protobufbasierter Topic-Vertrag sowie getrennte Project_0-/BSC-Adapter und Stores existieren im Repository. Project_0 bindet `project0.status` und `project0.capture.state`; weitere reservierte Topics können noch unavailable sein. BSC besitzt die fünf Panels und typisierte Status-/Launch-/Monitoring-/Wallet-Projektionen; ein echtes BSC-Execution-EVENT oder eine wirtschaftliche BUY-/ARM-Funktion ist damit nicht automatisch verfügbar. Einzelne ältere Dokumente und Legacy-Dateien beschreiben überholtes IST; **immer aktuelle Quellimplementierung und tatsächliche Nachweise prüfen**. Dateiexistenz ≠ End-to-End-PASS ≠ LIVE.
+Gemeinsamer Gateway, protobufbasierter Topic-Vertrag sowie getrennte Project_0-/BSC-Adapter und Stores existieren im Repository. Project_0 bindet `project0.status` und `project0.capture.state`; weitere reservierte Topics können noch unavailable sein. BSC besitzt sechs Reiter und typisierte Status-/Launch-/Monitoring-/Wallet-/LIVE-Projektionen; ein BSC-EVENT-Topic gibt es nicht (Platzhalter 40 entfernt), ein LIVE-BUY entsteht nur im nativen LIVE-Pfad unter dem LIVE-Gate der nativen Verwaltung (Freigabe des Betreibers), nie aus der GUI. Einzelne ältere Dokumente und Legacy-Dateien beschreiben überholtes IST; **immer aktuelle Quellimplementierung und tatsächliche Nachweise prüfen**. Dateiexistenz ≠ End-to-End-PASS ≠ LIVE.
 
 ## 7. Verbindliche Dokumente
 

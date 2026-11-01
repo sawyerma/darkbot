@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BACKEND_UNAVAILABLE, NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, VENUE_IDS, runtimeView, sourceControlView } from "./sources";
+import { BACKEND_UNAVAILABLE } from "./status";
+import { NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, VENUE_IDS, runtimeView, sourceControlView } from "./sources";
 import type { NativeRecordView } from "./types";
 
 const record = (generation: string, rows: [string, string, string, string?][]): NativeRecordView => ({

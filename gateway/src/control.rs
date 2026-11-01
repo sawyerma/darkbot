@@ -1,4 +1,9 @@
-//! Authenticated local capture control. No trading, wallet, arbitrary paths or shell commands.
+//! Authenticated local control: Project 0's capture and analytics jobs, BSC's readiness job and
+//! candidate request, and the requests of the native BSC owner (modes, wallet and economic
+//! switches, limits, the LIVE grant and its revocation), each one fixed allowlisted `darkbotctl`
+//! call. The gateway signs, sends and decides nothing: the native owners apply or refuse, and a
+//! BSC LIVE grant is a permission whose every intent the owner admits again at its dispatch.
+//! No arbitrary paths or shell commands.
 use crate::{
     config::Limits,
     http::AppState,
@@ -35,7 +40,8 @@ const BSC_STOP: &str = "bsc.readiness.stop";
 /// Offline G0.7 A/B candidate selection request; never arm, sign or send.
 const BSC_CANDIDATE: &str = "bsc.candidate.select";
 /// BSC source mode request (plan §5a.2, order V2 §5): the native owner applies or
-/// refuses it; a requested LIVE stays BLOCKED there. Never arm, sign or send.
+/// refuses it; a requested LIVE is effective only while the owner's LIVE gate holds
+/// (plan 28.10.). The gateway never arms, signs or sends.
 const BSC_SOURCE: &str = "bsc.source.mode.set";
 /// The five signal sources and the switchable runtime components of the
 /// native BSC mode owner (`bsc_runtime source request`).
@@ -72,7 +78,8 @@ const BSC_ECONOMIC_IDS: [&str; 5] = [
     "BSC_ECON_LIVE",
 ];
 const BSC_SWITCH_MODES: [&str; 2] = ["DISABLED", "ENABLED"];
-/// Plan v9 §2.5: the global runtime mode at the same owner (LIVE stays BLOCKED there).
+/// Plan v9 §2.5: the global runtime mode at the same owner (a requested LIVE is effective
+/// only while the owner's LIVE gate holds).
 const BSC_RUNTIME: &str = "bsc.runtime.mode.set";
 const BSC_RUNTIME_IDS: [&str; 1] = ["BSC_RUNTIME_MODE"];
 const BSC_RUNTIME_MODES: [&str; 4] = ["OFF", "SHADOW", "PAPER", "LIVE"];
@@ -841,6 +848,10 @@ pub struct Control {
     capacity: usize,
     window_ns: u64,
     retention: Duration,
+    /// `Limits::launchd_query_timeout_ms`: one read-only `launchctl list`.
+    launchd_query: Duration,
+    /// `Limits::controller_timeout_ms`: one `darkbotctl` dispatch.
+    controller: Duration,
 }
 #[derive(Clone, Serialize)]
 pub struct ProcessSnapshot {
@@ -998,6 +1009,8 @@ impl Control {
             capacity: limits.command_ledger_records,
             window_ns: limits.command_clock_window_ms.saturating_mul(1_000_000),
             retention: Duration::from_millis(limits.command_retention_ms),
+            launchd_query: Duration::from_millis(limits.launchd_query_timeout_ms),
+            controller: Duration::from_millis(limits.controller_timeout_ms),
         }
     }
     pub async fn observe(&self) -> ProcessSnapshot {
@@ -1016,7 +1029,7 @@ impl Control {
         snapshot.run_id = text_file(&p.rundir.join("capture.launch"));
         // List is read-only. An execution/permission/timeout error is NEVER evidence of STOPPED.
         let output = tokio::time::timeout(
-            Duration::from_secs(2),
+            self.launchd_query,
             Command::new(&p.launchctl)
                 .args(["list", &p.label])
                 .kill_on_drop(true)
@@ -1109,7 +1122,7 @@ impl Control {
                 "launch_id",
             ) == s.run_id;
         let out = tokio::time::timeout(
-            Duration::from_secs(2),
+            self.launchd_query,
             Command::new(&p.launchctl)
                 .args(["list", &label])
                 .kill_on_drop(true)
@@ -1489,7 +1502,7 @@ impl Control {
             vec!["capture", "stop", "--signal-only"]
         };
         let output = tokio::time::timeout(
-            Duration::from_secs(50),
+            self.controller,
             Command::new(&p.ctl)
                 .args(args)
                 .env("DARKBOT_STAGED", "1")
@@ -1593,7 +1606,7 @@ impl Control {
                 "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
             );
         }
-        let output = tokio::time::timeout(Duration::from_secs(50), {
+        let output = tokio::time::timeout(self.controller, {
             let mut ctl = Command::new(&p.ctl);
             ctl.args(&args).kill_on_drop(true);
             // DEC-07: the boot controller audits the staged capture environment, as the
@@ -1696,7 +1709,7 @@ impl Control {
             );
         }
         let output = tokio::time::timeout(
-            Duration::from_secs(50),
+            self.controller,
             Command::new(&p.ctl)
                 .args(&args)
                 .arg(id)
@@ -4713,6 +4726,64 @@ mod tests {
         );
         let s = control.observe_project(ProjectId::Bsc as i32).await;
         assert_eq!((s.state.as_str(), s.run_id.as_str()), ("STOPPED", "job-1"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// Audit E 3.7: the launchd query and the controller dispatch wait exactly the configured
+    /// `Limits`, no literal: a launchd stand-in slower than its bound reads UNKNOWN (never its
+    /// late answer), a controller slower than its bound leaves the command PENDING_RECONCILE
+    /// with an unknown outcome.
+    #[tokio::test]
+    async fn the_launchd_and_controller_waits_are_the_configured_limits() {
+        let dir = std::env::temp_dir().join(format!("gw-bounds-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let launchctl = dir.join("launchctl");
+        executable(&launchctl, "#!/bin/sh\nsleep 1\necho '\"PID\" = 7;'\n");
+        let ctl = dir.join("darkbotctl");
+        executable(&ctl, "#!/bin/sh\nsleep 1\necho outcome=APPLIED\n");
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl,
+            }),
+            &Limits {
+                launchd_query_timeout_ms: 100,
+                controller_timeout_ms: 100,
+                ..limits()
+            },
+        );
+        let started = std::time::Instant::now();
+        let s = control.observe().await;
+        assert_eq!(
+            (s.state.as_str(), s.reason.as_str(), s.pid),
+            ("UNKNOWN", "launchd query unavailable", None)
+        );
+        assert!(started.elapsed() < Duration::from_millis(900));
+        let req = CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: uuid(37),
+            action: BSC_SOURCE.into(),
+            resource_id: "BSC_INGRESS_DRPC:SHADOW".into(),
+            expected: Some(crate::proto::ExpectedVersion {
+                version: Some(expected_version::Version::ConfigVersion(4)),
+            }),
+            params: Default::default(),
+            issued_at_unix_ns: crate::overview::unix_ns_now(),
+        };
+        let started = std::time::Instant::now();
+        let r = control.execute(&req).await;
+        assert!(started.elapsed() < Duration::from_millis(900));
+        assert_eq!(
+            (r.status, r.phase, r.detail.as_str()),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::PendingReconcile as i32,
+                "Controller outcome unknown; the native source state decides"
+            )
+        );
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

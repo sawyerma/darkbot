@@ -174,7 +174,7 @@ User click → same-origin HTTPS Proto POST → Gateway auth proxy → ENGINE au
 | 'bsc.launch.state' | STATE | Launch/BUY, plan_version und fachlich gesperrte Actions |
 | 'bsc.monitoring.state' | STATE | Witness/Evidence/Chain-Reconcile |
 | 'bsc.wallets.state' | STATE | BSC-eigene Wallets, kein P0-Treasury |
-| 'bsc.execution.events' | EVENT | BSC Journal-/DBREC-Evidence; Epoch+Cursor |
+| 'bsc.live.state' | STATE | LIVE-Gate, Grant, Positionen (Plan 28.10.); ~~'bsc.execution.events'~~ entfernt (Audit E 1.2, Nummer 40 reserviert) |
 | 'solana.status' | STATE | späterer eigenständiger Adapter |
 
 ## 6. F0-VAR: Vor der Umsetzung vollständige P0- UND BSC-Variablenextraktion

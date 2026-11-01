@@ -391,12 +391,14 @@ async fn event_topics_and_state_cursors_are_refused() {
     handshake(&mut ws).await;
     for (topic, cursor, reason) in [
         (
-            TopicId::BscExecutionEvents,
+            TopicId::Project0ExecutionEvents as i32,
             None,
             darkbot_gateway::proto::AckReason::TopicUnavailable,
         ),
+        // Audit E 1.2: 40 was the placeholder bsc.execution.events; reserved, never a topic.
+        (40, None, darkbot_gateway::proto::AckReason::UnknownTopic),
         (
-            TopicId::OverviewAggregates,
+            TopicId::OverviewAggregates as i32,
             Some(darkbot_gateway::proto::EventCursor {
                 journal_epoch: "e".into(),
                 durable_cursor: 1,
@@ -408,7 +410,7 @@ async fn event_topics_and_state_cursors_are_refused() {
             &mut ws,
             client_message::Msg::Subscribe(Subscribe {
                 request_id: 7,
-                topic: topic as i32,
+                topic,
                 cursor,
                 start_policy: 0,
             }),

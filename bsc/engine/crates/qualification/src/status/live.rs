@@ -9,8 +9,9 @@
 use super::wire::bsc::*;
 use darkbot_bsc_execution::live_ledger::{Ledger, fold};
 use darkbot_bsc_execution::live_qualification;
+use darkbot_bsc_execution::runtime::RuntimeConfig;
 use darkbot_bsc_execution::sources::{
-    self, ComponentId, Entity, Generation, LiveContext, RUNTIME_MODE, SwitchId,
+    self, ComponentId, Entity, Generation, LiveContext, RUNTIME_MODE, SourceId, SwitchId,
 };
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{self as record, hex};
@@ -18,6 +19,28 @@ use std::path::Path;
 
 fn hex0x(bytes: &[u8]) -> String {
     format!("0x{}", hex(bytes))
+}
+
+/// Where a snapshot keeps the configuration its runtime runs with (`bsc_runtime run --config`).
+pub const RUNTIME_CONFIG_PATH: &str = "bsc/config/ingress.public.env";
+
+/// The snapshot's runtime configuration by the runtime's own rule (`RuntimeConfig::parse`), or
+/// the warning why there is none: unreadable, or one the runtime would refuse.
+pub fn runtime_config(root: &Path) -> Result<RuntimeConfig, &'static str> {
+    let text = std::fs::read_to_string(root.join(RUNTIME_CONFIG_PATH))
+        .map_err(|_| "RUNTIME_CONFIG_UNREADABLE")?;
+    RuntimeConfig::parse(&text).map_err(|_| "RUNTIME_CONFIG_INVALID")
+}
+
+/// The ingress sources a grant can name (Audit E 1.6): those the configuration gives an adapter
+/// endpoint, in source order. A source without one never sights a launch, so no qualification
+/// can ever name it.
+pub fn grantable_sources(config: &RuntimeConfig) -> Vec<String> {
+    SourceId::ALL
+        .iter()
+        .filter(|s| config.endpoints.iter().any(|(e, _)| e == *s))
+        .map(|s| s.name().into())
+        .collect()
 }
 
 /// One entity of the scope: as requested, and as it holds now under the
@@ -79,12 +102,21 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
 }
 
 /// The LIVE tab at `now_ms` (none: the clock is unreadable, the gate is
-/// UNKNOWN).
-pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveState {
+/// UNKNOWN) under the snapshot's runtime configuration ([`runtime_config`]).
+pub fn live_state(
+    root: &Path,
+    rundir: &Path,
+    config: Result<&RuntimeConfig, &str>,
+    now_ms: Option<u64>,
+) -> BscLiveState {
     let mut out = BscLiveState {
         gate: "UNKNOWN".into(),
         ..Default::default()
     };
+    match config {
+        Ok(c) => out.grantable_sources = grantable_sources(c),
+        Err(why) => out.warnings.push(why.into()),
+    }
     path(rundir, &mut out);
     let (verified, invalid) = live_qualification::view(root);
     (out.qualification, out.qualification_detail) = match invalid {
@@ -263,9 +295,4 @@ pub fn live_state(root: &Path, rundir: &Path, now_ms: Option<u64>) -> BscLiveSta
         out.scope = scope.into_iter().map(|e| scope_row(&g, e, &ctx)).collect();
     }
     out
-}
-
-/// Whether the LIVE path trades now: the gate clear and the runtime armed.
-pub fn trading(live: &BscLiveState) -> bool {
-    live.gate == "CLEAR" && live.path_state == "ARMED"
 }

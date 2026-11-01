@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ECONOMIC_SWITCHES, SWITCHES_UNAVAILABLE, buyLimitRow, economicRows, limitInputOk, modeHeld, summary, switchRow } from "./switches";
+import { ECONOMIC_SWITCHES, buyLimitRow, economicRows, limitInputOk, modeHeld, summary, switchRow } from "./switches";
+import { BACKEND_UNAVAILABLE } from "./status";
+import { readdirSync, readFileSync } from "node:fs";
 import type { ControlSwitchView } from "./types";
 
 const sw = (id: string, over: Partial<ControlSwitchView> = {}): ControlSwitchView =>
@@ -8,7 +10,7 @@ const sw = (id: string, over: Partial<ControlSwitchView> = {}): ControlSwitchVie
 describe("BSC wallet and economic switches (plan 27.10.)", () => {
   it("without the owner's state a switch is never requestable", () => {
     const row = switchRow("BSC_WALLET_LAUNCHER", undefined);
-    expect([row.available, row.effective, row.reason]).toEqual([false, SWITCHES_UNAVAILABLE, SWITCHES_UNAVAILABLE]);
+    expect([row.available, row.effective, row.reason]).toEqual([false, BACKEND_UNAVAILABLE, BACKEND_UNAVAILABLE]);
   });
   it("shows requested, effective, the CAS generation and the request that set it", () => {
     const row = switchRow("BSC_WALLET_BUYER", sw("BSC_WALLET_BUYER", { requested: "ENABLED", effective: "ENABLED", requestId: "abc", setGeneration: 3n }));
@@ -36,7 +38,7 @@ describe("BSC wallet and economic switches (plan 27.10.)", () => {
     expect(switchRow("BSC_RUNTIME_MODE", sw("BSC_RUNTIME_MODE", { requested: "UNKNOWN" })).available).toBe(false);
   });
   it("the daily BUY limit shows its use on the UTC day and accepts only what the owner takes", () => {
-    expect(buyLimitRow(undefined)).toMatchObject({ available: false, summary: SWITCHES_UNAVAILABLE });
+    expect(buyLimitRow(undefined)).toMatchObject({ available: false, summary: BACKEND_UNAVAILABLE });
     const row = buyLimitRow({ perDay: 3n, dayUtc: "2026-10-27", used: 1n, remaining: 2n, generation: 9n, requestId: "lim", setGeneration: 8n });
     expect(row).toMatchObject({ available: true, summary: "1 of 3 used on 2026-10-27 (UTC) · 2 remaining", receipt: "lim @ generation 8" });
     for (const ok of ["0", "10", "4294967295"]) expect(limitInputOk(ok)).toBe(true);
@@ -47,5 +49,15 @@ describe("BSC wallet and economic switches (plan 27.10.)", () => {
     expect([modeHeld(held, "ENABLED"), modeHeld(held, "DISABLED")]).toEqual([true, false]);
     const reset = switchRow("BSC_WALLET_BUYER", sw("BSC_WALLET_BUYER", { requested: "ENABLED", effective: "BLOCKED", blockReason: "RESET_BY_RESTART" }));
     expect([modeHeld(reset, "ENABLED"), modeHeld(reset, "DISABLED")]).toEqual([false, false]);
+  });
+});
+
+describe("one BACKEND_UNAVAILABLE (Audit E 5.11)", () => {
+  it("is spelled once, in model/status.ts; every other BSC source uses that constant", () => {
+    const root = new URL("../", import.meta.url);
+    const literal = JSON.stringify(BACKEND_UNAVAILABLE);
+    const spelled = (readdirSync(root, { recursive: true }) as string[]).filter(f => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+      .filter(f => readFileSync(new URL(f, root), "utf8").includes(literal));
+    expect(spelled).toEqual(["model/status.ts"]);
   });
 });

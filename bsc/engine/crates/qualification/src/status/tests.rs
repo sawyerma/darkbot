@@ -1712,7 +1712,9 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
         fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
     };
     let counted = || {
-        let live = super::live::live_state(&root, &rundir, Some(now));
+        let config = super::live::runtime_config(&root);
+        let live =
+            super::live::live_state(&root, &rundir, config.as_ref().map_err(|w| *w), Some(now));
         let launch = projection::project(&root, &rundir).launch;
         (live.total_used, launch.buy_attempt_limit.unwrap().used)
     };
@@ -1814,7 +1816,8 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         origin: None,
     };
     Ledger::open(&dir).append(&buy, now).unwrap();
-    let live = super::live::live_state(&root, &rundir, Some(now));
+    let config = super::live::runtime_config(&root);
+    let live = super::live::live_state(&root, &rundir, config.as_ref().map_err(|w| *w), Some(now));
     assert_eq!(live.gate, "BLOCKED");
     assert_eq!(
         live.blockers.first().map(String::as_str),
@@ -1924,4 +1927,123 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         ("BLOCKED", "LIVE_VENUE_UNQUALIFIED")
     );
     fs::remove_dir_all(root).unwrap();
+}
+/// Audit E 1.3/1.6: the Wallets tab names the LIVE buyer the runtime configuration names (C2
+/// watches it, or the runtime refuses the configuration), never a hand-written status; the
+/// grant form offers only the sources the configuration gives an adapter endpoint. Without a
+/// readable configuration both are UNKNOWN/empty and the reason is a warning.
+#[test]
+fn the_wallets_and_the_grant_follow_the_runtime_configuration() {
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-config-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("bsc/config")).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    // A hand-written public wallet file is no input.
+    fs::write(
+        root.join("bsc/config/wallet.public.env"),
+        "BSC_EXPECTED_ADDRESS=0x1111111111111111111111111111111111111111\nBSC_WALLET_STATUS=PROVISIONED\n",
+    )
+    .unwrap();
+    let project = || projection::project(&root, &root.join("run"));
+    let s = project();
+    assert_eq!(
+        (
+            s.wallets.expected_address.as_str(),
+            s.wallets.wallet_status.as_str()
+        ),
+        ("", "UNKNOWN")
+    );
+    assert!(s.live.grantable_sources.is_empty());
+    assert!(
+        s.live
+            .warnings
+            .contains(&"RUNTIME_CONFIG_UNREADABLE".to_string())
+    );
+    assert!(
+        s.status
+            .warnings
+            .contains(&"RUNTIME_CONFIG_UNREADABLE".to_string())
+    );
+    // The shipped configuration: PublicNode and dRPC have an adapter endpoint, no LIVE path.
+    const CONFIG: &str = include_str!("../../../../../config/ingress.public.env");
+    let config = root.join(super::live::RUNTIME_CONFIG_PATH);
+    fs::write(&config, CONFIG).unwrap();
+    let s = project();
+    assert_eq!(s.wallets.wallet_status, "UNKNOWN");
+    assert_eq!(
+        s.live.grantable_sources,
+        ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"]
+    );
+    assert!(
+        !s.status
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("RUNTIME_CONFIG"))
+    );
+    // A LIVE path: its buyer, watched by C2.
+    let buyer = "0x00000000000000000000000000000000000000aB";
+    let live = CONFIG.replace(
+        "BSC_STATE_WATCHED=\n",
+        &format!("BSC_STATE_WATCHED={buyer}\n"),
+    ) + &format!(
+        "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+    );
+    fs::write(&config, &live).unwrap();
+    let s = project();
+    assert_eq!(
+        (
+            s.wallets.expected_address.as_str(),
+            s.wallets.wallet_status.as_str()
+        ),
+        ("0x00000000000000000000000000000000000000ab", "WATCHED")
+    );
+    // A configuration the runtime refuses (the buyer not watched) names nothing.
+    fs::write(&config, CONFIG.to_string() + &live[CONFIG.len()..]).unwrap();
+    let s = project();
+    assert_eq!(
+        (
+            s.wallets.expected_address.as_str(),
+            s.wallets.wallet_status.as_str()
+        ),
+        ("", "UNKNOWN")
+    );
+    assert!(s.live.grantable_sources.is_empty());
+    assert!(
+        s.status
+            .warnings
+            .contains(&"RUNTIME_CONFIG_INVALID".to_string())
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+/// Audit E 1.4: a snapshot without a readable COMMIT or SYNCED_AT is UNKNOWN with its warning,
+/// never a stand-in revision ("working-tree") or a silent time 0.
+#[test]
+fn an_unreadable_snapshot_identity_is_unknown() {
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-identity-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("run")).unwrap();
+    let s = projection::project(&root, &root.join("run")).status;
+    assert_eq!(
+        (s.source_commit.as_str(), s.data_as_of_unix_s),
+        ("UNKNOWN", 0)
+    );
+    for w in ["SOURCE_COMMIT_UNKNOWN", "SNAPSHOT_SYNC_TIME_UNKNOWN"] {
+        assert!(s.warnings.contains(&w.to_string()), "{w}");
+    }
+    fs::write(root.join("COMMIT"), "0159c1a7\n").unwrap();
+    fs::write(root.join("SYNCED_AT"), "garbage").unwrap();
+    let s = projection::project(&root, &root.join("run")).status;
+    assert_eq!(
+        (s.source_commit.as_str(), s.data_as_of_unix_s),
+        ("0159c1a7", 0)
+    );
+    assert!(
+        s.warnings
+            .contains(&"SNAPSHOT_SYNC_TIME_UNKNOWN".to_string())
+    );
+    fs::write(root.join("SYNCED_AT"), "1792232000").unwrap();
+    let s = projection::project(&root, &root.join("run")).status;
+    assert_eq!(s.data_as_of_unix_s, 1792232000);
+    assert!(!s.warnings.iter().any(|w| w.ends_with("_UNKNOWN")));
+    fs::remove_dir_all(&root).unwrap();
 }

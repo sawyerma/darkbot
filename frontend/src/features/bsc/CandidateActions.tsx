@@ -1,7 +1,7 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { candidateCommand, useCandidateControl, type CandidateProfile } from "@/core/realtime/candidateControl";
+import { candidateCommand, useCandidateControl, type CandidateProfile } from "@/core/realtime/bscControl";
 import type { CandidateControlView } from "./model/candidate";
 // Offline A/B candidate request. Enabled only from the native projection;
 // the confirmation states that nothing is approved, signed or sent.

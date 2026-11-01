@@ -16,7 +16,6 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
-pub mod startup;
 pub mod submission;
 
 /// G0.7 acceptance guard: the compiled-in, fail-closed check of the binary

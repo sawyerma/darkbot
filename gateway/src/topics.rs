@@ -150,13 +150,6 @@ pub const TOPICS: &[TopicSpec] = &[
         "darkbot.bsc.v1.BscLiveState",
     ),
     s(
-        TopicId::BscExecutionEvents,
-        TopicClass::Event,
-        ProjectId::Bsc,
-        "bsc.execution.events",
-        "",
-    ),
-    s(
         TopicId::SolanaStatus,
         TopicClass::State,
         ProjectId::Solana,
@@ -201,5 +194,17 @@ mod tests {
             spec(TopicId::BscStatus).unwrap().available(),
             "BSC payload type only after F0-VAR"
         );
+    }
+
+    /// Audit E 1.2: the placeholder `bsc.execution.events` (40) is gone from the protocol and the
+    /// table; its number is reserved, so a client asking for it gets UNKNOWN_TOPIC.
+    #[test]
+    fn the_bsc_event_placeholder_is_gone() {
+        assert!(TopicId::try_from(40).is_err());
+        assert!(spec_from_wire(40).is_none());
+        assert!(!TOPICS
+            .iter()
+            .any(|t| t.wire_name == "bsc.execution.events" || t.id as i32 == 40));
+        assert!(topics_of(ProjectId::Bsc).all(TopicSpec::is_state));
     }
 }

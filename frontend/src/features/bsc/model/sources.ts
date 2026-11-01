@@ -2,8 +2,10 @@
 // bsc_runtime source owner is the only authority; the status reporter projects
 // its current generation as the native record `darkbot.bsc.source-modes.v1`.
 // Without it nothing can be requested (BACKEND_UNAVAILABLE). Effective modes
-// are the owner's: LIVE is never effective, it shows BLOCKED with its reason.
+// are the owner's: a requested LIVE is effective only while the owner's LIVE
+// gate holds for a grant that names it; otherwise BLOCKED with its reason.
 import type { NativeRecordView } from "./types";
+import { BACKEND_UNAVAILABLE } from "./status";
 
 export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
 export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
@@ -14,7 +16,6 @@ export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC", "BSC_STRATEGY_C"] as c
 export const VENUE_IDS = ["BSC_VENUE_FLAP", "BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"] as const;
 /** A component the owner's record does not name yet (a generation from before it existed). */
 export const NOT_RECORDED = "NOT_RECORDED";
-export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
 export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string; receipt?: string }
 /** The canonical chain follower (G0.4 denominator); absent when not configured. */

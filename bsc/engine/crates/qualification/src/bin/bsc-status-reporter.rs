@@ -62,11 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .write_all(&projection::project(&root, &run).status.encode_to_vec())?;
         return Ok(());
     }
-    let socket = PathBuf::from(
-        std::env::var_os("DARKBOT_BSC_SOCKET").unwrap_or_else(|| "/tmp/darkbot/bsc.sock".into()),
-    );
+    // Audit E 3.5: the controller that writes this reporter's plist (ops/bsc-control.sh) is the
+    // one source of the socket path and the readiness job's label; no second default here.
+    let socket =
+        PathBuf::from(std::env::var_os("DARKBOT_BSC_SOCKET").ok_or("DARKBOT_BSC_SOCKET missing")?);
     let label = std::env::var("DARKBOT_BSC_READINESS_LABEL")
-        .unwrap_or_else(|_| "com.darkbot.bsc.readiness".into());
+        .map_err(|_| "DARKBOT_BSC_READINESS_LABEL missing")?;
     let readiness_bin = std::env::var_os("DARKBOT_BSC_READINESS_BIN").map(PathBuf::from);
     publisher::serve(&root, &run, &socket, &label, readiness_bin.as_deref())?;
     Ok(())

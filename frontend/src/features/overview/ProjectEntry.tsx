@@ -1,4 +1,4 @@
-import {useReadinessControl} from "@/core/realtime/readinessControl";
+import {useReadinessControl} from "@/core/realtime/bscControl";
 import { useCaptureControl } from "@/core/realtime/captureControl";
 import { useId } from "react";
 import { Link } from "react-router-dom";

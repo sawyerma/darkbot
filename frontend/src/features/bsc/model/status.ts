@@ -1,3 +1,6 @@
+/** The one reason a control has no readable native owner state to act on (Audit E 5.11). */
+export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
+
 // Conservative tone of a native value: only a qualified pass is green. G0.7 classifications
 // are never a success (G0.8 decides); unknown or unclassified values stay visibly neutral.
 export function statusTone(state:string): "green"|"red"|"amber"|"neutral" {

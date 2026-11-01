@@ -1,7 +1,7 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { ownerCommand, useSourceControl, type OwnerAction, type SourceMode } from "@/core/realtime/sourceControl";
+import { ownerCommand, useSourceControl, type OwnerAction, type SourceMode } from "@/core/realtime/bscControl";
 import type { SourceControlView, SourceRow } from "./model/sources";
 // Mode requests to the native bsc_runtime owner. Enabled only from the
 // native projection; the confirmation states what the owner will do: LIVE is

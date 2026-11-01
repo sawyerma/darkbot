@@ -159,6 +159,68 @@ fn project0_live_authorized(frame: Option<&CachedState>) -> Option<bool> {
     status.operational?.effective.map(|e| e.live_authorized)
 }
 
+/// BSC's execution authorization exactly as its one LIVE source holds it (Audit E 1.1/4.10):
+/// the native owner's LIVE gate in `bsc.live.state`, CLEAR or BLOCKED; absent while that topic
+/// is not current or undecodable, or the gate is UNKNOWN (no readable owner state).
+fn bsc_live_authorized(frame: Option<&CachedState>) -> Option<bool> {
+    let frame = frame.filter(|s| s.quality == crate::proto::StateQuality::Ok)?;
+    let live = crate::proto::bsc::v1::BscLiveState::decode(frame.payload.clone()).ok()?;
+    match live.gate.as_str() {
+        "CLEAR" => Some(true),
+        "BLOCKED" => Some(false),
+        _ => None,
+    }
+}
+
+/// The connected projects' values from their own current topics; nothing is set otherwise.
+fn project_sources(msg: &mut OverviewAggregates, hub: &StateHub) {
+    if let Some(p) = msg.projects.iter_mut().find(|p| {
+        p.project == ProjectId::Project0 as i32 && p.source == WireSourceState::Connected as i32
+    }) {
+        p.live_authorized =
+            project0_live_authorized(hub.current(TopicId::Project0Status).as_deref());
+    }
+    if let Some(p) = msg.projects.iter_mut().find(|p| {
+        p.project == ProjectId::Bsc as i32 && p.source == WireSourceState::Connected as i32
+    }) {
+        p.live_authorized = bsc_live_authorized(hub.current(TopicId::BscLiveState).as_deref());
+        if let Some(frame) = hub
+            .current(TopicId::BscStatus)
+            .filter(|s| s.quality == crate::proto::StateQuality::Ok)
+        {
+            if let Ok(status) = crate::proto::bsc::v1::BscStatus::decode(frame.payload.clone()) {
+                p.warnings = status.warnings;
+                if let Some(r) = status.readiness {
+                    p.warnings.insert(0, format!("Pre-Live: {}", r.verdict));
+                }
+                p.active_jobs = if status.jobs.iter().any(|j| j.state == "UNKNOWN") {
+                    None
+                } else {
+                    Some(
+                        status
+                            .jobs
+                            .iter()
+                            .filter(|j| ["RUNNING", "STOPPING"].contains(&j.state.as_str()))
+                            .count() as u32,
+                    )
+                };
+                p.jobs = status
+                    .jobs
+                    .iter()
+                    .map(|j| crate::proto::ProjectJob {
+                        job: j.job.clone(),
+                        state: j.state.clone(),
+                        launch_id: j.launch_id.clone(),
+                        result_code: j.result_code.clone(),
+                        controller_available: j.controller_available,
+                    })
+                    .collect();
+                p.source_timestamp_unix_ns = frame.source_timestamp_unix_ns;
+            }
+        }
+    }
+}
+
 /// Publiziert bei jeder Quellenänderung und zusätzlich periodisch (Freshness-Zeitstempel).
 pub fn spawn_publisher(
     hub: Arc<StateHub>,
@@ -176,54 +238,7 @@ pub fn spawn_publisher(
         loop {
             seq += 1;
             let mut msg = build(&registry);
-            if let Some(p) = msg.projects.iter_mut().find(|p| {
-                p.project == ProjectId::Project0 as i32
-                    && p.source == WireSourceState::Connected as i32
-            }) {
-                p.live_authorized =
-                    project0_live_authorized(hub.current(TopicId::Project0Status).as_deref());
-            }
-            if let Some(p) = msg.projects.iter_mut().find(|p| {
-                p.project == ProjectId::Bsc as i32 && p.source == WireSourceState::Connected as i32
-            }) {
-                if let Some(frame) = hub
-                    .current(TopicId::BscStatus)
-                    .filter(|s| s.quality == crate::proto::StateQuality::Ok)
-                {
-                    if let Ok(status) =
-                        crate::proto::bsc::v1::BscStatus::decode(frame.payload.clone())
-                    {
-                        p.live_authorized = Some(false);
-                        p.warnings = status.warnings;
-                        if let Some(r) = status.readiness {
-                            p.warnings.insert(0, format!("Pre-Live: {}", r.verdict));
-                        }
-                        p.active_jobs = if status.jobs.iter().any(|j| j.state == "UNKNOWN") {
-                            None
-                        } else {
-                            Some(
-                                status
-                                    .jobs
-                                    .iter()
-                                    .filter(|j| ["RUNNING", "STOPPING"].contains(&j.state.as_str()))
-                                    .count() as u32,
-                            )
-                        };
-                        p.jobs = status
-                            .jobs
-                            .iter()
-                            .map(|j| crate::proto::ProjectJob {
-                                job: j.job.clone(),
-                                state: j.state.clone(),
-                                launch_id: j.launch_id.clone(),
-                                result_code: j.result_code.clone(),
-                                controller_available: j.controller_available,
-                            })
-                            .collect();
-                        p.source_timestamp_unix_ns = frame.source_timestamp_unix_ns;
-                    }
-                }
-            }
+            project_sources(&mut msg, &hub);
             let payload = Bytes::from(msg.encode_to_vec());
             if let Err(e) = hub.publish(StateUpdate {
                 topic: TopicId::OverviewAggregates,
@@ -315,5 +330,89 @@ mod tests {
             ..frame(ok, with(true))
         };
         assert_eq!(project0_live_authorized(Some(&garbage)), None);
+    }
+
+    /// Audit E 1.1/4.10: BSC's execution authorization is its LIVE gate in `bsc.live.state`, the
+    /// one LIVE source; never a constant, unknown without a current gate.
+    #[test]
+    fn bsc_live_authorization_is_the_owners_gate_in_bsc_live_state() {
+        use crate::proto::bsc::v1::{BscLiveState, BscStatus};
+        let hub = StateHub::new(262_144);
+        let mut seq = 0;
+        let mut publish = |topic, payload: Vec<u8>| {
+            seq += 1;
+            hub.publish(StateUpdate {
+                topic,
+                generation: 1,
+                seq,
+                source_timestamp_unix_ns: 1,
+                source_id: Arc::from("bsc"),
+                payload: Bytes::from(payload),
+            })
+            .unwrap();
+        };
+        let connected = || {
+            let mut o = build(&SourceRegistry::new());
+            for p in &mut o.projects {
+                p.source = WireSourceState::Connected as i32;
+            }
+            o
+        };
+        let bsc = |o: &OverviewAggregates| {
+            o.projects
+                .iter()
+                .find(|p| p.project == ProjectId::Bsc as i32)
+                .unwrap()
+                .live_authorized
+        };
+        let live = |gate: &str| {
+            BscLiveState {
+                gate: gate.into(),
+                ..Default::default()
+            }
+            .encode_to_vec()
+        };
+        // A current status alone says nothing about LIVE.
+        publish(TopicId::BscStatus, BscStatus::default().encode_to_vec());
+        let mut o = connected();
+        project_sources(&mut o, &hub);
+        assert_eq!(bsc(&o), None);
+        for (gate, expected) in [
+            ("CLEAR", Some(true)),
+            ("BLOCKED", Some(false)),
+            ("UNKNOWN", None),
+            ("CLEAR", Some(true)),
+        ] {
+            publish(TopicId::BscLiveState, live(gate));
+            let mut o = connected();
+            project_sources(&mut o, &hub);
+            assert_eq!(bsc(&o), expected, "{gate}");
+        }
+        // A stale or detached LIVE source, or garbage: unknown, never the last value.
+        for q in [
+            crate::proto::StateQuality::Stale,
+            crate::proto::StateQuality::SourceDetached,
+        ] {
+            let frame = CachedState {
+                topic: TopicId::BscLiveState,
+                generation: 1,
+                seq: 1,
+                quality: q,
+                source_timestamp_unix_ns: 0,
+                source_id: Arc::from("bsc"),
+                payload: Bytes::from(live("CLEAR")),
+                too_large: false,
+            };
+            assert_eq!(bsc_live_authorized(Some(&frame)), None);
+        }
+        publish(TopicId::BscLiveState, vec![0xff, 0xff]);
+        let mut o = connected();
+        project_sources(&mut o, &hub);
+        assert_eq!(bsc(&o), None);
+        // A project that is not connected gets nothing.
+        let mut o = build(&SourceRegistry::new());
+        publish(TopicId::BscLiveState, live("CLEAR"));
+        project_sources(&mut o, &hub);
+        assert_eq!(bsc(&o), None);
     }
 }

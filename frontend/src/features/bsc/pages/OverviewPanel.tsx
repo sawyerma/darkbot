@@ -1,6 +1,8 @@
 import { Line, Section } from "@/shared/ui/graphite/Rows";
 import { Notice } from "@/shared/ui/graphite/Notice";
-import { selectLaunch, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
+import { TopicId } from "@/core/realtime";
+import { useTopic } from "@/core/realtime/hooks";
+import { selectLaunch, selectLive, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
 import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
 import { SECTIONS } from "../model/placement";
 import { checkStatus } from "../model/checks";
@@ -8,13 +10,17 @@ import type { BscTab } from "../BscPage";
 import { runtimeView } from "../model/sources";
 import { useNativeRecords } from "./useNativeRecords";
 import { buyLimitRow, economicRows, summary, switchRow } from "../model/switches";
+import { liveIndicator } from "../model/live";
 
 const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
 const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
 
-/** Read-only summary in the fixed §13 order; details live in the four detail tabs. */
+/** Summary in the fixed §13 order; details and every control live in the five other tabs. */
 export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
   const { projection: s, status } = useBscStore(selectStatus);
+  // Audit E 4.10: the LIVE line reads the one LIVE source, bsc.live.state.
+  useTopic(TopicId.BSC_LIVE_STATE);
+  const live = liveIndicator(useBscStore(selectLive).projection);
   const job = s?.jobs.find(j => j.job === "readiness");
   const r = s?.readiness;
   const runtime = runtimeView(useNativeRecords(), Date.now()).view;
@@ -42,14 +48,14 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <Line label="Contract approval" value={s?.guard?.approved === undefined ? "UNKNOWN" : String(s.guard.approved)} />
       <Line label="Execution ready" value={s?.guard?.executionReady === undefined ? "UNKNOWN" : String(s.guard.executionReady)} />
       <Line label="Current contract" value={s?.guard?.contractPresent ? s.guard.contractPath : "No active V5 contract"} />
-      <Line label="LIVE" value={<ValueState state={s?.liveState} />} />
+      <Line label="LIVE" value={<ValueState state={live.state} />} hint={`${live.detail}; switch it on the LIVE tab`} />
       <Line label="Wallet switches" value={summary(walletSwitches)} hint="Native permissions; switch them in Wallets. DISABLED initially and after every restart" />
       <Line label="Economic switches" value={summary(economicRows(launch?.economicControls))} hint="Native permissions; switch them in Launch / BUY. None of them is LIVE or an approval" />
       <Line label="Runtime mode" value={<ValueState state={switchRow("BSC_RUNTIME_MODE", launch?.runtimeMode).effective} />} hint="Global execution mode of the native owner; set it in Launch / BUY" />
       <Line label="Daily BUY limit" value={buyLimitRow(launch?.buyAttemptLimit).summary} hint="Persisted per UTC day at the native owner; set it in Launch / BUY" />
     </Section>
     <Section title={title(4)}>
-      <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: read-only observation of the effective SHADOW sources; no build, signature or send exists`} />
+      <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: the runtime's own status record; it signs or sends only on its LIVE path, under the owner's LIVE gate (LIVE tab)`} />
       <Line label="Pre-Live verdict" value={<ValueState state={r?.verdict} />} />
       <Line label="Mode" value={<ValueState state={r?.mode || undefined} />} />
       <Line label="Selected candidate binding" value={<ValueState state={r?.candidateBinding || undefined} />} hint="Only BOUND counts for the selected candidate; STALE is history" />
@@ -65,6 +71,6 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <EvidenceRows evidence={r?.evidence} />
     </Section>
     <div className="g-actions"><button className="g-secondary" onClick={() => goto("launch")}>Launch / BUY</button><button className="g-secondary" onClick={() => goto("monitoring")}>Monitoring</button></div>
-    <Notice>Read-only observations. A connected reporter, successful readiness check or ARMED guard never grants LIVE permission.</Notice>
+    <Notice>Observations of the native owners. A connected reporter, a successful readiness check or an ARMED guard never grants LIVE: only the owner's LIVE gate does, for the operator's granted scope (LIVE tab).</Notice>
   </>;
 }

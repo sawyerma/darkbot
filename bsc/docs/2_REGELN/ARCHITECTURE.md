@@ -58,11 +58,11 @@ Namen sind stabile CLI (Runbooks, Testplan und Nachweise rufen sie so auf) und b
 | `g06a_preflight_readonly.cjs` | Mainnet-Preflight (Deployment, Konfiguration, Wallets) | read-only RPC |
 | `g06a_economics_evm_crosscheck.cjs`, `g06a_local_simulate.cjs` | unabhängige EVM-Gegenprüfung der Quote / exakte lokale Simulation | read-only RPC-State |
 | `g06a_final_dry.sh` | vollständiger G0.6a-DRY (DRY1–DRY4, Null-Egress) → `bsc/data/g06a_final_dry/` | read-only |
-| `g07_pre_live_readiness.sh`, `g07_min_spend_probe.sh`, `g07_find_min_executable_buy.sh` | G0.7-Bereitschaft, Spend-Kandidaten, minimale ausführbare BUY-Suche | read-only, kein Send |
+| `g07_pre_live_readiness.sh` | G0.7-Bereitschaft (startet den nativen Runner offline gebaut; Spend-Probe und BUY-Suche entfernt, Audit E 2.10) | read-only, kein Send |
 | `c1_apply_geth_overlay.py`, `c1_verify_geth_pin.sh` | Overlay auf gepinntes bsc-geth anwenden / Pin prüfen | — |
 | `c13_lifecycle_interop.sh`, `c14_ingress_interop.sh` | Go↔Rust-Interop V2-Lifecycle / Ingress | lokal |
 | `c14a_early_latency.sh` + `c14a_analyze.py`, `c19_native_latency.sh` (Auswertung: nativer `c19_report`), `c19_prepare_production.py`; C1.9b: nativer `c19b_report` | C1-Latenzmessungen und Auswertung (DBREC/DBTAB, kein JSON) | lokal |
-| nativer `c1_freeze` (DBREC-Inputs per CLI), `c1_freeze_geth_patch_evidence.py`, `c1_c1_1_v1_baseline.py` | C1-Freeze-Records und -Nachweise | — |
+| nativer `c1_freeze` (DBREC-Inputs per CLI) | C1-Freeze-Records und -Nachweise (Python-JSON-Werkzeuge entfernt, Audit E 2.11) | — |
 | `q5a_check_evidence.py` | Q5A-TLS-Evidence prüfen | — |
 | `lock_qualify.sh` + `verify_lock_member.py` | Lockfile-Mitgliedsprüfung | offline |
 

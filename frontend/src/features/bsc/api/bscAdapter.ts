@@ -1,8 +1,7 @@
-import { TopicId, topics, type EventMeta, type StateMeta } from "@/core/realtime";
+import { TopicId, topics, type StateMeta } from "@/core/realtime";
 import { useBscStore, type BscStateKey } from "../store/bscStore";
 import type { BscLaunchView, BscLiveView, BscMonitoringView, BscStatusView, BscWalletsView } from "../model/types";
-import { applyReadinessJob } from "@/core/realtime/readinessControl";
-import { candidateMirrorShows } from "@/core/realtime/candidateControl";
+import { applyReadinessJob, candidateMirrorShows } from "@/core/realtime/bscControl";
 
 import { fromBinary } from "@bufbuild/protobuf";
 import { BscStatusSchema, BscLaunchStateSchema, BscMonitoringStateSchema, BscWalletsStateSchema, BscLiveStateSchema } from "@/core/generated/darkbot/bsc/v1/status_pb";
@@ -41,11 +40,4 @@ export function ensureBscAdapter(): void {
     });
   }
 
-  topics.onTopicStatus(TopicId.BSC_EXECUTION_EVENTS, (status, reason) =>
-    useBscStore.getState().setTopicStatus("executionEvents", status, reason),
-  );
-  // Keine Execution-Ereignisse aus unverifiziertem Transport-Metadata konstruieren.
-  topics.onEvent(TopicId.BSC_EXECUTION_EVENTS, (_bytes: Uint8Array, _meta: EventMeta) => {
-    throw new Error("BSC_EVENT_SCHEMA_UNAVAILABLE");
-  });
 }

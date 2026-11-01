@@ -433,11 +433,10 @@ L = WALLET_LAUNCHER, B = WALLET_BUYER, S = ECON_SIGN, A = ECON_ARM, D = ECON_SEN
 - `frontend/src/core/realtime/TopicState.test.ts` — SOURCE_PRESENT
 - `frontend/src/core/realtime/TopicSubscriptions.test.ts` — SOURCE_PRESENT
 - `frontend/src/core/realtime/analyticsControl.test.ts` — SOURCE_PRESENT
-- `frontend/src/core/realtime/candidateControl.test.ts` — SOURCE_PRESENT
+- `frontend/src/core/realtime/bscControl.test.ts` — SOURCE_PRESENT (readiness, candidate and owner requests, Audit E 4.12)
 - `frontend/src/core/realtime/captureCommand.test.ts` — SOURCE_PRESENT
 - `frontend/src/core/realtime/captureControl.test.ts` — SOURCE_PRESENT
 - `frontend/src/core/realtime/control-golden.test.ts` — SOURCE_PRESENT
-- `frontend/src/core/realtime/readinessControl.test.ts` — SOURCE_PRESENT
 - `frontend/src/features/bsc/api/bsc-golden.test.ts` — SOURCE_PRESENT
 - `frontend/src/features/bsc/model/candidate.test.ts` — SOURCE_PRESENT
 - `frontend/src/features/bsc/model/checks.test.ts` — SOURCE_PRESENT

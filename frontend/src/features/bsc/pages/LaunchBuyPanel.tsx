@@ -11,7 +11,7 @@ import { useNativeRecords } from "./useNativeRecords";
 import { MISSING_INTEGRATION, candidateControlView } from "../model/candidate";
 import { labelOf } from "../model/placement";
 import { CandidateActions } from "../CandidateActions";
-import { useCandidateControl } from "@/core/realtime/candidateControl";
+import { useCandidateControl } from "@/core/realtime/bscControl";
 import { buyLimitRow, economicRows, switchRow, type SwitchRow } from "../model/switches";
 import { RUNTIME_CHOICES, SwitchActions } from "../SwitchActions";
 import { BuyLimitActions } from "../BuyLimitActions";

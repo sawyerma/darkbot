@@ -10,6 +10,12 @@ on:
       - 'bsc/**'
       - 'protocol/**'
       - 'frontend/contracts/bsc-*.json'
+      - 'frontend/src/features/bsc/**'
+      - 'frontend/src/core/**'
+      - 'frontend/tests/bsc.spec.ts'
+      - 'frontend/playwright.bsc.config.ts'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'ops/bsc-control.sh'
       - '.github/workflows/bsc.yml'
   workflow_dispatch:
@@ -79,3 +85,23 @@ jobs:
             grep -F "bsc_tools $f: exit Some(0), tests $n, pass $n, fail 0, error 0, skip 0" ../tools.txt \
               || { echo "::error::$f did not run with its $n tests all passing"; exit 1; }
           done
+  # Audit E 2.7: the BSC page in a production build (frontend/tests/bsc.spec.ts: six tabs, the one
+  # LIVE source, fail-closed controls), as the Project 0 page runs in project0-status.yml.
+  frontend:
+    # Pinned like project0-status.yml: Playwright 1.56 installs no Chromium on ubuntu 26.04.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:bsc

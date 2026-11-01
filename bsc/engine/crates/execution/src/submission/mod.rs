@@ -15,12 +15,13 @@
 //!   (plan 28.10.), qualified under its own implementation, never sending.
 //!
 //! A diagnostic dispatch runs over any [`Transport`], the TLS transport
-//! included. After the accepted Q5A run, the TLS module can bind a concrete
-//! 48Club or BlockRazor connection as transport-qualified when its complete
-//! measured profile matches fail-closed. This does not make either provider
-//! release-qualified: the frozen provider semantic properties are still
-//! unqualified, so a release plan remains blocked until those separate
-//! gates pass.
+//! included. A release dispatch takes only a qualified plan over qualified
+//! transports: the LIVE end (`live_end`, `runtime` feature) qualifies each
+//! prepared transaction's plan with the verified LIVE qualification (its
+//! adapters' qualification records) and binds a 48Club or BlockRazor TLS
+//! connection when its complete measured Q5A profile matches fail-closed, or
+//! the loopback stand-in; the native owner admits every intent before any
+//! byte can leave. Nothing else releases.
 //!
 //! [`Transport`]: transport::Transport
 

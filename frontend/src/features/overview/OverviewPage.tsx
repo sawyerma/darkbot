@@ -1,4 +1,4 @@
-import {recoverReadinessCommand,useReadinessControl} from "@/core/realtime/readinessControl";
+import {recoverReadinessCommand,useReadinessControl} from "@/core/realtime/bscControl";
 import { watchCaptureControl } from "@/core/realtime/captureControl";
 import { Fragment, useEffect, type ReactNode } from "react";
 import { PROJECT_REGISTRY } from "@/app/projectRegistry";

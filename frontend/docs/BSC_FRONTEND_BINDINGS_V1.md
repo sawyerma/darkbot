@@ -56,7 +56,7 @@ Die Erfassung aller zukünftigen BSC-Sollfelder ist **F0-VAR-Dokumentation**, ke
 | T-02 | `bsc.launch.state` | V5 contract read-only; `PublicField`-Liste inkl. `candidate.*` mirror | gleicher Owner | Launch / BUY | **A: vorhanden** |
 | T-03 | `bsc.monitoring.state` | aktuell G0.8-Verifikationsstatus/Resultfelder; nicht alle späteren Source-Statistiken | gleicher Owner | Monitoring, Analytics | **A: vorhanden** |
 | T-04 | `bsc.wallets.state` | Public Wallet/Funding-Snapshot, nicht automatisch aktueller Kontostand | gleicher Owner | Wallets | **A: vorhanden** |
-| T-05 | `bsc.execution.events` | im Topic-Katalog reserviert; kein qualifizierter binärer BSC-EVENT-Decoder/Catch-up im React-Adapter (throws) | BSC-Journal, später Gateway-F4 | Monitoring | **C: nicht verdrahtet** |
+| T-05 | ~~`bsc.execution.events`~~ | entfernt (REV.1.0 Audit E 1.2): Platzhalter ohne Producer/Decoder; Nummer 40 und Name reserviert | – | – | **entfernt** |
 
 Verboten als generische Commands: `BUY`, `SEND`, `ARM`, `SWEEP`, `sign`, `run arbitrary shell`, beliebige ENV-/File-/RPC-/CLI-Parameter. Die vorhandenen 3 BSC-Commands dürfen niemals durch syntaktisch erfundene neue Action-IDs erweitert werden; native Owner/typisierte Payloads, CAS, per-action explizite Freigabe und negative Tests sind Voraussetzung.
 
@@ -161,7 +161,7 @@ Keine Sicherheitsfreigabe im React-State errechnen. Kein LIVE-BUY-Button ohne ei
 - `BscStatus`, `BscLaunchState`, `BscMonitoringState`, `BscWalletsState` aus `bsc/v1/status.proto` weiterverwenden. Bestehende Proto-Tags dürfen nicht umgedeutet/überschrieben werden; etwaiger neuer typed Domainstatus zunächst F0-VAR/native Quelle, dann additive neue Proto-Tags/Message mit Rust/TS-Generierung und Golden-Tests.
 - Für neue Source×Venue-Qualität sind **entweder** klar typisierte neue Domain-Nachrichten auf bestehendem passendem STATE-Topic **oder** eine begründete neue BSC-STATE-Topic-Bindung zu entwerfen. Topic-IDs, Protobuf-Feldnummern und Control-IDs **noch nicht zuweisen**, bevor Source-Owner feststeht; `PublicField`-Wildwuchs ist kein Ersatz für stabile Vertragsprojektionen.
 - Der native Control-Owner muss atomare `config_generation`, requested/effective values, Admission-Grund und tatsächliche Request/Effective-CAS-Provenienz veröffentlichen. Kein TS-Inferieren von Backend-Qualifikation, keine React-Simulation eines Native-Settings.
-- `bsc.execution.events` bleibt RESERVED/UNAVAILABLE, bis BSC Journal + Gateway/Browser Zwei-Hop-`(journal_epoch,durable_cursor)`-Catch-up, Restore, Dedupe, COMPLETE/INCOMPLETE und Backpressure real ausgeführt/abgenommen sind.
+- Ein BSC-EVENT-Topic gibt es nicht (Platzhalter `bsc.execution.events`/40 entfernt, Audit E 1.2); ein künftiges braucht eine neue Nummer mit Journal + Zwei-Hop-Catch-up, Restore, Dedupe, COMPLETE/INCOMPLETE und Backpressure.
 - B-Salt, Walletkeys, Raw-RLP, Provider-Authorization, credentialed RPC-URLs, Builder-Headers und private DBREC-Felder **nie** an Browser/Gateway-State-Frames/Logs geben. Public Hashes/Commitments und nachvollziehbare Evidence-Pfade nur nach Redaction/Sensitivity-Prüfung.
 
 ## 6. Reihenfolge und Grenzen der Umsetzung (kein eigenständiger BSC-Phasenplan)

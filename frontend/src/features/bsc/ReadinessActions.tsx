@@ -1,7 +1,7 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useEffect,useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { readinessCommand,recoverReadinessCommand,useReadinessControl } from "@/core/realtime/readinessControl";
+import { readinessCommand,recoverReadinessCommand,useReadinessControl } from "@/core/realtime/bscControl";
 export function ReadinessActions(){
  const {process,busy,receipt}=useReadinessControl();const [confirm,setConfirm]=useState(false);
  // Process state is pushed with bsc.status; only an unresolved command is looked up once after reload.

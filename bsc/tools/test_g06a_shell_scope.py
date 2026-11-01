@@ -83,11 +83,29 @@ with_keys /bin/true && exit 1 || true
         self.assertLess(last_signer,text.rindex('drop_keys'))
         self.assertLess(text.rindex('drop_keys'),text.index('=== 6/6 '))
 
-    def test_legacy_tools_stop_before_credentials_or_network(self):
-        for tool in ["g07_find_min_executable_buy.sh","g07_min_spend_probe.sh"]:
-            out=subprocess.run(["/bin/bash",str(ROOT/"bsc/tools"/tool)],env={"PATH":"/no-tools"},capture_output=True,text=True)
-            self.assertEqual(out.returncode,2)
-            self.assertIn("SUPERSEDED_INCOMPATIBLE_WITH_V4_DBREC",out.stderr)
+    def test_g07_tools_stop_before_credentials_or_network(self):
+        # Audit E 2.9/2.10: the superseded and legacy tools are gone and named by no tool, workflow
+        # or controller; the one G0.7 shell entry left builds offline, reads no secret and only
+        # starts the native runner: a failed build stops it before anything else runs.
+        gone=["g07_find_min_executable_buy.sh","g07_min_spend_probe.sh","g06a_final_dry_legacy_v2.sh","g07_pre_live_readiness_legacy_v2.sh"]
+        for tool in gone:
+            self.assertFalse((ROOT/"bsc/tools"/tool).exists(),tool)
+        callers=[p for d in ["bsc/tools",".github/workflows"] for p in (ROOT/d).iterdir() if p.is_file() and p.suffix in (".sh",".py",".cjs",".yml") and p.resolve()!=pathlib.Path(__file__).resolve()]
+        callers+=[ROOT/"ops/darkbotctl",ROOT/"ops/bsc-control.sh"]
+        for path in callers:
+            text=path.read_text()
+            for tool in gone:
+                self.assertNotIn(tool,text,path)
+        entry=ROOT/"bsc/tools/g07_pre_live_readiness.sh"
+        self.assertNotIn("secrets.env",entry.read_text())
+        with tempfile.TemporaryDirectory() as bin_dir:
+            argv=pathlib.Path(bin_dir)/"argv"
+            cargo=pathlib.Path(bin_dir)/"cargo"
+            cargo.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv}"\nexit 3\n')
+            cargo.chmod(0o755)
+            out=subprocess.run(["/bin/bash",str(entry),"--current-rpc"],env={"PATH":f"{bin_dir}:/usr/bin:/bin","HOME":os.environ["HOME"]},capture_output=True,text=True)
+            self.assertEqual(out.returncode,3,out.stderr)
+            self.assertEqual(argv.read_text().split(),["build","--locked","--offline","-p","darkbot-bsc-execution","--features","g07-mainnet","--bin","g07_pre_live_readiness"])
 
     def test_required_reads_and_signing_scopes_in_real_harness(self):
         text=(ROOT/"bsc/tools/g06a_final_dry.sh").read_text()

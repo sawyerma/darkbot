@@ -46,7 +46,7 @@ export function LivePanel() {
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
       </> : <Line label="Grant" value="NONE" hint="LIVE needs the operator's grant of one confirmed scope" />}
-      <LiveGrantActions generation={generation} available={owner} />
+      <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} />
     </PlacedSection>
     <PlacedSection panel="live" section={3} records={records}>
       <Line label="Runtime mode" value={<ValueState state={l?.runtimeMode?.effective} />} hint={`requested ${l?.runtimeMode?.requested ?? "—"}${l?.runtimeMode?.blockReason ? ` · ${l.runtimeMode.blockReason}` : ""}`} />
