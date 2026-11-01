@@ -50,7 +50,8 @@ const NAVIGATION = new Set(["Launch / BUY", "Monitoring"]);
 test("the six tabs fail closed without a gateway: UNKNOWN, never 0, no control acts", async ({ page }) => {
   await page.routeWebSocket("**/ws/v1/gateway", (ws) => ws.close());
   await page.goto("/bsc");
-  expect(await page.getByRole("tablist", { name: "BSC areas" }).getByRole("tab").allTextContents()).toEqual(TABS);
+  // The page is a lazy chunk: wait for its tabs (a slow runner renders them later).
+  await expect(page.getByRole("tablist", { name: "BSC areas" }).getByRole("tab")).toHaveText(TABS);
   let locked = 0;
   for (const name of TABS) {
     await tab(page, name).click();
@@ -95,6 +96,7 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
   await expect(line(page, "LIVE gate")).toContainText("CLEAR");
   // Audit E 1.6: exactly the sources with an adapter endpoint; the first is chosen until the operator chooses.
   const sources = page.locator("[data-testid^=bsc-live-grant-source-]");
+  await expect(sources).toHaveCount(2);
   expect(await sources.evaluateAll(els => els.map(e => e.getAttribute("data-testid")))).toEqual(
     ["bsc-live-grant-source-BSC_INGRESS_PUBLICNODE", "bsc-live-grant-source-BSC_INGRESS_DRPC"]);
   await expect(page.getByTestId("bsc-live-grant-source-BSC_INGRESS_PUBLICNODE")).toBeChecked();
