@@ -392,8 +392,11 @@ pub enum Counter {
     /// V2-09 (P1-01): candidates whose blockhash was already stale before planning spent its
     /// budget (diagnostic; the late blockhash check stays the verdict).
     BlockhashStaleBeforePlanning,
+    /// P6-MT.7: Jupiter requests the account bucket refused locally (no token, no slot, or a
+    /// 429's wait) — never sent.
+    JupiterBudgetRefused,
 }
-const COUNTERS: usize = 11;
+const COUNTERS: usize = 12;
 const COUNTER_LIST: [(Counter, &str); COUNTERS] = [
     (Counter::PipelineEvaluations, "pipeline_evaluations"),
     (Counter::RoutedEvaluations, "routed_evaluations"),
@@ -415,6 +418,7 @@ const COUNTER_LIST: [(Counter, &str); COUNTERS] = [
         Counter::BlockhashStaleBeforePlanning,
         "blockhash_stale_before_planning",
     ),
+    (Counter::JupiterBudgetRefused, "jupiter_budget_refused"),
 ];
 
 /// Latency at or above this is consistent with at least one hidden 500 ms 429-retry sleep of

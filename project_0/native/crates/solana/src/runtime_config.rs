@@ -249,6 +249,14 @@ parameters! {
     // covering route compiled at once, a smaller cap asked only when it does not fit); the
     // route-cap hint re-probes after as many hits (revision 18; the bound both had before).
     route_attempts_max = 6, "requests", "P0_ROUTE_ATTEMPTS_MAX";
+    // P6-MT.7: Jupiter's quota is one bucket per account, every credential and endpoint of it
+    // (`/swap/v2/build` draws from the general one): the spacing of its requests authenticated
+    // and anonymous (the published free tier, 1 and 0.5 requests/s), the requests one burst may
+    // take and the requests in flight (revision 19).
+    jupiter_authenticated_interval_ms = 1000, "ms", "P0_JUPITER_AUTHENTICATED_INTERVAL_MS";
+    jupiter_anonymous_interval_ms = 2000, "ms", "P0_JUPITER_ANONYMOUS_INTERVAL_MS";
+    jupiter_burst = 1, "requests", "P0_JUPITER_BURST";
+    jupiter_inflight = 1, "requests", "P0_JUPITER_INFLIGHT";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -267,8 +275,9 @@ parameters! {
 /// `threshold_observe_budget_ppm`, `threshold_crosscheck_accounts` (DEC-06); 15: `index_rps` …
 /// `crosscheck_mib` (DEC-08, the verifiers' budgets per method); 16: `h0_window_days`,
 /// `h0_extended_window_days`, `h0_recurring_min_wins` (H0); 17: `fe06_grant_max_lifetime_seconds`
-/// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01).
-pub const LIMITS_REVISION: u16 = 18;
+/// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01); 19: `jupiter_authenticated_interval_ms` …
+/// `jupiter_inflight` (P6-MT.7, Jupiter's account bucket).
+pub const LIMITS_REVISION: u16 = 19;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -289,6 +298,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("jupiter_authenticated_interval_ms") => 19,
         f if position(f) >= position("route_attempts_max") => 18,
         f if position(f) >= position("fe06_grant_max_lifetime_seconds") => 17,
         f if position(f) >= position("h0_window_days") => 16,
@@ -2139,9 +2149,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                18,
-                155,
-                "Cqhcr6uST3mL37zgegtEEUE6pLEiDWZnfQaoNAuW21Kz".to_string()
+                19,
+                159,
+                "2oAjXnreyBnUkgyzBCFwzniCefVvPK5qRwhaW9oZP6y9".to_string()
             )
         );
     }

@@ -526,7 +526,8 @@ fn n2_hanging_jupiter_ends_planning_at_the_deadline() {
         true,
     )
     .unwrap()
-    .with_base_url(jupiter.url.clone());
+    .with_base_url(jupiter.url.clone())
+            .unpaced();
     let submitter = rpc_submitter(&rpc.url, n2_budget(4));
     let started = std::time::Instant::now();
     let outcome = n2_evaluate(&f, &payer, &routes, true, &submitter);
@@ -817,7 +818,8 @@ fn fe02_zero_prefund_end_to_end_through_the_real_adapters() {
     let routes =
         crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, None, 50, 64, false)
             .unwrap()
-            .with_base_url(jupiter.url.clone());
+            .with_base_url(jupiter.url.clone())
+            .unpaced();
     let submitter = rpc_submitter(&rpc.url, n2_budget(4));
     let record = darkbot_project0::protocol::liquidation_record_pda(&f.program, &f.account);
     let (rec, _) = n2_evaluate_record(&f, &payer, &routes, true, &submitter, record);
@@ -1040,7 +1042,8 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
     });
     let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
         .unwrap()
-        .with_base_url(jupiter.url.clone());
+        .with_base_url(jupiter.url.clone())
+            .unpaced();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let route = routes.exit_to_sol(&mint, 1_000, deadline).unwrap();
     let query = jupiter.bodies_of("/build")[0].as_str().unwrap().to_string();
@@ -1105,6 +1108,7 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
         crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false)
             .unwrap()
             .with_base_url(jupiter.url.clone())
+            .unpaced()
             .exit_to_sol(&mint, 1_000, deadline)
     };
     assert_eq!(
@@ -1228,7 +1232,8 @@ fn b01_the_quote_worker_skips_an_earlier_generations_job() {
         false,
     )
     .unwrap()
-    .with_base_url(jupiter.url.clone());
+    .with_base_url(jupiter.url.clone())
+            .unpaced();
     remote.start_rebalance_quoter(routes, &shutdown).unwrap();
     let queues = remote.rebalance.as_ref().unwrap();
     queues.generation.store(2, Ordering::Release);

@@ -138,9 +138,125 @@ pub(crate) fn swap_terms(
     })
 }
 
+/// P6-MT.7: Jupiter's quota is one bucket per account — every credential and endpoint of it — so
+/// the one provider and its clones share this budget. A request is admitted only with a token
+/// (one per the account tier's interval, `jupiter_authenticated_interval_ms` with an API key,
+/// `jupiter_anonymous_interval_ms` without; at most `jupiter_burst` saved) and a slot of
+/// `jupiter_inflight`; a 429 empties the bucket until its Retry-After (else one interval). It never
+/// waits: without a token or a slot the request is refused and counted — no thread sleeps or spins
+/// on the quota (P6-MT.7: without a token the candidate stays as it is, no re-prepare, no spin).
+#[derive(Debug)]
+pub struct JupiterBudget {
+    interval: Duration,
+    burst: u32,
+    inflight_max: u32,
+    state: std::sync::Mutex<JupiterState>,
+}
+
+#[derive(Debug)]
+struct JupiterState {
+    tokens: u32,
+    /// When the next token accrues.
+    refill_at: Instant,
+    /// A 429's wait: nothing is admitted before it.
+    cooldown_until: Option<Instant>,
+    inflight: u32,
+}
+
+/// A request's place in the bucket; its slot is released with it.
+pub struct JupiterPermit {
+    budget: std::sync::Arc<JupiterBudget>,
+}
+
+impl Drop for JupiterPermit {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.budget.state.lock() {
+            s.inflight = s.inflight.saturating_sub(1);
+        }
+    }
+}
+
+impl JupiterBudget {
+    pub fn new(interval: Duration, burst: u32, inflight_max: u32) -> Self {
+        Self {
+            interval,
+            burst,
+            inflight_max,
+            state: std::sync::Mutex::new(JupiterState {
+                tokens: burst,
+                refill_at: Instant::now() + interval,
+                cooldown_until: None,
+                inflight: 0,
+            }),
+        }
+    }
+
+    /// The account's bucket under `limits`, by its tier (`authenticated`: an API key is sent).
+    pub fn configured(
+        limits: &darkbot_solana::runtime_config::Limits,
+        authenticated: bool,
+    ) -> Self {
+        let interval = if authenticated {
+            limits.jupiter_authenticated_interval_ms
+        } else {
+            limits.jupiter_anonymous_interval_ms
+        };
+        Self::new(
+            Duration::from_millis(interval),
+            u32::try_from(limits.jupiter_burst).unwrap_or(u32::MAX),
+            u32::try_from(limits.jupiter_inflight).unwrap_or(u32::MAX),
+        )
+    }
+
+    /// A request now, or the code it is refused with (`JUPITER_RATE_LIMITED`: a 429's wait;
+    /// `JUPITER_RATE_BUDGET`: no token; `JUPITER_INFLIGHT`: no slot).
+    pub fn admit(self: &std::sync::Arc<Self>) -> Result<JupiterPermit, &'static str> {
+        let now = Instant::now();
+        let mut s = self.state.lock().map_err(|_| "JUPITER_BUDGET_POISONED")?;
+        if s.cooldown_until.is_some_and(|until| now < until) {
+            return Err("JUPITER_RATE_LIMITED");
+        }
+        if self.interval.is_zero() {
+            s.tokens = self.burst;
+        } else {
+            while s.tokens < self.burst && s.refill_at <= now {
+                s.tokens += 1;
+                s.refill_at += self.interval;
+            }
+            if s.tokens == self.burst && s.refill_at <= now {
+                s.refill_at = now + self.interval;
+            }
+        }
+        if s.inflight >= self.inflight_max {
+            return Err("JUPITER_INFLIGHT");
+        }
+        if s.tokens == 0 {
+            return Err("JUPITER_RATE_BUDGET");
+        }
+        s.tokens -= 1;
+        s.inflight += 1;
+        Ok(JupiterPermit {
+            budget: self.clone(),
+        })
+    }
+
+    /// A 429: nothing is admitted for `wait` (its Retry-After, else one interval); the bucket is
+    /// empty after it.
+    pub fn rate_limited(&self, wait: Option<Duration>) {
+        if let Ok(mut s) = self.state.lock() {
+            let until = Instant::now() + wait.unwrap_or(self.interval);
+            s.cooldown_until = Some(until);
+            s.tokens = 0;
+            s.refill_at = until + self.interval;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct JupiterV2RouteProvider {
     client: reqwest::blocking::Client,
+    /// P6-MT.7: the account's bucket, shared by every clone.
+    budget: std::sync::Arc<JupiterBudget>,
     /// D01: upper bound of one Jupiter request, also when the candidate deadline is further
     /// away (`jupiter_timeout_ms`).
     request_timeout: Duration,
@@ -164,12 +280,11 @@ impl JupiterV2RouteProvider {
         if max_accounts == 0 || u64::from(max_accounts) > most {
             return Err(format!("Jupiter max_accounts must be 1..={most}"));
         }
-        let request_timeout = Duration::from_millis(
-            darkbot_solana::runtime_config::active()
-                .limits
-                .jupiter_timeout_ms,
-        );
+        let limits = &darkbot_solana::runtime_config::active().limits;
+        let request_timeout = Duration::from_millis(limits.jupiter_timeout_ms);
+        let budget = std::sync::Arc::new(JupiterBudget::configured(limits, api_key.is_some()));
         Ok(Self {
+            budget,
             client: darkbot_solana::provider::blocking_http()
                 .timeout(request_timeout)
                 .build()
@@ -188,6 +303,13 @@ impl JupiterV2RouteProvider {
     #[cfg(test)]
     pub(crate) fn with_base_url(mut self, base_url: String) -> Self {
         self.base_url = base_url;
+        self
+    }
+
+    /// Tests of other behaviour than the quota ask a loopback endpoint without Jupiter's spacing.
+    #[cfg(test)]
+    pub(crate) fn unpaced(mut self) -> Self {
+        self.budget = std::sync::Arc::new(JupiterBudget::new(Duration::ZERO, u32::MAX, u32::MAX));
         self
     }
 
@@ -219,6 +341,11 @@ impl JupiterV2RouteProvider {
                 from_mint
             ));
         }
+        // P6-MT.7: the account's bucket admits it, or it is not sent.
+        let _permit = self.budget.admit().map_err(|code| {
+            darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::JupiterBudgetRefused, 1);
+            format!("jupiter /build: {code}")
+        })?;
         let url = format!("{}/build", self.base_url.trim_end_matches('/'));
         let mut req = self
             .client
@@ -285,6 +412,17 @@ impl JupiterV2RouteProvider {
         );
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err("jupiter /build: no route (HTTP 404)".into());
+        }
+        // P6-MT.7: a 429 holds the account's bucket for its Retry-After (seconds), else one
+        // interval.
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let wait = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .map(Duration::from_secs);
+            self.budget.rate_limited(wait);
         }
         if !response.status().is_success() {
             let status = response.status();
@@ -1148,7 +1286,8 @@ pub(crate) mod tests {
         let (url, requests) = serve_build_logged(serde_json::json!({}));
         let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
             .unwrap()
-            .with_base_url(url);
+            .with_base_url(url)
+            .unpaced();
         let deadline = Instant::now() + Duration::from_secs(5);
         let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline);
         let _ = provider.quote_bundle_exact_in_with_budget(&from, &to, 500, &[], 64, deadline);
@@ -1206,7 +1345,8 @@ pub(crate) mod tests {
             }
             let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
                 .unwrap()
-                .with_base_url(serve_build(body));
+                .with_base_url(serve_build(body))
+                .unpaced();
             provider.exact_in(
                 &from,
                 &to,
@@ -1269,5 +1409,119 @@ pub(crate) mod tests {
         let alts = transform_alts(Some(raw)).unwrap();
         assert_eq!(alts[0].key, key);
         assert_eq!(alts[0].addresses, vec![addr]);
+    }
+
+    /// A loopback endpoint answering every request with the raw `head` (status line and
+    /// headers) and an empty JSON body; the request lines it got.
+    fn serve_raw(head: &'static str) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = true;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) <= 2 {
+                        break;
+                    }
+                    if std::mem::take(&mut first) {
+                        log.lock().unwrap().push(line.trim_end().to_string());
+                    }
+                }
+                let _ = stream.write_all(
+                    format!("{head}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}")
+                        .as_bytes(),
+                );
+            }
+        });
+        (url, requests)
+    }
+
+    /// P6-MT.7: Jupiter's account bucket — a token per interval, at most the burst saved (also
+    /// after a long idle), at most its slots in flight; a 429's wait admits nothing and leaves the
+    /// bucket empty; every refusal is immediate.
+    #[test]
+    fn p6_mt7_the_jupiter_bucket_paces_bounds_and_holds_after_a_429() {
+        use std::sync::Arc;
+        let ms = Duration::from_millis;
+        let b = Arc::new(JupiterBudget::new(ms(80), 1, 1));
+        let first = b.admit().unwrap();
+        assert_eq!(b.admit().err(), Some("JUPITER_INFLIGHT"));
+        drop(first);
+        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
+        std::thread::sleep(ms(90));
+        drop(b.admit().unwrap());
+        // A long idle saves the burst, never more.
+        std::thread::sleep(ms(300));
+        drop(b.admit().unwrap());
+        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
+        let b = Arc::new(JupiterBudget::new(ms(80), 2, 4));
+        let (a, c) = (b.admit().unwrap(), b.admit().unwrap());
+        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
+        drop((a, c));
+        b.rate_limited(Some(ms(150)));
+        std::thread::sleep(ms(100));
+        assert_eq!(b.admit().err(), Some("JUPITER_RATE_LIMITED"));
+        // After the wait and one interval: one token.
+        std::thread::sleep(ms(160));
+        drop(b.admit().unwrap());
+        assert_eq!(b.admit().err(), Some("JUPITER_RATE_BUDGET"));
+    }
+
+    /// P6-MT.7 through the real adapter: the configured bucket (the anonymous tier's spacing)
+    /// admits the first `/build` and refuses the next at once without sending it — also from a
+    /// clone (one bucket per account); a 429 with its Retry-After holds the account, its next
+    /// request is refused before anything is sent.
+    #[test]
+    fn p6_mt7_the_router_sends_only_what_the_account_bucket_admits() {
+        let (taker, from, to) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let deadline = || Instant::now() + Duration::from_secs(5);
+        let (url, requests) = serve_build_logged(serde_json::json!({}));
+        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+            .unwrap()
+            .with_base_url(url);
+        let clone = provider.clone();
+        let refused =
+            darkbot_common::mt0::MT0.get(darkbot_common::mt0::Counter::JupiterBudgetRefused);
+        let _ = provider.quote_exact_in(&from, &to, 500, &[], deadline());
+        let second = provider.quote_exact_in(&from, &to, 500, &[], deadline());
+        let third = clone.quote_exact_in(&from, &to, 500, &[], deadline());
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            1,
+            "only the admitted one is sent"
+        );
+        for e in [second.unwrap_err(), third.unwrap_err()] {
+            assert!(e.contains("JUPITER_RATE_BUDGET"), "{e}");
+        }
+        assert!(
+            darkbot_common::mt0::MT0.get(darkbot_common::mt0::Counter::JupiterBudgetRefused)
+                >= refused + 2
+        );
+        // A 429 holds the account for its Retry-After, beyond the tier's spacing.
+        let (url, requests) = serve_raw(
+            "HTTP/1.1 429 Too Many Requests\r\nretry-after: 30\r\ncontent-type: application/json",
+        );
+        let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false)
+            .unwrap()
+            .with_base_url(url)
+            .unpaced();
+        assert!(provider
+            .quote_exact_in(&from, &to, 500, &[], deadline())
+            .is_err());
+        let held = provider
+            .quote_exact_in(&from, &to, 500, &[], deadline())
+            .unwrap_err();
+        assert!(held.contains("JUPITER_RATE_LIMITED"), "{held}");
+        assert_eq!(requests.lock().unwrap().len(), 1);
     }
 }

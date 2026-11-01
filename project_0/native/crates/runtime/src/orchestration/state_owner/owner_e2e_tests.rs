@@ -6651,7 +6651,8 @@ fn dec13b_fixture_with(
             token_program,
             asset_mint,
             liab_mint,
-        ));
+        ))
+        .unpaced();
     let mut keys = [Pubkey::new_unique(), Pubkey::new_unique()];
     keys.sort_unstable_by(|a, b| b.cmp(a));
     let (asset_bank, liab_bank, target) = (keys[0], keys[1], Pubkey::new_unique());
@@ -7407,7 +7408,8 @@ fn dec13b_exit_fixture_of(
             None => dec13b_exit_jupiter(liquidator, mint),
             // Nothing listens: a router asked would fail the exit.
             Some(_) => "http://127.0.0.1:9".into(),
-        });
+        })
+        .unpaced();
     let (calls, sent) = dec13b_live_node_wires(&mut f, send_ok, 0, None);
     (f, calls, sent, e)
 }
