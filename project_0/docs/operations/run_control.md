@@ -18,4 +18,4 @@ cargo build --release --locked --manifest-path project_0/native/Cargo.toml --fea
 
 **Runtime owner lock.** `p0-longtail` takes an exclusive lock on `P0_RUNTIME_LOCK` (launchers: `<run store parent>/.p0-runtime.lock`, i.e. `project_0/data/.p0-runtime.lock` by default) before any stream, journal or RPC exists, and refuses a second owner (`RUNTIME_OWNER_LOCKED`). The kernel releases it on every exit. Only the observation modes (`econ4h`, `market`) install the ordered stop; Shadow keeps the default signal behaviour.
 
-**Not covered yet:** a typed `RunStatus`/control DTO for the frontend, `runs list`, `logs --follow`, `UntilStopped` horizons and the network boot audit (needs explicit Mainnet read permission).
+**Not covered yet:** a typed `RunStatus`/control DTO for the frontend, `logs --follow` and the network boot audit (needs explicit Mainnet read permission); `runs list` and `--until-stopped` (DEC-16) exist.
