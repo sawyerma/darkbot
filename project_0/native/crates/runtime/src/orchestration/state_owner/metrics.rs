@@ -11,6 +11,9 @@ pub(super) struct OwnerMetrics {
     pub(super) oracle_bank_projection_ready: u64,
     pub(super) oracle_bank_projection_failed: u64,
     pub(super) oracle_bank_projection_stale: u64,
+    /// P6-MT.2: bank projections dropped because a recovery or a program upgrade began a newer
+    /// generation while they were in flight.
+    pub(super) oracle_bank_projection_old_generation: u64,
     pub(super) health_sweep_checks: u64,
     pub(super) health_sweep_healthy: u64,
     pub(super) health_sweep_liquidatable: u64,

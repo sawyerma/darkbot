@@ -1,6 +1,32 @@
 //! Apply bounded worker results on the single state owner.
 use super::*;
 
+/// [R126]/P6-MT.2: a bank's projection in flight — the newest trigger it covers
+/// `(t_rx_ns, slot)` and the owner's generations it was requested under: a result of an older
+/// generation commits nothing, and a trigger after a newer generation began requests anew
+/// instead of waiting for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct OraclePending {
+    pub(super) latest: (u64, u64),
+    pub(super) generations: crate::execution::identity::Generations,
+}
+
+impl OraclePending {
+    /// The bank's projection in `pending` that covers a trigger at `generations` — only one
+    /// requested under them; one requested before a recovery covers nothing (the trigger
+    /// requests anew, the old result commits nothing).
+    #[cfg(feature = "crate_health")]
+    pub(super) fn covering<'a>(
+        pending: &'a mut HashMap<Pubkey, OraclePending>,
+        bank: &Pubkey,
+        generations: crate::execution::identity::Generations,
+    ) -> Option<&'a mut OraclePending> {
+        pending
+            .get_mut(bank)
+            .filter(|p| p.generations == generations)
+    }
+}
+
 /// V2-13: one oracle admission — threshold hits (L0), re-checks (L2) and the trigger's
 /// `(t_rx_ns, slot)`.
 #[cfg(feature = "crate_health")]
@@ -114,7 +140,27 @@ impl ShadowOwner {
             let bank = done.bank;
             let base_slot = done.base_slot;
             let base_bank_hash = done.base_bank_hash;
-            let latest = self.oracle_bank_projection_pending.remove(&bank);
+            // P6-MT.2: a projection requested before a recovery (or a program upgrade) commits
+            // nothing and creates no follow-up work — the recovery re-evaluates every account; a
+            // newer request of the bank stays in flight.
+            if done.generations != self.generations() {
+                if self
+                    .oracle_bank_projection_pending
+                    .get(&bank)
+                    .is_some_and(|p| p.generations == done.generations)
+                {
+                    self.oracle_bank_projection_pending.remove(&bank);
+                }
+                self.metrics.oracle_bank_projection_old_generation = self
+                    .metrics
+                    .oracle_bank_projection_old_generation
+                    .saturating_add(1);
+                continue;
+            }
+            let latest = self
+                .oracle_bank_projection_pending
+                .remove(&bank)
+                .map(|p| p.latest);
             // DEC-06: a projection of the threshold trigger after ACTIVE was left admits nothing:
             // the full sweep at that change covers its bank.
             if !self.threshold_authority() {

@@ -899,10 +899,17 @@ impl ShadowOwner {
                                         // though the exact pre-Start refresh is deterministic. Project one
                                         // Bank refresh once, then threshold-select accounts from that fresh
                                         // pricing state instead of waking the whole Bank immediately.
+                                        // P6-MT.2: a projection requested before a recovery
+                                        // covers nothing; this trigger requests anew.
+                                        let generations = self.generations();
                                         if let Some(existing) =
-                                            self.oracle_bank_projection_pending.get_mut(&bank)
+                                            super::remote_apply::OraclePending::covering(
+                                                &mut self.oracle_bank_projection_pending,
+                                                &bank,
+                                                generations,
+                                            )
                                         {
-                                            *existing = (t_rx_ns, event_slot);
+                                            existing.latest = (t_rx_ns, event_slot);
                                             owner_log!(self,
                                         "oracle_bank_projection_coalesced: dependency={} bank={} error={}",
                                         dependency, bank, e
@@ -1043,6 +1050,7 @@ impl ShadowOwner {
                                                 base_bank_hash: hash(&bank_record.data),
                                                 tx: built.tx,
                                                 targets,
+                                                generations,
                                             };
                                             match self
                                                 .remote
@@ -1050,8 +1058,13 @@ impl ShadowOwner {
                                                 .try_push(work)
                                             {
                                                 Ok(()) => {
-                                                    self.oracle_bank_projection_pending
-                                                        .insert(bank, (t_rx_ns, event_slot));
+                                                    self.oracle_bank_projection_pending.insert(
+                                                        bank,
+                                                        super::remote_apply::OraclePending {
+                                                            latest: (t_rx_ns, event_slot),
+                                                            generations,
+                                                        },
+                                                    );
                                                     self.metrics.oracle_bank_projection_submitted =
                                                         self.metrics
                                                             .oracle_bank_projection_submitted

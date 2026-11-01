@@ -187,6 +187,8 @@ pub struct OraclePriceProjectionWork {
     pub base_bank_hash: Hash,
     pub tx: VersionedTransaction,
     pub targets: Vec<Pubkey>,
+    /// P6-MT.2: the owner's generations the projection was requested under.
+    pub generations: crate::execution::identity::Generations,
 }
 
 pub struct OraclePriceProjectionResultMessage {
@@ -194,6 +196,8 @@ pub struct OraclePriceProjectionResultMessage {
     pub base_slot: u64,
     pub base_bank_hash: Hash,
     pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
+    /// The request's generations, returned unchanged.
+    pub generations: crate::execution::identity::Generations,
 }
 
 /// FE-04/C3: the settlement reads of one UNKNOWN attempt or exit (its subject and observed
@@ -520,6 +524,7 @@ impl RemoteWorkers {
                         let bank = work.bank;
                         let base_slot = work.base_slot;
                         let base_bank_hash = work.base_bank_hash;
+                        let generations = work.generations;
                         let mt0_start = std::time::Instant::now(); // [MT0]
                                                                    // E9: the bank's projection is not older than its canonical bank.
                         let result = submitter
@@ -541,6 +546,7 @@ impl RemoteWorkers {
                                 base_slot,
                                 base_bank_hash,
                                 result,
+                                generations,
                             },
                             &oracle_projection_shutdown,
                             &oracle_projection_space,

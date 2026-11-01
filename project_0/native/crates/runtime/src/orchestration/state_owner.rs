@@ -243,7 +243,9 @@ pub(super) struct ShadowOwner {
     /// P6-MT.5 (MT3): the one oracle/sweep candidate queue — trigger-priority lanes L0/L1/L2
     /// under a weighted deficit round robin, one pending entry per account (coalesced).
     oracle_lanes: CandidateLanes,
-    oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)>,
+    /// [R126]: the bank projections in flight, one per bank (P6-MT.2: bound to the generations
+    /// it was requested under).
+    oracle_bank_projection_pending: HashMap<Pubkey, remote_apply::OraclePending>,
     integration_probe_expected: HashSet<Pubkey>,
     integration_probe_queue: VecDeque<(Pubkey, u64)>,
     integration_probe_terminal: HashSet<Pubkey>,

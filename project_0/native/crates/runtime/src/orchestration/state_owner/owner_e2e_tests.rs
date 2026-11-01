@@ -3608,6 +3608,120 @@ fn p6_mt14_4_older_pending_revisions_create_no_remote_work() {
     cleanup(f);
 }
 
+/// P6-MT.14 #6 for the bank projections (P6-MT.2): a recovery invalidates the price projection
+/// in flight. A failed projection of the current generation re-checks its bank (its account in
+/// L2); after a gap and its recovery the same result, requested before, commits nothing — no
+/// admission, no re-check, counted — and its pending entry ends; a newer request of the bank
+/// stays in flight past an older result and is the only one that covers a trigger.
+#[test]
+fn p6_mt14_6_a_recovery_invalidates_the_bank_projection_in_flight() {
+    use super::remote_apply::OraclePending;
+    use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
+    let mut f = fixture_with("p6_mt14_6", None);
+    f.owner.threshold_test_active();
+    let (state, account, _, _) = p2_accounts(&f, 85.0, 1_700_000_000, true);
+    let ready = |f: &mut Fixture| {
+        f.owner.st.install_snapshot(100, state.clone());
+        f.owner.st.reconcile(100, &state);
+        assert!(f.owner.st.confirm_ready().is_tradable());
+    };
+    ready(&mut f);
+    let bank = Pubkey::new_unique();
+    f.owner.reverse_index.set_account_banks(account, &[bank]);
+    let apply = |f: &mut Fixture, generations, revision| {
+        f.owner.bank_input_revision.insert(bank, revision);
+        assert!(f
+            .results
+            .as_ref()
+            .unwrap()
+            .oracle
+            .try_push(OraclePriceProjectionResultMessage {
+                bank,
+                base_slot: 100,
+                base_bank_hash: solana_sdk::hash::Hash::default(),
+                result: Err("RPC_TRANSPORT".into()),
+                generations,
+            })
+            .is_ok());
+        f.owner.remote_apply().unwrap();
+        std::iter::from_fn(|| f.owner.oracle_lanes.next())
+            .map(|e| e.work.0)
+            .collect::<Vec<_>>()
+    };
+    let pending = |generations| OraclePending {
+        latest: (5, 100),
+        generations,
+    };
+    let covered = |f: &mut Fixture| {
+        let generations = f.owner.generations();
+        OraclePending::covering(
+            &mut f.owner.oracle_bank_projection_pending,
+            &bank,
+            generations,
+        )
+        .is_some()
+    };
+    let older = f.owner.generations();
+    f.owner
+        .oracle_bank_projection_pending
+        .insert(bank, pending(older));
+    assert!(covered(&mut f));
+    assert_eq!(
+        apply(&mut f, older, 7),
+        vec![account],
+        "the current generation"
+    );
+    assert!(f.owner.oracle_bank_projection_pending.is_empty());
+
+    // The gap ends the Ready period; the recovery installs the same state.
+    f.owner
+        .oracle_bank_projection_pending
+        .insert(bank, pending(older));
+    f.owner.st.on_event(IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: Some(100),
+        to_slot: None,
+        t_rx_ns: 0,
+    });
+    ready(&mut f);
+    let current = f.owner.generations();
+    assert_eq!(current.recovery, older.recovery + 1);
+    assert!(
+        !covered(&mut f),
+        "a projection requested before the recovery covers no trigger"
+    );
+    let fallbacks = f.owner.metrics.oracle_price_fallbacks;
+    assert_eq!(
+        apply(&mut f, older, 8),
+        Vec::<Pubkey>::new(),
+        "no follow-up work"
+    );
+    assert_eq!(
+        f.owner.metrics.oracle_price_fallbacks, fallbacks,
+        "no re-check"
+    );
+    assert_eq!(f.owner.metrics.oracle_bank_projection_old_generation, 1);
+    assert!(
+        f.owner.oracle_bank_projection_pending.is_empty(),
+        "its entry ends"
+    );
+
+    // A newer request stays in flight past an older result, and only it commits.
+    f.owner
+        .oracle_bank_projection_pending
+        .insert(bank, pending(current));
+    assert_eq!(apply(&mut f, older, 9), Vec::<Pubkey>::new());
+    assert_eq!(f.owner.metrics.oracle_bank_projection_old_generation, 2);
+    assert_eq!(
+        f.owner.oracle_bank_projection_pending.get(&bank),
+        Some(&pending(current))
+    );
+    assert!(covered(&mut f));
+    assert_eq!(apply(&mut f, current, 10), vec![account]);
+    assert!(f.owner.oracle_bank_projection_pending.is_empty());
+    cleanup(f);
+}
+
 /// V2-13 (P4-03/P5b-02): a bank-wide re-check without a new cause is not admitted again — a
 /// second failed price projection of the same bank input revision, after the detection consumed
 /// the first admission, admits nothing (counted suppressed); a newer bank revision admits the
@@ -3621,11 +3735,13 @@ fn v2_13_a_repeated_bank_recheck_without_a_new_cause_is_suppressed() {
     let bank = Pubkey::new_unique();
     f.owner.reverse_index.set_account_banks(account, &[bank]);
     f.owner.bank_input_revision.insert(bank, 7);
+    let generations = f.owner.generations();
     let failed = || OraclePriceProjectionResultMessage {
         bank,
         base_slot: 100,
         base_bank_hash: solana_sdk::hash::Hash::default(),
         result: Err("RPC_TRANSPORT".into()),
+        generations,
     };
     let admitted = |f: &mut Fixture| {
         assert!(f
@@ -6387,6 +6503,7 @@ fn dec06_a_projection_after_active_was_left_admits_nothing() {
             base_slot: 100,
             base_bank_hash: solana_sdk::hash::Hash::default(),
             result: Err("RPC_TRANSPORT".into()),
+            generations: f.owner.generations(),
         })
         .is_ok());
     f.owner.remote_apply().unwrap();

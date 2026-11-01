@@ -729,7 +729,8 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let oracle_max_pending: usize = 0;
     #[cfg(feature = "crate_health")]
-    let oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)> = HashMap::new();
+    let oracle_bank_projection_pending: HashMap<Pubkey, remote_apply::OraclePending> =
+        HashMap::new();
     #[cfg(feature = "crate_health")]
     let oracle_bank_projection_submitted: u64 = 0;
     #[cfg(feature = "crate_health")]
@@ -738,6 +739,7 @@ pub(super) fn prepare(
     let oracle_bank_projection_failed: u64 = 0;
     #[cfg(feature = "crate_health")]
     let oracle_bank_projection_stale: u64 = 0;
+    let oracle_bank_projection_old_generation: u64 = 0;
     #[cfg(feature = "crate_health")]
     let integration_probe_expected: HashSet<Pubkey> = HashSet::new();
     #[cfg(feature = "crate_health")]
@@ -1127,6 +1129,7 @@ pub(super) fn prepare(
             oracle_bank_projection_ready,
             oracle_bank_projection_failed,
             oracle_bank_projection_stale,
+            oracle_bank_projection_old_generation,
             health_sweep_checks,
             health_sweep_healthy,
             health_sweep_liquidatable,
