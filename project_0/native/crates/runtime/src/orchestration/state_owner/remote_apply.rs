@@ -142,10 +142,11 @@ impl ShadowOwner {
             // P6-MT.2: a projection requested before a recovery (or a program upgrade) commits
             // nothing and creates no follow-up work — the recovery re-evaluates every account; a
             // newer request of the bank stays in flight.
-            let action =
-                crate::execution::identity::generation_action(done.generations, self.generations());
-            self.metrics.result_actions.count(action);
-            if action == crate::execution::identity::ResultAction::DropOldGeneration {
+            // Decided by the central policy's generation rule; counted as the bank's own (the
+            // `result_actions` verdicts stay the candidates').
+            if crate::execution::identity::generation_action(done.generations, self.generations())
+                == crate::execution::identity::ResultAction::DropOldGeneration
+            {
                 if self
                     .oracle_bank_projection_pending
                     .get(&bank)

@@ -3635,7 +3635,6 @@ fn p6_mt14_4_older_pending_revisions_create_no_remote_work() {
 #[test]
 fn p6_mt14_6_a_recovery_invalidates_the_bank_projection_in_flight() {
     use super::remote_apply::OraclePending;
-    use crate::execution::identity::ResultAction;
     use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
     let mut f = fixture_with("p6_mt14_6", None);
     f.owner.threshold_test_active();
@@ -3739,14 +3738,10 @@ fn p6_mt14_6_a_recovery_invalidates_the_bank_projection_in_flight() {
     assert!(covered(&mut f));
     assert_eq!(apply(&mut f, current, 10), vec![account]);
     assert!(f.owner.oracle_bank_projection_pending.is_empty());
-    let actions = &f.owner.metrics.result_actions;
     assert_eq!(
-        (
-            actions.get(ResultAction::Accept),
-            actions.get(ResultAction::DropOldGeneration)
-        ),
-        (2, 2),
-        "judged by the central policy"
+        f.owner.metrics.result_actions.total(),
+        0,
+        "the candidates' verdicts are not the bank's"
     );
     cleanup(f);
 }

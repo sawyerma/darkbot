@@ -303,7 +303,7 @@ impl ShadowOwner {
         {
             return;
         }
-        let now = crate::analytics::mt13::Mt13Telemetry::now(Some(self.mt13_owner()));
+        let now = crate::analytics::mt13::Mt13Telemetry::now(self.mt13_owner());
         if self
             .evidence
             .emit(OwnerEvidence::Mt13(Box::new(now.clone())))

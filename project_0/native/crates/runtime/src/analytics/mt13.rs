@@ -66,8 +66,7 @@ impl crate::analytics::payload::Payload for Mt13Telemetry {
     const SCHEMA: u16 = 3;
     /// Schema 2 (the layout of `7aa75c94`) had no owner's telemetry: readable without it. The
     /// first schema-2 writer (`1022f091`, pushed with `7aa75c94` and never run: no journal holds
-    /// it) wrote another layout under the same schema; such a frame fails closed
-    /// (`PAYLOAD_DECODE`).
+    /// it) wrote another layout under the same schema, which this reader does not support.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         (schema == crate::analytics::payload::TYPED).then(|| {
             crate::analytics::payload::decode_wire::<Mt13TelemetryV2>(bytes).map(|v| Self {
@@ -130,9 +129,9 @@ impl From<&darkbot_common::mt0::Mt13Snapshot> for Mt13Telemetry {
 
 impl Mt13Telemetry {
     /// The registry's now, with the owner's telemetry `owner`.
-    pub fn now(owner: Option<Mt13Owner>) -> Self {
+    pub fn now(owner: Mt13Owner) -> Self {
         Self {
-            owner,
+            owner: Some(owner),
             ..(&darkbot_common::mt0::MT0.mt13()).into()
         }
     }
@@ -154,7 +153,7 @@ mod tests {
             p99: Some(3),
             max: Some(4),
         };
-        let mut record = Mt13Telemetry::now(Some(Mt13Owner {
+        let mut record = Mt13Telemetry::now(Mt13Owner {
             lane_wait_ns: vec![("L0".into(), hist(3)), ("L2".into(), hist(1))],
             lane_promotions: 2,
             lane_demotions: 1,
@@ -162,7 +161,7 @@ mod tests {
             route_cap_hits: 5,
             route_cap_misses: 4,
             jupiter_requests_per_routed_revision: hist(9),
-        }));
+        });
         let bytes = encode(&record).unwrap();
         assert_eq!(
             decode::<Mt13Telemetry>(Mt13Telemetry::KIND, Mt13Telemetry::SCHEMA, &bytes).unwrap(),
