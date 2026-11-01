@@ -2015,7 +2015,7 @@ const PROVIDER_USAGE: &str = "usage: p0ctl provider status
   | p0ctl provider credential set|rotate --credential CID   (the secret from a hidden prompt or the standard input, never an argument)
   | p0ctl provider credential revoke --credential CID
   | p0ctl provider credential import-env --credential CID --variable NAME [--env-file FILE]   (the one-time import of an existing .env key)
-  | p0ctl provider adopt   (a registry recorded for another project directory: a new uid, every credential set again)
+  | p0ctl provider adopt   (a registry recorded for another project directory: a new uid; every credential is set again with `credential set` — the import is refused for an existing credential — and the other location's keychain items stay with it)
   every change: [--request-id ID] [--expect-version N]; effective at the next controlled start (DEC-05)";
 
 /// The value of `flag` once at most among `allowed` flags; any other flag is refused (a secret is
@@ -2093,11 +2093,14 @@ impl HiddenPrompt {
             // An inherited "ignore" (SIGHUP under nohup) stays ignored.
             let mut handlers = vec![];
             for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
-                let before = libc::signal(s, handler);
-                if before == libc::SIG_IGN {
-                    libc::signal(s, libc::SIG_IGN);
+                // The disposition is read first: an inherited "ignore" stays untouched.
+                let mut current: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(s, std::ptr::null(), &mut current) != 0
+                    || current.sa_sigaction == libc::SIG_IGN
+                {
+                    continue;
                 }
-                handlers.push((s, before));
+                handlers.push((s, libc::signal(s, handler)));
             }
             let prompt = Self { old, handlers };
             let mut quiet = old;
@@ -2188,7 +2191,12 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         if !rest.is_empty() {
             return Err(PROVIDER_USAGE.into());
         }
-        for line in reg::status_lines(&reg::current(project)?) {
+        let registry = reg::current(project)?;
+        // A copied store is shown as what it is: another project's, never this one's.
+        if let Err(e) = reg::owned(project, &registry) {
+            println!("{e}");
+        }
+        for line in reg::status_lines(&registry) {
             println!("{line}");
         }
         println!("PROVIDER_EFFECTIVE: a change takes effect at the next controlled start (DEC-05)");
@@ -2283,6 +2291,9 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if o.contains_key("--disabled") {
                 p.enabled = false;
             }
+            // A qualification is the store's (kept for the same binding, never set by an edit),
+            // so it is never part of what an edit's request id binds.
+            p.qualification = None;
             let action = if verb == "add" {
                 A::Add(p)
             } else {

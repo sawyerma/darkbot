@@ -86,8 +86,11 @@ impl AuthKind {
     /// Never echoes a refused value.
     pub fn parse(s: &str) -> Result<Self, String> {
         let name = |n: &str| -> Result<String, String> {
+            // A parameter or header name, never a key typed into it.
             let ok = !n.is_empty()
                 && n.len() <= 64
+                && !key_shaped(n)
+                && !token_like(n)
                 && n.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
             ok.then(|| n.to_string())
@@ -203,11 +206,26 @@ pub fn id_ok(id: &str) -> bool {
 /// token. A provider that carries its credential in the path uses `AuthKind::PathSegment`. (A
 /// short or digit-free token cannot be told from a name; it stays the operator's to keep out.)
 fn token_like(segment: &str) -> bool {
-    segment.split(['-', '_', '.']).any(|word| {
-        word.len() >= 16
-            && word.bytes().any(|b| b.is_ascii_digit())
-            && word.bytes().any(|b| b.is_ascii_alphabetic())
-    })
+    let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
+    let word = segment.split(['-', '_', '.']).any(|word| {
+        word.len() >= 16 && has(word, u8::is_ascii_digit) && has(word, u8::is_ascii_alphabetic)
+    });
+    // A UUID or hyphenated hex token: its characters without separators are 16+ hex digits with
+    // digits and letters.
+    let joined: String = segment
+        .chars()
+        .filter(|c| !matches!(c, '-' | '_' | '.'))
+        .collect();
+    let hex = joined.len() >= 16
+        && joined.bytes().all(|b| b.is_ascii_hexdigit())
+        && has(&joined, u8::is_ascii_digit)
+        && has(&joined, u8::is_ascii_alphabetic);
+    // A base64url key: 20+ characters mixing upper case, lower case and digits.
+    let mixed = segment.len() >= 20
+        && has(segment, u8::is_ascii_uppercase)
+        && has(segment, u8::is_ascii_lowercase)
+        && has(segment, u8::is_ascii_digit);
+    word || hex || mixed
 }
 
 /// The canonical endpoint of `raw` for `kind`: TLS (`https`/`wss`), a plain scheme only for a
@@ -753,6 +771,16 @@ mod tests {
                 "https://rpc.example/0123456789abcdef0123456789abcdef",
                 "PROVIDER_URL_PATH_SECRET",
             ),
+            (
+                Rpc,
+                "https://x.mainnet.rpcpool.com/7c1b4e7a-1234-4abc-9def-0123456789ab",
+                "PROVIDER_URL_PATH_SECRET",
+            ),
+            (
+                Rpc,
+                "https://rpc.example/aB3-dE5_fG7-hJ9_kL2-mN4",
+                "PROVIDER_URL_PATH_SECRET",
+            ),
         ] {
             let e = canonical_endpoint(kind, url).unwrap_err();
             assert!(e.starts_with(code), "{url}: {e}");
@@ -856,6 +884,12 @@ mod tests {
                 .unwrap_err()
                 .starts_with("CREDENTIAL_ID_INVALID"),
             "a hex key is no id"
+        );
+        assert!(AuthKind::parse("query:0123456789abcdef0123456789abcdef").is_err());
+        assert!(AuthKind::parse("header:7c1b4e7a-1234-4abc-9def-0123456789ab").is_err());
+        assert_eq!(
+            AuthKind::parse("header:x-api-key").unwrap(),
+            AuthKind::Header("x-api-key".into())
         );
         let mut p = helius();
         p.entitlement = "0123456789abcdef".into();

@@ -703,17 +703,21 @@ fn qualifies(
     let binding = current.binding_of(p)?;
     let record: crate::orchestration::provider_evidence::ProviderEvidence =
         journal::read_typed_value(path).map_err(|_| "PROVIDER_EVIDENCE_FORMAT".to_string())?;
-    let bound = record
+    // A passing FREE_ONLY measurement of exactly this binding (the WSS proof: a FREE_ONLY WSS).
+    let bound_rpc = record
         .providers
         .iter()
-        .any(|proof| proof.provider_binding == binding)
-        || record.wss_provider_binding.as_deref() == Some(binding.as_str());
-    if bound {
-        Ok(())
-    } else {
-        Err(format!(
+        .find(|proof| proof.provider_binding == binding);
+    let bound_wss = record.wss_provider_binding.as_deref() == Some(binding.as_str());
+    match (bound_rpc, bound_wss) {
+        (Some(proof), _) if proof.passed && proof.policy == "FREE_ONLY" => Ok(()),
+        (None, true) if record.wss_free_only => Ok(()),
+        (None, false) => Err(format!(
             "PROVIDER_EVIDENCE_BINDING_MISMATCH: {evidence} does not bind provider {id}'s binding"
-        ))
+        )),
+        _ => Err(format!(
+            "PROVIDER_EVIDENCE_NOT_PASSING: {evidence} is no passing FREE_ONLY measurement"
+        )),
     }
 }
 
@@ -874,6 +878,11 @@ mod tests {
 
     /// A stored provider evidence record with one proof of `provider_binding`; its id.
     fn evidence_for(d: &Path, tag: &str, provider_binding: &str) -> String {
+        evidence_passing(d, tag, provider_binding, true)
+    }
+
+    /// `evidence_for` with the measurement's verdict.
+    fn evidence_passing(d: &Path, tag: &str, provider_binding: &str, passed: bool) -> String {
         use crate::orchestration::provider_evidence::{self, ProviderEvidence, ProviderProof};
         let file = d.join(format!("{tag}.p0j"));
         journal::create_typed_value(
@@ -882,7 +891,7 @@ mod tests {
             &ProviderEvidence {
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),
-                    passed: true,
+                    passed,
                     provider_binding: provider_binding.into(),
                     measured_at_unix_s: 1.0,
                     evidence_sha256: Some("0".repeat(64)),
@@ -1206,6 +1215,11 @@ mod tests {
             "an unknown evidence id is no request"
         );
         assert!(receipt(&d, "q2").unwrap().is_none());
+        let failed = qualify("q4", &evidence_passing(&d, "failed", &binding, false)).unwrap();
+        assert!(
+            !failed.applied && failed.detail.starts_with("PROVIDER_EVIDENCE_NOT_PASSING"),
+            "{failed:?}"
+        );
         let good = evidence("good", &binding);
         assert!(qualify("q3", &good).unwrap().applied);
         assert_eq!(
