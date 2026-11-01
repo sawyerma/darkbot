@@ -303,7 +303,7 @@ impl ShadowOwner {
         {
             return;
         }
-        let now = crate::analytics::mt13::Mt13Telemetry::now(self.mt13_owner());
+        let now = crate::analytics::mt13::Mt13Telemetry::now(Some(self.mt13_owner()));
         if self
             .evidence
             .emit(OwnerEvidence::Mt13(Box::new(now.clone())))
@@ -315,35 +315,30 @@ impl ShadowOwner {
 
     /// P6-MT.13: the telemetry the owner keeps itself — the lanes' waits and changes (MT3), the
     /// route-cap hint cache's hits and misses and the Jupiter requests of a routed evaluation
-    /// (MT4); `None` without the lanes and the route search.
-    fn mt13_owner(&self) -> Option<crate::analytics::mt13::Mt13Owner> {
-        #[cfg(feature = "crate_health")]
-        {
-            let cache = self.route_cap.borrow();
-            Some(crate::analytics::mt13::Mt13Owner {
-                lane_wait_ns: LANE_LIST
-                    .iter()
-                    .map(|lane| {
-                        (
-                            lane.name().to_string(),
-                            (&self.metrics.lane_wait_ns[*lane as usize].snapshot()).into(),
-                        )
-                    })
-                    .collect(),
-                lane_promotions: self.oracle_lanes.stats.promotions,
-                lane_demotions: self.oracle_lanes.stats.demotions,
-                lane_cancellations: self.oracle_lanes.stats.cancellations,
-                route_cap_hits: cache.stats.hits,
-                route_cap_misses: cache.stats.misses,
-                jupiter_requests_per_routed_revision: (&self
-                    .metrics
-                    .jupiter_requests_per_routed_revision
-                    .snapshot())
-                    .into(),
-            })
+    /// (MT4).
+    fn mt13_owner(&self) -> crate::analytics::mt13::Mt13Owner {
+        let cache = self.route_cap.borrow();
+        crate::analytics::mt13::Mt13Owner {
+            lane_wait_ns: LANE_LIST
+                .iter()
+                .map(|lane| {
+                    (
+                        lane.name().to_string(),
+                        (&self.metrics.lane_wait_ns[*lane as usize].snapshot()).into(),
+                    )
+                })
+                .collect(),
+            lane_promotions: self.oracle_lanes.stats.promotions,
+            lane_demotions: self.oracle_lanes.stats.demotions,
+            lane_cancellations: self.oracle_lanes.stats.cancellations,
+            route_cap_hits: cache.stats.hits,
+            route_cap_misses: cache.stats.misses,
+            jupiter_requests_per_routed_revision: (&self
+                .metrics
+                .jupiter_requests_per_routed_revision
+                .snapshot())
+                .into(),
         }
-        #[cfg(not(feature = "crate_health"))]
-        None
     }
 
     /// Journals `host` unless it is the last record.

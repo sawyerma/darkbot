@@ -3413,58 +3413,60 @@ fn p2_accounts(
     (state, account, asset_bank, liab_bank)
 }
 
-/// P6-MT.14 #29 on the wired path: a threshold crossing raises priority. The collateral bank is
-/// priced by a Pyth push oracle; the account (100 units at maintenance weight 0.9 against 85 USD
-/// debt) waits in L2 from a bank-wide re-check. An oracle write that moves the price but crosses
-/// no threshold admits nothing (the account stays in L2); the write that crosses the account's
-/// maintenance threshold is a threshold-index hit and promotes it to L0, its first receive time
-/// kept — fails if the hit were admitted as a re-check.
-#[test]
-fn p6_mt14_29_a_threshold_crossing_raises_an_account_to_l0() {
-    use super::candidates::Lane;
-    use marginfi_type_crate::types::{Bank, OracleSetup};
+/// P6-MT.14: a PriceUpdateV2 (pyth-solana-receiver-sdk) of `oracle`: exponent -8, no
+/// confidence, EMA = spot, published at `published` (unix seconds); a snapshot at slot 100.
+fn pyth_price_update(
+    oracle: Pubkey,
+    price: f64,
+    published: u64,
+    slot: u64,
+    t_rx_ns: u64,
+) -> AccountUpdate {
     use std::str::FromStr;
-    let mut f = fixture("p6_mt14_29");
-    let t0 = 1_700_000_000u64;
-    let (mut state, account, asset_bank, _) = p2_accounts(&f, 85.0, t0, false);
+    let price = (price * 1e8) as i64;
+    let mut d = solana_sdk::hash::hash(b"account:PriceUpdateV2").to_bytes()[..8].to_vec();
+    d.extend_from_slice(&[7u8; 32]);
+    d.push(1);
+    d.extend_from_slice(&[9u8; 32]);
+    d.extend_from_slice(&price.to_le_bytes());
+    d.extend_from_slice(&0u64.to_le_bytes());
+    d.extend_from_slice(&(-8i32).to_le_bytes());
+    d.extend_from_slice(&(published as i64).to_le_bytes());
+    d.extend_from_slice(&(published as i64).to_le_bytes());
+    d.extend_from_slice(&price.to_le_bytes());
+    d.extend_from_slice(&0u64.to_le_bytes());
+    d.extend_from_slice(&slot.to_le_bytes());
+    AccountUpdate {
+        pubkey: oracle,
+        owner: Pubkey::from_str(protocol::PYTH_PUSH_ORACLE_ID).unwrap(),
+        lamports: 1,
+        data: d,
+        slot,
+        write_version: None,
+        source: if slot == 100 {
+            SourceKind::Snapshot
+        } else {
+            SourceKind::WsRpcControl
+        },
+        t_rx_ns,
+    }
+}
+
+/// P6-MT.14: `p2_accounts` (100 units of collateral at maintenance weight 0.9 against 85 USD
+/// debt, exact thresholds) with the collateral bank priced by a Pyth push oracle at 1 USD at
+/// `t0`, installed ready; the reverse index and the threshold index built, the threshold
+/// trigger ACTIVE, the owner never forcing a detection between events. Returns the account,
+/// the collateral bank, the oracle and the installed state.
+fn pyth_threshold_state(f: &mut Fixture, t0: u64) -> (Pubkey, Pubkey, Pubkey, Vec<AccountUpdate>) {
+    use marginfi_type_crate::types::{Bank, OracleSetup};
+    let (mut state, account, asset_bank, _) = p2_accounts(f, 85.0, t0, false);
     let oracle = Pubkey::new_unique();
-    let pyth = Pubkey::from_str(protocol::PYTH_PUSH_ORACLE_ID).unwrap();
-    // PriceUpdateV2 (pyth-solana-receiver-sdk), exponent -8, no confidence, EMA = spot.
-    let price_update = |price: f64, slot: u64, t_rx_ns: u64| {
-        let price = (price * 1e8) as i64;
-        let mut d = solana_sdk::hash::hash(b"account:PriceUpdateV2").to_bytes()[..8].to_vec();
-        d.extend_from_slice(&[7u8; 32]);
-        d.push(1);
-        d.extend_from_slice(&[9u8; 32]);
-        d.extend_from_slice(&price.to_le_bytes());
-        d.extend_from_slice(&0u64.to_le_bytes());
-        d.extend_from_slice(&(-8i32).to_le_bytes());
-        d.extend_from_slice(&(t0 as i64).to_le_bytes());
-        d.extend_from_slice(&(t0 as i64).to_le_bytes());
-        d.extend_from_slice(&price.to_le_bytes());
-        d.extend_from_slice(&0u64.to_le_bytes());
-        d.extend_from_slice(&slot.to_le_bytes());
-        AccountUpdate {
-            pubkey: oracle,
-            owner: pyth,
-            lamports: 1,
-            data: d,
-            slot,
-            write_version: None,
-            source: if slot == 100 {
-                SourceKind::Snapshot
-            } else {
-                SourceKind::WsRpcControl
-            },
-            t_rx_ns,
-        }
-    };
     let collateral = state.iter_mut().find(|u| u.pubkey == asset_bank).unwrap();
     let mut b: Bank = bytemuck::pod_read_unaligned(&collateral.data[8..]);
     b.config.oracle_setup = OracleSetup::PythPushOracle;
     b.config.oracle_keys[0] = oracle;
     collateral.data = [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&b)].concat();
-    state.push(price_update(1.0, 100, 0));
+    state.push(pyth_price_update(oracle, 1.0, t0, 100, 0));
     f.owner.st.install_snapshot(100, state.clone());
     f.owner.st.reconcile(100, &state);
     f.owner.st.confirm_ready();
@@ -3492,6 +3494,23 @@ fn p6_mt14_29_a_threshold_crossing_raises_an_account_to_l0() {
         "the account's thresholds are known"
     );
     f.owner.ingress_burst_before_detect = usize::MAX;
+    (account, asset_bank, oracle, state)
+}
+
+/// P6-MT.14 #29 on the wired path: a threshold crossing raises priority. The collateral bank is
+/// priced by a Pyth push oracle; the account (100 units at maintenance weight 0.9 against 85 USD
+/// debt) waits in L2 from a bank-wide re-check. An oracle write that moves the price but crosses
+/// no threshold admits nothing (the account stays in L2); the write that crosses the account's
+/// maintenance threshold is a threshold-index hit and promotes it to L0, its first receive time
+/// kept — fails if the hit were admitted as a re-check.
+#[test]
+fn p6_mt14_29_a_threshold_crossing_raises_an_account_to_l0() {
+    use super::candidates::Lane;
+    let mut f = fixture("p6_mt14_29");
+    let t0 = 1_700_000_000u64;
+    let (account, _, oracle, _) = pyth_threshold_state(&mut f, t0);
+    let price_update =
+        |price: f64, slot: u64, t_rx_ns: u64| pyth_price_update(oracle, price, t0, slot, t_rx_ns);
     f.owner
         .admit_oracle_accounts(HashSet::new(), HashSet::from([account]), (5, 100), 1);
     let lane = |f: &Fixture| {
@@ -3616,6 +3635,7 @@ fn p6_mt14_4_older_pending_revisions_create_no_remote_work() {
 #[test]
 fn p6_mt14_6_a_recovery_invalidates_the_bank_projection_in_flight() {
     use super::remote_apply::OraclePending;
+    use crate::execution::identity::ResultAction;
     use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
     let mut f = fixture_with("p6_mt14_6", None);
     f.owner.threshold_test_active();
@@ -3719,6 +3739,77 @@ fn p6_mt14_6_a_recovery_invalidates_the_bank_projection_in_flight() {
     assert!(covered(&mut f));
     assert_eq!(apply(&mut f, current, 10), vec![account]);
     assert!(f.owner.oracle_bank_projection_pending.is_empty());
+    let actions = &f.owner.metrics.result_actions;
+    assert_eq!(
+        (
+            actions.get(ResultAction::Accept),
+            actions.get(ResultAction::DropOldGeneration)
+        ),
+        (2, 2),
+        "judged by the central policy"
+    );
+    cleanup(f);
+}
+
+/// P6-MT.14 #6 on the trigger side (P6-MT.2): a price trigger whose bank's price is not readable
+/// (the oracle's price is older than its bound) is covered by the bank's projection in flight
+/// only when that projection is of the current generations — then it coalesces into it (the
+/// newest trigger kept, nothing re-checked); one requested before a recovery covers nothing: the
+/// trigger takes the request path again (this bank has no integration refresh, so it is
+/// re-checked bank-wide, its account in L2) — fails if the trigger coalesced into the old one.
+#[test]
+fn p6_mt14_6_a_trigger_after_a_recovery_is_not_covered_by_an_older_projection() {
+    use super::remote_apply::OraclePending;
+    let mut f = fixture("p6_mt14_6_trigger");
+    let t0 = 1_700_000_000u64;
+    let (account, asset_bank, oracle, state) = pyth_threshold_state(&mut f, t0);
+    // A price published an hour before the chain clock: not readable.
+    let stale = |slot, t_rx_ns| {
+        IngressEvent::Account(pyth_price_update(oracle, 0.99, t0 - 3_600, slot, t_rx_ns))
+    };
+    let tick = |f: &mut Fixture, slot, t_rx_ns| {
+        let fallbacks = f.owner.metrics.oracle_price_fallbacks;
+        f.producer.try_push(stale(slot, t_rx_ns)).unwrap();
+        f.owner.events(&mut || unreachable!(), &f.ingress).unwrap();
+        f.owner.metrics.oracle_price_fallbacks - fallbacks
+    };
+    let older = f.owner.generations();
+    let pending = |generations, latest| OraclePending {
+        latest,
+        generations,
+    };
+    f.owner
+        .oracle_bank_projection_pending
+        .insert(asset_bank, pending(older, (5, 100)));
+    assert_eq!(tick(&mut f, 101, 10), 0, "covered: nothing re-checked");
+    assert_eq!(
+        f.owner.oracle_bank_projection_pending.get(&asset_bank),
+        Some(&pending(older, (10, 101))),
+        "coalesced: the newest trigger kept"
+    );
+    assert!(f.owner.oracle_lanes.is_empty());
+
+    // The gap ends the Ready period; the recovery installs the same state.
+    f.owner.st.on_event(IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: Some(101),
+        to_slot: None,
+        t_rx_ns: 0,
+    });
+    f.owner.st.install_snapshot(101, state.clone());
+    f.owner.st.reconcile(101, &state);
+    assert!(f.owner.st.confirm_ready().is_tradable());
+    assert_eq!(f.owner.generations().recovery, older.recovery + 1);
+    assert_eq!(tick(&mut f, 102, 20), 1, "requested anew: re-checked");
+    assert_eq!(
+        f.owner.oracle_bank_projection_pending.get(&asset_bank),
+        Some(&pending(older, (10, 101))),
+        "the old projection is not the trigger's"
+    );
+    assert_eq!(
+        f.owner.oracle_lanes.get(&account).map(|e| e.lane),
+        Some(Lane::L2)
+    );
     cleanup(f);
 }
 
@@ -9778,6 +9869,12 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
         .admit_oracle_accounts(HashSet::new(), HashSet::from([waiting]), (1, 100), 1);
     f.owner
         .admit_oracle_accounts(HashSet::from([waiting]), HashSet::new(), (2, 100), 2);
+    // Its dispatch records its wait in L0.
+    f.owner.ingress_burst_before_detect = usize::MAX;
+    assert!(matches!(
+        f.owner.events(&mut || unreachable!(), &f.ingress).unwrap(),
+        OwnerStep::Next(Some((a, _, _, _))) if a == waiting
+    ));
     f.owner.mt13_record(true);
     let (_, journaled) = f.owner.mt13_journaled.clone().expect("journaled");
     let owner = journaled.owner.clone().expect("the owner's telemetry");
@@ -9789,6 +9886,15 @@ fn p6_mt13_the_owner_records_and_journals_the_mandatory_telemetry() {
             .map(|(lane, _)| lane.as_str())
             .collect::<Vec<_>>(),
         ["L0", "L1", "L2"]
+    );
+    assert_eq!(
+        owner
+            .lane_wait_ns
+            .iter()
+            .map(|(_, w)| w.count)
+            .collect::<Vec<_>>(),
+        [1, 0, 0],
+        "the dispatched entry's wait, in its lane"
     );
     f.owner.mt13_record(false);
     f.owner.mt13_record(false);

@@ -56,8 +56,7 @@ pub struct Mt13Telemetry {
     pub evidence_queue_depth: Hist,
     pub evidence_overflow: u64,
     pub staterace_queue_age_ns: Hist,
-    /// `None`: a build without the owner's lanes and route search (no `crate_health`), or a
-    /// schema-2 record (written before the owner's telemetry was part of it).
+    /// `None`: a schema-2 record (written before the owner's telemetry was part of it).
     pub owner: Option<Mt13Owner>,
 }
 
@@ -65,7 +64,10 @@ impl crate::analytics::payload::Payload for Mt13Telemetry {
     const KIND: u16 = crate::analytics::journal::kind::MT13_TELEMETRY;
     /// 3: the owner's telemetry.
     const SCHEMA: u16 = 3;
-    /// Schema 2 (`1022f091`) had no owner's telemetry: readable without it.
+    /// Schema 2 (the layout of `7aa75c94`) had no owner's telemetry: readable without it. The
+    /// first schema-2 writer (`1022f091`, pushed with `7aa75c94` and never run: no journal holds
+    /// it) wrote another layout under the same schema; such a frame fails closed
+    /// (`PAYLOAD_DECODE`).
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         (schema == crate::analytics::payload::TYPED).then(|| {
             crate::analytics::payload::decode_wire::<Mt13TelemetryV2>(bytes).map(|v| Self {
@@ -83,7 +85,7 @@ impl crate::analytics::payload::Payload for Mt13Telemetry {
     }
 }
 
-/// `Mt13Telemetry` schema 2 (`1022f091`).
+/// `Mt13Telemetry` schema 2 (`7aa75c94`).
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Mt13TelemetryV2 {
     pub(crate) admission: Vec<Mt13Admission>,

@@ -10,6 +10,8 @@ pub(super) struct OwnerMetrics {
     pub(super) oracle_bank_projection_submitted: u64,
     pub(super) oracle_bank_projection_ready: u64,
     pub(super) oracle_bank_projection_failed: u64,
+    /// Bank projections of the current generations that returned after ACTIVE was left or whose
+    /// canonical bank changed (one requested before a recovery: `…_old_generation`).
     pub(super) oracle_bank_projection_stale: u64,
     /// P6-MT.2: bank projections dropped because a recovery or a program upgrade began a newer
     /// generation while they were in flight.

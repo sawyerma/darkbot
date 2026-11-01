@@ -15,7 +15,6 @@ impl OraclePending {
     /// The bank's projection in `pending` that covers a trigger at `generations` — only one
     /// requested under them; one requested before a recovery covers nothing (the trigger
     /// requests anew, the old result commits nothing).
-    #[cfg(feature = "crate_health")]
     pub(super) fn covering<'a>(
         pending: &'a mut HashMap<Pubkey, OraclePending>,
         bank: &Pubkey,
@@ -143,7 +142,10 @@ impl ShadowOwner {
             // P6-MT.2: a projection requested before a recovery (or a program upgrade) commits
             // nothing and creates no follow-up work — the recovery re-evaluates every account; a
             // newer request of the bank stays in flight.
-            if done.generations != self.generations() {
+            let action =
+                crate::execution::identity::generation_action(done.generations, self.generations());
+            self.metrics.result_actions.count(action);
+            if action == crate::execution::identity::ResultAction::DropOldGeneration {
                 if self
                     .oracle_bank_projection_pending
                     .get(&bank)

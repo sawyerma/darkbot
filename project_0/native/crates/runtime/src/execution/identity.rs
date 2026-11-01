@@ -94,7 +94,8 @@ pub struct CandidateIdentity {
     pub read_set: Result<ReadSet, ReadSetOverflow>,
 }
 
-/// The plan's result actions (P6-MT.2), decided only by [`result_action`].
+/// The plan's result actions (P6-MT.2), decided only by [`result_action`] (and, for work below a
+/// candidate, its generation rule [`generation_action`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultAction {
     Accept,
@@ -181,7 +182,7 @@ pub struct Current<'a> {
 /// a changed readset means the result is for another state (re-check from the current one);
 /// otherwise the result is accepted.
 pub fn result_action(identity: &CandidateIdentity, current: &Current<'_>) -> ResultAction {
-    if identity.generations != current.generations {
+    if generation_action(identity.generations, current.generations) != ResultAction::Accept {
         return ResultAction::DropOldGeneration;
     }
     if let Some(inflight) = current.inflight {
@@ -208,6 +209,17 @@ pub fn result_action(identity: &CandidateIdentity, current: &Current<'_>) -> Res
         return ResultAction::RecheckCurrent;
     }
     ResultAction::Accept
+}
+
+/// The central policy's generation rule, alone for work below a candidate (a bank's price
+/// projection): a result requested under older generations than the owner's is
+/// `DropOldGeneration` — it commits nothing and creates no follow-up work.
+pub fn generation_action(requested: Generations, current: Generations) -> ResultAction {
+    if requested == current {
+        ResultAction::Accept
+    } else {
+        ResultAction::DropOldGeneration
+    }
 }
 
 /// P6-MT.13: result-action counters (owner-side only; no persisted MT0 layout change).
