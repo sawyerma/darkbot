@@ -501,6 +501,173 @@ message BscLiveState {
   // endpoint (BSC_INGRESS_<ID>_WSS); a source without one never sights a launch and can never be
   // qualified. In source order; empty without a readable runtime configuration.
   repeated string grantable_sources = 29;
+  // REV.1.0 R2b: the LIVE campaign verdict as its record (bsc_runtime live attempts) holds it;
+  // absent before any evaluation. Campaign evidence only, never a release or a permission.
+  LiveCampaign campaign = 30;
+  // The evaluated LIVE BUY attempts in their order, as their records hold them; at most the
+  // campaign's total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning.
+  repeated LiveAttempt attempts = 31;
+}
+// One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
+message LiveCampaignCell {
+  // EXTERNAL_FULL_LAUNCH or SELF_LAUNCH.
+  string cell = 1;
+  // Whether the manifest enables it.
+  bool enabled = 2;
+  // The manifest's minimum attempts; absent when it names none.
+  optional uint64 min_attempts = 3;
+  // Its attempts.
+  uint64 attempts = 4;
+  // Of them passed.
+  uint64 passed = 5;
+  // Of them failed.
+  uint64 failed = 6;
+  // Of them undecided.
+  uint64 undecided = 7;
+  // The manifest's minimum duration, seconds; absent when it names none.
+  optional uint64 min_duration_s = 8;
+  // How long it ran, seconds.
+  uint64 duration_s = 9;
+  // Its verdict.
+  string verdict = 10;
+}
+// The LIVE campaign verdict (REV.1.0 R2, master plan §13 J), unchanged from its record: the
+// evaluator decides, the reporter only reads. Every count's denominator is another count here.
+message LiveCampaign {
+  // CAMPAIGN_NOT_READY, CAMPAIGN_OPEN, CAMPAIGN_FAIL or CAMPAIGN_PASS.
+  string verdict = 1;
+  // RELEASE_EVIDENCE_NOT_READY or RELEASE_EVIDENCE_PASS: the campaign evidence only; a release
+  // also needs the implementation matrix, runtime enforcement and LIVE authorization.
+  string release_evidence = 2;
+  // Why the verdict is not a pass, in the evaluator's order.
+  repeated string reasons = 3;
+  // The enabled cells' minimum attempts, summed.
+  uint64 planned = 4;
+  // The canonical C1-scope Flap launches since the commitment.
+  uint64 observed = 5;
+  // Of them seen in full before their block (actionable).
+  uint64 selected = 6;
+  // C3 BUYs the owner admitted (written and withdrawn).
+  uint64 admitted = 7;
+  // Observed launches without an attempt.
+  uint64 skipped = 8;
+  // C3 BUYs written after the commitment: the campaign's attempts.
+  uint64 written = 9;
+  // Of them acquired.
+  uint64 acquired = 10;
+  // Of them reverted.
+  uint64 reverted = 11;
+  // Of them dropped.
+  uint64 dropped = 12;
+  // Of them late or in another block.
+  uint64 late = 13;
+  // Of them not resolved by the chain.
+  uint64 unresolved = 14;
+  // Of them passed.
+  uint64 passed = 15;
+  // Of them failed.
+  uint64 failed = 16;
+  // Of them undecided.
+  uint64 undecided = 17;
+  // The longest run of observed launches without an attempt.
+  uint64 consecutive_misses = 18;
+  // C3 BUYs written before the commitment (not the campaign's).
+  uint64 before_precommit = 19;
+  // Launches whose transaction could not be verified (coverage unknown).
+  uint64 unverifiable = 20;
+  // The time the campaign's sealed runs cover, seconds.
+  uint64 covered_s = 21;
+  // The rest of its span, seconds.
+  uint64 uncovered_s = 22;
+  // The covered share of its span, ppm.
+  uint64 covered_ppm = 23;
+  // The skipped launches by how they were seen, CLASS=count.
+  repeated string skip_reasons = 24;
+  // The cells of the manifest.
+  repeated LiveCampaignCell cells = 25;
+  // SHA-256 of the rated manifest, lowercase hex; empty without one.
+  string manifest_sha256 = 26;
+  // SHA-256 of its precommitment record, lowercase hex; empty without one.
+  string precommit_sha256 = 27;
+  // SHA-256 of the evaluating bsc_runtime build, lowercase hex (zero when unknown).
+  string build_sha256 = 28;
+  // When the evaluation wrote the record, unix milliseconds.
+  uint64 evaluated_unix_ms = 29;
+  // SHA-256 of the verdict record's bytes, lowercase hex.
+  string record_sha256 = 30;
+}
+// One adapter of a LIVE attempt's dispatch and its answer.
+message LiveAttemptAdapter {
+  // The granted builder, e.g. CLUB48_BUILDER_V1; empty when the record names none.
+  string builder = 1;
+  // The dispatch outcome at this adapter.
+  string outcome = 2;
+  // The builder's answer; empty without one.
+  string answer = 3;
+}
+// One evaluated LIVE BUY attempt (REV.1.0 R2), unchanged from its record. T0 is never the
+// producer's here: without its witness the timing verdict is UNKNOWN.
+message LiveAttempt {
+  // Its place among the evaluated BUYs, from 1.
+  uint64 ordinal = 1;
+  // The BUY's transaction hash, 0x hex.
+  string tx = 2;
+  // C3_BUY or STRATEGY_BUY.
+  string kind = 3;
+  // EXTERNAL_FULL_LAUNCH, SELF_LAUNCH or STRATEGY_ENTRY.
+  string cell = 4;
+  // RELEASED, UNKNOWN, INCLUDED, REVERTED, REPLACED or DROPPED.
+  string state = 5;
+  // The attempt's verdict: PASS, FAIL, UNKNOWN or NOT_APPLICABLE.
+  string verdict = 6;
+  // The acquisition's verdict.
+  string acquisition = 7;
+  // The canonical inclusion's verdict.
+  string canonical = 8;
+  // The producer's T0 to T_buy: UNKNOWN without its witness.
+  string timing = 9;
+  // The placement's verdict.
+  string placement = 10;
+  // The capture's verdict.
+  string capture = 11;
+  // The local start deadline and a qualified send time.
+  string local = 12;
+  // The economics' verdict.
+  string economics = 13;
+  // Why, in the evaluator's order.
+  repeated string reasons = 14;
+  // Whether the 15-s market window from the launch's block is complete.
+  bool window_complete = 15;
+  // Why it is not; empty when complete.
+  string window_why = 16;
+  // Trades of the token in the window.
+  uint64 trades = 17;
+  // Of them BUYs.
+  uint64 buys = 18;
+  // Of them SELLs.
+  uint64 sells = 19;
+  // Native wei per 10^18 token units of the first other trader's BUY, decimal; absent without one.
+  optional string first_external_price = 20;
+  // Its own price per token against that BUY's, ppm; absent without both.
+  optional uint64 price_vs_first_external_ppm = 21;
+  // Local timing on the runtime's clock, ingress (or decision) to the first qualified send, ns.
+  optional uint64 ingress_to_send_ns = 22;
+  // Selection to the first qualified send, ns.
+  optional uint64 select_to_send_ns = 23;
+  // The first qualified send to the first acknowledgement, ns.
+  optional uint64 send_to_ack_ns = 24;
+  // Counters of every attempt up to this one: the attempts (every rate's denominator).
+  uint64 attempts = 25;
+  // Of them acquired.
+  uint64 acquired = 26;
+  // Of them passed.
+  uint64 passed = 27;
+  // Of them failed.
+  uint64 failed = 28;
+  // Of them undecided.
+  uint64 undecided = 29;
+  // The adapters of its dispatch.
+  repeated LiveAttemptAdapter adapters = 30;
 }
 // The parameters of `bsc.live.grant`: the scope the operator confirmed and its digest.
 message BscLiveGrantCommand {

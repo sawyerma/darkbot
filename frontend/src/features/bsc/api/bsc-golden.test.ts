@@ -16,7 +16,7 @@ describe("native BSC reporter contract",()=>{
   const w=decodeWallets(golden("wallets"));expect(w.launcherBalanceWei).toBeUndefined();expect([w.expectedAddress,w.walletStatus]).toEqual(["","UNKNOWN"]);
   // Plan 28.10.: without the owner's state the LIVE gate is UNKNOWN, never CLEAR.
   expect(bindingOf(TopicId.BSC_LIVE_STATE)?.payloadType).toBe("darkbot.bsc.v1.BscLiveState");
-  const l=decodeLive(golden("live"));expect(l.gate).toBe("UNKNOWN");expect(l.warnings).toContain("OWNER_STATE_ABSENT");expect(l.qualification).toBe("NONE");expect(l.pathState).toBe("NOT_RUNNING");expect(l.grant).toBeUndefined();expect(l.grantableSources).toEqual([]);expect(l.warnings).toContain("RUNTIME_CONFIG_UNREADABLE");
+  const l=decodeLive(golden("live"));expect(l.gate).toBe("UNKNOWN");expect(l.warnings).toContain("OWNER_STATE_ABSENT");expect(l.qualification).toBe("NONE");expect(l.pathState).toBe("NOT_RUNNING");expect(l.grant).toBeUndefined();expect(l.grantableSources).toEqual([]);expect(l.campaign).toBeUndefined();expect(l.attempts).toEqual([]);expect(l.warnings).toContain("RUNTIME_CONFIG_UNREADABLE");
  });
  it("binds only the five BSC STATE topics into one store (Audit E 1.2, 5.10)",()=>{
   // The placeholder bsc.execution.events (40) is gone: no binding, no event slice, no reset.
@@ -39,5 +39,7 @@ describe("native BSC reporter contract",()=>{
   expect(statusTone("STOP_CAPTURE_INCOMPLETE__RECONCILE_G08__NO_AUTOMATIC_RETRY")).toBe("red");
   for(const state of ["SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY","PROVISIONAL_RELEASED__RECEIPT_WINDOW_OPEN__RECONCILE_G08__NO_AUTOMATIC_RETRY","PROVISIONAL_RELEASED__PROVIDER_RESULTS_PENDING__RECONCILE_G08__NO_AUTOMATIC_RETRY","ADAPT","UNRESOLVED","STALE"])expect(statusTone(state)).toBe("amber");
   for(const state of ["BOUND","NOT_EXECUTED","SOMETHING_NEW"])expect(statusTone(state)).toBe("neutral");
+  // REV.1.0 R2b: a campaign verdict is evidence; only its pass is green, a failure red, the rest open.
+  expect(["CAMPAIGN_PASS","RELEASE_EVIDENCE_PASS","CAMPAIGN_FAIL","CAMPAIGN_OPEN","CAMPAIGN_NOT_READY","RELEASE_EVIDENCE_NOT_READY"].map(statusTone)).toEqual(["green","green","red","amber","amber","amber"]);
  });
 });

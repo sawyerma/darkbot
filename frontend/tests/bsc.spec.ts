@@ -77,6 +77,9 @@ test("the six tabs fail closed without a gateway: UNKNOWN, never 0, no control a
   // Audit E 1.6: no grantable source without the native projection, so none is offered.
   await tab(page, "LIVE").click();
   await expect(page.locator("[data-testid^=bsc-live-grant-source-]")).toHaveCount(0);
+  // REV.1.0 R2b: no campaign verdict is no evaluation, never a value.
+  await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");
+  await expect(page.getByTestId("bsc-live-attempts")).toHaveCount(0);
 });
 
 test("LIVE comes from bsc.live.state alone and the grant offers only its grantable sources", async ({ page }) => {
@@ -106,5 +109,47 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
   await expect(page.getByTestId("bsc-live-grant-source-BSC_INGRESS_DRPC")).not.toBeChecked();
   await page.getByTestId("bsc-live-grant-source-BSC_INGRESS_PUBLICNODE").uncheck();
   await expect(page.getByTestId("bsc-live-grant-error")).toContainText("at least one grantable source");
+  await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");
+  expect(errors).toEqual([]);
+});
+
+test("the campaign verdict and its attempts as recorded, evidence only (REV.1.0 R2b)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY values: they test the display, they are no campaign.
+  const attempt = (ordinal: bigint, verdict: string) => ({
+    ordinal, tx: `0x${ordinal.toString(16).padStart(64, "0")}`, kind: "C3_BUY", cell: "EXTERNAL_FULL_LAUNCH", state: "INCLUDED", verdict,
+    acquisition: "PASS", canonical: "PASS", timing: "UNKNOWN", placement: "PASS", capture: "PASS", local: "PASS", economics: "PASS",
+    reasons: ["TIMING_WITNESS_MISSING"], windowComplete: true, trades: 7n, buys: 5n, sells: 2n, priceVsFirstExternalPpm: 800000n,
+    firstExternalPrice: "250000000000000000", ingressToSendNs: 900n, attempts: ordinal, acquired: ordinal, undecided: ordinal,
+    adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED" }],
+  });
+  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+    gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE",
+    campaign: { verdict: "CAMPAIGN_OPEN", releaseEvidence: "RELEASE_EVIDENCE_NOT_READY", reasons: ["SAMPLES_MISSING: EXTERNAL_FULL_LAUNCH 2/10"],
+      planned: 10n, observed: 40n, selected: 30n, admitted: 2n, skipped: 38n, written: 2n, acquired: 2n, undecided: 2n, consecutiveMisses: 12n,
+      coveredS: 3600n, uncoveredS: 400n, coveredPpm: 900000n, skipReasons: ["HASH_ONLY=7"], evaluatedUnixMs: 1793000050000n, recordSha256: "ab".repeat(32),
+      cells: [{ cell: "EXTERNAL_FULL_LAUNCH", enabled: true, minAttempts: 10n, attempts: 2n, undecided: 2n, durationS: 3600n, verdict: "CAMPAIGN_OPEN" }] },
+    attempts: [attempt(1n, "UNKNOWN"), attempt(2n, "UNKNOWN")],
+  }));
+  await feed(page, live);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  await expect(line(page, "Campaign verdict")).toContainText("CAMPAIGN_OPEN");
+  await expect(line(page, "Campaign verdict")).toContainText("SAMPLES_MISSING: EXTERNAL_FULL_LAUNCH 2/10");
+  await expect(line(page, "Release evidence")).toContainText("RELEASE_EVIDENCE_NOT_READY");
+  await expect(line(page, "Release evidence")).toContainText("Kampagnen-Evidenz allein");
+  const counts = page.getByTestId("bsc-live-campaign-counts");
+  await expect(line(page, "Acquired")).toContainText("2/2");
+  await expect(counts).toContainText("2/10 planned");
+  await expect(counts).toContainText("38/40");
+  await expect(page.getByTestId("bsc-live-campaign-cells")).toContainText("2 / min 10");
+  await expect(page.getByText("T0→T_buy bleibt UNKNOWN ohne Producer-Witness", { exact: false })).toBeVisible();
+  const rows = page.getByTestId("bsc-live-attempts").locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("timing UNKNOWN");
+  await expect(rows.first()).toContainText("800000 ppm");
+  await expect(rows.last()).toContainText("acquired 2/2");
+  await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
   expect(errors).toEqual([]);
 });

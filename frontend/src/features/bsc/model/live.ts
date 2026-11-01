@@ -3,7 +3,7 @@
 // (its SHA-256 is what the operator confirms). Nothing here decides LIVE: the owner admits every
 // intent again at its dispatch.
 import type { LiveGrantScope } from "@/core/realtime/bscControl";
-import type { BscLiveView, ControlSwitchView } from "./types";
+import type { BscLiveView, ControlSwitchView, LiveAttemptView, LiveCampaignView } from "./types";
 
 export const LIVE_VENUES = ["BSC_VENUE_FLAP"] as const;
 export const LIVE_STRATEGIES = ["C3", "STRATEGY_C", "C3+STRATEGY_C"] as const;
@@ -166,3 +166,53 @@ export function signedBnb(wei: string): string {
   const fraction = digits.padStart(18, "0").slice(-18).slice(0, 6).replace(/0+$/, "");
   return `${negative ? "−" : ""}${whole}${fraction ? `.${fraction}` : ""} BNB`;
 }
+
+// ---- REV.1.0 R2b: the LIVE campaign verdict and its attempts (section 4) ----
+
+/** Before `bsc_runtime live attempts` wrote a verdict there is no evaluation, never a value. */
+export const NO_EVALUATION = "keine Bewertung";
+/** What the verdict is: the campaign's evidence, never a release or a permission. */
+export const CAMPAIGN_SCOPE = "Kampagnen-Evidenz allein (RELEASE_EVIDENCE_*): ein Release braucht zusätzlich Implementierungsmatrix, Runtime-Durchsetzung und LIVE-Freigabe";
+/** The producer's T0 to T_buy is not measured locally. */
+export const T0_UNKNOWN = "T0→T_buy bleibt UNKNOWN ohne Producer-Witness; die lokalen Zeiten sind die Uhr der Runtime (Ingress→Send), nie T0→T_buy";
+
+export interface CountRow { label: string; value: string; hint: string }
+const of = (n: bigint, d: bigint) => `${n.toString()}/${d.toString()}`;
+
+/** The campaign's counts as the record holds them, every rate with its denominator. */
+export function campaignRows(c: LiveCampaignView): CountRow[] {
+  const w = c.written;
+  return [
+    { label: "Attempts written", value: `${of(w, c.planned)} planned`, hint: "C3 BUYs written after the commitment, of the enabled cells' minimum attempts" },
+    { label: "Acquired", value: of(c.acquired, w), hint: "of the written attempts" },
+    { label: "Passed · failed · undecided", value: `${of(c.passed, w)} · ${of(c.failed, w)} · ${of(c.undecided, w)}`, hint: "of the written attempts" },
+    { label: "Reverted · dropped · late · unresolved", value: `${of(c.reverted, w)} · ${of(c.dropped, w)} · ${of(c.late, w)} · ${of(c.unresolved, w)}`, hint: "of the written attempts" },
+    { label: "Selected launches", value: of(c.selected, c.observed), hint: "seen in full before their block, of the observed canonical C1-scope Flap launches" },
+    { label: "Skipped launches", value: of(c.skipped, c.observed), hint: c.skipReasons.length ? c.skipReasons.join(" · ") : "of the observed launches" },
+    { label: "Admitted by the owner", value: c.admitted.toString(), hint: "C3 BUYs the owner admitted, written and withdrawn" },
+    { label: "Longest run of misses", value: c.consecutiveMisses.toString(), hint: "observed launches in a row without an attempt" },
+    { label: "Before the commitment", value: c.beforePrecommit.toString(), hint: "C3 BUYs written before the manifest's commitment (not the campaign's)" },
+    { label: "Unverifiable launches", value: c.unverifiable.toString(), hint: "launches whose transaction could not be verified (coverage unknown)" },
+    { label: "Coverage", value: `${c.coveredS.toString()} s covered · ${c.uncoveredS.toString()} s not`, hint: `${c.coveredPpm.toString()} ppm of the campaign's span covered by sealed runs` },
+  ];
+}
+
+/** One attempt's row cells, as its record holds it ("—" where it names nothing). */
+export function attemptCells(a: LiveAttemptView): string[] {
+  const ns = (v: bigint | undefined) => v === undefined ? "—" : `${v.toString()} ns`;
+  return [
+    a.ordinal.toString(),
+    a.tx,
+    `${a.kind} · ${a.cell}`,
+    a.state,
+    a.verdict,
+    `acquisition ${a.acquisition} · canonical ${a.canonical} · timing ${a.timing} · placement ${a.placement} · capture ${a.capture} · local ${a.local} · economics ${a.economics}`,
+    `${a.windowComplete ? "COMPLETE" : `INCOMPLETE (${a.windowWhy || "UNKNOWN"})`} · trades ${a.trades.toString()} (buys ${a.buys.toString()}, sells ${a.sells.toString()})`,
+    a.priceVsFirstExternalPpm === undefined ? "—" : `${a.priceVsFirstExternalPpm.toString()} ppm of the first external BUY's price (${a.firstExternalPrice ?? "—"} wei per 10^18)`,
+    `ingress→send ${ns(a.ingressToSendNs)} · select→send ${ns(a.selectToSendNs)} · send→ack ${ns(a.sendToAckNs)}`,
+    `acquired ${of(a.acquired, a.attempts)} · passed ${of(a.passed, a.attempts)} · failed ${of(a.failed, a.attempts)} · undecided ${of(a.undecided, a.attempts)}`,
+    a.adapters.length ? a.adapters.map(x => `${x.builder || "UNKNOWN"} ${x.outcome}${x.answer ? ` ${x.answer}` : ""}`).join(" · ") : "—",
+    a.reasons.length ? a.reasons.join(" · ") : "—",
+  ];
+}
+

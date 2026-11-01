@@ -2049,3 +2049,423 @@ fn an_unreadable_snapshot_identity_is_unknown() {
     assert!(!s.warnings.iter().any(|w| w.ends_with("_UNKNOWN")));
     fs::remove_dir_all(&root).unwrap();
 }
+/// REV.1.0 R2b: an attempt as `bsc_runtime live attempts` writes it (synthetic values; they test
+/// the projection only, no acquisition sample).
+fn evaluated_attempt(ordinal: u64) -> darkbot_bsc_execution::live_attempts::Attempt {
+    use alloy_primitives::U256;
+    use darkbot_bsc_execution::live_attempts::{
+        AdapterRow, Attempt, Counters, Local, Verdicts, Window,
+    };
+    use darkbot_bsc_execution::live_ledger::{Placement, PlacementVerdict};
+    use darkbot_bsc_execution::sources::{LiveAdapter, SourceId};
+    Attempt {
+        ordinal,
+        attempt: [0xA0; 32],
+        tx_hash: [ordinal as u8; 32],
+        kind: "C3_BUY",
+        cell: "EXTERNAL_FULL_LAUNCH",
+        token: [0xAB; 20],
+        launch_hash: Some([0x1A; 32]),
+        trigger: Some(SourceId::PublicNode),
+        run: Some(3),
+        state: "INCLUDED",
+        block: Some((130_000_000, [0xB1; 32], 1_793_000_000_000)),
+        tokens: Some(U256::from(5_000u64)),
+        eth_wei: Some(U256::from(1_000u64)),
+        gas_wei: Some(U256::from(21u64)),
+        input_wei: Some(U256::from(1_000u64)),
+        placement: Some(Placement {
+            verdict: PlacementVerdict::First,
+            launch_index: Some(4),
+            own_index: 5,
+            buys_before: 0,
+        }),
+        chain_id: Some(56),
+        written_ms: 1_793_000_000_100,
+        local: Some(Local {
+            clock_id: 1,
+            ingress_ns: 1_000,
+            select_ns: 1_400,
+            send_ns: Some(1_900),
+            ack_ns: Some(9_900),
+            deadline_misses: 0,
+        }),
+        adapters: vec![AdapterRow {
+            adapter: 0,
+            builder: Some(LiveAdapter::Club48BuilderV1),
+            outcome: "SENT",
+            boundary: "WRITE",
+            qualified: true,
+            write_check_ns: Some(1_800),
+            boundary_ns: Some(1_900),
+            queue_ns: None,
+            answer: Some("ACCEPTED"),
+            answer_ns: Some(9_900),
+        }],
+        window: Window {
+            why_incomplete: None,
+            window_ms: 15_000,
+            launch_block: Some(130_000_000),
+            launch_ms: Some(1_793_000_000_000),
+            end_block: Some(130_000_005),
+            trades: 7,
+            buys: 5,
+            sells: 2,
+            buy_wei: U256::from(9_000u64),
+            sell_wei: U256::from(3_000u64),
+            first_external: Some((
+                [0xE1; 32],
+                130_000_001,
+                2,
+                U256::from(250_000_000_000_000_000u64),
+            )),
+            own_price: Some(U256::from(200_000_000_000_000_000u64)),
+            price_vs_first_external_ppm: Some(800_000),
+        },
+        verdicts: Verdicts {
+            acquisition: "PASS",
+            canonical: "PASS",
+            timing: "UNKNOWN",
+            placement: "PASS",
+            capture: "PASS",
+            local: "PASS",
+            economics: "PASS",
+            verdict: "UNKNOWN",
+        },
+        reasons: vec!["TIMING_WITNESS_MISSING".into()],
+        counters: Counters {
+            attempts: ordinal,
+            acquired: ordinal,
+            passed: 0,
+            failed: 0,
+            undecided: ordinal,
+        },
+    }
+}
+/// REV.1.0 R2b: the campaign verdict and the attempt records reach the LIVE tab typed and
+/// unchanged (a real `Campaign::encode` / `Attempt::encode` round trip); absent records are no
+/// rows and no warning.
+#[test]
+fn the_live_tab_shows_the_campaign_verdict_and_the_attempts_as_recorded() {
+    use darkbot_bsc_execution::live_attempts::{ATTEMPTS_DIR, Campaign, CellRow, VERDICT_PATH};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-campaign-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    fs::create_dir_all(rundir.join(ATTEMPTS_DIR)).unwrap();
+    let live =
+        || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1_793_000_100_000));
+    let empty = live();
+    assert!(empty.campaign.is_none() && empty.attempts.is_empty());
+    assert!(
+        !empty.warnings.iter().any(|w| w.starts_with("LIVE_")),
+        "{:?}",
+        empty.warnings
+    );
+    let campaign = Campaign {
+        verdict: "CAMPAIGN_NOT_READY",
+        reasons: vec!["NO_MANIFEST".into(), "NO_PRECOMMIT".into()],
+        release: "RELEASE_EVIDENCE_NOT_READY",
+        manifest_sha256: Some([0x11; 32]),
+        precommit_sha256: None,
+        build_sha256: [0x22; 32],
+        planned: 10,
+        observed: 40,
+        selected: 30,
+        admitted: 4,
+        skipped: 37,
+        written: 3,
+        acquired: 2,
+        reverted: 1,
+        dropped: 0,
+        late: 1,
+        unresolved: 0,
+        passed: 1,
+        failed: 1,
+        undecided: 1,
+        consecutive_misses: 12,
+        before_precommit: 1,
+        unverifiable: 2,
+        skip_reasons: vec!["HASH_ONLY=7".into()],
+        covered_s: 3_600,
+        uncovered_s: 400,
+        covered_ppm: 900_000,
+        cells: vec![CellRow {
+            cell: "EXTERNAL_FULL_LAUNCH",
+            enabled: true,
+            min_attempts: Some(10),
+            attempts: 3,
+            passed: 1,
+            failed: 1,
+            undecided: 1,
+            min_duration_s: None,
+            duration_s: 3_600,
+            verdict: "CAMPAIGN_OPEN",
+        }],
+    };
+    let bytes = campaign.encode(1_793_000_050_000).unwrap();
+    fs::write(rundir.join(VERDICT_PATH), &bytes).unwrap();
+    for n in [2u64, 1] {
+        let a = evaluated_attempt(n);
+        fs::write(
+            rundir
+                .join(ATTEMPTS_DIR)
+                .join(format!("0x{}.dbrec", darkbot_bsc_record::hex(&a.tx_hash))),
+            a.encode(1_793_000_050_000).unwrap(),
+        )
+        .unwrap();
+    }
+    let l = live();
+    assert!(
+        !l.warnings.iter().any(|w| w.starts_with("LIVE_")),
+        "{:?}",
+        l.warnings
+    );
+    let c = l.campaign.unwrap();
+    assert_eq!(
+        (
+            c.verdict.as_str(),
+            c.release_evidence.as_str(),
+            c.reasons.clone()
+        ),
+        (
+            "CAMPAIGN_NOT_READY",
+            "RELEASE_EVIDENCE_NOT_READY",
+            vec!["NO_MANIFEST".to_string(), "NO_PRECOMMIT".into()]
+        )
+    );
+    assert_eq!(
+        [
+            c.planned,
+            c.observed,
+            c.selected,
+            c.admitted,
+            c.skipped,
+            c.written,
+            c.acquired,
+            c.reverted,
+            c.dropped,
+            c.late,
+            c.unresolved,
+            c.passed,
+            c.failed,
+            c.undecided,
+            c.consecutive_misses,
+            c.before_precommit,
+            c.unverifiable,
+            c.covered_s,
+            c.uncovered_s,
+            c.covered_ppm
+        ],
+        [
+            10, 40, 30, 4, 37, 3, 2, 1, 0, 1, 0, 1, 1, 1, 12, 1, 2, 3_600, 400, 900_000
+        ]
+    );
+    assert_eq!(c.skip_reasons, ["HASH_ONLY=7"]);
+    assert_eq!(
+        (
+            c.manifest_sha256.as_str(),
+            c.precommit_sha256.as_str(),
+            c.build_sha256.as_str()
+        ),
+        ("11".repeat(32).as_str(), "", "22".repeat(32).as_str())
+    );
+    assert_eq!(c.evaluated_unix_ms, 1_793_000_050_000);
+    assert_eq!(
+        c.record_sha256,
+        darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&bytes))
+    );
+    let cell = &c.cells[0];
+    assert_eq!(
+        (
+            cell.cell.as_str(),
+            cell.enabled,
+            cell.min_attempts,
+            cell.attempts,
+            cell.passed,
+            cell.failed,
+            cell.undecided,
+            cell.min_duration_s,
+            cell.duration_s,
+            cell.verdict.as_str()
+        ),
+        (
+            "EXTERNAL_FULL_LAUNCH",
+            true,
+            Some(10),
+            3,
+            1,
+            1,
+            1,
+            None,
+            3_600,
+            "CAMPAIGN_OPEN"
+        )
+    );
+    // In their order, every recorded value as the record holds it.
+    assert_eq!(
+        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+        [1, 2]
+    );
+    let a = &l.attempts[0];
+    assert_eq!(a.tx, format!("0x{}", "01".repeat(32)));
+    assert_eq!(
+        [
+            a.kind.as_str(),
+            a.cell.as_str(),
+            a.state.as_str(),
+            a.verdict.as_str(),
+            a.acquisition.as_str(),
+            a.canonical.as_str(),
+            a.timing.as_str(),
+            a.placement.as_str(),
+            a.capture.as_str(),
+            a.local.as_str(),
+            a.economics.as_str()
+        ],
+        [
+            "C3_BUY",
+            "EXTERNAL_FULL_LAUNCH",
+            "INCLUDED",
+            "UNKNOWN",
+            "PASS",
+            "PASS",
+            "UNKNOWN",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS"
+        ]
+    );
+    assert_eq!(a.reasons, ["TIMING_WITNESS_MISSING"]);
+    assert_eq!(
+        (
+            a.window_complete,
+            a.window_why.as_str(),
+            a.trades,
+            a.buys,
+            a.sells
+        ),
+        (true, "", 7, 5, 2)
+    );
+    assert_eq!(
+        a.first_external_price.as_deref(),
+        Some("250000000000000000")
+    );
+    assert_eq!(a.price_vs_first_external_ppm, Some(800_000));
+    assert_eq!(
+        (a.ingress_to_send_ns, a.select_to_send_ns, a.send_to_ack_ns),
+        (Some(900), Some(500), Some(8_000))
+    );
+    assert_eq!(
+        (a.attempts, a.acquired, a.passed, a.failed, a.undecided),
+        (1, 1, 0, 0, 1)
+    );
+    assert_eq!(
+        a.adapters
+            .iter()
+            .map(|x| (x.builder.as_str(), x.outcome.as_str(), x.answer.as_str()))
+            .collect::<Vec<_>>(),
+        [("CLUB48_BUILDER_V1", "SENT", "ACCEPTED")]
+    );
+    // An incomplete window and no send: its reason, no timing, no price.
+    let mut open = evaluated_attempt(3);
+    open.window.why_incomplete = Some("WINDOW_NOT_FINAL");
+    open.window.first_external = None;
+    open.window.price_vs_first_external_ppm = None;
+    open.local = None;
+    open.adapters.clear();
+    fs::write(
+        rundir.join(ATTEMPTS_DIR).join("0x03.dbrec"),
+        open.encode(1).unwrap(),
+    )
+    .unwrap();
+    let a = live().attempts.pop().unwrap();
+    assert_eq!(
+        (a.ordinal, a.window_complete, a.window_why.as_str()),
+        (3, false, "WINDOW_NOT_FINAL")
+    );
+    assert_eq!(
+        (
+            a.first_external_price,
+            a.price_vs_first_external_ppm,
+            a.ingress_to_send_ns
+        ),
+        (None, None, None)
+    );
+    assert!(a.adapters.is_empty());
+    fs::remove_dir_all(&root).unwrap();
+}
+/// REV.1.0 R2b: a damaged campaign verdict or attempt record is a warning, never a value; the
+/// list stays within the campaign's total BUY attempt limit (more is a warning).
+#[test]
+fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
+    use darkbot_bsc_execution::live_attempts::{ATTEMPTS_DIR, Campaign, VERDICT_PATH};
+    use darkbot_bsc_execution::sources::MAX_BUY_ATTEMPTS_TOTAL;
+    let root =
+        std::env::temp_dir().join(format!("darkbot-bsc-campaign-bad-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join(ATTEMPTS_DIR);
+    fs::create_dir_all(&dir).unwrap();
+    let live = || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    let good = evaluated_attempt(1).encode(1).unwrap();
+    fs::write(dir.join("0x01.dbrec"), &good).unwrap();
+    // A torn verdict, a garbage attempt and a record of the wrong schema.
+    let verdict = Campaign {
+        verdict: "CAMPAIGN_OPEN",
+        release: "RELEASE_EVIDENCE_NOT_READY",
+        ..Campaign::default()
+    }
+    .encode(1)
+    .unwrap();
+    fs::write(rundir.join(VERDICT_PATH), &verdict[..verdict.len() - 1]).unwrap();
+    fs::write(dir.join("0x02.dbrec"), b"not a record").unwrap();
+    fs::write(dir.join("0x03.dbrec"), &verdict).unwrap();
+    // Not an attempt record's name: not read.
+    fs::write(dir.join("README"), b"x").unwrap();
+    let l = live();
+    assert!(l.campaign.is_none());
+    assert_eq!(
+        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+        [1]
+    );
+    for w in [
+        "LIVE_CAMPAIGN_VERDICT_INVALID",
+        "LIVE_ATTEMPT_INVALID 0x02.dbrec",
+        "LIVE_ATTEMPT_INVALID 0x03.dbrec",
+    ] {
+        assert!(l.warnings.contains(&w.to_string()), "{w}: {:?}", l.warnings);
+    }
+    assert!(!l.warnings.iter().any(|w| w.contains("README")));
+    // A link is no record.
+    fs::remove_file(rundir.join(VERDICT_PATH)).unwrap();
+    std::os::unix::fs::symlink(dir.join("0x01.dbrec"), rundir.join(VERDICT_PATH)).unwrap();
+    assert!(
+        live()
+            .warnings
+            .contains(&"LIVE_CAMPAIGN_VERDICT_INVALID".to_string())
+    );
+    // More records than the campaign can have attempts: the first ones, and a warning.
+    fs::remove_file(dir.join("0x02.dbrec")).unwrap();
+    fs::remove_file(dir.join("0x03.dbrec")).unwrap();
+    let limit = u64::from(MAX_BUY_ATTEMPTS_TOTAL);
+    for n in 2..=limit + 1 {
+        fs::write(
+            dir.join(format!("0x{n:02x}.dbrec")),
+            evaluated_attempt(n).encode(1).unwrap(),
+        )
+        .unwrap();
+    }
+    let l = live();
+    assert_eq!(
+        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+        (1..=limit).collect::<Vec<_>>()
+    );
+    assert!(
+        l.warnings
+            .contains(&format!("LIVE_ATTEMPTS_BEYOND_LIMIT {}/{limit}", limit + 1)),
+        "{:?}",
+        l.warnings
+    );
+    fs::remove_dir_all(&root).unwrap();
+}

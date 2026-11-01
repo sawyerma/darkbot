@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
-import type { BscLiveView } from "./types";
+import { NO_EVALUATION, attemptCells, campaignRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
 const OWNER_TEXT = "darkbot.bsc.live-grant.v1\nvenue=BSC_VENUE_FLAP\nstrategies=C3+STRATEGY_C\n"
@@ -108,5 +108,29 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     expect(liveIndicator(live("CLEAR", "PROBING")).state).toBe("BLOCKED");
     const blocked = liveIndicator(live("BLOCKED", "ARMED", ["LIVE_GRANT_MISSING"]));
     expect([blocked.state, blocked.detail]).toEqual(["BLOCKED", "gate BLOCKED (first: LIVE_GRANT_MISSING) · LIVE path ARMED"]);
+  });
+
+  it("shows the campaign's counts as recorded, every rate with its denominator (REV.1.0 R2b)", () => {
+    const c = { verdict: "CAMPAIGN_OPEN", releaseEvidence: "RELEASE_EVIDENCE_NOT_READY", reasons: [], planned: 10n, observed: 40n, selected: 30n, admitted: 4n, skipped: 37n,
+      written: 3n, acquired: 2n, reverted: 1n, dropped: 0n, late: 1n, unresolved: 0n, passed: 1n, failed: 1n, undecided: 1n, consecutiveMisses: 12n, beforePrecommit: 1n,
+      unverifiable: 2n, coveredS: 3600n, uncoveredS: 400n, coveredPpm: 900000n, skipReasons: ["HASH_ONLY=7"], cells: [], manifestSha256: "", precommitSha256: "", buildSha256: "",
+      evaluatedUnixMs: 1n, recordSha256: "" } as LiveCampaignView;
+    const rows = Object.fromEntries(campaignRows(c).map(r => [r.label, r.value]));
+    expect(rows).toMatchObject({
+      "Attempts written": "3/10 planned", "Acquired": "2/3", "Passed · failed · undecided": "1/3 · 1/3 · 1/3",
+      "Reverted · dropped · late · unresolved": "1/3 · 0/3 · 1/3 · 0/3", "Selected launches": "30/40", "Skipped launches": "37/40", "Longest run of misses": "12",
+    });
+    expect(campaignRows(c).find(r => r.label === "Skipped launches")?.hint).toBe("HASH_ONLY=7");
+    expect(NO_EVALUATION).toBe("keine Bewertung");
+    const a = { ordinal: 1n, tx: "0x01", kind: "C3_BUY", cell: "EXTERNAL_FULL_LAUNCH", state: "INCLUDED", verdict: "UNKNOWN", acquisition: "PASS", canonical: "PASS", timing: "UNKNOWN",
+      placement: "PASS", capture: "PASS", local: "PASS", economics: "PASS", reasons: ["TIMING_WITNESS_MISSING"], windowComplete: false, windowWhy: "WINDOW_NOT_FINAL", trades: 7n, buys: 5n, sells: 2n,
+      ingressToSendNs: 900n, attempts: 4n, acquired: 3n, passed: 0n, failed: 1n, undecided: 3n, adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED" }] } as LiveAttemptView;
+    const cells = attemptCells(a);
+    expect(cells[5]).toContain("timing UNKNOWN");
+    expect(cells[6]).toBe("INCOMPLETE (WINDOW_NOT_FINAL) · trades 7 (buys 5, sells 2)");
+    expect(cells[7]).toBe("—");
+    expect(cells[8]).toBe("ingress→send 900 ns · select→send — · send→ack —");
+    expect(cells[9]).toBe("acquired 3/4 · passed 0/4 · failed 1/4 · undecided 3/4");
+    expect(cells[10]).toBe("CLUB48_BUILDER_V1 SENT ACCEPTED");
   });
 });

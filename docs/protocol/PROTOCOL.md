@@ -18,6 +18,10 @@
     - [GateStatus](#darkbot-bsc-v1-GateStatus)
     - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
     - [JobStatus](#darkbot-bsc-v1-JobStatus)
+    - [LiveAttempt](#darkbot-bsc-v1-LiveAttempt)
+    - [LiveAttemptAdapter](#darkbot-bsc-v1-LiveAttemptAdapter)
+    - [LiveCampaign](#darkbot-bsc-v1-LiveCampaign)
+    - [LiveCampaignCell](#darkbot-bsc-v1-LiveCampaignCell)
     - [LiveGrant](#darkbot-bsc-v1-LiveGrant)
     - [LiveGrantLimits](#darkbot-bsc-v1-LiveGrantLimits)
     - [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk)
@@ -292,6 +296,8 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | warnings | [string](#string) | repeated | Unreadable inputs, made explicit. |
 | scope | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | Every entity the grant names (runtime, components, venue, sources) as requested and as it holds now under the gate: LIVE only while the gate is clear and the scope names it. |
 | grantable_sources | [string](#string) | repeated | The ingress sources a grant can name: those the runtime configuration gives an adapter endpoint (BSC_INGRESS_&lt;ID&gt;_WSS); a source without one never sights a launch and can never be qualified. In source order; empty without a readable runtime configuration. |
+| campaign | [LiveCampaign](#darkbot-bsc-v1-LiveCampaign) |  | REV.1.0 R2b: the LIVE campaign verdict as its record (bsc_runtime live attempts) holds it; absent before any evaluation. Campaign evidence only, never a release or a permission. |
+| attempts | [LiveAttempt](#darkbot-bsc-v1-LiveAttempt) | repeated | The evaluated LIVE BUY attempts in their order, as their records hold them; at most the campaign&#39;s total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning. |
 
 
 
@@ -531,6 +537,137 @@ Supervisor-owned read-only job lifecycle.
 | ended_unix_s | [uint64](#uint64) |  | Completion time recorded by the controller. |
 | result_code | [string](#string) |  | Result of this launch, not an earlier one: the native verdict PASS_READ_ONLY, BLOCKED or STOP, STOPPED when stopped on request, FAILED on a technical failure. |
 | controller_available | [bool](#bool) | optional | Whether the supervisor can control the job (deployed readiness binary and snapshot). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveAttempt"></a>
+
+### LiveAttempt
+One evaluated LIVE BUY attempt (REV.1.0 R2), unchanged from its record. T0 is never the
+producer&#39;s here: without its witness the timing verdict is UNKNOWN.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| ordinal | [uint64](#uint64) |  | Its place among the evaluated BUYs, from 1. |
+| tx | [string](#string) |  | The BUY&#39;s transaction hash, 0x hex. |
+| kind | [string](#string) |  | C3_BUY or STRATEGY_BUY. |
+| cell | [string](#string) |  | EXTERNAL_FULL_LAUNCH, SELF_LAUNCH or STRATEGY_ENTRY. |
+| state | [string](#string) |  | RELEASED, UNKNOWN, INCLUDED, REVERTED, REPLACED or DROPPED. |
+| verdict | [string](#string) |  | The attempt&#39;s verdict: PASS, FAIL, UNKNOWN or NOT_APPLICABLE. |
+| acquisition | [string](#string) |  | The acquisition&#39;s verdict. |
+| canonical | [string](#string) |  | The canonical inclusion&#39;s verdict. |
+| timing | [string](#string) |  | The producer&#39;s T0 to T_buy: UNKNOWN without its witness. |
+| placement | [string](#string) |  | The placement&#39;s verdict. |
+| capture | [string](#string) |  | The capture&#39;s verdict. |
+| local | [string](#string) |  | The local start deadline and a qualified send time. |
+| economics | [string](#string) |  | The economics&#39; verdict. |
+| reasons | [string](#string) | repeated | Why, in the evaluator&#39;s order. |
+| window_complete | [bool](#bool) |  | Whether the 15-s market window from the launch&#39;s block is complete. |
+| window_why | [string](#string) |  | Why it is not; empty when complete. |
+| trades | [uint64](#uint64) |  | Trades of the token in the window. |
+| buys | [uint64](#uint64) |  | Of them BUYs. |
+| sells | [uint64](#uint64) |  | Of them SELLs. |
+| first_external_price | [string](#string) | optional | Native wei per 10^18 token units of the first other trader&#39;s BUY, decimal; absent without one. |
+| price_vs_first_external_ppm | [uint64](#uint64) | optional | Its own price per token against that BUY&#39;s, ppm; absent without both. |
+| ingress_to_send_ns | [uint64](#uint64) | optional | Local timing on the runtime&#39;s clock, ingress (or decision) to the first qualified send, ns. |
+| select_to_send_ns | [uint64](#uint64) | optional | Selection to the first qualified send, ns. |
+| send_to_ack_ns | [uint64](#uint64) | optional | The first qualified send to the first acknowledgement, ns. |
+| attempts | [uint64](#uint64) |  | Counters of every attempt up to this one: the attempts (every rate&#39;s denominator). |
+| acquired | [uint64](#uint64) |  | Of them acquired. |
+| passed | [uint64](#uint64) |  | Of them passed. |
+| failed | [uint64](#uint64) |  | Of them failed. |
+| undecided | [uint64](#uint64) |  | Of them undecided. |
+| adapters | [LiveAttemptAdapter](#darkbot-bsc-v1-LiveAttemptAdapter) | repeated | The adapters of its dispatch. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveAttemptAdapter"></a>
+
+### LiveAttemptAdapter
+One adapter of a LIVE attempt&#39;s dispatch and its answer.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| builder | [string](#string) |  | The granted builder, e.g. CLUB48_BUILDER_V1; empty when the record names none. |
+| outcome | [string](#string) |  | The dispatch outcome at this adapter. |
+| answer | [string](#string) |  | The builder&#39;s answer; empty without one. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveCampaign"></a>
+
+### LiveCampaign
+The LIVE campaign verdict (REV.1.0 R2, master plan §13 J), unchanged from its record: the
+evaluator decides, the reporter only reads. Every count&#39;s denominator is another count here.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| verdict | [string](#string) |  | CAMPAIGN_NOT_READY, CAMPAIGN_OPEN, CAMPAIGN_FAIL or CAMPAIGN_PASS. |
+| release_evidence | [string](#string) |  | RELEASE_EVIDENCE_NOT_READY or RELEASE_EVIDENCE_PASS: the campaign evidence only; a release also needs the implementation matrix, runtime enforcement and LIVE authorization. |
+| reasons | [string](#string) | repeated | Why the verdict is not a pass, in the evaluator&#39;s order. |
+| planned | [uint64](#uint64) |  | The enabled cells&#39; minimum attempts, summed. |
+| observed | [uint64](#uint64) |  | The canonical C1-scope Flap launches since the commitment. |
+| selected | [uint64](#uint64) |  | Of them seen in full before their block (actionable). |
+| admitted | [uint64](#uint64) |  | C3 BUYs the owner admitted (written and withdrawn). |
+| skipped | [uint64](#uint64) |  | Observed launches without an attempt. |
+| written | [uint64](#uint64) |  | C3 BUYs written after the commitment: the campaign&#39;s attempts. |
+| acquired | [uint64](#uint64) |  | Of them acquired. |
+| reverted | [uint64](#uint64) |  | Of them reverted. |
+| dropped | [uint64](#uint64) |  | Of them dropped. |
+| late | [uint64](#uint64) |  | Of them late or in another block. |
+| unresolved | [uint64](#uint64) |  | Of them not resolved by the chain. |
+| passed | [uint64](#uint64) |  | Of them passed. |
+| failed | [uint64](#uint64) |  | Of them failed. |
+| undecided | [uint64](#uint64) |  | Of them undecided. |
+| consecutive_misses | [uint64](#uint64) |  | The longest run of observed launches without an attempt. |
+| before_precommit | [uint64](#uint64) |  | C3 BUYs written before the commitment (not the campaign&#39;s). |
+| unverifiable | [uint64](#uint64) |  | Launches whose transaction could not be verified (coverage unknown). |
+| covered_s | [uint64](#uint64) |  | The time the campaign&#39;s sealed runs cover, seconds. |
+| uncovered_s | [uint64](#uint64) |  | The rest of its span, seconds. |
+| covered_ppm | [uint64](#uint64) |  | The covered share of its span, ppm. |
+| skip_reasons | [string](#string) | repeated | The skipped launches by how they were seen, CLASS=count. |
+| cells | [LiveCampaignCell](#darkbot-bsc-v1-LiveCampaignCell) | repeated | The cells of the manifest. |
+| manifest_sha256 | [string](#string) |  | SHA-256 of the rated manifest, lowercase hex; empty without one. |
+| precommit_sha256 | [string](#string) |  | SHA-256 of its precommitment record, lowercase hex; empty without one. |
+| build_sha256 | [string](#string) |  | SHA-256 of the evaluating bsc_runtime build, lowercase hex (zero when unknown). |
+| evaluated_unix_ms | [uint64](#uint64) |  | When the evaluation wrote the record, unix milliseconds. |
+| record_sha256 | [string](#string) |  | SHA-256 of the verdict record&#39;s bytes, lowercase hex. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-LiveCampaignCell"></a>
+
+### LiveCampaignCell
+One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| cell | [string](#string) |  | EXTERNAL_FULL_LAUNCH or SELF_LAUNCH. |
+| enabled | [bool](#bool) |  | Whether the manifest enables it. |
+| min_attempts | [uint64](#uint64) | optional | The manifest&#39;s minimum attempts; absent when it names none. |
+| attempts | [uint64](#uint64) |  | Its attempts. |
+| passed | [uint64](#uint64) |  | Of them passed. |
+| failed | [uint64](#uint64) |  | Of them failed. |
+| undecided | [uint64](#uint64) |  | Of them undecided. |
+| min_duration_s | [uint64](#uint64) | optional | The manifest&#39;s minimum duration, seconds; absent when it names none. |
+| duration_s | [uint64](#uint64) |  | How long it ran, seconds. |
+| verdict | [string](#string) |  | Its verdict. |
 
 
 

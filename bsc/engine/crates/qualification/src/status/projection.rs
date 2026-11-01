@@ -32,7 +32,8 @@ pub fn clock_s() -> Option<u64> {
 pub fn now() -> u64 {
     clock_s().unwrap_or(0)
 }
-fn read(path: &Path) -> Option<Vec<u8>> {
+/// A regular file of at most one record's size (never a link).
+pub(super) fn read(path: &Path) -> Option<Vec<u8>> {
     let meta = fs::symlink_metadata(path).ok()?;
     if !meta.is_file() || meta.len() > record::MAX_RECORD_BYTES as u64 {
         return None;

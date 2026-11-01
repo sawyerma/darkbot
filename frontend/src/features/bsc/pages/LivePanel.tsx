@@ -12,6 +12,7 @@ import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
 import { SwitchActions } from "../SwitchActions";
 import { LiveGrantActions, LiveRevokeActions, ScopeLiveActions, TotalLimitActions } from "../LiveActions";
+import { LiveCampaign } from "./LiveCampaign";
 
 const wei = (v: string | undefined) => v === undefined || v === "" ? "—" : /^[0-9]+$/.test(v) ? formatNative(v, "wei") : v;
 
@@ -64,6 +65,7 @@ export function LivePanel() {
       <Line label="Campaign BUY attempts" value={`${(l?.totalUsed ?? 0n).toString()} of ${(l?.totalLimit ?? 0n).toString()} (at most 10)`} />
       <Line label="This grant's attempts" value={`${(l?.grantAttemptsUsed ?? 0n).toString()} of ${l?.grant?.maxAttempts ?? 0}`} />
       <TotalLimitActions generation={generation} available={owner} limit={l?.totalLimit ?? 0n} />
+      <LiveCampaign campaign={l?.campaign} attempts={l?.attempts ?? []} />
     </PlacedSection>
     <PlacedSection panel="live" section={5} records={records}>
       <Line label="Spent by this grant" value={wei(l?.spentWei)} hint="The most every admitted intent may cost (input and gas)" />

@@ -2,9 +2,10 @@
 //! native owner's LIVE gate as it holds now with every precondition and its
 //! reason, the grant and its scope, the daily and campaign attempts, the
 //! grant's spend, the scope's entities, the runtime's LIVE path and the
-//! LIVE ledger's positions, transactions and net result. Every value is the
-//! owner's, the runtime's or the ledger's; nothing is inferred here and
-//! nothing here can authorize anything.
+//! LIVE ledger's positions, transactions and net result, and the LIVE
+//! campaign's verdict and attempts ([`super::campaign`]). Every value is the
+//! owner's, the runtime's, the ledger's or the evaluator's; nothing is
+//! inferred here and nothing here can authorize anything.
 
 use super::wire::bsc::*;
 use darkbot_bsc_execution::live_ledger::{Ledger, fold};
@@ -118,6 +119,7 @@ pub fn live_state(
         Err(why) => out.warnings.push(why.into()),
     }
     path(rundir, &mut out);
+    super::campaign::project(rundir, &mut out);
     let (verified, invalid) = live_qualification::view(root);
     (out.qualification, out.qualification_detail) = match invalid {
         Some(why) => ("INVALID".into(), why),

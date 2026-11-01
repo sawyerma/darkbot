@@ -7,7 +7,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | Paket | Inhalt | REV.1.0-Status | Commit |
 |---|---|---|---|
 | R1 | LIVE-Betriebsblocker (BSC3-080..084) | FERTIG | `0159c1a7` |
-| R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | FERTIG (LIVE-Tab-Projektion der Versuche: R2b offen) | dieser Commit |
+| R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | FERTIG (LIVE-Tab-Projektion: R2b dieser Commit, `BscLiveState.campaign`/`attempts`) | `1d29cec7`; R2b dieser Commit |
 | R3 | Recovery/Betreiber (Receipt-Recovery, EXIT_STOPPED, Nonce-Burn gesperrt, Ledger-Reparatur, Slot-Rückgabe, G0.7-Lot) | OFFEN | – |
 | R4 | Grant-Varianten gesperrt (069, 059, 029, 042, Kampagnen-Spend, §20, Builder-Frische/Fee) | OFFEN | – |
 | R5 | Exit-Routen gesperrt (030 Mempool, Re-Price, DEX-Exit migrierter Lots) | OFFEN | – |

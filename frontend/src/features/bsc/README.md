@@ -8,7 +8,8 @@ LIVE gate for the operator's granted scope, and the browser signs or sends nothi
 - **Data:** `bsc.status`, `bsc.launch.state`, `bsc.monitoring.state`, `bsc.wallets.state` and
   `bsc.live.state` are decoded from `darkbot.bsc.v1` (`api/bscAdapter.ts`). Typed fields carry the
   guard, gates, readiness (native verdict, mode, candidate binding), jobs, wallets and the LIVE gate;
-  `bsc.live.state` is the one LIVE source (tabs, overview and gateway). Every other public native
+  `bsc.live.state` is the one LIVE source (tabs, overview and gateway); it also carries the LIVE
+  campaign verdict and its attempts as recorded (REV.1.0 R2b, evidence only). Every other public native
   leaf arrives as a `NativeRecord` with kind and unit.
 - **Placement:** every native field has exactly one panel section in the fixed order of
   `frontend/docs/FRONTEND_PHASENPLAN.md` §13. The rules live in `frontend/contracts/bsc-fields.json`.
