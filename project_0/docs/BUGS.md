@@ -1503,6 +1503,17 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `P0-014` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `d3ed33b2`, `0f430678` · CI `40410319544`/`40410345119` |
 | `P0-015` | DUPLIKAT | Commit | → P0-009 | §23 | `0f430678` |
 | `P0-016` | OFFEN | DEC-07-Review | zugelassener Rohdaten-Start Ende-zu-Ende | §23 | Reviewer-Befund 5 (MEDIUM) |
+| `P0-017` | OFFEN | DEC-18 (Nutzer 01.11.2026) | nativer typisierter Provider-Descriptor in `RuntimeConfig`/`Resolved`, `requested/effective`, gestaged bis zum kontrollierten Neustart | §23 | DEC-18 §1.3 Nr. 1–2 |
+| `P0-018` | OFFEN | DEC-18 (Nutzer 01.11.2026) | secretfreie kanonische Provider-/Credential-Revisionsbindung statt `hash(url)` | §23 | DEC-18 §1.2 |
+| `P0-019` | OFFEN | DEC-18 (Nutzer 01.11.2026) | Credentials im macOS-Schlüsselbund, nichtpersistierender Credential-Eingang (CLI verdeckt, GUI), Rotation/Widerruf, einmaliger `.env`-Import | §23 | DEC-18 §1.3 Nr. 5–7 |
+| `P0-020` | OFFEN | DEC-18 (Nutzer 01.11.2026) | Provider-Protobuf-Projektionen und typisierte Commands bis Capture/Health und Liquidator, Ende-zu-Ende | §23 | DEC-18 §1.3 Nr. 3–4, 9 |
+| `P0-021` | OFFEN | DEC-18 (Nutzer 01.11.2026) | Jupiter-`DEFAULT_BASE` als validierter Registry-Default; Regressionstest der Timeout-Übernahme | §23 | DEC-18 §1.3 Nr. 2 |
+| `P0-022` | OFFEN | DEC-18 / C-11 (Nutzer 01.11.2026) | `p0ctl provider measure`: `ProbeSpec` aus den realen Modus-Callgraphs, typisierter `PROVIDER_EVIDENCE`-Record, Pre-Audit-Read-Permit | §23 | DEC-18 §3 |
+| `P0-023` | OFFEN | DEC-18 §3.4 / DEC-09 | `ProviderEvidence::from_measured_json` nicht hinter dem Feature `historical` | §23 | `provider_evidence.rs` |
+| `P0-024` | OFFEN | DEC-18 §4.3 | econ4h-Kalibrierung und Lese-Messpfade laden den privaten Produktivschlüssel | §23 | `scripts/capture.sh`, `state_owner/setup.rs` |
+| `P0-025` | OFFEN | DEC-18 §2.1 / C-01 / C-10 | native Read-Werkzeuge fehlen: Bank-Resize-Census, IDL/Upgrade-Authority, Token-/ATA-Bytecode | §23 | Recherche 01.11.2026 |
+| `P0-026` | OFFEN | Befund 01.11.2026 (geprüft) | Laufzeit-Datenverzeichnisse im Projekt nicht git-ignoriert: ein Boot-Flow verändert seine eigene Quellidentität | §23 | `boot_audit.rs::identity_with`, `project_0/.gitignore` |
+| `P0-027` | OFFEN | Recherche 01.11.2026 (vor C-10 zu verifizieren) | Desktop-Market-Flow: `APP_HOME` ohne Git und Release ohne `p0-longtail` ⇒ BOOT-01 blockiert; ausgelieferte Release älter als DEC-07 | §23 | `ops/darkbotctl`, `boot_audit.rs` |
 
 ### 22.2 `bugs_b.md`: Z1–Z19 und Q1–Q14 — Zusammenführungen
 
@@ -1618,6 +1629,39 @@ Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein
 
 ### P0-016 — Zugelassener Rohdaten-Start Ende-zu-Ende nicht offline prüfbar
 - **Status: OFFEN · MEDIUM** (DEC-07-Review Befund 5). Kein Test führt einen gültigen Record durch das echte Binary unter launchd; eine Abweichung zwischen p0ctl- und launchd-Umgebung wird sicher abgelehnt (`BOOT_IDENTITY_DRIFT` mit Feld), bliebe aber unentdeckt bis zum ersten echten Start. Voraussetzung: realer Network-Audit (C-04) oder ein Testfixture über Crate-Grenzen.
+
+### P0-017 — DEC-18: nativer Provider-Descriptor
+- **Status: OFFEN** (DEC-18 `DESIGN_APPROVED`, Nutzer 01.11.2026). **Soll:** `RuntimeConfig`/`Resolved` (DEC-05), Provider-/Source-Control, Budgets und der gemeinsame Controller erweitert um einen typisierten Provider-Descriptor (ID, Typ RPC/WSS/Geyser/Jupiter/Jito, Endpoint, Auth-Typ, Credential-Referenz statt Key, Priorität, Kapazität, Quelle, Tarif/Entitlement, Qualifikations-ID, Version, `requested/effective`, Blockgrund, Restart-Regel); Änderungen gestaged, wirksam erst beim kontrollierten Neustart; keine zweite Registry.
+
+### P0-018 — DEC-18: secretfreie Provider-/Credential-Bindung statt `hash(url)`
+- **Status: OFFEN.** **Ist:** `boot_network.rs::run` und `provider_evidence.rs::validate_provider_evidence` hashen die gesamte URL, ggf. mit `api-key` in der Query. **Soll:** versionierter kanonischer Vertrag (Provider-ID, Transporttyp, kanonischer Endpunkt ohne Benutzerinfo/Secret-Query, Plan, Credential-ID und -Revision, wirksame Limits/Konfigurationsversionen), binär kanonisiert, domänensepariert gehasht, eine Implementierung für RPC, WSS, Evidence, Audit und Run-Manifest; alte Records lesbar, nicht als neue Audit-/LIVE-Evidence anerkannt; Secret-URLs abgelehnt bzw. kontrolliert in Credentials migriert; TOCTOU-/Restart-/Rotationstests.
+
+### P0-019 — DEC-18: Credential-Store und Credential-Eingang
+- **Status: OFFEN.** **Soll:** Provider-Credentials im macOS-Schlüsselbund; Eingabe/Rotation/Widerruf über GUI und `p0ctl provider credential set|rotate|revoke` (verdeckte Eingabe, nie Argument/History/Env/Log) über denselben nativen Controller und denselben nichtpersistierenden Eingang; Secret-Payload vor jeder dauerhaften Gateway-Idempotenz-/Command-Protokollierung separiert; einmaliger kontrollierter `.env`-Import, danach nur Credential-Referenz; ohne freigegebenen Store sicher blockiert; Leak-/Retry-/Crash-/Replaytests.
+
+### P0-020 — DEC-18: Provider-Bedienung Ende-zu-Ende
+- **Status: OFFEN.** **Soll:** redigierte Provider-Projektionen und action-spezifische typisierte Commands in `darkbot.project0.v1`; RPC/WSS/Geyser in Capture/Health, Jupiter/Jito in Liquidator (kein neuer Reiter); Abnahme Rust→Protobuf→Reporter→Gateway→WS→Adapter→Store→Reiter und Reiter→POST→Gateway→Controller→Receipt→STATE mit den Negativtests aus DEC-18 §1.3 Nr. 9; `protocol/scripts/check.sh --check`, Gateway/Frontend/Playwright, Gate und CI auf dem finalen SHA.
+
+### P0-021 — DEC-18: Jupiter-Basis-URL als Registry-Default
+- **Status: OFFEN.** **Ist:** `execution/route.rs::DEFAULT_BASE` konstant; `JupiterV2RouteProvider::new()` liest `jupiter_timeout_ms` bereits (Default 1500 ms). **Soll:** Basis-URL als validierter, konfigurierbarer Default der Provider-Konfiguration; Regressionstest für einen abweichenden Timeout; P6-MT.7-Bucket bleibt alleinige Budgetautorität.
+
+### P0-022 — DEC-18/C-11: Provider-Vormessung `p0ctl provider measure`
+- **Status: OFFEN.** **Soll:** providergenerisch, jetzt nur das manuell gewählte Paar; `ProbeSpec` je Modus (BOOT, 600-s-econ4h, 30-min-C0-MO) aus den realen Callgraphs/Adaptern, gegen Abweichung getestet; jede Methode/Subscription genau einmal minimal geprüft (`SUPPORTED`/`METHOD_UNSUPPORTED`/`NOT_PROVEN`/`BLOCKED`); direkter typisierter `.p0j`-Record mit Bindung nach P0-018; Grenzen C-11 (≤120 s, 1 RPS, ≤120 Versuche, 16 MiB, eine WSS, ≤2 gleichzeitig/≤3 unterschiedliche Subscriptions); Pre-Audit-Zulassung über den Boot-/Control-Weg mit Offline-Token-Bestätigung; Loopback-Tests aus DEC-18 §3.8.
+
+### P0-023 — DEC-18 §3.4: JSON-Evidence-Import nicht hinter `historical`
+- **Status: OFFEN.** **Ist:** `ProviderEvidence::from_measured_json` (und `p0ctl boot evidence import` aus JSON über `p0-journal import-provider-evidence`) im Standardbinary. **Soll:** nach Abgleich der realen Consumer unter das bestehende Feature `historical` (DEC-09), ohne historischen Lesezugriff zu brechen; kein produktiver Messpfad über JSON-Import.
+
+### P0-024 — DEC-18 §4.3: Lese-Messpfade laden den privaten Schlüssel
+- **Status: OFFEN.** **Ist (Recherche 01.11.2026):** der econ4h-Launcher verlangt das Signer-Gate und lädt das Keypair (`scripts/capture.sh`, `state_owner/setup.rs`). **Soll:** econ4h-Kalibrierung und andere rein lesende Messpfade ohne privaten Produktivschlüssel; konfigurierter öffentlicher Taker-/Wallet-Pubkey; unsignierte Simulation nur `sig_verify=false` mit Kennzeichnung `UNSIGNED_SIMULATION`; reale Signaturen nur in gesondert freigegebenen SIM_ONLY-/LIVE-Pfaden.
+
+### P0-025 — DEC-18 §2.1: Read-Werkzeuge für C-01 und C-10 fehlen
+- **Status: OFFEN.** **Ist (Recherche 01.11.2026):** kein natives Werkzeug für den Bank-Resize-Census je Group (nur das Python-Census `operations/capture/c0_census.py` über das ganze Programm), kein IDL-Read, Upgrade-Authority nicht erfasst, kein Programm-Bytecode-Read, `litesvm` nicht im Lockfile. **Soll:** native, budgetierte, read-only Werkzeuge mit typisierten Records für die C-01-Schritte 5–6 und den C-10-Bytecode-Read; eine neue Abhängigkeit (litesvm) nur nach technischer Bewertung.
+
+### P0-026 — Laufzeit-Datenverzeichnisse verändern die Quellidentität
+- **Status: OFFEN · HIGH** (geprüft 01.11.2026). **Befund:** `boot_audit::identity_with` bindet `git status --porcelain -- .`; `project_0/.gitignore` schließt nur `data/runs`, `data/econ4h`, `data/market`, `data/shadow`, `data/c0`, `data/cache` und die Lock-Datei aus. Laufzeitzustand unter `data/boot`, `data/provider_evidence`, `data/until_stopped`, `data/profiles`, `data/fe06`, `data/analytics-jobs`, `data/capability-control`, `data/source-control` erscheint als unversioniert und verändert die Identität: der erste Boot-Flow eines Projekts (oder ein Evidence-Import mitten im Flow) widerspricht danach seiner eigenen Offline-Identität. **Soll:** eng verankerte Ignore-Regeln für jedes Laufzeitverzeichnis, Test der stabilen Identität über einen Flow.
+
+### P0-027 — Desktop-Market-Flow kann BOOT-01 nicht bestehen
+- **Status: OFFEN** (Recherche 01.11.2026, vor C-10 am Code zu verifizieren). **Befund:** der Desktop-Market-Flow startet `p0ctl` mit `P0_PROJECT_DIR=$APP_HOME` (kein Git-Repository) aus einer Release ohne `p0-longtail` ⇒ Offline-BOOT-01 blockiert; die ausgelieferte Release stammt vom 20.10.2026, vor DEC-07. **Soll:** der zugelassene Market-Start über denselben Boot-Controller mit prüfbarer Identität; Build/Deploy über `darkbotctl build` → `deploy`.
 
 ### P0-007 — Flaky Linux-CI: P3-04-Floodtest verlangte < 500 ms je Ping-Send
 - **Status: ERLEDIGT_LOKAL** (Fix Commit B4; CI-Nachweis auf exaktem SHA in Commit C). **Gate:** N-4 (Flaky Tests gesondert erfassen), `project0-gate (test_all)`.

@@ -296,7 +296,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P1A-02 source/IDL manifest | `protocol.rs` parity tests | `manifests/CURRENT_MAINNET.md` | LOCAL_PASS | on-chain IDL hash NOT_RUN |
 | P1A-03 allowlists | `protocol.rs`, `planner.rs` | same | LOCAL_PASS | — |
 | P1A-04 upgrade watcher | `setup.rs`, `events.rs` | same | LOCAL_PASS | Mainnet behaviour NOT_RUN |
-| P1B-01…03 | `decode_bank`, tripwire tests, RC2 semantics | `manifests/UPCOMING_0_1_12.md` | LOCAL_PASS · `c9decd7f` RC2 integriert (Premium-Health/Repay/Sizing/Solvenz/Cap) | Schritte 5–7 BLOCKED (Bank-Resize-/Paritäts-Read, Freigabe) |
+| P1B-01…03 | `decode_bank`, tripwire tests, RC2 semantics | `manifests/UPCOMING_0_1_12.md` | LOCAL_PASS · `c9decd7f` RC2 integriert (Premium-Health/Repay/Sizing/Solvenz/Cap) | C-01 Schritte 5–6 ERTEILT 01.11.2026, Schritt 7 BEDINGT (nur nach vollständigem Paritäts-PASS, DEC-18 §2); NOT_RUN — erst nach DEC-18 + C-11 (DEC-18 §6); Read-Werkzeuge fehlen (P0-025); BOOT-05 ohne Ausnahme, C-12 NICHT ERTEILT |
 | C0-01 account census | `c0_census.py` (+ import) | 2026-10-02 slot 452723812 | historical PASS · current NOT_RUN | current read (permission); census import typed since 24.10. (JFI-04, `key=value` handoff) |
 | C0-02 health classification | `census.rs`, Shadow census worker | Ticket 2, C0-FIX-01…05 | LOCAL_PASS · current **NOT_RUN** | permitted Shadow start with measured cost model |
 | C0-03 race opportunity map | census facts (distance, oracles, integrations, TX load) | `evidence/C0_MARKET_CENSUS.md` | PARTIAL | exact v0/v1 fit per account needs built TX (pipeline); current data NOT_RUN |
@@ -319,6 +319,8 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | S1-06 v1 fidelity | `txv1` feature, `p0-probe-v1` | `V1_wire_probe_20261004.json` | PARTIAL | v1 submission capability gate |
 | S1-07 reconnect / gap / reconcile | `ws_rpc.rs`, `market_gap.rs`, `market_reconcile.rs` | 60 s disconnect recovered | PARTIAL | 4 h unrecovered gap; 429 handling |
 | S1-08 Mainnet binary source + cost | — | — | NOT_RUN · DEFERRED_PRIORITY | — |
+| DEC-18 provider config end-to-end | Provider-Descriptor (P0-017), secretfreie Bindung (P0-018), Keychain-Credentials (P0-019), Protobuf/GUI Capture-Health/Liquidator (P0-020), Jupiter-URL (P0-021), JSON-Import hinter `historical` (P0-023), Lese-Pfade ohne Privatschlüssel (P0-024), Laufzeitverzeichnisse ignoriert (P0-026) | `ENTSCHEIDUNGEN.md` Nr. 18 (Nutzer 01.11.2026) | DESIGN_APPROVED · OPEN | vor jedem Mainnet-Smoke vollständig offline abzunehmen (DEC-18 §6) |
+| C-11 provider pre-audit measurement | `p0ctl provider measure` (P0-022) | — | OPEN · Freigabe C-11 ERTEILT (≤120 s, 1 RPS, ≤120 Versuche, 16 MiB, 1 WSS) | nach DEC-18; Offline-Token-Bestätigung; danach C-01 5–6 → Schritt 7 → C-04 → C-05 → C-10 |
 | S2-01…04 canonical state, fork/root, bootstrap, recovery | `solana/src/state/*` | Mainnet PASS (bootstrap/recovery) | LOCAL_PASS · partial Mainnet | long-run qualification |
 | S2-05 blockhash / LUT / token metadata | `blockhash.rs`, `execution/lookup_tables.rs` | R120 protocol LUTs | PARTIAL | token metadata cache not separate |
 | S3-01 v0 builder | `solana/src/tx`, `execution/builder.rs` | simulation path proven (R97–R101) | PARTIAL | current candidate simulation (FE-02) |
