@@ -547,6 +547,8 @@ where
 
 /// FE-01 report status of a closed, observed scope (never a qualification).
 pub const OBSERVED: &str = "STATE_SCOPE_OBSERVED_NOT_QUALIFIED";
+/// The execution of a full observation against a provider: reads only, no signer.
+pub const READ_ONLY: &str = "READ_ONLY_NO_SIGNER";
 pub const INCOMPLETE: &str = "INCOMPLETE";
 
 /// The report of an observation that ended before a scope closed (or ran out of time).

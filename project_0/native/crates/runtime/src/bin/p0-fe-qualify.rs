@@ -150,7 +150,7 @@ fn run() -> Result<(), String> {
         requested,
         effective: resolved.effective(),
         qualification_sha256: Some(fe::sha(&record_bytes)),
-        execution: "READ_ONLY_NO_SIGNER".into(),
+        execution: fe::READ_ONLY.into(),
     };
     record(&mut evidence, &operational, None)?;
     resolved.activate()?;

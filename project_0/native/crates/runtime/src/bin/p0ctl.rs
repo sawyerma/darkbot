@@ -2172,7 +2172,9 @@ fn read_secret() -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String
 }
 
 const C01_USAGE: &str = "usage: p0ctl c01 plan   (C-01 steps 5–6, offline: the deployment reads through the selected RPC provider within the FE-01 budget fe_calls/fe_max_mib/fe_seconds; prints the plan and its token, reads nothing)
-  | p0ctl c01 run --plan PLAN_ID --approve TOKEN   (reads Mainnet once; writes the reads, the token programs' bytecode and the parity verdict)";
+  | p0ctl c01 run --plan PLAN_ID --approve TOKEN   (reads Mainnet once; writes the reads, the token programs' bytecode and the parity verdict)
+  | p0ctl c01 build --plan PLAN_ID --elf FILE --source DIR --image NAME@sha256:DIGEST --command TEXT   (offline, once per plan: a reproducible build of the pinned source against the deployed ELF; the parity derived again)
+  | p0ctl c01 fe01 --plan PLAN_ID --observation FE01_OUTPUT_DIR   (offline, once per plan: the FE-01 full observation against the read deployment; the parity derived again)";
 
 /// DEC-18 §2 (P0-025, C-01 steps 5–6): `c01 plan|run`.
 #[cfg(feature = "crate_health")]
@@ -2193,6 +2195,43 @@ fn c01_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     .ok_or_else(|| format!("{f} required\n{C01_USAGE}"))
             };
             let (reads, parity) = c01::run(project, &need("--plan")?, &need("--approve")?, &env)?;
+            print!("{}", c01::run_text(&reads, &parity));
+            Ok(parity.overall == "PASS")
+        }
+        [verb, rest @ ..] if verb == "build" => {
+            let o = provider_options(
+                rest,
+                &["--plan", "--elf", "--source", "--image", "--command"],
+                &[],
+            )?;
+            let need = |f: &str| {
+                o.get(f)
+                    .cloned()
+                    .ok_or_else(|| format!("{f} required\n{C01_USAGE}"))
+            };
+            let (reads, parity) = c01::build(
+                project,
+                &need("--plan")?,
+                Path::new(&need("--elf")?),
+                Path::new(&need("--source")?),
+                &need("--image")?,
+                &need("--command")?,
+            )?;
+            print!("{}", c01::run_text(&reads, &parity));
+            Ok(parity.overall == "PASS")
+        }
+        [verb, rest @ ..] if verb == "fe01" => {
+            let o = provider_options(rest, &["--plan", "--observation"], &[])?;
+            let need = |f: &str| {
+                o.get(f)
+                    .cloned()
+                    .ok_or_else(|| format!("{f} required\n{C01_USAGE}"))
+            };
+            let (reads, parity) = c01::fe01(
+                project,
+                &need("--plan")?,
+                Path::new(&need("--observation")?),
+            )?;
             print!("{}", c01::run_text(&reads, &parity));
             Ok(parity.overall == "PASS")
         }

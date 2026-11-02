@@ -303,6 +303,67 @@ fn plan(p: &Project, env: &[(&str, &str)]) -> (String, String, String) {
 
 const BUDGET: [(&str, &str); 1] = [("P0_FE_CALLS", "20")];
 
+/// A sealed FE-01 full observation (`p0-fe-qualify` journal layout) of the read deployment.
+fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads) {
+    use darkbot_runner::analytics::journal::{self, Provenance, Writer};
+    use darkbot_runner::analytics::payload::{Fe01Config, Fe01Observation};
+    use darkbot_runner::orchestration::fe_qualification as fe;
+    std::fs::create_dir_all(dir).unwrap();
+    let effective = darkbot_solana::runtime_config::Resolved::parse(&[], &|_| None)
+        .unwrap()
+        .effective();
+    let mut w = Writer::create(&dir.join("fe01.p0j")).unwrap();
+    let at = || Provenance {
+        source: journal::source::FE01,
+        ..Default::default()
+    };
+    w.append_typed(
+        at(),
+        &Fe01Config {
+            requested: effective.clone(),
+            effective,
+            qualification_sha256: None,
+            execution: fe::READ_ONLY.into(),
+        },
+    )
+    .unwrap();
+    let d = &reads.deployment;
+    let hash = solana_sdk::hash::Hash::from_str(d.account_hash.as_deref().unwrap()).unwrap();
+    let mut report = fe::incomplete(String::new());
+    report.status = fe::OBSERVED.into();
+    report.observation = Some(Fe01Observation {
+        rounds: 1,
+        slot: *reads.context_slots.iter().max().unwrap(),
+        unix_timestamp: 0,
+        clock: "CHAIN_SYSVAR_SAME_CONTEXT".into(),
+        program_data: pk(d.program_data.as_deref().unwrap()),
+        program_data_sha256: journal::hex(&hash.to_bytes()),
+        deployment_slot: d.deployment_slot.unwrap(),
+        source_pin: protocol::SOURCE_TAG.into(),
+        source_parity_reason: String::new(),
+        transaction_version: String::new(),
+        accounts: vec![],
+        targets: vec![],
+    });
+    w.append_typed(at(), &report).unwrap();
+    w.seal(true).unwrap();
+}
+
+/// The cargo checkout of the pinned source (`cargo fetch`): a git tree at its commit.
+fn pinned_checkout() -> PathBuf {
+    let home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))
+        .expect("CARGO_HOME or HOME");
+    let rev = &protocol::SOURCE_COMMIT[..7];
+    std::fs::read_dir(home.join("git/checkouts"))
+        .expect("the pinned source checkout (cargo fetch)")
+        .flatten()
+        .map(|e| e.path().join(rev))
+        .find(|p| p.join("programs/marginfi").is_dir())
+        .unwrap_or_else(|| panic!("no checkout of the pinned source {rev}"))
+}
+
 #[test]
 fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
     let p = setup("read");
@@ -395,6 +456,97 @@ fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
     let parity: c01::P1aParity =
         darkbot_runner::analytics::journal::read_typed_value(&dir.join("parity.p0j")).unwrap();
     assert!(parity.overall.starts_with("BLOCKED"));
+    // The BUILD step, offline: refused before anything is recorded on a source that is not the
+    // pinned checkout, an image without its digest, a file that is no ELF; then the build of the
+    // deployed ELF (padding trimmed) passes its gate, once.
+    let elf = p.base.join("marginfi.so");
+    std::fs::write(&elf, b"\x7fELF marginfi\0\0\0").unwrap();
+    let image = format!(
+        "solanafoundation/solana-verifiable-build@sha256:{}",
+        "a".repeat(64)
+    );
+    let checkout = pinned_checkout();
+    let build = |elf: &std::path::Path, source: &std::path::Path, image: &str| {
+        run(
+            &p,
+            &[
+                "c01",
+                "build",
+                "--plan",
+                &plan_id,
+                "--elf",
+                elf.to_str().unwrap(),
+                "--source",
+                source.to_str().unwrap(),
+                "--image",
+                image,
+                "--command",
+                "solana-verify build --library-name marginfi -- --features mainnet-beta,custom-heap",
+            ],
+            &[],
+            None,
+        )
+    };
+    let (ok, text) = build(&elf, &p.project, &image);
+    assert!(!ok && text.contains("C01_BUILD_SOURCE"), "{text}");
+    let (ok, text) = build(
+        &elf,
+        &checkout,
+        "solanafoundation/solana-verifiable-build:3.1.13",
+    );
+    assert!(!ok && text.contains("C01_BUILD_IMAGE"), "{text}");
+    let (ok, text) = build(&dir.join("plan.p0j"), &checkout, &image);
+    assert!(!ok && text.contains("C01_BUILD_ELF"), "{text}");
+    assert!(!dir.join("build.p0j").exists());
+    let (ok, text) = build(&elf, &checkout, &image);
+    assert!(!ok, "the 0.1.11 bank still fails: {text}");
+    assert!(text.contains("gate BUILD PASS built elf_sha256="), "{text}");
+    // The stale IDL is informational once the bytecode is proven (user decision 02.11.2026).
+    assert!(text.contains("gate IDL FAIL (informational)"), "{text}");
+    assert!(text.contains("P1A_PARITY BLOCKED: BANKS FAIL"), "{text}");
+    let parity: c01::P1aParity =
+        darkbot_runner::analytics::journal::read_typed_value(&dir.join("parity-build.p0j"))
+            .unwrap();
+    assert!(parity
+        .gates
+        .iter()
+        .any(|g| g.name == "BUILD" && g.verdict == "PASS"));
+    let (ok, text) = build(&elf, &checkout, &image);
+    assert!(
+        !ok && text.contains("C01_STEP_RECORDED: build.p0j"),
+        "{text}"
+    );
+    // Step 6 offline: the FE-01 full observation of the read deployment, from its sealed journal.
+    let observation = p.base.join("fe01_full");
+    fe01_journal(&observation, &reads);
+    let fe01 = || {
+        run(
+            &p,
+            &[
+                "c01",
+                "fe01",
+                "--plan",
+                &plan_id,
+                "--observation",
+                observation.to_str().unwrap(),
+            ],
+            &[],
+            None,
+        )
+    };
+    let (ok, text) = fe01();
+    assert!(!ok, "the 0.1.11 bank still fails: {text}");
+    assert!(
+        text.contains("gate FE01 PASS STATE_SCOPE_OBSERVED_NOT_QUALIFIED READ_ONLY_NO_SIGNER"),
+        "{text}"
+    );
+    assert!(text.contains("gate BUILD PASS"), "{text}");
+    assert!(dir.join("parity-build-fe01.p0j").is_file());
+    let (ok, text) = fe01();
+    assert!(
+        !ok && text.contains("C01_STEP_RECORDED: fe01.p0j"),
+        "{text}"
+    );
     // A plan reads once.
     let before = p.seen.lock().unwrap().len();
     let (ok, text) = run(

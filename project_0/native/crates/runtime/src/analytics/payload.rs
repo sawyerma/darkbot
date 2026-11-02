@@ -955,6 +955,10 @@ macro_rules! typed_kinds {
             k::P1A_PARITY => {
                 $f::<crate::orchestration::c01_records::P1aParity>($kind, $schema, $bytes)
             }
+            k::C01_BUILD => {
+                $f::<crate::orchestration::c01_records::C01Build>($kind, $schema, $bytes)
+            }
+            k::C01_FE01 => $f::<crate::orchestration::c01_records::C01Fe01>($kind, $schema, $bytes),
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

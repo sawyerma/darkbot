@@ -235,6 +235,12 @@ pub mod kind {
     pub const C01_READS: u16 = 1111;
     /// DEC-18 §2.2–2.5: the parity verdict of a deployment read (`c01_records::P1aParity`).
     pub const P1A_PARITY: u16 = 1112;
+    /// DEC-18 §2.2 (C-01 BUILD gate): a reproducible build of the pinned source
+    /// (`c01_records::C01Build`), `data/c01/<plan_id>/build.p0j`.
+    pub const C01_BUILD: u16 = 1113;
+    /// DEC-18 §2 (C-01 step 6, FE01 gate): the FE-01 observation bound to the read deployment
+    /// (`c01_records::C01Fe01`), `data/c01/<plan_id>/fe01.p0j`.
+    pub const C01_FE01: u16 = 1114;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -331,6 +337,8 @@ pub mod kind {
         C01_READ_PLAN,
         C01_READS,
         P1A_PARITY,
+        C01_BUILD,
+        C01_FE01,
         super::MANIFEST,
     ];
 }

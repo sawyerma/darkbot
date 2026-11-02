@@ -134,6 +134,51 @@ impl Payload for C01Reads {
     const KIND: u16 = journal::kind::C01_READS;
 }
 
+/// A reproducible build of the pinned source (the BUILD gate, `p0ctl c01 build`): the source
+/// checkout's commit as git reports it, the ELF's hash computed from the file (its trailing zero
+/// padding trimmed, as deployed), and how it was built.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct C01Build {
+    pub plan_id: String,
+    /// `HEAD` of the source checkout and whether a tracked file differs from it.
+    pub source_commit: String,
+    pub source_modified: bool,
+    /// The build as the operator ran it: the toolchain image and the command.
+    pub image: String,
+    pub command: String,
+    pub elf_sha256: String,
+    pub elf_len: u64,
+    pub recorded_unix_ms: Option<u64>,
+}
+impl Payload for C01Build {
+    const KIND: u16 = journal::kind::C01_BUILD;
+}
+
+/// The FE-01 observation bound to the read deployment (the FE01 gate, `p0ctl c01 fe01`): what the
+/// sealed `fe01.p0j` of `p0-fe-qualify --fe-mode full --execute` configured and observed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct C01Fe01 {
+    pub plan_id: String,
+    /// SHA-256 of the observation's journal (hex); whether its manifest sealed it complete.
+    pub journal_sha256: String,
+    pub sealed_complete: bool,
+    pub execution: String,
+    pub status: String,
+    pub reason: Option<String>,
+    /// The observation's chain slot, ProgramData, the SHA-256 of that whole account (hex) and
+    /// its deployment slot; `None` when no scope closed.
+    pub slot: Option<u64>,
+    pub program_data: Option<String>,
+    pub program_data_sha256: Option<String>,
+    pub deployment_slot: Option<u64>,
+    pub accounts: u64,
+    pub targets: u64,
+    pub recorded_unix_ms: Option<u64>,
+}
+impl Payload for C01Fe01 {
+    const KIND: u16 = journal::kind::C01_FE01;
+}
+
 /// One gate of the parity (DEC-18 §2.2–2.5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParityGate {

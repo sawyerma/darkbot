@@ -347,9 +347,14 @@ pub const BPF_LOADER_2_ID: &str = "BPFLoader2111111111111111111111111111111111";
 /// DEC-18 §2 (C-01): the program ELF of a loader-v3 ProgramData account — its bytes after the
 /// metadata, the account's trailing zero padding trimmed (the deployed binary itself).
 pub fn program_data_elf(data: &[u8]) -> Option<&[u8]> {
-    let elf = data.get(PROGRAM_DATA_METADATA_LEN..)?;
+    Some(trimmed_elf(data.get(PROGRAM_DATA_METADATA_LEN..)?))
+}
+
+/// An ELF without its trailing zero padding: the deployed binary as a ProgramData account holds
+/// it and a built one as `solana-verify get-executable-hash` hashes it.
+pub fn trimmed_elf(elf: &[u8]) -> &[u8] {
     let end = elf.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
-    Some(&elf[..end])
+    &elf[..end]
 }
 const PROGRAM_ACCOUNT_LEN: usize = 36;
 

@@ -10,10 +10,12 @@
 //! * the token programs' bytecode.
 //!
 //! The parity verdict (`P1A_PARITY`) is derived from the typed reads: PASS only when every mandatory
-//! gate passes; the build and the FE-01 observation are gates of their own steps.
+//! gate passes; the build (`p0ctl c01 build`, offline) and the FE-01 observation are gates of
+//! their own steps, each recorded once beside the reads and the parity derived again.
 //!
 //! `<project>/data/c01/<plan_id>/`: `plan.p0j`, `run.started`, `reads.p0j`, `parity.p0j`,
-//! `programs/<name>.so`.
+//! `programs/<name>.so`, `build.p0j`, `fe01.p0j` and the parity of the recorded steps
+//! (`parity-build.p0j`, `parity-fe01.p0j`, `parity-build-fe01.p0j`).
 pub use super::c01_records::*;
 use crate::analytics::journal;
 use crate::analytics::payload::{Fe01Account, Fe01ReadOutcome};
@@ -29,6 +31,71 @@ const PLAN: &str = "plan.p0j";
 const STARTED: &str = "run.started";
 const READS: &str = "reads.p0j";
 const PARITY: &str = "parity.p0j";
+const BUILD: &str = "build.p0j";
+const FE01: &str = "fe01.p0j";
+
+/// The evidence of the steps after the reads, each recorded once by its own step.
+#[derive(Default)]
+pub struct Steps {
+    pub build: Option<C01Build>,
+    pub fe01: Option<C01Fe01>,
+}
+impl Steps {
+    /// The parity record of exactly these steps: `parity.p0j` for the reads alone.
+    fn parity_file(&self) -> String {
+        match (&self.build, &self.fe01) {
+            (None, None) => PARITY.into(),
+            (Some(_), None) => "parity-build.p0j".into(),
+            (None, Some(_)) => "parity-fe01.p0j".into(),
+            (Some(_), Some(_)) => "parity-build-fe01.p0j".into(),
+        }
+    }
+
+    /// The steps recorded beside a run's reads.
+    fn recorded(dir: &Path) -> Result<Self, String> {
+        fn load<P: crate::analytics::payload::Payload>(path: &Path) -> Result<Option<P>, String> {
+            match journal::read_typed_value(path) {
+                Ok(v) => Ok(Some(v)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(format!("C01_STORE: {}: {e}", path.display())),
+            }
+        }
+        Ok(Self {
+            build: load(&dir.join(BUILD))?,
+            fe01: load(&dir.join(FE01))?,
+        })
+    }
+}
+
+/// Records a step once and derives the parity of every step recorded.
+fn record_step<P: crate::analytics::payload::Payload>(
+    dir: &Path,
+    file: &str,
+    value: &P,
+    reads: &C01Reads,
+    reads_sha256: &str,
+) -> Result<P1aParity, String> {
+    journal::create_typed_value(
+        &dir.join(file),
+        journal::source::PROVIDER_MEASUREMENT,
+        value,
+    )
+    .map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => {
+            format!("C01_STEP_RECORDED: {file} of this plan is recorded (a new one is a new plan)")
+        }
+        _ => format!("C01_STORE: {e}"),
+    })?;
+    let steps = Steps::recorded(dir)?;
+    let parity = evaluate(reads, reads_sha256, &steps);
+    journal::write_typed_value(
+        &dir.join(steps.parity_file()),
+        journal::source::PROVIDER_MEASUREMENT,
+        &parity,
+    )
+    .map_err(|e| format!("C01_STORE: {e}"))?;
+    Ok(parity)
+}
 
 fn sha(bytes: &[u8]) -> String {
     journal::hex(&solana_sdk::hash::hash(bytes).to_bytes())
@@ -218,13 +285,144 @@ pub fn run(
     )
     .map_err(|e| format!("C01_STORE: {e}"))?;
     let reads_bytes = std::fs::read(dir.join(READS)).map_err(|e| format!("C01_STORE: {e}"))?;
-    let parity = evaluate(&reads, &sha(&reads_bytes));
+    let parity = evaluate(&reads, &sha(&reads_bytes), &Steps::default());
     journal::create_typed_value(
         &dir.join(PARITY),
         journal::source::PROVIDER_MEASUREMENT,
         &parity,
     )
     .map_err(|e| format!("C01_STORE: {e}"))?;
+    Ok((reads, parity))
+}
+
+/// A run's reads and the SHA-256 of their record.
+fn load_reads(dir: &Path) -> Result<(C01Reads, String), String> {
+    let path = dir.join(READS);
+    let bytes = std::fs::read(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => "C01_READS_MISSING: the plan has not run".to_string(),
+        _ => format!("C01_STORE: {e}"),
+    })?;
+    let reads: C01Reads =
+        journal::read_typed_value(&path).map_err(|_| "C01_READS_FORMAT".to_string())?;
+    Ok((reads, sha(&bytes)))
+}
+
+/// `p0ctl c01 build --plan ID --elf FILE --source DIR --image IMAGE --command TEXT`: offline —
+/// records, once per plan, the ELF a reproducible build of the pinned source produced and
+/// derives the parity again. Refused before anything is recorded: a source checkout whose `HEAD`
+/// is not the pinned commit or whose tracked files differ from it, a file that is no ELF, an
+/// image not named by its digest. The ELF's hash is computed here; a hash that is not the
+/// deployed one is a recorded BUILD FAIL.
+pub fn build(
+    project: &Path,
+    plan_id: &str,
+    elf: &Path,
+    source: &Path,
+    image: &str,
+    command: &str,
+) -> Result<(C01Reads, P1aParity), String> {
+    let dir = plan_dir(project, plan_id)?;
+    let (reads, reads_sha) = load_reads(&dir)?;
+    let git = |args: &[&str]| -> Result<String, String> {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(source)
+            .args(args)
+            .output()
+            .map_err(|e| format!("C01_BUILD_SOURCE: git: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "C01_BUILD_SOURCE: {} is no git checkout",
+                source.display()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let head = git(&["rev-parse", "HEAD"])?;
+    if head != protocol::SOURCE_COMMIT {
+        return Err(format!(
+            "C01_BUILD_SOURCE: HEAD {head} is not the pinned {} ({})",
+            protocol::SOURCE_COMMIT,
+            protocol::SOURCE_TAG
+        ));
+    }
+    if !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
+        return Err(
+            "C01_BUILD_SOURCE_MODIFIED: a tracked file differs from the pinned commit".into(),
+        );
+    }
+    let digest = image.rsplit_once("@sha256:").map(|(_, d)| d);
+    if !digest.is_some_and(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err(
+            "C01_BUILD_IMAGE: the build image by its digest (<name>@sha256:<64 hex>)".into(),
+        );
+    }
+    if command.trim().is_empty() {
+        return Err("C01_BUILD_COMMAND: the build command as it was run".into());
+    }
+    let bytes = std::fs::read(elf).map_err(|e| format!("C01_BUILD_ELF: {e}"))?;
+    if !bytes.starts_with(b"\x7fELF") {
+        return Err("C01_BUILD_ELF: the file is no ELF".into());
+    }
+    let built = protocol::trimmed_elf(&bytes);
+    let record = C01Build {
+        plan_id: plan_id.into(),
+        source_commit: head,
+        source_modified: false,
+        image: image.into(),
+        command: command.trim().into(),
+        elf_sha256: sha(built),
+        elf_len: built.len() as u64,
+        recorded_unix_ms: now_ms(),
+    };
+    let parity = record_step(&dir, BUILD, &record, &reads, &reads_sha)?;
+    Ok((reads, parity))
+}
+
+/// `p0ctl c01 fe01 --plan ID --observation DIR`: offline — records, once per plan, what the
+/// FE-01 full observation in `DIR` (`p0-fe-qualify --fe-mode full --execute`, C-01 step 6)
+/// configured and observed, and derives the parity again. Its journal is read strictly (chain
+/// and manifest); the FE01 gate compares the observed deployment with the read one.
+pub fn fe01(
+    project: &Path,
+    plan_id: &str,
+    observation: &Path,
+) -> Result<(C01Reads, P1aParity), String> {
+    use crate::analytics::payload::{Fe01Config, Fe01Report, Manifest};
+    let dir = plan_dir(project, plan_id)?;
+    let (reads, reads_sha) = load_reads(&dir)?;
+    let path = observation.join(super::fe_replay::FE01_JOURNAL);
+    let bad = |e: std::io::Error| format!("C01_FE01_JOURNAL: {e}");
+    let bytes = std::fs::read(&path).map_err(bad)?;
+    let mut reader = journal::Reader::open(&path).map_err(bad)?;
+    let (mut config, mut report, mut complete) = (None, None, false);
+    while let Some(f) = reader.next_frame().map_err(bad)? {
+        match f.kind {
+            journal::kind::FE01_CONFIG => config = Some(f.typed::<Fe01Config>().map_err(bad)?),
+            journal::kind::FE01_RESULT => report = Some(f.typed::<Fe01Report>().map_err(bad)?),
+            journal::MANIFEST => complete = f.typed::<Manifest>().map_err(bad)?.complete,
+            _ => {}
+        }
+    }
+    let config = config.ok_or("C01_FE01_JOURNAL: no configuration frame")?;
+    let report = report.ok_or("C01_FE01_JOURNAL: no result frame")?;
+    let o = report.observation.as_ref();
+    let record = C01Fe01 {
+        plan_id: plan_id.into(),
+        journal_sha256: sha(&bytes),
+        sealed_complete: complete,
+        execution: config.execution,
+        status: report.status.clone(),
+        reason: report.reason.clone(),
+        slot: o.map(|o| o.slot),
+        program_data: o.map(|o| o.program_data.to_string()),
+        program_data_sha256: o.map(|o| o.program_data_sha256.clone()),
+        deployment_slot: o.map(|o| o.deployment_slot),
+        accounts: o.map_or(0, |o| o.accounts.len() as u64),
+        targets: o.map_or(0, |o| o.targets.len() as u64),
+        recorded_unix_ms: now_ms(),
+    };
+    let parity = record_step(&dir, FE01, &record, &reads, &reads_sha)?;
     Ok((reads, parity))
 }
 
@@ -589,9 +787,9 @@ fn store_elf(dir: &Path, row: &mut C01Program, elf: &[u8]) -> Result<(), String>
     Ok(())
 }
 
-/// DEC-18 §2.2–2.5: the parity gates of a run's reads. PASS only when every mandatory gate
-/// passes; a reproducible build and the FE-01 observation are their own steps (NOT_RUN here).
-pub fn evaluate(reads: &C01Reads, reads_sha256: &str) -> P1aParity {
+/// DEC-18 §2.2–2.5: the parity gates of a run's reads and the recorded steps. PASS only when
+/// every mandatory gate passes; a step not recorded is NOT_RUN.
+pub fn evaluate(reads: &C01Reads, reads_sha256: &str, steps: &Steps) -> P1aParity {
     let gate = |name: &str, verdict: &str, mandatory: bool, detail: String| ParityGate {
         name: name.into(),
         verdict: verdict.into(),
@@ -629,8 +827,45 @@ pub fn evaluate(reads: &C01Reads, reads_sha256: &str) -> P1aParity {
             protocol::PROGRAM_DATA_REFERENCE_SOURCE_TAG
         ),
     ));
+    let build = match &steps.build {
+        None => gate(
+            "BUILD",
+            "NOT_RUN",
+            true,
+            format!(
+                "no reproducible build of {} ({}) recorded (p0ctl c01 build): source/binary parity of the ELF is not shown",
+                protocol::SOURCE_TAG,
+                protocol::SOURCE_COMMIT
+            ),
+        ),
+        Some(b) => gate(
+            "BUILD",
+            pass(
+                b.plan_id == reads.plan_id
+                    && b.source_commit == protocol::SOURCE_COMMIT
+                    && !b.source_modified
+                    && d.elf_sha256.as_deref() == Some(b.elf_sha256.as_str())
+                    && d.elf_len == Some(b.elf_len),
+            ),
+            true,
+            format!(
+                "built elf_sha256={} elf_len={} from {} ({}) with {}: {}; deployed elf_sha256={}",
+                b.elf_sha256,
+                b.elf_len,
+                protocol::SOURCE_TAG,
+                b.source_commit,
+                b.image,
+                b.command,
+                d.elf_sha256.as_deref().unwrap_or("-")
+            ),
+        ),
+    };
+    // The user's decision of 02.11.2026: a build of the pinned source identical to the deployed
+    // ELF proves the code; the on-chain IDL is metadata its authority uploads apart from the
+    // program, informational then. Without that build it stays mandatory.
+    let built = build.verdict == "PASS";
     let idl = &reads.idl;
-    gates.push(match (&idl.sha256, idl.present) {
+    let mut idl_gate = match (&idl.sha256, idl.present) {
         (Some(s), _) => gate(
             "IDL",
             pass(s == protocol::SOURCE_IDL_SHA256),
@@ -649,7 +884,12 @@ pub fn evaluate(reads: &C01Reads, reads_sha256: &str) -> P1aParity {
             true,
             format!("no on-chain IDL at {}", idl.address),
         ),
-    });
+    };
+    if built {
+        idl_gate.mandatory = false;
+        idl_gate.detail += "; informational: the BUILD gate proves the deployed bytecode";
+    }
+    gates.push(idl_gate);
     gates.push(gate(
         "GROUP",
         pass(reads.group_decodes && reads.fee_state_decodes),
@@ -709,23 +949,53 @@ pub fn evaluate(reads: &C01Reads, reads_sha256: &str) -> P1aParity {
             .collect::<Vec<_>>()
             .join(" "),
     ));
-    gates.push(gate(
-        "BUILD",
-        "NOT_RUN",
-        true,
-        format!(
-            "no reproducible build of {} ({}) here: source/binary parity of the ELF is not shown",
-            protocol::SOURCE_TAG,
-            protocol::SOURCE_COMMIT
+    gates.push(build);
+    gates.push(match &steps.fe01 {
+        None => gate(
+            "FE01",
+            "NOT_RUN",
+            true,
+            "the FE-01 observation on this deployment (p0-fe-qualify --fe-mode full, C-01 step 6; p0ctl c01 fe01)"
+                .into(),
         ),
-    ));
-    gates.push(gate(
-        "FE01",
-        "NOT_RUN",
-        true,
-        "the FE-01 observation on this deployment (p0-fe-qualify --fe-mode full, C-01 step 6)"
-            .into(),
-    ));
+        Some(f) => {
+            // The read deployment's account hash (base58) as the observation states it (hex).
+            let account = d
+                .account_hash
+                .as_deref()
+                .and_then(|h| solana_sdk::hash::Hash::from_str(h).ok())
+                .map(|h| journal::hex(&h.to_bytes()));
+            gate(
+                "FE01",
+                pass(
+                    f.plan_id == reads.plan_id
+                        && f.sealed_complete
+                        && f.execution == super::fe_qualification::READ_ONLY
+                        && f.status == super::fe_qualification::OBSERVED
+                        && f.program_data.is_some()
+                        && f.program_data == d.program_data
+                        && f.deployment_slot == d.deployment_slot
+                        && account.is_some()
+                        && f.program_data_sha256 == account
+                        && f.slot >= reads.context_slots.iter().max().copied(),
+                ),
+                true,
+                format!(
+                    "{} {} slot={} program_data={} sha256={} deployment_slot={} accounts={} targets={} sealed_complete={} journal={}",
+                    f.status,
+                    f.execution,
+                    f.slot.map_or("-".into(), |s| s.to_string()),
+                    f.program_data.as_deref().unwrap_or("-"),
+                    f.program_data_sha256.as_deref().unwrap_or("-"),
+                    f.deployment_slot.map_or("-".into(), |s| s.to_string()),
+                    f.accounts,
+                    f.targets,
+                    f.sealed_complete,
+                    f.journal_sha256
+                ),
+            )
+        }
+    });
     let overall = gates
         .iter()
         .find(|g| g.mandatory && g.verdict != "PASS")
@@ -849,7 +1119,7 @@ mod tests {
     /// oracle setup or a missing observed account fails the oracle gate.
     #[test]
     fn p0_025_parity_passes_only_with_every_mandatory_gate() {
-        let p = evaluate(&reads(), "x");
+        let p = evaluate(&reads(), "x", &Steps::default());
         let verdict = |name: &str| {
             p.gates
                 .iter()
@@ -864,7 +1134,7 @@ mod tests {
         let mut r = reads();
         r.banks[0].observation_error = Some("unsupported".into());
         assert_eq!(
-            evaluate(&r, "x")
+            evaluate(&r, "x", &Steps::default())
                 .gates
                 .iter()
                 .find(|g| g.name == "ORACLES")
@@ -880,7 +1150,7 @@ mod tests {
             sha256: None,
         });
         assert_eq!(
-            evaluate(&r, "x")
+            evaluate(&r, "x", &Steps::default())
                 .gates
                 .iter()
                 .find(|g| g.name == "ORACLES")
@@ -890,11 +1160,143 @@ mod tests {
         );
         let mut r = reads();
         r.error = Some("C01_BUDGET: x".into());
-        assert_eq!(evaluate(&r, "x").overall, "BLOCKED: READS BLOCKED");
+        assert_eq!(
+            evaluate(&r, "x", &Steps::default()).overall,
+            "BLOCKED: READS BLOCKED"
+        );
         // The ELF of a ProgramData account: after the metadata, padding trimmed.
         let mut pd = vec![0u8; protocol::PROGRAM_DATA_METADATA_LEN];
         pd.extend_from_slice(b"ELF\0x");
         pd.extend_from_slice(&[0; 9]);
         assert_eq!(protocol::program_data_elf(&pd), Some(&b"ELF\0x"[..]));
+    }
+
+    /// C-01 BUILD gate: a recorded build of the pinned source passes only with the deployed
+    /// ELF's hash and length; the parity then waits for the FE-01 observation.
+    #[test]
+    fn p0_025_the_build_gate_is_the_recorded_build_against_the_deployed_elf() {
+        let build = |sha: &str, len: u64| Steps {
+            fe01: None,
+            build: Some(C01Build {
+                plan_id: "p".into(),
+                source_commit: protocol::SOURCE_COMMIT.into(),
+                source_modified: false,
+                image: "i@sha256:0".into(),
+                command: "c".into(),
+                elf_sha256: sha.into(),
+                elf_len: len,
+                recorded_unix_ms: None,
+            }),
+        };
+        let verdict = |steps: &Steps| {
+            let p = evaluate(&reads(), "x", steps);
+            let g = p.gates.iter().find(|g| g.name == "BUILD").unwrap();
+            (g.verdict.clone(), p.overall)
+        };
+        assert_eq!(
+            verdict(&build("e", 1)),
+            ("PASS".into(), "BLOCKED: FE01 NOT_RUN".into())
+        );
+        assert_eq!(verdict(&build("other", 1)).0, "FAIL");
+        assert_eq!(verdict(&build("e", 2)).0, "FAIL");
+        let mut modified = build("e", 1);
+        modified.build.as_mut().unwrap().source_modified = true;
+        assert_eq!(verdict(&modified).0, "FAIL");
+        // A stale on-chain IDL: mandatory without the build, informational with it.
+        let mut stale = reads();
+        stale.idl.sha256 = Some("stale".into());
+        assert_eq!(
+            evaluate(&stale, "x", &Steps::default()).overall,
+            "BLOCKED: IDL FAIL"
+        );
+        let p = evaluate(&stale, "x", &build("e", 1));
+        let idl = p.gates.iter().find(|g| g.name == "IDL").unwrap();
+        assert_eq!((idl.verdict.as_str(), idl.mandatory), ("FAIL", false));
+        assert_eq!(p.overall, "BLOCKED: FE01 NOT_RUN");
+        assert_eq!(
+            evaluate(&stale, "x", &build("other", 1)).overall,
+            "BLOCKED: IDL FAIL"
+        );
+        assert_eq!(Steps::default().parity_file(), "parity.p0j");
+        assert_eq!(build("e", 1).parity_file(), "parity-build.p0j");
+    }
+
+    /// C-01 step 6, FE01 gate: the sealed read-only observation of exactly the read deployment
+    /// (ProgramData, deployment slot, account hash), not before the reads; with the build the
+    /// parity is PASS.
+    #[test]
+    fn p0_025_the_fe01_gate_is_the_observation_of_the_read_deployment() {
+        let hash = solana_sdk::hash::hash(b"pd");
+        let mut r = reads();
+        r.deployment.account_hash = Some(hash.to_string());
+        let observed = C01Fe01 {
+            plan_id: "p".into(),
+            journal_sha256: "j".into(),
+            sealed_complete: true,
+            execution: crate::orchestration::fe_qualification::READ_ONLY.into(),
+            status: crate::orchestration::fe_qualification::OBSERVED.into(),
+            reason: None,
+            slot: Some(1),
+            program_data: Some("pd".into()),
+            program_data_sha256: Some(journal::hex(&hash.to_bytes())),
+            deployment_slot: Some(1),
+            accounts: 1,
+            targets: 1,
+            recorded_unix_ms: None,
+        };
+        let built = C01Build {
+            plan_id: "p".into(),
+            source_commit: protocol::SOURCE_COMMIT.into(),
+            source_modified: false,
+            image: "i".into(),
+            command: "c".into(),
+            elf_sha256: "e".into(),
+            elf_len: 1,
+            recorded_unix_ms: None,
+        };
+        let verdict = |f: C01Fe01| {
+            let p = evaluate(
+                &r,
+                "x",
+                &Steps {
+                    build: Some(built.clone()),
+                    fe01: Some(f),
+                },
+            );
+            let g = p.gates.iter().find(|g| g.name == "FE01").unwrap();
+            (g.verdict.clone(), p.overall)
+        };
+        assert_eq!(verdict(observed.clone()), ("PASS".into(), "PASS".into()));
+        for f in [
+            C01Fe01 {
+                program_data_sha256: Some("00".into()),
+                ..observed.clone()
+            },
+            C01Fe01 {
+                deployment_slot: Some(2),
+                ..observed.clone()
+            },
+            C01Fe01 {
+                sealed_complete: false,
+                ..observed.clone()
+            },
+            C01Fe01 {
+                status: crate::orchestration::fe_qualification::INCOMPLETE.into(),
+                ..observed.clone()
+            },
+            C01Fe01 {
+                slot: Some(0),
+                ..observed.clone()
+            },
+            C01Fe01 {
+                program_data: None,
+                program_data_sha256: None,
+                deployment_slot: None,
+                slot: None,
+                ..observed.clone()
+            },
+        ] {
+            assert_eq!(verdict(f).0, "FAIL");
+        }
     }
 }
