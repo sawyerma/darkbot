@@ -34,6 +34,9 @@ struct Behaviour {
     unauthorized: bool,
     /// This subscription is never acknowledged.
     unacknowledged: Option<&'static str>,
+    /// The first subscription of this method is acknowledged but never notified (the owner's
+    /// first program filter matches nothing in the window).
+    silent_first: Option<&'static str>,
 }
 
 /// What the loopback provider saw.
@@ -202,7 +205,10 @@ fn wss(b: Behaviour, seen: Arc<Mutex<Seen>>) -> String {
                     let _ = ws.send(tungstenite::Message::Text(
                         serde_json::json!({"jsonrpc":"2.0","result":next,"id":id}).to_string(),
                     ));
-                    if b.silent != Some(method.as_str()) {
+                    let first = s_count(&seen, &method) == 1;
+                    if b.silent != Some(method.as_str())
+                        && !(first && b.silent_first == Some(method.as_str()))
+                    {
                         let note = method.replace("Subscribe", "Notification");
                         let _ = ws.send(tungstenite::Message::Text(
                             serde_json::json!({"jsonrpc":"2.0","method":note,"params":{"result":{"slot":1},"subscription":next}}).to_string(),
@@ -213,6 +219,15 @@ fn wss(b: Behaviour, seen: Arc<Mutex<Seen>>) -> String {
         }
     });
     url
+}
+
+fn s_count(seen: &Arc<Mutex<Seen>>, method: &str) -> usize {
+    seen.lock()
+        .unwrap()
+        .subscribed
+        .iter()
+        .filter(|m| *m == method)
+        .count()
 }
 
 /// A project whose registry selects the loopback pair (a query credential in the test store).
@@ -426,7 +441,7 @@ fn p0_022_a_measurement_proves_each_read_once_and_admits_exactly_its_modes() {
     );
     assert_eq!(seen.ws_connections, 1, "one WSS connection");
     assert_eq!(seen.active_max, 1, "one subscription at a time");
-    assert_eq!(seen.subscribed.len(), 6, "{:?}", seen.subscribed);
+    assert_eq!(seen.subscribed.len(), 7, "{:?}", seen.subscribed);
     drop(seen);
     assert!(!text.contains("MEASURE-SECRET"), "{text}");
     for mode in ["boot", "econ4h", "c0-mo"] {
@@ -670,6 +685,35 @@ fn p0_022_a_plan_beyond_the_approved_bounds_is_refused() {
     }
     assert!(p.seen.lock().unwrap().rpc.is_empty());
     let _ = Path::new(&p.base);
+    let _ = std::fs::remove_dir_all(&p.base);
+}
+
+/// C-11 (02.11.2026): the owner subscribes with two program filters; a window in which the first
+/// matches nothing proves nothing against the read while the second delivers.
+#[test]
+fn p0_022_a_read_of_two_messages_is_supported_once_either_delivers() {
+    let p = setup(
+        "either",
+        Behaviour {
+            silent_first: Some("programSubscribe"),
+            ..Default::default()
+        },
+    );
+    let env = [("P0_MEASURE_SUBSCRIPTION_SECONDS", "2")];
+    let (_, plan_id, token, plan_text) = plan(&p, &env);
+    assert!(
+        plan_text.contains("its 2 messages one after another"),
+        "{plan_text}"
+    );
+    let (ok, text) = measure_with(&p, &plan_id, &token, &env);
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("read programSubscribe@confirmed SUPPORTED"),
+        "{text}"
+    );
+    assert!(text.contains("mode econ4h SUPPORTED"), "{text}");
+    assert_eq!(s_count(&p.seen, "programSubscribe"), 2);
+    admit(&p, &evidence_id(&text), "econ4h", "1").unwrap();
     let _ = std::fs::remove_dir_all(&p.base);
 }
 

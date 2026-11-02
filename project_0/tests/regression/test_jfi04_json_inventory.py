@@ -53,7 +53,7 @@ PINNED = {
     'runtime/src/orchestration/c01_read.rs': (9, 'W'),  # DEC-18 §2 (C-01, P0-025): the deployment reads' JSON-RPC params and answers and the external Anchor IDL at the wire; reads and parity are typed records
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),  # the measured JSON's explicit offline import, historical build only (DEC-18 §3.4, P0-023)
-    'runtime/src/orchestration/provider_measure.rs': (21, 'W'),  # DEC-18 §3 (C-11, P0-022): the probes' JSON-RPC params, subscribe messages and answers at the wire; plan and measurement are typed records
+    'runtime/src/orchestration/provider_measure.rs': (22, 'W'),  # DEC-18 §3 (C-11, P0-022): the probes' JSON-RPC params, subscribe messages and answers at the wire; plan and measurement are typed records
     'runtime/examples/p0-gap-ws-proxy.rs': (10, 'W'),
     'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
     'solana/src/chain.rs': (41, 'WH'),  # wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4)
@@ -181,7 +181,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 361)  # P0-025: 9 W (C-01 deployment reads at the wire); P0-022: 30 W (C-11 probes at the wire); DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 362)  # C-11 fix: 1 W (each subscribe message probed); P0-025: 9 W (C-01 deployment reads at the wire); P0-022: 30 W (C-11 probes at the wire); DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

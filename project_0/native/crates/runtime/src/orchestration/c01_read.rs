@@ -25,8 +25,6 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-/// The store of C-01 plans and their reads.
-pub const STORE: &str = "data/c01";
 const PLAN: &str = "plan.p0j";
 const STARTED: &str = "run.started";
 const READS: &str = "reads.p0j";

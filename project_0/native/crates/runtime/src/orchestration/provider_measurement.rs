@@ -6,6 +6,9 @@ use crate::analytics::journal;
 use crate::analytics::payload::Payload;
 use serde::{Deserialize, Serialize};
 
+/// The store of plans and measurements (under a project; git-ignored, P0-026).
+pub const STORE: &str = "data/provider_measure";
+
 /// A run path the pre-measurement qualifies (DEC-18 §3.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Mode {

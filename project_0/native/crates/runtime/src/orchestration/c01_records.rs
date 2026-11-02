@@ -6,6 +6,9 @@ use crate::analytics::journal;
 use crate::analytics::payload::Payload;
 use serde::{Deserialize, Serialize};
 
+/// The store of C-01 plans and their reads (under a project; git-ignored, P0-026).
+pub const STORE: &str = "data/c01";
+
 /// The read budget a plan binds (the FE-01 scope's: `fe_calls`, `fe_max_mib`, `fe_seconds`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct C01Budget {

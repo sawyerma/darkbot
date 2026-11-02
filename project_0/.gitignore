@@ -32,6 +32,10 @@
 /data/provider_evidence/
 # orchestration/provider_registry.rs STORE (DEC-18; no secret: credentials live in the keychain)
 /data/providers/
+# DEC-18 §3/§2 (C-11, C-01): the provider pre-measurements and the deployment reads (plans,
+# records, bytecode).
+/data/provider_measure/
+/data/c01/
 # orchestration/until_stopped.rs STORE (qualifications, autostart)
 /data/until_stopped/
 # orchestration/fe06.rs STORE

@@ -19,8 +19,6 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-/// The store of plans and measurements.
-pub const STORE: &str = "data/provider_measure";
 const PLAN: &str = "plan.p0j";
 const STARTED: &str = "run.started";
 const RESULTS: &str = "results";
@@ -187,7 +185,6 @@ fn rpc_params(method: &str, program: &Pubkey, group: &Pubkey) -> String {
 fn reads_of(program: Pubkey, group: &Pubkey) -> (Vec<ModeReads>, Vec<Read>, Vec<Value>) {
     let mut modes = Vec::new();
     let mut order: Vec<Read> = Vec::new();
-    let mut messages: Vec<Value> = Vec::new();
     for mode in Mode::ALL {
         let mut reads: Vec<Read> = rpc_methods(mode)
             .iter()
@@ -200,7 +197,6 @@ fn reads_of(program: Pubkey, group: &Pubkey) -> (Vec<ModeReads>, Vec<Read>, Vec<
             }
             if !order.contains(&read) {
                 order.push(read);
-                messages.push(m);
             }
         }
         modes.push(ModeReads { mode, reads });
@@ -214,7 +210,29 @@ fn reads_of(program: Pubkey, group: &Pubkey) -> (Vec<ModeReads>, Vec<Read>, Vec<
         }
     }
     rpc.extend(order);
+    let messages = wss_probes(program, group)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
     (modes, rpc, messages)
+}
+
+/// The subscription messages of every mode, each once (its request id aside), in order. Two
+/// messages of one read — the owner's two program filters — are both probed: the read is
+/// SUPPORTED once either delivers an event (the session needs either's accounts).
+fn wss_probes(program: Pubkey, group: &Pubkey) -> Vec<(Read, Value)> {
+    let mut probes: Vec<(Read, Value)> = Vec::new();
+    for mode in Mode::ALL {
+        for m in wss_messages(mode, program, group) {
+            if !probes
+                .iter()
+                .any(|(_, o)| o["method"] == m["method"] && o["params"] == m["params"])
+            {
+                probes.push((wss_read(&m), m));
+            }
+        }
+    }
+    probes
 }
 
 fn subscription_types(reads: &[Read]) -> usize {
@@ -252,10 +270,10 @@ pub fn plan(
     let (resolved, registry) = configure(project, get)?;
     let c = &resolved.config;
     let (program, group) = program_and_group(c)?;
-    let (modes, order, _) = reads_of(program, &group);
+    let (modes, order, messages) = reads_of(program, &group);
     let limits = MeasureLimits::of(&c.limits);
     let rpc_probes = order.iter().filter(|r| matches!(r, Read::Rpc(_))).count() as u64;
-    let subscriptions = (order.len() as u64) - rpc_probes;
+    let subscriptions = messages.len() as u64;
     let types = subscription_types(&order) as u64;
     // The probes fit the bounds: one attempt each, paced, every subscription in its window.
     let seconds =
@@ -266,7 +284,7 @@ pub fn plan(
         || seconds > limits.seconds
     {
         return Err(format!(
-            "MEASURE_PLAN_EXCEEDS_BOUNDS: {rpc_probes} RPC probes, {types} subscription types, about {seconds} s against {}",
+            "MEASURE_PLAN_EXCEEDS_BOUNDS: {rpc_probes} RPC probes, {types} subscription types in {subscriptions} subscriptions, about {seconds} s against {}",
             limits.text()
         ));
     }
@@ -276,14 +294,17 @@ pub fn plan(
             read: read.clone(),
             params: match read {
                 Read::Rpc(m) => rpc_params(m, &program, &group),
-                Read::Wss(m, c) => format!(
-                    "as its session sends it, commitment {c}{}",
-                    if m == "accountSubscribe" {
-                        ", the Clock sysvar (an owner dependency, notified every slot)"
+                Read::Wss(m, c) => {
+                    let n = messages.iter().filter(|v| wss_read(v) == *read).count();
+                    let note = if m == "accountSubscribe" {
+                        ", the Clock sysvar (an owner dependency, notified every slot)".to_string()
+                    } else if n > 1 {
+                        format!(", its {n} messages one after another (SUPPORTED once one delivers an event)")
                     } else {
-                        ""
-                    }
-                ),
+                        String::new()
+                    };
+                    format!("as its session sends it, commitment {c}{note}")
+                }
             },
         })
         .collect();
@@ -577,23 +598,15 @@ fn measure(
         });
     }
     // The subscriptions over one connection, one at a time.
-    let mut messages: Vec<Value> = Vec::new();
-    let mut wss_reads: Vec<Read> = Vec::new();
-    for mode in Mode::ALL {
-        for m in wss_messages(mode, program, &group) {
-            let read = wss_read(&m);
-            if !wss_reads.contains(&read) {
-                wss_reads.push(read);
-                messages.push(m);
-            }
-        }
-    }
+    let probes = wss_probes(program, &group);
+    let messages: Vec<Value> = probes.iter().map(|(_, m)| m.clone()).collect();
     let window = Duration::from_secs(plan.limits.subscription_seconds);
     let report =
         darkbot_solana::ingress::ws_probe::probe(&c.wss_endpoints[0], &messages, window, deadline);
     use darkbot_solana::ingress::ws_probe::{Stop, WsProbeOutcome as W};
     rate_limited |= report.retry_after_ms.is_some();
-    for (k, (read, o)) in wss_reads.iter().zip(&report.outcomes).enumerate() {
+    let mut wss: Vec<ProbeResult> = Vec::new();
+    for (k, ((read, _), o)) in probes.iter().zip(&report.outcomes).enumerate() {
         let outcome = match (o, report.connect_error) {
             (W::Supported { .. }, _) => Outcome::Supported,
             (W::AckOnly { .. }, _) => Outcome::NotProven("NO_EVENT_IN_WINDOW".into()),
@@ -624,14 +637,30 @@ fn measure(
             W::AckOnly { ack_ms } => *ack_ms,
             _ => 0,
         };
-        results.push(ProbeResult {
-            read: read.clone(),
-            outcome,
-            attempts: u64::from(!matches!(o, W::NotRun)),
-            bytes: report.probe_bytes.get(k).copied().unwrap_or(0),
-            elapsed_ms,
-        });
+        let (attempts, bytes) = (
+            u64::from(!matches!(o, W::NotRun)),
+            report.probe_bytes.get(k).copied().unwrap_or(0),
+        );
+        match wss.iter_mut().find(|p| &p.read == read) {
+            // A further message of the read: SUPPORTED once one delivers, timed by that one.
+            Some(p) => {
+                p.attempts += attempts;
+                p.bytes += bytes;
+                if p.outcome != Outcome::Supported && outcome == Outcome::Supported {
+                    p.outcome = outcome;
+                    p.elapsed_ms = elapsed_ms;
+                }
+            }
+            None => wss.push(ProbeResult {
+                read: read.clone(),
+                outcome,
+                attempts,
+                bytes,
+                elapsed_ms,
+            }),
+        }
     }
+    results.extend(wss);
     let modes = plan
         .modes
         .iter()
@@ -1064,12 +1093,14 @@ mod tests {
             set(&["logsSubscribe@finalized", "slotSubscribe@-"])
         );
         let (_, order, messages) = reads_of(program, &group);
-        assert_eq!(order.len() - messages.len(), 12, "twelve RPC methods");
+        let rpc = order.iter().filter(|r| matches!(r, Read::Rpc(_))).count();
+        assert_eq!(rpc, 12, "twelve RPC methods");
+        assert_eq!(order.len() - rpc, 6, "six subscription reads");
         assert_eq!(subscription_types(&order), 5);
         assert_eq!(
             messages.len(),
-            6,
-            "six subscription messages: logs at two commitments"
+            7,
+            "seven subscription messages: logs at two commitments, the owner's two program filters"
         );
     }
 }
