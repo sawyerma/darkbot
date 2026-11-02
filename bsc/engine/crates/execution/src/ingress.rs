@@ -106,6 +106,8 @@ pub struct SourceStats {
     pub launch_first: u64,
     /// Monotonic time of the last observation, if any.
     pub last_event_ns: Option<u64>,
+    /// REV.1.0 R6: monotonic time of its last verified full transaction.
+    pub last_full_ns: Option<u64>,
 }
 
 /// One first sighting: its source, its monotonic time and the runtime's
@@ -410,6 +412,7 @@ impl IngressCore {
             }
             Observation::Full { hash, raw } => {
                 self.stats[i].full += 1;
+                self.stats[i].last_full_ns = Some(now_ns);
                 let (launch, venue_target) = classify(&self.four, raw, self.max_launch_calldata);
                 self.last_venue_target = venue_target;
                 // The per-source launch counters stay the Flap C1 scope.
@@ -505,6 +508,60 @@ impl Health {
     }
 }
 
+/// REV.1.0 R6: what `source` delivered so far: its design capability once
+/// it delivered a verified full transaction (a QPT source always QPT),
+/// hash-only frames alone `HASH_ONLY`, nothing yet `UNKNOWN`.
+pub fn observed_capability(
+    source: crate::sources::SourceId,
+    stats: &SourceStats,
+) -> crate::sources::SourceCapability {
+    use crate::sources::SourceCapability as C;
+    match (source.capability(), stats.full, stats.hash_only) {
+        (C::Full, 0, 0) => C::Unknown,
+        (C::Full, 0, _) => C::HashOnly,
+        (designed, _, _) => designed,
+    }
+}
+
+/// R6 review LOW-2: what `source` delivers now, at `now_ns`: its design
+/// capability while its last verified full transaction is at most
+/// `quiet_ns` old; else hash-only frames `HASH_ONLY`, nothing `UNKNOWN`
+/// (never FULL on an old one).
+pub fn current_capability(
+    source: crate::sources::SourceId,
+    stats: &SourceStats,
+    now_ns: u64,
+    quiet_ns: u64,
+) -> crate::sources::SourceCapability {
+    use crate::sources::SourceCapability as C;
+    match (source.capability(), stats.last_full_ns) {
+        (C::Full, Some(at)) if now_ns.saturating_sub(at) <= quiet_ns => C::Full,
+        (C::Full, _) if stats.hash_only > 0 => C::HashOnly,
+        (C::Full, _) => C::Unknown,
+        (designed, _) => designed,
+    }
+}
+
+/// R6 review HIGH-1: a source's health at `now_ns`: not running this pass
+/// (the reconcile's view, LIVE included) or stopping, OFF; no endpoint in
+/// this build, UNQUALIFIED; else from its counters ([`health`]).
+pub fn source_health(
+    running: bool,
+    endpoint: bool,
+    stopping: bool,
+    stats: &SourceStats,
+    rate_limited_recent: bool,
+    now_ns: u64,
+    quiet_ns: u64,
+) -> Health {
+    match (running, endpoint, stopping) {
+        (false, _, _) => Health::Off,
+        (true, false, _) => Health::Unqualified,
+        (true, true, true) => Health::Off,
+        (true, true, false) => health(stats, rate_limited_recent, now_ns, quiet_ns),
+    }
+}
+
 /// Health of a running source from its counters at `now_ns`.
 /// `rate_limited_recent`: the last disconnect was a rate limit.
 pub fn health(
@@ -529,6 +586,56 @@ pub fn health(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REV.1.0 R6: a source's observed capability: nothing yet UNKNOWN,
+    /// hash-only frames alone HASH_ONLY, a verified full transaction its
+    /// design capability; 48Club always QPT.
+    #[test]
+    fn a_sources_capability_is_what_it_delivered() {
+        use crate::sources::{SourceCapability as C, SourceId};
+        let stats = |full, hash_only| SourceStats {
+            full,
+            hash_only,
+            ..SourceStats::default()
+        };
+        let seen = |s, full, hash_only| observed_capability(s, &stats(full, hash_only));
+        assert_eq!(seen(SourceId::PublicNode, 0, 0), C::Unknown);
+        assert_eq!(seen(SourceId::Drpc, 0, 3), C::HashOnly);
+        assert_eq!(seen(SourceId::BlockReq, 1, 3), C::Full);
+        assert_eq!(seen(SourceId::Geth, 2, 0), C::Full);
+        assert_eq!(seen(SourceId::Club48, 0, 0), C::Qpt);
+        // Review LOW-2: the gate's view: FULL only while the last full
+        // transaction is within the quiet bound.
+        let at = |last_full_ns, hash_only| SourceStats {
+            full: 1,
+            hash_only,
+            last_full_ns,
+            ..SourceStats::default()
+        };
+        let now = |s, st: &SourceStats| current_capability(s, st, 1_000, 100);
+        assert_eq!(now(SourceId::Geth, &at(Some(900), 0)), C::Full);
+        assert_eq!(now(SourceId::Geth, &at(Some(899), 0)), C::Unknown);
+        assert_eq!(now(SourceId::Geth, &at(Some(899), 4)), C::HashOnly);
+        assert_eq!(now(SourceId::Club48, &at(Some(900), 0)), C::Qpt);
+    }
+
+    /// Review HIGH-1: a source's health follows whether it runs this pass
+    /// (a LIVE one too), not its stored mode.
+    #[test]
+    fn a_running_sources_health_is_its_counters() {
+        let live = SourceStats {
+            connected: true,
+            last_event_ns: Some(950),
+            ..SourceStats::default()
+        };
+        let h = |running, endpoint, stopping| {
+            source_health(running, endpoint, stopping, &live, false, 1_000, 100)
+        };
+        assert_eq!(h(true, true, false), Health::Healthy);
+        assert_eq!(h(false, true, false), Health::Off);
+        assert_eq!(h(true, false, false), Health::Unqualified);
+        assert_eq!(h(true, true, true), Health::Off);
+    }
 
     /// A pending `newTokenV6` launch of the G0.4 coverage capture (real,
     /// canonical calldata).

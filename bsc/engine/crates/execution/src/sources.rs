@@ -54,6 +54,31 @@ pub enum SourceId {
     Club48,
 }
 
+/// REV.1.0 R6 (PHASENPLAN §5a.2): a source's capability class, by design
+/// ([`SourceId::capability`]) or as observed ([`crate::ingress::observed_capability`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceCapability {
+    /// Verified full signed transactions: a C3 BUY's signal.
+    Full,
+    /// Only transaction hashes so far: never a signal.
+    HashOnly,
+    /// 48Club's auction events: never a signal.
+    Qpt,
+    /// Nothing delivered yet.
+    Unknown,
+}
+
+impl SourceCapability {
+    pub const fn name(self) -> &'static str {
+        match self {
+            SourceCapability::Full => "FULL",
+            SourceCapability::HashOnly => "HASH_ONLY",
+            SourceCapability::Qpt => "QPT",
+            SourceCapability::Unknown => "UNKNOWN",
+        }
+    }
+}
+
 impl SourceId {
     /// Its place in [`SourceId::ALL`] (BSC3-002): a fixed index per value,
     /// the match exhaustive, so a new value needs its own; one left out of
@@ -75,6 +100,19 @@ impl SourceId {
             self,
             SourceId::PublicNode | SourceId::Drpc | SourceId::BlockReq
         )
+    }
+
+    /// REV.1.0 R6 (PHASENPLAN §5a.2): what this source's adapter delivers
+    /// by design: the WSS endpoints and the local geth's txpool lanes full
+    /// signed transactions (a hash-only frame counted, never acted on),
+    /// 48Club its auctions (QPT: no transaction to act on).
+    pub const fn capability(self) -> SourceCapability {
+        match self {
+            SourceId::Geth | SourceId::PublicNode | SourceId::Drpc | SourceId::BlockReq => {
+                SourceCapability::Full
+            }
+            SourceId::Club48 => SourceCapability::Qpt,
+        }
     }
 
     pub const ALL: [SourceId; 5] = [

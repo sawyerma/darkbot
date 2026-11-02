@@ -336,6 +336,10 @@ pub enum Refusal {
     Admission,
     /// This session already bought the token.
     DuplicateToken,
+    /// REV.1.0 R6: another launch transaction predicts a token this arm
+    /// bought on its own launch (a CONFLICT: the chain decides which one
+    /// lands; nothing more goes on the token).
+    TokenConflict,
     /// The BUY would exceed the session's exposure cap.
     SessionCap,
     /// The expectation could not be formed.
@@ -404,6 +408,7 @@ impl Refusal {
             Self::NoSnapshot => "NO_SNAPSHOT",
             Self::Admission => "ADMISSION",
             Self::DuplicateToken => "DUPLICATE_TOKEN",
+            Self::TokenConflict => "TOKEN_CONFLICT",
             Self::SessionCap => "SESSION_CAP",
             Self::Intent => "INTENT",
             Self::LanesExhausted => "LANES_EXHAUSTED",
@@ -702,6 +707,8 @@ pub struct Executor<E: End> {
     spent_wei: U256,
     /// Tokens bought in this session (at most one per lane).
     bought: Vec<[u8; 20]>,
+    /// R6: each C3 token with the launch transaction it was bought on.
+    bought_on: Vec<([u8; 20], [u8; 32])>,
     fence: PathBuf,
     scratch: Vec<u8>,
     raw: Vec<u8>,
@@ -1340,6 +1347,7 @@ impl<E: End> Executor<E> {
             used: 0,
             spent_wei: U256::ZERO,
             bought: Vec::with_capacity(config.lanes),
+            bought_on: Vec::with_capacity(config.lanes),
             fence,
             scratch: Vec::with_capacity(512),
             raw: Vec::with_capacity(512),
@@ -1440,7 +1448,18 @@ impl<E: End> Executor<E> {
         let admitted_ns = clock.now_ns();
         let token = admitted.token().into_array();
         if self.holds(&token) {
-            return Err(Refusal::DuplicateToken);
+            // R6: another launch transaction of a token bought on its own
+            // launch is a CONFLICT, not the same launch seen again.
+            return Err(
+                match self
+                    .bought_on
+                    .iter()
+                    .any(|(t, h)| *t == token && *h != hash)
+                {
+                    true => Refusal::TokenConflict,
+                    false => Refusal::DuplicateToken,
+                },
+            );
         }
         let exposure = self.budget.max_total_wei;
         if self.spent_wei + exposure > U256::from(self.config.session_cap_wei) {
@@ -1473,6 +1492,7 @@ impl<E: End> Executor<E> {
         // The token is taken at the reservation, as the production lane
         // burns it there: a replacement launch of it is refused.
         self.bought.push(token);
+        self.bought_on.push((token, hash));
         let sender = Address::from(self.end.address());
         let expected = ExpectedBuy::from_admitted(
             &self.deployment,
@@ -2778,7 +2798,7 @@ pub(crate) mod tests {
         let portal = bsc_mainnet_v5_27_2().portal.into_array();
         let (mut exec, d) = armed("session", config(4, 2));
         let (h1, r1, i1) = launch(0, 1);
-        let (h2, r2, i2) = launch(0, 2); // another launch of the same token
+        let (h2, r2, i2) = launch(0, 2); // another launch of the same token (R6: a conflict)
         let (h3, r3, i3) = launch(1, 3);
         let (h4, r4, i4) = launch(2, 4);
         let ok = |e: &mut PaperExecutor, h, r: &[u8], i: &[u8]| {
@@ -2795,7 +2815,9 @@ pub(crate) mod tests {
             )
         };
         assert!(ok(&mut exec, h1, &r1, &i1).is_ok());
-        assert_eq!(ok(&mut exec, h2, &r2, &i2), Err(Refusal::DuplicateToken));
+        assert_eq!(ok(&mut exec, h2, &r2, &i2), Err(Refusal::TokenConflict));
+        // The same launch again is a duplicate, not a conflict.
+        assert_eq!(ok(&mut exec, h1, &r1, &i1), Err(Refusal::DuplicateToken));
         assert!(ok(&mut exec, h3, &r3, &i3).is_ok());
         // Two BUYs exhaust a cap of two, lanes left or not.
         assert_eq!(ok(&mut exec, h4, &r4, &i4), Err(Refusal::SessionCap));

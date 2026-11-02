@@ -419,6 +419,15 @@ pub struct LiveRuntime {
     source_not_live: u64,
     /// R4 (PHASENPLAN §20): launches while every LIVE source is public.
     public_only_refused: u64,
+    /// R6: each source's health and observed capability at the runtime's
+    /// last status pass (none before it: no non-public signal yet), and
+    /// the launches refused while every non-public LIVE source was down.
+    source_signals: Vec<(
+        SourceId,
+        crate::ingress::Health,
+        crate::sources::SourceCapability,
+    )>,
+    source_unhealthy: u64,
     /// The grant's sources effective LIVE at the last tick (the owner's
     /// [`crate::sources::LiveNow::sources_live`]); none before a tick.
     sources_live: Vec<SourceId>,
@@ -605,6 +614,8 @@ impl LiveRuntime {
             source_refused: 0,
             source_not_live: 0,
             public_only_refused: 0,
+            source_signals: Vec::new(),
+            source_unhealthy: 0,
             sources_live: Vec::new(),
             exit_deciders: None,
             strategy_buys_refused: 0,
@@ -2531,7 +2542,11 @@ impl LiveRuntime {
             return None;
         }
         if self.public_only_locked() {
-            self.public_only_refused += 1;
+            // R6: a non-public LIVE source down is its own count.
+            match self.sources_live.iter().any(|s| !s.public()) {
+                true => self.source_unhealthy += 1,
+                false => self.public_only_refused += 1,
+            }
             return None;
         }
         self.poll_responses(clock);
@@ -3181,12 +3196,39 @@ impl LiveRuntime {
         repriced(prior, x.live_exit_reprice_bps, x.gas_price_wei, max)
     }
 
-    /// R4 (PHASENPLAN §20): every LIVE source is public and
-    /// `BSC_EXEC_LIVE_PUBLIC_ONLY` is OFF: a sighting is no C3 BUY's signal.
+    /// R4 (PHASENPLAN §20): `BSC_EXEC_LIVE_PUBLIC_ONLY` is OFF and no
+    /// non-public LIVE source is a signal now (R6: healthy and delivering
+    /// full transactions at the runtime's last status pass): a sighting is
+    /// no C3 BUY's signal.
     fn public_only_locked(&self) -> bool {
         !self.exec.exec.live_public_only
-            && !self.sources_live.is_empty()
-            && self.sources_live.iter().all(|s| s.public())
+            && !self
+                .sources_live
+                .iter()
+                .any(|s| !s.public() && self.signals(*s))
+    }
+
+    /// R6: whether `source` is healthy and delivers full transactions, as
+    /// the runtime last told ([`Self::set_source_signals`]).
+    fn signals(&self, source: SourceId) -> bool {
+        self.source_signals.iter().any(|(s, h, c)| {
+            *s == source
+                && *h == crate::ingress::Health::Healthy
+                && *c == crate::sources::SourceCapability::Full
+        })
+    }
+
+    /// R6: each source's health and observed capability, from the runtime's
+    /// status pass.
+    pub fn set_source_signals(
+        &mut self,
+        signals: Vec<(
+            SourceId,
+            crate::ingress::Health,
+            crate::sources::SourceCapability,
+        )>,
+    ) {
+        self.source_signals = signals;
     }
 
     /// Review LOW-2: a transaction of the buyer (one written before its
@@ -3509,6 +3551,7 @@ impl LiveRuntime {
             ("SOURCE_NOT_GRANTED", self.source_refused),
             ("SOURCE_NOT_LIVE", self.source_not_live),
             ("SOURCE_PUBLIC_ONLY", self.public_only_refused),
+            ("SOURCE_UNHEALTHY", self.source_unhealthy),
             ("STRATEGY_BUYS_NOT_GRANTED", self.strategy_buys_refused),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
@@ -7417,6 +7460,49 @@ mod tests {
             x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
                 .is_some()
         );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R6: with `BSC_EXEC_LIVE_PUBLIC_ONLY` OFF a non-public LIVE
+    /// source unlocks public sightings only while it is healthy and
+    /// delivers full transactions (the runtime's last status pass; before
+    /// one: down): a sighting meanwhile triggers no C3 BUY, counted
+    /// SOURCE_UNHEALTHY; a public source's health unlocks nothing.
+    #[test]
+    fn a_non_public_source_unlocks_public_sightings_only_while_it_signals() {
+        use crate::ingress::Health;
+        use crate::sources::SourceCapability as C;
+        let mut r = Rig::new("live-source-health", LiveStrategies::C3);
+        r.exec.exec.live_public_only = false;
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        x.sources_live = vec![SourceId::Geth, SourceId::PublicNode];
+        assert!(x.public_only_locked(), "no status pass yet");
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
+                .is_none()
+        );
+        assert!(refused_by(&x, "SOURCE_UNHEALTHY"), "{:?}", reason(&x));
+        assert!(!refused_by(&x, "SOURCE_PUBLIC_ONLY"));
+        for (h, c) in [
+            (Health::Degraded, C::Full),
+            (Health::Disconnected, C::Full),
+            (Health::RateLimited, C::Full),
+            (Health::Healthy, C::HashOnly),
+            (Health::Healthy, C::Unknown),
+        ] {
+            x.set_source_signals(vec![(SourceId::Geth, h, c)]);
+            assert!(x.public_only_locked(), "{h:?} {c:?}");
+        }
+        x.set_source_signals(vec![(SourceId::Geth, Health::Healthy, C::Full)]);
+        assert!(!x.public_only_locked());
+        x.set_source_signals(vec![(SourceId::PublicNode, Health::Healthy, C::Full)]);
+        assert!(x.public_only_locked());
         x.shutdown();
         r.clean();
     }

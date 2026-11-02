@@ -1013,11 +1013,14 @@ pub mod runtime_status {
         pub const LAUNCH_FIRST: u16 = 15;
         /// Milliseconds since its last observation; absent before the first.
         pub const LAST_EVENT_AGE_MS: u16 = 16;
+        /// v2 (REV.1.0 R6): its observed capability class: `FULL`,
+        /// `HASH_ONLY`, `QPT` or `UNKNOWN`.
+        pub const CAPABILITY: u16 = 17;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.source",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(SOURCE_ID, "source_id", Text),
                 Field::req(EFFECTIVE, "effective", Text),
@@ -1035,6 +1038,7 @@ pub mod runtime_status {
                 Field::req(LAUNCH_SIGHTINGS, "launch_sightings", U64),
                 Field::req(LAUNCH_FIRST, "launch_first", U64),
                 Field::opt(LAST_EVENT_AGE_MS, "last_event_age_ms", U64),
+                Field::opt(CAPABILITY, "capability", Text),
             ],
         };
     }

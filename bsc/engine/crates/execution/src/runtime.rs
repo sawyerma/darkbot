@@ -28,7 +28,7 @@ use crate::chain_follower::{
     run_follower,
 };
 use crate::g04_census::{Census, census};
-use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
+use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
@@ -3363,7 +3363,11 @@ fn status_bytes(
             .set(e::FIRST_ANY, s.first_any)
             .set(e::FIRST_FULL, s.first_full)
             .set(e::LAUNCH_SIGHTINGS, s.launch_sightings)
-            .set(e::LAUNCH_FIRST, s.launch_first);
+            .set(e::LAUNCH_FIRST, s.launch_first)
+            .set(
+                e::CAPABILITY,
+                crate::ingress::observed_capability(*source, s).name(),
+            );
         if let Some(at) = s.last_event_ns {
             row.set(e::LAST_EVENT_AGE_MS, now.saturating_sub(at) / 1_000_000);
         }
@@ -4050,24 +4054,37 @@ pub fn run(
                     let i = index(s);
                     let mut st = core.stats(s);
                     st.dropped += dropped[i].load(Ordering::Relaxed);
-                    let h = match generation.source(s).effective {
-                        Effective::Off
-                        | Effective::Blocked(_)
-                        | Effective::Paper
-                        | Effective::Disabled
-                        | Effective::Enabled
-                        | Effective::PerDay(_) => Health::Off,
-                        Effective::Shadow | Effective::Live if config.endpoint(s).is_none() => {
-                            Health::Unqualified
-                        }
-                        Effective::Shadow | Effective::Live if stopping => Health::Off,
-                        Effective::Shadow | Effective::Live => {
-                            health(&st, rate_limited_last[i], now, config.quiet_ms * 1_000_000)
-                        }
-                    };
+                    // R6 review HIGH-1: whether it runs this pass (the
+                    // reconcile's view, LIVE included), not its stored mode.
+                    let h = crate::ingress::source_health(
+                        source_on[i],
+                        config.endpoint(s).is_some(),
+                        stopping,
+                        &st,
+                        rate_limited_last[i],
+                        now,
+                        config.quiet_ms * 1_000_000,
+                    );
                     (s, st, h)
                 })
                 .collect();
+            // R6: the LIVE path counts a non-public source a signal only while
+            // it is healthy and delivers full transactions.
+            if let Some(l) = live.as_mut() {
+                l.set_source_signals(
+                    stats
+                        .iter()
+                        .map(|(s, st, h)| {
+                            let quiet = config.quiet_ms * 1_000_000;
+                            (
+                                *s,
+                                *h,
+                                crate::ingress::current_capability(*s, st, now, quiet),
+                            )
+                        })
+                        .collect(),
+                );
+            }
             let observed = observed_now()?;
             let bytes = status_bytes(
                 &generation,
@@ -6092,6 +6109,14 @@ mod tests {
         assert!(
             rows.iter()
                 .all(|row| row.text(rs::source::HEALTH).unwrap() == "OFF")
+        );
+        // R6: each source's observed capability: nothing delivered yet,
+        // UNKNOWN; 48Club QPT by design.
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.text(rs::source::CAPABILITY).unwrap())
+                .collect::<Vec<_>>(),
+            ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "QPT"]
         );
         let journals: Vec<_> = fs::read_dir(base.join("bsc-runtime/journal"))
             .unwrap()
