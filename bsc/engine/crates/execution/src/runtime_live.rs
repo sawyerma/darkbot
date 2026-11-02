@@ -6363,15 +6363,39 @@ mod tests {
         };
         ledger.append(&target, 1).unwrap();
         assert_eq!(
-            ledger.request_burn(TARGET, Some(r.buyer), "burn-1", "operator", false, NOW),
+            ledger.request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                NOW
+            ),
             Err(LIVE_NONCE_BURN_OFF.into())
         );
         let written = ledger
-            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         assert!(written.is_some());
         assert_eq!(
-            ledger.request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW),
+            ledger.request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW
+            ),
             Ok(None),
             "once per request: written before"
         );
@@ -6527,7 +6551,15 @@ mod tests {
             .append(&unknown_window(TARGET, 5, ComponentId::ExecC3), 1)
             .unwrap();
         ledger
-            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         let mut x = r.runtime("boot-1");
         let mut c2 = c2_at(&r.d, r.buyer, 5);
@@ -6614,7 +6646,15 @@ mod tests {
         settle(&mut x, &c2);
         assert!(!x.armed(), "no position, no burn: nothing to arm for");
         ledger
-            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
@@ -6782,12 +6822,28 @@ mod tests {
         settle(&mut x, &c2);
         assert!(!x.armed(), "both block");
         ledger
-            .request_burn(A, Some(r.buyer), "burn-a", "operator", true, NOW)
+            .request_burn(
+                A,
+                Some(r.buyer),
+                "burn-a",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         x.refold();
         assert_eq!(x.free_nonce(&c2), None, "B, not requested, blocks");
         ledger
-            .request_burn(B, Some(r.buyer), "burn-b", "operator", true, NOW)
+            .request_burn(
+                B,
+                Some(r.buyer),
+                "burn-b",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         x.refold();
         assert_eq!(x.free_nonce(&c2), Some(5));
@@ -6839,7 +6895,15 @@ mod tests {
         };
         ledger.append(&earlier, 1).unwrap();
         ledger
-            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .request_burn(
+                TARGET,
+                Some(r.buyer),
+                "burn-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                NOW,
+            )
             .unwrap();
         let c2 = c2_at(&r.d, r.buyer, 0);
         let mut x = r.probed("boot-1", one_burn);
@@ -11540,7 +11604,7 @@ mod tests {
             let bad = r.state.join("live-ledger").join(format!("{:020}.dbrec", 2));
             fs::write(&bad, b"torn").unwrap();
             Ledger::open(&r.state)
-                .quarantine(2, "q-2", "operator", 0, NOW)
+                .quarantine(2, "q-2", "operator", 0, || Ok(0), NOW)
                 .unwrap();
             settle(&mut x, &c2);
             assert!(!returns.exists());
@@ -11662,6 +11726,7 @@ mod tests {
                 "resume-a",
                 "operator",
                 false,
+                ledger.version().unwrap(),
                 NOW,
             )
             .unwrap();
@@ -11678,6 +11743,7 @@ mod tests {
                 "exit-b",
                 "operator",
                 true,
+                ledger.version().unwrap(),
                 NOW,
             )
             .unwrap();
@@ -11706,6 +11772,7 @@ mod tests {
                 "off-b",
                 "operator",
                 false,
+                ledger.version().unwrap(),
                 NOW,
             )
             .unwrap();
@@ -11743,7 +11810,7 @@ mod tests {
         let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
         let g = s.current().unwrap().generation;
         Ledger::open(&r.state)
-            .quarantine(0, "q-0", "operator", g, NOW)
+            .quarantine(0, "q-0", "operator", g, || Ok(g), NOW)
             .unwrap();
         let mut x = r.runtime("boot-1");
         let c2 = c2_at(&r.d, r.buyer, 5);

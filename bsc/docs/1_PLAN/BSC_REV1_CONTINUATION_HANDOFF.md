@@ -39,7 +39,7 @@ Bei Widerspruch gelten diese Dateien. Alle Angaben hier sind am genannten Zeitpu
    - Die drei überholten R3a-Stashes sind gelöscht; ihr Inhalt liegt auf `main` und als Patch in `backups/`.
    - Der Hauptcheckout ist per Fast-forward auf `49bcd98f` gebracht.
    - Kein Agent und kein eigener Hintergrundjob läuft.
-4. **Nächster Schritt (02.11.):** R2b-Fix auf main `fed702cc`; R3b-1 (Receipt-Recovery, LIVE-Tab-Felder) mit diesem Commit; als Nächstes R3b-2 (gesperrter Nonce-Burn, Gateway/Frontend-Aktionen der R3-Befehle), dann R4 bis R14 und die offenen Audit-E-Befunde. Plan: `DarkBot-bsc-rev1/scratch/r3b/PLAN.md`.
+4. **Nächster Schritt (02.11.):** R3b-1 `58f78ecd`, R3b-2a `b3523732` (gesperrter Nonce-Burn), R3b-2b-1 mit diesem Commit (R3-Betreiberbefehle über Gateway und darkbotctl, CAS); als Nächstes R3b-2b-2 (LIVE-Tab-Aktionen in `LiveActions.tsx`), dann R4 bis R14 und die offenen Audit-E-Befunde. Plan: `DarkBot-bsc-rev1/scratch/r3b/PLAN.md`.
 
 ---
 
@@ -211,7 +211,7 @@ Quellen:
 | R1 | LIVE-Betriebsblocker BSC3-080..084 | **DONE_VERIFIED** (Review FAIL→PASS, Gate GR1 OK, CI grün) | `0159c1a7` |
 | R2 | Versuchs-Record, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Fenster | **DONE_VERIFIED** (5 Review-Runden, letzte PASS; 59 Mutanten RED; Gate GR2e OK; CI grün). Echte Kampagnenläufe: EXTERNAL_BLOCKED (nach 03.11., Manifest durch den Betreiber) | `1d29cec7` |
 | R2b | LIVE-Tab-Projektion Kampagne/Versuche | **DONE** (Review FAIL → Fix, Re-Checks PASS; 35 Mutanten RED, Gate R2bfix3 OK; CI siehe Commit) | `9d5ed3a0`; Fix `fed702cc` |
-| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE**, **R3b-1** (Receipt-Recovery, LIVE-Tab) dieser Commit, R3b-2 NOT_STARTED (§6.2) | R3a `49bcd98f`; R3b-1 dieser Commit |
+| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE**, **R3b-1** (Receipt-Recovery, LIVE-Tab), **R3b-2a** (Nonce-Burn gesperrt), **R3b-2b-1** (Gateway/darkbotctl, CAS) dieser Commit; R3b-2b-2 (LIVE-Tab-Aktionen) offen; `adopt-g07` PARTIAL: nur Terminal (zwei lokale Evidenzdateien ohne festen Ort, der Browser nennt keine Datei) (§6.2) | R3a `49bcd98f`; R3b-1 `58f78ecd`; R3b-2a `b3523732`; R3b-2b-1 dieser Commit |
 | R4 | Grant-Varianten gesperrt: 069 Outlier-Ack, 059 max. Dauer, 029 Builder-Payment, 042 C3-Re-Arm, kampagnenweite Spend-Grenze, §20 public-only-Verweigerung, Builder-Frische/Fee-Check, C2-LIVE-Doku | NOT_STARTED | – |
 | R5 | Exit-Routen gesperrt: 030 Public-Mempool-Adapter, Re-Price-Variante, DEX-Exit migrierter Lots | NOT_STARTED | – |
 | R6 | Quellen: GETH/Hot0Poller-Adapter, Health-/Capability-Gating, Queues je Quelle, CONFLICT-Zustand, Census je Quelle (O05/§3a), 48Club-Adapter synthetisch | NOT_STARTED | – |
@@ -246,13 +246,14 @@ Commit-Text: `git log -1 --format=%B 49bcd98f`, auch in `scratch/r3a/msgR3a.txt`
   - `bsc_runtime live lot resume|write-off|exit-now` (einmal je Request-ID; Exit-now gesperrt durch `BSC_EXEC_LIVE_OPERATOR_EXIT=OFF`)
   - `live adopt-g07 --g08 --capture` (G0.8 v7 plus Capture; Launch- und BUY-Block final, Scope ok, kein offenes Lot des Tokens)
   - `live ledger check|quarantine`
+  - R3b-2b-1: `lot` und `nonce-burn` mit `--expect-version` (Ledger-Version), `ledger quarantine` mit `--expect-generation`, geprüft unter dem Operator-Lock nach dem Replay (`LIVE_REQUEST_STALE`); Quittung `outcome=APPLIED …`; Gateway `bsc.live.lot|nonce_burn|ledger.quarantine`, `darkbotctl bsc live lot|nonce-burn|ledger-quarantine`.
 - **BSC3-045:** Temp-Cleanup per Lock; Quarantäne mit Record zuerst, Nummer nie wiederverwendet; BUYs alter Grants gesperrt (`LIVE_LEDGER_QUARANTINED`).
 - **R1-Rest:** Lots, die beim Start offen sind, gelten als gemeldet. Ein danach geschlossenes oder abgeschriebenes Lot endet für die Strategie.
 - **Review:** FAIL (F1–F5) → behoben → Re-Check PASS; dessen RC1–RC4 behoben.
 - **Nachweise:** 45 Mutanten RED (`tools/mut_r3.py`, Logs `scratch/mut_r3a*.out`). Gate GR3a3 GATE_OK: 1650/0/27, bsc_tools 7/7, Clippy, F0-VAR PASS mit 3496 nativen Feldern (`scratch/gate_GR3a3.out`).
 - **Hot-Path:** Append plus Lock/Inode 3,1 µs p50 gegenüber einem Append von 10,8 ms; das liegt nach dem Senden.
 
-### 6.2 R3b — NOT_STARTED (Soll und Plan)
+### 6.2 R3b — R3b-1, R3b-2a, R3b-2b-1 fertig; R3b-2b-2 offen (Soll und Plan)
 - **Receipt-Recovery (BSC3-024/041)** für unaufgelöste Transaktionen, die blockieren: Nonce ≠ next, Fenster unbekannt oder verwaist, eingeschlossen in einem Block, dem der Follower nicht folgte.
   - `eth_getTransactionReceipt(hash)` → Blocknummer und -hash.
   - Hash durch die zweite Quelle bestätigen (BSC3-056, `canonical_confirm.rs` / `chain_follower/confirm.rs`, Header-Abruf).
@@ -261,8 +262,8 @@ Commit-Text: `git log -1 --format=%B 49bcd98f`, auch in `scratch/r3a/msgR3a.txt`
   - Ohne Receipt und mit bestätigter Konto-Nonce > Tx-Nonce (C2-Nonce-Fakten, `runtime_state.rs`) → REPLACED mit `source=NONCE`.
   - Begrenzt per Config (neue Schlüssel z. B. `BSC_CANONICAL_RECOVERY_READS_MAX`/`_RETRY_MS`), als Lese-Thread wie der Kurvenleser in R1 (`runtime.rs` `ask_lot_reads`).
   - Offen ist, wie das sauber an `on_canonical` andockt, ohne den laufenden Blockzustand (`self.block`, `seen`) zu stören: nur zwischen den Blöcken verarbeiten.
-- **Nonce-Burn gesperrt:** `bsc_runtime live nonce-burn`, Default `BSC_LIVE_NONCE_BURN=OFF`, nur bei Gate CLEAR plus Grant; 0-Wert-Self-Transfer → REPLACED; nur Loopback-Tests, **nie real senden**.
-- **Gateway/Frontend-Aktionen** für die R3-Befehle (Audit A: CLI + Gateway + `LiveActions.tsx`, CAS, gesperrt), zusammen mit R10.
+- **Nonce-Burn gesperrt** (R3b-2a `b3523732`): `bsc_runtime live nonce-burn`, Default `BSC_EXEC_LIVE_NONCE_BURN=OFF`, nur bei Gate CLEAR plus Grant; 0-Wert-Self-Transfer → REPLACED; nur Loopback-Tests, **nie real senden**.
+- **Gateway/Frontend-Aktionen** für die R3-Befehle (Audit A: CLI + Gateway + `LiveActions.tsx`, CAS, gesperrt), zusammen mit R10: CLI-CAS, Gateway und darkbotctl R3b-2b-1 (dieser Commit); `LiveActions.tsx` R3b-2b-2 offen: zuerst `Ledger::version()` (= `count()`, quarantänierte Nummern eingeschlossen, nicht `facts().len()`) in `BscLiveState` projizieren (schema_id + BSC-Golden), `config_version` = Ledger-Version für Lot/Burn im Wire-Vertrag nennen.
 - **Statusprojektion:** eine Warnung `LIVE_LEDGER_QUARANTINED` im LIVE-Tab. Bisher nur als Verweigerungsgrund sichtbar.
 
 

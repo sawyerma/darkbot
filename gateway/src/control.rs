@@ -101,6 +101,18 @@ const BSC_LIVE_ADAPTERS: [&str; 2] = ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V
 /// The campaign's limit is at most ten real BUY attempts (PHASENPLAN 28.10.).
 const BSC_MAX_ATTEMPTS_TOTAL: u32 = 10;
 
+/// REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger (`bsc_runtime live lot`,
+/// `nonce-burn`, `ledger quarantine`), once per request, each with the state it was decided on as
+/// CAS: a lot's RESUME, WRITE_OFF or EXIT_NOW (exit-now locked by `BSC_EXEC_LIVE_OPERATOR_EXIT`)
+/// and an unresolved transaction's nonce burn (locked by `BSC_EXEC_LIVE_NONCE_BURN`) at the
+/// ledger's version, the quarantine of a ledger entry that does not decode at the owner
+/// generation. Facts the runtime acts on, never a release of its own.
+const BSC_LIVE_LOT: &str = "bsc.live.lot";
+const BSC_LIVE_LOT_DECISIONS: [&str; 3] = ["RESUME", "WRITE_OFF", "EXIT_NOW"];
+const BSC_LIVE_NONCE_BURN: &str = "bsc.live.nonce_burn";
+const BSC_LIVE_QUARANTINE: &str = "bsc.live.ledger.quarantine";
+const BSC_LIVE_DECISIONS: [&str; 3] = [BSC_LIVE_LOT, BSC_LIVE_NONCE_BURN, BSC_LIVE_QUARANTINE];
+
 const BSC_OWNER_ACTIONS: [&str; 8] = [
     BSC_SOURCE,
     BSC_VENUE,
@@ -401,7 +413,8 @@ fn allowed(project: i32, action: &str) -> bool {
             || PROVIDER_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
             && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
-                || BSC_OWNER_ACTIONS.contains(&action)))
+                || BSC_OWNER_ACTIONS.contains(&action)
+                || BSC_LIVE_DECISIONS.contains(&action)))
 }
 /// The only accepted candidate request: a fixed profile as resource and the
 /// selection generation of the last applied status as `profile_version` CAS.
@@ -560,6 +573,51 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             generation.to_string(),
         ]
     })
+}
+
+/// R3b: the only accepted operator decision of the LIVE ledger: a lot
+/// `0x<64 hex>:<RESUME|WRITE_OFF|EXIT_NOW>`, a transaction `0x<64 hex>` or a ledger entry's
+/// sequence number (a plain decimal) as resource, no parameters, and as `config_version` CAS the
+/// version of the displayed native state: the ledger's (its next entry's number) for a lot or a
+/// burn, the owner generation for a quarantine. The arguments of `darkbotctl bsc live
+/// lot|nonce-burn|ledger-quarantine` without the request id; the native ledger refuses, under its
+/// operator lock, what does not hold (another version or generation, the lot not open, the switch
+/// OFF, the transaction not unresolved, the entry decoding).
+fn live_decision(req: &CommandRequest) -> Option<Vec<String>> {
+    let hash = |s: &str| {
+        s.strip_prefix("0x")
+            .is_some_and(scope_digest_ok)
+            .then(|| s.to_string())
+    };
+    let target = match req.action.as_str() {
+        BSC_LIVE_LOT => {
+            let (lot, what) = req.resource_id.split_once(':')?;
+            let what = BSC_LIVE_LOT_DECISIONS.iter().find(|d| **d == what)?;
+            vec!["lot".to_string(), hash(lot)?, what.to_string()]
+        }
+        BSC_LIVE_NONCE_BURN => vec!["nonce-burn".to_string(), hash(&req.resource_id)?],
+        BSC_LIVE_QUARANTINE => {
+            let seq = &req.resource_id;
+            (wei_ok(seq) && seq.parse::<u64>().is_ok()).then_some(())?;
+            vec!["ledger-quarantine".to_string(), seq.clone()]
+        }
+        _ => return None,
+    };
+    if !req.params.is_empty() {
+        return None;
+    }
+    let expected_version::Version::ConfigVersion(generation) = req.expected.as_ref()?.version?
+    else {
+        return None;
+    };
+    Some(
+        ["bsc", "live"]
+            .into_iter()
+            .map(String::from)
+            .chain(target)
+            .chain([generation.to_string()])
+            .collect(),
+    )
 }
 
 /// A run id under the project's run roots: never a path.
@@ -1610,7 +1668,7 @@ impl Control {
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop, the offline BSC candidate request and the BSC owner's source, venue, wallet, economic, limit and LIVE grant requests are available",
+                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop, the offline BSC candidate request, the BSC owner's source, venue, wallet, economic, limit and LIVE grant requests and the LIVE ledger's lot, nonce burn and quarantine decisions are available",
             );
         }
         let source = if req.action == BSC_LIVE_GRANT {
@@ -1622,6 +1680,22 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, 1..=10 attempts, expiry, the execution risk, the confirmed scope SHA-256) and the config_version generation",
+                    );
+                }
+            }
+        } else if BSC_LIVE_DECISIONS.contains(&req.action.as_str()) {
+            match live_decision(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        match req.action.as_str() {
+                            BSC_LIVE_LOT => "LIVE lot decision takes exactly 0x<lot, 64 lowercase hex>:<RESUME|WRITE_OFF|EXIT_NOW> and the ledger version as config_version",
+                            BSC_LIVE_NONCE_BURN => "LIVE nonce burn takes exactly 0x<transaction, 64 lowercase hex> and the ledger version as config_version",
+                            _ => "LIVE ledger quarantine takes exactly <the entry's sequence number> and the config_version generation",
+                        },
                     );
                 }
             }
@@ -1819,7 +1893,8 @@ impl Control {
         }
         drop(secret);
         if let Some(source) = source {
-            return self.dispatch_source(p, id, encoded, source).await;
+            let ledger = BSC_LIVE_DECISIONS.contains(&req.action.as_str());
+            return self.dispatch_source(p, id, encoded, source, ledger).await;
         }
         // DEC-07: a raw capture reads Mainnet, so it starts only through the boot controller with
         // the start approval of its READY market flow; without one nothing is called.
@@ -2118,12 +2193,18 @@ impl Control {
         id: &str,
         encoded: Vec<u8>,
         args: Vec<String>,
+        ledger: bool,
     ) -> CommandResponse {
+        // R3b review N1: an operator's LIVE ledger decision is the native ledger's, not the
+        // owner's.
         let accepted = reply(
             id,
             CommandStatus::Accepted,
             CommandRejectReason::Unspecified,
-            "Source request persisted; the native owner decides",
+            match ledger {
+                true => "LIVE ledger decision persisted; the native ledger decides",
+                false => "Source request persisted; the native owner decides",
+            },
         );
         let mut record = Record {
             request: encoded,
@@ -2169,14 +2250,19 @@ impl Control {
                 record.detail = receipt(&out).unwrap_or_else(|| refusal(&out.stderr));
             }
             _ => {
-                record.detail =
-                    "Controller outcome unknown; the native source state decides".into();
+                record.detail = format!(
+                    "Controller outcome unknown; {}",
+                    match ledger {
+                        true => "the native ledger decides",
+                        false => "the native source state decides",
+                    }
+                );
             }
         }
         if self.persist(id, &record).is_err() {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
-        tracing::info!(request_id=%id, phase=record.phase, request=%args[..args.len().min(4)].join(" "), "bsc owner request");
+        tracing::info!(request_id=%id, phase=record.phase, request=%args[..args.len().min(4)].join(" "), ledger, "bsc native request");
         CommandResponse {
             phase: record.phase,
             detail: record.detail,
@@ -3636,6 +3722,176 @@ mod tests {
             ConfigVersion(9),
         );
         bad.request_id = "72345678-1234-1234-1234-123456789abc".into();
+        assert_eq!(
+            control.execute(&bad).await.reject_reason,
+            CommandRejectReason::InvalidParams as i32
+        );
+        assert!(!log.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// REV.1.0 R3b (Audit A): the operator's LIVE ledger decisions reach the native ledger as
+    /// exactly a lot's RESUME, WRITE_OFF or EXIT_NOW or a transaction's nonce burn with the
+    /// ledger's version as CAS, or an entry's quarantine with the owner generation; its receipt
+    /// or refusal is the answer; anything else never reaches it.
+    #[tokio::test]
+    async fn the_live_ledger_decisions_reach_the_native_ledger_with_their_cas() {
+        use crate::proto::expected_version::Version::{ConfigVersion, WalletPolicyVersion};
+        let request =
+            |action: &str, resource: &str, v: Option<expected_version::Version>, id: &str| {
+                CommandRequest {
+                    project: ProjectId::Bsc as i32,
+                    request_id: id.into(),
+                    action: action.into(),
+                    resource_id: resource.into(),
+                    expected: v.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                    params: Default::default(),
+                    issued_at_unix_ns: crate::overview::unix_ns_now(),
+                }
+            };
+        const ID: &str = "82345678-1234-1234-1234-123456789abc";
+        let lot = format!("0x{}", "ab".repeat(32));
+        let decided = |action: &str, resource: &str| {
+            live_decision(&request(action, resource, Some(ConfigVersion(7)), ID))
+        };
+        for what in BSC_LIVE_LOT_DECISIONS {
+            assert_eq!(
+                decided(BSC_LIVE_LOT, &format!("{lot}:{what}")).unwrap(),
+                ["bsc", "live", "lot", lot.as_str(), what, "7"]
+            );
+        }
+        assert_eq!(
+            decided(BSC_LIVE_NONCE_BURN, &lot).unwrap(),
+            ["bsc", "live", "nonce-burn", lot.as_str(), "7"]
+        );
+        assert_eq!(
+            decided(BSC_LIVE_QUARANTINE, "4").unwrap(),
+            ["bsc", "live", "ledger-quarantine", "4", "7"]
+        );
+        let upper = format!("0x{}", "AB".repeat(32));
+        let short = format!("0x{}", "ab".repeat(31));
+        let bare = "ab".repeat(32);
+        for (action, resource) in [
+            (BSC_LIVE_LOT, format!("{lot}:SELL")),
+            (BSC_LIVE_LOT, format!("{lot}:resume")),
+            (BSC_LIVE_LOT, lot.clone()),
+            (BSC_LIVE_LOT, format!("{upper}:RESUME")),
+            (BSC_LIVE_LOT, format!("{short}:RESUME")),
+            (BSC_LIVE_LOT, format!("{bare}:RESUME")),
+            (BSC_LIVE_NONCE_BURN, upper.clone()),
+            (BSC_LIVE_NONCE_BURN, short.clone()),
+            (BSC_LIVE_NONCE_BURN, bare.clone()),
+            (BSC_LIVE_NONCE_BURN, format!("{lot}:RESUME")),
+            (BSC_LIVE_QUARANTINE, String::new()),
+            (BSC_LIVE_QUARANTINE, "04".into()),
+            (BSC_LIVE_QUARANTINE, "-4".into()),
+            (BSC_LIVE_QUARANTINE, "4.0".into()),
+            (BSC_LIVE_QUARANTINE, "18446744073709551616".into()),
+            (BSC_LIVE_REVOKE, lot.clone()),
+        ] {
+            assert_eq!(decided(action, &resource), None, "{action} {resource}");
+        }
+        assert_eq!(
+            live_decision(&request(
+                BSC_LIVE_NONCE_BURN,
+                &lot,
+                Some(WalletPolicyVersion(7)),
+                ID
+            )),
+            None
+        );
+        assert_eq!(
+            live_decision(&request(BSC_LIVE_NONCE_BURN, &lot, None, ID)),
+            None
+        );
+        let mut with_params = request(BSC_LIVE_QUARANTINE, "4", Some(ConfigVersion(7)), ID);
+        with_params.params = vec![1u8].into();
+        assert_eq!(live_decision(&with_params), None);
+        for action in BSC_LIVE_DECISIONS {
+            assert!(allowed(ProjectId::Bsc as i32, action));
+            assert!(!allowed(ProjectId::Project0 as i32, action));
+        }
+        // Through the controller: the ledger gets exactly these arguments and the request id;
+        // its receipt line is the answer, its refusal too.
+        let dir = std::env::temp_dir().join(format!("gw-live-ledger-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        executable(
+            &ctl,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncase \"$3\" in\n  nonce-burn) echo 'STOP: LIVE_NONCE_BURN_OFF: BSC_EXEC_LIVE_NONCE_BURN is OFF' >&2; exit 2 ;;\nesac\necho \"outcome=APPLIED lot=$4 decision=RESUMED fact=2 version=7 request_id=$7\"\n",
+                log.display()
+            ),
+        );
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let applied = control
+            .execute(&request(
+                BSC_LIVE_LOT,
+                &format!("{lot}:RESUME"),
+                Some(ConfigVersion(7)),
+                ID,
+            ))
+            .await;
+        assert_eq!(
+            (applied.status, applied.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            applied.detail
+        );
+        assert_eq!(
+            applied.detail,
+            format!("outcome=APPLIED lot={lot} decision=RESUMED fact=2 version=7 request_id={ID}")
+        );
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            format!("bsc\nlive\nlot\n{lot}\nRESUME\n7\n{ID}\n")
+        );
+        let burn_id = "92345678-1234-1234-1234-123456789abc";
+        let refused = control
+            .execute(&request(
+                BSC_LIVE_NONCE_BURN,
+                &lot,
+                Some(ConfigVersion(7)),
+                burn_id,
+            ))
+            .await;
+        assert_eq!(
+            refused.phase,
+            CommandPhase::Failed as i32,
+            "{}",
+            refused.detail
+        );
+        assert!(
+            refused.detail.contains("LIVE_NONCE_BURN_OFF"),
+            "{}",
+            refused.detail
+        );
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            format!("bsc\nlive\nnonce-burn\n{lot}\n7\n{burn_id}\n")
+        );
+        // A malformed decision never reaches the ledger.
+        fs::remove_file(&log).unwrap();
+        let bad = request(
+            BSC_LIVE_QUARANTINE,
+            "04",
+            Some(ConfigVersion(7)),
+            "a2345678-1234-1234-1234-123456789abc",
+        );
         assert_eq!(
             control.execute(&bad).await.reject_reason,
             CommandRejectReason::InvalidParams as i32

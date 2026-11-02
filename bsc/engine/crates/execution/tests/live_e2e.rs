@@ -1324,6 +1324,177 @@ fn source_init_keeps_a_running_live_grant_and_a_reset_ends_it() {
     fs::remove_dir_all(state).unwrap();
 }
 
+/// REV.1.0 R3b (Audit A): the GUI's LIVE ledger decisions go through the one controller as the
+/// terminal's: `darkbotctl bsc live lot|nonce-burn|ledger-quarantine` (`ops/bsc-control.sh`, in
+/// its isolated test mode) hands this build's runtime a lot's decision and a nonce burn with the
+/// ledger's version, a quarantine with the owner generation, the asking account as decider, the
+/// owner state and the runtime's configuration (exit-now and the burn locked under the
+/// repository's switches); a malformed one (a request ID that is a flag among them) never
+/// reaches the runtime. The controller is the macOS desktop app's (launchd, shlock).
+#[cfg(target_os = "macos")]
+#[test]
+fn the_controller_hands_the_operators_ledger_decisions_to_the_runtime() {
+    use darkbot_bsc_execution::live_ledger::{Fact, FactKind, Ledger};
+    use darkbot_bsc_execution::sources::{ComponentId, LiveIntentKind};
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let dir = PathBuf::from(format!(
+        "/private/tmp/darkbot-test.r3b{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    // Review N5: gone also when an assertion fails.
+    struct Gone(PathBuf);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let _gone = Gone(dir.clone());
+    let current = dir.join("app/current");
+    fs::create_dir_all(&current).unwrap();
+    fs::create_dir_all(dir.join("home/.darkbot")).unwrap();
+    fs::write(dir.join(".isolated"), b"").unwrap();
+    std::os::unix::fs::symlink(
+        env!("CARGO_BIN_EXE_bsc_runtime"),
+        current.join("bsc_runtime"),
+    )
+    .unwrap();
+    let config = dir.join("app/bsc-source/bsc/config");
+    fs::create_dir_all(&config).unwrap();
+    fs::copy(
+        repo.join("bsc/config/ingress.public.env"),
+        config.join("ingress.public.env"),
+    )
+    .unwrap();
+    let state = dir.join("run/bsc-sources");
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(&state)
+        .unwrap();
+    activate(&state, &[], now_ms() + 3_600_000);
+    let ledger = Ledger::open(&state);
+    let buy = Fact {
+        kind: FactKind::Released,
+        tx_hash: [2; 32],
+        intent: LiveIntentKind::Buy,
+        component: ComponentId::StrategyC,
+        token: [0xB; 20],
+        nonce: 0,
+        grant_generation: 1,
+        input_wei: Some(U256::from(1_000u64)),
+        max_wei: Some(U256::from(1_300u64)),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+        max_block: Some(100),
+        by_tx: None,
+        response: None,
+        origin: None,
+        launcher: None,
+        placement: None,
+        attempt: None,
+        operator: None,
+        source: None,
+    };
+    ledger.append(&buy, 1).unwrap();
+    ledger
+        .append(
+            &Fact {
+                block: Some((5, [5; 32], 5_000)),
+                gas_wei: Some(U256::from(100u64)),
+                tokens: Some(U256::from(7u64)),
+                eth_wei: Some(U256::from(1_000u64)),
+                ..Fact::about(&buy, FactKind::Included)
+            },
+            2,
+        )
+        .unwrap();
+    let g = darkbot_bsc_execution::sources::current_generation(&state)
+        .unwrap()
+        .generation
+        .to_string();
+    let version = || ledger.version().unwrap().to_string();
+    let lot = format!("0x{}", hex::encode([2u8; 32]));
+    let ctl = |args: &[&str]| {
+        let out = Command::new(repo.join("ops/darkbotctl"))
+            .args(args)
+            .env("DARKBOT_TEST_DIR", &dir)
+            .env("DARKBOT_TEST_PORT", "18787")
+            .env("HOME", dir.join("home"))
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        )
+    };
+    let me = String::from_utf8(Command::new("id").arg("-un").output().unwrap().stdout).unwrap();
+    // A malformed decision never reaches the runtime; nothing is written.
+    let upper = format!("0x{}", hex::encode([0xABu8; 32]).to_uppercase());
+    let v = version();
+    for bad in [
+        vec!["bsc", "live", "lot", &upper, "WRITE_OFF", &v, "r-1"],
+        vec!["bsc", "live", "lot", &lot, "SELL", &v, "r-1"],
+        vec!["bsc", "live", "lot", &lot, "WRITE_OFF", "x", "r-1"],
+        // Review L3: a request ID is never a flag of the runtime's.
+        vec!["bsc", "live", "lot", &lot, "WRITE_OFF", &v, "--decided-by"],
+        vec!["bsc", "live", "lot", &lot, "WRITE_OFF", &v, "r_1"],
+        vec!["bsc", "live", "nonce-burn", &lot, &v],
+        vec!["bsc", "live", "ledger-quarantine", "4x", &g, "r-1"],
+    ] {
+        let (code, out) = ctl(&bad);
+        assert_ne!(code, 0, "{bad:?}: {out}");
+        assert!(out.contains("darkbotctl: "), "{bad:?}: {out}");
+    }
+    assert_eq!(ledger.facts().unwrap().len(), 2);
+    // Review M1: exit-now stays locked under the repository's switch (OFF).
+    let (code, out) = ctl(&["bsc", "live", "lot", &lot, "EXIT_NOW", &v, "r-exit"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("LIVE_OPERATOR_EXIT_OFF"), "{out}");
+    // The lot written off at the ledger's version, by the asking account.
+    let (code, out) = ctl(&["bsc", "live", "lot", &lot, "WRITE_OFF", &v, "r-off"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!(
+            "outcome=APPLIED lot={lot} decision=WRITTEN_OFF fact=2 version={v} request_id=r-off"
+        )),
+        "{out}"
+    );
+    let facts = ledger.facts().unwrap();
+    let off = facts.last().unwrap();
+    assert_eq!(off.kind, FactKind::WrittenOff);
+    assert_eq!(off.operator.as_ref().unwrap().decided_by, me.trim());
+    // At the version it saw before: refused, nothing written.
+    let (code, out) = ctl(&["bsc", "live", "lot", &lot, "RESUME", &v, "r-stale"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("LIVE_REQUEST_STALE"), "{out}");
+    // The nonce burn stays locked under the repository's switch (OFF).
+    let (code, out) = ctl(&["bsc", "live", "nonce-burn", &lot, &version(), "r-burn"]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("LIVE_NONCE_BURN_OFF"), "{out}");
+    assert_eq!(ledger.facts().unwrap().len(), 3);
+    // A torn entry quarantined at the owner generation.
+    fs::write(
+        state.join("live-ledger").join(format!("{:020}.dbrec", 3)),
+        b"torn",
+    )
+    .unwrap();
+    let (code, out) = ctl(&["bsc", "live", "ledger-quarantine", "3", &g, "r-q"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!(
+            "outcome=APPLIED seq=3 decision=QUARANTINED generation={g} request_id=r-q"
+        )),
+        "{out}"
+    );
+}
+
 /// REV.1.0 R3 (BSC3-045, R1's stranded lots): the operator's commands
 /// through the binary: `live lot resume` writes its fact once per request,
 /// `exit-now` is refused while the configuration's operator exit is OFF,
@@ -1377,13 +1548,18 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
     };
     ledger.append(&included, 2).unwrap();
     let lot = format!("0x{}", hex::encode([1u8; 32]));
-    let decide = |what: &str, id: &str| {
+    // R3b: a lot's decision and a nonce burn expect the ledger's version, a
+    // quarantine the owner generation (each as the LIVE tab shows it).
+    let version = || ledger.version().unwrap().to_string();
+    let decide_at = |what: &str, id: &str, expected: &str| {
         cli(&[
             "live",
             "lot",
             what,
             "--lot",
             &lot,
+            "--expect-version",
+            expected,
             "--state",
             s,
             "--config",
@@ -1394,12 +1570,30 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
             "operator",
         ])
     };
+    let decide = |what: &str, id: &str| decide_at(what, id, &version());
+    let (code, out) = decide_at("resume", "resume-0", "3");
+    assert_ne!(code, 0, "{out}");
+    assert!(
+        out.contains("LIVE_REQUEST_STALE: the ledger's version is 2, not 3"),
+        "{out}"
+    );
     let (code, out) = decide("resume", "resume-1");
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("fact=2"), "{out}");
-    let (code, out) = decide("resume", "resume-1");
+    assert!(
+        out.contains(&format!(
+            "outcome=APPLIED lot={lot} decision=RESUMED fact=2 version=2 request_id=resume-1"
+        )),
+        "{out}"
+    );
+    // The same request again: its replay, though the ledger moved since.
+    let (code, out) = decide_at("resume", "resume-1", "2");
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("written before"), "{out}");
+    assert!(
+        out.contains(&format!(
+            "outcome=APPLIED lot={lot} decision=RESUMED replay=true request_id=resume-1"
+        )),
+        "{out}"
+    );
     let (code, out) = decide("exit-now", "exit-1");
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("LIVE_OPERATOR_EXIT_OFF"), "{out}");
@@ -1423,26 +1617,66 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
     let (code, out) = check();
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("unreadable seq=4"), "{out}");
-    let (code, out) = cli(&[
-        "live",
-        "ledger",
-        "quarantine",
-        "--seq",
-        "4",
-        "--state",
-        s,
-        "--request-id",
-        "q-4",
-        "--decided-by",
-        "operator",
-    ]);
+    let g = darkbot_bsc_execution::sources::current_generation(&state)
+        .unwrap()
+        .generation;
+    let quarantine = |expected: u64| {
+        cli(&[
+            "live",
+            "ledger",
+            "quarantine",
+            "--seq",
+            "4",
+            "--expect-generation",
+            &expected.to_string(),
+            "--state",
+            s,
+            "--request-id",
+            "q-4",
+            "--decided-by",
+            "operator",
+        ])
+    };
+    let (code, out) = quarantine(g + 1);
+    assert_ne!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!(
+            "LIVE_REQUEST_STALE: the owner generation is {g}, not {}",
+            g + 1
+        )),
+        "{out}"
+    );
+    let (code, out) = quarantine(g);
     assert_eq!(code, 0, "{out}");
+    let applied =
+        format!("outcome=APPLIED seq=4 decision=QUARANTINED generation={g} request_id=q-4");
+    assert!(out.contains(&applied), "{out}");
     let (code, out) = check();
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("entries=4 unreadable=0 quarantined_at_generation="),
+        out.contains(&format!(
+            "entries=4 unreadable=0 quarantined_at_generation={g}"
+        )),
         "{out}"
     );
+    // The owner generation moves on; the same quarantine again is its
+    // replay at the generation recorded.
+    let (code, out) = cli(&[
+        "source",
+        "request",
+        "BSC_ECON_SIGN",
+        "DISABLED",
+        "--expect-generation",
+        &g.to_string(),
+        "--request-id",
+        "e2e-bump",
+        "--state",
+        s,
+    ]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = quarantine(g + 1);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&applied), "{out}");
     let (code, out) = cli(&[
         "live",
         "adopt-g07",
@@ -1461,22 +1695,74 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
     ]);
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("BSC_LIVE_BUYER is not configured"), "{out}");
-    // R3b: the nonce burn, refused under the repository's switch (OFF).
-    let (code, out) = cli(&[
-        "live",
-        "nonce-burn",
-        "--tx",
-        &lot,
-        "--state",
-        s,
-        "--config",
-        config,
-        "--request-id",
-        "burn-1",
-        "--decided-by",
-        "operator",
-    ]);
+    // R3b: a BUY whose window is unknown (its bytes may land at any height).
+    let unknown = Fact {
+        tx_hash: [9; 32],
+        nonce: 1,
+        max_block: None,
+        ..buy.clone()
+    };
+    ledger.append(&unknown, 3).unwrap();
+    let tx = format!("0x{}", hex::encode([9u8; 32]));
+    let burn = |config: &str, expected: &str, id: &str| {
+        cli(&[
+            "live",
+            "nonce-burn",
+            "--tx",
+            &tx,
+            "--expect-version",
+            expected,
+            "--state",
+            s,
+            "--config",
+            config,
+            "--request-id",
+            id,
+            "--decided-by",
+            "operator",
+        ])
+    };
+    // Refused under the repository's switch (OFF).
+    let (code, out) = burn(config, &version(), "burn-1");
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("LIVE_NONCE_BURN_OFF"), "{out}");
+    // A configuration with the switch ON and its LIVE buyer: at another
+    // version refused, at the ledger's written once.
+    let buyer = "0x00000000000000000000000000000000000000aB";
+    let on = fs::read_to_string(config)
+        .unwrap()
+        .replace(
+            "BSC_STATE_WATCHED=\n",
+            &format!("BSC_STATE_WATCHED={buyer}\n"),
+        )
+        .replace(
+            "BSC_EXEC_LIVE_NONCE_BURN=OFF\n",
+            "BSC_EXEC_LIVE_NONCE_BURN=ON\n",
+        );
+    let on_path = state.with_file_name(format!("burn-on-{}.env", std::process::id()));
+    fs::write(
+        &on_path,
+        format!(
+            "{on}BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
+             BSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+        ),
+    )
+    .unwrap();
+    let on_config = on_path.to_str().unwrap();
+    let (code, out) = burn(on_config, "5", "burn-2");
+    assert_ne!(code, 0, "{out}");
+    assert!(
+        out.contains("LIVE_REQUEST_STALE: the ledger's version is 6, not 5"),
+        "{out}"
+    );
+    let (code, out) = burn(on_config, &version(), "burn-2");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!(
+            "outcome=APPLIED tx={tx} decision=BURN_REQUESTED fact=6 version=6 request_id=burn-2"
+        )),
+        "{out}"
+    );
+    fs::remove_file(on_path).unwrap();
     fs::remove_dir_all(state).unwrap();
 }

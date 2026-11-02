@@ -170,7 +170,7 @@ BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLE
 # LIVE scope. `scope` prints the canonical scope text and its SHA-256, the
 # value `grant` must confirm; `revoke` withdraws it; `status` names every
 # condition LIVE still misses. A grant is a permission, never an order.
-BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms>; bsc live grant <the same nineteen> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status"
+BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms>; bsc live grant <the same nineteen> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status; bsc live lot <0x lot> RESUME|WRITE_OFF|EXIT_NOW <ledger_version> <request_id>; bsc live nonce-burn <0x tx> <ledger_version> <request_id>; bsc live ledger-quarantine <seq> <generation> <request_id>"
 bsc_live_flags() {
   for v in "$1" "$2" "$3" "$4"; do case "$v" in ''|*[!A-Z0-9_+,]*) die "unknown LIVE scope value" ;; esac; done
   for v in "$5" "$6" "$7" "$8"; do case "$v" in ''|*[!0-9]*) die "LIVE limits are unsigned integers" ;; esac; done
@@ -190,6 +190,28 @@ bsc_live_flags() {
   done
   LIVE_FLAGS+=(--max-open-positions "${16}" --max-realized-loss-wei "${17}" \
     --max-daily-realized-loss-wei "${18}" --min-buy-interval-ms "${19}")
+}
+# REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger, once per request, each with
+# the state it was decided on as the CAS: a lot's RESUME, WRITE_OFF or EXIT_NOW and an unresolved
+# transaction's nonce burn at the ledger's version, the quarantine of an entry that does not
+# decode at the owner generation. Exit-now and the burn stay locked while their switch in
+# ingress.public.env is OFF. The decider is the account this runs as (the gateway's for the GUI).
+# The same command the GUI uses.
+bsc_live_hash() {
+  case "$1" in 0x*) ;; *) die "a lot or transaction is 0x and 64 lowercase hex digits" ;; esac
+  case "${1#0x}" in ''|*[!0-9a-f]*) die "a lot or transaction is 0x and 64 lowercase hex digits" ;; esac
+  [ "${#1}" -eq 66 ] || die "a lot or transaction is 0x and 64 lowercase hex digits"
+}
+bsc_live_number() {
+  case "$1" in ''|*[!0-9]*) die "$2 must be an unsigned integer" ;; esac
+}
+bsc_live_ledger() {
+  local rt="$1" id="$2"; shift 2
+  # R3b review L3: a request ID as the native owner takes it, never a flag.
+  case "$id" in ''|-*|*[!A-Za-z0-9-]*) die "the request id is letters, digits and hyphens" ;; esac
+  [ "${#id}" -le 64 ] || die "the request id is letters, digits and hyphens"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live "$@" --request-id "$id" --decided-by "$(/usr/bin/id -un)" \
+    --state "$RUNDIR/bsc-sources"
 }
 bsc_live() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
@@ -211,6 +233,21 @@ bsc_live() {
     status) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
         --rundir "$RUNDIR" ;;
+    lot) [ "$#" -eq 4 ] || die "$BSC_LIVE_USAGE"; bsc_live_hash "$1"
+      local what
+      case "$2" in RESUME) what=resume ;; WRITE_OFF) what=write-off ;; EXIT_NOW) what=exit-now ;;
+        *) die "a lot's decision is RESUME, WRITE_OFF or EXIT_NOW" ;; esac
+      bsc_live_number "$3" "the ledger version"
+      bsc_live_ledger "$rt" "$4" lot "$what" --lot "$1" --expect-version "$3" \
+        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
+    nonce-burn) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"; bsc_live_hash "$1"
+      bsc_live_number "$2" "the ledger version"
+      bsc_live_ledger "$rt" "$3" nonce-burn --tx "$1" --expect-version "$2" \
+        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
+    ledger-quarantine) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"
+      bsc_live_number "$1" "a ledger entry's sequence number"
+      bsc_live_number "$2" "generation"
+      bsc_live_ledger "$rt" "$3" ledger quarantine --seq "$1" --expect-generation "$2" ;;
     *) die "$BSC_LIVE_USAGE" ;;
   esac
 }
@@ -232,7 +269,7 @@ cmd_bsc() {
       *) die "$BSC_REQUEST_USAGE" ;;
     esac ;;
     live) case "${2:-}" in
-      grant|revoke) locked bsc_live "${@:2}" ;;
+      grant|revoke|lot|nonce-burn|ledger-quarantine) locked bsc_live "${@:2}" ;;
       *) bsc_live "${@:2}" ;;
     esac ;;
     candidate) case "${2:-}" in
@@ -248,7 +285,7 @@ cmd_bsc() {
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
       locked bsc_sync ;;
     reporter) locked bsc_reporter_up ;;
-    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request | show; bsc live scope | grant | revoke | status" ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request | show; bsc live scope | grant | revoke | status | lot | nonce-burn | ledger-quarantine" ;;
   esac
 }
 

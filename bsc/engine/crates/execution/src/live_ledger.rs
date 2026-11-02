@@ -567,17 +567,20 @@ impl Ledger {
     /// without its first fact comes back as UNKNOWN, but a launch's C3 BUY
     /// has no admission of its own (its lease's) and an inclusion only
     /// from the chain. So the BUYs of every grant written at or before the
-    /// owner `generation` stay refused ([`Self::quarantined`]) and no slot
-    /// goes back any more (BSC3-068); what the entry said is the
-    /// operator's reconstruction.
+    /// owner generation (`generation`, read under the operator's lock: the
+    /// one the operator expects, LIVE_REQUEST_STALE otherwise) stay refused
+    /// ([`Self::quarantined`]) and no slot goes back any more (BSC3-068);
+    /// what the entry said is the operator's reconstruction. The
+    /// generation recorded (the request's again: its replay).
     pub fn quarantine(
         &self,
         seq: u64,
         request_id: &str,
         decided_by: &str,
-        generation: u64,
+        expected_generation: u64,
+        generation: impl FnOnce() -> Result<u64, String>,
         now_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         use darkbot_bsc_record::schema::bsc_runtime::live_ledger_quarantine as q;
         let _deciding = self.operator_lock()?;
         if !crate::sources::safe_id(request_id) {
@@ -591,7 +594,7 @@ impl Ledger {
         let moved = qdir.join(format!("{seq:020}.entry"));
         let entry = self.dir.join(format!("{seq:020}.dbrec"));
         let e = |p: &Path, err: std::io::Error| format!("{}: {err}", p.display());
-        let recorded = match fs::read(&record) {
+        let (recorded, at) = match fs::read(&record) {
             Ok(bytes) => {
                 let r = decode(&q::SCHEMA, &bytes).map_err(|x| x.0)?;
                 if r.text(q::REQUEST_ID).map_err(|x| x.0)? != request_id {
@@ -599,7 +602,10 @@ impl Ledger {
                         "{LIVE_REQUEST_REUSED}: entry {seq} was quarantined by another request"
                     ));
                 }
-                r.b256(q::SHA256).map_err(|x| x.0)?
+                (
+                    r.b256(q::SHA256).map_err(|x| x.0)?,
+                    r.u64(q::GENERATION).map_err(|x| x.0)?,
+                )
             }
             Err(err) if err.kind() == ErrorKind::NotFound => {
                 let bytes = fs::read(&entry).map_err(|err| e(&entry, err))?;
@@ -609,6 +615,14 @@ impl Ledger {
                     }
                     Err(why) => why,
                 };
+                // R3b: at the owner generation the operator saw (the
+                // grants it keeps refused), read under this lock.
+                let generation = generation()?;
+                if generation != expected_generation {
+                    return Err(format!(
+                        "{LIVE_REQUEST_STALE}: the owner generation is {generation}, not {expected_generation}"
+                    ));
+                }
                 let mut d = Draft::new(&q::SCHEMA);
                 d.set(q::SEQ, seq)
                     .set(q::SHA256, Value::B256(darkbot_bsc_record::sha256(&bytes)))
@@ -627,7 +641,7 @@ impl Ledger {
                 // Review F4: published whole or not at all (a crash leaves
                 // no torn record that would refuse its own rerun).
                 crate::sources::write_new(&record, &encoded).map_err(|err| e(&record, err))?;
-                darkbot_bsc_record::sha256(&bytes)
+                (darkbot_bsc_record::sha256(&bytes), generation)
             }
             Err(err) => return Err(e(&record, err)),
         };
@@ -644,7 +658,7 @@ impl Ledger {
                 .and_then(|f| f.sync_all())
                 .map_err(|err| e(d, err))?;
         }
-        Ok(())
+        Ok(at)
     }
 
     /// R3: the highest owner generation an entry of this ledger was
@@ -765,6 +779,26 @@ impl Ledger {
             Err(err) => return Err(format!("{}: {err}", self.quarantine_dir().display())),
         };
         Ok(published.max(quarantined))
+    }
+
+    /// R3b: the ledger's version, its next entry's sequence number (never
+    /// reused; a quarantined one counted): an operator's lot decision or
+    /// nonce burn expects the version it was decided on (its
+    /// compare-and-swap; the LIVE tab shows it from R3b-2b-2).
+    pub fn version(&self) -> Result<u64, String> {
+        self.count()
+    }
+
+    /// R3b: refused (LIVE_REQUEST_STALE) unless the ledger is still at
+    /// `expected`; under the operator's lock, after the request's replay.
+    fn expect_version(&self, expected: u64) -> Result<(), String> {
+        let version = self.count()?;
+        match version == expected {
+            true => Ok(()),
+            false => Err(format!(
+                "{LIVE_REQUEST_STALE}: the ledger's version is {version}, not {expected}"
+            )),
+        }
     }
 
     /// Every fact in order. One that does not decode refuses the whole
@@ -1353,6 +1387,10 @@ pub const LIVE_NONCE_BURN_OFF: &str = "LIVE_NONCE_BURN_OFF";
 pub const LIVE_BURN_REFUSED: &str = "LIVE_BURN_REFUSED";
 /// A G0.8 result whose BUY cannot be adopted as a lot.
 pub const LIVE_ADOPTION_REFUSED: &str = "LIVE_ADOPTION_REFUSED";
+/// R3b: an operator's request expects another ledger version (a lot's
+/// decision, a nonce burn) or owner generation (a quarantine) than the
+/// current one: it was decided on another state (its compare-and-swap).
+pub const LIVE_REQUEST_STALE: &str = "LIVE_REQUEST_STALE";
 
 /// What the operator decides of a lot (`bsc_runtime live lot`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1375,7 +1413,8 @@ impl LotDecision {
         }
     }
 
-    fn kind(self) -> FactKind {
+    /// Its fact's kind.
+    pub fn kind(self) -> FactKind {
         match self {
             Self::Resume => FactKind::Resumed,
             Self::WriteOff => FactKind::WrittenOff,
@@ -1602,8 +1641,11 @@ impl Ledger {
     /// resume and exit-now need the token's open lot, write-off and
     /// exit-now with no step of its exit out, exit-now
     /// `BSC_EXEC_LIVE_OPERATOR_EXIT` ON (`operator_exit`). A running
-    /// runtime acts on it at its next reconcile. The fact's sequence number
-    /// (`None`: the same request was written before).
+    /// runtime acts on it at its next reconcile. A new request expects the
+    /// ledger at `expected_version` ([`Self::version`];
+    /// LIVE_REQUEST_STALE otherwise). The fact's sequence number (`None`:
+    /// the same request was written before).
+    #[allow(clippy::too_many_arguments)]
     pub fn decide(
         &self,
         lot: [u8; 32],
@@ -1611,6 +1653,7 @@ impl Ledger {
         request_id: &str,
         decided_by: &str,
         operator_exit: bool,
+        expected_version: u64,
         now_ms: u64,
     ) -> Result<Option<u64>, String> {
         let _deciding = self.operator_lock()?;
@@ -1621,6 +1664,7 @@ impl Ledger {
         })? {
             return Ok(seen);
         }
+        self.expect_version(expected_version)?;
         let book = fold(&facts);
         let buy = book
             .tx(&lot)
@@ -1665,9 +1709,12 @@ impl Ledger {
     /// nonce of the unresolved transaction `tx` burnt, once per request: a
     /// transaction whose signed bytes may still land at any height (its
     /// block left the chain, or its window is not known) and keep the LIVE
-    /// path from arming. Refused while `BSC_EXEC_LIVE_NONCE_BURN` is OFF.
-    /// The running runtime burns it at its next pass, when its nonce is
-    /// the buyer's next and the path is armed.
+    /// path from arming. Refused while `BSC_EXEC_LIVE_NONCE_BURN` is OFF; a
+    /// new request expects the ledger at `expected_version`
+    /// ([`Self::version`]; LIVE_REQUEST_STALE otherwise). The running
+    /// runtime burns it at its next pass, when its nonce is the buyer's
+    /// next and the path is armed.
+    #[allow(clippy::too_many_arguments)]
     pub fn request_burn(
         &self,
         tx: [u8; 32],
@@ -1675,6 +1722,7 @@ impl Ledger {
         request_id: &str,
         decided_by: &str,
         nonce_burn: bool,
+        expected_version: u64,
         now_ms: u64,
     ) -> Result<Option<u64>, String> {
         let _deciding = self.operator_lock()?;
@@ -1687,6 +1735,7 @@ impl Ledger {
         if !nonce_burn {
             return Err(LIVE_NONCE_BURN_OFF.into());
         }
+        self.expect_version(expected_version)?;
         let buyer = buyer.ok_or("BSC_LIVE_BUYER is not configured")?;
         let book = fold(&facts);
         let target = book
@@ -2475,12 +2524,28 @@ mod tests {
             .unwrap();
         let me = Some(crate::sources::tests::ORIGIN.sender);
         assert_eq!(
-            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", false, 20),
+            ledger.request_burn(
+                unknown.tx_hash,
+                me,
+                "b-1",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                20
+            ),
             Err(LIVE_NONCE_BURN_OFF.into())
         );
         for tx in [bounded.tx_hash, [0x99; 32]] {
             let e = ledger
-                .request_burn(tx, me, "b-x", "operator", true, 20)
+                .request_burn(
+                    tx,
+                    me,
+                    "b-x",
+                    "operator",
+                    true,
+                    ledger.version().unwrap(),
+                    20,
+                )
                 .unwrap_err();
             assert!(e.starts_with(LIVE_BURN_REFUSED), "{e}");
         }
@@ -2493,31 +2558,72 @@ mod tests {
                 "b-o",
                 "operator",
                 true,
+                ledger.version().unwrap(),
                 20,
             )
             .unwrap_err();
         assert!(e.starts_with(LIVE_BURN_REFUSED), "{e}");
         assert_eq!(
-            ledger.request_burn(unknown.tx_hash, None, "b-n", "operator", true, 20),
+            ledger.request_burn(
+                unknown.tx_hash,
+                None,
+                "b-n",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                20
+            ),
             Err("BSC_LIVE_BUYER is not configured".into())
         );
         let first = ledger
-            .request_burn(unknown.tx_hash, me, "b-1", "operator", true, 20)
+            .request_burn(
+                unknown.tx_hash,
+                me,
+                "b-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                20,
+            )
             .unwrap();
         assert!(first.is_some());
         assert_eq!(
-            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", true, 21),
+            ledger.request_burn(
+                unknown.tx_hash,
+                me,
+                "b-1",
+                "operator",
+                true,
+                ledger.version().unwrap(),
+                21
+            ),
             Ok(None)
         );
         assert!(
             ledger
-                .request_burn(orphaned.tx_hash, me, "b-1", "operator", true, 21)
+                .request_burn(
+                    orphaned.tx_hash,
+                    me,
+                    "b-1",
+                    "operator",
+                    true,
+                    ledger.version().unwrap(),
+                    21
+                )
                 .unwrap_err()
                 .starts_with(LIVE_REQUEST_REUSED)
         );
         assert!(
             ledger
-                .request_burn(orphaned.tx_hash, me, "b-2", "operator", true, 22)
+                .request_burn(
+                    orphaned.tx_hash,
+                    me,
+                    "b-2",
+                    "operator",
+                    true,
+                    ledger.version().unwrap(),
+                    22
+                )
                 .unwrap()
                 .is_some(),
             "a transaction once included in a block that left the chain"
@@ -2603,6 +2709,90 @@ mod tests {
         assert_eq!(returned, vec![a, [5; 32]]);
     }
 
+    /// R3b review M2/L1: an operator's new request expects the state it
+    /// was decided on, checked under the operator's lock after its own
+    /// replay: a lot's decision and a nonce burn the ledger's version (any
+    /// fact since refuses it, LIVE_REQUEST_STALE, nothing written), a
+    /// quarantine the owner generation (read under the lock); the same
+    /// request again is its replay whatever moved since (a quarantine's
+    /// answers its recorded generation).
+    #[test]
+    fn an_operators_request_expects_the_state_it_was_decided_on() {
+        let dir = r3_dir("cas");
+        let ledger = Ledger::open(&dir);
+        let buy = released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300);
+        ledger.append(&buy, 1).unwrap();
+        ledger.append(&included(&buy, 5, 100, 7, 1_000), 2).unwrap();
+        let unknown = Fact {
+            max_block: None,
+            ..released(2, LiveIntentKind::Buy, 0xB, 1_000, 1_300)
+        };
+        ledger.append(&unknown, 3).unwrap();
+        let (lot, seen) = ([1; 32], ledger.version().unwrap());
+        assert_eq!(seen, 3);
+        // A fact since the operator saw the ledger: refused, nothing written.
+        ledger
+            .append(&released(3, LiveIntentKind::Approve, 0xA, 0, 300), 4)
+            .unwrap();
+        let stale = ledger
+            .decide(lot, LotDecision::Resume, "r-1", "operator", false, seen, 10)
+            .unwrap_err();
+        assert_eq!(
+            stale,
+            format!("{LIVE_REQUEST_STALE}: the ledger's version is 4, not 3")
+        );
+        let me = Some(crate::sources::tests::ORIGIN.sender);
+        let stale = ledger
+            .request_burn(unknown.tx_hash, me, "b-1", "operator", true, seen, 10)
+            .unwrap_err();
+        assert!(stale.starts_with(LIVE_REQUEST_STALE), "{stale}");
+        assert_eq!(ledger.facts().unwrap().len(), 4);
+        // At the current version; then the same request again is its
+        // replay, though the ledger moved.
+        assert_eq!(
+            ledger.decide(lot, LotDecision::Resume, "r-1", "operator", false, 4, 11),
+            Ok(Some(4))
+        );
+        assert_eq!(
+            ledger.decide(lot, LotDecision::Resume, "r-1", "operator", false, 4, 12),
+            Ok(None)
+        );
+        assert_eq!(
+            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", true, 5, 13),
+            Ok(Some(5))
+        );
+        assert_eq!(
+            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", true, 0, 14),
+            Ok(None)
+        );
+        // A quarantine at another owner generation: refused, no record;
+        // the generation read under the lock is recorded and answered
+        // again on its replay.
+        fs::write(
+            dir.join("live-ledger").join(format!("{:020}.dbrec", 6)),
+            b"torn",
+        )
+        .unwrap();
+        let stale = ledger
+            .quarantine(6, "q-6", "operator", 7, || Ok(8), 20)
+            .unwrap_err();
+        assert_eq!(
+            stale,
+            format!("{LIVE_REQUEST_STALE}: the owner generation is 8, not 7")
+        );
+        assert_eq!(ledger.quarantined(), Ok(None));
+        assert_eq!(
+            ledger.quarantine(6, "q-6", "operator", 8, || Ok(8), 21),
+            Ok(8)
+        );
+        assert_eq!(
+            ledger.quarantine(6, "q-6", "operator", 9, || Ok(9), 22),
+            Ok(8)
+        );
+        assert_eq!(ledger.quarantined(), Ok(Some(8)));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// R3 (`bsc_runtime live lot`): each decision of an open lot is written
     /// once per request (the same again changes nothing, another under its
     /// ID is refused); write-off and exit-now refuse while a step of the
@@ -2617,24 +2807,64 @@ mod tests {
         ledger.append(&included(&buy, 5, 100, 7, 1_000), 2).unwrap();
         let lot = [1; 32];
         let seq = ledger
-            .decide(lot, LotDecision::Resume, "req-1", "operator", false, 10)
+            .decide(
+                lot,
+                LotDecision::Resume,
+                "req-1",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                10,
+            )
             .unwrap();
         assert_eq!(seq, Some(2));
         assert_eq!(
-            ledger.decide(lot, LotDecision::Resume, "req-1", "operator", false, 11),
+            ledger.decide(
+                lot,
+                LotDecision::Resume,
+                "req-1",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                11
+            ),
             Ok(None)
         );
         let reused = ledger
-            .decide(lot, LotDecision::WriteOff, "req-1", "operator", false, 12)
+            .decide(
+                lot,
+                LotDecision::WriteOff,
+                "req-1",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                12,
+            )
             .unwrap_err();
         assert!(reused.starts_with(LIVE_REQUEST_REUSED), "{reused}");
         assert_eq!(
-            ledger.decide(lot, LotDecision::ExitNow, "req-2", "operator", false, 13),
+            ledger.decide(
+                lot,
+                LotDecision::ExitNow,
+                "req-2",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                13
+            ),
             Err(LIVE_OPERATOR_EXIT_OFF.to_string())
         );
         assert_eq!(
             ledger
-                .decide(lot, LotDecision::ExitNow, "req-2", "operator", true, 14)
+                .decide(
+                    lot,
+                    LotDecision::ExitNow,
+                    "req-2",
+                    "operator",
+                    true,
+                    ledger.version().unwrap(),
+                    14
+                )
                 .unwrap(),
             Some(3)
         );
@@ -2648,7 +2878,15 @@ mod tests {
             .append(&released(5, LiveIntentKind::Approve, 0xA, 0, 300), 15)
             .unwrap();
         let e = ledger
-            .decide(lot, LotDecision::WriteOff, "req-8", "operator", false, 16)
+            .decide(
+                lot,
+                LotDecision::WriteOff,
+                "req-8",
+                "operator",
+                false,
+                ledger.version().unwrap(),
+                16,
+            )
             .unwrap_err();
         assert!(e.starts_with(LIVE_LOT_EXIT_OUT), "{e}");
         // Its SELL is out: write-off and exit-now wait for it, resume not.
@@ -2660,13 +2898,29 @@ mod tests {
             (LotDecision::ExitNow, "req-4"),
         ] {
             let e = ledger
-                .decide(lot, what, id, "operator", true, 21)
+                .decide(
+                    lot,
+                    what,
+                    id,
+                    "operator",
+                    true,
+                    ledger.version().unwrap(),
+                    21,
+                )
                 .unwrap_err();
             assert!(e.starts_with(LIVE_LOT_EXIT_OUT), "{e}");
         }
         assert!(
             ledger
-                .decide(lot, LotDecision::Resume, "req-5", "operator", false, 22)
+                .decide(
+                    lot,
+                    LotDecision::Resume,
+                    "req-5",
+                    "operator",
+                    false,
+                    ledger.version().unwrap(),
+                    22
+                )
                 .unwrap()
                 .is_some()
         );
@@ -2678,6 +2932,7 @@ mod tests {
                     "req-6",
                     "operator",
                     false,
+                    ledger.version().unwrap(),
                     23,
                 )
                 .unwrap_err();
@@ -2685,12 +2940,28 @@ mod tests {
         }
         assert!(
             ledger
-                .decide(lot, LotDecision::Resume, "bad id!", "operator", false, 24)
+                .decide(
+                    lot,
+                    LotDecision::Resume,
+                    "bad id!",
+                    "operator",
+                    false,
+                    ledger.version().unwrap(),
+                    24
+                )
                 .is_err()
         );
         assert!(
             ledger
-                .decide(lot, LotDecision::Resume, "req-7", " ", false, 24)
+                .decide(
+                    lot,
+                    LotDecision::Resume,
+                    "req-7",
+                    " ",
+                    false,
+                    ledger.version().unwrap(),
+                    24
+                )
                 .is_err()
         );
         assert_eq!(ledger.facts().unwrap().len(), 7);
@@ -3028,10 +3299,18 @@ mod tests {
         let (entries, unreadable) = ledger.check().unwrap();
         assert_eq!((entries, unreadable.len(), unreadable[0].0), (2, 1, 1));
         assert_eq!(ledger.quarantined(), Ok(None));
-        let e = ledger.quarantine(0, "q-0", "operator", 7, 100).unwrap_err();
+        let e = ledger
+            .quarantine(0, "q-0", "operator", 7, || Ok(7), 100)
+            .unwrap_err();
         assert!(e.contains("never quarantined"), "{e}");
-        assert!(ledger.quarantine(5, "q-5", "operator", 7, 100).is_err());
-        ledger.quarantine(1, "q-1", "operator", 7, 100).unwrap();
+        assert!(
+            ledger
+                .quarantine(5, "q-5", "operator", 7, || Ok(7), 100)
+                .is_err()
+        );
+        ledger
+            .quarantine(1, "q-1", "operator", 7, || Ok(7), 100)
+            .unwrap();
         assert_eq!(ledger.facts().unwrap(), vec![buy]);
         assert_eq!(ledger.check().unwrap(), (1, Vec::new()));
         assert_eq!(ledger.quarantined(), Ok(Some(7)));
@@ -3040,13 +3319,19 @@ mod tests {
             fs::read(qdir.join(format!("{:020}.entry", 1))).unwrap(),
             b"torn entry"
         );
-        ledger.quarantine(1, "q-1", "operator", 7, 101).unwrap();
+        ledger
+            .quarantine(1, "q-1", "operator", 7, || Ok(7), 101)
+            .unwrap();
         // A crash after the record, before the move: the rerun moves it.
         let entry = qdir.join(format!("{:020}.entry", 1));
         fs::rename(&entry, &bad).unwrap();
-        ledger.quarantine(1, "q-1", "operator", 7, 101).unwrap();
+        ledger
+            .quarantine(1, "q-1", "operator", 7, || Ok(7), 101)
+            .unwrap();
         assert!(entry.exists() && !bad.exists());
-        let reused = ledger.quarantine(1, "q-2", "operator", 7, 102).unwrap_err();
+        let reused = ledger
+            .quarantine(1, "q-2", "operator", 7, || Ok(7), 102)
+            .unwrap_err();
         assert!(reused.starts_with(LIVE_REQUEST_REUSED), "{reused}");
         // The next append never takes the quarantined number.
         assert_eq!(
@@ -3057,7 +3342,9 @@ mod tests {
         // of another writer at that number stays, the moved one is kept.
         let other = fs::read(dir.join("live-ledger").join(format!("{:020}.dbrec", 2))).unwrap();
         fs::write(&bad, &other).unwrap();
-        ledger.quarantine(1, "q-1", "operator", 7, 103).unwrap();
+        ledger
+            .quarantine(1, "q-1", "operator", 7, || Ok(7), 103)
+            .unwrap();
         assert_eq!(fs::read(&bad).unwrap(), other);
         assert_eq!(
             fs::read(qdir.join(format!("{:020}.entry", 1))).unwrap(),
