@@ -1,4 +1,4 @@
-# BSC REV.1.0 — Fortsetzungs-Übergabe (technische Momentaufnahme 01.11.2026, ~20:20 CET)
+# BSC REV.1.0 — Fortsetzungs-Übergabe (technische Momentaufnahme 02.11.2026, 08:20 CET; ersetzt den Stand vom 01.11. 20:20)
 
 Zweck: Eine neue Claude-Instanz ohne den alten Chatverlauf setzt BSC REV.1.0 exakt an dieser Stelle fort.
 Diese Datei ist **keine** Projektautorität. Verbindlich bleiben:
@@ -15,21 +15,31 @@ Bei Widerspruch gelten diese Dateien. Alle Angaben hier sind am genannten Zeitpu
 
 ## 0. Kurzfassung (wichtigste Fakten)
 
-1. **R1, R2, R2b und E-A sind auf `origin/main` und haben grüne CI** (Nachweise in §3):
-   - R1 `0159c1a7`
-   - E-A `8a9584d9` … `f6156fa0`
-   - R2 `1d29cec7`
-   - R2b `9d5ed3a0`
+1. **Auf `origin/main` (`49bcd98f`) liegen alle bisher fertigen BSC-Pakete:**
 
-   Die Annahme im Übergabeauftrag, R2 sei „mitten in der Implementierung“ und ein R2-Mutationslauf aktiv, ist **überholt**. R2 wurde nach fünf Review-Runden, 59 roten Mutanten und GATE_OK als `1d29cec7` gepusht.
-2. **In Arbeit ist R3a** (Recovery/Betreiber, erster Teil). Der Stand ist **uncommitted** im Worktree `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtR2`:
-   - Basis `1d29cec7`, 15 Dateien, +1391/−51.
-   - `cargo check --workspace --all-features --tests --bins` ist grün.
-   - **Noch keine Tests geschrieben, kein fmt, kein Re-Pin, kein Review, kein Gate.**
-   - Zusätzliche Patch-Sicherung: `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtR2_R3a_uncommitted_before_move.patch`, sha256 `fab0ae28ddbfb9aeb25cc008eb8a4b8c72b0c5626dd8477150ff461b571f3766`. Er ist identisch mit `git -C …/wtR2 diff` nach dem Verschieben.
-3. **R2b (`9d5ed3a0`) hat noch kein unabhängiges Review.** Gate EB1 GATE_OK, CI grün. Das Review ist der erste offene Prüfschritt.
-4. Keine Agenten und keine eigenen Hintergrundjobs laufen mehr. Die beiden Agenten (R2b, R8) endeten am Session-Limit, R8 hat nichts geändert. Kein mutierter Quellcode liegt herum, siehe §2.
-5. **Dauerhafter Ort aller BSC-REV.1.0-Worktrees, Build-Targets, Werkzeuge und Notizen:** `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/`. Er liegt nicht mehr unter `/private/tmp`.
+   | Paket | Commit(s) |
+   |---|---|
+   | R1 | `0159c1a7` |
+   | E-A | `8a9584d9` … `f6156fa0` |
+   | R2 | `1d29cec7` |
+   | R2b | `9d5ed3a0` |
+   | Übergabe-Datei (alte Fassung) | `4fbf4ddb` |
+   | BSC-Golden-Schema-ID nach dem Project_0-Push `887a31bf` | `738a2cc7` |
+   | **R3a** | **`49bcd98f`** |
+
+   - CI grün bestätigt: R1, E-A, R2, R2b.
+   - **CI für `738a2cc7`, `49bcd98f` und `4fbf4ddb`: nicht bestätigt (CI_PENDING).** Die Warter wurden beim Stopp beendet; prüfen mit `python3 -I <tools>/ci_wait2.py <sha>` als Hintergrundjob.
+2. **Unfertig, uncommitted:** der **Fix der R2b-Review-Befunde**.
+   - Er liegt im einzigen verbleibenden BSC-Worktree `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtEA`: HEAD `49bcd98f`, 18 Dateien geändert.
+   - Der Agent wurde beim Stopp mitten im Übertrag auf `49bcd98f` angehalten: nach `stash apply` und Regenerieren, vor dem Gate.
+   - Sichere Ausgangsfassung desselben Fixes vor dem Übertrag: **Stash `stash@{0}` „R2bfix-L1L4-20261101“** (Basis `047eafe7`).
+   - Beides liegt zusätzlich als Patch in `DarkBot-bsc-rev1/backups/` (siehe §1).
+3. **Aufgeräumt am 02.11.:**
+   - Die überflüssigen Worktrees `wtR2` und `wtR8` sind mit `git worktree remove` ohne force entfernt, ihre Build-Caches gelöscht (etwa 21 GB frei).
+   - Die drei überholten R3a-Stashes sind gelöscht; ihr Inhalt liegt auf `main` und als Patch in `backups/`.
+   - Der Hauptcheckout ist per Fast-forward auf `49bcd98f` gebracht.
+   - Kein Agent und kein eigener Hintergrundjob läuft.
+4. **Nächster Schritt:** den R2b-Fix in `wtEA` fertigstellen, siehe den letzten Abschnitt. Danach R3b, dann R4 bis R14 und die offenen Audit-E-Befunde.
 
 ---
 
@@ -37,44 +47,41 @@ Bei Widerspruch gelten diese Dateien. Alle Angaben hier sind am genannten Zeitpu
 
 | Was | Pfad | Stand |
 |---|---|---|
-| Hauptcheckout (BSC, gemeinsam genutzt) | `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot` | Branch `main` auf `1d29cec7`, **4 hinter `origin/main`**. Nur lokale untracked Evidence (siehe §3.1). **Nicht pullen, nicht resetten.** |
-| R3a-Arbeitsbaum | `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtR2` | detached `1d29cec7`, 15 Dateien uncommitted (R3a), siehe §6 |
-| R2b-Agent-Baum | `…/DarkBot-bsc-rev1/wtEA` | detached `9d5ed3a0`, sauber |
-| R8-Agent-Baum | `…/DarkBot-bsc-rev1/wtR8` | detached `1d29cec7`, sauber (der Agent hat nichts geschrieben) |
-| Build-Targets | `…/DarkBot-bsc-rev1/{wtR2,wtEA,wtR8}-target` | Je Worktree zeigt der Symlink `bsc/engine/target` auf das zugehörige Target. Der Symlink ist git-ignoriert. Nach dem Verschieben baut Cargo die Workspace-Crates einmal neu (Pfade geändert). |
-| Werkzeuge (Pfade bereits angepasst) | `…/DarkBot-bsc-rev1/tools/` | siehe §11 |
-| Notizen, Audits, Review-/Mutations-/Gate-Logs | `…/DarkBot-bsc-rev1/scratch/` | Kopie des alten Scratchpads: alle Dateien unter 2 MB, dazu `rev1/`, `eb/`, `ea/` ohne `ea/base-target` |
-| Project_0-Worktrees (**tabu für BSC**) | `../DarkBot-project0`, `../DarkBot-p0-ctrl`, `../DarkBot-p0-gate`, `../DarkBot-p0-mut` | nicht anfassen |
+| Hauptcheckout (BSC, mit Project_0 geteilt) | `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot` | `main` = `origin/main` = `49bcd98f`; nur die acht lokalen untracked Evidence-Pfade (§3.1); **nicht darin arbeiten, nichts stagen** |
+| **Einziger BSC-Worktree** | `/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtEA` | detached `49bcd98f`, R2b-Review-Fix uncommitted (18 Dateien, siehe §7.D) |
+| Build-Target dazu | `…/DarkBot-bsc-rev1/wtEA-target` | Symlink `wtEA/bsc/engine/target` zeigt darauf; `frontend/node_modules` und `bsc/tools/*/node_modules` in `wtEA` vorhanden (ignoriert) |
+| Werkzeuge (Pfade angepasst) | `…/DarkBot-bsc-rev1/tools/` | `commit_wt.sh`, `gate_wt.sh`, `fmt_mine.py`, `repin.py`, `ci_wait2.py`, `mut_r2.py`, `mut_r3.py`, `fmt_base_files*.txt` |
+| Notizen, Logs, Agentenberichte | `…/DarkBot-bsc-rev1/scratch/` | u. a. `rev1/` (Plan, Audits), `r3a/` (Commit-Text, Doku-Generator), `r2bfix/` (Fix-Agent: msg, files, Gate, Mutationen), Gate-/Mutations-Logs |
+| Sicherungen | `…/DarkBot-bsc-rev1/backups/` | `wtEA_R2bfix_on_49bcd98f_uncommitted.patch` (Diff von `wtEA`), `stash_0_R2bfix-L1L4-20261101.patch`, die drei gelöschten R3a-Stashes als Patch, frühere R3a-Patches |
+| Project_0-Worktrees (**tabu**) | `../DarkBot-p0-*`, `../DarkBot-project0` | gehören der Project_0-Sitzung |
 
-Der alte Scratchpad-Pfad `/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad` existiert noch, ist aber nicht mehr nötig. Die Worktrees wurden mit `git worktree move` verschoben, die Targets per `mv` (Rename auf demselben Volume). Es gab kein Neu-Auschecken und keinen Verlust.
-
-**Plattenplatz: Auf `/System/Volumes/Data` sind nur ~18 GB frei.** Keine großen Kopien anlegen, Targets nicht duplizieren.
+`wtR2` und `wtR8` gibt es nicht mehr. Ein Worktree unter `/private/tmp` existiert nicht mehr. Freier Platz auf dem Datenvolume: etwa 67 GB.
 
 ---
 
-## 2. Laufende Arbeiten beim Einfrieren (geprüft 20:14–20:20)
+## 2. Stand beim Stopp (02.11. 08:14–08:20)
 
-- **Agenten:** keine aktiv.
-  - Agent „R2b“ (vorher E-A): Endzustand Commit `9d5ed3a0` gepusht, CI-Warter beendet (`scratch/eb/ci1.txt`: bsc, gateway und Project 0 status contract = success). Danach am API-Session-Limit abgebrochen, sein Abschlussbericht kam nicht mehr.
-  - Agent „R8“: nach dem Setup am Session-Limit abgebrochen. `wtR8` ist sauber, nur das Target ist vorgewärmt (`scratch/r8_warm.log`).
-- **Eigene Hintergrundjobs:** keine. Der CI-Warter für R2 ist beendet (`scratch/ci_R2.out`).
-- **Mutationen:** Kein Mutationslauf aktiv.
-  - Die R2-Läufe (`scratch/mut_r2*.out`) sind abgeschlossen. `tools/mut_r2.py` stellt jede Datei mit frischem mtime wieder her.
-  - Der R2-Code ist so committet, wie er nach den Läufen reviewt wurde (`1d29cec7`).
-  - `wtEA` ist sauber, also enthält er keinen Mutanten.
-  - Der Diff in `wtR2` ist ausschließlich beabsichtigter R3a-Code (Inhalt in §6). Es gab noch keinen Mutationslauf auf R3a.
-- **Fremde Prozesse (nicht beendet, Regel: keine Prozesse töten):**
-  - PID `64432`: G0.4-Kampagne `~/.darkbot/g04/campaign_20261027/bsc_runtime run …`. Sie läuft bis **03.11. 08:05Z**, eigenes Binary und eigene Config-Kopie, **read-only**.
-  - PID `44297`: verwaister `…/DarkBot/bsc/engine/target/debug/bsc_runtime run --rundir /var/folders/…/T/bsc-runtime-sigterm-44061 …`, ppid 1, gestartet ~19:51. Vermutlich ein abgebrochener SIGTERM-Test, nicht von dieser Instanz. Er schreibt nur in sein `/var/folders`-Temp-Verzeichnis. Der Nutzer kann ihn beenden. Er gefährdet keinen Worktree.
+- **Agenten:**
+  - Gestoppt wurde der R2b-Fix-Agent, mitten im Übertrag nach `wtEA`; letzte Meldung: „Regenerated manifest passes F0-VAR (3496 native fields, including R3a's quarantine record)“.
+  - Die Reviewer sind abgeschlossen: R3a-Review FAIL, R3a-Re-Check PASS (LOW behoben), R2b-Review FAIL, R2b-Re-Check PASS mit L-1 bis L-4.
+- **Hintergrundjobs:** alle CI-Warter gestoppt. Kein Gate und kein Mutationslauf aktiv; keiner hinterließ Mutanten (R3a: `mut_r3.py --check`, alle 45 Muster wieder im Original).
+- **Fremde Prozesse (nicht anfassen):**
+  - PID 64432: G0.4-Kampagne, bis 03.11. 08:05Z, read-only.
+  - PID 44297: verwaister `bsc_runtime`-Testprozess aus dem Target des Hauptcheckouts. Er schreibt nur in `/var/folders/…`; der Nutzer kann ihn beenden.
+  - Ein `cargo test darkbot-runner`: Project_0.
+- **Absprache mit der Project_0-Sitzung (01.11.):**
+  - Jede Sitzung pusht nur ihren eigenen Fast-forward, nach fetch und rebase, und prüft die Dateiliste.
+  - Gemeinsame generierte Dateien werden **regeneriert**, nie von Hand gemergt: `frontend/contracts/bsc-fields.json`, `bsc-native-fields.json`, `protocol/schema_id.txt`, generiertes Protokoll, Golden-Dateien.
+  - P0 kündigt eine Änderung von `protocol/schema_id.txt` vorher an; BSC erzeugt dann `protocol/golden/bsc/engine.stream.hex` neu mit `UPDATE_BSC_GOLDENS=1 cargo test --locked --all-features -p darkbot-bsc-qualification -- status::tests::read_only_projection_and_golden_frames`.
 
 ---
 
-## 3. Git- und CI-Stand (tatsächliche Ausgaben)
+## 3. Git- und CI-Stand (tatsächliche Ausgaben, 02.11. 08:16)
 
 ### 3.1 Hauptcheckout
 ```
 $ git status -sb
-## main...origin/main [hinterher 4]
+## main...origin/main
 ?? bsc/config/g07_attempt1_acceptance_v4.dbrec
 ?? bsc/config/g07_attempt1_acceptance_v4.e1-review.dbrec
 ?? bsc/docs/9_ALT/Backup_v1.zip
@@ -84,63 +91,60 @@ $ git status -sb
 ?? bsc/native/evidence/g07/readiness_20261020T120918Z/
 ?? bsc/native/evidence/g07/readiness_20261020T121103Z/
 ```
-`git status --porcelain=v1` zeigt dieselben acht `??`-Einträge, nichts gestaged und nichts geändert.
 **Diese acht Pfade nie committen und nie anfassen** (lokale Evidence und Nutzerdateien; `runtime_live.rs.orig` gehört dem Nutzer).
 
-### 3.2 Worktrees (`git worktree list --porcelain`, gekürzt auf BSC)
+### 3.2 Worktrees (`git worktree list --porcelain`, BSC)
 ```
-worktree /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot              HEAD 1d29cec7… branch refs/heads/main
-worktree /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtEA HEAD 9d5ed3a0… detached
-worktree /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtR2 HEAD 1d29cec7… detached
-worktree /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1/wtR8 HEAD 1d29cec7… detached
-(+ vier Project_0-Worktrees, tabu)
+worktree …/DarkBot                       HEAD 49bcd98f… branch refs/heads/main
+worktree …/DarkBot-bsc-rev1/wtEA         HEAD 49bcd98f… detached
+(+ Project_0-Worktrees, tabu)
+```
+`git stash list`: `stash@{0}: On (no branch): R2bfix-L1L4-20261101` (BSC, behalten). Andere Stashes gibt es nicht.
+
+### 3.3 `origin/main` (= `49bcd98f`) seit der alten Übergabe
+```
+49bcd98f fix(bsc): REV.1.0 R3a — a BUY attempt no byte of which left gives its slots back, …
+738a2cc7 fix(bsc): the BSC golden engine stream carries the protocol schema id 09470f3d of 887a31bf
+887a31bf feat(p0): DEC-18 package 4 …            (Project_0)
+62bc70f0 fix(p0): DEC-18 package 2 re-check …    (Project_0)
+047eafe7 docs(p0): DEC-18 session handoff …      (Project_0)
+3f491f6c docs(p0): DEC-18 session handoff …      (Project_0)
+4fbf4ddb docs(bsc): REV.1.0 continuation handoff (alte Fassung dieser Datei)
 ```
 
-### 3.3 `origin/main` und neue Commits
-`git fetch origin` → `origin/main = fffa69440dc8a85d2a7ac05021df4cfe05ebfcd0`, vor dem Commit dieser Übergabedatei.
-
-Commits seit `1d29cec7`:
-- `9d5ed3a0` feat(bsc): REV.1.0 R2b — LIVE-Tab zeigt Kampagnen-Verdikt und Versuche (BSC)
-- `35f58ff0`, `69f0103b`, `fffa6944`: Project_0 DEC-18 package 2 (**Project_0, fremd, nicht anfassen**)
-
-BSC-Pakete auf `main` (chronologisch): `0159c1a7` R1 → `8a9584d9`, `ca08fcb8`, `d0883feb`, `f6156fa0` (E-A) → `1d29cec7` R2 → `9d5ed3a0` R2b.
-
-### 3.4 Worktrees gegenüber `origin/main`
-- `wtR2`: HEAD `1d29cec7`, also 4 Commits hinter `origin/main` (R2b plus drei Project_0-Commits).
-  - Uncommitted, nicht gestaged (`git status --porcelain=v1`):
+### 3.4 `wtEA` gegenüber `origin/main`
+Er steht auf HEAD `49bcd98f`, mit 18 geänderten Dateien (2962+/638−), nichts gestaged, nichts untracked:
 ```
- M bsc/config/ingress.public.env
- M bsc/engine/crates/execution/src/bin/bsc_runtime.rs
  M bsc/engine/crates/execution/src/live_attempts.rs
- M bsc/engine/crates/execution/src/live_end.rs
- M bsc/engine/crates/execution/src/live_ledger.rs
- M bsc/engine/crates/execution/src/paper_exec.rs
- M bsc/engine/crates/execution/src/runtime.rs
- M bsc/engine/crates/execution/src/runtime_exec.rs
- M bsc/engine/crates/execution/src/runtime_live.rs
- M bsc/engine/crates/execution/src/sources.rs
- M bsc/engine/crates/execution/tests/c3_paper_latency.rs
- M bsc/engine/crates/execution/tests/live_e2e.rs
- M bsc/engine/crates/execution/tests/strategy_paper_latency.rs
+ M bsc/engine/crates/qualification/src/status/campaign.rs
+ M bsc/engine/crates/qualification/src/status/live.rs
+ M bsc/engine/crates/qualification/src/status/publisher.rs
  M bsc/engine/crates/qualification/src/status/tests.rs
- M bsc/engine/crates/record/src/schema/bsc_runtime.rs
+ M docs/protocol/PROTOCOL.md
+ M frontend/contracts/bsc-fields.json
+ M frontend/src/core/generated/darkbot/bsc/v1/status_pb.ts
+ M frontend/src/features/bsc/model/live.test.ts
+ M frontend/src/features/bsc/model/live.ts
+ M frontend/src/features/bsc/model/placement.generated.ts
+ M frontend/src/features/bsc/model/types.ts
+ M frontend/src/features/bsc/pages/LiveCampaign.tsx
+ M frontend/src/features/bsc/pages/LivePanel.tsx
+ M frontend/tests/bsc.spec.ts
+ M protocol/golden/bsc/engine.stream.hex
+ M protocol/schema_id.txt
+ M protocol/schemas/darkbot/bsc/v1/status.proto
 ```
-  - Keine untracked Dateien (node_modules und der target-Symlink sind ignoriert).
-- `wtEA`: HEAD `9d5ed3a0`, sauber, 3 hinter `origin/main` (nur Project_0).
-- `wtR8`: HEAD `1d29cec7`, sauber.
 
-### 3.5 CI (GitHub Actions) — geprüfte Ergebnisse
+### 3.5 CI (GitHub Actions)
 | Commit | Ergebnis | Beleg |
 |---|---|---|
-| `0159c1a7` R1 | bsc success, Project 0 status contract success | `scratch/ci_R1.out` (runs 41287776723 / 41287776667) |
-| `f6156fa0` E-A | bsc (macOS, ubuntu, frontend) + Project 0 success | STATUS.md-Gate-Tabelle; Agentenbericht |
-| `1d29cec7` R2 | bsc success (41300469409), Project 0 status contract success (41300469399) | `scratch/ci_R2.out` |
-| `9d5ed3a0` R2b | bsc success (41302394662), gateway success (41302394674), Project 0 status contract success (41302394646) | `scratch/eb/ci1.txt` |
-| Übergabe-Commit | CI nach dem Push abfragen, SHA siehe Schlussmeldung | `tools/ci_wait2.py <sha>` |
+| `0159c1a7` R1 | bsc success, Project 0 status contract success | `scratch/ci_R1.out` |
+| `f6156fa0` E-A | bsc (macOS, ubuntu, frontend) + Project 0 success | STATUS.md-Gate-Tabelle |
+| `1d29cec7` R2 | bsc success, Project 0 status contract success | `scratch/ci_R2.out` |
+| `9d5ed3a0` R2b | bsc, gateway, Project 0 status contract success | `scratch/eb/ci1.txt` |
+| `4fbf4ddb`, `738a2cc7`, `49bcd98f` | **UNVERIFIZIERT** (Warter gestoppt) | prüfen: `python3 -I …/tools/ci_wait2.py <sha>` als Hintergrundjob |
 
-Hinweis: `gh` ist in der Shell nicht installiert. Direkte unauthentifizierte API-Aufrufe aus einer Vordergrund-Shell bekamen am 01.11. abends HTTP 404, obwohl `ci_wait2.py` zuvor als Hintergrundjob funktionierte. Die Ursache ist UNVERIFIZIERT, vermutlich Netz-/Sandbox-Kontext. `ci_wait2.py` deshalb als Hintergrundjob laufen lassen.
-
----
+Hinweis: Der bsc-Workflow auf `887a31bf` (Project_0) war wahrscheinlich rot, weil das BSC-Golden zur neuen `schema_id` fehlte; `738a2cc7` behebt das.
 
 ## 4. Verbindliche Regeln (dauerhaft, aus Nutzeraufträgen)
 
@@ -206,8 +210,8 @@ Quellen:
 |---|---|---|---|
 | R1 | LIVE-Betriebsblocker BSC3-080..084 | **DONE_VERIFIED** (Review FAIL→PASS, Gate GR1 OK, CI grün) | `0159c1a7` |
 | R2 | Versuchs-Record, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Fenster | **DONE_VERIFIED** (5 Review-Runden, letzte PASS; 59 Mutanten RED; Gate GR2e OK; CI grün). Echte Kampagnenläufe: EXTERNAL_BLOCKED (nach 03.11., Manifest durch den Betreiber) | `1d29cec7` |
-| R2b | LIVE-Tab-Projektion Kampagne/Versuche | **REVIEW_PENDING** (Code, Tests, 9 Mutanten RED, Gate EB1 OK, Push und CI grün; **unabhängiges Review fehlt**) | `9d5ed3a0` |
-| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **IN_PROGRESS** (R3a kompiliert, uncommitted; R3b nicht begonnen) | `wtR2` (§6) |
+| R2b | LIVE-Tab-Projektion Kampagne/Versuche | **IN_PROGRESS** (`9d5ed3a0` auf main mit CI grün; Review FAIL → Fix uncommitted in `wtEA`, Re-Check PASS mit L-1–L-4, siehe §7.D) | `9d5ed3a0`; Fix in `wtEA` |
+| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE (CI_PENDING)**, R3b NOT_STARTED (§6) | R3a `49bcd98f` |
 | R4 | Grant-Varianten gesperrt: 069 Outlier-Ack, 059 max. Dauer, 029 Builder-Payment, 042 C3-Re-Arm, kampagnenweite Spend-Grenze, §20 public-only-Verweigerung, Builder-Frische/Fee-Check, C2-LIVE-Doku | NOT_STARTED | – |
 | R5 | Exit-Routen gesperrt: 030 Public-Mempool-Adapter, Re-Price-Variante, DEX-Exit migrierter Lots | NOT_STARTED | – |
 | R6 | Quellen: GETH/Hot0Poller-Adapter, Health-/Capability-Gating, Queues je Quelle, CONFLICT-Zustand, Census je Quelle (O05/§3a), 48Club-Adapter synthetisch | NOT_STARTED | – |
@@ -230,166 +234,37 @@ Abhängigkeiten:
 
 ---
 
-## 6. R3 — exakter Arbeitsstand (uncommitted in `wtR2`)
+## 6. R3 — Stand
 
-Design-Notiz: `scratch/rev1/r3/DESIGN.md`. R3 ist zweigeteilt:
-- **R3a**: Ledger v4, 068, Betreiberfakten, Adopt, 045 Check/Quarantäne/Temp-Cleanup. Hier wird gearbeitet.
-- **R3b**: Receipt-Recovery 024/041 und Nonce-Burn gesperrt. Noch nicht begonnen.
+### 6.1 R3a — fertig auf `main` (`49bcd98f`; CI UNVERIFIZIERT)
+Commit-Text: `git log -1 --format=%B 49bcd98f`, auch in `scratch/r3a/msgR3a.txt`. Inhalt:
+- **Ledger v4:** BUY-Fakten tragen `attempt`; Betreiberfakten RESUMED, WRITTEN_OFF, EXIT_REQUESTED und ADOPTED (`request_id`, `decided_by`, bei ADOPTED die Evidence); `source` RECEIPT/NONCE für R3b vorbereitet.
+- **BSC3-068:** Ein Versuch, dessen jeder BUY-Fakt WITHDRAWN ist, gibt seine Slots zurück, sofern der eigene BUY-Fakt dabei ist, nichts verwaist war und keine Quarantäne besteht.
+  - Umsetzung: `Store::return_attempt` (Rename unter dem Spend-Lock nach `buy-attempt-returns/`), `LiveRuntime::return_withdrawn` im Reconcile.
+  - Die Vorwärtsuhr liest die zurückgegebenen Slots weiter.
+- **Betreiberbefehle:**
+  - `bsc_runtime live lot resume|write-off|exit-now` (einmal je Request-ID; Exit-now gesperrt durch `BSC_EXEC_LIVE_OPERATOR_EXIT=OFF`)
+  - `live adopt-g07 --g08 --capture` (G0.8 v7 plus Capture; Launch- und BUY-Block final, Scope ok, kein offenes Lot des Tokens)
+  - `live ledger check|quarantine`
+- **BSC3-045:** Temp-Cleanup per Lock; Quarantäne mit Record zuerst, Nummer nie wiederverwendet; BUYs alter Grants gesperrt (`LIVE_LEDGER_QUARANTINED`).
+- **R1-Rest:** Lots, die beim Start offen sind, gelten als gemeldet. Ein danach geschlossenes oder abgeschriebenes Lot endet für die Strategie.
+- **Review:** FAIL (F1–F5) → behoben → Re-Check PASS; dessen RC1–RC4 behoben.
+- **Nachweise:** 45 Mutanten RED (`tools/mut_r3.py`, Logs `scratch/mut_r3a*.out`). Gate GR3a3 GATE_OK: 1650/0/27, bsc_tools 7/7, Clippy, F0-VAR PASS mit 3496 nativen Feldern (`scratch/gate_GR3a3.out`).
+- **Hot-Path:** Append plus Lock/Inode 3,1 µs p50 gegenüber einem Append von 10,8 ms; das liegt nach dem Senden.
 
-### 6.1 Bereits geschrieben (kompiliert, **ungetestet**)
+### 6.2 R3b — NOT_STARTED (Soll und Plan)
+- **Receipt-Recovery (BSC3-024/041)** für unaufgelöste Transaktionen, die blockieren: Nonce ≠ next, Fenster unbekannt oder verwaist, eingeschlossen in einem Block, dem der Follower nicht folgte.
+  - `eth_getTransactionReceipt(hash)` → Blocknummer und -hash.
+  - Hash durch die zweite Quelle bestätigen (BSC3-056, `canonical_confirm.rs` / `chain_follower/confirm.rs`, Header-Abruf).
+  - Block und Receipts über den Follower-Abruf (`eth_getBlockByNumber(n,true)` + `eth_getBlockReceipts`, `chain_follower/follow.rs`) und `launches::flap_events`.
+  - Fakten INCLUDED/REVERTED mit `source=RECEIPT`.
+  - Ohne Receipt und mit bestätigter Konto-Nonce > Tx-Nonce (C2-Nonce-Fakten, `runtime_state.rs`) → REPLACED mit `source=NONCE`.
+  - Begrenzt per Config (neue Schlüssel z. B. `BSC_CANONICAL_RECOVERY_READS_MAX`/`_RETRY_MS`), als Lese-Thread wie der Kurvenleser in R1 (`runtime.rs` `ask_lot_reads`).
+  - Offen ist, wie das sauber an `on_canonical` andockt, ohne den laufenden Blockzustand (`self.block`, `seen`) zu stören: nur zwischen den Blöcken verarbeiten.
+- **Nonce-Burn gesperrt:** `bsc_runtime live nonce-burn`, Default `BSC_LIVE_NONCE_BURN=OFF`, nur bei Gate CLEAR plus Grant; 0-Wert-Self-Transfer → REPLACED; nur Loopback-Tests, **nie real senden**.
+- **Gateway/Frontend-Aktionen** für die R3-Befehle (Audit A: CLI + Gateway + `LiveActions.tsx`, CAS, gesperrt), zusammen mit R10.
+- **Statusprojektion:** eine Warnung `LIVE_LEDGER_QUARANTINED` im LIVE-Tab. Bisher nur als Verweigerungsgrund sichtbar.
 
-**Record-Schema** `bsc/engine/crates/record/src/schema/bsc_runtime.rs`:
-- `live_ledger::SCHEMA` jetzt **schema_version 4** mit den optionalen Feldern `ATTEMPT` 28 (B256), `REQUEST_ID` 29 (Text), `DECIDED_BY` 30 (Text), `EVIDENCE_SHA256` 31 (B256), `SOURCE` 32 (Text).
-- v3 bleibt lesbar als `live_ledger::V3`; v2 und v1 bleiben ebenfalls. In `ALL` wurde `V3` ergänzt.
-- KIND-Doku um RESPONDED, PLACED, RESUMED, WRITTEN_OFF, EXIT_REQUESTED und ADOPTED ergänzt.
-- Neues Schema `live_ledger_quarantine` (record_type **74**, `darkbot.bsc.live-ledger-quarantine.v1`) mit den Feldern SEQ, SHA256, PROVENANCE_TOOL, PROVENANCE_OBSERVED_UNIX_MS, REQUEST_ID, DECIDED_BY, WHY und GENERATION; in `ALL` eingetragen.
-
-**Ledger** `execution/src/live_ledger.rs`:
-- `FactKind` hat neu `Resumed`, `WrittenOff`, `ExitRequested` und `Adopted`. `Adopted` ist eine erste Fakt-Art (`first()`), dazu kommt `operators()`.
-- Neue Typen: `Operator {request_id, decided_by, evidence, at_ms}` (`at_ms` = Provenance-Zeit des Eintrags, beim Decode gesetzt) und `FactSource {Receipt, Nonce}`.
-- `Fact` hat neu `attempt: Option<[u8;32]>`, `operator: Option<Operator>` und `source: Option<FactSource>`.
-- `Fact::about()` setzt `operator` und `source` zurück.
-- `Fact::admitted()` setzt `attempt` = tx_hash für einen nicht-Lease-BUY, sonst None.
-- Encode/Decode der v4-Felder. Strenge Regeln: Operator-Felder genau in Operator-Fakten, Evidence genau in ADOPTED, Source nur auf INCLUDED/REVERTED/REPLACED. Decode-Reihenfolge SCHEMA → V3 → V2 → V1.
-- `Tx.decided: Decided {resumes, excused, written_off: Option<u64>, exit_requested}`.
-- Fold:
-  - RESUMED entschuldigt die bis dahin revertierten Exit-Schritte des Tokens.
-  - WRITTEN_OFF macht eine Position `Open` zu `PositionState::WrittenOff` mit `closed_ms` = Faktzeit und PnL = Erlös − Input − Gas. Ein noch ausstehender SELL entscheidet zuerst; ein später eingeschlossener SELL schließt die Position.
-  - ADOPTED wird als INCLUDED gefaltet, `inclusion` ist der Fakt selbst. ORPHANED eines ADOPTED wird zu UNKNOWN.
-  - `PositionState::WrittenOff` (Name `WRITTEN_OFF`).
-- `Book::withdrawn_attempts()`: Versuche, deren jeder BUY-Fakt (Transaktion und Lease) WITHDRAWN-first und WITHDRAWN ist. Schlüssel ist `attempt` oder der tx_hash.
-- `Ledger::fact_count()`.
-- Konstanten `LIVE_LOT_NOT_OPEN`, `LIVE_LOT_EXIT_OUT`, `LIVE_OPERATOR_EXIT_OFF`, `LIVE_REQUEST_REUSED`, `LIVE_ADOPTION_REFUSED`.
-- `LotDecision {Resume, WriteOff, ExitNow}` mit `parse("resume"|"write-off"|"exit-now")`.
-- `Ledger::decide(lot, what, request_id, decided_by, operator_exit, now_ms)`:
-  - Betreiber-Lock `live-ledger/operator.lock`.
-  - Idempotent je Request-ID; eine andere Entscheidung unter derselben ID gibt `LIVE_REQUEST_REUSED`.
-  - Write-off und Exit-now nur ohne ausstehenden Exit-Schritt und nur bei Zustand Open.
-  - Exit-now nur mit `BSC_EXEC_LIVE_OPERATOR_EXIT=ON`.
-- `G07Buy` und `g07_buy(result, capture, buyer, finality_blocks)`:
-  - G0.8-Ergebnis v7 plus dessen Chain-Capture-Journal (SHA muss passen).
-  - Bedingungen: BUY_STATUS==1, CANONICAL, Acquisition-Evidence vollständig, positive zurechenbare Acquisition, BUYER == LIVE-Buyer, CONFIRMATIONS ≥ Finalität, Token-Netto > 0.
-  - Aus dem Capture kommen Nonce, Gas und Preis des BUY, der Sender des Launches und die Block-ms. Wert und Gas werden mit dem Ergebnis abgeglichen.
-- `Ledger::adopt(buy, chain_id, request_id, decided_by, now_ms)`: ADOPTED-Fakt mit Grant-Generation 0 und Komponente ExecC3; verweigert, wenn der Hash schon im Ledger steht.
-- **BSC3-045:**
-  - `append()` hält die `pending-*.tmp` exklusiv gelockt, bis sie veröffentlicht ist, und prüft per Inode, dass die Datei noch die eigene ist; sonst legt es eine neue an. `write_entry` nimmt jetzt `&mut File`.
-  - `Ledger::clear_pending()` entfernt nur tmp-Dateien, deren Lock es bekommt.
-  - `Ledger::check()` meldet (Anzahl, unlesbare (seq, warum)).
-  - `Ledger::quarantine(seq, request_id, decided_by, generation, now_ms)`: nur für eine nicht dekodierbare Datei; erst den Record create-new und dauerhaft schreiben, dann den Eintrag umbenennen nach `live-ledger-quarantine/<seq>.entry`, beide Verzeichnisse fsyncen; idempotent je Request.
-  - `Ledger::quarantined()` liefert die höchste Owner-Generation; ein unlesbarer Record zählt als `u64::MAX`.
-
-**Owner** `execution/src/sources.rs`:
-- `safe_id` ist jetzt `pub(crate)`.
-- `slot_returns_dir` = `buy-attempt-returns/`.
-- `latest_slot_ms` liest auch die zurückgegebenen Kampagnen-Slots (Vorwärtsuhr BSC3-004).
-- `Store::return_attempt(attempt_hex)`:
-  - unter dem Spend-Lock
-  - verschiebt jeden Tages-Slot mit attempt == A oder `A-<Tag>` (Lease-Tages-ID) und den Kampagnen-Slot von A per Rename nach `buy-attempt-returns/{A}-daily-{utc}-{slot}.dbrec` bzw. `{A}-total-{slot}.dbrec`
-  - sync_dir aller berührten Verzeichnisse, danach `flush_device`
-  - idempotent; nicht dekodierbare Slots bleiben
-  - **Spend-Einträge bleiben bewusst stehen**: Write-ahead und „nie zweimal zugelassen“ (BSC3-024) bleiben unverändert. Die Alternativen einer Nonce zählen ohnehin nur einmal.
-- Neue Konstante `LIVE_LEDGER_QUARANTINED`.
-
-**LIVE-Runtime** `execution/src/runtime_live.rs`:
-- Neue Felder `folded_len`, `returned`, `slot_return_failed`, `slot_return_error`, `resumes_seen`, `exit_requests_done`, `operator_exits_locked`, `decided` und `quarantine`.
-- `refold()` setzt `folded_len` und `quarantine`.
-- `position_changes()` wurde aus `record()` herausgelöst (gleiches Verhalten).
-- `fold_decisions()` läuft im Tick nach dem Store-Open:
-  - Wuchs das Ledger, folgt ein Refold und die Positionsänderungen landen in `decided`.
-  - RESUMED → `reopen_exit`, dazu ein Token in `decided.1`; hatte das Lot schon Exit-Schritte, folgt `want_exit`.
-  - EXIT_REQUESTED einmal je Prozess → `want_exit` bei ON, sonst wird `OPERATOR_EXIT_LOCKED` gezählt.
-- `take_decided()`.
-- `return_withdrawn(store)` im Tick nach `fold_decisions`: für jedes `withdrawn_attempts()`, das nicht von einem Lease oder `lease_attempt` gehalten wird → `store.return_attempt`. Fehler werden gezählt (`SLOT_RETURN_FAILED` in REFUSALS) und später wiederholt.
-- `exit_stopped()` ignoriert die entschuldigten Reverts.
-- `buy_refusal()`: direkt nach LIVE_PLACEMENT_VIOLATED → `LIVE_LEDGER_QUARANTINED`, solange die Grant-Generation ≤ der Quarantäne-Generation ist.
-- `folded()` ruft beim Start `clear_pending()`.
-- Der `match` der Fakt-Arten in der Funds-Rechnung ist um die neuen Arten ergänzt (zählen nicht).
-
-**LIVE-End** `execution/src/live_end.rs`:
-- Der BUY-Fakt trägt `attempt` = Lease-Attempt oder tx_hash.
-- Der Lease-Fakt übernimmt ihn per `..fact.clone()`.
-
-**Runtime-Loop** `execution/src/runtime.rs`:
-- Neuer Config-Schlüssel `BSC_EXEC_LIVE_OPERATOR_EXIT` (ON/OFF, Pflicht mit `BSC_EXEC_PAPER_IDENTITY`, sonst verweigert) → `ExecConfig.live_operator_exit`.
-- Nach dem LIVE-Tick führt `take_decided()` → `Opened`/`Ended` zu `s.hold`/`s.unhold` (journalisiert); `resumed` → `LotDeciders::resume(token)` (stranded/retry/refused gelöscht), danach `refresh_lot_deciders`.
-
-**Config** `bsc/config/ingress.public.env`: `BSC_EXEC_LIVE_OPERATOR_EXIT=OFF` mit Kommentar.
-
-**`ExecConfig`-Literale:** `live_operator_exit: false` in `paper_exec.rs`, `runtime_exec.rs`, `tests/c3_paper_latency.rs`, `tests/strategy_paper_latency.rs` und `tests/live_e2e.rs`.
-
-**Fact-Literale:** `attempt: None, operator: None, source: None` in `runtime_live.rs` (10), `live_ledger.rs` (2), `live_end.rs` (1, Response-Fakt), `live_attempts.rs` (1) und `qualification/src/status/tests.rs` (1).
-
-**CLI** `execution/src/bin/bsc_runtime.rs`:
-- Hilfsfunktion `hex32()`; `sha256_flag` nutzt sie.
-- Neue Befehle:
-  - `live lot resume|write-off|exit-now --lot <0x…> --state --config --request-id --decided-by`
-  - `live adopt-g07 --g08 --capture --state --config --request-id --decided-by` (chain_id = `wss::BSC_MAINNET_CHAIN_ID`, Finalität = `BSC_CANONICAL_REORG_DEPTH`)
-  - `live ledger check --state` (Exit 0 nur, wenn alles lesbar ist)
-  - `live ledger quarantine --seq --state --request-id --decided-by` (Generation aus dem Owner)
-- Usage und Doku ergänzt.
-
-### 6.2 Offen in R3a (in dieser Reihenfolge)
-
-1. **Tests schreiben** (fail-before = Feature fehlt auf `1d29cec7`, dazu Mutationen):
-   - `live_ledger.rs` tests:
-     - v4-Roundtrip und v3-lesbar, Operator/Evidence/Source-Regeln
-     - `withdrawn_attempts`: Lease-BUY und Lease-Fakt WITHDRAWN → ja; RELEASED/UNKNOWN → nein; v3 ohne attempt → tx_hash
-     - `decide`: alle Vorbedingungen, Wiederholung → None, wiederverwendete ID → Fehler, Write-off bei ausstehendem SELL → `LIVE_LOT_EXIT_OUT`, Exit-now OFF → Fehler
-     - Write-off-Fold: Zustand, PnL, `closed_ms`, SELL draußen / SELL später
-     - RESUMED entschuldigt die Reverts
-     - `g07_buy`/`adopt` mit synthetischem G0.8-v7-Record und einem `JournalWriter`-Capture (chain_block, chain_transaction): Erfolg und jede Verweigerung
-     - `clear_pending`: gelockte Datei bleibt, ungelockte geht; `append` danach ok
-     - `check`/`quarantine`/`quarantined`: unlesbar → `facts()` Err → Quarantäne → `facts()` Ok; lesbare seq verweigert; idempotent; andere Request-ID verweigert
-   - `sources.rs` tests (`return_attempt`):
-     - Lease-Tages-ID und normale ID, Usage sinkt
-     - Uhr-zurück wird weiter verweigert (`latest_slot_ms` mit Returns)
-     - zweiter Lauf → 0; halb verschoben → wird vervollständigt; nicht-hex verweigert; Spend-Lock gehalten → Fehler
-   - `runtime_live.rs`:
-     - ein WITHDRAWN-BUY gibt nach dem Tick seine Slots zurück (vorhandene Testhelfer prüfen: `a_buy_late_after_its_lease_was_taken_withdraws_both` in `live_end.rs` ~Z.2173, `live_ready_*` in `sources.rs`)
-     - Betreiberfakten erreichen die laufende Runtime: resume → Exit wieder gewollt; write-off → `Ended`; exit-now OFF → `OPERATOR_EXIT_LOCKED`; ON → `exits_wanted`
-     - Quarantäne verweigert BUYs alter Grants, ein neuer Grant ist frei
-   - `runtime.rs`: Config `BSC_EXEC_LIVE_OPERATOR_EXIT` ON/OFF/anderes/fehlt.
-2. **Rebase auf das aktuelle `origin/main`** (enthält R2b `9d5ed3a0`):
-   - Überlappung nur `bsc/engine/crates/qualification/src/status/tests.rs`: R3a fügt 3 Felder in ein Fact-Literal ein, R2b fügt Tests hinzu. Nach dem Rebase prüfen, ob R2b neue Fact-Literale enthält, die ebenfalls die 3 Felder brauchen.
-   - `frontend/contracts/bsc-fields.json` und `bsc-native-fields.json` hat R2b geändert; R3a hat sie noch nicht angefasst, sie werden in Schritt 4 neu erzeugt.
-   - Methode wie bei R2: `git -C wtR2 stash push -m R3a` (benannt), `git -C wtR2 checkout --detach origin/main`, `git -C wtR2 stash apply` (nicht `pop`), Konflikte von Hand lösen, danach `stash drop` erst nach Sichtprüfung.
-   - Vorher den Patch `wtR2_R3a_uncommitted_before_move.patch` als Sicherung behalten.
-3. **fmt** nur der eigenen Hunks: `python3 -I tools/fmt_mine.py <wtR2>/bsc/engine origin/main <Datei relativ zu bsc/engine>…`.
-   - Baseline: 355 Hunks (`tools/fmt_base_files.txt`); sie darf nicht wachsen.
-   - Achtung: Das Skript hat einmal fälschlich einen Umordnungs-Hunk in `lib.rs` angewandt; das Ergebnis immer mit `git diff` prüfen.
-4. **Re-Pin und Inventar:**
-   - Gepinnte Dateien `sources.rs`, `live_ledger.rs`, `runtime_live.rs` (`bsc-fields.json`): `cd <wtR2> && python3 -I <DarkBot-bsc-rev1>/tools/repin.py`.
-   - Natives Inventar neu: Ledger v4-Felder und Quarantäne-Schema. Ablauf:
-     1. `cargo build --release -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter` (Bin und Feature in `qualification/Cargo.toml` geprüft).
-     2. `DARKBOT_BSC_ROOT=<wtR2> DARKBOT_RUNDIR=<tmp-rundir> <target>/release/bsc-status-reporter --field-inventory > frontend/contracts/bsc-native-fields.json`
-     3. `node frontend/scripts/check-bsc-fields.mjs --write-placement`, danach die Platzierung der neuen Felder in `bsc-fields.json` entscheiden (EXCLUDED mit Grund oder IST_CONNECTED), dann `node frontend/scripts/check-bsc-fields.mjs` → PASS.
-   - Bei R2 lief das mit `DARKBOT_RUNDIR=$S/invrunR2`.
-5. Status-/Frontend-Sichtbarkeit (R10-Anteil):
-   - WRITTEN_OFF erscheint bereits als Positionszustand-Text im LIVE-Tab (`qualification/src/status/live.rs` projiziert `p.state.name()`).
-   - Offen ist eine Warnung `LIVE_LEDGER_QUARANTINED` in der Statusprojektion; sie war bewusst zurückgestellt, um mit R2b nicht zu kollidieren.
-6. Docs-Einzeiler:
-   - STATUS.md: R3-Zeile, BSC3-068 (bisher „FIX_VERIFIED `a6943fe0`, Rückgabe … nicht umgesetzt“), BSC3-045, BSC3-024/041 (weiter offen bis R3b)
-   - Messplan-Einzeiler
-   - Bei R2 entstanden die Doku-Overrides über `scratch/rev1/r2/make_docs_R2.py`; analog vorgehen, Basis `origin/main`.
-7. Mutationen: `tools/mut_r2.py` als Vorlage (Format `(ID, Datei, alt, neu, crate, --lib, Testname)`, stellt mit mtime wieder her). Eine neue Liste für R3a anlegen, z. B. `tools/mut_r3.py`.
-8. **Unabhängiges Review** (1 Agent; Prompt mit Diff und Fragen zu Race, Crash, Idempotenz, 024/045-Regression), Befunde beheben, Re-Check.
-9. **Gate:** `zsh tools/gate_wt.sh R3a <wtR2> <wtR2-target>` → GATE_OK, danach Commit über `tools/commit_wt.sh`, Push, CI.
-
-### 6.3 R3b (nicht begonnen) — Soll
-
-- **Receipt-Recovery (024/041):**
-  - Für eine unaufgelöste Tx, deren Fenster vorbei ist oder deren Nonce ≠ next blockiert: Hintergrund-`eth_getTransactionReceipt` am kanonischen Endpoint, Blockhash per zweiter Quelle bestätigt (`canonical_confirm.rs`).
-  - Gefunden → INCLUDED/REVERTED mit `source=RECEIPT` (Gas, Tokens aus dem Portal-Event).
-  - Nicht gefunden und Konto-Nonce eines bestätigten Blocks > Tx-Nonce → REPLACED mit `source=NONCE` (by_tx unbekannt).
-  - Begrenzt per Config (`BSC_CANONICAL_RECOVERY_READS_MAX` / `_RETRY_MS`, neu). Ergebnis als Fakt, danach Refold.
-  - Follower-Call `Call::Receipt` im `chain_follower`.
-- **Nonce-Burn gesperrt:** `bsc_runtime live nonce-burn`.
-  - `BSC_LIVE_NONCE_BURN=OFF` als Default; nur bei Gate CLEAR plus Grant.
-  - 0-Wert-Self-Transfer mit höherem Gas → REPLACED.
-  - Nur Loopback-Tests, **nie real senden**.
-- **Gateway und Frontend für die R3-Betreiberbefehle** (Audit A „CLI+gateway+LiveActions.tsx“, CAS, gesperrt): kann als R3c oder in R10 laufen.
-
----
 
 ## 7. R2 — vollständige Übergabe (DONE_VERIFIED, `1d29cec7`; Projektion R2b `9d5ed3a0`)
 
@@ -467,22 +342,28 @@ R2 wurde vor dem Commit auf `f6156fa0` rebased (stash, checkout, apply). Die üb
 
 Hier ist nichts mehr offen.
 
-### 7.D Nächster Schritt zu R2
+### 7.D R2b-Review-Fix — IN_PROGRESS (uncommitted in `wtEA`)
 
-Kein Code-Schritt. Offen ist (1) das **unabhängige Review von R2b `9d5ed3a0`** und (2) die realen Läufe nach 03.11. (EXTERNAL_BLOCKED):
-- Kampagnen-Manifest durch den Betreiber
-- `live campaign-precommit`
-- Läufe
-- `live attempts`
+1. **Erstes Review von `9d5ed3a0`: FAIL.** HIGH-1, MEDIUM-2 bis 5 und LOW-6 bis 9 (Details: Agentenbericht in `scratch/r2bfix/msg.txt`):
+   - HIGH-1: 40 Versuchsfelder als angeschlossen markiert, aber nicht projiziert
+   - MEDIUM-2: unbegrenzte Reads und Warnungen
+   - MEDIUM-3: Dateiname nicht gegen TX_HASH geprüft
+   - MEDIUM-4: Versuche anderer Auswertungen ohne Warnung
+   - MEDIUM-5: Fixtures mit gleichen Werten
+   - LOW-6: Symlink-Verzeichnis
+   - LOW-7: INVALID-Verdikt
+   - LOW-8: Zähler als Raten
+   - LOW-9: Fenstertext als Bool
+2. **Fix-Agent auf Basis `047eafe7`:** alle 9 behoben. Gate R2bfix GATE_OK (1634/0/27, F0-VAR PASS), 21 Mutanten RED.
+3. **Re-Check: PASS** mit LOW:
+   - L-1: Rest des LIVE-Tabs nicht im Budget; Kampagnenteil zuletzt mit Restbudget projizieren und Test mit gefülltem Tab.
+   - L-2: Link-Tests prüfen Links nicht wirklich.
+   - L-3: Auswahlregel bei mehr als MAX+1 Records dokumentieren.
+   - L-4: Frontend-Tests und Mutanten auf dem Endstand wiederholen.
+   - Dazu Nits: eine gemeinsame `attempt_file_name`, Warnung bei gemischten Auswertungen ohne Verdikt, T0-Hinweis.
+4. **Der Agent hat L-1 bis L-4 bearbeitet** (Umfang UNVERIFIZIERT), den Stand als **`stash@{0}` „R2bfix-L1L4-20261101“** gesichert (Basis `047eafe7`), `wtEA` auf `49bcd98f` gesetzt, den Stash angewendet und begonnen zu regenerieren. **Dann wurde er gestoppt.**
 
-Review-Fokus R2b:
-- `qualification/src/status/campaign.rs` liest nur und bewertet nichts
-- Verhalten bei beschädigten Records
-- Begrenzung auf `MAX_BUY_ATTEMPTS_TOTAL`
-- Frontend `pages/LiveCampaign.tsx` und `model/live.ts`
-- Proto-Felder 30/31 und Golden-Dateien
-
-Ein Befund wird als Folge-Commit behoben.
+Ob in `wtEA` alle gemeinsamen Dateien korrekt neu erzeugt sind, ist UNVERIFIZIERT: `schema_id.txt`, `PROTOCOL.md`, `status_pb.ts`, Golden, `bsc-fields.json`, `placement.generated.ts`.
 
 ---
 
@@ -728,40 +609,44 @@ Integrations-Tests (Auswahl, nachgewiesen grün im Gate): `execution/tests/live_
 
 ## EXAKTER WIEDERAUFNAHMEPUNKT – ANWEISUNG AN DIE NÄCHSTE CLAUDE-INSTANZ
 
-Letzter abgeschlossener Schritt:
-- R3a-Code (Ledger v4, Slot-Rückgabe 068, Betreiberfakten resume/write-off/exit-now, adopt-g07, Ledger check/quarantine/Temp-Cleanup 045, CLI, Runtime-Verdrahtung, Config) ist geschrieben.
-- `cargo check -q --workspace --all-features --tests --bins` war grün (vor dem Verschieben, Target `wtR2-target`).
+**Letzter abgeschlossener Schritt:**
+- R3a ist als `49bcd98f` auf `main` gepusht (CI UNVERIFIZIERT).
+- Danach Stopp und Aufräumen: `wtR2` und `wtR8` entfernt, R3a-Stashes gelöscht (als Patch gesichert), Hauptcheckout per Fast-forward auf `49bcd98f`.
 
-Unmittelbar nächster Schritt:
-- `bsc/engine/crates/execution/src/live_ledger.rs`, Modul `mod tests` (beginnt bei `#[cfg(test)] mod tests`, Helfer `released(...)` und `admitted(...)`): die R3a-Ledger-Tests aus §6.2 Punkt 1 schreiben.
-- Danach die Tests für `sources.rs` (`return_attempt`), `runtime_live.rs` und `runtime.rs` (Config).
+**Unmittelbar nächster Schritt:** den R2b-Review-Fix in `wtEA` verifizieren und abschließen.
 
-Reihenfolge:
+```
+R=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot
+D=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1
+W=$D/wtEA
+git -C $R fetch -q origin; git -C $R worktree list; git -C $R stash list
+git -C $W status --porcelain=v1          # 18 Dateien (§3.4)
+git -C $W diff | shasum -a 256           # vergleichen mit backups/wtEA_R2bfix_on_49bcd98f_uncommitted.patch
+```
 
-1. **Orte prüfen**, ohne etwas zu ändern:
-   ```
-   R=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot
-   D=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-bsc-rev1
-   git -C $R fetch -q origin; git -C $R worktree list
-   git -C $D/wtR2 status --porcelain=v1        # die 15 R3a-Dateien aus §3.4
-   git -C $D/wtR2 diff | shasum -a 256          # fab0ae28… = unveränderter R3a-Stand
-   git -C $R log --oneline 0159c1a7^..origin/main -- bsc frontend gateway ops protocol
-   ```
-2. Diese Datei vollständig lesen; dann `bsc/docs/1_PLAN/PHASENPLAN.md`, `STATUS.md` (REV.1.0-Abschnitt und Audit-E-Tabelle), den Messplan, `bsc/docs/5_OFFENE_FEHLER/BSC_Bug_V3.md` (BSC3-024, -041, -045, -068) und `$D/scratch/rev1/{PLAN.md,auditC_summary.md,auditA_summary.md,auditE_register.md,r3/DESIGN.md}`.
-3. Abschlüsse gegen Git prüfen: `git -C $R log -1 --format=%B 0159c1a7`, `… 8a9584d9`, `… 1d29cec7`, `… 9d5ed3a0`. CI über `python3 -I $D/tools/ci_wait2.py <sha>` als Hintergrundjob.
-4. **R2b-Review** (unabhängiger Reviewer-Agent, höchstens 2 Agenten) auf `9d5ed3a0` starten; Fokus siehe §7.D. Befunde als Folge-Commit beheben.
-5. **R3a fortsetzen in `$D/wtR2`:**
-   1. `ln -sfn $D/wtR2-target $D/wtR2/bsc/engine/target` prüfen; ist `node_modules` vorhanden, ist es ignoriert.
-   2. Tests schreiben (§6.2 Punkt 1) und gezielt laufen lassen:
-      `cd $D/wtR2/bsc/engine && CARGO_TARGET_DIR=$D/wtR2-target cargo test --locked --all-features -p darkbot-bsc-execution --lib <testname> -j 2`
-   3. Rebase auf das aktuelle `origin/main` (§6.2 Punkt 2), `stash apply`, nicht `pop`.
-   4. fmt der eigenen Hunks, Re-Pin, natives Inventar, F0-VAR-Platzierung (§6.2 Punkte 3–4).
-   5. Doku-Einzeiler (STATUS-Zeilen R3, BSC3-068/045; Messplan).
-   6. Mutationen (`tools/mut_r2.py` als Vorlage) und unabhängiges Review mit Re-Check.
-   7. `zsh $D/tools/gate_wt.sh R3a $D/wtR2 $D/wtR2-target` → GATE_OK.
-   8. `bash $D/tools/commit_wt.sh $D/wtR2 <origin/main-sha> <msg> <liste> [doc-overrides]`, dann `git -C $D/wtR2 push origin <sha>:refs/heads/main`, dann `python3 -I $D/tools/ci_wait2.py <sha>`.
-6. **R3b** (§6.3): Receipt-Recovery mit zweiter Quelle, Nonce-Burn gesperrt, danach Gateway/Frontend-Aktionen für die R3-Befehle. Gleicher Paketablauf.
-7. Danach R4 bis R13 gemäß §5 und die offenen Audit-E-Befunde gemäß §8 (Reihenfolge des Paketplans; maximal zwei Agenten; jedes Paket mit Review, Mutationen, Gate, Push, CI).
-8. Nach 03.11. 08:05Z (Kampagnenende, nur der Nutzer stoppt die Kampagne): die Läufe aus Audit B/R14. Am Ende R14 mit Gesamtabnahme und der vollständigen Anforderungs-/Abnahmematrix.
+1. **CI-Stand prüfen:** `python3 -I $D/tools/ci_wait2.py 738a2cc7 49bcd98f` als Hintergrundjob (volle SHAs mit `git rev-parse`). Ist bsc rot, das zuerst beheben.
+2. **Rebase in `wtEA` prüfen und abschließen.**
+   - Gemeinsame Dateien nur regenerieren, nie von Hand mergen:
+     - Proto-Generat und `PROTOCOL.md`, `schema_id.txt` mit den Repo-Generatoren (siehe `git show --stat 9d5ed3a0` und `scratch/r2bfix/`).
+     - Golden mit `UPDATE_BSC_GOLDENS=1 cargo test … read_only_projection_and_golden_frames`.
+     - `npm run gen:bsc-placement`, `python3 -I $D/tools/repin.py`, natives Inventar (§11), `node frontend/scripts/check-bsc-fields.mjs`.
+   - Bei Zweifel: aus `stash@{0}` (Basis `047eafe7`) neu übertragen; `stash apply`, nicht `pop`.
+3. **L-1 bis L-4 abschließen** (§7.D) und auf dem Endstand laufen lassen: Frontend vitest, type-check, `npm run test:bsc`, die Rust-Tests in `status::tests`, Mutationen (`scratch/r2bfix/mutR2bfix.py`), fmt nur der eigenen Hunks (Baseline 355).
+4. **Unabhängiger Re-Check** (1 Agent), danach `zsh $D/tools/gate_wt.sh R2bfix2 $W $D/wtEA-target` → GATE_OK.
+5. **Commit und Push:**
+   - `bash $D/tools/commit_wt.sh $W <origin/main-sha> <msg> <liste> [bsc/docs/1_PLAN/STATUS.md=<datei>]`
+   - Commit-Text: `scratch/r2bfix/msg.txt`; Dateiliste: `scratch/r2bfix/files.txt`, beide aktualisiert.
+   - STATUS: R2-Zeile.
+   - Dann `git -C $W push origin "<sha>:refs/heads/main"` (Refspec in zsh quoten) und `ci_wait2.py <sha>`.
+6. **R3b** (§6.2), dann R4 bis R14 (§5) und die offenen Audit-E-Befunde (§8). Jedes Paket mit fail-before, Tests, Mutationen, unabhängigem Review, Gate, Push und CI.
+   - **Nur ein BSC-Worktree:** neue Arbeit in `wtEA` (nach dem R2b-Commit sauber auf `origin/main` setzen) oder einem neuen, aber dann nur diesem einen; überflüssige sofort mit `git worktree remove` entfernen.
+7. **Läufe nach 03.11. 08:05Z** (Kampagnenende; nur der Nutzer stoppt die Kampagne): Audit B/R14. Am Ende R14 mit Gesamtabnahme und der Anforderungs-/Abnahmematrix.
 
-Nicht tun: R3a verwerfen, `wtR2` neu auschecken, den Hauptcheckout pullen oder resetten, eine Echtgeld-Aktion, paketweites `cargo fmt`, die acht lokalen Evidence-Pfade committen, Project_0 berühren.
+**Nicht tun:**
+- den R2b-Fix oder `stash@{0}` verwerfen
+- im Hauptcheckout arbeiten oder pullen, außer per Fast-forward nach Absprache
+- neue Worktrees anhäufen
+- eine Echtgeld-Aktion
+- paketweites `cargo fmt`
+- die acht lokalen Evidence-Pfade committen
+- Project_0 berühren
