@@ -48,6 +48,10 @@ pub mod defaults {
     /// field at its largest, its projection (`project0.analytics.jobs`, beside the most jobs and
     /// runs) stays below one STATE frame.
     pub const PROVIDER_REGISTRY_ENTRIES_MAX: u64 = 32;
+    /// DEC-18: a provider endpoint's length and its host's (a DNS name), at most — the
+    /// registry's projection (hosts) is bounded by them (the gateway applies the same).
+    pub const PROVIDER_ENDPOINT_MAX: u64 = 512;
+    pub const PROVIDER_HOST_MAX: u64 = 253;
     /// The quote rounds one rebalancing observation may take at most (each round asks the quotes
     /// the plan still lacks).
     pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;

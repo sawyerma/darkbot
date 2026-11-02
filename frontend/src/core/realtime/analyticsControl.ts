@@ -183,7 +183,17 @@ export function autostartGrantCommand(digest: string): { params: Uint8Array } | 
   return { params: toBinary(AutostartGrantCommandSchema, message(AutostartGrantCommandSchema, { confirmDigest: digest })) };
 }
 
-const PROVIDER_ID = /^(?![0-9a-fA-F]{16,}$)[a-z0-9_-]{1,32}$/;
+const PROVIDER_ID = /^(?!-)(?![0-9a-fA-F]{16,}$)[a-z0-9_-]{1,32}$/;
+/** DEC-18: an endpoint as the gateway and the native descriptor take it — parsed by the same WHATWG URL
+ * rules, no user info, query, fragment, backslash or character the parser would encode, a DNS host of at
+ * most 253 characters or an IPv6 address, at most 512 characters. */
+function endpointOk(raw: string): boolean {
+  if (raw.length > 512 || !/^(?:https?|wss?):\/\//.test(raw) || /[\s\\"<>^`{}|?#]/.test(raw)) return false;
+  let url: URL;
+  try { url = new URL(raw); } catch { return false; }
+  if (url.username || url.password) return false;
+  return url.hostname.startsWith("[") || /^[A-Za-z0-9._-]{1,253}$/.test(url.hostname);
+}
 const PROVIDER_KINDS = ["rpc", "wss", "geyser", "jupiter", "jito"] as const;
 /** The provider form as the operator entered it (empty: not set; an update changes only what it sets). */
 export interface ProviderInput {
@@ -199,7 +209,7 @@ export function providerDescriptorCommand(v: ProviderInput, add: boolean): { par
   if (!PROVIDER_ID.test(t(v.id))) return { problem: "Id: 1–32 of a-z, 0-9, _ or - (never a key)." };
   if (add && (!t(v.kind) || !t(v.endpoint) || !t(v.plan) || !t(v.entitlement))) return { problem: "A new provider needs its kind, endpoint, plan and entitlement." };
   if (t(v.kind) && !(PROVIDER_KINDS as readonly string[]).includes(t(v.kind))) return { problem: "Kind: rpc, wss, geyser, jupiter or jito." };
-  if (t(v.endpoint) && (!/^(?:https?|wss?):\/\/[^/@?#\s]+(?:\/[^?#\s]*)?$/.test(t(v.endpoint)))) return { problem: "Endpoint: a URL without user info, query or fragment — a key is the credential's, never the endpoint's." };
+  if (t(v.endpoint) && !endpointOk(t(v.endpoint))) return { problem: "Endpoint: a URL without user info, query or fragment — a key is the credential's, never the endpoint's." };
   if (t(v.auth) && !/^(?:none|path|(?:query|header):[A-Za-z0-9_-]{1,64})$/.test(t(v.auth))) return { problem: "Authentication: none, path, query:NAME or header:NAME (a name, never a key)." };
   if (t(v.credential) && !PROVIDER_ID.test(t(v.credential))) return { problem: "Credential: its id (never the key itself)." };
   if (t(v.plan) && !["free", "unknown"].includes(t(v.plan))) return { problem: "Plan: free or unknown (FREE_ONLY)." };
@@ -325,7 +335,11 @@ async function lookup(id: string, action: JobAction): Promise<void> {
 /** One request per user action; a start's request id becomes the job id. */
 /** `configVersion`: the CTRL-03 CAS of a source change (the version the projection showed). */
 export async function analyticsCommand(action: JobAction, args: { resourceId?: string; params?: Uint8Array; configVersion?: bigint }): Promise<void> {
-  if (useAnalyticsControl.getState().busy) return;
+  const carriesKey = action === "project0.provider.credential.set" || action === "project0.provider.credential.rotate";
+  if (useAnalyticsControl.getState().busy) {
+    if (carriesKey) args.params?.fill(0); // a key not sent is overwritten all the same
+    return;
+  }
   const id = crypto.randomUUID();
   useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "SENDING", detail: "" } });
   let submitted = false;
@@ -354,7 +368,7 @@ export async function analyticsCommand(action: JobAction, args: { resourceId?: s
   } finally {
     // DEC-18 (review F13): a credential's key leaves once; its request body and parameters are
     // overwritten afterwards (the gateway's ledger never holds it).
-    if (action === "project0.provider.credential.set" || action === "project0.provider.credential.rotate") {
+    if (carriesKey) {
       body?.fill(0);
       args.params?.fill(0);
     }

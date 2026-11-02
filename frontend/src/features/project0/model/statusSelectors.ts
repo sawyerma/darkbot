@@ -78,8 +78,6 @@ export function healthLabel(topicStatus: TopicStatus, c: CaptureView | null, clo
   return "Live · unverified";
 }
 
-/** Execution needs the engine's LIVE and submission authorization (system.proto 16/17). Without a
- *  current effective record it is unknown: never a fixed GUI claim either way. */
 /** DEC-18: the providers a running process is bound to, of `kinds` (its secret-free binding and
  * credential revision) — the effective ones only on a live project0.status topic; otherwise the
  * last report is named as such (review F8). */
@@ -90,6 +88,8 @@ export function effectiveProviders(s: SystemView | null, topicStatus: TopicStatu
   return `not current (${topicStatus})${listed ? ` · last reported: ${listed}` : ""}`;
 }
 
+/** Execution needs the engine's LIVE and submission authorization (system.proto 16/17). Without a
+ *  current effective record it is unknown: never a fixed GUI claim either way. */
 export function executionAuthorization(s: SystemView | null, topicStatus: TopicStatus): string {
   if (topicStatus !== "LIVE" || !s) return "Authorization unknown";
   if (s.liveAuthorized === false || s.submissionAuthorized === false) return "Not authorized";

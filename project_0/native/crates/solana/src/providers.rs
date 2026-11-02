@@ -238,6 +238,12 @@ fn token_like(segment: &str) -> bool {
 /// parameter is the descriptor's `AuthKind`), no fragment, no token-like path segment; the host
 /// lowercased, a default port and a lone trailing `/` dropped. A refusal never echoes the input.
 pub fn canonical_endpoint(kind: ProviderKind, raw: &str) -> Result<String, String> {
+    use crate::runtime_config::defaults::{PROVIDER_ENDPOINT_MAX, PROVIDER_HOST_MAX};
+    if raw.trim().len() > PROVIDER_ENDPOINT_MAX as usize {
+        return Err(format!(
+            "PROVIDER_URL_TOO_LONG: at most {PROVIDER_ENDPOINT_MAX} characters"
+        ));
+    }
     let url = reqwest::Url::parse(raw.trim()).map_err(|_| "PROVIDER_URL_INVALID".to_string())?;
     if !url.username().is_empty() || url.password().is_some() {
         return Err("PROVIDER_URL_USERINFO: credentials belong in a credential entry".into());
@@ -252,6 +258,11 @@ pub fn canonical_endpoint(kind: ProviderKind, raw: &str) -> Result<String, Strin
         return Err("PROVIDER_URL_PATH_SECRET: a credential in the path is the provider's auth (path), never part of its endpoint".into());
     }
     let host = url.host_str().ok_or("PROVIDER_URL_HOST")?;
+    if host.len() > PROVIDER_HOST_MAX as usize {
+        return Err(format!(
+            "PROVIDER_URL_HOST: at most {PROVIDER_HOST_MAX} characters"
+        ));
+    }
     let loopback = loopback_host(host);
     let (tls, plain) = kind.schemes();
     if url.scheme() != tls && !(loopback && url.scheme() == plain) {
@@ -1142,6 +1153,22 @@ mod tests {
         p.credential = Some("--project".into());
         assert!(p.validate().is_err());
         assert!(helius().validate().is_ok());
+    }
+
+    /// DEC-18 package-4 re-review L3: a host has at most 253 characters (a DNS name) and an
+    /// endpoint at most `PROVIDER_ENDPOINT_MAX` — the registry's projection (hosts) stays within the
+    /// STATE frame budget whatever `p0ctl provider add` is given.
+    #[test]
+    fn an_endpoint_and_its_host_are_bounded() {
+        let host = |n: usize| format!("https://{}.example", "a".repeat(n));
+        assert!(canonical_endpoint(ProviderKind::Rpc, &host(245)).is_ok());
+        assert!(
+            canonical_endpoint(ProviderKind::Rpc, &host(246)).is_err(),
+            "254-character host"
+        );
+        let path = format!("https://rpc.example/{}", "seg/".repeat(130));
+        assert!(path.len() > crate::runtime_config::defaults::PROVIDER_ENDPOINT_MAX as usize);
+        assert!(canonical_endpoint(ProviderKind::Rpc, &path).is_err());
     }
 
     fn helius() -> ProviderDescriptor {

@@ -235,8 +235,18 @@ mod provider_shape {
                 None => (authority, None),
             },
         };
+        // An IPv6 host is an address (the native parser refuses anything else in brackets); any
+        // other host is a DNS name or an IPv4 address of at most 253 characters.
+        let host_ok = if authority.starts_with('[') {
+            host.parse::<std::net::Ipv6Addr>().is_ok()
+        } else {
+            host.len() <= 253
+                && host
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+        };
         !host.is_empty()
-            && !host.contains(['@', '[', ']'])
+            && host_ok
             && match port {
                 Some(p) => {
                     !p.is_empty()
@@ -256,7 +266,7 @@ mod provider_shape {
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
         url.len() <= 512
             && url.bytes().all(|b| b.is_ascii_graphic())
-            && !url.contains(['?', '#', '\\'])
+            && !url.contains(['?', '#', '\\', '"', '<', '>', '^', '`', '{', '}', '|'])
             && ["https", "http", "wss", "ws"].contains(&scheme)
             && authority_ok(authority)
             && !path.split('/').any(token_like)
@@ -323,14 +333,22 @@ impl Drop for WipedBody {
     }
 }
 
+/// DEC-18 (P0-019, review L1): a credential command read from its request without copying the
+/// secret — decoded from the shared `Bytes`, its secret stays a view of the request body (decoding
+/// from a slice would allocate a copy that is freed unwiped).
+fn credential_command(
+    req: &CommandRequest,
+) -> Option<crate::proto::project0::v1::ProviderCredentialCommand> {
+    crate::proto::project0::v1::ProviderCredentialCommand::decode(req.params.clone()).ok()
+}
+
 /// DEC-18 (P0-019): `req` without its secret (the request every durable record holds) and the
 /// secret, for a credential action; `None` when its parameters do not decode or carry none.
 fn separate_secret(req: &CommandRequest) -> Option<(CommandRequest, Option<SecretBuf>)> {
-    use crate::proto::project0::v1::ProviderCredentialCommand;
     if !SECRET_ACTIONS.contains(&req.action.as_str()) {
         return Some((req.clone(), None));
     }
-    let mut c = ProviderCredentialCommand::decode(req.params.as_ref()).ok()?;
+    let mut c = credential_command(req)?;
     // The native rule (`provider_registry` CREDENTIAL_SECRET_FORMAT): one line of visible bytes —
     // the controller reads its input up to the line end; the body limit bounds its length.
     if c.secret.is_empty() || c.secret.iter().any(u8::is_ascii_control) {
@@ -677,9 +695,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
         AutostartGrantCommand, AutostartPreviewCommand, BacktestJobCommand, BootNetworkCommand,
         BootOfflineCommand, BootStartCommand, CapabilityControlCommand, H0JobCommand,
-        OptimizeJobCommand, PostCaptureJobCommand, ProviderCredentialCommand,
-        ProviderDescriptorCommand, ProviderPriorityCommand, ProviderQualifyCommand,
-        ProviderSelectCommand, SourceControlCommand,
+        OptimizeJobCommand, PostCaptureJobCommand, ProviderDescriptorCommand,
+        ProviderPriorityCommand, ProviderQualifyCommand, ProviderSelectCommand,
+        SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
@@ -970,7 +988,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 PROVIDER_CREDENTIAL_SET | PROVIDER_CREDENTIAL_ROTATE
                     if req.resource_id.is_empty() =>
                 {
-                    let c = ProviderCredentialCommand::decode(req.params.as_ref()).ok()?;
+                    let c = credential_command(req)?;
                     if !id_ok(&c.credential) {
                         return None;
                     }
@@ -2069,7 +2087,7 @@ impl Control {
             }
             _ => {
                 record.detail = if provider {
-                    "Controller outcome unknown; inspect the provider registry in project0.analytics.jobs before a new request (this request id stays PendingReconcile here; its native receipt: p0ctl provider status)"
+                    "Controller outcome unknown; inspect the provider registry in project0.analytics.jobs before a new request (this request id stays PendingReconcile here; the registry it changed or not: p0ctl provider status, project0.analytics.jobs)"
                 } else if action == CAPABILITY_SET {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
                 } else if BOOT_ACTIONS.contains(&action) || action == START {
@@ -2388,6 +2406,10 @@ pub async fn command(State(app): State<Arc<AppState>>, h: HeaderMap, body: Bytes
     if h.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()) != Some("application/x-protobuf") {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
+    // The header values are views of the same read buffer as the body: released before the
+    // command runs, so the body can be overwritten when it returns (best effort — hyper's
+    // connection buffer may still hold the bytes; review L1).
+    drop(h);
     let Ok(req) = CommandRequest::decode(body.0.clone()) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -4716,8 +4738,10 @@ mod tests {
             ProviderQualifyCommand, ProviderSelectCommand,
         };
         use provider_shape::{endpoint_ok, entitlement_ok, id_ok};
-        // F1: what the native `canonical_endpoint` refuses (its URL parser reads `\` as `/`, a
-        // port as at most 65535) is refused here too; ordinary endpoints stay accepted.
+        // F1, L2: refused here as natively or more strictly (the native URL parser reads `\`
+        // as `/`, a port as at most 65535, an IPv6 host as an address, percent-encodes `{` in a
+        // path; a host has at most 253 characters) — nothing it refuses after the ledger passes.
+        let long_host = format!("https://{}.example", "a".repeat(250));
         for bad in [
             "https://rpc.example\\LEAKEDKEY1a2b3c4d5e6f7g8h9",
             "https://rpc.example:0123456789abcdef0123",
@@ -4725,6 +4749,11 @@ mod tests {
             "https://rpc.example:65536",
             "https://[::1",
             "https://[::1]x",
+            "https://[0123456789abcdef0123456789abcdef]",
+            "https://rp<c.example",
+            "https://rpc.example/abcdefghijklmno{",
+            "https://rpc.example/a|b",
+            &long_host,
         ] {
             assert!(!endpoint_ok(bad), "{bad}");
         }
@@ -4737,6 +4766,30 @@ mod tests {
         ] {
             assert!(endpoint_ok(good), "{good}");
         }
+        // L1: a credential command is read from its request without copying the secret — it
+        // stays a view of the request body (the one copy is the wiped `SecretBuf`).
+        let body = Bytes::from(
+            CommandRequest {
+                project: ProjectId::Project0 as i32,
+                request_id: "12345678-1234-1234-1234-123456789abc".into(),
+                action: PROVIDER_CREDENTIAL_SET.into(),
+                params: ProviderCredentialCommand {
+                    credential: "helius".into(),
+                    secret: b"VIEW-NOT-COPY".to_vec().into(),
+                }
+                .encode_to_vec()
+                .into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+        );
+        let request = CommandRequest::decode(body.clone()).unwrap();
+        let decoded = credential_command(&request).unwrap();
+        assert_eq!(&decoded.secret[..], b"VIEW-NOT-COPY");
+        assert!(
+            body.as_ptr_range().contains(&decoded.secret.as_ptr()),
+            "a view, not a copy"
+        );
         // F9: an identifier or an entitlement never reads as an option of the controller.
         for bad in ["--project", "-x", "-"] {
             assert!(!id_ok(bad) && !entitlement_ok(bad), "{bad}");

@@ -171,7 +171,7 @@ describe("DEC-18 provider registry commands", () => {
 
   it("types a provider, refusing a key in an endpoint or a name before anything is sent", async () => {
     const { ProviderDescriptorCommandSchema, ProviderSelectCommandSchema } = await import("../generated/darkbot/project0/v1/analytics_pb");
-    const { providerDescriptorCommand, providerSelectCommand, providerPriorityCommand, providerQualifyCommand } = await import("./analyticsControl");
+    const { providerCredentialCommand, providerDescriptorCommand, providerSelectCommand, providerPriorityCommand, providerQualifyCommand } = await import("./analyticsControl");
     const ok = providerDescriptorCommand(input, true);
     if (!("params" in ok)) throw new Error(ok.problem);
     const c = fromBinary(ProviderDescriptorCommandSchema, ok.params);
@@ -191,6 +191,16 @@ describe("DEC-18 provider registry commands", () => {
       expect("problem" in providerDescriptorCommand({ ...input, ...bad }, true)).toBe(true);
     }
     expect("problem" in providerDescriptorCommand({ ...input, endpoint: "" }, true)).toBe(true);
+    // Re-review nit: the GUI's own checks are the native/gateway rules (an option-shaped id, a
+    // backslash, a non-numeric port, a non-address in brackets, a character the URL parser encodes).
+    for (const bad of [{ id: "-x" }, { credential: "--project" }, { endpoint: "https://rpc.example\\KEY" }, { endpoint: "https://rpc.example:abc" },
+      { endpoint: "https://[0123456789abcdef0123456789abcdef]" }, { endpoint: "https://rpc.example/a{b" }, { endpoint: `https://${"a".repeat(254)}` }]) {
+      expect("problem" in providerDescriptorCommand({ ...input, ...bad }, true), JSON.stringify(bad)).toBe(true);
+    }
+    for (const good of ["https://[::1]:8899", "http://127.0.0.1:8899", "https://x.example:443/v1/rpc"]) {
+      expect("params" in providerDescriptorCommand({ ...input, endpoint: good }, true), good).toBe(true);
+    }
+    expect("problem" in providerCredentialCommand("--project", "k")).toBe(true);
     const sel = providerSelectCommand("rpc", "helius-rpc");
     if (!("params" in sel)) throw new Error(sel.problem);
     expect(fromBinary(ProviderSelectCommandSchema, sel.params)).toMatchObject({ kind: "rpc", id: "helius-rpc" });
@@ -223,6 +233,14 @@ describe("DEC-18 provider registry commands", () => {
     expect(state).not.toContain("KEY-ONE-SECRET");
     expect(useAnalyticsControl.getState().receipt).toMatchObject({ phase: "COMPLETED", action: "project0.provider.credential.set" });
     for (const bad of ["", "two\nlines"]) expect("problem" in providerCredentialCommand("helius", bad)).toBe(true);
+    // Re-review nit: a key refused because another command is running is overwritten as well.
+    useAnalyticsControl.setState({ busy: true });
+    const refused = providerCredentialCommand("helius", "KEY-TWO-SECRET");
+    if (!("params" in refused)) throw new Error(refused.problem);
+    await analyticsCommand("project0.provider.credential.rotate", { params: refused.params, configVersion: 8n });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(refused.params.every(b => b === 0)).toBe(true);
+    useAnalyticsControl.setState({ busy: false });
     expect("problem" in providerCredentialCommand("0123456789abcdef0123", "k")).toBe(true);
   });
 });

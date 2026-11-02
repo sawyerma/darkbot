@@ -58,7 +58,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
   <RunsSection analytics={analytics} topicStatus={analyticsStatus}/>
   <BootSection analytics={analytics} topicStatus={analyticsStatus} ttl={system?.parameters.get("boot_token_ttl_seconds") ?? null}/>
   <SourcesSection owner={owner} topicStatus={ownerStatus}/>
-  <ProvidersSection title="Providers · RPC, WSS, Geyser" kinds={["rpc", "wss", "geyser"]} analytics={analytics} topicStatus={analyticsStatus} system={system} systemStatus={systemStatus}/>
+  <ProvidersSection title="Providers · RPC, WSS, Geyser" kinds={["rpc", "wss", "geyser"]} analytics={analytics} topicStatus={analyticsStatus} system={system} systemStatus={systemStatus} holdsUnreferenced/>
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">
       {PRESETS.map(d => <button key={d} className={preset === d ? "p0-selected" : ""} onClick={() => setPreset(d)}>{d === "custom" ? "Custom" : d}</button>)}

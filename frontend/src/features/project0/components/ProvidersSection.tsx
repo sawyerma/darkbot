@@ -21,17 +21,18 @@ const EMPTY: ProviderInput = { id: "", kind: "", endpoint: "", auth: "", credent
  * the command and never kept (the gateway hands it to the controller's standard input; the
  * macOS keychain holds it).
  */
-export function ProvidersSection({ title, kinds, analytics, topicStatus, system, systemStatus }: {
+export function ProvidersSection({ title, kinds, analytics, topicStatus, system, systemStatus, holdsUnreferenced = false }: {
   title: string; kinds: readonly ProviderKind[]; analytics: AnalyticsView | null; topicStatus: TopicStatus; system: SystemView | null; systemStatus: TopicStatus;
+  /** The tab that also lists the credentials no provider references (Capture). */
+  holdsUnreferenced?: boolean;
 }) {
   const { busy, receipt } = useAnalyticsControl();
   const registry = analytics?.providers ?? null;
   const providers = (registry?.providers ?? []).filter(p => (kinds as readonly string[]).includes(p.kind));
   const used = new Set(providers.map(p => p.credential).filter(Boolean));
   // Review F7: a credential no provider references (set before its provider, left after a removal,
-  // freshly imported) stays visible — the Capture tab (the RPC one) holds it.
+  // freshly imported) stays visible in the tab that holds them (Capture).
   const referenced = new Set((registry?.providers ?? []).map(p => p.credential).filter(Boolean));
-  const holdsUnreferenced = (kinds as readonly string[]).includes("rpc");
   const credentials = (registry?.credentials ?? []).filter(c => used.has(c.id) || (holdsUnreferenced && !referenced.has(c.id)));
   const [form, setForm] = useState<ProviderInput>({ ...EMPTY, kind: kinds[0] ?? "" });
   const [target, setTarget] = useState(""); const [priority, setPriority] = useState(""); const [evidence, setEvidence] = useState("");
