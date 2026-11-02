@@ -396,6 +396,7 @@ impl RuntimeConfig {
         let public_exit = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT");
         let public_exit_rpc = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC");
         let dex_exit = values.remove("BSC_EXEC_LIVE_DEX_EXIT");
+        let divergence = values.remove("BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -599,6 +600,11 @@ impl RuntimeConfig {
                 if dex_exit.is_some() {
                     return Err("BSC_EXEC_LIVE_DEX_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if divergence.is_some() {
+                    return Err(
+                        "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE needs BSC_EXEC_PAPER_IDENTITY".into(),
+                    );
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -794,6 +800,20 @@ impl RuntimeConfig {
                                 ));
                             }
                             None => return Err("BSC_EXEC_LIVE_DEX_EXIT is required".into()),
+                        },
+                        live_divergence_quarantine: match divergence {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => {
+                                return Err(
+                                    "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE is required".into()
+                                );
+                            }
                         },
                         live_builder_policy: match builder_policy {
                             Some(p)
@@ -5030,6 +5050,14 @@ mod tests {
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(RuntimeConfig::parse(&without).unwrap().canonical, None);
+        // R7 review L2: the divergence quarantine never without the path.
+        assert!(
+            RuntimeConfig::parse(&format!(
+                "{without}BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=ON\n"
+            ))
+            .unwrap_err()
+            .contains("BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE needs BSC_EXEC_PAPER_IDENTITY")
+        );
         // The PAPER path needs C2: without the follower it is refused.
         assert!(
             RuntimeConfig::parse(&format!(
@@ -5172,6 +5200,12 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_DEX_EXIT=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_DEX_EXIT=OFF", "BSC_EXEC_LIVE_DEX_EXIT=yes"),
+            // R7: the divergence quarantine: ON or OFF, required.
+            CONFIG.replace("BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=OFF\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=OFF",
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=on",
+            ),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF", "BSC_EXEC_LIVE_PUBLIC_EXIT=ON"),
             CONFIG.replace(
@@ -5286,6 +5320,14 @@ mod tests {
         );
         // R5: a migrated lot stays stranded for the operator.
         assert!(!x.live_dex_exit);
+        assert!(!x.live_divergence_quarantine);
+        assert!(
+            exec(&CONFIG.replace(
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=OFF",
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=ON",
+            ))
+            .live_divergence_quarantine
+        );
         let on = exec(
             &CONFIG
                 .replace(

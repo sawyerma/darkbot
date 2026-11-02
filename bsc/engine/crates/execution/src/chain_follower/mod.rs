@@ -67,6 +67,7 @@ use crate::wss::{DisconnectReason, RateLimitSignal, RejectReason, UrlError, WssL
 mod confirm;
 mod follow;
 pub(crate) mod http;
+mod integrity;
 pub(crate) mod jsonrpc;
 pub mod launches;
 mod recover;
@@ -77,6 +78,8 @@ mod tests_follow;
 mod tests_launches;
 #[cfg(test)]
 mod tests_live;
+#[cfg(test)]
+mod tests_seal;
 #[cfg(test)]
 mod tests_wire;
 
@@ -127,7 +130,8 @@ pub struct FollowerLimits {
     /// Cap of the wait; also the wait after any rate-limit signal.
     pub backoff_max: Duration,
     /// How often a launch transaction answer the verifier refuses for a
-    /// provider-side reason (malformed, a hash or signer mismatch, ...) is
+    /// provider-side reason (e.g. another chain; R7: a hash or signer
+    /// mismatch already refuses its block) is
     /// fetched before the launch is accepted with that refusal. A refusal
     /// that is a property of the transaction ([`is_unrebuildable`]) is
     /// accepted at once.
@@ -462,7 +466,8 @@ pub enum FollowerFault {
     /// backend, or the block left the chain in between).
     Unavailable(Call),
     /// The receipts are not exactly the block's transactions (count, order,
-    /// hashes, senders, block hash or number, log order).
+    /// hashes, senders, block hash or number, log order), or not its
+    /// header's `receiptsRoot` (R7).
     ReceiptsMismatch(u64),
     /// During a reorg walk the parent link of the new chain broke at this
     /// height: the chain moved again; the step is retried.
@@ -512,6 +517,28 @@ pub enum RequestError {
     /// A launch transaction object of the block failed the WSS verifier
     /// (a refusal that may be the provider's; retried).
     Unverifiable(RejectReason),
+    /// R7 (BSC3-056): the answer is not consistent in itself.
+    Integrity(Integrity),
+    /// R7 review LOW-5: a transaction of a type this build does not
+    /// rebuild (a fork it does not follow): its block cannot be verified.
+    UnsupportedTxType(u8),
+}
+
+/// R7 (BSC3-056): how an answer contradicts itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Integrity {
+    /// The hash is not keccak of the header's RLP.
+    HeaderHash,
+    /// Not keccak of the header's RLP either, and the header has a field
+    /// this build does not know (a fork it does not follow, or a forgery).
+    UnknownHeaderField,
+    /// A transaction object's rebuilt bytes are not the transaction its
+    /// hash names.
+    TxHash,
+    /// A transaction's signature does not recover to its `from`.
+    TxSigner,
+    /// The transactions are not the header's `transactionsRoot`.
+    TransactionsRoot,
 }
 
 /// A violation of HTTP/1.1 framing by the provider.
@@ -574,6 +601,13 @@ pub enum Field {
     /// A transaction object's block hash, number or index differ from its
     /// block and position.
     TxBinding,
+    /// R7: a field of the header's RLP is missing or not of its width, or
+    /// an optional one follows a missing one.
+    Header,
+    /// R7: a signed field of a transaction object is missing or malformed.
+    TxFields,
+    /// R7: a receipt's `type` or `cumulativeGasUsed`.
+    ReceiptFields,
 }
 
 /// Follows the canonical chain at `endpoints` (each `https://host[:port][/path]`;

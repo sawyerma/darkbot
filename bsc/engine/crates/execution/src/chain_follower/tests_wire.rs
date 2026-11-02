@@ -11,6 +11,7 @@ use super::jsonrpc::{
     quantity_u64, request,
 };
 use super::*;
+use serde_json::Value;
 
 /// A stream that answers with `input` and records what was written.
 struct Canned {
@@ -283,19 +284,37 @@ const MIX_200: &str = "0x0000000000000000000000000000000000000000000000000000000
 
 const SENDER: &str = "0x3333333333333333333333333333333333333333";
 
-fn header_body(number: &str, transactions: &str) -> String {
-    format!(
-        r#"{{"jsonrpc":"2.0","id":1,"result":{{"number":"{number}","hash":"{HASH_A}","parentHash":"{HASH_B}","timestamp":"0x6ade7af4","mixHash":"{MIX_200}","transactions":{transactions}}}}}"#
-    )
+/// Block `number` on `HASH_B` with `transactions` (JSON), `mix` its
+/// `mixHash`; not yet sealed.
+fn header_json(number: &str, transactions: &str, mix: &str) -> Value {
+    serde_json::from_str(&format!(
+        r#"{{"number":"{number}","hash":"{HASH_A}","parentHash":"{HASH_B}","timestamp":"0x6ade7af4","mixHash":"{mix}","transactions":{transactions}}}"#
+    ))
+    .unwrap()
 }
 
-/// One full transaction object of block 5 (`HASH_A`) at index 0; not a
-/// signed transaction (its WSS conversion is refused, which only matters
-/// for a launch).
-fn tx_json() -> String {
-    format!(
-        r#"{{"hash":"{HASH_B}","from":"{SENDER}","nonce":"0x7","transactionIndex":"0x0","blockHash":"{HASH_A}","blockNumber":"0x5"}}"#
-    )
+/// The answer carrying `block` as it is.
+fn answer(block: &Value) -> String {
+    serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": block}).to_string()
+}
+
+/// R7: the answer carrying `block` sealed (consistent in itself).
+fn sealed(mut block: Value) -> String {
+    super::tests_seal::seal(&mut block, None);
+    answer(&block)
+}
+
+fn header_body(number: &str, transactions: &str) -> String {
+    sealed(header_json(number, transactions, MIX_200))
+}
+
+/// One signed transaction object of block 5 at index 0, nonce 7.
+fn tx_value() -> Value {
+    let mut tx = super::tests_seal::synth_tx(b"wire", 7, 56);
+    tx["transactionIndex"] = Value::from("0x0");
+    tx["blockHash"] = Value::from(HASH_A);
+    tx["blockNumber"] = Value::from("0x5");
+    tx
 }
 
 /// The typed block of a body (its WSS conversions left out).
@@ -305,13 +324,10 @@ fn head(body: &str, number: u64) -> Result<Option<BlockHead>, RequestError> {
 
 #[test]
 fn block_shapes() {
-    let good = parse_block(
-        header_body("0x5", &format!("[{}]", tx_json())).as_bytes(),
-        1,
-        5,
-    )
-    .unwrap()
-    .unwrap();
+    let one = format!("[{}]", tx_value());
+    let good = parse_block(header_body("0x5", &one).as_bytes(), 1, 5)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         (
             good.head.header.number,
@@ -323,12 +339,13 @@ fn block_shapes() {
     let tx = good.head.txs[0];
     assert_eq!(
         (tx.hash, tx.from, tx.nonce),
-        (data_fixed(HASH_B).unwrap(), data_fixed(SENDER).unwrap(), 7)
+        (
+            data_fixed(tx_value()["hash"].as_str().unwrap()).unwrap(),
+            super::tests_seal::synth_sender(),
+            7
+        )
     );
-    assert!(matches!(
-        good.objects[..],
-        [Err(crate::wss::RejectReason::Missing(_))]
-    ));
+    assert!(matches!(good.objects[..], [Ok(_)]));
     assert_eq!(
         head(r#"{"jsonrpc":"2.0","id":1,"result":null}"#, 5),
         Ok(None)
@@ -342,49 +359,39 @@ fn block_shapes() {
         head(&header_body("0x5", &format!(r#"["{HASH_B}"]"#)), 5),
         Err(RequestError::Shape(Field::Transactions))
     );
+    let mut short_hash = header_json("0x5", "[]", MIX_200);
+    super::tests_seal::seal(&mut short_hash, None);
+    short_hash["hash"] = Value::from("0x11");
     assert_eq!(
-        head(&header_body("0x5", "[]").replace(HASH_A, "0x11"), 5),
+        head(&answer(&short_hash), 5),
         Err(RequestError::Shape(Field::Hash))
     );
     // Each object is bound to the block and its position, and strict.
     let cases = [
-        (
-            r#""transactionIndex":"0x0""#,
-            r#""transactionIndex":"0x1""#,
-            Field::TxBinding,
-        ),
-        (
-            r#""blockNumber":"0x5""#,
-            r#""blockNumber":"0x6""#,
-            Field::TxBinding,
-        ),
-        (r#""from":"0x33"#, r#""from":"0x3"#, Field::From),
-        (r#""nonce":"0x7""#, r#""nonce":"0x07""#, Field::Nonce),
-        (r#""hash":"0x22"#, r#""hash":"0x2"#, Field::TxHash),
+        ("transactionIndex", "0x1", Field::TxBinding),
+        ("blockNumber", "0x6", Field::TxBinding),
+        ("blockHash", HASH_B, Field::TxBinding),
+        ("from", "0x3", Field::From),
+        ("nonce", "0x07", Field::Nonce),
+        ("hash", "0x2", Field::TxHash),
     ];
-    for (from, to, field) in cases {
-        let tx = tx_json().replacen(from, to, 1);
+    for (name, value, field) in cases {
+        let mut block = header_json("0x5", &one, MIX_200);
+        super::tests_seal::seal(&mut block, None);
+        block["transactions"][0][name] = Value::from(value);
         assert_eq!(
-            head(&header_body("0x5", &format!("[{tx}]")), 5),
+            head(&answer(&block), 5),
             Err(RequestError::Shape(field)),
-            "{tx}"
+            "{name}"
         );
     }
-    let other_block = tx_json().replace(
-        &format!(r#""blockHash":"{HASH_A}""#),
-        &format!(r#""blockHash":"{HASH_B}""#),
-    );
-    assert_eq!(
-        head(&header_body("0x5", &format!("[{other_block}]")), 5),
-        Err(RequestError::Shape(Field::TxBinding))
-    );
 }
 
 /// bsc-geth v1.7.8 `Header.MilliTimestamp()`: a zero `mixHash` adds 0,
 /// otherwise its 256-bit value, which must stay below 1000.
 #[test]
 fn mix_hash_milliseconds() {
-    let with_mix = |mix: &str| header_body("0x5", "[]").replace(MIX_200, mix);
+    let with_mix = |mix: &str| sealed(header_json("0x5", "[]", mix));
     let ms = |mix: &str| {
         head(&with_mix(mix), 5).map(|b| b.unwrap().header.block_ms - 0x6ade_7af4 * 1000)
     };
@@ -401,8 +408,12 @@ fn mix_hash_milliseconds() {
     ] {
         assert_eq!(ms(&bad), Err(RequestError::Shape(Field::MixHash)), "{bad}");
     }
-    let missing = header_body("0x5", "[]").replace(&format!(r#""mixHash":"{MIX_200}","#), "");
-    assert_eq!(head(&missing, 5), Err(RequestError::Shape(Field::MixHash)));
+    let mut missing = header_json("0x5", "[]", MIX_200);
+    missing.as_object_mut().unwrap().remove("mixHash");
+    assert_eq!(
+        head(&sealed(missing), 5),
+        Err(RequestError::Shape(Field::MixHash))
+    );
     let overflow = with_mix(&word("1")).replace("0x6ade7af4", "0xffffffffffffffff");
     assert_eq!(
         head(&overflow, 5),
@@ -412,7 +423,7 @@ fn mix_hash_milliseconds() {
 
 fn receipt_body(log: &str) -> String {
     format!(
-        r#"{{"jsonrpc":"2.0","id":1,"result":[{{"transactionHash":"{HASH_B}","transactionIndex":"0x0","from":"{SENDER}","blockHash":"{HASH_A}","blockNumber":"0x5","status":"0x1","logs":[{log}]}}]}}"#
+        r#"{{"jsonrpc":"2.0","id":1,"result":[{{"transactionHash":"{HASH_B}","transactionIndex":"0x0","from":"{SENDER}","blockHash":"{HASH_A}","blockNumber":"0x5","status":"0x1","type":"0x2","cumulativeGasUsed":"0xa410","logs":[{log}]}}]}}"#
     )
 }
 
@@ -471,6 +482,25 @@ fn receipt_and_log_shapes() {
             parse_receipts(receipt_body(&log).as_bytes(), 1),
             Err(RequestError::Shape(field)),
             "{log}"
+        );
+    }
+    // R7: its transaction's type and the block's gas up to it.
+    assert_eq!(
+        (receipts[0].tx_type, receipts[0].cumulative_gas),
+        (2, 42_000)
+    );
+    for (from, to) in [
+        (r#""type":"0x2","#, ""),
+        (r#""type":"0x2""#, r#""type":"0x100""#),
+        (
+            r#""cumulativeGasUsed":"0xa410""#,
+            r#""cumulativeGasUsed":"0x0a410""#,
+        ),
+    ] {
+        assert_eq!(
+            parse_receipts(receipt_body("").replace(from, to).as_bytes(), 1),
+            Err(RequestError::Shape(Field::ReceiptFields)),
+            "{to}"
         );
     }
     let failed = receipt_body("").replace(r#""status":"0x1""#, r#""status":"0x0""#);

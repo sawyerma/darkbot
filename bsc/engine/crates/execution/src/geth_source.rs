@@ -9,12 +9,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use alloy_primitives::{B256, keccak256};
+use alloy_primitives::keccak256;
 use darkbot_bsc_geth_ipc::hot0::{Hot0Config, Hot0Decision, Hot0Outcome, Hot0Poller};
 use darkbot_bsc_geth_ipc::ingress::{C14LanePlan, decode_tx_signature};
 use darkbot_bsc_geth_ipc::protocol_v2::{LaneClassV2, arena_path_v2};
-use darkbot_bsc_trading::signer::recover_signer;
-use darkbot_bsc_trading::transactions::legacy::RecoverableSignature;
 
 /// Where the local geth's arena is and how it is polled.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,16 +62,15 @@ pub fn sender_of(raw: &[u8], chain_id: u64) -> Result<([u8; 20], u64), String> {
     if signed.chain_id != chain_id {
         return Err(format!("chain {} is not {chain_id}", signed.chain_id));
     }
-    let from = recover_signer(
-        &B256::from(keccak256(&signed.signing_payload)),
-        &RecoverableSignature {
-            r: signed.r,
-            s: signed.s,
-            y_parity: signed.y_parity,
-        },
+    // R7: libsecp256k1, as the WSS sources recover theirs (BSC3-063).
+    let from = crate::wss::recover(
+        &keccak256(&signed.signing_payload).0,
+        &signed.r,
+        &signed.s,
+        signed.y_parity,
     )
     .map_err(|e| format!("{e:?}"))?;
-    Ok((from.into_array(), signed.nonce))
+    Ok((from, signed.nonce))
 }
 
 /// A peer-lane record's event: [`GethEvent::Full`] when `raw` is the

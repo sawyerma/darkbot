@@ -672,12 +672,15 @@ pub(super) fn block_events(
 
 /// The receipts are exactly the block's transactions: same count, in
 /// order, each with its transaction's hash and sender, bound to the block's
-/// hash and number, with the block's log indices contiguous from 0.
+/// hash and number, with the block's log indices contiguous from 0; R7
+/// (BSC3-056): the ones its header's `receiptsRoot` commits to, each
+/// stated cost its gas and its transaction's price (review M1).
 pub(super) fn receipts_match(block: &BlockHead, receipts: &[Receipt]) -> bool {
     if receipts.len() != block.txs.len() {
         return false;
     }
     let mut next_log = 0u64;
+    let mut cumulative = 0u64;
     for (index, (receipt, tx)) in receipts.iter().zip(&block.txs).enumerate() {
         let bound = receipt.tx_index == index as u64
             && receipt.tx_hash == tx.hash
@@ -687,6 +690,20 @@ pub(super) fn receipts_match(block: &BlockHead, receipts: &[Receipt]) -> bool {
         if !bound {
             return false;
         }
+        // R7 review M1: its gas the block's up to it less the one before
+        // (the receipts root commits to that), its price its transaction's
+        // under the block's base fee.
+        let Some(used) = receipt.cumulative_gas.checked_sub(cumulative) else {
+            return false;
+        };
+        cumulative = receipt.cumulative_gas;
+        if let Some(cost) = receipt.cost
+            && (cost.gas_used != used
+                || Some(u128::from(cost.effective_gas_price))
+                    != tx.price.effective(block.header.base_fee))
+        {
+            return false;
+        }
         for log in &receipt.logs {
             if log.log_index != next_log {
                 return false;
@@ -694,5 +711,5 @@ pub(super) fn receipts_match(block: &BlockHead, receipts: &[Receipt]) -> bool {
             next_log += 1;
         }
     }
-    true
+    super::integrity::receipts_root(receipts) == block.header.receipts_root
 }

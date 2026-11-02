@@ -307,6 +307,7 @@ fn c3_paper_path_latency() {
             live_public_exit: false,
             live_public_exit_rpc: String::new(),
             live_dex_exit: false,
+            live_divergence_quarantine: false,
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::C3,
         },
         Arming {

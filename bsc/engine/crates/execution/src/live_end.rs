@@ -938,6 +938,16 @@ impl End for LiveEnd {
         {
             return self.refuse(Refusal::Unconfirmed, why);
         }
+        // R7 (BSC3-056): the divergence quarantine (ON): while the second
+        // source holds another block, nothing goes, exits neither.
+        if config.live_divergence_quarantine
+            && let Some(c) = self.confirmation
+            && let crate::canonical_confirm::Verdict::Disagrees { height } = c.verdict
+        {
+            let why =
+                format!("DIVERGENCE_QUARANTINE: the second source holds another block at {height}");
+            return self.refuse(Refusal::Unconfirmed, why);
+        }
         // BSC3-051: a provider refused one of this end's BUYs: no further
         // BUY through it (before the owner's admission; exits go on).
         if let Some(why) = self

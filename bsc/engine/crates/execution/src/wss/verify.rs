@@ -187,7 +187,7 @@ compile_error!("the pending-transaction source never builds with cfg(secp256k1_f
 /// (`r` and `s` scalars in 1..n, then low `s`, then the recovery), but
 /// recovers with libsecp256k1: measured p50 17.5 µs against k256's
 /// 90.8 µs, paid on the source thread for every full transaction.
-pub(super) fn recover(
+pub(crate) fn recover(
     prehash: &[u8; 32],
     r: &[u8; 32],
     s: &[u8; 32],

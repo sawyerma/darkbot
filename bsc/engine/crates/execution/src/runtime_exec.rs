@@ -778,6 +778,7 @@ pub(crate) mod tests {
                 live_public_exit: false,
                 live_public_exit_rpc: String::new(),
                 live_dex_exit: false,
+                live_divergence_quarantine: false,
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

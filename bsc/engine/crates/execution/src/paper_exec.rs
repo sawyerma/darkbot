@@ -229,6 +229,11 @@ pub struct ExecConfig {
     /// (`BSC_EXEC_LIVE_DEX_EXIT`, OFF by default: it stays stranded for the
     /// operator).
     pub live_dex_exit: bool,
+    /// REV.1.0 R7 (BSC3-056): while the second source holds another block
+    /// at a height of the followed chain (DISAGREES) nothing LIVE goes,
+    /// exits neither (`BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE`, OFF by default:
+    /// only BUYs wait, as before; the operator's decision).
+    pub live_divergence_quarantine: bool,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -396,7 +401,8 @@ pub enum Refusal {
     GrantLimit,
     /// BSC3-056: the independent second source does not confirm the
     /// followed chain now (stale, behind, another hash, no common height):
-    /// no BUY on it (exits go on).
+    /// no BUY on it (exits go on; R7: under the divergence quarantine not
+    /// while it holds another block).
     Unconfirmed,
 }
 
@@ -1376,6 +1382,12 @@ impl<E: End> Executor<E> {
     /// LIVE owner disarms only what its reconciliation resolved).
     pub fn disarm(self) -> Result<(), String> {
         fs::remove_file(&self.fence).map_err(|e| format!("{}: {e}", self.fence.display()))
+    }
+
+    /// Tests: the configuration it was armed with, changed in place.
+    #[cfg(test)]
+    pub(crate) fn config_mut(&mut self) -> &mut ExecConfig {
+        &mut self.config
     }
 
     /// A launch the runtime could not hand over (its signed bytes are not a
@@ -2600,6 +2612,7 @@ pub(crate) mod tests {
             live_public_exit: false,
             live_public_exit_rpc: String::new(),
             live_dex_exit: false,
+            live_divergence_quarantine: false,
             sender_paths: SenderPaths::Both,
         }
     }

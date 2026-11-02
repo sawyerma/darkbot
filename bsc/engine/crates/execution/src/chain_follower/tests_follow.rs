@@ -533,8 +533,19 @@ fn q(n: u64) -> String {
     format!("0x{n:x}")
 }
 
+thread_local! {
+    /// R7: the hashes of the sealed synthetic blocks and transactions, by
+    /// label.
+    static SEALED: std::cell::RefCell<std::collections::HashMap<String, [u8; 32]>> =
+        Default::default();
+}
+
+/// The hash of `label`: its sealed block's or transaction's, else keccak of
+/// the label.
 fn named(label: &str) -> [u8; 32] {
-    keccak256(label.as_bytes()).0
+    SEALED
+        .with(|sealed| sealed.borrow().get(label).copied())
+        .unwrap_or_else(|| keccak256(label.as_bytes()).0)
 }
 
 fn word(n: u64) -> [u8; 32] {
@@ -671,32 +682,36 @@ fn hash_of(tx: &Value) -> [u8; 32] {
     hex::decode_to_array(tx["hash"].as_str().unwrap()).unwrap()
 }
 
-/// The sender of every synthetic (unsigned) transaction.
-const SYNTH_SENDER: [u8; 20] = [0xaa; 20];
+/// The sender of every synthetic transaction (signed, R7).
+fn synth_sender() -> [u8; 20] {
+    super::tests_seal::synth_sender()
+}
 
 struct Synth {
     number: u64,
     served: Served,
 }
 
-/// Block `label` (its hash is keccak of the label, its transactions'
-/// hashes keccak of `label/txN` unless they stand for a real one) on top
-/// of `parent`, with `number % 1000` milliseconds in its `mixHash`.
+/// Block `label` on top of `parent`, with `number % 1000` milliseconds in
+/// its `mixHash`, sealed (R7): its hash and its synthetic transactions'
+/// are [`named`] by `label` and `label/txN`.
 fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
     let hash = named(label);
-    // Real objects rebound to this block; synthetic ones with the fields
-    // the follower reads (their WSS conversion is refused, which only
-    // matters for a launch).
+    // Real objects rebound to this block; synthetic ones signed legacy
+    // transactions of [`synth_sender`] with nonce `N`.
     let objects: Vec<Value> = txs
         .iter()
         .enumerate()
         .map(|(i, t)| {
             let mut object = t.real.clone().unwrap_or_else(|| {
-                json!({
-                    "hash": hx(&named(&format!("{label}/tx{i}"))),
-                    "from": hx(&SYNTH_SENDER),
-                    "nonce": q(i as u64),
-                })
+                let name = format!("{label}/tx{i}");
+                let tx = super::tests_seal::synth_tx(
+                    name.as_bytes(),
+                    i as u64,
+                    crate::wss::BSC_MAINNET_CHAIN_ID,
+                );
+                SEALED.with(|sealed| sealed.borrow_mut().insert(name, hash_of(&tx)));
+                tx
             });
             object["blockHash"] = json!(hx(&hash));
             object["blockNumber"] = json!(q(number));
@@ -712,6 +727,7 @@ fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
         "timestamp": q(1_760_000_000 + number),
         "mixHash": format!("0x{:064x}", number % 1000),
         "miner": hx(&[0u8; 20]),
+        "extraData": hx(label.as_bytes()),
         "transactions": objects,
     });
     let mut log_index = 0u64;
@@ -739,15 +755,24 @@ fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
             "blockHash": hx(&hash),
             "blockNumber": q(number),
             "status": if t.ok { "0x1" } else { "0x0" },
+            "type": header["transactions"][i]["type"],
+            "cumulativeGasUsed": q(21_000 * (i as u64 + 1)),
             "gasUsed": "0x5208",
             "logs": logs,
         }));
     }
+    let (mut header, mut receipts) = (header, Value::Array(receipts));
+    super::tests_seal::seal(&mut header, Some(&mut receipts));
+    SEALED.with(|sealed| {
+        sealed
+            .borrow_mut()
+            .insert(label.to_owned(), hash_of(&header))
+    });
     Synth {
         number,
         served: Served {
             block: header,
-            receipts: Value::Array(receipts),
+            receipts,
         },
     }
 }
@@ -855,7 +880,12 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
 }
 
 const DEV: [u8; 20] = [0xde; 20];
-const BUYER: [u8; 20] = [0xb0; 20];
+/// The LIVE buyer's key in these tests (R7: its transactions are signed).
+const BUYER_KEY: [u8; 32] = [0xb0; 32];
+
+fn buyer() -> [u8; 20] {
+    super::tests_seal::address_of(&BUYER_KEY)
+}
 const T1: [u8; 20] = [0x71; 20];
 const T2: [u8; 20] = [0x72; 20];
 const T3: [u8; 20] = [0x73; 20];
@@ -877,13 +907,13 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
                 tx_direct(),
                 vec![flap_launch(DEV, T1), flap_buy(T1, DEV, 7)],
             ),
-            tx(vec![flap_buy(T1, BUYER, 7)]),
+            tx(vec![flap_buy(T1, buyer(), 7)]),
             Tx {
                 ok: false,
-                logs: vec![flap_buy(T1, BUYER, 7)],
+                logs: vec![flap_buy(T1, buyer(), 7)],
                 real: None,
             },
-            tx(vec![flap_buy(OTHER, BUYER, 7), flap_buy(T1, BUYER, 7)]),
+            tx(vec![flap_buy(OTHER, buyer(), 7), flap_buy(T1, buyer(), 7)]),
         ],
     );
     let a102 = block("102A", 102, "101A", vec![]);
@@ -905,7 +935,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
             // A later buy event of the token that is malformed.
             vec![
                 signed(tx_router(), vec![flap_launch(DEV, T3)]),
-                tx(vec![flap_buy(T3, BUYER, 6)]),
+                tx(vec![flap_buy(T3, buyer(), 6)]),
             ]
         } else {
             vec![]
@@ -1013,7 +1043,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
     let synthetic = |i: u64, succeeded| CanonicalTx {
         hash: named(&format!("101A/tx{i}")),
         index: i,
-        sender: SYNTH_SENDER,
+        sender: synth_sender(),
         nonce: i,
         succeeded,
         cost: None,
@@ -1254,98 +1284,116 @@ fn a_real_launch_block_through_the_whole_path() {
 }
 
 /// Review Paket 3 (second pass), HIGH: a launch transaction the verifier
-/// refuses for good (here re-typed to EIP-7702 type 4) is a fact of that
-/// launch, never a retried fault: the block is emitted at once, the launch
-/// carries the reason, and nothing is skipped.
+/// refuses for good (here an EIP-7702 one; R7: consistent in its block) is
+/// a fact of that launch, never a retried fault: the block is emitted at
+/// once, the launch carries the reason, and nothing is skipped.
 #[test]
 fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
-    let served = real_block(&|txs| txs[26]["type"] = Value::from("0x4"));
+    let launch = Tx {
+        ok: true,
+        logs: vec![flap_launch(DEV, T1)],
+        real: Some(super::tests_seal::synth_7702(b"launch", 0)),
+    };
+    let b = block("101U", 101, "100U", vec![launch]);
     let script = Script {
-        phases: vec![only(served)],
+        phases: vec![phase(101, &[&b])],
         inject: vec![],
         chunk: 4096,
     };
     let outcome = follow_script(script, limits(), &[], None);
-    // Phase H: the block's trades follow its launches; checked apart.
-    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
-        outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
-            matches!(
-                e,
-                CanonicalEvent::FlapTrade(_)
-                    | CanonicalEvent::FlapTerm(_)
-                    | CanonicalEvent::FlapMigrated { .. }
-            )
-        });
-    assert_real_block_trades(&trades);
+    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Block { number, .. },
-        CanonicalEvent::Launch(first),
-        CanonicalEvent::Launch(second),
+        CanonicalEvent::Launch(launch),
     ] = events.as_slice()
     else {
         panic!("{events:?}");
     };
-    assert_eq!(*number, 129_774_331);
-    assert_eq!((first.c1_scope, first.unverifiable), (true, None));
+    assert_eq!(*number, 101);
     assert_eq!(
         (
-            second.sender,
-            second.nonce,
-            second.c1_scope,
-            second.unverifiable
+            launch.sender,
+            launch.nonce,
+            launch.c1_scope,
+            launch.unverifiable
         ),
         (None, None, false, Some(RejectReason::UnsupportedType(4)))
     );
 }
 
 /// Review Paket 3 (third pass), LOW: a refusal that may be the provider's
-/// (here a hash mismatch from a changed nonce) is fetched again up to
-/// `tx_attempts` times, then accepted with its reason; it never stalls and
-/// never silently passes as verified.
+/// (here a launch signed for another chain; R7: consistent in its block)
+/// is fetched again up to `tx_attempts` times, then accepted with its
+/// reason; it never stalls and never silently passes as verified.
 #[test]
 fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
+    let launch = Tx {
+        ok: true,
+        logs: vec![flap_launch(DEV, T1)],
+        real: Some(super::tests_seal::synth_tx(b"launch", 0, 97)),
+    };
+    let b = block("101W", 101, "100W", vec![launch]);
     // The same block in two phases: a phase ends with its head's receipts,
     // so the second one serves the retry.
-    let served = real_block(&|txs| txs[26]["nonce"] = Value::from("0x1"));
     let script = Script {
-        phases: vec![only(served.clone()), only(served)],
+        phases: vec![phase(101, &[&b]), phase(101, &[&b])],
         inject: vec![],
         chunk: 4096,
     };
     let limits = limits();
     assert_eq!(limits.tx_attempts, 2);
     let outcome = follow_script(script, limits, &[], None);
-    // Phase H: the block's trades follow its launches; checked apart.
-    let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
-        outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
-            matches!(
-                e,
-                CanonicalEvent::FlapTrade(_)
-                    | CanonicalEvent::FlapTerm(_)
-                    | CanonicalEvent::FlapMigrated { .. }
-            )
-        });
-    assert_real_block_trades(&trades);
+    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Fault(FollowerFault::Request {
-            error: RequestError::Unverifiable(RejectReason::HashMismatch),
+            error: RequestError::Unverifiable(RejectReason::WrongChain(97)),
             ..
         }),
         CanonicalEvent::Block { number, .. },
-        CanonicalEvent::Launch(first),
-        CanonicalEvent::Launch(second),
+        CanonicalEvent::Launch(launch),
     ] = events.as_slice()
     else {
         panic!("{events:?}");
     };
-    assert_eq!(*number, 129_774_331);
-    assert_eq!(first.unverifiable, None);
+    assert_eq!(*number, 101);
     assert_eq!(
-        (second.sender, second.c1_scope, second.unverifiable),
-        (None, false, Some(RejectReason::HashMismatch))
+        (launch.sender, launch.c1_scope, launch.unverifiable),
+        (None, false, Some(RejectReason::WrongChain(97)))
     );
-    assert!(!is_unrebuildable(RejectReason::HashMismatch));
+    assert!(!is_unrebuildable(RejectReason::WrongChain(97)));
     assert!(is_unrebuildable(RejectReason::UnsupportedType(4)));
+}
+
+/// R7 (BSC3-056): a transaction object that is not the transaction its
+/// hash names (here its nonce changed) makes the block contradict itself:
+/// refused at every fetch, never reported, nothing of it applied.
+#[test]
+fn a_block_that_contradicts_itself_is_never_reported() {
+    let served = real_block(&|txs| txs[26]["nonce"] = Value::from("0x1"));
+    let script = Script {
+        phases: vec![only(served)],
+        inject: vec![],
+        chunk: 4096,
+    };
+    let outcome = follow_script(script, limits(), &[], Some(Duration::from_millis(1500)));
+    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    let refused = |e: &CanonicalEvent| {
+        matches!(
+            e,
+            CanonicalEvent::Fault(FollowerFault::Request {
+                call: Call::Block(129_774_331),
+                error: RequestError::Integrity(Integrity::TxHash),
+            })
+        )
+    };
+    assert!(
+        events.iter().filter(|e| refused(e)).count() >= 2,
+        "{events:?}"
+    );
+    assert!(
+        events.iter().all(|e| matches!(e, CanonicalEvent::Fault(_))),
+        "{events:?}"
+    );
 }
 
 /// C2 restart: the follower resumes after the window of blocks the caller
@@ -1991,12 +2039,23 @@ fn script_of(head: u64, blocks: &[Synth], inject: Vec<(Req, usize, Reply)>) -> S
     }
 }
 
-/// The LIVE buyer's transaction `hash` at `nonce`, with `logs`.
-fn buyer_tx(hash: [u8; 32], nonce: u64, logs: Vec<SynthLog>) -> Tx {
-    signed(
-        json!({"hash": hx(&hash), "from": hx(&BUYER), "nonce": q(nonce)}),
-        logs,
+/// The LIVE buyer's transaction `label` at `nonce` (signed), with `logs`.
+fn buyer_tx(label: &str, nonce: u64, logs: Vec<SynthLog>) -> Tx {
+    signed(buyer_object(label, nonce), logs)
+}
+
+fn buyer_object(label: &str, nonce: u64) -> Value {
+    super::tests_seal::signed_legacy(
+        &BUYER_KEY,
+        label.as_bytes(),
+        nonce,
+        Some(crate::wss::BSC_MAINNET_CHAIN_ID),
     )
+}
+
+/// The hash of [`buyer_tx`] `label` at `nonce`.
+fn buyer_hash(label: &str, nonce: u64) -> [u8; 32] {
+    hash_of(&buyer_object(label, nonce))
 }
 
 /// The requests a server answered (but the head that starts its script),
@@ -2095,15 +2154,18 @@ const SEARCH: u64 = 28_800;
 /// error.
 #[test]
 fn a_receipt_names_a_final_block_the_second_source_confirms() {
-    let hash = named("buyer/tx");
+    let hash = buyer_hash("buyer/tx", 3);
     let with = |n: u64| match n {
-        12 => vec![tx(vec![]), buyer_tx(hash, 3, vec![flap_buy(T1, BUYER, 7)])],
+        12 => vec![
+            tx(vec![]),
+            buyer_tx("buyer/tx", 3, vec![flap_buy(T1, buyer(), 7)]),
+        ],
         _ => vec![],
     };
     let ours = chain(&|n| format!("{n}"), 20, &with);
     let target = RecoveryTarget::Hash {
         tx_hash: hash,
-        sender: BUYER,
+        sender: buyer(),
         nonce: 3,
         window_end: Some(13),
     };
@@ -2153,9 +2215,9 @@ fn a_receipt_names_a_final_block_the_second_source_confirms() {
     // A receipt stale after a reorg (it names block 9, which does not hold
     // the transaction): the search decides (re-check NIT 5). The
     // transaction at nonce 11 is in block 12 (the nonce passes there).
-    let moved = named("buyer/moved");
+    let moved = buyer_hash("buyer/moved", 11);
     let at12 = chain(&|n| format!("{n}"), 20, &|n| match n {
-        12 => vec![buyer_tx(moved, 11, vec![])],
+        12 => vec![buyer_tx("buyer/moved", 11, vec![])],
         _ => vec![tx(vec![])],
     });
     let (got, ..) = recover_against(
@@ -2169,7 +2231,7 @@ fn a_receipt_names_a_final_block_the_second_source_confirms() {
         SEARCH,
         RecoveryTarget::Hash {
             tx_hash: moved,
-            sender: BUYER,
+            sender: buyer(),
             nonce: 11,
             window_end: Some(13),
         },
@@ -2207,20 +2269,20 @@ fn a_receipt_names_a_final_block_the_second_source_confirms() {
 /// its nonce (which replaced it); the search goes down at most its bound.
 #[test]
 fn without_a_receipt_the_block_that_took_its_nonce_decides() {
-    let (ours_tx, foreign) = (named("ours/tx"), named("foreign/tx"));
+    let (ours_tx, foreign) = (buyer_hash("ours/tx", 5), buyer_hash("foreign/tx", 5));
     // The transaction at nonce 5 lands in block 6 (the nonce passes there).
-    let at6 = |hash: [u8; 32]| {
+    let at6 = |label: &'static str| {
         move |n: u64| match n {
-            6 => vec![buyer_tx(hash, 5, vec![])],
+            6 => vec![buyer_tx(label, 5, vec![])],
             _ => vec![tx(vec![])],
         }
     };
-    let ours = chain(&|n| format!("{n}"), 20, &at6(ours_tx));
-    let other = chain(&|n| format!("{n}"), 20, &at6(foreign));
+    let ours = chain(&|n| format!("{n}"), 20, &at6("ours/tx"));
+    let other = chain(&|n| format!("{n}"), 20, &at6("foreign/tx"));
     let no_receipt = || vec![(Req::Receipt(ours_tx), 0, Reply::Null)];
     let target = |nonce, window_end| RecoveryTarget::Hash {
         tx_hash: ours_tx,
-        sender: BUYER,
+        sender: buyer(),
         nonce,
         window_end,
     };
@@ -2255,7 +2317,9 @@ fn without_a_receipt_the_block_that_took_its_nonce_decides() {
     // The sources read the nonce at the final block on either side of it
     // (re-check MEDIUM 1): one source never decides.
     let mut low = no_receipt();
-    low.push((Req::Nonce(BUYER, named("17")), 0, Reply::Head(4)));
+    // (R7: both chains name their blocks alike; ours' block 17.)
+    let ours_17 = hash_of(&ours[16].served.block);
+    low.push((Req::Nonce(buyer(), ours_17), 0, Reply::Head(4)));
     assert_eq!(
         run(&ours, &ours, low, SEARCH, target(5, Some(4))).0,
         Ok(Recovered::Pending(RecoveryPending::SourcesDisagree {
@@ -2272,7 +2336,7 @@ fn without_a_receipt_the_block_that_took_its_nonce_decides() {
             }
         },
         20,
-        &at6(ours_tx),
+        &at6("ours/tx"),
     );
     assert_eq!(
         run(&ours, &fork, no_receipt(), SEARCH, target(5, Some(4))).0,
@@ -2322,19 +2386,19 @@ fn without_a_receipt_the_block_that_took_its_nonce_decides() {
 #[test]
 fn a_lease_is_found_where_the_senders_nonce_passes_it() {
     let (lease, early, late) = (
-        named("lease/buy"),
-        named("lease/early"),
-        named("lease/late"),
+        buyer_hash("lease/buy", 14),
+        buyer_hash("lease/early", 11),
+        buyer_hash("lease/late", 16),
     );
     let with = |n: u64| match n {
-        12 => vec![buyer_tx(early, 11, vec![])],
-        15 => vec![buyer_tx(lease, 14, vec![flap_buy(T2, BUYER, 7)])],
-        17 => vec![buyer_tx(late, 16, vec![])],
+        12 => vec![buyer_tx("lease/early", 11, vec![])],
+        15 => vec![buyer_tx("lease/buy", 14, vec![flap_buy(T2, buyer(), 7)])],
+        17 => vec![buyer_tx("lease/late", 16, vec![])],
         _ => vec![tx(vec![])],
     };
     let ours = chain(&|n| format!("{n}"), 20, &with);
     let window = |nonce, from, to| RecoveryTarget::Window {
-        sender: BUYER,
+        sender: buyer(),
         nonce,
         from,
         to,
@@ -2363,7 +2427,7 @@ fn a_lease_is_found_where_the_senders_nonce_passes_it() {
     // over the whole window still with a depth of just its length
     // (re-check LOW A: the bound anchored at the window's end).
     let long = chain(&|n| format!("{n}"), 43, &|n| match n {
-        12 => vec![buyer_tx(early, 11, vec![])],
+        12 => vec![buyer_tx("lease/early", 11, vec![])],
         _ => vec![tx(vec![])],
     });
     let (got, ..) = recover_against(
@@ -2409,11 +2473,17 @@ fn a_lease_is_found_where_the_senders_nonce_passes_it() {
 }
 
 /// REV.1.0 R3b review (LOW 3): a recovered block whose launch transaction
-/// object a provider refuses is fetched again, up to `tx_attempts` times,
-/// then carried by its launch (as the follower's): never failed for good.
+/// object a provider refuses (signed for another chain; R7: consistent in
+/// its block) is fetched again, up to `tx_attempts` times, then carried by
+/// its launch (as the follower's): never failed for good.
 #[test]
 fn a_provider_side_refusal_in_a_recovered_block_is_fetched_again_then_carried() {
-    let served = real_block(&|txs| txs[26]["nonce"] = Value::from("0x1"));
+    let launch = Tx {
+        ok: true,
+        logs: vec![flap_launch(DEV, T1)],
+        real: Some(super::tests_seal::synth_tx(b"launch", 1, 97)),
+    };
+    let served = block("101R", 101, "100R", vec![tx(vec![]), launch]).served;
     let object = &served.block["transactions"][0];
     let fixed = |v: &Value| -> Vec<u8> { hex::decode(&v.as_str().unwrap()[2..]).unwrap() };
     let target = RecoveryTarget::Hash {
@@ -2423,13 +2493,16 @@ fn a_provider_side_refusal_in_a_recovered_block_is_fetched_again_then_carried() 
         window_end: None,
     };
     let script = || Script {
-        phases: vec![only(served.clone())],
+        phases: vec![Phase {
+            head: 101,
+            blocks: BTreeMap::from([(101, served.clone())]),
+        }],
         inject: vec![],
         chunk: 4096,
     };
     let limits = limits();
     assert_eq!(limits.tx_attempts, 2);
-    let (got, primary, _) = recover_against(script(), script(), 129_774_331 + 3, SEARCH, target);
+    let (got, primary, _) = recover_against(script(), script(), 101 + 3, SEARCH, target);
     let Ok(Recovered::Block(events)) = &got else {
         panic!("{got:?}");
     };
@@ -2440,9 +2513,9 @@ fn a_provider_side_refusal_in_a_recovered_block_is_fetched_again_then_carried() 
             _ => None,
         })
         .collect();
-    assert_eq!(launches, [None, Some(RejectReason::HashMismatch)]);
+    assert_eq!(launches, [Some(RejectReason::WrongChain(97))]);
     assert!(
-        primary.contains(&(Req::Block(129_774_331), 2)),
+        primary.contains(&(Req::Block(101), 2)),
         "fetched again once: {primary:?}"
     );
 }

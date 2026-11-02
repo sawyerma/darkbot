@@ -4693,6 +4693,26 @@ mod tests {
             verdict: crate::canonical_confirm::Verdict::Disagrees { height: HEAD + 1 },
             max_lag_blocks: 2,
         }));
+        // R7: unless the divergence quarantine is ON: then nothing goes.
+        x.executor
+            .as_mut()
+            .unwrap()
+            .config_mut()
+            .live_divergence_quarantine = true;
+        reconnect(&mut x);
+        let (out, _) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
+        assert!(out.is_empty());
+        assert!(
+            refused_for(&x, "UNCONFIRMED"),
+            "{:?}",
+            record(&x).texts(l::REFUSALS)
+        );
+        assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
+        x.executor
+            .as_mut()
+            .unwrap()
+            .config_mut()
+            .live_divergence_quarantine = false;
         reconnect(&mut x);
         let (out, refused) = x.on_strategy(&exit, &c2, &clock, now_ms).unwrap();
         assert_eq!(out.len(), 1);

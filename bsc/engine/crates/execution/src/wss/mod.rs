@@ -42,6 +42,7 @@ mod tests_session;
 mod tests_verify;
 
 pub(crate) use jsonrpc::{ParsedTx, parse_tx_map, verify_parsed};
+pub(crate) use verify::recover;
 pub use verify::verify_tx_object;
 
 /// The chain every full transaction of this source must be signed for.

@@ -47,7 +47,6 @@ use super::launches::{
     verify_object,
 };
 use super::{CanonicalLaunch, Field, FourToken, RequestError, Venue};
-use crate::wss::RejectReason;
 
 const FLAP_A_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129774331.full.json");
 const FLAP_A_RECEIPTS: &str =
@@ -586,35 +585,27 @@ fn block_transactions_are_bound_cross_checked_and_verified() {
         parse(&tampered(1, &|tx| tx["blockNumber"] = Value::from("0x7bc32fc"))).err(),
         Some(RequestError::Shape(Field::TxBinding))
     );
-    // A changed signed field breaks the hash.
-    let renonced = parse(&tampered(1, &|tx| tx["nonce"] = Value::from("0xe")))
-        .unwrap()
-        .unwrap();
-    assert!(receipts_match(&renonced.head, &receipts));
+    // R7 (BSC3-056): a changed signed field, sender or type makes the block
+    // contradict itself: refused with it, before any verifier.
     assert_eq!(
-        verify_object(&renonced.objects[1]).err(),
-        Some(RejectReason::HashMismatch)
+        parse(&tampered(1, &|tx| tx["nonce"] = Value::from("0xe"))).err(),
+        Some(RequestError::Integrity(super::Integrity::TxHash))
     );
-    // A changed sender breaks the receipt cross-check and the signer.
-    let resent = parse(&tampered(1, &|tx| {
-        tx["from"] = Value::from("0x1111111111111111111111111111111111111111");
-    }))
-    .unwrap()
-    .unwrap();
-    assert!(!receipts_match(&resent.head, &receipts));
     assert_eq!(
-        verify_object(&resent.objects[1]).err(),
-        Some(RejectReason::SignerMismatch)
+        parse(&tampered(1, &|tx| {
+            tx["from"] = Value::from("0x1111111111111111111111111111111111111111");
+        }))
+        .err(),
+        Some(RequestError::Integrity(super::Integrity::TxSigner))
     );
-    // A type the verifier does not rebuild is known at conversion.
-    let retyped = parse(&tampered(26, &|tx| tx["type"] = Value::from("0x4")))
-        .unwrap()
-        .unwrap();
     assert_eq!(
-        verify_object(&retyped.objects[26]).err(),
-        Some(RejectReason::UnsupportedType(4))
+        parse(&tampered(26, &|tx| tx["type"] = Value::from("0x4"))).err(),
+        Some(RequestError::Shape(Field::TxFields))
     );
-    assert!(verify_object(&retyped.objects[1]).is_ok());
+    // As sent, every object is verified (the launches) or verifiable.
+    let full = parse(FLAP_A_BLOCK).unwrap().unwrap();
+    assert!(receipts_match(&full.head, &receipts));
+    assert!(verify_object(&full.objects[1]).is_ok());
 }
 
 /// Phase F §10 (gate M4): of a block's failed receipts exactly the launch

@@ -635,6 +635,7 @@ fn exec_setup() -> ExecSetup {
             live_public_exit: false,
             live_public_exit_rpc: String::new(),
             live_dex_exit: false,
+            live_divergence_quarantine: false,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),
