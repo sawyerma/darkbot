@@ -711,6 +711,11 @@ impl RuntimeConfig {
                             0,
                             31_536_000_000,
                         )?,
+                        live_qualification_max_age_ms: take(
+                            "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS",
+                            0,
+                            31_536_000_000,
+                        )?,
                         live_spend_total_wei: u128::from(take(
                             "BSC_EXEC_LIVE_SPEND_TOTAL_WEI",
                             0,
@@ -5158,6 +5163,12 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF", "BSC_EXEC_LIVE_PUBLIC_ONLY=yes"),
             CONFIG.replace("BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0\n", ""),
+            // R8: the qualification's age bound, required, at most a year.
+            CONFIG.replace("BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=0\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=0",
+                "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=31536000001",
+            ),
             CONFIG.replace("BSC_EXEC_LIVE_SPEND_TOTAL_WEI=0\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_RISK_OUTLIER=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_RISK_OUTLIER=OFF", "BSC_EXEC_LIVE_RISK_OUTLIER=On"),
@@ -5292,6 +5303,7 @@ mod tests {
             .live_public_only
         );
         assert_eq!(exec(CONFIG).live_grant_max_duration_ms, 0);
+        assert_eq!(exec(CONFIG).live_qualification_max_age_ms, 0);
         // The campaign's budget: none in the repository (no BUY).
         assert_eq!(exec(CONFIG).live_spend_total_wei, 0);
         // R4 (BSC3-069): the soft bounds are the qualified values; an

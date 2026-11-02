@@ -34,7 +34,6 @@ use crate::evidence::{
     SampleOutcome,
 };
 use crate::identity::{EXPECTED_BASELINE, EXPECTED_RING, EXPECTED_RUSTLS, Identity};
-use crate::json::Json;
 use crate::stats::{Summary, summarize};
 
 /// A verdict.
@@ -283,46 +282,6 @@ impl Reason {
             Self::PreviousFactsStillCurrent(_) => "previous_facts_still_current",
             Self::ReconnectProbeFailed(_) => "reconnect_probe_failed",
         }
-    }
-
-    /// The JSON form: name, severity and detail.
-    pub fn to_json(self) -> Json {
-        let detail = match self {
-            Self::IdentityUnknown(field) | Self::IdentityInvalid(field) => Json::str(field),
-            Self::InconsistentEvidence {
-                samples,
-                phase,
-                index,
-                issue,
-            } => Json::object([
-                ("samples", Json::U64(u64::from(samples))),
-                ("first_phase", Json::str(phase.name())),
-                ("first_index", Json::U64(u64::from(index))),
-                ("first_issue", Json::str(issue.name())),
-            ]),
-            Self::MeasuredSamplesMissing { expected, recorded }
-            | Self::MeasuredTimingMissing { expected, recorded }
-            | Self::ReconnectCyclesMissing { expected, recorded } => Json::object([
-                ("expected", Json::U64(u64::from(expected))),
-                ("recorded", Json::U64(u64::from(recorded))),
-            ]),
-            Self::Skipped(count)
-            | Self::TransportFailures(count)
-            | Self::DeadlineMisses(count)
-            | Self::ReconnectFailed(count)
-            | Self::GenerationNotIncreased(count)
-            | Self::PreviousFactsStillCurrent(count)
-            | Self::ReconnectProbeFailed(count) => Json::U64(u64::from(count)),
-            _ => Json::Null,
-        };
-        Json::object([
-            ("reason", Json::str(self.name())),
-            (
-                "severity",
-                Json::str(if self.fails() { "fail" } else { "incomplete" }),
-            ),
-            ("detail", detail),
-        ])
     }
 }
 

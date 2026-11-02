@@ -4,8 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use darkbot_bsc_execution::submission::tls::TLS_TRANSPORT_IMPLEMENTATION;
 
-use crate::json::Json;
-
 /// The baseline of the frozen production code this qualification is for.
 pub const EXPECTED_BASELINE: &str = "92fa5204777e566acbaccf111721d9295ffb3a90";
 /// The rustls version the transport must be built with.
@@ -71,32 +69,6 @@ impl Identity {
             transport_implementation: TLS_TRANSPORT_IMPLEMENTATION.to_owned(),
             harness: HARNESS.to_owned(),
         }
-    }
-
-    /// The JSON form.
-    pub fn to_json(&self) -> Json {
-        Json::object([
-            ("baseline", Json::str(&self.baseline)),
-            ("git_head", Json::str(&self.git_head)),
-            ("git_dirty", Json::str(&self.git_dirty)),
-            ("baseline_ancestor", Json::str(&self.baseline_ancestor)),
-            (
-                "frozen_sources_unchanged",
-                Json::str(&self.frozen_sources_unchanged),
-            ),
-            ("rustc", Json::str(&self.rustc)),
-            ("cargo", Json::str(&self.cargo)),
-            ("rustls", Json::str(&self.rustls)),
-            ("ring", Json::str(&self.ring)),
-            ("profile", Json::str(&self.profile)),
-            ("os", Json::str(&self.os)),
-            ("arch", Json::str(&self.arch)),
-            (
-                "transport_implementation",
-                Json::str(&self.transport_implementation),
-            ),
-            ("harness", Json::str(&self.harness)),
-        ])
     }
 }
 

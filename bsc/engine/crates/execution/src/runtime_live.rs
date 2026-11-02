@@ -2039,6 +2039,15 @@ impl LiveRuntime {
                     false => Ok(n),
                 },
             )
+            // R8 (BSC3-049): a qualification older than the runtime's
+            // bound admits no BUY; its exits go on.
+            .and_then(|n| {
+                let max = self.exec.exec.live_qualification_max_age_ms;
+                match live_qualification::stale(verified, now_ms, max) {
+                    Some(why) => Err(why.into()),
+                    None => Ok(n),
+                }
+            })
             // R4: no room left in the campaign's budget for one BUY (the
             // repository's 0, or spent): BUYs close here, no lease is asked
             // for (the owner's admission holds the exact bound, exits
@@ -7579,6 +7588,31 @@ mod tests {
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         assert_eq!(x.buys_closed, None, "exactly the longest admits BUYs");
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R8 (BSC3-049): a qualification older than
+    /// `BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS` admits no BUY (the rig's
+    /// is made 1 ms after the epoch: nothing to exit, nothing arms); no
+    /// bound (0) arms.
+    #[test]
+    fn a_qualification_older_than_its_bound_admits_no_buy() {
+        let mut r = Rig::new("live-qualification-age", LiveStrategies::C3);
+        r.exec.exec.live_qualification_max_age_ms = 31_536_000_000;
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(
+            reason(&x).1.as_deref(),
+            Some(crate::sources::LIVE_QUALIFICATION_STALE)
+        );
+        x.shutdown();
+        r.exec.exec.live_qualification_max_age_ms = 0;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
         x.shutdown();
         r.clean();
     }

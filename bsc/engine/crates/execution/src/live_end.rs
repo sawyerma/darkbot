@@ -1511,6 +1511,7 @@ pub(crate) mod tests {
             ],
             sha256: [0; 32],
             acquisition_buyer: Some(crate::live_qualification::tests::buyer()),
+            observed_unix_ms: 0,
         }
     }
 

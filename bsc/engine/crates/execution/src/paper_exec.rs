@@ -193,6 +193,10 @@ pub struct ExecConfig {
     /// to go (`BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS`; 0: no bound); its
     /// exits go on.
     pub live_grant_max_duration_ms: u64,
+    /// REV.1.0 R8 (BSC3-049): the oldest a LIVE qualification may be for a
+    /// BUY to go (`BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS`; 0: no bound);
+    /// its exits go on.
+    pub live_qualification_max_age_ms: u64,
     /// REV.1.0 R4: the campaign's cumulative worst-case budget every LIVE
     /// BUY with its exits is admitted within, all grants together
     /// (`BSC_EXEC_LIVE_SPEND_TOTAL_WEI`; 0: no BUY).
@@ -2600,6 +2604,7 @@ pub(crate) mod tests {
             // The test rigs' sources are public: the variant ON (R4 tests OFF).
             live_public_only: true,
             live_grant_max_duration_ms: 0,
+            live_qualification_max_age_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
             // No test grant is an outlier.
             live_risk_soft_buy_slippage_bps: 9_999,

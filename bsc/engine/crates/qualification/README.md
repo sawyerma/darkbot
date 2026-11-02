@@ -27,14 +27,14 @@ Keine Transaktion, kein Wert. Ein JSON-RPC-Fehler ist die erwartete Antwort.
 5. **Messen**, das Token ohne Shell-History:
    ```bash
    read -rs Q5A_BLOCKRAZOR_AUTHORIZATION && export Q5A_BLOCKRAZOR_AUTHORIZATION
-   Q5A_EVIDENCE_PATH=q5a-tls-evidence.json bsc/engine/target/release/u5_tls_qualify
+   Q5A_EVIDENCE_PATH=q5a-tls-evidence.dbrec bsc/engine/target/release/u5_tls_qualify
    ```
    Dauer etwa 25 s je Provider (10 + 100 Proben im Abstand von 200 ms, dann drei Reconnects mit Probe). Exit-Status: 0 PASS, 1 FAIL, 2 INCOMPLETE, 3 Harness-Fehler.
 6. **Gegenprüfen**, mit dem Token noch in der Umgebung (sucht es in der Datei):
    ```bash
-   python3 bsc/tools/q5a_check_evidence.py q5a-tls-evidence.json
+   bsc/engine/target/release/u5_tls_qualify --check q5a-tls-evidence.dbrec
    ```
-   Der Prüfer wendet dieselben Regeln wie der Evaluator an, rechnet jede Übergabedauer aus den Roh-Zeitstempeln nach (`t_boundary_ns − t_write_check_ns`) und bildet daraus Zusammenfassung, Ursachen und Urteile. Jede Abweichung von der Datei meldet er als INCONSISTENT.
+   R8 (BSC-048): die Evidenz ist ein DBREC-Record. `--check` rechnet jede Übergabedauer aus den Roh-Zeitstempeln nach (`t_boundary_ns − t_write_check_ns`), daraus Zusammenfassung und Zählungen, die Identitäts- und Zähl-Ursachen, das Transport-Urteil je Provider und das Gesamturteil; jede Abweichung: Exit 3. `bsc/tools/q5a_check_evidence.py` prüft nur die historische JSON-Evidenz.
 
 ## Umgebung
 

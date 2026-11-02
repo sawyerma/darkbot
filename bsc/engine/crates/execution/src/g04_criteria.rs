@@ -11,7 +11,9 @@
 //! free of an `INVALID` journal and of a suspect clock, and its criteria's
 //! hash committed before the campaign's first journal started (BSC3-033:
 //! [`Precommit`], a record apart from the editable file), else
-//! `NOT_EVALUABLE`.
+//! `NOT_EVALUABLE`. R8 (BSC3-064): a file may count the observable time
+//! instead of the runtime (`BSC_G04_COVERAGE_BASIS`) and run for minutes
+//! instead of days (`BSC_G04_CAMPAIGN_MINUTES`, a short proposed run).
 
 use crate::g04_census::{CRITERIA_UNCONFIRMED, CRITERIA_VENUES, Census, percentile};
 use crate::sources::SourceId;
@@ -24,7 +26,10 @@ pub use darkbot_bsc_record::schema::bsc_census::verdict::CONTINUE;
 pub const ADAPT: &str = "ADAPT";
 pub const STOP: &str = "STOP";
 
-const DAY_MS: u64 = 86_400_000;
+/// A calendar day: the shortest campaign that may rate a source for LIVE
+/// (R8 review M1: a run in minutes never does).
+pub const DAY_MS: u64 = 86_400_000;
+const MINUTE_MS: u64 = 60_000;
 
 /// The decision a pre-commitment binds.
 pub const SCOPE: &str = "G0.4/V10-8";
@@ -34,7 +39,11 @@ pub const SCOPE: &str = "G0.4/V10-8";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Criteria {
     pub confirmed: bool,
-    pub campaign_days: u64,
+    /// Its duration: days or (R8) minutes.
+    pub campaign_ms: u64,
+    /// R8 (BSC3-064): the covered time counted is the census's observable
+    /// time (`BSC_G04_COVERAGE_BASIS=OBSERVABLE`), else its runtime.
+    pub coverage_observable: bool,
     pub min_covered_ppm: u64,
     /// In [`CRITERIA_VENUES`] order.
     pub min_launches: [u64; 3],
@@ -73,6 +82,30 @@ impl Criteria {
             }
             None => return Err("BSC_G04_CRITERIA_STATE is required".into()),
         };
+        // R8 (BSC3-064): the covered time counted (absent: the runtime, as
+        // before) and the campaign in days or minutes, one of the two.
+        let coverage_observable = match values.remove("BSC_G04_COVERAGE_BASIS") {
+            None | Some("RUNTIME") => false,
+            Some("OBSERVABLE") => true,
+            Some(other) => {
+                return Err(format!(
+                    "BSC_G04_COVERAGE_BASIS={other} is neither RUNTIME nor OBSERVABLE"
+                ));
+            }
+        };
+        let in_days = match (
+            values.contains_key("BSC_G04_CAMPAIGN_DAYS"),
+            values.contains_key("BSC_G04_CAMPAIGN_MINUTES"),
+        ) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => {
+                return Err(
+                    "exactly one of BSC_G04_CAMPAIGN_DAYS and BSC_G04_CAMPAIGN_MINUTES is required"
+                        .into(),
+                );
+            }
+        };
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -88,7 +121,11 @@ impl Criteria {
         let criteria = Criteria {
             confirmed,
             // Plan rule 5: at most seven calendar days.
-            campaign_days: take("BSC_G04_CAMPAIGN_DAYS", 1, 7)?,
+            campaign_ms: match in_days {
+                true => take("BSC_G04_CAMPAIGN_DAYS", 1, 7)? * DAY_MS,
+                false => take("BSC_G04_CAMPAIGN_MINUTES", 1, 7 * 24 * 60)? * MINUTE_MS,
+            },
+            coverage_observable,
             min_covered_ppm: take("BSC_G04_MIN_COVERED_PPM", 1, 1_000_000)?,
             min_launches: [
                 take("BSC_G04_MIN_LAUNCHES_FLAP", 1, 10_000_000)?,
@@ -252,14 +289,18 @@ pub fn evaluate(
     census: &Census,
     now_unix_ms: u64,
 ) -> Evaluation {
-    let campaign_ms = criteria.campaign_days * DAY_MS;
+    let campaign_ms = criteria.campaign_ms;
+    let covered_ms = match criteria.coverage_observable {
+        true => census.observable_ms,
+        false => census.covered_ms,
+    };
     let mut e = Evaluation {
         criteria_sha256: criteria.sha256,
         confirmed: criteria.confirmed,
         verdict: CRITERIA_UNCONFIRMED,
         reasons: Vec::new(),
         campaign_ms,
-        covered_ms: census.covered_ms,
+        covered_ms,
         covered_ppm: None,
         venues: Vec::new(),
         precommit: precommit.cloned(),
@@ -296,9 +337,8 @@ pub fn evaluate(
         }
         Some(_) => {}
     }
-    let covered_ppm =
-        u64::try_from(u128::from(census.covered_ms) * 1_000_000 / u128::from(campaign_ms))
-            .unwrap_or(u64::MAX);
+    let covered_ppm = u64::try_from(u128::from(covered_ms) * 1_000_000 / u128::from(campaign_ms))
+        .unwrap_or(u64::MAX);
     e.covered_ppm = Some(covered_ppm);
     let end = census
         .windows
@@ -597,6 +637,50 @@ mod tests {
         assert_eq!(Criteria::parse(file).unwrap().sendable_lead_us, 1_000);
     }
 
+    /// R8 (BSC3-064): the observable basis counts the observable time: a
+    /// full runtime observable for one day of seven is below the minimum;
+    /// the shipped proposal still counts the runtime. The ten-minute
+    /// proposal parses: ten minutes, observable, unconfirmed.
+    #[test]
+    fn an_observable_basis_counts_the_observable_time() {
+        let observable = Criteria::parse(
+            format!(
+                "{}BSC_G04_COVERAGE_BASIS=OBSERVABLE\n",
+                PROPOSED.replace("=PROPOSED", "=CONFIRMED")
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let mut full = census(
+            7 * DAY_MS,
+            [
+                inputs(5000, 4000, 900_000),
+                inputs(5000, 0, 0),
+                inputs(500, 400, 900_000),
+            ],
+        );
+        full.observable_ms = DAY_MS;
+        let below = |c: &Criteria, census: &Census| {
+            rate(c, census).reasons.contains(&"COVERAGE_BELOW_MINIMUM")
+        };
+        assert!(below(&observable, &full));
+        assert!(!below(&confirmed(), &full));
+        assert_eq!(rate(&observable, &full).covered_ms, DAY_MS);
+        full.observable_ms = 7 * DAY_MS;
+        assert!(!below(&observable, &full));
+        let ten =
+            Criteria::parse(include_bytes!("../../../../config/g04_criteria_10min.env")).unwrap();
+        assert_eq!(
+            (ten.confirmed, ten.campaign_ms, ten.coverage_observable),
+            (false, 600_000, true)
+        );
+        assert!(
+            !Criteria::parse(include_bytes!("../../../../config/g04_criteria.env"))
+                .unwrap()
+                .coverage_observable
+        );
+    }
+
     fn census(covered_ms: u64, venues: [VenueInputs; 3]) -> Census {
         Census {
             windows: vec![Window {
@@ -647,6 +731,19 @@ mod tests {
                 "not a G0.4 criteria key",
             ),
             (format!("{PROPOSED}BSC_G04_CAMPAIGN_DAYS=7\n"), "set twice"),
+            // R8: days or minutes, one of the two; a known coverage basis.
+            (
+                format!("{PROPOSED}BSC_G04_CAMPAIGN_MINUTES=10\n"),
+                "exactly one",
+            ),
+            (
+                PROPOSED.replace("BSC_G04_CAMPAIGN_DAYS=7\n", ""),
+                "exactly one",
+            ),
+            (
+                format!("{PROPOSED}BSC_G04_COVERAGE_BASIS=WALL\n"),
+                "neither RUNTIME",
+            ),
             (
                 PROPOSED.replace("STOP_ACTIONABLE_PPM=50000", "STOP_ACTIONABLE_PPM=300000"),
                 "not below",

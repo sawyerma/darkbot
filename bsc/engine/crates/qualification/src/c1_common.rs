@@ -327,14 +327,26 @@ pub fn repo_root_head(path: &Path) -> Option<String> {
 // Files and arguments
 // ---------------------------------------------------------------------------
 
-/// Writes a new file; an existing one is never replaced.
+/// Writes a new file; an existing one is never replaced. R8 (BSC3-018):
+/// the file and its directory's entry are durable once it returns.
 pub fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|()| sync_parent(path))
         .map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// R8 (BSC3-018): the directory holding `path` synced (its entries, a new
+/// or renamed one included, survive a crash).
+fn sync_parent(path: &Path) -> io::Result<()> {
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    File::open(dir)?.sync_all()
 }
 
 /// Replaces `path` atomically: a staging file beside it, synced, renamed.
@@ -347,8 +359,11 @@ pub fn write_replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
         name.to_string_lossy(),
         std::process::id()
     ));
-    let staged = write_new(&staging, bytes)
-        .and_then(|()| fs::rename(&staging, path).map_err(|e| e.to_string()));
+    let staged = write_new(&staging, bytes).and_then(|()| {
+        fs::rename(&staging, path)
+            .and_then(|()| sync_parent(path))
+            .map_err(|e| e.to_string())
+    });
     if let Err(e) = staged {
         let _ = fs::remove_file(&staging);
         return Err(format!("cannot replace {}: {e}", path.display()));
@@ -439,6 +454,24 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R8 (BSC3-018): a new file is written once, never replaced; a
+    /// replacement is whole, its staging file gone (relative paths too).
+    #[test]
+    fn a_record_is_written_new_or_replaced_whole() {
+        let dir = std::env::temp_dir().join(format!("bsc-c1-write-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("record.dbrec");
+        write_new(&path, b"one").unwrap();
+        assert!(write_new(&path, b"two").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"one");
+        write_replace(&path, b"three").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"three");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        assert!(sync_parent(Path::new("relative.dbrec")).is_ok());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     // Ported from bsc/tools/test_c1_qualification_tools.py (DescribeTest).
 

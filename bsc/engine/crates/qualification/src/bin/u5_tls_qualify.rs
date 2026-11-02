@@ -12,9 +12,13 @@
 //!   handshake and stays unqualified.
 //! - `Q5A_PROVIDERS`: `club48`, `blockrazor` or both, comma-separated.
 //!   Default both. A run with one provider cannot pass.
-//! - `Q5A_EVIDENCE_PATH`: where to write the evidence. Default
-//!   `q5a-tls-evidence-<UTC time>.json`. An existing file is never
-//!   overwritten.
+//! - `Q5A_EVIDENCE_PATH`: where to write the evidence record (R8, BSC-048:
+//!   `darkbot.bsc.q5a.tls-transport-evidence.v2`, checked against itself
+//!   once written). Default `q5a-tls-evidence-<UTC time>.dbrec`. An
+//!   existing file is never overwritten.
+//!
+//! `u5_tls_qualify --check <file>` checks a written record against itself
+//! (offline; exit 0 when it checks, 3 when not).
 //!
 //! Exit status: 0 PASS, 1 FAIL, 2 INCOMPLETE, 3 the harness could not run
 //! (also: `BSC_ECON_SEND` not ENABLED in the native owner state, plan
@@ -31,7 +35,7 @@ use darkbot_bsc_execution::submission::tls::{
 };
 use darkbot_bsc_execution::submission::transport::MonotonicClock;
 use darkbot_bsc_qualification::evidence::{
-    ProviderRun, QUALIFICATION_WORKLOAD, contains_secret, evidence_json,
+    ProviderRun, QUALIFICATION_WORKLOAD, check_record, contains_secret, evidence_record,
 };
 use darkbot_bsc_qualification::identity::{Identity, now_rfc3339};
 use darkbot_bsc_qualification::measure::{Auth, Provider, QUALIFICATION_POLICY, run_provider};
@@ -52,6 +56,24 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<Verdict, String> {
+    // R8 review M3: `--check <file>` checks a written evidence record
+    // against itself, offline (nothing sent).
+    let args: Vec<String> = env::args().collect();
+    if let [_, flag, path] = args.as_slice()
+        && flag == "--check"
+    {
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("cannot read {path}: {:?}", error.kind()))?;
+        check_record(&bytes).map_err(|e| format!("{path} does not check: {e}"))?;
+        // The authorization still in the environment is searched for too.
+        if env::var("Q5A_BLOCKRAZOR_AUTHORIZATION")
+            .is_ok_and(|secret| contains_secret(&bytes, &secret))
+        {
+            return Err(format!("{path} contains the authorization"));
+        }
+        println!("u5_tls_qualify: {path} checks against its samples");
+        return Ok(Verdict::Pass);
+    }
     let identity = Identity::of_this_build();
     let selected = env::var("Q5A_PROVIDERS").unwrap_or_else(|_| "club48,blockrazor".to_owned());
     let wanted: Vec<&str> = selected.split(',').map(str::trim).collect();
@@ -80,7 +102,7 @@ fn run() -> Result<Verdict, String> {
             .chars()
             .filter(char::is_ascii_alphanumeric)
             .collect();
-        format!("q5a-tls-evidence-{stamp}.json")
+        format!("q5a-tls-evidence-{stamp}.dbrec")
     });
     // Reserve the evidence file first: an existing one is never replaced,
     // and a run that cannot write its evidence does not start.
@@ -126,21 +148,30 @@ fn run() -> Result<Verdict, String> {
     let verdicts: Vec<ProviderVerdict> = runs.iter().map(|run| evaluate(run, &identity)).collect();
     let verdict = overall(&runs, &verdicts);
 
-    let text = evidence_json(&identity, &runs, &verdicts, verdict).render();
+    let now_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        });
+    let record = evidence_record(&identity, &runs, &verdicts, verdict, now_unix_ms)?;
     if secret
         .as_deref()
-        .is_some_and(|secret| contains_secret(&text, secret))
+        .is_some_and(|secret| contains_secret(&record, secret))
     {
         // Never written; the reserved file stays empty.
         return Err("the evidence would contain the authorization; not written".to_owned());
     }
-    file.write_all(text.as_bytes())
+    file.write_all(&record)
         .and_then(|()| file.sync_all())
         .map_err(|error| format!("cannot write evidence file {path}: {:?}", error.kind()))?;
-
+    // R8: what was written is read back and checked against itself.
+    let written = std::fs::read(&path)
+        .map_err(|error| format!("cannot read evidence file {path}: {:?}", error.kind()))?;
+    // Review LOW-2: the summary first, whatever the check says.
     for (run, verdict) in runs.iter().zip(&verdicts) {
         print_summary(run, verdict);
     }
+    check_record(&written).map_err(|e| format!("evidence file {path} does not check: {e}"))?;
     println!(
         "u5_tls_qualify: TLS_TRANSPORT_QUALIFICATION = {}",
         verdict.name()

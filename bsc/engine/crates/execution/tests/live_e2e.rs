@@ -187,6 +187,11 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
     g04.set(gv::CRITERIA_STATE, gv::CONFIRMED)
         .set(gv::VERDICT, gv::CONTINUE)
         .set(gv::PRECOMMIT_SHA256, Value::B256([3; 32]))
+        // R8: a campaign of a week (a run under a day qualifies no source).
+        .set(
+            gv::CAMPAIGN_MS,
+            7 * darkbot_bsc_execution::g04_criteria::DAY_MS,
+        )
         .push(gv::VENUES, flap.into_nested())
         .push(gv::SOURCES, publicnode.into_nested());
     fs::write(root.join(ev).join("g04.dbrec"), g04.encode().unwrap()).unwrap();
@@ -623,6 +628,7 @@ fn exec_setup() -> ExecSetup {
             // The rig's sources are public: the variant ON.
             live_public_only: true,
             live_grant_max_duration_ms: 0,
+            live_qualification_max_age_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
             // No test grant is an outlier.
             live_risk_soft_buy_slippage_bps: 9_999,

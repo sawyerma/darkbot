@@ -65,6 +65,10 @@ pub struct Verified {
     /// BSC3-012: the SHA-256 of the `bsc_runtime` build qualified (none
     /// before v3: no build is).
     pub runtime_sha256: Option<[u8; 32]>,
+    /// R8 (BSC3-049): when the oldest of it was observed (Unix ms): its
+    /// record, each evidence record that states its time, the risk
+    /// decision (review M2: assembling it again makes nothing newer).
+    pub observed_unix_ms: u64,
 }
 
 /// The schemas of a venue's evidence: the G0.1 freeze (v2, with its
@@ -257,7 +261,8 @@ fn parity_binds(
 
 /// A G0.4 verdict that qualifies `source`: confirmed criteria committed
 /// before the campaign, `CONTINUE` for the campaign and for Flap, and in the
-/// census it rated `source` delivered at least one actionable launch first.
+/// census it rated `source` delivered at least one actionable launch first;
+/// R8 review M1: a campaign of at least a day (a short run never).
 fn source_binds(v: &Record, source: SourceId) -> Result<(), String> {
     let mut flap = Vec::new();
     for row in v.nested_all(gv::VENUES).map_err(re)? {
@@ -281,10 +286,11 @@ fn source_binds(v: &Record, source: SourceId) -> Result<(), String> {
         && v.text(gv::VERDICT).map_err(re)? == gv::CONTINUE
         && v.opt_b256(gv::PRECOMMIT_SHA256).map_err(re)?.is_some()
         && flap
-        && first > 0;
+        && first > 0
+        && v.u64(gv::CAMPAIGN_MS).map_err(re)? >= crate::g04_criteria::DAY_MS;
     if !bound {
         return Err(
-            "no G0.4 verdict CONTINUE for Flap on committed criteria in whose census it delivered an actionable launch first"
+            "no G0.4 verdict CONTINUE for Flap on committed criteria of a campaign of at least a day in whose census it delivered an actionable launch first"
                 .into(),
         );
     }
@@ -395,6 +401,13 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
     let pin = bsc_mainnet_v5_27_2();
     let mut view = LiveQualification::default();
     let mut acquisition_buyer = None;
+    // Review M2: the oldest observation it rests on.
+    let mut oldest = r.u64(lq::PROVENANCE_OBSERVED_UNIX_MS).map_err(e)?;
+    let mut seen = |rec: &Record| {
+        if let Some(at) = observed_at(rec) {
+            oldest = oldest.min(at);
+        }
+    };
     for row in r.nested_all(lq::ITEMS).map_err(e)? {
         use lq::item as k;
         let id = row.text(k::ID).map_err(e)?;
@@ -410,6 +423,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                 let (mut freezes, mut parities) = (0, 0);
                 let reference = behaviour_reference(&pin);
                 for f in verified_all(root, &row, k::EVIDENCE, Some(VENUE_EVIDENCE))? {
+                    seen(&f);
                     let bound = if f.schema().name == fp::SCHEMA.name {
                         parities += 1;
                         match &reference {
@@ -441,6 +455,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                     return Err(format!("{id} is qualified twice"));
                 }
                 for v in verified_all(root, &row, k::EVIDENCE, Some(SOURCE_EVIDENCE))? {
+                    seen(&v);
                     source_binds(&v, source).map_err(|why| format!("{id}: {why}"))?;
                 }
                 view.sources.push(source);
@@ -457,6 +472,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
             return Err(format!("{name} is qualified twice"));
         }
         for attempt in verified_all(root, &row, k::EVIDENCE, Some(ATTEMPT_EVIDENCE))? {
+            seen(&attempt);
             attempt_of(&attempt, &pin).map_err(|why| format!("{name}: {why}"))?;
             if !accepted(&attempt)?.contains(&adapter) {
                 return Err(format!("{name}: a G0.7 attempt it did not accept"));
@@ -486,6 +502,8 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
             .map_err(e)?
             .ok_or("the acquisition names no G0.7 attempt: qualify again")?;
         let attempt = verified_evidence(root, &attempt_ref, Some(ATTEMPT_EVIDENCE))?;
+        seen(&result);
+        seen(&attempt);
         let attempt_sha256 = attempt_ref.b256(lq::evidence::SHA256).map_err(e)?;
         let (buyer, sent) = acquisition_binds(&result, &attempt, attempt_sha256, &pin)?;
         view.acquisition = true;
@@ -509,6 +527,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         }
         for ev in refs {
             let record = verified_evidence(root, &ev, Some(RISK_EVIDENCE))?;
+            seen(&record);
             let bound =
                 if ev.text(lq::evidence::SCHEMA_NAME).map_err(e)? == g08::result::SCHEMA.name {
                     Some(ev.b256(lq::evidence::SHA256).map_err(e)?) == acquisition_sha256
@@ -524,6 +543,7 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         }
         view.risk_decision = true;
         view.risk_scope_sha256 = Some(row.b256(k::SCOPE_SHA256).map_err(e)?);
+        oldest = oldest.min(row.u64(k::DECIDED_UNIX_MS).map_err(e)?);
     }
     Ok(Verified {
         view,
@@ -531,7 +551,27 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         sha256: darkbot_bsc_record::sha256(bytes),
         acquisition_buyer,
         runtime_sha256,
+        observed_unix_ms: oldest,
     })
+}
+
+/// R8 (BSC3-049): why `q` is too old at `now_ms` for a BUY under the
+/// runtime's bound `max_age_ms` (0: no bound), if it is; one from the
+/// future is (review LOW-1: never fresh by a clock ahead).
+pub fn stale(q: &Verified, now_ms: u64, max_age_ms: u64) -> Option<&'static str> {
+    let age = now_ms.checked_sub(q.observed_unix_ms);
+    (max_age_ms > 0 && age.is_none_or(|age| age > max_age_ms))
+        .then_some(crate::sources::LIVE_QUALIFICATION_STALE)
+}
+
+/// R8 review M2: when an evidence record says it was observed, if it does.
+fn observed_at(rec: &Record) -> Option<u64> {
+    let field = rec
+        .schema()
+        .fields
+        .iter()
+        .find(|f| f.name == "_provenance.observed_unix_ms")?;
+    rec.opt_u64(field.tag).ok().flatten()
 }
 
 /// BSC3-012: the SHA-256 of this process's executable, read once (at the
@@ -622,6 +662,7 @@ pub fn view(root: &Path) -> (Verified, Option<String>) {
         sha256: [0; 32],
         acquisition_buyer: None,
         runtime_sha256: None,
+        observed_unix_ms: 0,
     };
     match load(root) {
         Ok(Some(v)) => (v, None),
@@ -963,6 +1004,7 @@ pub(crate) mod tests {
         v.set(gv::CRITERIA_STATE, gv::CONFIRMED)
             .set(gv::VERDICT, gv::CONTINUE)
             .set(gv::PRECOMMIT_SHA256, Value::B256([3; 32]))
+            .set(gv::CAMPAIGN_MS, 7 * crate::g04_criteria::DAY_MS)
             .push(gv::VENUES, flap.into_nested())
             .push(gv::SOURCES, source.into_nested());
         v
@@ -1057,6 +1099,45 @@ pub(crate) mod tests {
                 evidence: vec!["ev/g08.dbrec".into()],
             }),
         }
+    }
+
+    /// R8 (BSC3-049): a qualification at most its bound old is fresh; no
+    /// bound (0), never stale.
+    #[test]
+    fn a_qualification_is_stale_only_beyond_its_bound() {
+        let q = Verified {
+            observed_unix_ms: 1_000,
+            ..view(Path::new("/nonexistent")).0
+        };
+        let stale_at = |now, max| stale(&q, now, max);
+        assert_eq!(stale_at(2_000, 1_000), None);
+        assert_eq!(
+            stale_at(2_001, 1_000),
+            Some(crate::sources::LIVE_QUALIFICATION_STALE)
+        );
+        assert_eq!(stale_at(u64::MAX, 0), None);
+        // Review LOW-1: from the future: stale.
+        assert_eq!(
+            stale_at(999, 1_000),
+            Some(crate::sources::LIVE_QUALIFICATION_STALE)
+        );
+    }
+
+    /// R8 review M2: a qualification is as old as the oldest observation it
+    /// rests on (its evidence's, the risk decision's), not when it was
+    /// assembled.
+    #[test]
+    fn a_qualification_is_as_old_as_its_oldest_evidence() {
+        let root = fixture("lq-oldest", "PASS");
+        // Without the risk decision: the evidence alone is older.
+        let without_risk = Spec {
+            risk: None,
+            ..spec()
+        };
+        let bytes = build(&root, &without_risk, 5_000_000).unwrap();
+        let v = verify(&root, &bytes).unwrap();
+        assert!(v.observed_unix_ms < 5_000_000, "{}", v.observed_unix_ms);
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// Plan 28.10.: a qualification verified against its evidence gives the
@@ -1203,6 +1284,10 @@ pub(crate) mod tests {
             }),
             with(&|v| {
                 v.set(gv::SOURCES, drpc.clone().into_nested());
+            }),
+            // R8 review M1: a run shorter than a day.
+            with(&|v| {
+                v.set(gv::CAMPAIGN_MS, crate::g04_criteria::DAY_MS - 1);
             }),
         ] {
             fs::write(root.join("ev/g04.dbrec"), v.encode().unwrap()).unwrap();

@@ -11,16 +11,16 @@ use darkbot_bsc_execution::submission::tls::{
 use darkbot_bsc_execution::submission::transport::ConnectionState;
 use darkbot_bsc_qualification::evidence::{
     AuthScope, MISS_NS, Phase, ProviderRun, QUALIFICATION_WORKLOAD, ReconnectCycle, ResponseClass,
-    SCHEMA, Sample, SampleOutcome, Stage, Workload, contains_secret, evidence_json,
+    Sample, SampleOutcome, Stage, Workload, check_record, contains_secret, evidence_record,
 };
 use darkbot_bsc_qualification::identity::{EXPECTED_BASELINE, Identity, rfc3339};
-use darkbot_bsc_qualification::json::Json;
 use darkbot_bsc_qualification::measure::{QUALIFICATION_POLICY, classify, state_after_response};
 use darkbot_bsc_qualification::probe::{frame_request, probe_body, sha256_hex};
 use darkbot_bsc_qualification::stats::{nearest_rank, summarize};
 use darkbot_bsc_qualification::verdict::{
     ApiScope, EvidenceIssue, Reason, Verdict, evaluate, handoff_issue, overall,
 };
+use darkbot_bsc_record::{decode, schema::q5a};
 
 type SampleMutation = fn(&mut Sample);
 type IdentityMutation = fn(&mut Identity);
@@ -112,29 +112,8 @@ fn no_percentile_hides_a_maximum_miss() {
 }
 
 // ---------------------------------------------------------------------------
-// JSON and time
+// Time
 // ---------------------------------------------------------------------------
-
-#[test]
-fn json_escapes_and_renders_deterministically() {
-    let value = Json::object([
-        ("text", Json::str("a\"b\\c\nd\u{1}")),
-        (
-            "list",
-            Json::Array(vec![Json::U64(1), Json::Null, Json::Bool(false)]),
-        ),
-        ("empty", Json::Array(Vec::new())),
-        ("fraction", Json::F64(0.25)),
-        ("nan", Json::F64(f64::NAN)),
-        ("negative", Json::I64(-38_000)),
-    ]);
-    assert_eq!(
-        value.render(),
-        "{\n  \"text\": \"a\\\"b\\\\c\\nd\\u0001\",\n  \"list\": [\n    1,\n    null,\n    \
-         false\n  ],\n  \"empty\": [],\n  \"fraction\": 0.250000,\n  \"nan\": null,\n  \
-         \"negative\": -38000\n}\n"
-    );
-}
 
 #[test]
 fn timestamps_are_rfc3339_utc() {
@@ -741,25 +720,67 @@ fn the_evidence_binds_identity_workload_and_verdict_and_holds_no_secret() {
         passing("blockrazor", AuthScope::Present),
     ];
     let verdicts: Vec<_> = runs.iter().map(|run| evaluate(run, &identity())).collect();
-    let text = evidence_json(&identity(), &runs, &verdicts, overall(&runs, &verdicts)).render();
+    let record = |runs: &[ProviderRun], verdicts: &[_]| {
+        evidence_record(&identity(), runs, verdicts, overall(runs, verdicts), 1).unwrap()
+    };
+    // R8 (BSC-048): a record (no JSON) that checks against its samples.
+    let bytes = record(&runs, &verdicts);
+    check_record(&bytes).unwrap();
+    let text = decode(&q5a::evidence::SCHEMA, &bytes).unwrap().render();
     for needle in [
-        SCHEMA,
+        "darkbot.bsc.q5a.tls-transport-evidence.v2",
         EXPECTED_BASELINE,
-        "\"tls_transport_qualification\": \"PASS\"",
-        "\"auth_scope\": \"PRESENT\"",
-        "\"transport_verdict\": \"PASS\"",
-        "\"body_sha256\"",
-        "\"write_check_to_boundary_ns\"",
-        "\"not_qualified_by_this_evidence\"",
-        "\"pacing_ms\": 200",
-        "\"rustls\": \"0.23.45\"",
+        "verdict.tls_transport_qualification = \"PASS\"",
+        "providers[1].auth_scope = \"PRESENT\"",
+        "providers[0].transport_verdict = \"PASS\"",
+        "body_sha256",
+        "write_check_to_boundary_ns",
+        "not_qualified_by_this_evidence[0]",
+        "required.workload.pacing_ms = 200",
+        "identity.rustls = \"0.23.45\"",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
     assert!(!text.contains("Authorization"));
-    assert!(contains_secret(&text, "PRESENT"));
-    assert!(!contains_secret(&text, "a-token-that-was-never-written"));
-    assert!(!contains_secret(&text, ""));
+    assert!(contains_secret(&bytes, "PRESENT"));
+    assert!(!contains_secret(&bytes, "a-token-that-was-never-written"));
+    assert!(!contains_secret(&bytes, ""));
+    // A summary or a duration its samples do not hold does not check.
+    let mut miscounted = verdicts.clone();
+    miscounted[0].summary.count += 1;
+    assert!(check_record(&record(&runs, &miscounted)).is_err());
+    let mut moved = runs.clone();
+    let sample = moved[0]
+        .samples
+        .iter_mut()
+        .find(|s| s.write_check_to_boundary_ns.is_some())
+        .unwrap();
+    sample.t_boundary_ns = sample.t_boundary_ns.map(|t| t + 1);
+    assert!(check_record(&record(&moved, &verdicts)).is_err());
+    // Review LOW-2: a handed-off sample without its timings is the
+    // verdict's to judge, not the record's to refuse.
+    let mut untimed = runs.clone();
+    untimed[0].samples[0].t_boundary_ns = None;
+    let untimed_verdicts: Vec<_> = untimed
+        .iter()
+        .map(|run| evaluate(run, &identity()))
+        .collect();
+    check_record(&record(&untimed, &untimed_verdicts)).unwrap();
+    // Review M3: a verdict its reasons do not give, an overall verdict its
+    // providers do not, an identity reason left out: refused.
+    let mut failed = verdicts.clone();
+    failed[0].transport = Verdict::Fail;
+    // (The overall verdict the providers' reasons give: only the
+    // provider's own verdict is wrong.)
+    let failed = evidence_record(&identity(), &runs, &failed, Verdict::Pass, 1).unwrap();
+    assert!(check_record(&failed).is_err());
+    let incomplete =
+        evidence_record(&identity(), &runs, &verdicts, Verdict::Incomplete, 1).unwrap();
+    assert!(check_record(&incomplete).is_err());
+    let mut dirty = identity();
+    dirty.git_dirty = "true".into();
+    let unnamed = evidence_record(&dirty, &runs, &verdicts, overall(&runs, &verdicts), 1).unwrap();
+    assert!(check_record(&unnamed).is_err());
 }
 
 /// Plan 27.10.: the Q5A builder probe sends Mainnet `eth_sendBundle`

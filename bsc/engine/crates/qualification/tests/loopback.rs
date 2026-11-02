@@ -8,7 +8,8 @@ use std::time::Duration;
 use darkbot_bsc_execution::submission::tls::{AuthorizationToken, TLS_TRANSPORT_IMPLEMENTATION};
 use darkbot_bsc_execution::submission::transport::{ConnectionState, MonotonicClock};
 use darkbot_bsc_qualification::evidence::{
-    AuthScope, Phase, ResponseClass, SampleOutcome, Workload, evidence_json,
+    AuthScope, Phase, ResponseClass, SampleOutcome, Workload, check_record, contains_secret,
+    evidence_record,
 };
 use darkbot_bsc_qualification::identity::{EXPECTED_BASELINE, Identity};
 use darkbot_bsc_qualification::measure::{Auth, Provider, QUALIFICATION_POLICY, run_provider};
@@ -158,10 +159,17 @@ fn the_authorization_is_sent_and_never_recorded() {
 
     let runs = [run];
     let verdicts: Vec<_> = runs.iter().map(|run| evaluate(run, &identity())).collect();
-    let text = evidence_json(&identity(), &runs, &verdicts, overall(&runs, &verdicts)).render();
-    assert!(!text.contains(TOKEN));
+    // R8 (BSC-048): the record of the run, checked, holds no token.
+    let bytes =
+        evidence_record(&identity(), &runs, &verdicts, overall(&runs, &verdicts), 1).unwrap();
+    check_record(&bytes).unwrap();
+    assert!(!contains_secret(&bytes, TOKEN));
+    let text =
+        darkbot_bsc_record::decode(&darkbot_bsc_record::schema::q5a::evidence::SCHEMA, &bytes)
+            .unwrap()
+            .render();
     assert!(!text.contains("Authorization"));
-    assert!(text.contains("\"auth_scope\": \"PRESENT\""));
+    assert!(text.contains("providers[0].auth_scope = \"PRESENT\""));
 }
 
 #[test]

@@ -413,6 +413,9 @@ pub const LIVE_NONCE_BURN_FIRST: &str = "LIVE_NONCE_BURN_FIRST";
 /// REV.1.0 R4 (BSC3-059): the grant runs longer than
 /// `BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS` admits for a BUY (exits go on).
 pub const LIVE_GRANT_DURATION_ABOVE_MAX: &str = "LIVE_GRANT_DURATION_ABOVE_MAX";
+/// REV.1.0 R8 (BSC3-049): the LIVE qualification is older than
+/// `BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS` admits for a BUY (exits go on).
+pub const LIVE_QUALIFICATION_STALE: &str = "LIVE_QUALIFICATION_STALE";
 /// BSC3-012: the running `bsc_runtime` is not the build the LIVE
 /// qualification names (or it names none, or this one is unreadable).
 pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";

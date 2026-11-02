@@ -1391,6 +1391,17 @@ fn the_g04_gate_shows_the_criteria_state_or_the_verdict() {
         gate(&projection::project(&root, &run)),
         ("CONTINUE".into(), Vec::<String>::new())
     );
+    // R8 review M1: a run shorter than a day is no campaign result.
+    rated.campaign_ms = 600_000;
+    fs::write(
+        run.join("bsc-runtime/g04-verdict.dbrec"),
+        rated.encode(1).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        gate(&projection::project(&root, &run)),
+        ("NOT_EVALUABLE".into(), vec!["SHORT_CAMPAIGN".into()])
+    );
     fs::remove_dir_all(&root).unwrap();
 }
 

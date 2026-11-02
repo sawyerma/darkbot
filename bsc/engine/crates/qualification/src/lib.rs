@@ -12,10 +12,10 @@
 //!   transactions that no builder can include;
 //! - [`measure`]: the measurement over the frozen `TlsConnectionOwner` and
 //!   `TlsTransport`;
-//! - [`evidence`]: what is recorded, and its JSON form;
+//! - [`evidence`]: what is recorded, and its record (R8, BSC-048: no JSON
+//!   is written; the historical JSON evidence stays as it was);
 //! - [`stats`] and [`verdict`]: aggregation and the acceptance rules;
-//! - [`identity`]: what the build is bound to;
-//! - [`json`]: a small JSON writer.
+//! - [`identity`]: what the build is bound to.
 //!
 //! C1 qualification (typed binary records, no JSON): [`c1_latency`] (C1.9
 //! `c19_report`), [`c1_hook_path`] (C1.9b `c19b_report`), [`c1_freeze`]
@@ -30,7 +30,6 @@ pub mod c1_latency;
 pub mod economics_snapshot;
 pub mod evidence;
 pub mod identity;
-pub mod json;
 pub mod measure;
 pub mod probe;
 pub mod stats;

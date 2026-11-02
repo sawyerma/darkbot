@@ -1,4 +1,5 @@
-//! What a Q5A run records, and its JSON form.
+//! What a Q5A run records, and (R8, BSC-048) its record; the historical
+//! JSON evidence stays as it was written.
 //!
 //! Evidence never contains a request, a header or a credential: per sample
 //! it holds the plaintext length of the request and the length and SHA-256
@@ -12,13 +13,13 @@ use darkbot_bsc_execution::submission::response::ProtocolFailure;
 use darkbot_bsc_execution::submission::tls::{ConnectionFacts, TlsPolicy};
 use darkbot_bsc_execution::submission::transport::ConnectionState;
 
-use crate::identity::Identity;
-use crate::json::Json;
-use crate::stats::Summary;
-use crate::verdict::{ProviderVerdict, Verdict};
+use darkbot_bsc_record::schema::q5a::{
+    connection as qc, evidence as qe, provider as qp, reason as qr, reconnect as qn, sample as qs,
+};
+use darkbot_bsc_record::{Draft, RecordError, Value};
 
-/// Schema of the evidence document.
-pub const SCHEMA: &str = "darkbot.bsc.q5a.tls-transport-evidence.v1";
+use crate::identity::Identity;
+use crate::verdict::{ProviderVerdict, Reason, Verdict};
 
 /// A handoff of this duration or longer, from the write check to the
 /// boundary, is a miss.
@@ -267,211 +268,212 @@ fn stage_name(stage: Stage) -> &'static str {
     }
 }
 
-fn duration_ms(duration: Duration) -> Json {
-    Json::U64(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+fn ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-fn opt_u64(value: Option<u64>) -> Json {
-    Json::opt(value, Json::U64)
+fn facts_record(facts: &ConnectionFacts) -> Value {
+    let mut d = Draft::new(&qc::SCHEMA);
+    d.set(qc::GENERATION, facts.generation)
+        .set(qc::PEER, facts.peer.to_string())
+        .set(qc::TLS_VERSION, format!("{:?}", facts.tls_version))
+        .set(qc::CIPHER_SUITE, format!("{:?}", facts.cipher_suite))
+        .set(qc::HTTP, format!("{:?}", facts.http))
+        .set(qc::ALPN_SELECTED, facts.alpn_selected);
+    d.into_nested()
 }
 
-/// JSON of connection facts.
-pub fn facts_json(facts: &ConnectionFacts) -> Json {
-    Json::object([
-        ("generation", Json::U64(facts.generation)),
-        ("peer", Json::str(facts.peer.to_string())),
-        ("tls_version", Json::str(format!("{:?}", facts.tls_version))),
+/// R8 (BSC-048): one sample as its record.
+fn sample_record(sample: &Sample) -> Result<Value, String> {
+    let body: [u8; 32] = hex::decode(&sample.body_sha256)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            format!(
+                "sample {} {}: its body SHA-256 is not 32 bytes of hex",
+                sample.phase.name(),
+                sample.index
+            )
+        })?;
+    let mut d = Draft::new(&qs::SCHEMA);
+    d.set(qs::PHASE, sample.phase.name())
+        .set(qs::INDEX, u64::from(sample.index))
+        .set(qs::STATE_BEFORE, state_name(sample.state_before))
+        .set(qs::REQUEST_PLAINTEXT_BYTES, sample.request_bytes as u64)
+        .set(qs::BODY_BYTES, sample.body_bytes as u64)
+        .set(qs::BODY_SHA256, Value::B256(body))
+        .set(qs::STATE_AFTER, state_name(sample.state_after));
+    if let Some(peer) = sample.peer {
+        d.set(qs::PEER, peer.to_string());
+    }
+    let times = [
+        (qs::GENERATION, sample.generation),
+        (qs::PREPARE_NS, sample.prepare_ns),
+        (qs::T_WRITE_CHECK_NS, sample.t_write_check_ns),
+        (qs::T_BOUNDARY_NS, sample.t_boundary_ns),
         (
-            "cipher_suite",
-            Json::str(format!("{:?}", facts.cipher_suite)),
+            qs::WRITE_CHECK_TO_BOUNDARY_NS,
+            sample.write_check_to_boundary_ns,
         ),
-        ("http", Json::str(format!("{:?}", facts.http))),
-        ("alpn_selected", Json::Bool(facts.alpn_selected)),
-    ])
-}
-
-fn connect_json(result: &Result<ConnectionFacts, String>) -> Json {
-    match result {
-        Ok(facts) => Json::object([("ok", Json::Bool(true)), ("facts", facts_json(facts))]),
-        Err(error) => Json::object([("ok", Json::Bool(false)), ("error", Json::str(error))]),
+        (qs::WIRE_BYTES, sample.wire_bytes),
+        (qs::RESPONSE_LATENCY_NS, sample.response_latency_ns),
+    ];
+    for (tag, value) in times {
+        if let Some(value) = value {
+            d.set(tag, value);
+        }
     }
-}
-
-fn outcome_json(outcome: SampleOutcome) -> Json {
-    match outcome {
-        SampleOutcome::HandedOff => Json::object([("kind", Json::str("handed_off"))]),
-        SampleOutcome::Skipped(state) => Json::object([
-            ("kind", Json::str("skipped")),
-            ("state", Json::str(state_name(state))),
-        ]),
-        SampleOutcome::Unknown { stage, error } => Json::object([
-            ("kind", Json::str("unknown")),
-            ("stage", Json::str(stage_name(stage))),
-            ("error", Json::str(format!("{error:?}"))),
-        ]),
-    }
-}
-
-fn response_json(class: ResponseClass) -> Json {
-    let (name, detail) = match class {
-        ResponseClass::Ack => ("ack", Json::Null),
-        ResponseClass::Reject { code } => ("reject", Json::opt(code, Json::I64)),
-        ResponseClass::RateLimited => ("rate_limited", Json::Null),
-        ResponseClass::HttpStatus(status) => ("http_status", Json::U64(u64::from(status))),
-        ResponseClass::Malformed(failure) => ("malformed", Json::str(format!("{failure:?}"))),
-        ResponseClass::Connection => ("connection", Json::Null),
-        ResponseClass::Timeout => ("timeout", Json::Null),
+    match sample.outcome {
+        SampleOutcome::HandedOff => d.set(qs::OUTCOME, "handed_off"),
+        SampleOutcome::Skipped(state) => d
+            .set(qs::OUTCOME, "skipped")
+            .set(qs::OUTCOME_STATE, state_name(state)),
+        SampleOutcome::Unknown { stage, error } => d
+            .set(qs::OUTCOME, "unknown")
+            .set(qs::OUTCOME_STAGE, stage_name(stage))
+            .set(qs::OUTCOME_ERROR, format!("{error:?}")),
     };
-    Json::object([
-        ("class", Json::str(name)),
-        ("detail", detail),
-        ("answered", Json::Bool(class.answered())),
-    ])
+    if let Some(class) = sample.response {
+        let name = match class {
+            ResponseClass::Ack => "ack",
+            ResponseClass::Reject { code } => {
+                if let Some(code) = code {
+                    d.set(qs::RESPONSE_REJECT_CODE, code);
+                }
+                "reject"
+            }
+            ResponseClass::RateLimited => "rate_limited",
+            ResponseClass::HttpStatus(status) => {
+                d.set(qs::RESPONSE_HTTP_STATUS, u64::from(status));
+                "http_status"
+            }
+            ResponseClass::Malformed(failure) => {
+                d.set(qs::RESPONSE_MALFORMED, format!("{failure:?}"));
+                "malformed"
+            }
+            ResponseClass::Connection => "connection",
+            ResponseClass::Timeout => "timeout",
+        };
+        d.set(qs::RESPONSE, name)
+            .set(qs::RESPONSE_ANSWERED, class.answered());
+    }
+    Ok(d.into_nested())
 }
 
-/// JSON of one sample.
-pub fn sample_json(sample: &Sample) -> Json {
-    Json::object([
-        ("phase", Json::str(sample.phase.name())),
-        ("index", Json::U64(u64::from(sample.index))),
-        ("generation", opt_u64(sample.generation)),
-        (
-            "peer",
-            Json::opt(sample.peer, |peer| Json::str(peer.to_string())),
-        ),
-        ("state_before", Json::str(state_name(sample.state_before))),
-        (
-            "request_plaintext_bytes",
-            Json::U64(sample.request_bytes as u64),
-        ),
-        ("body_bytes", Json::U64(sample.body_bytes as u64)),
-        ("body_sha256", Json::str(&sample.body_sha256)),
-        ("outcome", outcome_json(sample.outcome)),
-        ("prepare_ns", opt_u64(sample.prepare_ns)),
-        ("t_write_check_ns", opt_u64(sample.t_write_check_ns)),
-        ("t_boundary_ns", opt_u64(sample.t_boundary_ns)),
-        (
-            "write_check_to_boundary_ns",
-            opt_u64(sample.write_check_to_boundary_ns),
-        ),
-        ("wire_bytes", opt_u64(sample.wire_bytes)),
-        ("response", Json::opt(sample.response, response_json)),
-        ("response_latency_ns", opt_u64(sample.response_latency_ns)),
-        ("state_after", Json::str(state_name(sample.state_after))),
-    ])
+fn reconnect_record(cycle: &ReconnectCycle) -> Result<Value, String> {
+    let mut d = Draft::new(&qn::SCHEMA);
+    d.set(qn::CYCLE, u64::from(cycle.cycle))
+        .set(qn::PREVIOUS_STILL_CURRENT, cycle.previous_still_current);
+    if let Some(previous) = cycle.previous {
+        d.set(qn::PREVIOUS_GENERATION, previous.generation);
+    }
+    match &cycle.result {
+        Ok(facts) => d.set(qn::CONNECTION, facts_record(facts)),
+        Err(error) => d.set(qn::ERROR, error.as_str()),
+    };
+    if let Some(probe) = &cycle.probe {
+        d.set(qn::PROBE, sample_record(probe)?);
+    }
+    Ok(d.into_nested())
 }
 
-fn reconnect_json(cycle: &ReconnectCycle) -> Json {
-    Json::object([
-        ("cycle", Json::U64(u64::from(cycle.cycle))),
-        (
-            "previous_generation",
-            Json::opt(cycle.previous, |facts| Json::U64(facts.generation)),
-        ),
-        ("result", connect_json(&cycle.result)),
-        (
-            "previous_still_current",
-            Json::Bool(cycle.previous_still_current),
-        ),
-        ("probe", Json::opt(cycle.probe.as_ref(), sample_json)),
-    ])
+fn reason_record(reason: Reason) -> Value {
+    let mut d = Draft::new(&qr::SCHEMA);
+    d.set(qr::NAME, reason.name())
+        .set(qr::FAILS, reason.fails());
+    match reason {
+        Reason::IdentityUnknown(field) | Reason::IdentityInvalid(field) => {
+            d.set(qr::FIELD, field);
+        }
+        Reason::InconsistentEvidence {
+            samples,
+            phase,
+            index,
+            issue,
+        } => {
+            d.set(qr::SAMPLES, u64::from(samples))
+                .set(qr::FIRST_PHASE, phase.name())
+                .set(qr::FIRST_INDEX, u64::from(index))
+                .set(qr::FIRST_ISSUE, issue.name());
+        }
+        Reason::MeasuredSamplesMissing { expected, recorded }
+        | Reason::MeasuredTimingMissing { expected, recorded }
+        | Reason::ReconnectCyclesMissing { expected, recorded } => {
+            d.set(qr::EXPECTED, u64::from(expected))
+                .set(qr::RECORDED, u64::from(recorded));
+        }
+        Reason::Skipped(count)
+        | Reason::TransportFailures(count)
+        | Reason::DeadlineMisses(count)
+        | Reason::ReconnectFailed(count)
+        | Reason::GenerationNotIncreased(count)
+        | Reason::PreviousFactsStillCurrent(count)
+        | Reason::ReconnectProbeFailed(count) => {
+            d.set(qr::COUNT, u64::from(count));
+        }
+        _ => {}
+    }
+    d.into_nested()
 }
 
-/// JSON of a workload.
-pub fn workload_json(workload: &Workload) -> Json {
-    Json::object([
-        ("warmup", Json::U64(u64::from(workload.warmup))),
-        ("measured", Json::U64(u64::from(workload.measured))),
-        ("pacing_ms", duration_ms(workload.pacing)),
-        (
-            "reconnect_cycles",
-            Json::U64(u64::from(workload.reconnect_cycles)),
-        ),
-    ])
-}
-
-fn policy_json(policy: &TlsPolicy) -> Json {
-    Json::object([
-        ("connect_timeout_ms", duration_ms(policy.connect_timeout)),
-        (
-            "handshake_timeout_ms",
-            duration_ms(policy.handshake_timeout),
-        ),
-        ("max_idle_ms", duration_ms(policy.max_idle)),
-        ("response_timeout_ms", duration_ms(policy.response_timeout)),
-        (
-            "max_plaintext_request_len",
-            Json::U64(policy.max_plaintext_request_len as u64),
-        ),
-    ])
-}
-
-fn summary_json(summary: &Summary) -> Json {
-    Json::object([
-        ("count", Json::U64(summary.count as u64)),
-        ("p50_ns", opt_u64(summary.p50)),
-        ("p95_ns", opt_u64(summary.p95)),
-        ("p99_ns", opt_u64(summary.p99)),
-        ("max_ns", opt_u64(summary.max)),
-        ("limit_ns", Json::U64(summary.limit)),
-        (
-            "at_or_above_limit",
-            Json::U64(summary.at_or_above_limit as u64),
-        ),
-        (
-            "fraction_at_or_above_limit",
-            Json::F64(summary.fraction_at_or_above_limit),
-        ),
-    ])
-}
-
-fn provider_json(run: &ProviderRun, verdict: &ProviderVerdict) -> Json {
-    Json::object([
-        ("provider", Json::str(run.provider)),
-        ("host", Json::str(&run.host)),
-        ("port", Json::U64(u64::from(run.port))),
-        ("auth_scope", Json::str(run.auth.name())),
-        ("policy", policy_json(&run.policy)),
-        ("workload", workload_json(&run.workload)),
-        ("started_at", Json::str(&run.started_at)),
-        ("ended_at", Json::str(&run.ended_at)),
-        ("connect", connect_json(&run.connect)),
-        (
-            "samples",
-            Json::Array(run.samples.iter().map(sample_json).collect()),
-        ),
-        (
-            "reconnects",
-            Json::Array(run.reconnects.iter().map(reconnect_json).collect()),
-        ),
-        ("summary", summary_json(&verdict.summary)),
-        (
-            "counts",
-            Json::object([
-                ("handed_off", Json::U64(verdict.handed_off as u64)),
-                ("skipped", Json::U64(verdict.skipped as u64)),
-                ("unknown", Json::U64(verdict.unknown as u64)),
-                ("stale_after", Json::U64(verdict.stale_after as u64)),
-                (
-                    "disconnected_after",
-                    Json::U64(verdict.disconnected_after as u64),
-                ),
-                ("reconnects", Json::U64(run.reconnects.len() as u64)),
-            ]),
-        ),
-        ("api_scope", Json::str(verdict.api.name())),
-        ("transport_verdict", Json::str(verdict.transport.name())),
-        (
-            "reasons",
-            Json::Array(
-                verdict
-                    .reasons
-                    .iter()
-                    .map(|reason| reason.to_json())
-                    .collect(),
-            ),
-        ),
-    ])
+fn provider_record(run: &ProviderRun, verdict: &ProviderVerdict) -> Result<Value, String> {
+    let mut d = Draft::new(&qp::SCHEMA);
+    let summary = &verdict.summary;
+    d.set(qp::PROVIDER, run.provider)
+        .set(qp::HOST, run.host.as_str())
+        .set(qp::PORT, u64::from(run.port))
+        .set(qp::AUTH_SCOPE, run.auth.name())
+        .set(qp::CONNECT_TIMEOUT_MS, ms(run.policy.connect_timeout))
+        .set(qp::HANDSHAKE_TIMEOUT_MS, ms(run.policy.handshake_timeout))
+        .set(qp::MAX_IDLE_MS, ms(run.policy.max_idle))
+        .set(qp::RESPONSE_TIMEOUT_MS, ms(run.policy.response_timeout))
+        .set(
+            qp::MAX_PLAINTEXT_REQUEST_LEN,
+            run.policy.max_plaintext_request_len as u64,
+        )
+        .set(qp::WARMUP, u64::from(run.workload.warmup))
+        .set(qp::MEASURED, u64::from(run.workload.measured))
+        .set(qp::PACING_MS, ms(run.workload.pacing))
+        .set(
+            qp::RECONNECT_CYCLES,
+            u64::from(run.workload.reconnect_cycles),
+        )
+        .set(qp::STARTED_AT, run.started_at.as_str())
+        .set(qp::ENDED_AT, run.ended_at.as_str())
+        .set(qp::SUMMARY_COUNT, summary.count as u64)
+        .set(qp::LIMIT_NS, summary.limit)
+        .set(qp::AT_OR_ABOVE_LIMIT, summary.at_or_above_limit as u64)
+        .set(qp::HANDED_OFF, verdict.handed_off as u64)
+        .set(qp::SKIPPED, verdict.skipped as u64)
+        .set(qp::UNKNOWN, verdict.unknown as u64)
+        .set(qp::STALE_AFTER, verdict.stale_after as u64)
+        .set(qp::DISCONNECTED_AFTER, verdict.disconnected_after as u64)
+        .set(qp::API_SCOPE, verdict.api.name())
+        .set(qp::TRANSPORT_VERDICT, verdict.transport.name());
+    for (tag, value) in [
+        (qp::P50_NS, summary.p50),
+        (qp::P95_NS, summary.p95),
+        (qp::P99_NS, summary.p99),
+        (qp::MAX_NS, summary.max),
+    ] {
+        if let Some(value) = value {
+            d.set(tag, value);
+        }
+    }
+    match &run.connect {
+        Ok(facts) => d.set(qp::CONNECTION, facts_record(facts)),
+        Err(error) => d.set(qp::CONNECT_ERROR, error.as_str()),
+    };
+    for sample in &run.samples {
+        d.push(qp::SAMPLES, sample_record(sample)?);
+    }
+    for cycle in &run.reconnects {
+        d.push(qp::RECONNECTS, reconnect_record(cycle)?);
+    }
+    for reason in &verdict.reasons {
+        d.push(qp::REASONS, reason_record(*reason));
+    }
+    Ok(d.into_nested())
 }
 
 /// What this evidence never qualifies, whatever its verdict.
@@ -486,55 +488,247 @@ pub const NOT_QUALIFIED: [&str; 8] = [
     "T0 to T_buy",
 ];
 
-/// The complete evidence document.
-pub fn evidence_json(
+/// R8 (BSC-048): the complete evidence as its record, made at
+/// `now_unix_ms`.
+pub fn evidence_record(
     identity: &Identity,
     runs: &[ProviderRun],
     verdicts: &[ProviderVerdict],
     overall: Verdict,
-) -> Json {
-    Json::object([
-        ("schema", Json::str(SCHEMA)),
-        (
-            "kind",
-            Json::str(
-                "Q5A real TLS transport qualification. Transport only; not a provider \
-                 qualification. The probe is an eth_sendBundle without transactions.",
-            ),
-        ),
-        ("identity", identity.to_json()),
-        (
-            "required",
-            Json::object([
-                ("workload", workload_json(&QUALIFICATION_WORKLOAD)),
-                ("miss_limit_ns", Json::U64(MISS_NS)),
-                (
-                    "providers",
-                    Json::Array(vec![Json::str("club48"), Json::str("blockrazor")]),
-                ),
-            ]),
-        ),
-        (
-            "providers",
-            Json::Array(
-                runs.iter()
-                    .zip(verdicts)
-                    .map(|(run, verdict)| provider_json(run, verdict))
-                    .collect(),
-            ),
-        ),
-        (
-            "verdict",
-            Json::object([("tls_transport_qualification", Json::str(overall.name()))]),
-        ),
-        (
-            "not_qualified_by_this_evidence",
-            Json::Array(NOT_QUALIFIED.iter().map(|item| Json::str(*item)).collect()),
-        ),
-    ])
+    now_unix_ms: u64,
+) -> Result<Vec<u8>, String> {
+    let mut d = Draft::new(&qe::SCHEMA);
+    d.set(qe::PROVENANCE_TOOL, "u5_tls_qualify")
+        .set(qe::PROVENANCE_OBSERVED_UNIX_MS, now_unix_ms)
+        .set(qe::BASELINE, identity.baseline.as_str())
+        .set(qe::GIT_HEAD, identity.git_head.as_str())
+        .set(qe::GIT_DIRTY, identity.git_dirty.as_str())
+        .set(qe::BASELINE_ANCESTOR, identity.baseline_ancestor.as_str())
+        .set(
+            qe::FROZEN_SOURCES_UNCHANGED,
+            identity.frozen_sources_unchanged.as_str(),
+        )
+        .set(qe::RUSTC, identity.rustc.as_str())
+        .set(qe::CARGO, identity.cargo.as_str())
+        .set(qe::RUSTLS, identity.rustls.as_str())
+        .set(qe::RING, identity.ring.as_str())
+        .set(qe::PROFILE, identity.profile.as_str())
+        .set(qe::OS, identity.os.as_str())
+        .set(qe::ARCH, identity.arch.as_str())
+        .set(
+            qe::TRANSPORT_IMPLEMENTATION,
+            identity.transport_implementation.as_str(),
+        )
+        .set(qe::HARNESS, identity.harness.as_str())
+        .set(
+            qe::REQUIRED_WARMUP,
+            u64::from(QUALIFICATION_WORKLOAD.warmup),
+        )
+        .set(
+            qe::REQUIRED_MEASURED,
+            u64::from(QUALIFICATION_WORKLOAD.measured),
+        )
+        .set(qe::REQUIRED_PACING_MS, ms(QUALIFICATION_WORKLOAD.pacing))
+        .set(
+            qe::REQUIRED_RECONNECT_CYCLES,
+            u64::from(QUALIFICATION_WORKLOAD.reconnect_cycles),
+        )
+        .set(qe::MISS_LIMIT_NS, MISS_NS)
+        .set(qe::VERDICT, overall.name());
+    for provider in ["club48", "blockrazor"] {
+        d.push(qe::REQUIRED_PROVIDERS, provider);
+    }
+    for (run, verdict) in runs.iter().zip(verdicts) {
+        d.push(qe::PROVIDERS, provider_record(run, verdict)?);
+    }
+    for item in NOT_QUALIFIED {
+        d.push(qe::NOT_QUALIFIED, item);
+    }
+    d.encode().map_err(|e| format!("Q5A evidence: {e:?}"))
 }
 
-/// Whether `text` contains `secret`. An empty secret is never contained.
-pub fn contains_secret(text: &str, secret: &str) -> bool {
-    !secret.is_empty() && text.contains(secret)
+/// R8 (BSC-048): an evidence record checked against itself, from its raw
+/// samples: a handed-off sample with all its timings has the duration of
+/// its boundary less its write check (one without them is the verdict's
+/// INCONSISTENT_EVIDENCE); per provider, the summary of the measured
+/// durations (nearest-rank, misses at [`MISS_NS`]) and the counts of all
+/// samples, reconnect probes included, are the ones it states; review M3:
+/// the identity's reasons (from its fields) and the count reasons are its
+/// reasons, its transport verdict theirs, the overall verdict the
+/// providers'.
+pub fn check_record(bytes: &[u8]) -> Result<(), String> {
+    let e = |x: RecordError| x.0;
+    let r = darkbot_bsc_record::decode(&qe::SCHEMA, bytes).map_err(e)?;
+    if r.u64(qe::MISS_LIMIT_NS).map_err(e)? != MISS_NS {
+        return Err(format!("the miss limit is not {MISS_NS} ns"));
+    }
+    let text = |tag| r.text(tag).map(str::to_string).map_err(e);
+    let identity = Identity {
+        baseline: text(qe::BASELINE)?,
+        git_head: text(qe::GIT_HEAD)?,
+        git_dirty: text(qe::GIT_DIRTY)?,
+        baseline_ancestor: text(qe::BASELINE_ANCESTOR)?,
+        frozen_sources_unchanged: text(qe::FROZEN_SOURCES_UNCHANGED)?,
+        rustc: text(qe::RUSTC)?,
+        cargo: text(qe::CARGO)?,
+        rustls: text(qe::RUSTLS)?,
+        ring: text(qe::RING)?,
+        profile: text(qe::PROFILE)?,
+        os: text(qe::OS)?,
+        arch: text(qe::ARCH)?,
+        transport_implementation: text(qe::TRANSPORT_IMPLEMENTATION)?,
+        harness: text(qe::HARNESS)?,
+    };
+    let from_identity: Vec<&str> = crate::verdict::identity_reasons(&identity)
+        .into_iter()
+        .map(Reason::name)
+        .collect();
+    let mut verdicts = Vec::new();
+    for p in r.nested_all(qe::PROVIDERS).map_err(e)? {
+        let name = p.text(qp::PROVIDER).map_err(e)?.to_string();
+        let mut samples = p.nested_all(qp::SAMPLES).map_err(e)?;
+        for cycle in p.nested_all(qp::RECONNECTS).map_err(e)? {
+            samples.extend(cycle.opt_nested(qn::PROBE).map_err(e)?);
+        }
+        let mut durations = Vec::new();
+        let mut counts = [0u64; 5];
+        for s in &samples {
+            let at = || {
+                format!(
+                    "{name} {} {}",
+                    s.text(qs::PHASE).unwrap_or("?"),
+                    s.u64(qs::INDEX).unwrap_or(0)
+                )
+            };
+            let (write, boundary, duration) = (
+                s.opt_u64(qs::T_WRITE_CHECK_NS).map_err(e)?,
+                s.opt_u64(qs::T_BOUNDARY_NS).map_err(e)?,
+                s.opt_u64(qs::WRITE_CHECK_TO_BOUNDARY_NS).map_err(e)?,
+            );
+            match s.text(qs::OUTCOME).map_err(e)? {
+                "handed_off" => {
+                    counts[0] += 1;
+                    if let (Some(w), Some(b), Some(d)) = (write, boundary, duration)
+                        && b.checked_sub(w) != Some(d)
+                    {
+                        return Err(format!(
+                            "{}: its duration is not its boundary less its write check",
+                            at()
+                        ));
+                    }
+                }
+                "skipped" => counts[1] += 1,
+                "unknown" => counts[2] += 1,
+                other => return Err(format!("{}: outcome {other}", at())),
+            }
+            match s.text(qs::STATE_AFTER).map_err(e)? {
+                "stale" => counts[3] += 1,
+                "disconnected" => counts[4] += 1,
+                _ => {}
+            }
+            if s.text(qs::PHASE).map_err(e)? == "measured"
+                && let Some(d) = duration
+            {
+                durations.push(d);
+            }
+        }
+        let summary = crate::stats::summarize(&durations, MISS_NS);
+        let stated = [
+            (qp::HANDED_OFF, counts[0]),
+            (qp::SKIPPED, counts[1]),
+            (qp::UNKNOWN, counts[2]),
+            (qp::STALE_AFTER, counts[3]),
+            (qp::DISCONNECTED_AFTER, counts[4]),
+            (qp::SUMMARY_COUNT, summary.count as u64),
+            (qp::AT_OR_ABOVE_LIMIT, summary.at_or_above_limit as u64),
+            (qp::LIMIT_NS, MISS_NS),
+        ];
+        for (tag, value) in stated {
+            if p.u64(tag).map_err(e)? != value {
+                return Err(format!(
+                    "{name}: field {tag} states {}, its samples {value}",
+                    p.u64(tag).map_err(e)?
+                ));
+            }
+        }
+        let percentiles = [
+            (qp::P50_NS, summary.p50),
+            (qp::P95_NS, summary.p95),
+            (qp::P99_NS, summary.p99),
+            (qp::MAX_NS, summary.max),
+        ];
+        for (tag, value) in percentiles {
+            if p.opt_u64(tag).map_err(e)? != value {
+                return Err(format!("{name}: field {tag} is not its samples' {value:?}"));
+            }
+        }
+        // Review M3: its reasons and its verdict.
+        let mut reasons = Vec::new();
+        for x in p.nested_all(qp::REASONS).map_err(e)? {
+            let reason = (
+                x.text(qr::NAME).map_err(e)?.to_string(),
+                x.opt_u64(qr::COUNT).map_err(e)?,
+            );
+            reasons.push((reason, x.bool(qr::FAILS).map_err(e)?));
+        }
+        let named = |reason: &str| reasons.iter().find(|((n, _), _)| n == reason);
+        if let Some(missing) = from_identity.iter().find(|r| named(r).is_none()) {
+            return Err(format!(
+                "{name}: the identity's reason {missing} is not named"
+            ));
+        }
+        let derived = [
+            ("skipped", counts[1]),
+            ("transport_failures", counts[2]),
+            ("deadline_misses", summary.at_or_above_limit as u64),
+        ];
+        for (reason, count) in derived {
+            let stated = named(reason).map(|((_, c), _)| *c);
+            if stated != (count > 0).then_some(Some(count)) {
+                return Err(format!(
+                    "{name}: reason {reason} is not its samples' {count}"
+                ));
+            }
+        }
+        let transport = if reasons.iter().any(|(_, fails)| *fails) {
+            Verdict::Fail
+        } else if reasons.is_empty() {
+            Verdict::Pass
+        } else {
+            Verdict::Incomplete
+        };
+        if p.text(qp::TRANSPORT_VERDICT).map_err(e)? != transport.name() {
+            return Err(format!(
+                "{name}: its verdict is not its reasons' {}",
+                transport.name()
+            ));
+        }
+        verdicts.push((name, transport));
+    }
+    let present = |provider: &str| verdicts.iter().any(|(n, _)| n == provider);
+    let overall = if verdicts.iter().any(|(_, v)| *v == Verdict::Fail) {
+        Verdict::Fail
+    } else if verdicts.iter().all(|(_, v)| *v == Verdict::Pass)
+        && present("club48")
+        && present("blockrazor")
+    {
+        Verdict::Pass
+    } else {
+        Verdict::Incomplete
+    };
+    if r.text(qe::VERDICT).map_err(e)? != overall.name() {
+        return Err(format!(
+            "the overall verdict is not its providers' {}",
+            overall.name()
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `bytes` contain `secret`. An empty secret is never contained.
+pub fn contains_secret(bytes: &[u8], secret: &str) -> bool {
+    !secret.is_empty()
+        && bytes
+            .windows(secret.len())
+            .any(|window| window == secret.as_bytes())
 }

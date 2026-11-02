@@ -317,7 +317,7 @@ cmd_build() {
   (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
   (cd "$ROOT/gateway" && cargo build --release --locked --offline)
   (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported --bin p0-analytics-reporter && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
-  (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate && cargo build --release --locked --offline -p darkbot-bsc-execution --features runtime --bin bsc_runtime)
+  (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-qualification --bin g08_mainnet_verify && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate --bin g07_mainnet_self_launch_buy --bin g07_builder_probe --bin g07_attempt_authority && cargo build --release --locked --offline -p darkbot-bsc-execution --features runtime --bin bsc_runtime && cargo build --release --locked --offline -p darkbot-bsc-record --bin dbrec_show)
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
 }

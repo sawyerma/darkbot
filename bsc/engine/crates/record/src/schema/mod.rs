@@ -22,6 +22,7 @@ pub mod g06a;
 pub mod g07;
 pub mod g07_candidate;
 pub mod g08;
+pub mod q5a;
 
 /// Provenance of an imported legacy file: tags 1 and 2 of every import
 /// schema.
@@ -51,6 +52,7 @@ pub fn all() -> Vec<&'static Schema> {
         .chain(g07::ALL)
         .chain(g07_candidate::ALL)
         .chain(g08::ALL)
+        .chain(q5a::ALL)
         .copied()
         .collect()
 }

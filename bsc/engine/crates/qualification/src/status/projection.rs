@@ -446,6 +446,19 @@ fn g04_gate(root: &Path, rundir: &Path) -> GateStatus {
                     vec!["CRITERIA_NOT_PRECOMMITTED".into()],
                 )
             }
+            // R8 review M1: a run shorter than a day (a smoke run in
+            // minutes) is no campaign result.
+            Ok(r)
+                if r.u64(gv::CAMPAIGN_MS)
+                    .is_ok_and(|ms| ms < darkbot_bsc_execution::g04_criteria::DAY_MS) =>
+            {
+                gate(
+                    "G0.4",
+                    darkbot_bsc_execution::g04_criteria::NOT_EVALUABLE,
+                    Some(evidence(rundir, &path, Some(&r))),
+                    vec!["SHORT_CAMPAIGN".into()],
+                )
+            }
             Ok(r) => gate(
                 "G0.4",
                 &r.text(gv::VERDICT).map(safe_text).unwrap_or_default(),

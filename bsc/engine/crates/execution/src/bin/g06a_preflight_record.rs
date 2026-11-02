@@ -94,6 +94,14 @@ fn write_new(path: &str, bytes: &[u8]) {
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .unwrap_or_else(|e| panic!("write {path}: {e}"));
+    // R8 (BSC3-018): its directory's new entry durable too.
+    let dir = match std::path::Path::new(path).parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => std::path::Path::new("."),
+    };
+    fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .unwrap_or_else(|e| panic!("sync the directory of {path}: {e}"));
 }
 
 fn arg(args: &[String], flag: &str) -> Option<String> {

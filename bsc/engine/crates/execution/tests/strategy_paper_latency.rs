@@ -192,6 +192,7 @@ fn strategy_paper_path_latency() {
             // The test rigs' sources are public: the variant ON (R4 tests OFF).
             live_public_only: true,
             live_grant_max_duration_ms: 0,
+            live_qualification_max_age_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
             // No test grant is an outlier.
             live_risk_soft_buy_slippage_bps: 9_999,
