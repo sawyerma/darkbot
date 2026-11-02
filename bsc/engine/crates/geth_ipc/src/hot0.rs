@@ -942,6 +942,13 @@ impl Hot0Poller {
         self.core.continuity.broken()
     }
 
+    /// Whether the node began the arena's shutdown: every peer lane shut
+    /// (one lane's quarantine is not). REV.1.0 R6: the geth source's end.
+    pub fn shut_down(&self) -> bool {
+        let mut peers = (0..self.lanes.len()).filter(|lane| Some(*lane) != self.chain);
+        peers.all(|lane| self.lanes.stats(lane).shutdown)
+    }
+
     /// The lane ids currently polled, in poll order from the cursor.
     pub fn active_lane_ids(&self) -> impl Iterator<Item = u16> + '_ {
         let count = self.active.len();

@@ -382,6 +382,161 @@ fn rlp_field(list_payload: &[u8], index: usize) -> Result<RlpItem<'_>, EnvelopeE
     Ok(rlp_next(rest)?.0)
 }
 
+/// REV.1.0 R6: what the signature of a signed transaction commits to, and
+/// the signature: legacy (EIP-155 only, `v = 35 + 2·chainId + parity`, as
+/// the WSS sources verify), EIP-2930 (1), EIP-1559 (2), EIP-4844 (3,
+/// without the network sidecar wrapper), EIP-7702 (4). Its chain id and
+/// nonce, the bytes signed (typed: `type ‖ rlp(fields before the
+/// signature)`; legacy: `rlp(six fields, chainId, 0, 0)`), `y_parity`, `r`,
+/// `s`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TxSignatureV2 {
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub signing_payload: Vec<u8>,
+    pub y_parity: bool,
+    pub r: [u8; 32],
+    pub s: [u8; 32],
+}
+
+/// The [`TxSignatureV2`] of the signed transaction `raw`.
+pub fn decode_tx_signature(raw: &[u8]) -> Result<TxSignatureV2, EnvelopeErrorV2> {
+    fn scalar(encoded: &[u8]) -> Result<&[u8], EnvelopeErrorV2> {
+        let item = rlp_next(encoded)?.0;
+        match item.list {
+            true => Err(EnvelopeErrorV2::Malformed(
+                "envelope: a list where a scalar was expected",
+            )),
+            false => Ok(item.payload),
+        }
+    }
+    fn uint(encoded: &[u8]) -> Result<u64, EnvelopeErrorV2> {
+        let bytes = scalar(encoded)?;
+        if bytes.len() > 8 || bytes.first() == Some(&0) {
+            return Err(EnvelopeErrorV2::Malformed("envelope: not a canonical u64"));
+        }
+        Ok(bytes.iter().fold(0u64, |v, b| (v << 8) | u64::from(*b)))
+    }
+    fn word(encoded: &[u8]) -> Result<[u8; 32], EnvelopeErrorV2> {
+        let bytes = scalar(encoded)?;
+        if bytes.len() > 32 || bytes.first() == Some(&0) {
+            return Err(EnvelopeErrorV2::Malformed(
+                "envelope: not a canonical 256-bit scalar",
+            ));
+        }
+        let mut out = [0u8; 32];
+        out[32 - bytes.len()..].copy_from_slice(bytes);
+        Ok(out)
+    }
+    /// `rlp(list)` of already encoded `items` into `out`.
+    fn list(items: &[&[u8]], out: &mut Vec<u8>) {
+        let body: usize = items.iter().map(|i| i.len()).sum();
+        if body <= 55 {
+            out.push(0xc0 + body as u8);
+        } else {
+            let length = (body as u64).to_be_bytes();
+            let skip = length.iter().take_while(|b| **b == 0).count();
+            out.push(0xf7 + (8 - skip) as u8);
+            out.extend_from_slice(&length[skip..]);
+        }
+        for i in items {
+            out.extend_from_slice(i);
+        }
+    }
+    let first = *raw.first().ok_or(EnvelopeErrorV2::Empty)?;
+    let (tx_type, envelope) = match first {
+        0xc0..=0xff => (None, raw),
+        0x01..=0x04 => (Some(first), &raw[1..]),
+        0x00 | 0x05..=0x7f => return Err(EnvelopeErrorV2::UnsupportedType(first)),
+        0x80..=0xbf => {
+            return Err(EnvelopeErrorV2::Malformed(
+                "envelope: neither a list nor a type byte",
+            ));
+        }
+    };
+    let (outer, trailing) = rlp_next(envelope)?;
+    if !outer.list || !trailing.is_empty() {
+        return Err(EnvelopeErrorV2::Malformed(
+            "envelope: not exactly one rlp list",
+        ));
+    }
+    // Each field as signed (its own encoding), in order.
+    let mut fields: Vec<&[u8]> = Vec::new();
+    let mut rest = outer.payload;
+    while !rest.is_empty() {
+        let (item, next) = rlp_next(rest)?;
+        if fields.is_empty() && item.list {
+            return Err(EnvelopeErrorV2::Malformed(
+                "envelope: a blob network wrapper",
+            ));
+        }
+        fields.push(&rest[..rest.len() - next.len()]);
+        rest = next;
+    }
+    let mut signing_payload = Vec::with_capacity(raw.len());
+    let (chain_id, nonce, y_parity, sig) = match tx_type {
+        None => {
+            if fields.len() != 9 {
+                return Err(EnvelopeErrorV2::Malformed(
+                    "envelope: legacy is not nine fields",
+                ));
+            }
+            let v = uint(fields[6])?;
+            let offset = match v {
+                27 | 28 => return Err(EnvelopeErrorV2::Malformed("envelope: pre-EIP-155")),
+                _ => v
+                    .checked_sub(35)
+                    .ok_or(EnvelopeErrorV2::Malformed("envelope: v below EIP-155"))?,
+            };
+            let chain_id = offset / 2;
+            // `chainId` as an rlp integer, then two empty strings.
+            let bytes = chain_id.to_be_bytes();
+            let skip = bytes.iter().take_while(|b| **b == 0).count();
+            let value = &bytes[skip..];
+            let mut chain = Vec::with_capacity(9);
+            match value {
+                [b] if *b < 0x80 => chain.push(*b),
+                _ => {
+                    chain.push(0x80 + value.len() as u8);
+                    chain.extend_from_slice(value);
+                }
+            }
+            let mut items: Vec<&[u8]> = fields[..6].to_vec();
+            items.push(&chain);
+            items.push(&[0x80]);
+            items.push(&[0x80]);
+            list(&items, &mut signing_payload);
+            (chain_id, uint(fields[0])?, offset % 2 == 1, &fields[7..])
+        }
+        Some(t) => {
+            let Some(body) = fields.len().checked_sub(3).filter(|n| *n >= 2) else {
+                return Err(EnvelopeErrorV2::Malformed("envelope: too few fields"));
+            };
+            let y_parity = match uint(fields[body])? {
+                0 => false,
+                1 => true,
+                _ => return Err(EnvelopeErrorV2::Malformed("envelope: y parity not 0 or 1")),
+            };
+            signing_payload.push(t);
+            list(&fields[..body], &mut signing_payload);
+            (
+                uint(fields[0])?,
+                uint(fields[1])?,
+                y_parity,
+                &fields[body + 1..],
+            )
+        }
+    };
+    Ok(TxSignatureV2 {
+        chain_id,
+        nonce,
+        signing_payload,
+        y_parity,
+        r: word(sig[0])?,
+        s: word(sig[1])?,
+    })
+}
+
 /// Decodes destination and calldata of a canonical signed transaction:
 /// legacy, EIP-2930 (1), EIP-1559 (2), EIP-4844 (3, plain or with the
 /// network sidecar wrapper) and EIP-7702 (4). Other types are unsupported.

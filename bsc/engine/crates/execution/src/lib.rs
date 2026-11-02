@@ -68,6 +68,9 @@ pub mod live_key;
 /// transports (plan 28.10.).
 #[cfg(feature = "runtime")]
 pub mod live_end;
+/// The local bsc-geth source over its C1.4 arena (REV.1.0 R6).
+#[cfg(feature = "runtime")]
+pub mod geth_source;
 /// The LIVE ledger: released transactions, their inclusions, positions and
 /// net result (plan 28.10.).
 #[cfg(feature = "runtime")]

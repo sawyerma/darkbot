@@ -102,14 +102,25 @@ pub mod census {
 
         pub const SOURCE_ID: u16 = 1;
         pub const FIRST_FULL_BEFORE: u16 = 2;
+        /// v2 (REV.1.0 R6, O05/§3a): its sightings of a launch another
+        /// source delivered first, their lag behind it (µs), and the
+        /// pending events the ingress queue dropped of it.
+        pub const LATER_SIGHTINGS: u16 = 3;
+        pub const LATER_LAG_P50_US: u16 = 4;
+        pub const LATER_LAG_MAX_US: u16 = 5;
+        pub const DROPPED: u16 = 6;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.g04-census.source",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(SOURCE_ID, "source_id", Text),
                 Field::req(FIRST_FULL_BEFORE, "first_full_before", U64),
+                Field::opt(LATER_SIGHTINGS, "later_sightings", U64),
+                Field::opt(LATER_LAG_P50_US, "later_lag_p50_us", U64),
+                Field::opt(LATER_LAG_MAX_US, "later_lag_max_us", U64),
+                Field::opt(DROPPED, "dropped", U64),
             ],
         };
     }

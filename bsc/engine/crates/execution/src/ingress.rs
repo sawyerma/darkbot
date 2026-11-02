@@ -50,6 +50,9 @@ pub enum Observation<'a> {
     },
     /// A full object that failed verification: counted, never used.
     Rejected,
+    /// R6 review HIGH: a source whose channel carries signed transactions
+    /// only (the local geth's open arena) is still there.
+    Alive,
     Connected,
     Disconnected {
         rate_limited: bool,
@@ -108,6 +111,20 @@ pub struct SourceStats {
     pub last_event_ns: Option<u64>,
     /// REV.1.0 R6: monotonic time of its last verified full transaction.
     pub last_full_ns: Option<u64>,
+    /// R6 review HIGH: monotonic time of its last [`Observation::Alive`].
+    pub last_alive_ns: Option<u64>,
+    /// REV.1.0 R6 (T_queue): its events dequeued, their summed and longest
+    /// wait between receipt and the runtime's dequeue (ns).
+    pub queued: u64,
+    pub queue_total_ns: u64,
+    pub queue_max_ns: u64,
+}
+
+impl SourceStats {
+    /// R6: the mean queue wait of its events (none dequeued: none).
+    pub fn queue_mean_ns(&self) -> Option<u64> {
+        self.queue_total_ns.checked_div(self.queued)
+    }
 }
 
 /// One first sighting: its source, its monotonic time and the runtime's
@@ -354,6 +371,15 @@ impl IngressCore {
             || self.gone_until_us.is_some_and(|t| t >= since_us)
     }
 
+    /// REV.1.0 R6 (T_queue): one event of `source` dequeued `wait_ns` after
+    /// its receipt.
+    pub fn queued(&mut self, source: SourceId, wait_ns: u64) {
+        let s = &mut self.stats[index(source)];
+        s.queued += 1;
+        s.queue_total_ns = s.queue_total_ns.saturating_add(wait_ns);
+        s.queue_max_ns = s.queue_max_ns.max(wait_ns);
+    }
+
     /// One observation of `source` at monotonic `now_ns`, `wall_us` being
     /// the wall-clock estimate of the same moment.
     pub fn observe(
@@ -382,6 +408,10 @@ impl IngressCore {
             }
             Observation::Rejected => {
                 self.stats[i].rejected += 1;
+                None
+            }
+            Observation::Alive => {
+                self.stats[i].last_alive_ns = Some(now_ns);
                 None
             }
             Observation::Dropped => {
@@ -524,9 +554,10 @@ pub fn observed_capability(
 }
 
 /// R6 review LOW-2: what `source` delivers now, at `now_ns`: its design
-/// capability while its last verified full transaction is at most
-/// `quiet_ns` old; else hash-only frames `HASH_ONLY`, nothing `UNKNOWN`
-/// (never FULL on an old one).
+/// capability while its last verified full transaction, or its last alive
+/// (a channel of signed transactions only), is at most `quiet_ns` old; else
+/// hash-only frames `HASH_ONLY`, nothing `UNKNOWN` (never FULL on an old
+/// one).
 pub fn current_capability(
     source: crate::sources::SourceId,
     stats: &SourceStats,
@@ -534,7 +565,10 @@ pub fn current_capability(
     quiet_ns: u64,
 ) -> crate::sources::SourceCapability {
     use crate::sources::SourceCapability as C;
-    match (source.capability(), stats.last_full_ns) {
+    match (
+        source.capability(),
+        stats.last_full_ns.max(stats.last_alive_ns),
+    ) {
         (C::Full, Some(at)) if now_ns.saturating_sub(at) <= quiet_ns => C::Full,
         (C::Full, _) if stats.hash_only > 0 => C::HashOnly,
         (C::Full, _) => C::Unknown,
@@ -617,6 +651,37 @@ mod tests {
         assert_eq!(now(SourceId::Geth, &at(Some(899), 0)), C::Unknown);
         assert_eq!(now(SourceId::Geth, &at(Some(899), 4)), C::HashOnly);
         assert_eq!(now(SourceId::Club48, &at(Some(900), 0)), C::Qpt);
+        // Review HIGH: the local geth's open arena, alive within the bound,
+        // is FULL without a recent transaction (its lanes carry launches).
+        let alive = |last_alive_ns| SourceStats {
+            last_alive_ns,
+            ..at(Some(10), 0)
+        };
+        assert_eq!(now(SourceId::Geth, &alive(Some(900))), C::Full);
+        assert_eq!(now(SourceId::Geth, &alive(Some(899))), C::Unknown);
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
+        core.observe(SourceId::Geth, Observation::Alive, 950, None);
+        let geth = core.stats(SourceId::Geth);
+        assert_eq!(
+            (geth.last_alive_ns, geth.last_event_ns, geth.full),
+            (Some(950), Some(950), 0)
+        );
+    }
+
+    /// R6 (T_queue): each source's events' wait, its own: count, mean, max.
+    #[test]
+    fn each_sources_queue_wait_is_its_own() {
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
+        core.queued(SourceId::PublicNode, 30);
+        core.queued(SourceId::PublicNode, 10);
+        core.queued(SourceId::Drpc, 5);
+        let p = core.stats(SourceId::PublicNode);
+        assert_eq!(
+            (p.queued, p.queue_max_ns, p.queue_mean_ns()),
+            (2, 30, Some(20))
+        );
+        assert_eq!(core.stats(SourceId::Drpc).queue_max_ns, 5);
+        assert_eq!(core.stats(SourceId::Geth).queue_mean_ns(), None);
     }
 
     /// Review HIGH-1: a source's health follows whether it runs this pass

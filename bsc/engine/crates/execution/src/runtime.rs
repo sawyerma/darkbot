@@ -208,8 +208,12 @@ pub fn gas_limits_cover(
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeConfig {
-    /// The public WSS endpoint of each source, if it has one.
+    /// The public WSS endpoint of each source, if it has one (R6: the
+    /// local geth's arena directory).
     pub endpoints: Vec<(SourceId, String)>,
+    /// REV.1.0 R6: the local geth's C1.4 arena, if this build has one
+    /// (`BSC_INGRESS_GETH_*`).
+    pub geth: Option<crate::geth_source::GethArena>,
     pub queue_events: usize,
     pub dedup_hashes: usize,
     /// A connected source silent this long is DEGRADED.
@@ -395,6 +399,7 @@ impl RuntimeConfig {
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
+        let geth_arena = values.remove("BSC_INGRESS_GETH_ARENA");
         let live_token = values.remove("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE");
         let capture_pending = CaptureScope::parse(
             values
@@ -891,11 +896,48 @@ impl RuntimeConfig {
             backoff_max: ms(take("BSC_RUNTIME_BACKOFF_MAX_MS", 1_000, 3_600_000)?),
             stable_after: ms(take("BSC_RUNTIME_STABLE_AFTER_MS", 1_000, 3_600_000)?),
         };
+        let quiet_ms = take("BSC_RUNTIME_QUIET_MS", 1000, 600_000)?;
+        // R6: the local geth's arena: all of its keys, or none (no geth
+        // source in this build).
+        let geth = match geth_arena {
+            None => None,
+            Some(dir) if !Path::new(dir).is_absolute() => {
+                return Err("BSC_INGRESS_GETH_ARENA is no absolute path".into());
+            }
+            Some(dir) => {
+                let dedup_sets = take("BSC_INGRESS_GETH_DEDUP_SETS", 1, 1 << 20)? as usize;
+                if !dedup_sets.is_power_of_two() {
+                    return Err("BSC_INGRESS_GETH_DEDUP_SETS is no power of two".into());
+                }
+                Some(crate::geth_source::GethArena {
+                    dir: PathBuf::from(dir),
+                    generation: take("BSC_INGRESS_GETH_GENERATION", 1, u64::MAX)?,
+                    peer_lanes: take(
+                        "BSC_INGRESS_GETH_PEER_LANES",
+                        1,
+                        darkbot_bsc_geth_ipc::ingress::C14_PEER_LANE_POOL_BOUND as u64,
+                    )? as usize,
+                    idle: Duration::from_micros(take("BSC_INGRESS_GETH_IDLE_US", 1, 1_000_000)?),
+                    // No record becomes an intent here (the runtime's
+                    // ingress decides): the poller's one slot stays free.
+                    hot0: (1, dedup_sets),
+                    // Review HIGH: alive twice per quiet bound (its lanes
+                    // carry launches only); a closed arena tried again as a
+                    // WSS source after its first backoff.
+                    alive: Duration::from_millis(quiet_ms / 2),
+                    retry: wss.backoff_initial,
+                })
+            }
+        };
+        if let Some(g) = &geth {
+            endpoints.push((SourceId::Geth, g.dir.display().to_string()));
+        }
         let config = RuntimeConfig {
+            geth,
             endpoints,
             queue_events: take("BSC_RUNTIME_QUEUE_EVENTS", 64, 1 << 22)? as usize,
             dedup_hashes: take("BSC_RUNTIME_DEDUP_HASHES", 1024, 1 << 24)? as usize,
-            quiet_ms: take("BSC_RUNTIME_QUIET_MS", 1000, 600_000)?,
+            quiet_ms,
             journal_queue: take("BSC_RUNTIME_JOURNAL_QUEUE", 16, 1 << 20)? as usize,
             journal_budget_bytes: take("BSC_RUNTIME_JOURNAL_BUDGET_BYTES", 1 << 20, 1 << 32)?
                 as usize,
@@ -1043,6 +1085,8 @@ enum Event {
     },
     Rejected,
     Connected,
+    /// R6 review HIGH: the local geth's arena is still open.
+    Alive,
     Disconnected {
         rate_limited: bool,
     },
@@ -3045,6 +3089,52 @@ fn spawn_adapter(
     Ok(Adapter { stop, handle })
 }
 
+/// REV.1.0 R6: the local geth's adapter: its arena polled on its own
+/// thread, each event on the runtime's ingress queue as a WSS source's.
+fn spawn_geth_adapter(
+    arena: crate::geth_source::GethArena,
+    tx: SyncSender<(SourceId, u64, Event)>,
+    dropped: Arc<AtomicU64>,
+    clock: Clock,
+) -> Result<Adapter, String> {
+    use crate::geth_source::GethEvent;
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let source = SourceId::Geth;
+    let handle = thread::Builder::new()
+        .name(format!("bsc-src-{}", source.name()))
+        .spawn(move || {
+            let mut sink = |event: GethEvent, read: Instant| {
+                let event = match event {
+                    GethEvent::Connected => Event::Connected,
+                    GethEvent::Full {
+                        hash,
+                        raw,
+                        from,
+                        nonce,
+                    } => Event::Full {
+                        hash,
+                        raw,
+                        from,
+                        nonce,
+                    },
+                    GethEvent::Rejected => Event::Rejected,
+                    GethEvent::Alive => Event::Alive,
+                    GethEvent::Disconnected => Event::Disconnected {
+                        rate_limited: false,
+                    },
+                };
+                if let Err(TrySendError::Full(_)) = tx.try_send((source, clock.ns_at(read), event))
+                {
+                    dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            };
+            crate::geth_source::run(&arena, crate::wss::BSC_MAINNET_CHAIN_ID, &flag, &mut sink);
+        })
+        .map_err(|e| format!("spawn {} adapter: {e}", source.name()))?;
+    Ok(Adapter { stop, handle })
+}
+
 /// One pass of the C2 checkpoint (BSC3-039): the writes the writer
 /// finished are counted; when one is `due` the window is handed to the
 /// writer, never written on this loop, except at the stop: then here,
@@ -3370,6 +3460,10 @@ fn status_bytes(
             );
         if let Some(at) = s.last_event_ns {
             row.set(e::LAST_EVENT_AGE_MS, now.saturating_sub(at) / 1_000_000);
+        }
+        if let Some(mean) = s.queue_mean_ns() {
+            row.set(e::QUEUE_MAX_NS, s.queue_max_ns)
+                .set(e::QUEUE_MEAN_NS, mean);
         }
         d.push(rs::SOURCES, row.into_nested());
     }
@@ -3775,14 +3869,23 @@ pub fn run(
                 match (want, adapters.contains_key(&i)) {
                     (true, false) => {
                         let url = config.endpoint(source).unwrap_or_default().to_string();
-                        let a = spawn_adapter(
-                            source,
-                            url,
-                            limits,
-                            tx.clone(),
-                            Arc::clone(&dropped[i]),
-                            clock,
-                        )?;
+                        let a = match (source, &config.geth) {
+                            // R6: the local geth over its arena.
+                            (SourceId::Geth, Some(arena)) => spawn_geth_adapter(
+                                arena.clone(),
+                                tx.clone(),
+                                Arc::clone(&dropped[i]),
+                                clock,
+                            )?,
+                            _ => spawn_adapter(
+                                source,
+                                url,
+                                limits,
+                                tx.clone(),
+                                Arc::clone(&dropped[i]),
+                                clock,
+                            )?,
+                        };
                         adapters.insert(i, a);
                         journal.record(
                             RecordKind::Runtime,
@@ -3848,10 +3951,13 @@ pub fn run(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,
             };
+            // R6 (T_queue): its wait between receipt and this dequeue.
+            core.queued(source, clock.now_ns().saturating_sub(at));
             let observation = match &event {
                 Event::Full { hash, raw, .. } => Observation::Full { hash: *hash, raw },
                 Event::HashOnly { hash } => Observation::HashOnly { hash: *hash },
                 Event::Rejected => Observation::Rejected,
+                Event::Alive => Observation::Alive,
                 Event::Connected => {
                     rate_limited_last[index(source)] = false;
                     journal.record(
@@ -4773,6 +4879,26 @@ mod tests {
             None,
             "no endpoint: UNQUALIFIED"
         );
+        // R6: no geth arena in the repository (UNQUALIFIED); one configured
+        // is the geth source's endpoint, with all of its keys.
+        assert_eq!((c.endpoint(SourceId::Geth), c.geth.as_ref()), (None, None));
+        let g = RuntimeConfig::parse(&format!(
+            "{CONFIG}BSC_INGRESS_GETH_ARENA=/var/geth\nBSC_INGRESS_GETH_GENERATION=7\nBSC_INGRESS_GETH_PEER_LANES=8\nBSC_INGRESS_GETH_IDLE_US=50\nBSC_INGRESS_GETH_DEDUP_SETS=16\n"
+        ))
+        .unwrap();
+        assert_eq!(g.endpoint(SourceId::Geth), Some("/var/geth"));
+        assert_eq!(
+            g.geth,
+            Some(crate::geth_source::GethArena {
+                dir: "/var/geth".into(),
+                generation: 7,
+                peer_lanes: 8,
+                idle: Duration::from_micros(50),
+                hot0: (1, 16),
+                alive: Duration::from_millis(5_000),
+                retry: Duration::from_millis(1_000),
+            })
+        );
         assert_eq!((c.reconcile_ms, c.stop_timeout_ms), (500, 15_000));
         // 500 + max(5000 + 5000 + 200, 5000 + 200)
         assert_eq!(c.stop_bound_ms(), 10_700);
@@ -5030,6 +5156,17 @@ mod tests {
             // required and exact (a repository-relative path).
             CONFIG.replace("BSC_EXEC_LIVE_C3_REARM=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_EXIT_REPRICE_BPS=0\n", ""),
+            // R6: the local geth's arena: an absolute path with all of its
+            // keys, its dedup sets a power of two; its keys never alone.
+            format!("{CONFIG}BSC_INGRESS_GETH_ARENA=relative/arena\n"),
+            format!("{CONFIG}BSC_INGRESS_GETH_ARENA=/var/geth\n"),
+            format!("{CONFIG}BSC_INGRESS_GETH_GENERATION=7\n"),
+            format!(
+                "{CONFIG}BSC_INGRESS_GETH_ARENA=/var/geth\nBSC_INGRESS_GETH_GENERATION=7\nBSC_INGRESS_GETH_PEER_LANES=8\nBSC_INGRESS_GETH_IDLE_US=50\nBSC_INGRESS_GETH_DEDUP_SETS=12\n"
+            ),
+            format!(
+                "{CONFIG}BSC_INGRESS_GETH_ARENA=/var/geth\nBSC_INGRESS_GETH_GENERATION=7\nBSC_INGRESS_GETH_PEER_LANES=257\nBSC_INGRESS_GETH_IDLE_US=50\nBSC_INGRESS_GETH_DEDUP_SETS=16\n"
+            ),
             // R5: the public exit route, required and exact; ON only with
             // an https:// endpoint.
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\n", ""),

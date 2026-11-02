@@ -201,9 +201,25 @@ pub struct Census {
     pub clock_suspect: bool,
     /// Per source: actionable launches it delivered first.
     pub first_full_before: Vec<(SourceId, u64)>,
+    /// REV.1.0 R6 (O05/§3a): per source, in [`SourceId::ALL`] order, its
+    /// later sightings, their lag, and its dropped events.
+    pub source_spread: Vec<SourceSpread>,
     /// The inputs of the G0.4 criteria (`g04_criteria`) per venue, in
     /// [`CRITERIA_VENUES`] order. Not part of the census record.
     pub criteria_inputs: [VenueInputs; 3],
+}
+
+/// REV.1.0 R6 (O05/§3a): one source's spread behind the first sightings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceSpread {
+    pub source: SourceId,
+    /// Its sightings of a launch another source delivered first.
+    pub later_sightings: u64,
+    /// Their lag behind the first (µs; p50 only from two on).
+    pub later_lag_p50_us: Option<u64>,
+    pub later_lag_max_us: Option<u64>,
+    /// Pending events of it the ingress queue dropped.
+    pub dropped: u64,
 }
 
 /// The venues of the G0.4 criteria, in [`Census::criteria_inputs`] order.
@@ -465,8 +481,11 @@ struct Replay {
     /// Journaled launch sightings never included by the window's end.
     not_included: u64,
     connectivity: Connectivity,
-    /// The lag of every later sighting of a launch behind its first (`L`).
-    later_lags_ns: Vec<u64>,
+    /// The lag of every later sighting of a launch behind its first (`L`),
+    /// with its source's byte.
+    later_lags_ns: Vec<(u8, u64)>,
+    /// Each source's pending events the ingress queue dropped (`D`).
+    dropped: HashMap<u8, u64>,
     /// Flap BUYs (`T`).
     buys: BlockBuys,
     /// Blocks whose trades are incomplete (`W`).
@@ -559,7 +578,7 @@ fn replay(
     let mut precommit_conflict = false;
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
-    let mut later_lags_ns: Vec<u64> = Vec::new();
+    let mut later_lags_ns: Vec<(u8, u64)> = Vec::new();
     let mut buys: BlockBuys = HashMap::new();
     let mut trade_gap_blocks: HashSet<[u8; 32]> = HashSet::new();
     // BSC3-037: each Flap launch's creator word (`N`), by token, and every
@@ -642,7 +661,7 @@ fn replay(
             // `L | source u8 | hash [32] | lag_ns u64`: the spread across sources.
             (RecordKind::Runtime, Some(b'L')) if p.len() == 42 => {
                 if let Some(lag) = u64_at(p, 34) {
-                    later_lags_ns.push(lag);
+                    later_lags_ns.push((p[1], lag));
                 }
             }
             (RecordKind::Canonical, Some(b'P')) if p.len() == 74 => {
@@ -802,6 +821,7 @@ fn replay(
         launches.clear();
         connectivity = Connectivity::default();
         later_lags_ns.clear();
+        dropped.clear();
         buys.clear();
         trade_gap_blocks.clear();
     } else {
@@ -882,6 +902,7 @@ fn replay(
         not_included,
         connectivity,
         later_lags_ns,
+        dropped,
         buys,
         trade_gap_blocks,
         creator_buys_after,
@@ -956,6 +977,9 @@ fn census_of(
     let mut later: Vec<u64> = Vec::new();
     let mut lags: Vec<i64> = Vec::new();
     let mut firsts: HashMap<usize, u64> = HashMap::new();
+    // R6: each source's later sightings (µs) and dropped events.
+    let mut per_later: HashMap<u8, Vec<u64>> = HashMap::new();
+    let mut per_dropped: HashMap<u8, u64> = HashMap::new();
     for (started, name) in names {
         let path = dir.join(&name);
         let is_active = active.is_some_and(|a| a == path.as_path());
@@ -1117,7 +1141,13 @@ fn census_of(
                 _ => out.placement_unknown += 1,
             }
         }
-        later.extend(r.later_lags_ns.iter().map(|ns| ns / 1_000));
+        later.extend(r.later_lags_ns.iter().map(|(_, ns)| ns / 1_000));
+        for (source, ns) in &r.later_lags_ns {
+            per_later.entry(*source).or_default().push(ns / 1_000);
+        }
+        for (source, n) in &r.dropped {
+            *per_dropped.entry(*source).or_default() += n;
+        }
         for v in &r.reverted {
             *match v {
                 Venue::Flap => &mut out.reverted_flap,
@@ -1153,6 +1183,21 @@ fn census_of(
         .iter()
         .enumerate()
         .map(|(i, s)| (*s, firsts.get(&i).copied().unwrap_or(0)))
+        .collect();
+    out.source_spread = SourceId::ALL
+        .iter()
+        .map(|s| {
+            let byte = crate::runtime_journal::source_byte(*s);
+            let mut later = per_later.remove(&byte).unwrap_or_default();
+            later.sort_unstable();
+            SourceSpread {
+                source: *s,
+                later_sightings: later.len() as u64,
+                later_lag_p50_us: percentile(&later, 500),
+                later_lag_max_us: later.last().copied(),
+                dropped: per_dropped.get(&byte).copied().unwrap_or(0),
+            }
+        })
         .collect();
     Ok(out)
 }
@@ -1248,6 +1293,13 @@ impl Census {
             let mut row = Draft::new(&e::SCHEMA);
             row.set(e::SOURCE_ID, source.name())
                 .set(e::FIRST_FULL_BEFORE, *n);
+            // R6: its spread (a census of this build: every source's).
+            if let Some(s) = self.source_spread.iter().find(|s| s.source == *source) {
+                row.set(e::LATER_SIGHTINGS, s.later_sightings)
+                    .set(e::DROPPED, s.dropped)
+                    .set_opt(e::LATER_LAG_P50_US, s.later_lag_p50_us)
+                    .set_opt(e::LATER_LAG_MAX_US, s.later_lag_max_us);
+            }
             d.push(cs::SOURCES, row.into_nested());
         }
         d.set(cs::CRITERIA, CRITERIA_UNCONFIRMED)
@@ -1626,16 +1678,18 @@ mod tests {
         ] {
             records.push((RecordKind::Canonical, 100, p));
         }
-        // Two later sightings: the spread across sources.
-        for (i, lag) in [3_000_000u64, 1_000_000].into_iter().enumerate() {
+        // Two later sightings: the spread across sources (R6: one each).
+        for (i, (source, lag)) in [
+            (SourceId::PublicNode, 3_000_000u64),
+            (SourceId::Drpc, 1_000_000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             records.push((
                 RecordKind::Runtime,
                 200,
-                crate::runtime_journal::later_sighting_payload(
-                    SourceId::PublicNode,
-                    &[i as u8; 32],
-                    lag,
-                ),
+                crate::runtime_journal::later_sighting_payload(source, &[i as u8; 32], lag),
             ));
         }
         // Phase E review L3: one drift guard probe found a drift, one a match.
@@ -1682,6 +1736,14 @@ mod tests {
             (c.later_sightings, c.later_lag_p50_us, c.later_lag_max_us),
             (2, Some(1_000), Some(3_000))
         );
+        // R6: each source's own spread, in the record's source rows.
+        let spread = |s: SourceId| {
+            let x = c.source_spread.iter().find(|x| x.source == s).unwrap();
+            (x.later_sightings, x.later_lag_p50_us, x.later_lag_max_us)
+        };
+        assert_eq!(spread(SourceId::PublicNode), (1, None, Some(3_000)));
+        assert_eq!(spread(SourceId::Drpc), (1, None, Some(1_000)));
+        assert_eq!(spread(SourceId::Geth), (0, None, None));
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 2);
         assert_eq!(record.u64(cs::FOUR_MISSED).unwrap(), 6);
@@ -2129,6 +2191,24 @@ mod tests {
         let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
         assert_eq!(states, ["COMPLETE", "INVALID"]);
         assert_eq!((c.windows[0].ingress_dropped, c.ingress_dropped), (7, 7));
+        // R6: per source, from the valid window only.
+        let dropped: Vec<_> = c
+            .source_spread
+            .iter()
+            .map(|s| (s.source, s.dropped))
+            .collect();
+        assert!(
+            dropped.contains(&(SourceId::PublicNode, 5)) && dropped.contains(&(SourceId::Drpc, 2))
+        );
+        let rows = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap())
+            .unwrap()
+            .nested_all(cs::SOURCES)
+            .unwrap();
+        let public = rows
+            .iter()
+            .find(|r| r.text(cs::source::SOURCE_ID).unwrap() == SourceId::PublicNode.name())
+            .unwrap();
+        assert_eq!(public.opt_u64(cs::source::DROPPED).unwrap(), Some(5));
         assert_eq!((c.windows[0].unparsed_records, c.unparsed_records), (1, 1));
         assert_eq!(c.covered_ms, 2_000);
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();

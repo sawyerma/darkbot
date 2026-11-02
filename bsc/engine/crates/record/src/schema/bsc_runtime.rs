@@ -1016,6 +1016,11 @@ pub mod runtime_status {
         /// v2 (REV.1.0 R6): its observed capability class: `FULL`,
         /// `HASH_ONLY`, `QPT` or `UNKNOWN`.
         pub const CAPABILITY: u16 = 17;
+        /// v2 (REV.1.0 R6, T_queue): the longest and the mean wait of its
+        /// events between their receipt and the runtime's dequeue (ns);
+        /// absent before the first.
+        pub const QUEUE_MAX_NS: u16 = 18;
+        pub const QUEUE_MEAN_NS: u16 = 19;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.source",
@@ -1039,6 +1044,8 @@ pub mod runtime_status {
                 Field::req(LAUNCH_FIRST, "launch_first", U64),
                 Field::opt(LAST_EVENT_AGE_MS, "last_event_age_ms", U64),
                 Field::opt(CAPABILITY, "capability", Text),
+                Field::opt(QUEUE_MAX_NS, "queue_max_ns", U64),
+                Field::opt(QUEUE_MEAN_NS, "queue_mean_ns", U64),
             ],
         };
     }
