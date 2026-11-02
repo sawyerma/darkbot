@@ -166,8 +166,9 @@ pub mod kind {
     /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
     /// `boot_network` wire edge and never stored as JSON).
     pub const BOOT_NETWORK: u16 = 710;
-    /// Measured FREE_ONLY provider evidence read by the network boot audit, imported offline
-    /// from the measured JSON (`p0-journal import-provider-evidence`).
+    /// Measured FREE_ONLY provider evidence read by the network boot audit and the FE-01
+    /// observation (a historical measured JSON only through the `historical` build's
+    /// `p0-journal import-provider-evidence`).
     pub const PROVIDER_EVIDENCE: u16 = 711;
     /// DEC-07: a boot flow's offline step (`orchestration::boot_control::BootFlow`), a sealed
     /// single-value journal `data/boot/<flow_id>/flow.p0j`.

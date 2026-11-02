@@ -614,35 +614,6 @@ fn run(
     result.audit.readiness_token = hash(&bincode::serialize(&result).map_err(|_| "BOOT_TOKEN")?);
     Ok(result)
 }
-/// X2: the typed PROVIDER_EVIDENCE record at `path` and its bytes (bounded, read twice: a
-/// record changed while it is read is refused). A boot flow names its record by id (DEC-07):
-/// the bytes are exactly the ones the id names.
-fn read_evidence(path: &Path, id: Option<&str>) -> Result<(Vec<u8>, fe::ProviderEvidence), String> {
-    let read_bounded = || -> Result<Vec<u8>, String> {
-        let mut data = Vec::new();
-        use std::io::Read;
-        std::fs::File::open(path)
-            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?
-            .take(super::provider_evidence::RECORD_LIMIT as u64 + 1)
-            .read_to_end(&mut data)
-            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?;
-        if data.len() > super::provider_evidence::RECORD_LIMIT {
-            return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
-        }
-        Ok(data)
-    };
-    let data = read_bounded()?;
-    if id.is_some_and(|id| !super::provider_evidence::names(id, &data)) {
-        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
-    }
-    let proof: fe::ProviderEvidence =
-        journal::read_typed_value(path).map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
-    if read_bounded()? != data {
-        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
-    }
-    Ok((data, proof))
-}
-
 /// Read permission and FREE_ONLY proof are checked before constructing clients or opening WSS.
 /// `mode`: the operating mode `run start` will launch (DEC-05: its profile).
 pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, String> {
@@ -679,11 +650,10 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
         val("--capture-source").as_deref(),
     )?;
     spec.validate()?;
-    // X2: the typed PROVIDER_EVIDENCE record of the explicit offline import
-    // (`p0-journal import-provider-evidence`); its bytes are bound into the audit record. A boot
+    // X2: the typed PROVIDER_EVIDENCE record; its bytes are bound into the audit record. A boot
     // flow passes the controller's stored record its id resolves to (DEC-07).
     let proof_path = val("--provider-evidence").ok_or("BOOT_PROVIDER_EVIDENCE_REQUIRED")?;
-    let (data, proof) = read_evidence(
+    let (data, proof) = super::provider_evidence::read_record(
         Path::new(&proof_path),
         val("--provider-evidence-id").as_deref(),
     )?;
@@ -1240,22 +1210,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let record = d.join("operator.p0j");
-        let evidence = fe::ProviderEvidence::from_measured_json(br#"{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1.0,"evidence_sha256":null,"allowed_rps":1.0,"available_calls":1}"#).unwrap();
+        let evidence = fe::ProviderEvidence {
+            providers: vec![fe::ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: "b".into(),
+                measured_at_unix_s: 1.0,
+                evidence_sha256: None,
+                allowed_rps: 1.0,
+                available_calls: 1,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified: false,
+            source_sha256: "0".repeat(64),
+        };
         journal::write_typed_value(&record, 0, &evidence).unwrap();
         let id = super::super::provider_evidence::import(&d, &record).unwrap();
         let stored = super::super::provider_evidence::resolve(&d, &id).unwrap();
-        let (data, proof) = read_evidence(&stored, Some(&id)).unwrap();
+        let (data, proof) =
+            super::super::provider_evidence::read_record(&stored, Some(&id)).unwrap();
         assert_eq!(
             (data, proof),
             (std::fs::read(&stored).unwrap(), evidence.clone())
         );
         // Another id: these are not the bytes it names.
         assert_eq!(
-            read_evidence(&stored, Some("0000000000000000")).unwrap_err(),
+            super::super::provider_evidence::read_record(&stored, Some("0000000000000000"))
+                .unwrap_err(),
             "BOOT_PROVIDER_EVIDENCE_CHANGED"
         );
         // The terminal doctor names a file, no id.
-        assert!(read_evidence(&record, None).is_ok());
+        assert!(super::super::provider_evidence::read_record(&record, None).is_ok());
+        // The store's loader: the id's record and its bytes; an id never imported is refused.
+        assert_eq!(
+            super::super::provider_evidence::load(&d, &id).unwrap(),
+            (std::fs::read(&stored).unwrap(), evidence)
+        );
+        assert_eq!(
+            super::super::provider_evidence::load(&d, "0123456789abcdef").unwrap_err(),
+            "BOOT_PROVIDER_EVIDENCE_UNKNOWN"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
     /// DEC-07: the registry's TTL is the record's — 10 s and 120 s are issued, 9 s and 121 s are

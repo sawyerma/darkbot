@@ -299,28 +299,79 @@ fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// A typed `PROVIDER_EVIDENCE` record of one passing FREE_ONLY proof at `path`.
+fn evidence_record(path: &std::path::Path) {
+    use darkbot_runner::analytics::journal;
+    use darkbot_runner::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
+    journal::create_typed_value(
+        path,
+        journal::source::BOOT_CONTROL,
+        &ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: "b".into(),
+                measured_at_unix_s: 1.0,
+                evidence_sha256: None,
+                allowed_rps: 1.0,
+                available_calls: 1,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified: false,
+            source_sha256: "0".repeat(64),
+        },
+    )
+    .unwrap();
+}
+
+/// DEC-18 §3.4 (P0-023): the measured provider JSON is a historical source. The standard build
+/// refuses its import and writes nothing; the build with `--features historical` imports it
+/// into the typed record the store takes.
 #[test]
-fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
-    let d = std::env::temp_dir().join(format!("p0ctl_boot_evidence_{}", std::process::id()));
+fn p0_023_the_measured_json_import_is_historical_only() {
+    let d = std::env::temp_dir().join(format!("p0_023_json_import_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(d.join("operator")).unwrap();
-    let store = d.join("data/provider_evidence");
-    // The operator's typed record: a measured JSON through p0-journal's explicit import.
-    let (json, record) = (
-        d.join("operator/measured.json"),
-        d.join("operator/evidence.p0j"),
-    );
+    std::fs::create_dir_all(&d).unwrap();
+    let (json, record) = (d.join("measured.json"), d.join("evidence.p0j"));
     std::fs::write(&json, br#"{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1.0,"evidence_sha256":null,"allowed_rps":1.0,"available_calls":1}"#).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_p0-journal"))
         .arg("import-provider-evidence")
         .args([&json, &record])
         .serialized_output()
         .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+    let err = String::from_utf8_lossy(&out.stderr);
+    if cfg!(feature = "historical") {
+        assert!(out.status.success(), "{err}");
+        let (code, stdout, err) = p0ctl(
+            &d,
+            &["boot", "evidence", "import", record.to_str().unwrap()],
+        );
+        assert!(
+            code == 0 && stdout.starts_with("PROVIDER_EVIDENCE_ID "),
+            "{err}"
+        );
+    } else {
+        assert_eq!(out.status.code(), Some(2), "{err}");
+        assert!(err.contains("HISTORICAL_READER_NOT_BUILT"), "{err}");
+        assert!(!record.exists(), "nothing written");
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
+    let d = std::env::temp_dir().join(format!("p0ctl_boot_evidence_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("operator")).unwrap();
+    let store = d.join("data/provider_evidence");
+    // The operator's typed record (DEC-18 §3.4: a measured JSON is no record).
+    let (json, record) = (
+        d.join("operator/measured.json"),
+        d.join("operator/evidence.p0j"),
     );
+    std::fs::write(&json, br#"{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1.0,"evidence_sha256":null,"allowed_rps":1.0,"available_calls":1}"#).unwrap();
+    evidence_record(&record);
     for flow in ["n1", "n2", "n3", "n4"] {
         let _ = p0ctl(&d, &offline(flow, "10m", None));
     }

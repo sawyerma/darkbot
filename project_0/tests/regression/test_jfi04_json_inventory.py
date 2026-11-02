@@ -51,7 +51,7 @@ PINNED = {
     'runtime/src/market_truth.rs': (2, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
-    'runtime/src/orchestration/provider_evidence.rs': (1, 'C'),  # measured operator file (F13)
+    'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),  # the measured JSON's explicit offline import, historical build only (DEC-18 §3.4, P0-023)
     'runtime/examples/p0-gap-ws-proxy.rs': (10, 'W'),
     'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
     'solana/src/chain.rs': (41, 'WH'),  # wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4)

@@ -20,7 +20,7 @@ pub struct ProviderProof {
     pub available_calls: u64,
 }
 /// Provider evidence (`PROVIDER_EVIDENCE`, X2): one proof per usable RPC endpoint, the WSS and
-/// archive qualification, and the hash of the measured JSON it was imported from.
+/// archive qualification, and the hash of the measurement it was made from.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderEvidence {
     pub providers: Vec<ProviderProof>,
@@ -35,7 +35,9 @@ impl crate::analytics::payload::Payload for ProviderEvidence {
 impl ProviderEvidence {
     /// Explicit offline import of the measured JSON format: one proof, or `providers: [...]`,
     /// each optionally with `wss_provider_binding`, `wss_free_only`, `archive_qualified`. Unknown
-    /// fields and mixed shapes are refused. Productive paths read only the typed record.
+    /// fields and mixed shapes are refused. A historical source (DEC-18 §3.4): compiled only with
+    /// the `historical` feature; productive paths read only the typed record.
+    #[cfg(feature = "historical")]
     pub fn from_measured_json(bytes: &[u8]) -> Result<Self, String> {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -136,8 +138,8 @@ fn read_limited(path: &std::path::Path, missing: &str) -> Result<Vec<u8>, String
     Ok(data)
 }
 
-/// Imports a typed `PROVIDER_EVIDENCE` record (`p0-journal import-provider-evidence`) into the
-/// store under its id: the record must decode, and an existing id holds the same bytes (an
+/// Imports a typed `PROVIDER_EVIDENCE` record (`p0ctl boot evidence import`) into the store
+/// under its id: the record must decode, and an existing id holds the same bytes (an
 /// import is idempotent, never an overwrite).
 pub fn import(project: &std::path::Path, record: &std::path::Path) -> Result<String, String> {
     let io = |e: std::io::Error| format!("BOOT_PROVIDER_EVIDENCE_IO: {e}");
@@ -187,6 +189,44 @@ pub fn resolve(project: &std::path::Path, id: &str) -> Result<std::path::PathBuf
         return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
     }
     Ok(path)
+}
+
+/// X2: the typed record at `path` and its bytes (bounded, read twice: a record changed while it
+/// is read is refused). With `id` (DEC-07: a record named by its id) the bytes are exactly the
+/// ones the id names.
+pub fn read_record(
+    path: &std::path::Path,
+    id: Option<&str>,
+) -> Result<(Vec<u8>, ProviderEvidence), String> {
+    let read_bounded = || -> Result<Vec<u8>, String> {
+        let mut data = Vec::new();
+        use std::io::Read;
+        std::fs::File::open(path)
+            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?
+            .take(RECORD_LIMIT as u64 + 1)
+            .read_to_end(&mut data)
+            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?;
+        if data.len() > RECORD_LIMIT {
+            return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
+        }
+        Ok(data)
+    };
+    let data = read_bounded()?;
+    if id.is_some_and(|id| !names(id, &data)) {
+        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
+    }
+    let proof: ProviderEvidence = crate::analytics::journal::read_typed_value(path)
+        .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
+    if read_bounded()? != data {
+        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
+    }
+    Ok((data, proof))
+}
+
+/// The stored record of `id` and its bytes (DEC-18 §3.4: the productive evidence input, never a
+/// measured JSON).
+pub fn load(project: &std::path::Path, id: &str) -> Result<(Vec<u8>, ProviderEvidence), String> {
+    read_record(&resolve(project, id)?, Some(id))
 }
 
 /// DEC-18 (FREE_ONLY): evidence qualifies a provider of the registry on a free plan only — never

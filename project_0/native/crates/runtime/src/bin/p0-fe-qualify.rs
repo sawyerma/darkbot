@@ -4,7 +4,7 @@ fn run() -> Result<(), String> {
     use darkbot_runner::analytics::journal::Writer;
     use darkbot_runner::analytics::payload::{Fe01Config, Fe01ReadOutcome};
     use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
-    use darkbot_runner::orchestration::{fe_freeze, fe_replay};
+    use darkbot_runner::orchestration::{fe_freeze, fe_replay, provider_evidence};
     use darkbot_solana::{provider, runtime_config::Resolved};
     use solana_sdk::pubkey::Pubkey;
     use std::{
@@ -16,7 +16,7 @@ fn run() -> Result<(), String> {
     let mut operational = Vec::new();
     let mut execute = false;
     let mut output = None;
-    let mut qualification = None;
+    let mut evidence_id = None;
     let mut replay = None;
     let mut against = None;
     let mut legacy_reads = false;
@@ -41,12 +41,16 @@ fn run() -> Result<(), String> {
                 )
             }
             "--output" => output = args.next().map(PathBuf::from),
-            "--provider-qualification" => qualification = args.next().map(PathBuf::from),
+            "--provider-evidence" => {
+                evidence_id = Some(args.next().ok_or("FE_PROVIDER_EVIDENCE_ID_REQUIRED")?)
+            }
+            // DEC-18 §3.4: a measured JSON is no productive evidence input (no fallback).
+            "--provider-qualification" => return Err("FE_PROVIDER_QUALIFICATION_RETIRED: name the imported typed record (--provider-evidence RECORD_ID, p0ctl boot evidence import FILE.p0j)".into()),
             _ => operational.push(arg),
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY [--legacy-reads]) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-evidence RECORD_ID | --replay SAVED_DIRECTORY [--legacy-reads]) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
@@ -64,7 +68,7 @@ fn run() -> Result<(), String> {
     if resolved.config.fe_mode == "smoke" {
         // The bounded deployment/target observation; explicit `--execute` only, no replay,
         // freeze or provider qualification (it reads three times through the provider budget).
-        if !execute || replay.is_some() || against.is_some() || qualification.is_some() {
+        if !execute || replay.is_some() || against.is_some() || evidence_id.is_some() {
             return Err("FE_SMOKE_TAKES_ONLY_EXECUTE_AND_OUTPUT".into());
         }
         return smoke(resolved, output.ok_or("FE_OUTPUT_REQUIRED")?);
@@ -115,13 +119,13 @@ fn run() -> Result<(), String> {
     l.max_response_mib = l.max_response_mib.min(l.max_total_mib);
     l.wss_message_mib = l.wss_message_mib.min(l.max_total_mib);
     let config = resolved.config.clone();
-    // Existing FREE_ONLY qualification shape; a configured URL is not capacity evidence.
-    // Decoded at the file edge into the typed evidence (X2); no value tree is passed on.
-    let proof = fe::ProviderEvidence::from_measured_json(
-        &fs::read(qualification.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?)
-            .map_err(|_| "FE_QUALIFICATION_IO")?,
-    )
-    .map_err(|_| "FE_QUALIFICATION_JSON")?;
+    // DEC-18 §3.4: the typed PROVIDER_EVIDENCE record of the project's store, named by its id
+    // (DEC-07); a configured URL is not capacity evidence. Its bytes are bound below.
+    let evidence_id = evidence_id.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?;
+    let project =
+        std::env::var_os("P0_PROJECT_DIR").ok_or("FE_PROVIDER_EVIDENCE_PROJECT_REQUIRED")?;
+    let (record_bytes, proof) =
+        provider_evidence::load(std::path::Path::new(&project), &evidence_id)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "CLOCK_INVALID")?
@@ -135,7 +139,7 @@ fn run() -> Result<(), String> {
     let operational = Fe01Config {
         requested,
         effective: resolved.effective(),
-        qualification_sha256: Some(proof.source_sha256.clone()),
+        qualification_sha256: Some(fe::sha(&record_bytes)),
         execution: "READ_ONLY_NO_SIGNER".into(),
     };
     record(&mut evidence, &operational, None)?;

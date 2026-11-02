@@ -5,7 +5,8 @@
 //! `import KIND JOURNAL` writes typed `key=value` rows from stdin into a new journal (census kinds
 //! only);
 //! `import-provider-evidence JSON JOURNAL` turns a measured provider evidence JSON into the typed
-//! `PROVIDER_EVIDENCE` record the network boot audit reads (X2);
+//! `PROVIDER_EVIDENCE` record the network boot audit reads (X2; DEC-18 §3.4: a historical source,
+//! only in the `historical` build);
 //! `renders RUN` checks every existing historical view of a run byte for byte against its
 //! journal (read only; a missing view stays MISSING, nothing is rendered into the run; DEC-09:
 //! only in the `historical` build).
@@ -106,6 +107,7 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
 }
 /// Explicit offline import of measured provider evidence (X2): the JSON is decoded once into the
 /// typed record; the boot audit reads only that record and binds its bytes.
+#[cfg(feature = "historical")]
 fn import_provider_evidence(json: &Path, out: &Path) -> Result<(), String> {
     use darkbot_runner::orchestration::provider_evidence::ProviderEvidence;
     if std::fs::metadata(json).map_err(|e| e.to_string())?.len() > 65536 {
@@ -180,8 +182,13 @@ fn main() {
             .parse()
             .map_err(|_| "KIND_INVALID".to_string())
             .and_then(|k| import(k, Path::new(path))),
+        #[cfg(feature = "historical")]
         ["import-provider-evidence", json, out] => {
             import_provider_evidence(Path::new(json), Path::new(out))
+        }
+        #[cfg(not(feature = "historical"))]
+        ["import-provider-evidence", _, _] => {
+            Err(darkbot_runner::analytics::renders::HISTORICAL_READER_NOT_BUILT.into())
         }
         #[cfg(feature = "historical")]
         ["renders", run] => views(Path::new(run)),

@@ -268,3 +268,153 @@ fn dec18_the_transport_applies_the_bound_credential_and_nothing_else_holds_it() 
     assert!(!text.contains("remote.invalid"), "{text}");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// DEC-18 §3.4 (P0-023): the full FE-01 observation is admitted on the typed `PROVIDER_EVIDENCE`
+/// record of the project's store, named by its id. The measured JSON flag is retired (no
+/// fallback) and an id never imported is refused, each before any read; the record's
+/// observation reads through the bound provider and binds the record's bytes.
+#[test]
+fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
+    use darkbot_runner::analytics::journal;
+    use darkbot_runner::orchestration::{fe_qualification, provider_evidence, provider_registry};
+    let base = std::env::temp_dir().join(format!("p0_023_full_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (project, store) = (base.join("project"), base.join("keychain"));
+    std::fs::create_dir_all(&project).unwrap();
+    let (url, seen) = rpc();
+    let ctl = |args: &[&str], stdin: Option<&[u8]>| {
+        let mut all = vec!["--project", project.to_str().unwrap(), "provider"];
+        all.extend_from_slice(args);
+        let (ok, text) = run(env!("CARGO_BIN_EXE_p0ctl"), &project, &store, &all, stdin);
+        assert!(ok, "{args:?}: {text}");
+    };
+    ctl(
+        &[
+            "add",
+            "--id",
+            "loop-rpc",
+            "--kind",
+            "rpc",
+            "--endpoint",
+            &url,
+            "--auth",
+            "query:api-key",
+            "--credential",
+            "loop",
+            "--plan",
+            "free",
+            "--entitlement",
+            "loopback-free",
+        ],
+        None,
+    );
+    ctl(
+        &["credential", "set", "--credential", "loop"],
+        Some(b"LOOP-SECRET-1\n"),
+    );
+    ctl(&["select", "--kind", "rpc", "--id", "loop-rpc"], None);
+    let registry = provider_registry::current(&project).unwrap();
+    let binding = registry
+        .binding_of(registry.provider("loop-rpc").unwrap())
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    let record = base.join("measured.p0j");
+    journal::create_typed_value(
+        &record,
+        journal::source::BOOT_CONTROL,
+        &provider_evidence::ProviderEvidence {
+            providers: vec![provider_evidence::ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: binding.clone(),
+                measured_at_unix_s: now - 1.0,
+                evidence_sha256: Some("a".repeat(64)),
+                allowed_rps: 1e6,
+                available_calls: u64::MAX,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified: false,
+            source_sha256: "0".repeat(64),
+        },
+    )
+    .unwrap();
+    let id = provider_evidence::import(&project, &record).unwrap();
+    // The same measurement as JSON: the shape the retired flag read.
+    let json = base.join("measured.json");
+    std::fs::write(
+        &json,
+        format!(
+            r#"{{"policy":"FREE_ONLY","passed":true,"provider_binding":"{binding}","measured_at_unix_s":{now},"evidence_sha256":"{}","allowed_rps":1000000,"available_calls":1000000}}"#,
+            "a".repeat(64)
+        ),
+    )
+    .unwrap();
+    let observe = |name: &str, evidence: &[&str]| {
+        let output = base.join(name);
+        let mut args = vec![
+            "--fe-mode",
+            "full",
+            "--execute",
+            "--output",
+            output.to_str().unwrap(),
+        ];
+        args.extend_from_slice(evidence);
+        let (ok, text) = run(
+            env!("CARGO_BIN_EXE_p0-fe-qualify"),
+            &project,
+            &store,
+            &args,
+            None,
+        );
+        (ok, text, output)
+    };
+
+    for (name, evidence, code) in [
+        (
+            "json",
+            vec!["--provider-qualification", json.to_str().unwrap()],
+            "FE_PROVIDER_QUALIFICATION_RETIRED",
+        ),
+        (
+            "unknown",
+            vec!["--provider-evidence", "0123456789abcdef"],
+            "BOOT_PROVIDER_EVIDENCE_UNKNOWN",
+        ),
+        (
+            "path",
+            vec!["--provider-evidence", record.to_str().unwrap()],
+            "BOOT_PROVIDER_EVIDENCE_ID_INVALID",
+        ),
+        ("none", vec![], "FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED"),
+    ] {
+        let (ok, text, output) = observe(name, &evidence);
+        assert!(!ok && text.contains(code), "{name}: {text}");
+        assert!(!output.exists(), "{name}: no evidence directory");
+        assert!(seen.lock().unwrap().is_empty(), "{name}: no read");
+    }
+
+    let (_, text, output) = observe("record", &["--provider-evidence", &id]);
+    let lines = seen.lock().unwrap().clone();
+    assert!(!lines.is_empty(), "the observation read: {text}");
+    assert!(
+        lines.iter().all(|l| l.contains("?api-key=LOOP-SECRET-1 ")),
+        "{lines:?}"
+    );
+    let stored = project
+        .join(provider_evidence::STORE)
+        .join(format!("{id}.p0j"));
+    let evidence = bytes_under(&output);
+    assert!(
+        contains(
+            &evidence,
+            &fe_qualification::sha(&std::fs::read(stored).unwrap())
+        ),
+        "the observation binds the record's bytes: {text}"
+    );
+    assert!(!contains(&evidence, "LOOP-SECRET"));
+    let _ = std::fs::remove_dir_all(&base);
+}

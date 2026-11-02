@@ -773,11 +773,11 @@ pub(crate) mod tests {
         c.fallback = false;
         assert!(validate_provider_evidence(&c, primary, &p, 1001.0).is_ok());
     }
-    /// X2: the measured JSON is imported once, offline, into the typed record; the record round
-    /// trips through the journal and fails closed on schema, corruption and truncation.
+    /// X2 (DEC-18 §3.4: historical build only): a historical measured JSON is imported once,
+    /// offline, into the typed record; unknown fields and mixed shapes are refused.
+    #[cfg(feature = "historical")]
     #[test]
-    fn provider_evidence_round_trips_as_typed_journal() {
-        use crate::analytics::{journal, payload::Payload};
+    fn historical_measured_json_imports_into_the_typed_record() {
         let example = std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../config/examples/provider_qualification.example.json"),
@@ -790,6 +790,7 @@ pub(crate) mod tests {
         let bundle = br#"{"providers":[{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1,"evidence_sha256":"e","allowed_rps":5,"available_calls":3}],"wss_provider_binding":"w","wss_free_only":true,"archive_qualified":false}"#;
         let typed = ProviderEvidence::from_measured_json(bundle).unwrap();
         assert_eq!(typed.wss_provider_binding.as_deref(), Some("w"));
+        assert_eq!(typed.providers[0].available_calls, 3);
         for bad in [
             br#"{"providers":[],"wss_free_only":true}"#.as_slice(),
             br#"{"policy":"FREE_ONLY","passed":true}"#,
@@ -802,6 +803,27 @@ pub(crate) mod tests {
                 "PROVIDER_EVIDENCE_FORMAT"
             );
         }
+    }
+    /// X2: the typed record round trips through the journal and fails closed on schema,
+    /// corruption and truncation.
+    #[test]
+    fn provider_evidence_round_trips_as_typed_journal() {
+        use crate::analytics::{journal, payload::Payload};
+        let typed = ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: "b".into(),
+                measured_at_unix_s: 1.0,
+                evidence_sha256: Some("e".into()),
+                allowed_rps: 5.0,
+                available_calls: 3,
+            }],
+            wss_provider_binding: Some("w".into()),
+            wss_free_only: true,
+            archive_qualified: false,
+            source_sha256: "0".repeat(64),
+        };
         let dir = std::env::temp_dir().join(format!(
             "p0_provider_evidence_{}_{}",
             std::process::id(),
