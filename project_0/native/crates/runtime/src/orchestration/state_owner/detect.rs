@@ -589,7 +589,7 @@ impl ShadowOwner {
             submitter: &self.submitter,
             safety: &mut self.safety,
             blockhash: &self.blockhash,
-            payer: &self.payer,
+            payer: self.payer.as_ref(),
             allowlist: &self.allowlist,
             failed_costs: &self.failed_costs,
             limits: TxLimits::default(),

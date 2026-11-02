@@ -237,8 +237,17 @@ pub(super) fn prepare(
     let buffer_cap = usize::try_from(operational.ingress_queue)?;
 
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
-    let payer = tx::load_keypair_json(&config::require("P0_KEYPAIR_PATH")?)?;
-    let liquidator = tx::payer_of(&payer);
+    // DEC-18 §4.3 (P0-024): the econ4h calibration (a read-only measurement) loads no private
+    // key: its payer is the configured public identity, every simulation UNSIGNED_SIMULATION.
+    let payer =
+        crate::execution::payer::OwnerPayer::of(&|k| std::env::var(k).ok(), econ.is_some())?;
+    let liquidator = payer.pubkey();
+    if payer.signer().is_none() {
+        crate::console::line(format!(
+            "payer: {liquidator} public only (no private key loaded; every simulation {})",
+            crate::analytics::record::Signing::Synthetic.label()
+        ));
+    }
     let shutdown = Shutdown::new();
     let halt = IngressHalt::new();
     let slot_watch = SlotWatch::new(); // [FIX-40]

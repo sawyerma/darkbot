@@ -962,7 +962,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         submitter: &adapter,
         safety: &mut safety,
         blockhash: &bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -1132,7 +1132,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         submitter: &adapter,
         safety: &mut safety,
         blockhash: &bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -1337,7 +1337,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             submitter: &adapter,
             safety: &mut safety,
             blockhash: &bh,
-            payer: &payer,
+            payer: (&payer).into(),
             allowlist: &allow,
             failed_costs: &failed,
             limits: TxLimits::default(),
@@ -1457,7 +1457,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         submitter: &submitter,
         safety: &mut safety,
         blockhash: &bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -1502,6 +1502,31 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         (None, None, None)
     );
     assert_eq!(sims.load(Ordering::Relaxed), 1);
+    assert_eq!(calls.load(Ordering::Relaxed), 0, "no submit call");
+    // DEC-18 §4.3 (P0-024): the same evaluation with the payer's public key only (a read-only
+    // measurement): LIVE cannot sign — every gate enabled — and Shadow simulates unsigned
+    // (UNSIGNED_SIMULATION), no permit asked for.
+    p.payer =
+        crate::execution::payer::Payer::PublicOnly(solana_sdk::signature::Signer::pubkey(&payer));
+    let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+    assert_eq!(r.signing, None);
+    assert!(
+        r.reason_text()
+            .as_deref()
+            .is_some_and(|x| x.contains("no private key on a read-only path")),
+        "{:?}",
+        r.reason_text()
+    );
+    p.mode = Mode::Shadow;
+    let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+    assert_eq!(
+        r.signing,
+        Some(crate::analytics::record::Signing::Synthetic)
+    );
+    assert_eq!(
+        crate::analytics::record::Signing::Synthetic.label(),
+        "UNSIGNED_SIMULATION"
+    );
     assert_eq!(calls.load(Ordering::Relaxed), 0, "no submit call");
     assert_eq!(safety.capital_in_use(), 0, "no reservation left");
 }
@@ -1734,7 +1759,7 @@ fn evaluate_in(
         submitter: adapter,
         safety,
         blockhash: &bh,
-        payer,
+        payer: payer.into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -2397,7 +2422,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         submitter: &submitter,
         safety: &mut safety,
         blockhash: &bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -2527,7 +2552,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             submitter: &submitter,
             safety: &mut safety,
             blockhash: &bh,
-            payer: &payer,
+            payer: (&payer).into(),
             allowlist: &allow,
             failed_costs: &failed,
             limits: TxLimits::default(),
@@ -2693,7 +2718,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             submitter: &submitter,
             safety: &mut safety,
             blockhash: &bh,
-            payer: &payer,
+            payer: (&payer).into(),
             allowlist: &allow,
             failed_costs: &failed,
             limits: TxLimits::default(),
@@ -3502,7 +3527,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         submitter: &adapter,
         safety: &mut safety,
         blockhash: &bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -3801,7 +3826,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         submitter,
         safety: &mut safety,
         blockhash: bh,
-        payer: &payer,
+        payer: (&payer).into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),
@@ -5232,7 +5257,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         submitter: adapter,
         safety,
         blockhash: &bh,
-        payer,
+        payer: payer.into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),

@@ -199,7 +199,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         operational_failure: None,
         program,
         group,
-        payer: solana_sdk::signature::Keypair::new(),
+        payer: crate::execution::payer::OwnerPayer::Signer(solana_sdk::signature::Keypair::new()),
         synthetic_signer: solana_sdk::signature::Keypair::new(),
         liquidator,
         shutdown: shutdown.clone(),
@@ -7002,7 +7002,10 @@ fn dec13b_fixture_with(
     let mut f = fixture_with(tag, None);
     let payer = solana_sdk::signature::Keypair::new();
     let liquidator = payer.pubkey();
-    (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
+    (f.owner.liquidator, f.owner.payer) = (
+        liquidator,
+        crate::execution::payer::OwnerPayer::Signer(payer),
+    );
     f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
     f.owner.zero_prefund_enabled = true;
     let calls = dec13b_live_node(&mut f, send_ok, sim_delay_ms, sim_fee);
@@ -7663,7 +7666,10 @@ fn dec13b_exit_fixture_of(
     let mut f = fixture_with(tag, None);
     let payer = solana_sdk::signature::Keypair::new();
     let liquidator = payer.pubkey();
-    (f.owner.liquidator, f.owner.payer) = (liquidator, payer);
+    (f.owner.liquidator, f.owner.payer) = (
+        liquidator,
+        crate::execution::payer::OwnerPayer::Signer(payer),
+    );
     f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
     let (dir, wallet) = (f.dir.join("fe04"), liquidator.to_string());
     let now_s = wall_unix_s().unwrap();
@@ -7819,7 +7825,6 @@ fn dec13b_exit_fixture_of(
 /// never synced (the close would pay them out), and an approval naming another route program.
 #[test]
 fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
-    use solana_sdk::signer::Signer;
     let token = protocol::TOKEN_PROGRAM_ID;
     let case = |tokens, unsynced_lamports, route_program| WsolCase {
         tokens,

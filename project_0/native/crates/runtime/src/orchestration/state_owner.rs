@@ -299,7 +299,8 @@ pub(super) struct ShadowOwner {
     operational_failure: Option<&'static str>,
     program: Pubkey,
     group: Pubkey,
-    payer: solana_sdk::signature::Keypair,
+    /// DEC-18 §4.3 (P0-024): the keypair, or the public identity only (the econ4h calibration).
+    payer: crate::execution::payer::OwnerPayer,
     /// P8-CTRL.4: an ephemeral key of this owner only (never a wallet's, never stored): the
     /// synthetic signature of a simulation without a sign permit.
     synthetic_signer: solana_sdk::signature::Keypair,

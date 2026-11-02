@@ -163,6 +163,13 @@ class Launchers(unittest.TestCase):
             (out/'taken').mkdir(parents=True);(out/'taken/keep.json').write_text('{}')
             p=self.run_script('capture.sh econ4h-launcher --duration 61s',{**env,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'taken'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
+            # DEC-18 §4.3 (P0-024): the calibration needs no private key — without a keypair path the
+            # econ4h launcher passes its identity gate (to the run store's checks); shadow still needs one.
+            keyless={k:v for k,v in env.items() if k!='P0_KEYPAIR_PATH'}
+            p=self.run_script('capture.sh econ4h-launcher --duration 61s',{**keyless,'P0_ECON_OUT_DIR':str(out),'P0_ECON_RUN_ID':'../escape'})
+            self.assertEqual(p.returncode,2,p.stderr);self.assertIn('RUN_ID_INVALID',p.stderr);self.assertNotIn('missing required env',p.stderr)
+            p=self.run_script('capture.sh shadow-launcher --duration 61s',{**keyless,'P0_SHADOW_RUN_ID':'s1'})
+            self.assertEqual(p.returncode,2,p.stderr);self.assertIn('missing required env: P0_KEYPAIR_PATH',p.stderr)
             self.assertEqual(sorted(x.name for x in (out/'taken').iterdir()),['keep.json'])
 
     def test_market_and_gap_launchers_resolve_through_the_same_contract(self):

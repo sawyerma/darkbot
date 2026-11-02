@@ -41,8 +41,9 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 }
 
-# Shared signer gate of econ4h and shadow: public identity, endpoints, owner-only keypair outside the repository.
-require_signer() {
+# DEC-18 §4.3 (P0-024): the public identity and the bounds every owner needs — all the econ4h
+# calibration (a read-only measurement) takes: it loads no private key.
+require_identity() {
 # Public signer identity is versioned; secret key material is not.
 # shellcheck source=/dev/null
 source "$PROJECT_DIR/config/wallet.public.env"
@@ -64,9 +65,16 @@ need() {
 
 export P0_GROUP_ID="${P0_GROUP_ID:-4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8}"
 
-need P0_KEYPAIR_PATH
 need P0_MAX_SLIPPAGE_BPS
 need P0_EXPECTED_PUBKEY
+export P0_EXPECTED_PUBKEY
+}
+
+# The signer gate of shadow: the public identity and an owner-only keypair outside the repository
+# that is exactly that identity's.
+require_signer() {
+require_identity
+need P0_KEYPAIR_PATH
 
 # [SEC-02] Fail closed on wrong or weakly protected signer.
 KEYPAIR_REAL="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$P0_KEYPAIR_PATH")"
@@ -193,7 +201,9 @@ case "$CHAIN_VERIFY" in
 esac
 export P0_MEASUREMENT_DURATION="$DURATION"
 
-require_signer
+require_identity
+# DEC-18 §4.3: the runtime of the read-only calibration never sees a keypair path.
+unset P0_KEYPAIR_PATH
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
 case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   false:false|0:0|false:0|0:false) ;;

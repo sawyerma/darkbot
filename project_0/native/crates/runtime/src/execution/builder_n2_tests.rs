@@ -346,7 +346,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         submitter,
         safety: &mut safety,
         blockhash: &bh,
-        payer,
+        payer: payer.into(),
         allowlist: &allow,
         failed_costs: &failed,
         limits: TxLimits::default(),

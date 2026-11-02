@@ -892,7 +892,6 @@ impl ShadowOwner {
         };
         // A WSOL position is unwrapped locally (no router); every other mint is sold to SOL.
         let route = if mint == wsol {
-            use solana_sdk::signer::Signer;
             crate::execution::route::unwrap_exit_route(&self.payer.pubkey(), units)
         } else {
             // P6-MT.7: an exit may take every token of Jupiter's bucket.
@@ -922,7 +921,6 @@ impl ShadowOwner {
         // close pays out, less the rent-exempt minimum its re-creation pays (Rent sysvar).
         let unwrap_payout_lamports = (mint == wsol)
             .then(|| {
-                use solana_sdk::signer::Signer;
                 let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().ok()?;
                 let own = accounts::associated_token_address(&self.payer.pubkey(), &wsol, &token);
                 let (ata, _) = accounts::validated_liquidator_ata(&view, &wsol, &self.atas)?;
@@ -932,9 +930,16 @@ impl ShadowOwner {
                 (ata == own).then(|| self.st.get(&ata)?.lamports.checked_sub(rent))?
             })
             .flatten();
+        // DEC-18 §4.3: an exit is signed; a read-only measurement holds no private key.
+        let Some(payer) = self.payer.signer() else {
+            return refuse(
+                self,
+                "EXIT_SIGNER_UNAVAILABLE: no private key on a read-only path".into(),
+            );
+        };
         let candidate = ExitCandidate {
             route: &route,
-            payer: &self.payer,
+            payer,
             blockhash: bh.hash,
             last_valid_block_height: bh.last_valid_block_height,
             resources: self.resources,

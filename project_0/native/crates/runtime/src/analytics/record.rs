@@ -285,6 +285,15 @@ pub enum Signing {
     /// simulated without signature verification, never sent; no FE-02/FE-03 PASS rests on it.
     Synthetic,
 }
+impl Signing {
+    /// Its marking in a run's evidence: `UNSIGNED_SIMULATION` for a synthetic one (DEC-18 §4.3).
+    pub fn label(self) -> &'static str {
+        match self {
+            Signing::Wallet => "WALLET",
+            Signing::Synthetic => "UNSIGNED_SIMULATION",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpportunityRecord {

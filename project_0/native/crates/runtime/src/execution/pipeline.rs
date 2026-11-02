@@ -406,7 +406,8 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub submitter: &'a S,
     pub safety: &'a mut Safety,
     pub blockhash: &'a BlockhashCache,
-    pub payer: &'a Keypair,
+    /// DEC-18 §4.3 (P0-024): its keypair, or its public key only (a read-only measurement).
+    pub payer: crate::execution::payer::Payer<'a>,
     /// P8-CTRL.4: the owner's ephemeral synthetic signer (never a wallet's key, never stored):
     /// the signature of a simulation without a sign permit.
     pub synthetic: &'a Keypair,
@@ -466,27 +467,33 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             Mode::Live => SignPurpose::NewAttempt,
             Mode::Shadow => SignPurpose::Simulation,
         };
-        let payer = tx::payer_of(self.payer);
+        let payer = self.payer.pubkey();
         // P8-CTRL.4 (review): a simulation's real signature only where the simulation can never
-        // send it — else no SIM_ONLY permit is even asked for (a synthetic signature).
+        // send it — else no SIM_ONLY permit is even asked for (a synthetic signature). DEC-18
+        // §4.3 (P0-024): without a private key (a read-only measurement) none is asked for either.
         let sends =
             purpose == SignPurpose::Simulation && !self.submitter.simulates_without_sending();
-        let permit = self
-            .egress
-            .as_ref()
+        let signer = self.payer.signer();
+        let permit = signer
+            .and(self.egress.as_ref())
             .filter(|_| !sends)
             .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message, bound));
-        match (permit, self.mode) {
-            (Some(Ok(p)), _) => p
-                .sign(tx, &[self.payer])
+        match (permit, signer, self.mode) {
+            (Some(Ok(p)), Some(kp), _) => p
+                .sign(tx, &[kp])
                 .map(|()| Signing::Wallet)
                 .map_err(darkbot_solana::tx::BuildError::Sign),
-            (refused, Mode::Live) => Err(darkbot_solana::tx::BuildError::Sign(
-                refused
-                    .and_then(Result::err)
-                    .unwrap_or_else(|| "SIGN_NOT_PERMITTED: no authority".into()),
+            (refused, _, Mode::Live) => Err(darkbot_solana::tx::BuildError::Sign(
+                refused.and_then(Result::err).unwrap_or_else(|| {
+                    if signer.is_none() {
+                        "SIGN_NOT_PERMITTED: no private key on a read-only path (DEC-18 §4.3)"
+                            .into()
+                    } else {
+                        "SIGN_NOT_PERMITTED: no authority".into()
+                    }
+                }),
             )),
-            (_, Mode::Shadow) => {
+            (_, _, Mode::Shadow) => {
                 tx::sign_synthetic(tx, self.synthetic).map(|()| Signing::Synthetic)
             }
         }
@@ -872,7 +879,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             let txplan = TxPlan {
                 version: plan.tx_version,
-                payer: tx::payer_of(self.payer),
+                payer: self.payer.pubkey(),
                 instructions: plan.instructions.clone(),
                 lookup_tables: plan.lookup_tables.clone(),
                 resources: self.resources,
@@ -1195,7 +1202,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 };
                 Some(crate::execution::one_shot::admission::attempt_use(
                     &plan,
-                    &tx::payer_of(self.payer),
+                    &self.payer.pubkey(),
                     fee_lamports,
                     max_loss_usd_micro,
                     priority,
@@ -1290,7 +1297,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 } else {
                     (self.submitter.path(), vec![built.tx.clone()])
                 };
-                SignedPayload::new(txs, path, tx::payer_of(self.payer))
+                SignedPayload::new(txs, path, self.payer.pubkey())
                     .ok()
                     .map(|payload| {
                         let binding = SimulationBinding {
@@ -1467,7 +1474,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 target: account,
                 txs,
                 path,
-                payer: tx::payer_of(self.payer),
+                payer: self.payer.pubkey(),
                 fee_lamports,
                 net_usd_micro: rec.net_profit.unwrap_or(i128::MIN),
                 max_loss_usd_micro,
@@ -1663,7 +1670,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut prerequisites = Vec::with_capacity(plan.prerequisite_txs.len());
         for pre in &plan.prerequisite_txs {
             let pre_plan = prerequisite_tx_plan(
-                tx::payer_of(self.payer),
+                self.payer.pubkey(),
                 pre.clone(),
                 plan.lookup_tables.clone(),
                 self.resources,
@@ -1674,10 +1681,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .map_err(|code| (LossReason::Build, Rejection::PrerequisiteMessage(code)))?;
             prerequisites.push(b);
         }
-        let tip_tx =
-            submit::build_tip_tx(&tx::payer_of(self.payer), &tip.account, plan.tip, blockhash)
-                .map_err(|e| (LossReason::Build, Rejection::TipBuild(e)))?;
-        submit::tip_matches(&tip_tx, &tx::payer_of(self.payer), &tip.account, plan.tip)
+        let tip_tx = submit::build_tip_tx(&self.payer.pubkey(), &tip.account, plan.tip, blockhash)
+            .map_err(|e| (LossReason::Build, Rejection::TipBuild(e)))?;
+        submit::tip_matches(&tip_tx, &self.payer.pubkey(), &tip.account, plan.tip)
             .map_err(|code| (LossReason::Build, Rejection::TipMismatch(code)))?;
         Ok(BundleParts {
             prerequisites,
