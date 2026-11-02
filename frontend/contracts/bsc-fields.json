@@ -7822,7 +7822,7 @@
   "command_bindings": [
     {
       "source_path": "ops/bsc-control.sh",
-      "source_sha": "27dece1806c59a837cdb95700ec95dccda9415f5c048a7249e0685af5a637e5a",
+      "source_sha": "49cac97aa274bac4ac72796e6567ac51721a2a752089eedb6070d5e71918cdf3",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },

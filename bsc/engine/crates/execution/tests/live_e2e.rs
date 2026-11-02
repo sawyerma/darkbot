@@ -1418,11 +1418,16 @@ fn the_controller_hands_the_operators_ledger_decisions_to_the_runtime() {
     let version = || ledger.version().unwrap().to_string();
     let lot = format!("0x{}", hex::encode([2u8; 32]));
     let ctl = |args: &[&str]| {
-        let out = Command::new(repo.join("ops/darkbotctl"))
+        // The system bash (3.2) that launchd's PATH finds for the desktop
+        // app, under the CI runner's locale: its collation once let A-F
+        // through a bash range [a-f] (the controller checks character lists).
+        let out = Command::new("/bin/bash")
+            .arg(repo.join("ops/darkbotctl"))
             .args(args)
             .env("DARKBOT_TEST_DIR", &dir)
             .env("DARKBOT_TEST_PORT", "18787")
             .env("HOME", dir.join("home"))
+            .env("LC_ALL", "en_US.UTF-8")
             .output()
             .unwrap();
         (

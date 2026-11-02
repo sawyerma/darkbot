@@ -197,9 +197,13 @@ bsc_live_flags() {
 # decode at the owner generation. Exit-now and the burn stay locked while their switch in
 # ingress.public.env is OFF. The decider is the account this runs as (the gateway's for the GUI).
 # The same command the GUI uses.
+# Character lists, never ranges: a range follows the locale's collation (en_US.UTF-8: [a-f] holds
+# A-F too).
+BSC_HEX='0123456789abcdef'
+BSC_ID_CHARS='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-'
 bsc_live_hash() {
   case "$1" in 0x*) ;; *) die "a lot or transaction is 0x and 64 lowercase hex digits" ;; esac
-  case "${1#0x}" in ''|*[!0-9a-f]*) die "a lot or transaction is 0x and 64 lowercase hex digits" ;; esac
+  case "${1#0x}" in ''|*[!$BSC_HEX]*) die "a lot or transaction is 0x and 64 lowercase hex digits" ;; esac
   [ "${#1}" -eq 66 ] || die "a lot or transaction is 0x and 64 lowercase hex digits"
 }
 bsc_live_number() {
@@ -208,7 +212,7 @@ bsc_live_number() {
 bsc_live_ledger() {
   local rt="$1" id="$2"; shift 2
   # R3b review L3: a request ID as the native owner takes it, never a flag.
-  case "$id" in ''|-*|*[!A-Za-z0-9-]*) die "the request id is letters, digits and hyphens" ;; esac
+  case "$id" in ''|-*|*[!$BSC_ID_CHARS]*) die "the request id is letters, digits and hyphens" ;; esac
   [ "${#id}" -le 64 ] || die "the request id is letters, digits and hyphens"
   /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live "$@" --request-id "$id" --decided-by "$(/usr/bin/id -un)" \
     --state "$RUNDIR/bsc-sources"
@@ -221,7 +225,7 @@ bsc_live() {
     scope) [ "$#" -eq 19 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live scope "${LIVE_FLAGS[@]}" ;;
     grant) [ "$#" -eq 22 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
-      case "${20}" in ''|*[!0-9a-f]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
+      case "${20}" in ''|*[!$BSC_HEX]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
       [ "${#20}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
       case "${21}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${20}" \
