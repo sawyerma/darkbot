@@ -2041,20 +2041,16 @@ Setze BSC-WATCH V0.4 (dieses Dokument) um. Es ersetzt V0.3; wo V0.2 genauer ist,
 
 ---
 
-# Anhang B" unten unverändert am Dateiende (nach Anhang A) anhängen.
-2. In "### 1. Einordnung und Reihenfolge" nach dem Absatz "REV.2.0-Implementierungsziel: …" diesen Satz ergänzen:
-   "Zusätzlich gehört zu REV.2.0 der Anschluss an den gemeinsamen Credential-Store (Anhang B, Paket C); er hat einen eigenen Auslöser und eine ab 02.11.2026 geltende Einfrier-Regel und läuft unabhängig von WATCH."
-3. Eigener BSC-Doku-Commit nach der laufenden BSC-Arbeit; nichts unter shared/** und project_0/** ändern.
-Zentraler Vertrag: frontend/docs/FRONTEND_PHASENPLAN.md §14 (Project_0-Doku-Commit vom 02.11.2026).
--->
 
 # Anhang B – BSC-SHC: Anschluss an den gemeinsamen Credential-Store (REV.2.0, DEFERRED; Nutzerentscheidung 02.11.2026)
 
 **Zentrale Autorität:** [`frontend/docs/FRONTEND_PHASENPLAN.md` §14 `SHARED-KEYCHAIN-CREDENTIALS-V1`](../../../frontend/docs/FRONTEND_PHASENPLAN.md). Shared-Store, macOS-Keychain, Fehler- und Testvertrag **nur dort**; dieser Anhang enthält ausschließlich die produktiven BSC-Consumer und Integrationsdiffs. **Status:** `REV.2.0 / DEFERRED` – SOLL, nicht implementiert. BSC3-001 bleibt ein gesonderter Betreiberentscheid.
 
-**Auslöser (wie §14.0):** Project_0-REV.1.0-Softwareabnahme abgeschlossen **und** BSC-REV.1.0 abgeschlossen (R14-Abschlussmatrix); früher nur durch ausdrückliche Nutzerentscheidung bei nachgewiesenem Bedarf. Dieser Anhang ist **Paket C**: Er beginnt erst, wenn das Project_0-Paket A+B (`shared/`-Crates, Project_0-Adapter, Project_0-/Gateway-CI) auf `main` liegt.
+**Auslöser (wie §14.0):** Project_0-REV.1.0-Softwareabnahme abgeschlossen **und** BSC-REV.1.0 abgeschlossen (R14-Abschlussmatrix); früher nur durch ausdrückliche Nutzerentscheidung bei nachgewiesenem Bedarf. Start per ausdrücklichem Nutzerauftrag. Dieser Anhang ist **Paket C**: Er beginnt erst, wenn das Project_0-Paket A+B (`shared/`-Crates, Project_0-Adapter, Project_0-/Gateway-CI) auf `main` liegt.
 
 **Einfrier-Regel BSC (gilt ab 02.11.2026 bis zur Umsetzung):** BSC baut keinen eigenen Schlüsselbund- oder Secret-Speicher-Code für Provider-Credentials. `runtime_live.rs::token_from()` (`.token`-Datei) und `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` bleiben wie heute. **Nicht eingefroren:** ein Präsenz-/Operator-Anker für BSC3-001 (Klasse Operator-Freigabe, nicht Teil des Credential-Stores).
+
+**Cutover-Regel:** Bis zum jeweiligen kontrollierten Credential-Cutover gelten die bestehenden zugelassenen und gehärteten Speicher-/Startverträge unverändert (Project_0: DEC-18-Schlüsselbund mit einmaligem `.env`-Import; BSC: `.token`-Datei für LIVE, `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` für G0.7). Nach abgeschlossenem Cutover gilt für den migrierten Provider-Credential-Pfad ausschließlich der gemeinsame Schlüsselbund-Store, ohne stillschweigenden Datei-/ENV-Fallback. Wallet-Private-Keys und Operator-Freigaben bleiben eigenständige Klassen. Kein bestehender produktiver Pfad wird allein durch eine Dokumentationsänderung abgeschaltet.
 
 **Drei Klassen von Geheimnissen, nie vermischen:**
 
