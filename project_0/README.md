@@ -124,6 +124,26 @@ flowchart TB
 
 Bevor du die neue Dokumentation lokal übernimmst, prüfe `git status --short` und die gestagten Project_0-Dateien. Insbesondere darf ein Pull weder lokale Änderungen noch `delete/`-Quarantäne überschreiben. Bei Konflikten **STOP und diffen**, nicht resetten/cleannen, keine anderen Projekte stagen.
 
+### Arbeits-Worktree (seit 02.11.2026)
+
+`DarkBot/` (Branch `main`) ist der kanonische lokale Checkout. Project_0 wird ausschließlich im einen Worktree `../DarkBot-p0-work` entwickelt (detached auf `origin/main`, kein Branch); nach jedem geprüften Paket direkt nach `main` integriert. BSC arbeitet in eigenen Worktrees; `bsc/` wird hier nie committet.
+
+```bash
+# Anlegen und einrichten (einmal)
+git -C DarkBot worktree add --detach ../DarkBot-p0-work origin/main
+(cd frontend && npm ci) && cargo fetch --locked --manifest-path project_0/native/Cargo.toml
+# Vor jedem Paket und vor jedem Push
+git fetch origin main && git rebase origin/main
+# Prüfen (ein Gate zur Zeit; Logverzeichnis außerhalb des Repos)
+bash project_0/scripts/gate.sh /tmp/p0-gate-$(git rev-parse --short HEAD)   # alle Schritte; P6_GATE_STEPS="…" wählt einzelne
+(cd gateway && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test)
+PROTOCOL_BASE_REF=origin/main bash protocol/scripts/check.sh --check   # nach Proto-Änderung --generate; neue Schema-ID vorher der BSC-Session melden (BSC-Golden)
+(cd frontend && npm test && npm run build && npm run lint && npm run lint:boundaries && npm run check:freeze && npm run lint:css && npm run test:project0 && npm run test:code-split)
+# Integrieren: nur eigene Dateien (`git show --name-only HEAD`, kein bsc/), kein Force
+git push origin HEAD:main
+# Bauen/Ausliefern (Desktop): ops/darkbotctl build && ops/darkbotctl deploy; Starts nur über den Boot-Controller (p0ctl boot …), Mainnet nur mit Freigabe
+```
+
 ---
 
 ## 1. Start here

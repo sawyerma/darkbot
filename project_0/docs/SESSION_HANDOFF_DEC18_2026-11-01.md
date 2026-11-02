@@ -652,6 +652,14 @@ Der nächste Commit soll der Rebase von `0a48870f` + `106300ae` auf `main` sein,
 | Nachtrag nach dem ersten Push | R-PY präzisiert: zwei der drei Python-Leser sind hash-gepinnt (Änderung = Nutzerentscheidung); sonst unverändert |
 | `UNKNOWN` | Keychain-ACL realer Binaries (B-KC); fmt-Stand von `0a48870f` allein; Abdeckung der generischen §1.3-Nr.-9-Tests für Provider-Actions |
 
+
+## Nachtrag 02.11.2026 — Integration, Konsolidierung, Entscheidungen
+
+- **Integriert:** `0a48870f` + `106300ae` als `62bc70f0` + `887a31bf` auf `main` (`887a31bf` = `106300ae` rebased plus rustfmt-Zeilenumbrüche in vier Dateien). Gate PASS `887a31bf`; Reviewer PASS (8 LOW/5 NIT, BUGS P0-017/019/020); CI gateway `41348465579` grün. Project_0-CI `41348465645` rot durch einen vorbestehenden flaky Test (P0-028), behoben in `618f8582` (Reviewer PASS, CI `41405642651` grün 7/7). bsc-CI auf `887a31bf` rot durch das veraltete BSC-Golden nach der Schema-ID-Änderung; von BSC in `738a2cc7` regeneriert.
+- **Konsolidiert:** die Worktrees `DarkBot-p0-ctrl`, `DarkBot-p0-mut`, `DarkBot-p0-gate`, `DarkBot-project0` wurden nach Prüfung (alle Commits auf `main` oder nachweislich ersetzt, keine Laufzeitdaten, kein Prozess) mit `git worktree remove` entfernt; einziger Project_0-Worktree ist `DarkBot-p0-work` (detached auf `origin/main`). Die Pfade in §3 und §11 sind damit überholt; Arbeitsweise und Befehle: `project_0/README.md` „Arbeits-Worktree“. Anhang A bleibt als Rekonstruktionsbeleg gültig.
+- **Entscheidungen 01.11.2026 abends** (R-PY offline only ohne Re-Pin; B-KC Dummy-Keychain-Test nach dem Push): `ENTSCHEIDUNGEN.md` §2 Nr. 18 letzte Zeile; Umsetzung offen in BUGS P0-019.
+- **Weiter:** DEC-18 Restpunkte (B-KC, R-PY-Launcher-Fix, Paket-4-LOWs, §1.3-Nr.-9-Tests, P0-023, P0-024), dann P0-022 (C-11-Werkzeug).
+
 ## Anhang B — `git status --porcelain=v1 -uall` des Haupt-Checkouts `DarkBot` beim Freeze (54 Zeilen, alle BSC-eigen, nicht anfassen)
 
 ```text
