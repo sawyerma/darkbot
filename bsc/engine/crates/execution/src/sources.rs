@@ -3336,6 +3336,21 @@ pub fn spent_by_grant(dir: &Path, grant_generation: u64) -> Result<u128, String>
     spend_of_grant(&admitted_intents(dir)?, grant_generation)?.wei()
 }
 
+/// The owner's LIVE spend lock held ([`Store::spend_lock`]), unlocked
+/// explicitly when dropped: the lock lives on the file's open description,
+/// which a child forked meanwhile holds a copy of until its exec; closing
+/// this copy alone would leave it locked (a Linux CI flake: "held by
+/// another admission" of nobody's).
+pub(crate) struct SpendGuard {
+    file: fs::File,
+}
+
+impl Drop for SpendGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// [`spent_by_grant`] of the admitted intents `admitted`, by nonce.
 fn spend_of_grant(admitted: &[Admitted], grant_generation: u64) -> Result<NonceCosts, String> {
     spend_of(admitted, |a| a.grant_generation == grant_generation)
@@ -3814,7 +3829,7 @@ impl Store {
     /// when the process ends). Never waited for: held by another admission
     /// (another thread or process), or not to be taken, this one admits
     /// nothing; the clock it was given stays the admission's.
-    fn spend_lock(&self) -> Result<fs::File, String> {
+    fn spend_lock(&self) -> Result<SpendGuard, String> {
         let path = self.dir.join("live-spend.lock");
         let file = fs::OpenOptions::new()
             .read(true)
@@ -3825,7 +3840,7 @@ impl Store {
             .open(&path)
             .map_err(|e| format!("{LIVE_SPEND_UNREADABLE}: {}: {e}", path.display()))?;
         match file.try_lock() {
-            Ok(()) => Ok(file),
+            Ok(()) => Ok(SpendGuard { file }),
             Err(fs::TryLockError::WouldBlock) => Err(format!(
                 "{LIVE_SPEND_UNREADABLE}: {}: held by another admission",
                 path.display()
@@ -7417,6 +7432,48 @@ pub(crate) mod tests {
         };
         assert!(s.admit_live(&armed, &exit, &q, now).is_ok());
         assert_eq!(spent_total(&dir).unwrap(), 20_500);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The spend lock is released though a child forked during an admission
+    /// holds a copy of its file until its exec: the next admission takes it
+    /// (the Linux CI flake "held by another admission" of nobody's). A
+    /// second admission meanwhile, and another description's lock (another
+    /// process's), still refuse it; a replaced state's file is the one
+    /// locked.
+    #[test]
+    fn the_spend_lock_outlives_a_forked_copy_of_its_file() {
+        let (dir, s) = session("spend-lock-fork", "boot-1");
+        let held = |r: Result<SpendGuard, String>| {
+            r.err()
+                .is_some_and(|e| e.contains("held by another admission"))
+        };
+        let g = s.spend_lock().unwrap();
+        let child = g.file.try_clone().unwrap();
+        assert!(held(s.spend_lock()));
+        drop(g);
+        let again = s.spend_lock();
+        assert!(again.is_ok(), "{:?}", again.err());
+        drop(again);
+        drop(child);
+        let other = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join("live-spend.lock"))
+            .unwrap();
+        other.try_lock().unwrap();
+        assert!(held(s.spend_lock()));
+        drop(other);
+        // The state replaced: its new file is locked, not the old one.
+        fs::remove_file(dir.join("live-spend.lock")).unwrap();
+        let g = s.spend_lock().unwrap();
+        let other = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join("live-spend.lock"))
+            .unwrap();
+        assert!(other.try_lock().is_err());
+        drop(g);
         fs::remove_dir_all(dir).unwrap();
     }
 
