@@ -19,7 +19,12 @@ use std::{
 pub const MAGIC: &[u8; 8] = b"P0JRNL01";
 pub const VERSION: u16 = 1;
 pub const HEADER_LEN: u64 = 60;
-pub const MAX_FRAME: usize = 8 * 1024 * 1024;
+/// The largest account data Solana permits (`MAX_PERMITTED_DATA_LENGTH`): an upgradeable
+/// program's ProgramData can reach it.
+pub const MAX_ACCOUNT_DATA: usize = 10 * 1024 * 1024;
+/// One frame holds a read of the largest account with the rest of its batch (FE-01 02.11.2026:
+/// the ~10 MiB marginfi 0.1.12 ProgramData did not fit the former 8 MiB).
+pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 pub const MANIFEST: u16 = u16::MAX;
 const FIXED: usize = 120;
 /// Bytes of one frame beyond its payload: length prefix, fixed header, CRC and SHA-256.

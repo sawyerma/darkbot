@@ -652,3 +652,41 @@ fn dec09_historical_manifest_seals_without_a_json_reader() {
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }
+
+/// FE-01 (02.11.2026): a read of the largest account Solana permits (an upgradeable program's
+/// ProgramData; marginfi 0.1.12's is ~10 MiB) with a full batch of 10-KiB accounts beside it is
+/// one frame, read back exactly.
+#[test]
+fn a_read_of_the_largest_account_and_its_batch_is_one_frame() {
+    use crate::analytics::payload::{Fe01Account, Fe01Read, Fe01ReadOutcome};
+    let batch = darkbot_solana::runtime_config::RuntimeConfig::default()
+        .limits
+        .fe_batch_size as usize;
+    let account = |len: usize| {
+        Some(Fe01Account {
+            owner: solana_sdk::pubkey::Pubkey::new_unique(),
+            lamports: 1,
+            executable: false,
+            data: vec![7u8; len],
+        })
+    };
+    let mut accounts = vec![account(MAX_ACCOUNT_DATA)];
+    accounts.extend((1..batch).map(|_| account(10 * 1024)));
+    let read = Fe01Read {
+        keys: (0..batch)
+            .map(|_| solana_sdk::pubkey::Pubkey::new_unique())
+            .collect(),
+        min_context_slot: 1,
+        outcome: Fe01ReadOutcome::Accounts {
+            context_slot: 1,
+            accounts,
+        },
+    };
+    let p = path();
+    let mut w = Writer::create(&p).unwrap();
+    w.append_typed(Provenance::default(), &read).unwrap();
+    w.seal(true).unwrap();
+    let mut r = Reader::open(&p).unwrap();
+    assert_eq!(r.next_frame().unwrap().unwrap().typed::<Fe01Read>().unwrap(), read);
+    let _ = fs::remove_dir_all(p.parent().unwrap());
+}
