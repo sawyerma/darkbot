@@ -2781,6 +2781,40 @@ mod contract_tests {
             finished_unix_ms: Some(u64::MAX),
         }));
         a.jobs = vec![job; defaults::ANALYTICS_JOBS_MAX as usize];
+        // DEC-18 (package-4 review F6): the fullest provider registry, every field at its largest.
+        {
+            use darkbot_runner::orchestration::provider_registry::{
+                CredentialView, ProviderView, RegistryView, ENTRIES_MAX,
+            };
+            let provider = ProviderView {
+                id: "p".repeat(32),
+                kind: "jupiter",
+                host: "h".repeat(253),
+                auth: format!("header:{}", "a".repeat(64)),
+                credential: Some("c".repeat(32)),
+                priority: u32::MAX,
+                capacity_rps: Some(u64::MAX),
+                plan: "unknown",
+                entitlement: "e".repeat(32),
+                qualification: Some("f".repeat(16)),
+                enabled: true,
+                selected: true,
+                binding: Some("b".repeat(64)),
+                selection_block: Some("B".repeat(160)),
+            };
+            let credential = CredentialView {
+                id: "c".repeat(32),
+                revision: u64::MAX,
+                state: "revoked",
+                origin: format!("env:{}", "V".repeat(64)),
+                created_unix_s: u64::MAX,
+            };
+            a.providers = Some(RegistryView {
+                version: u64::MAX,
+                providers: vec![provider; ENTRIES_MAX],
+                credentials: vec![credential; ENTRIES_MAX],
+            });
+        }
         let analytics = analytics::analytics_jobs(&a).encoded_len();
         // At most three quarters of the gateway's 256 KiB STATE frame.
         assert!(analytics < 192 * 1024, "analytics jobs {analytics} bytes");

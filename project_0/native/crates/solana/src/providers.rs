@@ -195,6 +195,7 @@ fn key_shaped(s: &str) -> bool {
 pub fn id_ok(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 32
+        && !id.starts_with('-')
         && !key_shaped(id)
         && id
             .bytes()
@@ -293,6 +294,7 @@ impl ProviderDescriptor {
         }
         let entitlement_ok = !self.entitlement.is_empty()
             && self.entitlement.len() <= 32
+            && !self.entitlement.starts_with('-')
             && !key_shaped(&self.entitlement)
             && self.entitlement.bytes().all(|b| {
                 b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
@@ -1125,6 +1127,22 @@ pub fn system_store() -> Result<Box<dyn CredentialStore>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DEC-18 package-4 review F9: an identifier or an entitlement never starts with `-`, so the
+    /// controller never reads it as an option (`remove --id --project`).
+    #[test]
+    fn an_identifier_never_reads_as_an_option() {
+        for bad in ["--project", "-x", "-"] {
+            assert!(!id_ok(bad), "{bad}");
+        }
+        let mut p = helius();
+        p.entitlement = "-free".into();
+        assert!(p.validate().is_err());
+        let mut p = helius();
+        p.credential = Some("--project".into());
+        assert!(p.validate().is_err());
+        assert!(helius().validate().is_ok());
+    }
 
     fn helius() -> ProviderDescriptor {
         ProviderDescriptor {

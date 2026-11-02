@@ -44,6 +44,10 @@ pub mod defaults {
     /// largest (32 capital scenarios per score) the frame stays far below one STATE frame.
     pub const ANALYTICS_RUNS_MAX: u64 = 64;
     pub const ANALYTICS_JOBS_MAX: u64 = 16;
+    /// DEC-18: the providers and the credentials one provider registry holds at most: with every
+    /// field at its largest, its projection (`project0.analytics.jobs`, beside the most jobs and
+    /// runs) stays below one STATE frame.
+    pub const PROVIDER_REGISTRY_ENTRIES_MAX: u64 = 32;
     /// The quote rounds one rebalancing observation may take at most (each round asks the quotes
     /// the plan still lacks).
     pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;

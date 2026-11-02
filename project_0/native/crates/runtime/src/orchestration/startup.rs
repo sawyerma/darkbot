@@ -223,15 +223,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         })
     };
     if mode == "econ4h" {
-        // A configuration drifted since the admission is an admission refusal (the refused run
-        // keeps its local manifest, like every other).
-        let admission = admission.and_then(|record| match admitted(&record) {
-            Ok(()) => Ok(record),
-            Err(e) => {
-                crate::console::line(format!("BOOT admission refused: {e}"));
-                Err("BOOT_IDENTITY_DRIFT")
-            }
-        });
+        let admission = econ4h_admission(admission, admitted);
         if admission.is_ok() {
             credentials(&bound_registry).map_err(OperationalConfigError)?;
         }
@@ -329,6 +321,22 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
     } else {
         "SHADOW_RUNTIME_ERROR"
     }
+}
+
+/// DEC-18 (review M1/N2): an econ4h start whose activated configuration drifted since its
+/// admission is refused as an admission (BOOT_IDENTITY_DRIFT), so the refused run keeps its local
+/// manifest and phase journal like every other admission refusal; an earlier refusal stands.
+fn econ4h_admission(
+    admission: Result<Option<super::boot_audit::NetworkAudit>, &'static str>,
+    admitted: impl Fn(&Option<super::boot_audit::NetworkAudit>) -> Result<(), String>,
+) -> Result<Option<super::boot_audit::NetworkAudit>, &'static str> {
+    admission.and_then(|record| match admitted(&record) {
+        Ok(()) => Ok(record),
+        Err(e) => {
+            crate::console::line(format!("BOOT admission refused: {e}"));
+            Err("BOOT_IDENTITY_DRIFT")
+        }
+    })
 }
 
 fn run_econ4h(
@@ -855,6 +863,66 @@ mod supervise_tests {
         };
         let result = run_econ4h_with(cfg, market, clock, Ok::<_, &'static str>(owner));
         (run, result, accepted.load(Ordering::Acquire))
+    }
+
+    /// DEC-18 (review M1/N2): an econ4h configuration drifted since its admission is an admission
+    /// refusal (BOOT_IDENTITY_DRIFT; an earlier refusal stands, an undrifted start is admitted),
+    /// and on the production C0-E1 path that refusal ends the run before its owners and keeps its
+    /// local run evidence (manifest, phase journal); no owner starts and nothing is read.
+    #[test]
+    fn n2_a_drifted_econ4h_start_is_an_admission_refusal_that_keeps_its_run_evidence() {
+        use crate::orchestration::boot_audit::NetworkAudit;
+        let drifted = |_: &Option<NetworkAudit>| Err::<(), _>("RUNTIME_CONFIG_DRIFT".to_string());
+        let same = |_: &Option<NetworkAudit>| Ok::<(), String>(());
+        assert_eq!(
+            econ4h_admission(Ok(None), drifted).err(),
+            Some("BOOT_IDENTITY_DRIFT")
+        );
+        assert_eq!(
+            econ4h_admission(Err("BOOT_NETWORK_AUDIT_MISSING"), drifted).err(),
+            Some("BOOT_NETWORK_AUDIT_MISSING")
+        );
+        assert!(econ4h_admission(Ok(None), same).is_ok_and(|r| r.is_none()));
+        let out = std::env::temp_dir().join(format!("p0_n2_refused_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let env: std::collections::HashMap<&str, String> = [
+            ("P0_ECON_RUN_ID", "n2_refused".to_string()),
+            ("P0_ECON_OUT_DIR", out.to_string_lossy().to_string()),
+            ("P0_RUN_LAYOUT", "v2".into()),
+            ("P0_ECON_DURATION_SECS", "4".into()),
+            ("P0_WS_URL", "ws://127.0.0.1:1".into()),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            ),
+            ("P0_MARKET_SOURCE", "logs".into()),
+        ]
+        .into_iter()
+        .collect();
+        let get = |k: &str| env.get(k).cloned();
+        let cfg = crate::analytics::econ::EconConfig::from_lookup(&get, 1).unwrap();
+        let market = crate::market_observer::MarketConfig::from_lookup(&get, 1).unwrap();
+        let paths = cfg.paths();
+        // `run_with` reports the refusal under its admission code (`refused(code)`); the run
+        // itself ends refused before either owner.
+        let refused = run_econ4h_with(
+            cfg,
+            market,
+            Clock::new(),
+            Err::<fn(crate::analytics::econ::Handle) -> Result<(), String>, _>(
+                "BOOT_IDENTITY_DRIFT",
+            ),
+        );
+        assert!(refused.is_err());
+        assert!(
+            paths.capture("run_manifest.p0j").is_file(),
+            "the refused run keeps its manifest"
+        );
+        assert!(
+            paths.capture("measurement_phases.p0j").is_file(),
+            "and its phase journal"
+        );
+        let _ = std::fs::remove_dir_all(&out);
     }
 
     /// DEC-16: an unbounded econ4h configuration (`until-stopped:W:R`) measures windows of W

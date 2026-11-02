@@ -31,6 +31,10 @@ const RECEIPT_PREFIX: &str = "receipt_";
 const LOCK: &str = ".decide.lock";
 /// The bound of a credential's secret (bytes).
 pub const SECRET_LIMIT: usize = 4096;
+/// DEC-18: the providers, and the credentials, a registry holds at most (its projection fits one
+/// STATE frame).
+pub const ENTRIES_MAX: usize =
+    darkbot_solana::runtime_config::defaults::PROVIDER_REGISTRY_ENTRIES_MAX as usize;
 
 /// One committed version, the request that committed it and its action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,6 +320,11 @@ pub fn apply(
                         .into(),
                 );
             }
+            if current.providers.len() >= ENTRIES_MAX {
+                return Err(format!(
+                    "PROVIDER_REGISTRY_FULL: {ENTRIES_MAX} providers (remove one first)"
+                ));
+            }
             next.providers.push(p.clone());
         }
         A::Update(p) => {
@@ -421,6 +430,11 @@ pub fn apply(
                     c.state = CredentialState::Active;
                     c.created_unix_s = now;
                     c.origin = origin.clone();
+                }
+                None if current.credentials.len() >= ENTRIES_MAX => {
+                    return Err(format!(
+                        "CREDENTIAL_REGISTRY_FULL: {ENTRIES_MAX} credentials (a revoked one takes its next revision)"
+                    ))
                 }
                 None => next.credentials.push(CredentialMeta {
                     id: credential.clone(),
@@ -607,10 +621,7 @@ pub fn decide(
             ))
         }
         (true, false) => {
-            return Err(format!(
-                "PROVIDER_REGISTRY_FOREIGN: recorded for another project directory ({}); `p0ctl provider adopt` takes it over",
-                current.project
-            ))
+            return Err("PROVIDER_REGISTRY_FOREIGN: recorded for another project directory; `p0ctl provider adopt` takes it over".into())
         }
     }
     if let Some(e) = expected.filter(|e| *e != current.version) {
@@ -1115,6 +1126,66 @@ mod tests {
             qualification: None,
             enabled: true,
         }
+    }
+
+    /// DEC-18 package-4 review F6: a registry holds at most `PROVIDER_REGISTRY_ENTRIES_MAX`
+    /// providers and credentials, so its projection fits one STATE frame (the reporter's worst
+    /// case); a full registry still takes a new revision of a credential it has.
+    #[test]
+    fn a_registry_holds_at_most_its_bound_of_providers_and_credentials() {
+        let max = darkbot_solana::runtime_config::defaults::PROVIDER_REGISTRY_ENTRIES_MAX as usize;
+        let d = project("bound");
+        let store = DirectoryStore(d.join("keychain"));
+        let add = |n: usize| {
+            let mut p = helius();
+            p.id = format!("rpc-{n}");
+            p.endpoint = format!("https://rpc-{n}.example");
+            p.auth = AuthKind::None;
+            p.credential = None;
+            ProviderAction::Add(p)
+        };
+        let credential = |n: usize| ProviderAction::CredentialSet {
+            credential: format!("cred-{n}"),
+            origin: "input".into(),
+        };
+        for n in 0..max {
+            let r = decide(&d, &format!("a{n}"), None, &add(n), None, &store, 1).unwrap();
+            assert!(r.applied, "{r:?}");
+            let r = decide(
+                &d,
+                &format!("c{n}"),
+                None,
+                &credential(n),
+                Some(b"KEY"),
+                &store,
+                1,
+            )
+            .unwrap();
+            assert!(r.applied, "{r:?}");
+        }
+        let full = decide(&d, "a-full", None, &add(max), None, &store, 1).unwrap();
+        assert!(
+            !full.applied && full.detail.starts_with("PROVIDER_REGISTRY_FULL"),
+            "{full:?}"
+        );
+        let full = decide(
+            &d,
+            "c-full",
+            None,
+            &credential(max),
+            Some(b"KEY"),
+            &store,
+            1,
+        )
+        .unwrap();
+        assert!(
+            !full.applied && full.detail.starts_with("CREDENTIAL_REGISTRY_FULL"),
+            "{full:?}"
+        );
+        let rotate = ProviderAction::CredentialRotate("cred-0".into());
+        let r = decide(&d, "c-rotate", None, &rotate, Some(b"KEY-2"), &store, 1).unwrap();
+        assert!(r.applied, "{r:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn set() -> ProviderAction {
@@ -1683,6 +1754,8 @@ mod tests {
             foreign.starts_with("PROVIDER_REGISTRY_FOREIGN"),
             "{foreign}"
         );
+        // Review F11: the other project's path is never echoed.
+        assert!(!foreign.contains(&*d.to_string_lossy()), "{foreign}");
         assert!(owned(&copy, &current(&copy).unwrap()).is_err());
         let own = decide(&d, "o", None, &ProviderAction::Adopt, None, &store, 4).unwrap();
         assert!(!own.applied && own.detail.starts_with("PROVIDER_REGISTRY_OWN"));
