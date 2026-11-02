@@ -2020,6 +2020,8 @@ const PROVIDER_USAGE: &str = "usage: p0ctl provider status
   | p0ctl provider credential revoke --credential CID
   | p0ctl provider credential import-env --credential CID --variable NAME [--env-file FILE]   (the one-time import of an existing .env key)
   | p0ctl provider adopt   (a registry recorded for another project directory: a new uid; every credential is set again with `credential set` — the import is refused for an existing credential — and the other location's keychain items stay with it)
+  | p0ctl provider measure plan   (C-11, offline: the code-derived reads of the BOOT audit, the econ4h calibration and the C0-MO observation against the selected pair, within the `measure_*` bounds; prints the plan and its token, reads nothing)
+  | p0ctl provider measure run --plan PLAN_ID --approve TOKEN   (C-11: reads Mainnet once through the selected pair; writes the measurement and its PROVIDER_EVIDENCE)
   every change: [--request-id ID] [--expect-version N]; effective at the next controlled start (DEC-05)";
 
 /// The value of `flag` once at most among `allowed` flags; any other flag is refused (a secret is
@@ -2169,6 +2171,37 @@ fn read_secret() -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String
     Ok(secret)
 }
 
+/// DEC-18 §3 (P0-022, C-11): `provider measure plan|run`.
+#[cfg(feature = "crate_health")]
+fn provider_measure(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::provider_measure as pm;
+    let env = |k: &str| std::env::var(k).ok();
+    match args {
+        [verb] if verb == "plan" => {
+            let (plan, token) = pm::plan(project, &env)?;
+            print!("{}", pm::plan_text(&plan, &token));
+            Ok(true)
+        }
+        [verb, rest @ ..] if verb == "run" => {
+            let o = provider_options(rest, &["--plan", "--approve"], &[])?;
+            let need = |f: &str| {
+                o.get(f)
+                    .cloned()
+                    .ok_or_else(|| format!("{f} required\n{PROVIDER_USAGE}"))
+            };
+            let (m, id, evidence) = pm::run(project, &need("--plan")?, &need("--approve")?, &env)?;
+            print!("{}", pm::measurement_text(&m, &id, &evidence));
+            Ok(m.modes.iter().all(|v| v.outcome == pm::Outcome::Supported))
+        }
+        _ => Err(PROVIDER_USAGE.into()),
+    }
+}
+#[cfg(not(feature = "crate_health"))]
+fn provider_measure(project: &Path, args: &[String]) -> Result<bool, String> {
+    let _ = (project, args);
+    Err("PROVIDER_MEASURE_REQUIRES_CRATE_HEALTH".into())
+}
+
 /// DEC-18: the provider registry — decided here, staged (a runtime takes the version current at
 /// its start), every change under a one-time request id with an optional expected version and a
 /// durable redacted receipt; a credential's secret goes to the macOS keychain, never into a
@@ -2191,6 +2224,9 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         [verb, rest @ ..] => (verb.as_str(), rest),
         [] => return Err(PROVIDER_USAGE.into()),
     };
+    if verb == "measure" {
+        return provider_measure(project, rest);
+    }
     if verb == "status" {
         if !rest.is_empty() {
             return Err(PROVIDER_USAGE.into());

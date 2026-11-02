@@ -11,6 +11,9 @@ pub mod fe_freeze;
 #[cfg(feature = "crate_health")]
 pub mod fe_qualification;
 pub mod provider_evidence;
+#[cfg(feature = "crate_health")]
+pub mod provider_measure;
+pub mod provider_measurement;
 pub mod provider_registry;
 pub mod remote_workers;
 pub mod source_control;

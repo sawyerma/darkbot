@@ -1123,6 +1123,10 @@ impl BudgetedSender {
                         continue;
                     }
                 }
+                // DEC-18 §3.3: a refused authorization is its own answer (no permission).
+                if matches!(response.status().as_u16(), 401 | 403) {
+                    return Err(late("RPC_UNAUTHORIZED"));
+                }
                 return Err(late("RPC_HTTP_ERROR"));
             }
             let mut bytes = Vec::new();

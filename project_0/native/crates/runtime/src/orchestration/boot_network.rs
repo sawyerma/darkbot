@@ -614,6 +614,44 @@ fn run(
     result.audit.readiness_token = hash(&bincode::serialize(&result).map_err(|_| "BOOT_TOKEN")?);
     Ok(result)
 }
+/// X2, DEC-18 §3.3: the provider evidence a network audit of operating mode `mode` admits, before
+/// any read: the typed record at `path` (the bytes `id` names), FREE_ONLY capacity for the run's
+/// rate, the WSS and archive qualification, and the C-11 measurement behind it — of exactly the
+/// audited pair and source, proving every read of the audit and of the run it starts.
+pub fn admit_evidence(
+    project: &Path,
+    c: &darkbot_solana::runtime_config::RuntimeConfig,
+    path: &Path,
+    id: Option<&str>,
+    mode: &str,
+    transactions: bool,
+    now: f64,
+) -> Result<(Vec<u8>, fe::ProviderEvidence), String> {
+    let (data, proof) = super::provider_evidence::read_record(path, id)?;
+    let primary = c.rpc_endpoints.first().ok_or("BOOT_RPC_REQUIRED")?;
+    fe::validate_provider_evidence(c, primary, &proof, now)?;
+    let wss = c.wss_endpoints.first().ok_or("BOOT_WSS_REQUIRED")?;
+    let wss = c.bound(ProviderKind::Wss, wss)?;
+    super::provider_evidence::free_registry_provider(wss)?;
+    if proof.wss_provider_binding.as_deref() != Some(wss.binding.as_str()) || !proof.wss_free_only {
+        return Err("BOOT_WSS_FREE_ONLY_UNQUALIFIED".into());
+    }
+    if c.verification != "off" && !proof.archive_qualified {
+        return Err("BOOT_ARCHIVE_UNQUALIFIED".into());
+    }
+    let group = solana_sdk::pubkey::Pubkey::from_str(&c.fe_group).map_err(|_| "BOOT_GROUP")?;
+    super::provider_measure::admits(
+        project,
+        &proof,
+        &c.bound(ProviderKind::Rpc, primary)?.binding,
+        &wss.binding,
+        &group,
+        transactions,
+        mode,
+    )?;
+    Ok((data, proof))
+}
+
 /// Read permission and FREE_ONLY proof are checked before constructing clients or opening WSS.
 /// `mode`: the operating mode `run start` will launch (DEC-05: its profile).
 pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, String> {
@@ -653,25 +691,15 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     // X2: the typed PROVIDER_EVIDENCE record; its bytes are bound into the audit record. A boot
     // flow passes the controller's stored record its id resolves to (DEC-07).
     let proof_path = val("--provider-evidence").ok_or("BOOT_PROVIDER_EVIDENCE_REQUIRED")?;
-    let (data, proof) = super::provider_evidence::read_record(
+    let (data, _) = admit_evidence(
+        project,
+        c,
         Path::new(&proof_path),
         val("--provider-evidence-id").as_deref(),
-    )?;
-    fe::validate_provider_evidence(
-        c,
-        c.rpc_endpoints.first().ok_or("BOOT_RPC_REQUIRED")?,
-        &proof,
+        mode,
+        spec.transactions,
         now()? as f64,
     )?;
-    let wss = c.wss_endpoints.first().ok_or("BOOT_WSS_REQUIRED")?;
-    let wss = c.bound(ProviderKind::Wss, wss)?;
-    super::provider_evidence::free_registry_provider(wss)?;
-    if proof.wss_provider_binding.as_deref() != Some(wss.binding.as_str()) || !proof.wss_free_only {
-        return Err("BOOT_WSS_FREE_ONLY_UNQUALIFIED".into());
-    }
-    if c.verification != "off" && !proof.archive_qualified {
-        return Err("BOOT_ARCHIVE_UNQUALIFIED".into());
-    }
     // DEC-18: the bound providers' credentials, read once after the approval and before the
     // first read — exactly the audited revisions (a rotation since refuses the audit).
     super::provider_registry::install_credentials(&super::provider_registry::current(project)?, c)?;

@@ -52,11 +52,13 @@ PINNED = {
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),  # the measured JSON's explicit offline import, historical build only (DEC-18 §3.4, P0-023)
+    'runtime/src/orchestration/provider_measure.rs': (21, 'W'),  # DEC-18 §3 (C-11, P0-022): the probes' JSON-RPC params, subscribe messages and answers at the wire; plan and measurement are typed records
     'runtime/examples/p0-gap-ws-proxy.rs': (10, 'W'),
     'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
     'solana/src/chain.rs': (41, 'WH'),  # wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4)
     'solana/src/ingress/mod.rs': (5, 'W'),
-    'solana/src/ingress/ws_rpc.rs': (14, 'W'),
+    'solana/src/ingress/ws_probe.rs': (8, 'W'),  # DEC-18 §3.3 (C-11): the subscription probes' messages on the one WSS connection
+    'solana/src/ingress/ws_rpc.rs': (15, 'W'),  # + subscribe_messages (C-11 probes send the sessions' own messages)
     'solana/src/provider.rs': (13, 'W'),  # V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result)
     'solana/src/state/snapshot.rs': (4, 'W'),
     'solana/src/submit/jito.rs': (18, 'W'),  # DEC-02: the bundle simulation's context slot
@@ -178,7 +180,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 322)  # DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 352)  # P0-022: 30 W (C-11 probes at the wire); DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

@@ -222,6 +222,12 @@ pub mod kind {
     /// DEC-18: the redacted receipt of one provider request, a sealed single-value journal
     /// `data/providers/receipt_<request_id>.p0j`.
     pub const PROVIDER_RECEIPT: u16 = 1107;
+    /// DEC-18 §3 (C-11): a provider pre-measurement's plan
+    /// (`orchestration::provider_measure::ProbePlan`), `data/provider_measure/<plan_id>/plan.p0j`.
+    pub const PROVIDER_PROBE_PLAN: u16 = 1108;
+    /// DEC-18 §3.4: a provider pre-measurement (`provider_measure::ProviderMeasurement`),
+    /// content-addressed in `data/provider_measure/results/`.
+    pub const PROVIDER_MEASUREMENT: u16 = 1109;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -313,6 +319,8 @@ pub mod kind {
         FE06_SCOPE,
         PROVIDER_REGISTRY,
         PROVIDER_RECEIPT,
+        PROVIDER_PROBE_PLAN,
+        PROVIDER_MEASUREMENT,
         super::MANIFEST,
     ];
 }

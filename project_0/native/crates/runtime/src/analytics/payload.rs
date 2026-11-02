@@ -940,6 +940,12 @@ macro_rules! typed_kinds {
             k::PROVIDER_RECEIPT => $f::<crate::orchestration::provider_registry::ProviderReceipt>(
                 $kind, $schema, $bytes,
             ),
+            k::PROVIDER_PROBE_PLAN => {
+                $f::<crate::orchestration::provider_measurement::ProbePlan>($kind, $schema, $bytes)
+            }
+            k::PROVIDER_MEASUREMENT => $f::<
+                crate::orchestration::provider_measurement::ProviderMeasurement,
+            >($kind, $schema, $bytes),
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

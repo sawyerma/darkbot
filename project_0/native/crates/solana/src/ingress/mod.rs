@@ -9,6 +9,7 @@ pub mod geyser_grpc;
 #[cfg(any(test, feature = "test-support"))]
 pub mod geyser_loopback;
 pub mod sources;
+pub mod ws_probe;
 pub mod ws_rpc;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -240,7 +241,7 @@ pub enum ProgramFilter {
 
 impl ProgramFilter {
     /// Wire encoding (`{"dataSize": n}` / `{"memcmp": {"offset", "bytes": base58}}`).
-    pub(crate) fn wire(&self) -> serde_json::Value {
+    pub fn wire(&self) -> serde_json::Value {
         match self {
             ProgramFilter::DataSize(n) => serde_json::json!({ "dataSize": n }),
             ProgramFilter::Memcmp { offset, bytes } => serde_json::json!({

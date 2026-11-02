@@ -405,18 +405,7 @@ pub(super) fn prepare(
     ));
     drop(pre_state);
     // Ingress-Thread (WSS). Provider nur als URL.
-    let sub = Subscription {
-        programs: vec![],
-        program_filters: vec![
-            (program, liability_account_filters(&group)),
-            (program, bank_filters(&group)),
-        ],
-        accounts: subscription_keys.clone(),
-        slots: true,
-        roots: true,
-        transactions_mentioning: vec![],
-        logs_mentioning: vec![],
-    };
+    let sub = super::sources::owner_subscription(program, &group, subscription_keys.clone());
     // [FIX-34] Ingress als neu startbare Session: bei Änderung der Dependency-Menge wird die alte
     // Session beendet, eine neue mit erweiterter Subscription gestartet, dann HALT → Recovery → READY.
     let slot_watch_for_spawn = slot_watch.clone();

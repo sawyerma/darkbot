@@ -140,7 +140,8 @@ impl MarketConfig {
             _ => MarketSource::Transactions,
         };
         let commitment: &'static str = match opt("P0_MARKET_COMMITMENT").as_deref() {
-            None | Some("finalized") => "finalized",
+            None => MARKET_COMMITMENT_DEFAULT,
+            Some("finalized") => "finalized",
             Some("confirmed") => "confirmed",
             Some(other) => {
                 return Err(format!(
@@ -240,21 +241,30 @@ impl MarketConfig {
     }
 }
 
-/// Market ingress configuration: source subscription (+ slotSubscribe as telemetry), market
-/// commitment and the transport heartbeat. Shadow/Live keep `WsRpcConfig::new` defaults.
-pub fn market_ws_config(cfg: &MarketConfig) -> Result<WsRpcConfig, String> {
-    let sub = match cfg.source {
+/// The market capture's commitment without `P0_MARKET_COMMITMENT`.
+pub const MARKET_COMMITMENT_DEFAULT: &str = "finalized";
+
+/// The market source's subscription: the program's logs (or its transactions) and slots as
+/// telemetry (DEC-18 §3.2: the pre-measurement probes it too).
+pub fn market_subscription(source: MarketSource, program: Pubkey) -> Subscription {
+    match source {
         MarketSource::Transactions => Subscription {
-            transactions_mentioning: vec![cfg.program],
+            transactions_mentioning: vec![program],
             slots: true,
             ..Subscription::default()
         },
         MarketSource::Logs => Subscription {
-            logs_mentioning: vec![cfg.program],
+            logs_mentioning: vec![program],
             slots: true,
             ..Subscription::default()
         },
-    };
+    }
+}
+
+/// Market ingress configuration: source subscription (+ slotSubscribe as telemetry), market
+/// commitment and the transport heartbeat. Shadow/Live keep `WsRpcConfig::new` defaults.
+pub fn market_ws_config(cfg: &MarketConfig) -> Result<WsRpcConfig, String> {
+    let sub = market_subscription(cfg.source, cfg.program);
     let mut ws = WsRpcConfig::new(cfg.ws_url.clone(), sub);
     ws.commitment = cfg.commitment;
     ws.recovery_budget = Some(Duration::from_millis(

@@ -84,7 +84,8 @@ type EnrichmentFetcher<'a> =
 #[path = "configuration.rs"]
 mod configuration;
 pub use configuration::{
-    market_ws_config, redact_url, source_name, EnrichConfig, MarketConfig, MarketSource,
+    market_subscription, market_ws_config, redact_url, source_name, EnrichConfig, MarketConfig,
+    MarketSource, MARKET_COMMITMENT_DEFAULT,
 };
 #[path = "time.rs"]
 mod time;

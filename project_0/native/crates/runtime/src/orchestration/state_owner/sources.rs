@@ -357,23 +357,33 @@ pub(super) fn unit_name(unit: &SourceUnit) -> String {
     }
 }
 
+/// The owner's WSS/Geyser subscription of a dependency set: its group's liability accounts and
+/// banks, the dependency accounts, slots and roots (DEC-18 §3.2: the pre-measurement probes it).
+pub(crate) fn owner_subscription(
+    program: Pubkey,
+    group: &Pubkey,
+    accounts: Vec<Pubkey>,
+) -> Subscription {
+    Subscription {
+        programs: vec![],
+        program_filters: vec![
+            (program, liability_account_filters(group)),
+            (program, bank_filters(group)),
+        ],
+        accounts,
+        slots: true,
+        roots: true,
+        transactions_mentioning: vec![],
+        logs_mentioning: vec![],
+    }
+}
+
 impl ShadowOwner {
     /// The WSS/Geyser subscription of the owner's current dependency set.
     pub(super) fn source_subscription(&self) -> Subscription {
         let mut accounts: Vec<Pubkey> = self.subscribed.iter().copied().collect();
         accounts.sort_unstable_by_key(|k| k.to_bytes());
-        Subscription {
-            programs: vec![],
-            program_filters: vec![
-                (self.program, liability_account_filters(&self.group)),
-                (self.program, bank_filters(&self.group)),
-            ],
-            accounts,
-            slots: true,
-            roots: true,
-            transactions_mentioning: vec![],
-            logs_mentioning: vec![],
-        }
+        owner_subscription(self.program, &self.group, accounts)
     }
 
     /// Control messages, then a bounded batch of observed events.

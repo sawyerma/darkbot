@@ -66,6 +66,9 @@ macro_rules! owner_log {
 }
 
 mod accounts;
+// DEC-18 §3.2 (C-11): the owner's subscription and bank filters the pre-measurement probes.
+pub(crate) use accounts::bank_filters;
+pub(crate) use sources::owner_subscription;
 mod candidates;
 mod census;
 use accounts::*;

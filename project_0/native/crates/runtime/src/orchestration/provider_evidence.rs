@@ -287,7 +287,9 @@ pub fn validate_provider_evidence(
             .find(|p| p.provider_binding == *binding)
             .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
         let measured = p.measured_at_unix_s;
-        let min_rps = config.limits.rpc_rps.min(config.limits.bootstrap_rps) as f64;
+        // P0-022 review: the run's rate is its global cap (`rpc_rps`, every workload paced
+        // below it), never the lowest workload's.
+        let min_rps = config.limits.rpc_rps as f64;
         if !now.is_finite()
             || now < 0.0
             || !measured.is_finite()

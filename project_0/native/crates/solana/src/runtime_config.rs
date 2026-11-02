@@ -63,6 +63,17 @@ pub mod defaults {
     pub const BPS_MAX: u64 = 10_000;
     /// The most accounts a Jupiter route may use (the route provider refuses more).
     pub const JUPITER_ACCOUNTS_MAX: u64 = 64;
+    /// DEC-18 §3.5 (C-11, the user's approval of 01.11.2026; five subscription types 02.11.2026):
+    /// the provider pre-measurement's upper bounds — the maxima of its `measure_*` parameters (a
+    /// smaller provider quota sets a stricter value, never a larger one).
+    pub const C11_SECONDS_MAX: u64 = 120;
+    pub const C11_RPS_MAX: u64 = 1;
+    pub const C11_ATTEMPTS_MAX: u64 = 120;
+    pub const C11_MIB_MAX: u64 = 16;
+    pub const C11_SUBSCRIPTION_TYPES_MAX: u64 = 5;
+    pub const C11_SUBSCRIPTIONS_ACTIVE_MAX: u64 = 2;
+    /// The window one subscription probe waits for its acknowledgement and first event.
+    pub const C11_SUBSCRIPTION_SECONDS: u64 = 15;
 }
 
 macro_rules! parameters {
@@ -269,6 +280,16 @@ parameters! {
     jupiter_burst = 6, "requests", "P0_JUPITER_BURST";
     jupiter_inflight = 2, "requests", "P0_JUPITER_INFLIGHT";
     jupiter_exit_reserve = 1, "requests", "P0_JUPITER_EXIT_RESERVE";
+    // DEC-18 §3.5 (C-11, P0-022): the provider pre-measurement — its whole duration, its RPC rate,
+    // attempts and response bytes, the subscription types it reads over its one WSS connection,
+    // how many of them at once, and one subscription's window (revision 21).
+    measure_seconds = defaults::C11_SECONDS_MAX, "s", "P0_MEASURE_SECONDS";
+    measure_rps = defaults::C11_RPS_MAX, "requests/s", "P0_MEASURE_RPS";
+    measure_attempts = defaults::C11_ATTEMPTS_MAX, "requests", "P0_MEASURE_ATTEMPTS";
+    measure_mib = defaults::C11_MIB_MAX, "MiB", "P0_MEASURE_MIB";
+    measure_subscription_types = defaults::C11_SUBSCRIPTION_TYPES_MAX, "types", "P0_MEASURE_SUBSCRIPTION_TYPES";
+    measure_subscriptions_active = defaults::C11_SUBSCRIPTIONS_ACTIVE_MAX, "subscriptions", "P0_MEASURE_SUBSCRIPTIONS_ACTIVE";
+    measure_subscription_seconds = defaults::C11_SUBSCRIPTION_SECONDS, "s", "P0_MEASURE_SUBSCRIPTION_SECONDS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -289,8 +310,9 @@ parameters! {
 /// `h0_extended_window_days`, `h0_recurring_min_wins` (H0); 17: `fe06_grant_max_lifetime_seconds`
 /// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01); 19: `jupiter_authenticated_interval_ms` …
 /// `jupiter_exit_reserve` (P6-MT.7, Jupiter's account bucket); 20: no new parameter — the run's
-/// provider bindings appended to [`EffectiveConfig`] (DEC-18, [`PROVIDERS_REVISION`]).
-pub const LIMITS_REVISION: u16 = 20;
+/// provider bindings appended to [`EffectiveConfig`] (DEC-18, [`PROVIDERS_REVISION`]); 21:
+/// `measure_seconds` … `measure_subscription_seconds` (DEC-18 §3.5, the C-11 pre-measurement).
+pub const LIMITS_REVISION: u16 = 21;
 
 /// The first revision whose [`EffectiveConfig`] ends with the run's provider bindings (DEC-18);
 /// an earlier record has none.
@@ -315,6 +337,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("measure_seconds") => 21,
         f if position(f) >= position("jupiter_authenticated_interval_ms") => 19,
         f if position(f) >= position("route_attempts_max") => 18,
         f if position(f) >= position("fe06_grant_max_lifetime_seconds") => 17,
@@ -421,6 +444,12 @@ impl Parameter {
             "analytics_jobs_listed" => defaults::ANALYTICS_JOBS_MAX,
             "rebalance_quote_rounds" => defaults::REBALANCE_QUOTE_ROUNDS_MAX,
             "route_attempts_max" => defaults::ROUTE_ATTEMPTS_MAX,
+            "measure_seconds" | "measure_subscription_seconds" => defaults::C11_SECONDS_MAX,
+            "measure_rps" => defaults::C11_RPS_MAX,
+            "measure_attempts" => defaults::C11_ATTEMPTS_MAX,
+            "measure_mib" => defaults::C11_MIB_MAX,
+            "measure_subscription_types" => defaults::C11_SUBSCRIPTION_TYPES_MAX,
+            "measure_subscriptions_active" => defaults::C11_SUBSCRIPTIONS_ACTIVE_MAX,
             // DEC-05: the owner's types (u64 USD-micro/lamports/ns, the census's i64 profit
             // floor, a bps fraction, the route provider's account bound).
             "max_total_capital"
@@ -2519,9 +2548,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                20,
-                160,
-                "EoSr9vdCZGKnPG4gTFXrpk8drZuH1meLgNJyRnvCSdu3".to_string()
+                21,
+                167,
+                "99aiFVj3NpMi32DyZ6PL4uzhQFDY1AU248HxadtetY1j".to_string()
             )
         );
     }

@@ -456,7 +456,11 @@ fn read_error(e: CallError) -> ReadError {
         }
         CallError::Deadline(_)
         | CallError::Transport(
-            "RPC_TRANSPORT" | "RPC_HTTP_ERROR" | "RPC_BODY_READ" | "RPC_RETRY_EXHAUSTED",
+            "RPC_TRANSPORT"
+            | "RPC_HTTP_ERROR"
+            | "RPC_UNAUTHORIZED"
+            | "RPC_BODY_READ"
+            | "RPC_RETRY_EXHAUSTED",
         ) => ReadError::Unreachable,
         _ => ReadError::Faulty,
     }

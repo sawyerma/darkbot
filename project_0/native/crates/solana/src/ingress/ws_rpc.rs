@@ -152,6 +152,25 @@ pub(crate) enum SubKind {
     Logs,
 }
 
+/// DEC-18 §3.2 (C-11): the subscribe messages a session of `sub` at `commitment` sends — the
+/// pre-measurement probes exactly these.
+pub fn subscribe_messages(sub: &Subscription, commitment: &str) -> Vec<Value> {
+    build_subscribe_requests(sub, commitment)
+        .into_iter()
+        .map(|(_, _, v)| v)
+        .collect()
+}
+
+/// The BOOT audit's liveness subscription: slots and the program's logs (or its transactions).
+pub fn audit_subscription(program: Pubkey, transactions: bool) -> Subscription {
+    Subscription {
+        slots: true,
+        logs_mentioning: if transactions { vec![] } else { vec![program] },
+        transactions_mentioning: if transactions { vec![program] } else { vec![] },
+        ..Default::default()
+    }
+}
+
 /// Baut die Subscribe-Requests. Request-ID → Art, damit die Bestätigungen
 /// (`result: <subscription id>`) zugeordnet werden können.
 fn build_subscribe_requests(sub: &Subscription, commitment: &str) -> Vec<(u64, SubKind, Value)> {
@@ -992,12 +1011,7 @@ pub fn audit_liveness(
     budget: Duration,
 ) -> Result<(u64, u64), &'static str> {
     use super::{IngressEvent, IngressHalt, IngressSource, SlotWatch};
-    let sub = Subscription {
-        slots: true,
-        logs_mentioning: if transactions { vec![] } else { vec![program] },
-        transactions_mentioning: if transactions { vec![program] } else { vec![] },
-        ..Default::default()
-    };
+    let sub = audit_subscription(program, transactions);
     let mut cfg = WsRpcConfig::new(url, sub);
     cfg.idle_timeout = budget;
     cfg.recovery_budget = Some(budget);
