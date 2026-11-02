@@ -105,8 +105,9 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
     );
     Ok(())
 }
-/// Explicit offline import of measured provider evidence (X2): the JSON is decoded once into the
-/// typed record; the boot audit reads only that record and binds its bytes.
+/// Explicit offline import of a historical measured provider evidence JSON (X2): decoded once
+/// into a typed record of the historical origin — readable, never productive evidence (DEC-18
+/// §3.4: the store and every productive reader take records of the native measurement only).
 #[cfg(feature = "historical")]
 fn import_provider_evidence(json: &Path, out: &Path) -> Result<(), String> {
     use darkbot_runner::orchestration::provider_evidence::ProviderEvidence;
@@ -117,7 +118,13 @@ fn import_provider_evidence(json: &Path, out: &Path) -> Result<(), String> {
         ProviderEvidence::from_measured_json(&std::fs::read(json).map_err(|e| e.to_string())?)?;
     let mut writer = journal::Writer::create(out).map_err(|e| e.to_string())?;
     writer
-        .append_typed(journal::Provenance::default(), &evidence)
+        .append_typed(
+            journal::Provenance {
+                source: journal::source::HISTORICAL_PROVIDER_IMPORT,
+                ..Default::default()
+            },
+            &evidence,
+        )
         .map_err(|e| e.to_string())?;
     let durable = writer.seal(true).map_err(|e| e.to_string())?;
     println!(

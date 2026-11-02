@@ -817,8 +817,8 @@ fn qualifies(
         .provider(id)
         .ok_or_else(|| format!("PROVIDER_UNKNOWN: {id}"))?;
     let binding = current.binding_of(p)?;
-    let record: crate::orchestration::provider_evidence::ProviderEvidence =
-        journal::read_typed_value(path).map_err(|_| "PROVIDER_EVIDENCE_FORMAT".to_string())?;
+    let record =
+        crate::orchestration::provider_evidence::read_measured(path, "PROVIDER_EVIDENCE_FORMAT")?;
     // A passing FREE_ONLY measurement of exactly this binding (the WSS proof: a FREE_ONLY WSS).
     let bound_rpc = record
         .providers
@@ -1210,7 +1210,7 @@ mod tests {
         let file = d.join(format!("{tag}.p0j"));
         journal::create_typed_value(
             &file,
-            journal::source::BOOT_CONTROL,
+            journal::source::PROVIDER_MEASUREMENT,
             &ProviderEvidence {
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),
@@ -1718,6 +1718,48 @@ mod tests {
         assert!(
             !failed.applied && failed.detail.starts_with("PROVIDER_EVIDENCE_NOT_PASSING"),
             "{failed:?}"
+        );
+        // DEC-18 §3.4 (P0-023): a passing record of this binding that is no record of the native
+        // measurement (placed into the store by hand) never qualifies.
+        let foreign = {
+            use crate::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
+            let file = d.join("foreign-origin.p0j");
+            journal::create_typed_value(
+                &file,
+                journal::source::BOOT_CONTROL,
+                &ProviderEvidence {
+                    providers: vec![ProviderProof {
+                        policy: "FREE_ONLY".into(),
+                        passed: true,
+                        provider_binding: binding.clone(),
+                        measured_at_unix_s: 1.0,
+                        evidence_sha256: Some("0".repeat(64)),
+                        allowed_rps: 1.0,
+                        available_calls: 1,
+                    }],
+                    wss_provider_binding: None,
+                    wss_free_only: true,
+                    archive_qualified: false,
+                    source_sha256: "1".repeat(64),
+                },
+            )
+            .unwrap();
+            let bytes = std::fs::read(&file).unwrap();
+            let id = journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes())[..16].to_string();
+            std::fs::create_dir_all(d.join(crate::orchestration::provider_evidence::STORE))
+                .unwrap();
+            std::fs::write(
+                d.join(crate::orchestration::provider_evidence::STORE)
+                    .join(format!("{id}.p0j")),
+                bytes,
+            )
+            .unwrap();
+            id
+        };
+        let refused = qualify("q5", &foreign).unwrap();
+        assert!(
+            !refused.applied && refused.detail.starts_with("PROVIDER_EVIDENCE_NOT_MEASURED"),
+            "{refused:?}"
         );
         let good = evidence("good", &binding);
         assert!(qualify("q3", &good).unwrap().applied);

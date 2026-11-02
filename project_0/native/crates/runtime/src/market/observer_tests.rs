@@ -3094,7 +3094,12 @@ fn unbounded_capture(
         source_sha256: "s".into(),
     };
     let file = root.join("evidence.p0j");
-    crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
+    crate::analytics::journal::write_typed_value(
+        &file,
+        crate::analytics::journal::source::PROVIDER_MEASUREMENT,
+        &evidence,
+    )
+    .unwrap();
     let evidence_id = pe::import(&project, &file).unwrap();
     let mut rolling = us::Rolling {
         project: project.clone(),

@@ -276,7 +276,7 @@ fn dec08_p0ctl_verifies_index_through_429_and_resume_and_crosscheck_is_not_run()
         let path = d.join(name);
         journal::write_typed_value(
             &path,
-            source::FE01,
+            source::PROVIDER_MEASUREMENT,
             &ProviderEvidence {
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),

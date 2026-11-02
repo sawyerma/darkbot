@@ -324,7 +324,7 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
     let record = base.join("measured.p0j");
     journal::create_typed_value(
         &record,
-        journal::source::BOOT_CONTROL,
+        journal::source::PROVIDER_MEASUREMENT,
         &provider_evidence::ProviderEvidence {
             providers: vec![provider_evidence::ProviderProof {
                 policy: "FREE_ONLY".into(),
@@ -353,26 +353,39 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
         ),
     )
     .unwrap();
-    let observe = |name: &str, evidence: &[&str]| {
+    let observe_with = |name: &str, evidence: &[&str], keychain: &Path, mode: &[&str]| {
         let output = base.join(name);
-        let mut args = vec![
-            "--fe-mode",
-            "full",
-            "--execute",
-            "--output",
-            output.to_str().unwrap(),
-        ];
+        let mut args = vec!["--fe-mode", "full"];
+        args.extend_from_slice(mode);
+        args.extend_from_slice(&["--output", output.to_str().unwrap()]);
         args.extend_from_slice(evidence);
         let (ok, text) = run(
             env!("CARGO_BIN_EXE_p0-fe-qualify"),
             &project,
-            &store,
+            keychain,
             &args,
             None,
         );
         (ok, text, output)
     };
+    let observe =
+        |name: &str, evidence: &[&str]| observe_with(name, evidence, &store, &["--execute"]);
 
+    // A replay reads no provider: it takes no provider evidence (review L2).
+    let (ok, text, output) = observe_with(
+        "replay",
+        &["--provider-evidence", &id],
+        &store,
+        &["--replay", base.to_str().unwrap()],
+    );
+    assert!(
+        !ok && text.contains("FE_REPLAY_TAKES_NO_PROVIDER_EVIDENCE"),
+        "{text}"
+    );
+    assert!(!output.exists());
+    // Every refusal comes before the credential store is opened (review L1): with no store,
+    // each is still its own refusal, never CREDENTIAL_UNAVAILABLE.
+    let no_store = base.join("no-keychain");
     for (name, evidence, code) in [
         (
             "json",
@@ -391,7 +404,7 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
         ),
         ("none", vec![], "FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED"),
     ] {
-        let (ok, text, output) = observe(name, &evidence);
+        let (ok, text, output) = observe_with(name, &evidence, &no_store, &["--execute"]);
         assert!(!ok && text.contains(code), "{name}: {text}");
         assert!(!output.exists(), "{name}: no evidence directory");
         assert!(seen.lock().unwrap().is_empty(), "{name}: no read");

@@ -1225,7 +1225,8 @@ mod tests {
             archive_qualified: false,
             source_sha256: "0".repeat(64),
         };
-        journal::write_typed_value(&record, 0, &evidence).unwrap();
+        journal::write_typed_value(&record, journal::source::PROVIDER_MEASUREMENT, &evidence)
+            .unwrap();
         let id = super::super::provider_evidence::import(&d, &record).unwrap();
         let stored = super::super::provider_evidence::resolve(&d, &id).unwrap();
         let (data, proof) =

@@ -305,7 +305,7 @@ fn evidence_record(path: &std::path::Path) {
     use darkbot_runner::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
     journal::create_typed_value(
         path,
-        journal::source::BOOT_CONTROL,
+        journal::source::PROVIDER_MEASUREMENT,
         &ProviderEvidence {
             providers: vec![ProviderProof {
                 policy: "FREE_ONLY".into(),
@@ -342,14 +342,30 @@ fn p0_023_the_measured_json_import_is_historical_only() {
         .unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
     if cfg!(feature = "historical") {
+        // A historical record, readable, but no evidence: the store takes records of the native
+        // measurement only (review M1).
         assert!(out.status.success(), "{err}");
-        let (code, stdout, err) = p0ctl(
+        let (code, _, err) = p0ctl(
             &d,
             &["boot", "evidence", "import", record.to_str().unwrap()],
         );
         assert!(
-            code == 0 && stdout.starts_with("PROVIDER_EVIDENCE_ID "),
+            code == 2 && err.contains("PROVIDER_EVIDENCE_NOT_MEASURED"),
             "{err}"
+        );
+        assert_eq!(
+            std::fs::read_dir(d.join("data/provider_evidence")).map_or(0, |r| r.count()),
+            0,
+            "nothing stored"
+        );
+        let frames = Command::new(env!("CARGO_BIN_EXE_p0-journal"))
+            .arg("frames")
+            .arg(&record)
+            .serialized_output()
+            .unwrap();
+        assert!(
+            frames.status.success(),
+            "the historical record stays readable"
         );
     } else {
         assert_eq!(out.status.code(), Some(2), "{err}");

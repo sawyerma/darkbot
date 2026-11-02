@@ -760,7 +760,12 @@ mod tests {
         b.mode = "shadow".into();
         if evidence {
             let file = dir.join("evidence.p0j");
-            journal::write_typed_value(&file, 0, &evidence_for(&config, &b, 1_000.0)).unwrap();
+            journal::write_typed_value(
+                &file,
+                journal::source::PROVIDER_MEASUREMENT,
+                &evidence_for(&config, &b, 1_000.0),
+            )
+            .unwrap();
             crate::orchestration::provider_evidence::import(&dir, &file).unwrap();
         }
         let run_dir = dir.join("data/shadow/r1");

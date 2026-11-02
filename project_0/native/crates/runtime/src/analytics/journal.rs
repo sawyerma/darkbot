@@ -346,6 +346,12 @@ pub mod source {
     pub const UNTIL_STOPPED: u32 = 17;
     /// DEC-18: the provider registry (`p0ctl provider …`).
     pub const PROVIDER_CONTROL: u32 = 18;
+    /// DEC-18 §3.4: the native provider measurement (C-11), the one producer of productive
+    /// `PROVIDER_EVIDENCE`.
+    pub const PROVIDER_MEASUREMENT: u32 = 19;
+    /// DEC-18 §3.4: a historical measured JSON turned into a `PROVIDER_EVIDENCE` record by the
+    /// `historical` build — readable, never productive evidence.
+    pub const HISTORICAL_PROVIDER_IMPORT: u32 = 20;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never
@@ -1377,6 +1383,10 @@ pub fn create_typed_value<P: Payload>(path: &Path, source: u32, value: &P) -> io
 }
 /// The value of a sealed, complete single-frame journal of `P`'s kind.
 pub fn read_typed_value<P: Payload>(path: &Path) -> io::Result<P> {
+    read_typed_value_with_provenance(path).map(|(_, value)| value)
+}
+/// `read_typed_value` with the provenance its one frame was written with (its origin).
+pub fn read_typed_value_with_provenance<P: Payload>(path: &Path) -> io::Result<(Provenance, P)> {
     let mut r = Reader::open(path)?;
     let mut value = None;
     while let Some(f) = r.next_frame()? {
@@ -1386,7 +1396,7 @@ pub fn read_typed_value<P: Payload>(path: &Path) -> io::Result<P> {
         if value.is_some() {
             return Err(bad("VALUE_COUNT"));
         }
-        value = Some(f.typed::<P>()?);
+        value = Some((f.provenance.clone(), f.typed::<P>()?));
     }
     if !(r.sealed && r.complete) {
         return Err(bad("VALUE_JOURNAL_INCOMPLETE"));

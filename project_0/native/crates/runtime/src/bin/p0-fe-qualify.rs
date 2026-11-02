@@ -4,7 +4,9 @@ fn run() -> Result<(), String> {
     use darkbot_runner::analytics::journal::Writer;
     use darkbot_runner::analytics::payload::{Fe01Config, Fe01ReadOutcome};
     use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
-    use darkbot_runner::orchestration::{fe_freeze, fe_replay, provider_evidence};
+    use darkbot_runner::orchestration::{
+        fe_freeze, fe_replay, provider_evidence, provider_registry,
+    };
     use darkbot_solana::{provider, runtime_config::Resolved};
     use solana_sdk::pubkey::Pubkey;
     use std::{
@@ -45,7 +47,7 @@ fn run() -> Result<(), String> {
                 evidence_id = Some(args.next().ok_or("FE_PROVIDER_EVIDENCE_ID_REQUIRED")?)
             }
             // DEC-18 §3.4: a measured JSON is no productive evidence input (no fallback).
-            "--provider-qualification" => return Err("FE_PROVIDER_QUALIFICATION_RETIRED: name the imported typed record (--provider-evidence RECORD_ID, p0ctl boot evidence import FILE.p0j)".into()),
+            "--provider-qualification" => return Err("FE_PROVIDER_QUALIFICATION_RETIRED: name a stored record of the native provider measurement (--provider-evidence RECORD_ID)".into()),
             _ => operational.push(arg),
         }
     }
@@ -85,6 +87,10 @@ fn run() -> Result<(), String> {
         return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
     }
     if let Some(directory) = replay {
+        // A replay reads no provider (review L2).
+        if evidence_id.is_some() {
+            return Err("FE_REPLAY_TAKES_NO_PROVIDER_EVIDENCE".into());
+        }
         let (mut report, freeze) =
             fe_replay::replay_frozen(&resolved.config, &directory, funding_class, legacy_reads)?;
         fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
@@ -110,7 +116,16 @@ fn run() -> Result<(), String> {
         }
         return Ok(());
     }
-    network(&mut resolved)?;
+    // DEC-18 §3.4: the typed PROVIDER_EVIDENCE record of the native measurement in the project's
+    // store, named by its id (DEC-07); a configured URL is not capacity evidence. Read and
+    // checked before the credential store is opened (review L1); its bytes are bound below.
+    let evidence_id = evidence_id.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?;
+    let project = std::env::var_os("P0_PROJECT_DIR")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .ok_or("FE_PROVIDER_EVIDENCE_PROJECT_REQUIRED")?;
+    let (record_bytes, proof) = provider_evidence::load(&project, &evidence_id)?;
+    let registry = provider_registry::bind(&project, &mut resolved)?;
     let url = resolved.config.rpc_url().ok_or("RPC_URL_MISSING")?;
     let requested = resolved.effective();
     let l = &mut resolved.config.limits;
@@ -119,18 +134,13 @@ fn run() -> Result<(), String> {
     l.max_response_mib = l.max_response_mib.min(l.max_total_mib);
     l.wss_message_mib = l.wss_message_mib.min(l.max_total_mib);
     let config = resolved.config.clone();
-    // DEC-18 §3.4: the typed PROVIDER_EVIDENCE record of the project's store, named by its id
-    // (DEC-07); a configured URL is not capacity evidence. Its bytes are bound below.
-    let evidence_id = evidence_id.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?;
-    let project =
-        std::env::var_os("P0_PROJECT_DIR").ok_or("FE_PROVIDER_EVIDENCE_PROJECT_REQUIRED")?;
-    let (record_bytes, proof) =
-        provider_evidence::load(std::path::Path::new(&project), &evidence_id)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "CLOCK_INVALID")?
         .as_secs_f64();
     fe::validate_provider_evidence(&config, &url, &proof, now)?;
+    // DEC-18: the bound providers' credentials, read once, after the evidence is admitted.
+    provider_registry::install_credentials(&registry, &config)?;
     fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
     // PERSIST-01/JFI-04: configuration, every saved read and the result are typed frames of one
     // binary journal; each frame is fsynced before the read is used or the next one is made.

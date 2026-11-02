@@ -452,12 +452,7 @@ pub fn qualify(
     );
     let _ = std::fs::remove_dir_all(&work);
     let evidence = match &inputs.evidence_id {
-        Some(id) => Some(
-            journal::read_typed_value::<provider_evidence::ProviderEvidence>(
-                &provider_evidence::resolve(inputs.project, id)?,
-            )
-            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?,
-        ),
+        Some(id) => Some(provider_evidence::load(inputs.project, id)?.1),
         None => None,
     };
     let (provider_evidence, provider_budget, evidence_valid_until_unix_s) =
@@ -885,11 +880,8 @@ pub fn newest_evidence(
         let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".p0j")) else {
             continue;
         };
-        let Ok(path) = provider_evidence::resolve(project, id) else {
-            continue;
-        };
-        let Ok(evidence) = journal::read_typed_value::<provider_evidence::ProviderEvidence>(&path)
-        else {
+        // A record of the native measurement only (DEC-18 §3.4).
+        let Ok((_, evidence)) = provider_evidence::load(project, id) else {
             continue;
         };
         let (part, budget, until) = provider(config, Some(&evidence), at, binding);
@@ -1680,7 +1672,7 @@ pub(crate) mod tests {
         assert!(newest_evidence(&d, &c, &run, 5_000).is_none());
         let import = |e: &ProviderEvidence, tag: &str| {
             let file = d.join(format!("e{tag}.p0j"));
-            journal::write_typed_value(&file, 0, e).unwrap();
+            journal::write_typed_value(&file, journal::source::PROVIDER_MEASUREMENT, e).unwrap();
             provider_evidence::import(&d, &file).unwrap()
         };
         let older = import(&evidence_for(&c, &run, 1_000.0), "older");
@@ -1688,6 +1680,22 @@ pub(crate) mod tests {
         let mut short = evidence_for(&c, &run, 4_000.0);
         short.providers[0].available_calls = c.limits.max_requests;
         import(&short, "short");
+        // DEC-18 §3.4 (P0-023): a newer, qualifying record that is no native measurement
+        // (placed into the store by hand) is never taken.
+        let foreign = d.join("foreign.p0j");
+        journal::write_typed_value(
+            &foreign,
+            journal::source::BOOT_CONTROL,
+            &evidence_for(&c, &run, 3_500.0),
+        )
+        .unwrap();
+        let bytes = std::fs::read(&foreign).unwrap();
+        let id = journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes())[..16].to_string();
+        std::fs::write(
+            d.join(provider_evidence::STORE).join(format!("{id}.p0j")),
+            bytes,
+        )
+        .unwrap();
         let age = c.limits.fe_qualification_age_seconds;
         assert_eq!(newest_evidence(&d, &c, &run, 5_000).unwrap().0, newer);
         assert_eq!(newest_evidence(&d, &c, &run, 1_001 + age).unwrap().0, newer);

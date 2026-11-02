@@ -1040,7 +1040,12 @@ mod supervise_tests {
             source_sha256: "s".into(),
         };
         let file = out.join("evidence.p0j");
-        crate::analytics::journal::write_typed_value(&file, 0, &evidence).unwrap();
+        crate::analytics::journal::write_typed_value(
+            &file,
+            crate::analytics::journal::source::PROVIDER_MEASUREMENT,
+            &evidence,
+        )
+        .unwrap();
         pe::import(&project, &file).unwrap();
         cfg.rolling = Some(us::Rolling {
             project: project.clone(),

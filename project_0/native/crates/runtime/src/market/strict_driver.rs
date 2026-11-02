@@ -242,8 +242,10 @@ pub fn strict_provider_gate(
     evidence: &Path,
     now_unix_s: f64,
 ) -> Result<(), String> {
-    let proof: crate::orchestration::provider_evidence::ProviderEvidence =
-        journal::read_typed_value(evidence).map_err(|_| "STRICT_PROVIDER_EVIDENCE_INVALID")?;
+    let proof = crate::orchestration::provider_evidence::read_measured(
+        evidence,
+        "STRICT_PROVIDER_EVIDENCE_INVALID",
+    )?;
     crate::orchestration::provider_evidence::validate_provider_evidence(
         config, url, &proof, now_unix_s,
     )?;
@@ -781,8 +783,10 @@ fn method_capacity(
     url: &str,
     budget: &StrictBudget,
 ) -> Result<(), String> {
-    let proof: crate::orchestration::provider_evidence::ProviderEvidence =
-        journal::read_typed_value(evidence).map_err(|_| "STRICT_PROVIDER_EVIDENCE_INVALID")?;
+    let proof = crate::orchestration::provider_evidence::read_measured(
+        evidence,
+        "STRICT_PROVIDER_EVIDENCE_INVALID",
+    )?;
     let binding = &config
         .bound(darkbot_solana::providers::ProviderKind::Rpc, url)?
         .binding;
@@ -1112,7 +1116,7 @@ mod tests {
         };
         let write = |name: &str, e: &ProviderEvidence| {
             let path = dir.join(name);
-            journal::write_typed_value(&path, source::FE01, e).unwrap();
+            journal::write_typed_value(&path, source::PROVIDER_MEASUREMENT, e).unwrap();
             path
         };
         let qualified = write("archive.p0j", &evidence(true));
@@ -1208,7 +1212,7 @@ mod tests {
         let path = dir.join("evidence.p0j");
         journal::write_typed_value(
             &path,
-            source::FE01,
+            source::PROVIDER_MEASUREMENT,
             &ProviderEvidence {
                 providers: vec![ProviderProof {
                     policy: "FREE_ONLY".into(),
@@ -1341,7 +1345,7 @@ mod tests {
                 archive_qualified: true,
                 source_sha256: sha(b"measured"),
             };
-            journal::write_typed_value(&path, source::FE01, &e).unwrap();
+            journal::write_typed_value(&path, source::PROVIDER_MEASUREMENT, &e).unwrap();
             path
         };
         let both = evidence(&[primary, second]);

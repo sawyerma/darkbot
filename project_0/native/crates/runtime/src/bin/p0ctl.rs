@@ -1455,7 +1455,8 @@ source at the network step: the audited identity is exactly the started one. Mod
 desktop raw capture (its environment files, no operational arguments), started through its
 launcher with the admission of exactly the approved record. Provider evidence is named by the
 record id of its import into the controller's store (`boot evidence import`, a typed
-PROVIDER_EVIDENCE record; never a measured JSON); a local file given here is imported first.";
+PROVIDER_EVIDENCE record of the native provider measurement; never an imported JSON); a local
+file given here is imported first.";
 
 /// DEC-07: a boot step names provider evidence by its record id; a local record file (the
 /// terminal) is imported into the controller's store first. An id never imported is refused.

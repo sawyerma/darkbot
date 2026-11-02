@@ -120,6 +120,24 @@ pub fn names(id: &str, data: &[u8]) -> bool {
     is_id(id) && sha(data)[..16] == *id
 }
 
+/// DEC-18 §3.4 (P0-023): the evidence of the record at `path` — a record of the native provider
+/// measurement only (`journal::source::PROVIDER_MEASUREMENT`); one of another origin (the
+/// historical build's JSON import, a default or foreign provenance) is refused. `format`: the
+/// caller's code for a file that is no `PROVIDER_EVIDENCE` record.
+pub fn read_measured(path: &std::path::Path, format: &str) -> Result<ProviderEvidence, String> {
+    use crate::analytics::journal;
+    let (provenance, evidence) =
+        journal::read_typed_value_with_provenance::<ProviderEvidence>(path)
+            .map_err(|_| format.to_string())?;
+    if provenance.source != journal::source::PROVIDER_MEASUREMENT {
+        return Err(format!(
+            "PROVIDER_EVIDENCE_NOT_MEASURED: the record is no native provider measurement (origin {}); productive evidence is measured, never imported",
+            provenance.source
+        ));
+    }
+    Ok(evidence)
+}
+
 /// A record's bytes within [`RECORD_LIMIT`]; a missing file is `missing`.
 fn read_limited(path: &std::path::Path, missing: &str) -> Result<Vec<u8>, String> {
     use std::io::Read;
@@ -157,9 +175,8 @@ pub fn import(project: &std::path::Path, record: &std::path::Path) -> Result<Str
             .map_err(io)?;
         f.write_all(&data).map_err(io)?;
         f.sync_all().map_err(io)?;
-        // The bytes stored are the bytes checked.
-        crate::analytics::journal::read_typed_value::<ProviderEvidence>(&temp)
-            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT".to_string())?;
+        // The bytes stored are the bytes checked: a record of the native measurement only.
+        read_measured(&temp, "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
         let target = store.join(format!("{id}.p0j"));
         match std::fs::hard_link(&temp, &target) {
             Ok(()) => {}
@@ -215,8 +232,7 @@ pub fn read_record(
     if id.is_some_and(|id| !names(id, &data)) {
         return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
     }
-    let proof: ProviderEvidence = crate::analytics::journal::read_typed_value(path)
-        .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
+    let proof = read_measured(path, "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
     if read_bounded()? != data {
         return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
     }
@@ -291,4 +307,69 @@ pub fn validate_provider_evidence(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analytics::journal;
+
+    /// DEC-18 §3.4 (P0-023, review M1): productive provider evidence is a record of the native
+    /// provider measurement only. A record of another origin — the historical build's JSON
+    /// import, a default or a foreign provenance — never enters the store, and one placed there
+    /// by hand is refused by every productive reader.
+    #[test]
+    fn p0_023_a_record_not_of_the_native_measurement_is_no_evidence() {
+        let d = std::env::temp_dir().join(format!("p0_023_origin_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join(STORE)).unwrap();
+        let url = "https://archive.invalid";
+        let mut config = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec![url.into()],
+            ..Default::default()
+        };
+        crate::orchestration::provider_registry::bind_endpoints(&mut config);
+        let evidence = ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: config
+                    .bound(darkbot_solana::providers::ProviderKind::Rpc, url)
+                    .unwrap()
+                    .binding
+                    .clone(),
+                measured_at_unix_s: 1.0,
+                evidence_sha256: Some("a".repeat(64)),
+                allowed_rps: 1e6,
+                available_calls: u64::MAX,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified: true,
+            source_sha256: "0".repeat(64),
+        };
+        fn not_measured<T>(e: Result<T, String>) -> bool {
+            e.is_err_and(|e| e.starts_with("PROVIDER_EVIDENCE_NOT_MEASURED"))
+        }
+        for source in [0, journal::source::BOOT_CONTROL] {
+            let record = d.join(format!("origin-{source}.p0j"));
+            journal::create_typed_value(&record, source, &evidence).unwrap();
+            assert!(not_measured(import(&d, &record)), "{source}: import");
+            let id = sha(&std::fs::read(&record).unwrap())[..16].to_string();
+            let stored = d.join(STORE).join(format!("{id}.p0j"));
+            assert!(!stored.exists(), "{source}: nothing stored");
+            std::fs::copy(&record, &stored).unwrap();
+            assert!(not_measured(load(&d, &id)), "{source}: load");
+            assert!(not_measured(read_record(&record, None)), "{source}: read");
+            assert!(
+                not_measured(
+                    crate::market::observer::strict_driver::strict_provider_gate(
+                        &config, url, &stored, 2.0
+                    )
+                ),
+                "{source}: the strict verifier's gate"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
