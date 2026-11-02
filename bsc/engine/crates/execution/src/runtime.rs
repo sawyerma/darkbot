@@ -391,6 +391,7 @@ impl RuntimeConfig {
         let builder_policy = values.remove("BSC_EXEC_LIVE_BUILDER_POLICY");
         let public_exit = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT");
         let public_exit_rpc = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC");
+        let dex_exit = values.remove("BSC_EXEC_LIVE_DEX_EXIT");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -590,6 +591,9 @@ impl RuntimeConfig {
                 if public_exit.is_some() || public_exit_rpc.is_some() {
                     return Err("BSC_EXEC_LIVE_PUBLIC_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if dex_exit.is_some() {
+                    return Err("BSC_EXEC_LIVE_DEX_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -775,6 +779,16 @@ impl RuntimeConfig {
                                 }
                             }
                             url => url.unwrap_or_default().to_string(),
+                        },
+                        live_dex_exit: match dex_exit {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_DEX_EXIT={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_DEX_EXIT is required".into()),
                         },
                         live_builder_policy: match builder_policy {
                             Some(p)
@@ -1381,8 +1395,13 @@ fn hold_read_lots(
             continue;
         }
         if !curve.terms.tradable {
-            lot.stranded
-                .push((r.token, crate::sources::LIVE_POSITION_OFF_CURVE));
+            // R5: a token migrated to its DEX is named so (its exit the DEX
+            // exit's when ON).
+            let why = match curve.dex_listed {
+                true => crate::sources::LIVE_POSITION_MIGRATED,
+                false => crate::sources::LIVE_POSITION_OFF_CURVE,
+            };
+            lot.stranded.push((r.token, why));
             continue;
         }
         if PricedToken::new(&curve.terms).is_err() {
@@ -1473,9 +1492,157 @@ fn apply_canonical(
     c.refresh_confirmation(live, wall_or_expired(observed_now()));
     if let Some(block) = complete {
         burn_nonce(live, owner, clock, journal);
+        let clk = FnClock {
+            id: CLOCK_ID_MONOTONIC,
+            now: || clock.now_ns(),
+        };
+        exit_quoted_lots(
+            c,
+            live,
+            owner,
+            &clk,
+            journal,
+            block,
+            wall_or_expired(observed_now()),
+        );
         strategy_to_paper(c, exec, live, owner, clock, journal, block);
         ask_lot_reads(c, live, block);
+        ask_dex_quotes(c, live, block);
         ask_recoveries(c, live, block);
+    }
+}
+
+/// REV.1.0 R5 (BSC3-030): at the end of block `block`, with the DEX exit
+/// ON, the Portal's quote of each migrated lot the DEX exit takes now
+/// ([`LiveRuntime::dex_exit_due`]) and not quoted yet, of the lot's
+/// tokens, pinned to the block's hash, off the loop; with the curve reads
+/// at most `BSC_CANONICAL_LOT_READS_MAX` at a time.
+fn ask_dex_quotes(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
+    let (Some(l), Some((number, hash))) = (live.as_ref(), c.head) else {
+        return;
+    };
+    let Some(portal) = l.portal() else {
+        return;
+    };
+    if number != block {
+        return;
+    }
+    let endpoint = c.lot.config.endpoint_at(c.active).to_string();
+    let lot = &mut c.lot;
+    let now = Instant::now();
+    let migrated: Vec<([u8; 20], alloy_primitives::U256)> = lot
+        .stranded
+        .iter()
+        .filter(|(t, why)| {
+            *why == crate::sources::LIVE_POSITION_MIGRATED
+                && l.dex_exit_due(t, number)
+                && !lot.quotes.iter().any(|q| q.token == *t)
+                && !lot.retry_at.iter().any(|(r, at)| r == t && *at > now)
+        })
+        .filter_map(|(t, _)| Some((*t, l.dex_exit_amount(t)?)))
+        .collect();
+    for (token, tokens) in migrated {
+        if lot.reads.len() + lot.quotes.len() >= lot.config.lot_reads_max {
+            break;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (quote, endpoint, limits) = (lot.quoter, endpoint.clone(), lot.config.limits);
+        let spawned = std::thread::Builder::new()
+            .name("bsc-dex-quote".into())
+            .spawn(move || {
+                let result = quote(
+                    &endpoint,
+                    &limits,
+                    portal,
+                    alloy_primitives::Address::from(token),
+                    tokens,
+                    number,
+                    hash,
+                )
+                .map_err(|e| e.to_string());
+                let _ = tx.send(result);
+            });
+        match spawned {
+            Ok(_handle) => lot.quotes.push(QuoteRead {
+                token,
+                amount: tokens,
+                block,
+                hash,
+                rx,
+                overtaken: false,
+                #[cfg(test)]
+                handle: Some(_handle),
+            }),
+            Err(e) => {
+                lot.faults += 1;
+                lot.fault = Some(format!("DEX quote not started: {e}"));
+            }
+        }
+    }
+}
+
+/// R5: a DEX quote read at block `quoted_at` prices an exit at block
+/// `block` only when it is that block's or the one before.
+fn quote_fresh(quoted_at: u64, block: u64) -> bool {
+    quoted_at <= block && quoted_at.saturating_add(1) >= block
+}
+
+/// REV.1.0 R5 (BSC3-030): at block `block`'s complete state, the DEX quotes
+/// that came back, of this block or the one before and still on the chain,
+/// go to the LIVE path's DEX exit ([`LiveRuntime::on_dex_exit`]), its
+/// intents journaled; an older or overtaken one is dropped (quoted again);
+/// a failed one, or one the exit refused, counts and waits for the read
+/// backoff (`BSC_CANONICAL_LOT_READ_RETRY_MS`). `now_unix_ms`: the wall
+/// clock the head's age is measured against.
+#[allow(clippy::too_many_arguments)]
+fn exit_quoted_lots(
+    c: &mut Canonical,
+    live: &mut Option<LiveRuntime>,
+    owner: &Option<StateOwner>,
+    clk: &dyn crate::submission::transport::Clock,
+    journal: &mut RuntimeJournal,
+    block: u64,
+    now_unix_ms: u64,
+) {
+    let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref()) else {
+        return;
+    };
+    let quotes = std::mem::take(&mut c.lot.quotes);
+    for q in quotes {
+        let quote = match q.rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                c.lot.quotes.push(q);
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("DEX quote ended without an answer".to_string())
+            }
+            Ok(answer) => answer,
+        };
+        let quote = match quote {
+            Ok(_) if q.overtaken => continue,
+            Ok(quote) => quote,
+            Err(why) => {
+                c.lot.faults += 1;
+                c.lot.fault = Some(format!(
+                    "DEX quote 0x{}: {why}",
+                    alloy_primitives::hex::encode(q.token)
+                ));
+                c.lot.retry_later(q.token);
+                continue;
+            }
+        };
+        if !quote_fresh(quote.block_number, block) {
+            continue;
+        }
+        if let Some((intents, refused)) =
+            l.on_dex_exit(q.token, q.amount, quote.output, o, clk, now_unix_ms)
+        {
+            journal_live(journal, &intents);
+            if intents.is_empty() && refused.is_some() {
+                c.lot.retry_later(q.token);
+            }
+        }
     }
 }
 
@@ -2075,6 +2242,32 @@ type CurveReader = fn(
     [u8; 32],
 ) -> Result<crate::venue_probe::FlapCurve, crate::venue_probe::ProbeError>;
 
+/// REV.1.0 R5: the Portal's quote of a migrated token's SELL at one block
+/// (production: [`crate::venue_probe::read_flap_dex_quote`]).
+type DexQuoter = fn(
+    &str,
+    &FollowerLimits,
+    alloy_primitives::Address,
+    alloy_primitives::Address,
+    alloy_primitives::U256,
+    u64,
+    [u8; 32],
+) -> Result<crate::venue_probe::DexQuote, crate::venue_probe::ProbeError>;
+
+/// REV.1.0 R5: one DEX quote of a migrated lot's tokens at a block;
+/// `overtaken` once that block may have left the chain.
+struct QuoteRead {
+    token: [u8; 20],
+    /// The tokens quoted: what the exit sells.
+    amount: alloy_primitives::U256,
+    block: u64,
+    hash: [u8; 32],
+    rx: std::sync::mpsc::Receiver<Result<crate::venue_probe::DexQuote, String>>,
+    overtaken: bool,
+    #[cfg(test)]
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
 /// 01.11. (R1): who decides the open LIVE lots' exits. A lot the strategy
 /// does not hold (a restart, a gap or a reorg ended its tracking, or its
 /// token was never followed) is read (its curve at a block's end, off the
@@ -2087,6 +2280,9 @@ struct LotDeciders {
     config: CanonicalConfig,
     reader: CurveReader,
     reads: Vec<LotRead>,
+    /// R5: the migrated lots' DEX quotes (the DEX exit ON).
+    quoter: DexQuoter,
+    quotes: Vec<QuoteRead>,
     /// The tokens of the open lots at the last refresh.
     open: Vec<[u8; 20]>,
     stranded: Vec<([u8; 20], &'static str)>,
@@ -2123,6 +2319,8 @@ impl LotDeciders {
             config: config.clone(),
             reader: crate::venue_probe::read_flap_curve,
             reads: Vec::new(),
+            quoter: crate::venue_probe::read_flap_dex_quote,
+            quotes: Vec::new(),
             open: Vec::new(),
             stranded: Vec::new(),
             retry_at: Vec::new(),
@@ -2145,6 +2343,7 @@ impl LotDeciders {
             | CanonicalEvent::Gap { .. }
             | CanonicalEvent::FlapTradeUndecodable { .. } => {
                 self.reads.iter_mut().for_each(|r| r.overtaken = true);
+                self.quotes.iter_mut().for_each(|q| q.overtaken = true);
                 None
             }
             CanonicalEvent::Block {
@@ -2155,6 +2354,11 @@ impl LotDeciders {
                 for r in &mut self.reads {
                     if r.block.checked_add(1) == Some(*number) && r.hash != *parent_hash {
                         r.overtaken = true;
+                    }
+                }
+                for q in &mut self.quotes {
+                    if q.block.checked_add(1) == Some(*number) && q.hash != *parent_hash {
+                        q.overtaken = true;
                     }
                 }
                 None
@@ -2189,6 +2393,11 @@ impl LotDeciders {
     fn settle(&mut self) {
         for r in &mut self.reads {
             if let Some(h) = r.handle.take() {
+                let _ = h.join();
+            }
+        }
+        for q in &mut self.quotes {
+            if let Some(h) = q.handle.take() {
                 let _ = h.join();
             }
         }
@@ -4525,6 +4734,15 @@ mod tests {
         exec_gas_covered(&config).unwrap();
     }
 
+    /// R5: a DEX quote prices an exit at its own block and the next, no
+    /// later one.
+    #[test]
+    fn a_dex_quote_is_fresh_for_its_block_and_the_next() {
+        assert!(super::quote_fresh(10, 10) && super::quote_fresh(10, 11));
+        assert!(!super::quote_fresh(10, 12) && !super::quote_fresh(11, 10));
+        assert!(super::quote_fresh(u64::MAX, u64::MAX));
+    }
+
     #[test]
     fn the_config_is_strict() {
         let c = RuntimeConfig::parse(CONFIG).unwrap();
@@ -4798,6 +5016,8 @@ mod tests {
             // R5: the public exit route, required and exact; ON only with
             // an https:// endpoint.
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_DEX_EXIT=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_DEX_EXIT=OFF", "BSC_EXEC_LIVE_DEX_EXIT=yes"),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF", "BSC_EXEC_LIVE_PUBLIC_EXIT=ON"),
             CONFIG.replace(
@@ -4910,6 +5130,8 @@ mod tests {
             (x.live_public_exit, x.live_public_exit_rpc.as_str()),
             (false, "")
         );
+        // R5: a migrated lot stays stranded for the operator.
+        assert!(!x.live_dex_exit);
         let on = exec(
             &CONFIG
                 .replace(

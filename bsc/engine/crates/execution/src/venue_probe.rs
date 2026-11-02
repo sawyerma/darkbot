@@ -140,6 +140,8 @@ pub enum ProbeRead {
     /// 01.11. (R1): a held token's `getTokenV8Safe` and `nftGate`.
     TokenState,
     NftGate,
+    /// REV.1.0 R5: the Portal's `quoteExactInput` of a migrated lot's SELL.
+    DexQuote,
 }
 
 /// How a well-formed hex answer violates its ABI or storage type.
@@ -413,6 +415,85 @@ pub struct FlapCurve {
     pub terms: darkbot_bsc_trading::economics::flap::native_curve20::TokenTerms,
     pub reserve: U256,
     pub circulating: U256,
+    /// REV.1.0 R5: the token migrated to its DEX (status DEX): off the
+    /// curve, the Portal routes its SELL through its DEX router.
+    pub dex_listed: bool,
+}
+
+/// REV.1.0 R5 (BSC3-030): the Portal's quote of a migrated token's SELL at
+/// one canonical block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DexQuote {
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    /// The native output the Portal's `quoteExactInput` answered.
+    pub output: U256,
+}
+
+/// REV.1.0 R5 (BSC3-030): the Portal `portal`'s quote of a native-output
+/// SELL of `amount` of `token` at the block `number` whose hash is `hash`
+/// (`quoteExactInput` pinned to that hash; the block still the one at its
+/// height afterwards), read-only over `endpoint` as [`read_flap_curve`].
+pub fn read_flap_dex_quote(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    portal: Address,
+    token: Address,
+    amount: U256,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<DexQuote, ProbeError> {
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
+    quote_with(&mut client, portal, token, amount, number, hash)
+}
+
+/// `quoteExactInput((address,address,uint256))` (REV.1.0 R5: the Portal's
+/// own quote, also of a token it routes to its DEX).
+const QUOTE_EXACT_INPUT_SELECTOR: [u8; 4] = [0xfc, 0x84, 0x7c, 0x2b];
+
+/// The Portal's quote of a native-output SELL of `amount` of `token`: its
+/// static tuple inline (the token, native, the amount).
+fn dex_quote_calldata(token: Address, amount: U256) -> Vec<u8> {
+    let mut calldata = QUOTE_EXACT_INPUT_SELECTOR.to_vec();
+    calldata.extend_from_slice(&address_word(token));
+    calldata.extend_from_slice(&address_word(Address::ZERO));
+    calldata.extend_from_slice(&amount.to_be_bytes::<32>());
+    calldata
+}
+
+/// [`read_flap_dex_quote`] over a connected client (plain TCP in the tests).
+fn quote_with<S, C>(
+    client: &mut Client<S, C>,
+    portal: Address,
+    token: Address,
+    amount: U256,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<DexQuote, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let read = ProbeRead::DexQuote;
+    let calldata = dex_quote_calldata(token, amount);
+    let mut wire = Wire {
+        client,
+        stop: AtomicBool::new(false),
+        id: 0,
+    };
+    let [output] =
+        abi_words::<1>(&wire.call(&pinned(&hash), read, portal, &calldata)?).map_err(abi(read))?;
+    if wire.block_hash(ProbeRead::BlockRecheck, number)? != hash {
+        return Err(ProbeError::Reorg { number });
+    }
+    Ok(DexQuote {
+        block_number: number,
+        block_hash: hash,
+        output: U256::from_be_bytes(output),
+    })
 }
 
 /// 01.11. (R1): the curve of `token` as the Portal `portal` held it at the
@@ -463,6 +544,7 @@ where
         .map_err(abi(read))?;
     let fault = |f| abi(read)(f);
     let status = word_u8(&w[0]).map_err(fault)?;
+    let dex_listed = status == darkbot_bsc_trading::venues::flap::TOKEN_STATUS_DEX;
     let terms = TokenTerms {
         tradable: status == darkbot_bsc_trading::venues::flap::TOKEN_STATUS_TRADABLE,
         version: word_u8(&w[4]).map_err(fault)?,
@@ -491,6 +573,7 @@ where
         terms: TokenTerms { nft_gate, ..terms },
         reserve: U256::from_be_bytes(w[1]),
         circulating: U256::from_be_bytes(w[2]),
+        dex_listed,
     })
 }
 
@@ -1295,6 +1378,78 @@ mod tests {
         (result, server.handle.join().unwrap())
     }
 
+    /// REV.1.0 R5: the quote's selector is its signature's; its static
+    /// tuple inline: the token, native, the amount.
+    #[test]
+    fn the_quote_call_is_its_signature_and_its_static_tuple() {
+        assert_eq!(
+            alloy_primitives::keccak256(b"quoteExactInput((address,address,uint256))")[..4],
+            QUOTE_EXACT_INPUT_SELECTOR
+        );
+        let token = Address::repeat_byte(0xab);
+        let call = dex_quote_calldata(token, U256::from(7u8));
+        assert_eq!(call.len(), 4 + 3 * WORD);
+        assert_eq!(&call[4 + 12..4 + WORD], token.as_slice());
+        assert_eq!(call[4 + WORD..4 + 2 * WORD], [0u8; WORD]);
+        assert_eq!(U256::from_be_slice(&call[4 + 2 * WORD..]), U256::from(7u8));
+    }
+
+    /// REV.1.0 R5: a migrated token's SELL quote is the Portal's
+    /// `quoteExactInput` answer at the pinned block; a reorg between the
+    /// reads or a short answer refuse it.
+    #[test]
+    fn a_migrated_tokens_quote_is_read_at_its_block() {
+        let d = bsc_mainnet_v5_27_2();
+        let token = Address::repeat_byte(0x77);
+        let amount = U256::from(5_000u64);
+        let calldata = dex_quote_calldata(token, amount);
+        let node = |answer: Vec<u8>| {
+            let mut n = Node::mainnet();
+            n.set_call(d.portal, calldata.clone(), answer);
+            n
+        };
+        let read = |n: Node| {
+            let server = serve(n);
+            let limits = limits();
+            let mut client = Client::new(
+                connector(server.addr, limits),
+                server.addr.to_string(),
+                "/rpc".to_owned(),
+                &limits,
+            );
+            let result = quote_with(&mut client, d.portal, token, amount, HEAD, HASH);
+            drop(client);
+            server.done.store(true, Ordering::Release);
+            (result, server.handle.join().unwrap())
+        };
+        let word = U256::from(123_456u64).to_be_bytes::<32>().to_vec();
+        let (result, seen) = read(node(word.clone()));
+        assert_eq!(
+            result.unwrap(),
+            DexQuote {
+                block_number: HEAD,
+                block_hash: HASH,
+                output: U256::from(123_456u64),
+            }
+        );
+        let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(methods, ["eth_call", "eth_getBlockByNumber"]);
+        let mut moved = node(word);
+        moved.hashes = [HASH, [0x44; 32]];
+        moved.blocks_served = 1;
+        assert_eq!(
+            read(moved).0.unwrap_err(),
+            ProbeError::Reorg { number: HEAD }
+        );
+        assert!(matches!(
+            read(node(vec![0u8; 16])).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::DexQuote,
+                ..
+            })
+        ));
+    }
+
     /// 01.11. (R1): a held token's curve is read at its pinned block into
     /// the production terms (`TokenBook::seeded` takes them); off the curve
     /// it reads as not tradable; a reorg between the reads, a tax outside
@@ -1380,8 +1535,10 @@ mod tests {
         );
         let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
         assert_eq!(methods, ["eth_call", "eth_call", "eth_getBlockByNumber"]);
-        // Migrated: off the curve.
-        assert!(!read(node(state(4, 100, 18))).0.unwrap().terms.tradable);
+        assert!(!c.dex_listed);
+        // Migrated: off the curve, listed on its DEX (R5).
+        let migrated = read(node(state(4, 100, 18))).0.unwrap();
+        assert!(!migrated.terms.tradable && migrated.dex_listed);
         // A reorg between the reads.
         let mut moved = node(state(1, 100, 18));
         moved.hashes = [HASH, [0x44; 32]];

@@ -673,6 +673,32 @@ pub fn strategy_to<E: End>(
     }
 }
 
+/// REV.1.0 R5 (BSC3-030): the exit of a migrated token's position through
+/// `executor` at the Portal's quote `quoted` ([`Executor::on_dex_exit`]);
+/// the context as in [`strategy_to`].
+#[allow(clippy::too_many_arguments)]
+pub fn dex_exit_to<E: End>(
+    executor: &mut Executor<E>,
+    token: [u8; 20],
+    tokens: U256,
+    quoted: U256,
+    owner: &StateOwner,
+    next_nonce: Option<u64>,
+    exit_gas_price_wei: Option<u64>,
+    clock: &dyn Clock,
+    now_unix_ms: u64,
+) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
+    let c2 = crate::paper_exec::CanonicalContext {
+        snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
+        head: owner.head(),
+        now_unix_ms,
+        next_nonce,
+        exit_reserve_wei: None,
+        exit_gas_price_wei,
+    };
+    executor.on_dex_exit(token, tokens, quoted, &c2, clock)
+}
+
 /// REV.1.0 R3b: the operator's nonce burn on C2's canonical snapshot, at
 /// the clean next nonce `next_nonce` ([`Executor::on_burn`]).
 pub fn burn_to<E: End>(
@@ -751,6 +777,7 @@ pub(crate) mod tests {
                 live_exit_reprice_bps: 0,
                 live_public_exit: false,
                 live_public_exit_rpc: String::new(),
+                live_dex_exit: false,
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

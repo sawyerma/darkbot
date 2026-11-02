@@ -336,6 +336,9 @@ pub const LIVE_EXIT_OUT_OF_GAS: &str = "LIVE_EXIT_OUT_OF_GAS";
 /// or not a Portal token): no strategy exit can sell it; no new BUY until
 /// it ends.
 pub const LIVE_POSITION_OFF_CURVE: &str = "LIVE_POSITION_OFF_CURVE";
+/// REV.1.0 R5: the lot's token migrated to its DEX (off the curve): its exit
+/// is the DEX exit's (`BSC_EXEC_LIVE_DEX_EXIT`), else the operator's.
+pub const LIVE_POSITION_MIGRATED: &str = "LIVE_POSITION_MIGRATED";
 /// REV.1.0 R2: a C3 BUY of the grant landed behind another trader's BUY,
 /// outside its launch's block or without tokens (the ledger's `PLACED`):
 /// no new BUY until the operator grants anew; the exits go on.

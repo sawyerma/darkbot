@@ -1732,6 +1732,76 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// REV.1.0 R5: a lot whose SELL is included without the Portal's trade
+/// event (a DEX-routed SELL) shows closed, its proceeds unknown, its PnL
+/// the lower bound (proceeds 0).
+#[test]
+fn a_dex_routed_sells_proceeds_show_as_unknown() {
+    use darkbot_bsc_execution::live_ledger::{Fact, FactKind, Ledger};
+    use darkbot_bsc_execution::sources::{ComponentId, LiveIntentKind};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-live-r5-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join("bsc-sources");
+    fs::create_dir_all(rundir.join("bsc-runtime")).unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    let now = projection::clock_s().unwrap() * 1_000;
+    let fact = |n: u8, intent, input: u64| Fact {
+        kind: FactKind::Released,
+        tx_hash: [n; 32],
+        intent,
+        component: ComponentId::ExecC3,
+        token: [0xAB; 20],
+        nonce: u64::from(n),
+        grant_generation: 1,
+        input_wei: Some(input.try_into().unwrap()),
+        max_wei: Some(2_000u64.try_into().unwrap()),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+        max_block: Some(100),
+        by_tx: None,
+        response: None,
+        origin: None,
+        launcher: None,
+        placement: None,
+        attempt: None,
+        operator: None,
+        source: None,
+    };
+    let (buy, sell) = (
+        fact(1, LiveIntentKind::Buy, 1_000),
+        fact(2, LiveIntentKind::Sell, 0),
+    );
+    let ledger = Ledger::open(&dir);
+    for f in [
+        buy.clone(),
+        Fact {
+            block: Some((90, [9; 32], 1_000)),
+            gas_wei: Some(1u64.try_into().unwrap()),
+            tokens: Some(7u64.try_into().unwrap()),
+            eth_wei: Some(1_000u64.try_into().unwrap()),
+            ..Fact::about(&buy, FactKind::Included)
+        },
+        sell.clone(),
+        Fact {
+            block: Some((91, [10; 32], 2_000)),
+            gas_wei: Some(1u64.try_into().unwrap()),
+            ..Fact::about(&sell, FactKind::Included)
+        },
+    ] {
+        ledger.append(&f, now).unwrap();
+    }
+    let l = super::live::live_state(&root, &rundir, Err("no configuration"), Some(now));
+    let p = &l.positions[0];
+    assert_eq!(
+        (p.state.as_str(), p.proceeds_unknown, p.pnl_wei.as_deref()),
+        ("CLOSED", true, Some("-1002"))
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 /// REV.1.0 R1/R3b: the LIVE tab shows who decides the open lots' exits and
 /// the receipt recovery as the runtime's status names them, where each
 /// transaction's chain fact comes from (RECEIPT: a recovered block; the follower's
@@ -1957,6 +2027,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
                 "BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\nBSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n",
                 "BSC_EXEC_LIVE_PUBLIC_EXIT=ON\nBSC_EXEC_LIVE_PUBLIC_EXIT_RPC=https://rpc.example.test/\n",
             )
+            .replace("BSC_EXEC_LIVE_DEX_EXIT=OFF\n", "BSC_EXEC_LIVE_DEX_EXIT=ON\n")
             .replace(
                 "BSC_STATE_WATCHED=\n",
                 &format!("BSC_STATE_WATCHED={buyer}\n"),
@@ -1989,7 +2060,10 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     };
     assert_eq!(l.c3_rearm, Some(true));
     // R5: the exit re-price and the public exit route as configured.
-    assert_eq!((l.exit_reprice_bps, l.public_exit), (Some(250), Some(true)));
+    assert_eq!(
+        (l.exit_reprice_bps, l.public_exit, l.dex_exit),
+        (Some(250), Some(true), Some(true))
+    );
     assert_eq!(l.builder_policy_fresh_until_unix_ms, None);
     refusal(&l, "LIVE_BUILDER_POLICY_UNVERIFIED");
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
@@ -3140,6 +3214,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
                 decisions: ["RESUME", "WRITE_OFF", "EXIT_NOW"]
                     .map(String::from)
                     .to_vec(),
+                proceeds_unknown: true,
             })
             .collect(),
         transactions: (0..4 * lots)
@@ -3188,6 +3263,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         builder_policy_refusal: Some(text.clone()),
         exit_reprice_bps: Some(u32::MAX),
         public_exit: Some(true),
+        dex_exit: Some(true),
         ..Default::default()
     };
     let mut l = full.clone();

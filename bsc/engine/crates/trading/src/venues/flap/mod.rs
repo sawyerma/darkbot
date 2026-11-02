@@ -44,5 +44,11 @@ pub mod recognize;
 /// curve (the only status a curve read or a qualification tool prices).
 pub const TOKEN_STATUS_TRADABLE: u8 = 1;
 
+/// `getTokenV8Safe`'s `TokenStatus.DEX` (the verified Portal source's enum:
+/// Invalid, Tradable, InDuel, Killed, DEX, Staged): the token migrated to
+/// its DEX; the Portal's `swapExactInput` routes it through its DEX router
+/// (REV.1.0 R5).
+pub const TOKEN_STATUS_DEX: u8 = 4;
+
 #[cfg(test)]
 mod decoder_tests;

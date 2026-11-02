@@ -170,6 +170,7 @@ fn owner_tab(
                 // R5: the exit re-price and the public exit route.
                 out.exit_reprice_bps = Some(u32::from(x.live_exit_reprice_bps));
                 out.public_exit = Some(x.live_public_exit);
+                out.dex_exit = Some(x.live_dex_exit);
                 use darkbot_bsc_execution::builder_policy as bp;
                 out.builder_policy_fresh_until_unix_ms = bp::read(root, &x.live_builder_policy)
                     .ok()
@@ -222,6 +223,7 @@ fn owner_tab(
                     proceeds_wei: p.proceeds_wei.to_string(),
                     gas_wei: p.gas_wei.to_string(),
                     pnl_wei: p.pnl_wei.map(|v| v.to_string()),
+                    proceeds_unknown: p.proceeds_unknown,
                     decisions: LotDecision::ALL
                         .into_iter()
                         .filter(|d| book.decidable(&p.lot, *d).is_ok())

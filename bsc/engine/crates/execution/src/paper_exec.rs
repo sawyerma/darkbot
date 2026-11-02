@@ -224,6 +224,11 @@ pub struct ExecConfig {
     /// `BSC_EXEC_LIVE_PUBLIC_EXIT_RPC`, an `https://` URL or empty).
     pub live_public_exit: bool,
     pub live_public_exit_rpc: String,
+    /// REV.1.0 R5 (BSC3-030): a LIVE lot whose token migrated to its DEX
+    /// exits at the Portal's quote, routed through its DEX router
+    /// (`BSC_EXEC_LIVE_DEX_EXIT`, OFF by default: it stays stranded for the
+    /// operator).
+    pub live_dex_exit: bool,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -459,6 +464,20 @@ pub struct StrategyCurve {
     pub terms: PricedToken,
     pub reserve: U256,
     pub circulating: U256,
+}
+
+/// How an exit's SELL is priced: on the token's curve, or (REV.1.0 R5) by
+/// the Portal's quote of a token that migrated to its DEX.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitSale {
+    Curve(StrategyCurve),
+    Quoted(U256),
+}
+
+/// An exit's SELL as admitted: on its curve, or (R5) at the Portal's quote.
+enum SellAdmitted {
+    Curve(darkbot_bsc_trading::economics::flap::AdmittedSell),
+    Quoted(U256),
 }
 
 /// A Strategy C position whose BUY reached the sink: the tokens it is bound
@@ -1565,10 +1584,44 @@ impl<E: End> Executor<E> {
             .strategy_exit(
                 token,
                 tokens,
-                curve,
+                ExitSale::Curve(curve),
                 c2,
                 clock,
                 triggered_ns,
+                start_ns,
+                &mut out,
+            )
+            .err();
+        self.strategy_counters.handoffs += out.len() as u64;
+        if let Some(r) = refused {
+            self.strategy_counters.refuse(r);
+        }
+        (out, refused)
+    }
+
+    /// REV.1.0 R5 (BSC3-030): the exit of a position whose token migrated
+    /// to its DEX, as [`Executor::on_strategy_exit`]: the SELL's expected
+    /// output the Portal's quote `quoted` of `tokens` (its minimum under
+    /// the exit slippage); the Portal routes it through its DEX router.
+    pub fn on_dex_exit(
+        &mut self,
+        token: [u8; 20],
+        tokens: U256,
+        quoted: U256,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+    ) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
+        self.strategy_counters.launches += 1;
+        let start_ns = clock.now_ns();
+        let mut out = Vec::with_capacity(2);
+        let refused = self
+            .strategy_exit(
+                token,
+                tokens,
+                ExitSale::Quoted(quoted),
+                c2,
+                clock,
+                start_ns,
                 start_ns,
                 &mut out,
             )
@@ -1740,6 +1793,25 @@ impl<E: End> Executor<E> {
     fn exits_after_buy(&self, known: Option<U256>) -> U256 {
         let (approval, sell) = self.exit_gas();
         known.unwrap_or_else(|| self.held_exit_reserve()) + approval + sell
+    }
+
+    /// What an exit of `tokens` sells: at most what the handed-off BUY is
+    /// bound to have bought and what an approval out approved.
+    fn sellable(tokens: U256, held: Held, approved: Option<U256>) -> U256 {
+        let amount = tokens.min(held.min_tokens);
+        approved.map_or(amount, |a| amount.min(a))
+    }
+
+    /// REV.1.0 R5: what an exit of `token`'s `tokens` sells now (none: not
+    /// held), the amount a DEX exit's quote is of.
+    pub fn exit_amount(&self, token: [u8; 20], tokens: U256) -> Option<U256> {
+        let held = self.strategy_bought.iter().find(|h| h.token == token)?;
+        let approved = self
+            .approved
+            .iter()
+            .find(|(t, _)| *t == token)
+            .map(|(_, amount)| *amount);
+        Some(Self::sellable(tokens, *held, approved))
     }
 
     /// Whether a C3 BUY of this arm was disclosed at the arm's nonce.
@@ -2013,7 +2085,7 @@ impl<E: End> Executor<E> {
         &mut self,
         token: [u8; 20],
         tokens: U256,
-        curve: StrategyCurve,
+        sale: ExitSale,
         c2: &CanonicalContext<'_>,
         clock: &dyn Clock,
         triggered_ns: u64,
@@ -2045,18 +2117,7 @@ impl<E: End> Executor<E> {
         )
         .ok_or(Refusal::NoSnapshot)?;
         let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
-        let state = CurveState::tracked(
-            Address::from(token),
-            curve.terms,
-            curve.reserve,
-            curve.circulating,
-            &self.terms,
-            snapshot,
-        )
-        .map_err(|_| Refusal::Admission)?;
-        // At most what the handed-off BUY is bound to have bought.
-        let amount = tokens.min(held.min_tokens);
-        let amount = approved.map_or(amount, |a| amount.min(a));
+        let amount = Self::sellable(tokens, held, approved);
         // R5: a re-priced exit is signed and budgeted at its own price.
         let price = c2.exit_gas_price_wei.unwrap_or(self.config.gas_price_wei);
         let repriced = match price == self.config.gas_price_wei {
@@ -2073,8 +2134,26 @@ impl<E: End> Executor<E> {
             ),
         };
         let exit_policy = repriced.unwrap_or(self.exit_policy);
-        let admitted =
-            admit_curve_sell(&state, amount, &exit_policy).map_err(|_| Refusal::Admission)?;
+        let admitted = match sale {
+            ExitSale::Curve(curve) => SellAdmitted::Curve(
+                CurveState::tracked(
+                    Address::from(token),
+                    curve.terms,
+                    curve.reserve,
+                    curve.circulating,
+                    &self.terms,
+                    snapshot,
+                )
+                .map_err(|_| Refusal::Admission)
+                .and_then(|state| {
+                    admit_curve_sell(&state, amount, &exit_policy).map_err(|_| Refusal::Admission)
+                })?,
+            ),
+            // R5: a migrated token: the Portal's quote at the snapshot, of
+            // exactly the tokens sold (else its minimum is another amount's).
+            ExitSale::Quoted(_) if amount != tokens => return Err(Refusal::Admission),
+            ExitSale::Quoted(quoted) => SellAdmitted::Quoted(quoted),
+        };
         let admitted_ns = clock.now_ns();
         let (approval_gas, sell_gas) = (
             U256::from(price) * U256::from(self.config.approve_gas_limit),
@@ -2118,7 +2197,7 @@ impl<E: End> Executor<E> {
         let mut tickets = [None, None];
         for (slot, index) in [approve_index, sell_index].into_iter().enumerate() {
             let Some(index) = index else { continue };
-            match self.strategy_lanes[index].reserve(admitted.token()) {
+            match self.strategy_lanes[index].reserve(Address::from(token)) {
                 Ok(t) => tickets[slot] = Some(t),
                 Err(_) => {
                     self.strategy_refused(first, true);
@@ -2141,9 +2220,22 @@ impl<E: End> Executor<E> {
             return Err(Refusal::Intent);
         };
         let sender = Address::from(self.end.address());
-        let Ok(expected) =
-            ExpectedExit::from_admitted(&self.deployment, &admitted, &exit_policy, sender, base)
-        else {
+        let expected = match admitted {
+            SellAdmitted::Curve(admitted) => {
+                ExpectedExit::from_admitted(&self.deployment, &admitted, &exit_policy, sender, base)
+            }
+            SellAdmitted::Quoted(quoted) => ExpectedExit::from_quote(
+                &self.deployment,
+                Address::from(token),
+                amount,
+                quoted,
+                &exit_policy,
+                snapshot,
+                sender,
+                base,
+            ),
+        };
+        let Ok(expected) = expected else {
             self.strategy_refused(first, false);
             return Err(Refusal::Intent);
         };
@@ -2207,7 +2299,7 @@ impl<E: End> Executor<E> {
                 }
             };
             if kind == IntentKind::Approve {
-                self.approved.push((token, admitted.input_tokens()));
+                self.approved.push((token, amount));
             }
             out.push(ExecIntent {
                 kind,
@@ -2487,6 +2579,7 @@ pub(crate) mod tests {
             live_exit_reprice_bps: 0,
             live_public_exit: false,
             live_public_exit_rpc: String::new(),
+            live_dex_exit: false,
             sender_paths: SenderPaths::Both,
         }
     }

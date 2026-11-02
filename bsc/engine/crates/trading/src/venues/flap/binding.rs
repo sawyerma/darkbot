@@ -54,6 +54,8 @@ pub enum IntentError {
     PolicyGenerationMismatch,
     /// The policy's amount or slippage differs from the admitted quote.
     PolicyMismatch,
+    /// REV.1.0 R5: the quote leaves no positive minimum output.
+    NoMinimum,
 }
 
 impl core::fmt::Display for IntentError {
@@ -62,6 +64,7 @@ impl core::fmt::Display for IntentError {
             Self::GenerationMismatch => "buy intent: code generation mismatch",
             Self::PolicyGenerationMismatch => "buy intent: policy generation mismatch",
             Self::PolicyMismatch => "buy intent: policy differs from the admitted quote",
+            Self::NoMinimum => "exit intent: the quote leaves no positive minimum output",
         })
     }
 }
@@ -401,6 +404,50 @@ impl ExpectedExit {
             token: admitted.token(),
             input_tokens: admitted.input_tokens(),
             min_output_amount: admitted.min_output_amount(),
+            snapshot,
+        })
+    }
+
+    /// REV.1.0 R5 (BSC3-030): the expectation of a SELL of `input_tokens`
+    /// of `token` after it migrated to its DEX (the Portal routes its
+    /// `swapExactInput` through its DEX router): no curve; the Portal's own
+    /// quote `quoted` at `snapshot`'s block, its minimum under the exit
+    /// policy's slippage. `nonce` is the approval's, the SELL takes the
+    /// next.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_quote(
+        deployment: &ValidatedDeployment,
+        token: Address,
+        input_tokens: U256,
+        quoted: U256,
+        policy: &ExitPolicy,
+        snapshot: SnapshotId,
+        sender: Address,
+        nonce: u64,
+    ) -> Result<Self, IntentError> {
+        if deployment.codehash_generation() != snapshot.codehash_generation {
+            return Err(IntentError::GenerationMismatch);
+        }
+        if policy.generation() != snapshot.policy_generation {
+            return Err(IntentError::PolicyGenerationMismatch);
+        }
+        if nonce == u64::MAX {
+            return Err(IntentError::PolicyMismatch);
+        }
+        let min_output_amount =
+            crate::economics::slippage::min_output(quoted, policy.slippage_bps())
+                .map_err(|_| IntentError::NoMinimum)?;
+        Ok(Self {
+            chain_id: deployment.deployment().chain_id,
+            portal: deployment.deployment().portal,
+            sender,
+            nonce,
+            gas_price: policy.gas_price(),
+            approve_gas_limit: policy.approve_gas_limit(),
+            sell_gas_limit: policy.sell_gas_limit(),
+            token,
+            input_tokens,
+            min_output_amount,
             snapshot,
         })
     }
@@ -1311,6 +1358,54 @@ mod tests {
         assert_eq!(
             verify_final_burn(&raw, &cheaper, &snap, &mut scratch),
             Err(BindingError::WrongGasPrice)
+        );
+    }
+
+    /// REV.1.0 R5: a migrated token's exit at the Portal's quote: its
+    /// minimum the quote under the exit slippage, signed and bound as a
+    /// curve exit; another generation or no positive minimum refused.
+    #[test]
+    fn a_quoted_exit_is_the_quote_under_the_slippage() {
+        let signer = Signer::from_secret_bytes(&[0x61; 32]).unwrap();
+        let deployment = validated_mainnet(7);
+        let token = Address::from([0xAB; 20]);
+        let snap = snapshot(7);
+        let policy = ExitPolicy::new(POLICY_GENERATION, 100, GAS_PRICE, 60_000, 900_000).unwrap();
+        let exit = |quoted: u64, snap| {
+            ExpectedExit::from_quote(
+                &deployment,
+                token,
+                U256::from(7u8),
+                U256::from(quoted),
+                &policy,
+                snap,
+                signer.address(),
+                9,
+            )
+        };
+        let quoted = exit(10_000, snap).unwrap();
+        assert_eq!(
+            (
+                quoted.token(),
+                quoted.input_tokens(),
+                quoted.min_output_amount()
+            ),
+            (token, U256::from(7u8), U256::from(9_900u64))
+        );
+        let (mut scratch, mut sell) = (Vec::new(), Vec::new());
+        let hash = quoted.sign_sell(&signer, &mut scratch, &mut sell).unwrap();
+        assert_eq!(
+            verify_final_sell(&sell, &quoted, &snap, &mut scratch),
+            Ok(hash)
+        );
+        assert_eq!(exit(0, snap).unwrap_err(), IntentError::NoMinimum);
+        let other = SnapshotId {
+            policy_generation: POLICY_GENERATION + 1,
+            ..snap
+        };
+        assert_eq!(
+            exit(10_000, other).unwrap_err(),
+            IntentError::PolicyGenerationMismatch
         );
     }
 

@@ -1077,6 +1077,10 @@ pub struct Position {
     pub closed_ms: Option<u64>,
     /// An approval of this lot is included: its SELL needs no other.
     pub approved: bool,
+    /// REV.1.0 R5: its SELL is included without the Portal's trade event of
+    /// the buyer (a DEX-routed SELL): the proceeds are unknown, counted as 0
+    /// (its PnL a lower bound: the loss limits see the worst case).
+    pub proceeds_unknown: bool,
     /// Proceeds − input − gas, once closed (failed: − gas).
     pub pnl_wei: Option<i128>,
 }
@@ -1356,6 +1360,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                     grant_generation: t.released.grant_generation,
                     closed_ms: None,
                     approved: false,
+                    proceeds_unknown: false,
                     pnl_wei: None,
                 });
                 book.positions.len() - 1
@@ -1381,6 +1386,7 @@ pub fn fold(facts: &[Fact]) -> Book {
             (LiveIntentKind::Approve, FactKind::Included) => p.approved = true,
             (LiveIntentKind::Sell, FactKind::Included) => {
                 p.state = PositionState::Closed;
+                p.proceeds_unknown = inclusion.and_then(|f| f.eth_wei).is_none();
                 p.proceeds_wei = inclusion.and_then(|f| f.eth_wei).unwrap_or_default();
                 p.closed_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
             }
@@ -2316,6 +2322,26 @@ mod tests {
         assert_eq!(book.realized_pnl_wei, 1_500 - 1_000 - 380);
         assert_eq!(book.gas_wei, U256::from(250 + 40 + 90 + 270 + 45));
         assert_eq!(book.count(PositionState::Pending), 0);
+        assert!(!first.proceeds_unknown);
+        // R5: lot 2's SELL included without the Portal's trade event (DEX
+        // routed): closed, its proceeds unknown, counted as 0 (the worst
+        // case: the loss limits see it).
+        let sell2 = released(7, LiveIntentKind::Sell, 0xA, 0, 150);
+        for f in [sell2.clone(), included(&sell2, 16, 80, 7_000, 0)] {
+            ledger.append(&f, 1).unwrap();
+        }
+        let book = fold(&Ledger::open(&dir).facts().unwrap());
+        let second = &book.positions[1];
+        assert_eq!(second.state, PositionState::Closed);
+        assert!(second.proceeds_unknown);
+        assert_eq!(
+            (second.proceeds_wei, second.pnl_wei),
+            (U256::ZERO, Some(-2_000 - (270 + 45 + 80)))
+        );
+        assert_eq!(
+            book.realized_pnl_wei,
+            1_500 - 1_000 - 380 - 2_000 - (270 + 45 + 80)
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -426,6 +426,9 @@ message LivePosition {
   // REV.1.0 R3b: the operator's decisions the ledger takes of this lot now (RESUME, WRITE_OFF,
   // EXIT_NOW; exit-now also needs BSC_EXEC_LIVE_OPERATOR_EXIT ON), by the ledger's own rule.
   repeated string decisions = 10;
+  // REV.1.0 R5: its SELL is included without the Portal's trade event (a DEX-routed SELL): the
+  // proceeds are unknown, counted as 0 (proceeds_wei 0; pnl_wei a lower bound, the worst case).
+  bool proceeds_unknown = 11;
 }
 // One LIVE transaction whose bytes may have left, and what the chain made of it.
 message LiveTransaction {
@@ -589,6 +592,9 @@ message BscLiveState {
   // REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_PUBLIC_EXIT): true sends every exit step, once handed to the
   // builders, also to the configured public JSON-RPC endpoint (the public mempool); never a BUY.
   optional bool public_exit = 54;
+  // REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_DEX_EXIT): true exits a lot whose token migrated to its DEX
+  // at the Portal's quote (routed through its DEX router); false: it stays stranded for the operator.
+  optional bool dex_exit = 55;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

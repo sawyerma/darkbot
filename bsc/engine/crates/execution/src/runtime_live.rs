@@ -3008,18 +3008,7 @@ impl LiveRuntime {
         if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action {
             self.want_exit(token);
         }
-        // R5 (BSC3-030): with the public exit route ON, the exit steps
-        // handed to the builders also go to the public endpoint.
-        if self.exec.exec.live_public_exit {
-            for i in handed.0.iter().filter(|i| {
-                matches!(
-                    i.kind,
-                    crate::paper_exec::IntentKind::Approve | crate::paper_exec::IntentKind::Sell
-                )
-            }) {
-                self.public_send(i.handoff.tx_hash, &i.raw);
-            }
-        }
+        self.send_public_exits(&handed.0);
         if handed
             .0
             .iter()
@@ -3028,6 +3017,92 @@ impl LiveRuntime {
         {
             self.last_buy_ms = Some((self.wall)());
         }
+        self.record_responses();
+        Some(handed)
+    }
+
+    /// R5 (BSC3-030): with the public exit route ON, the exit steps handed
+    /// to the builders also go to the public endpoint.
+    fn send_public_exits(&mut self, handed: &[ExecIntent<LiveHandoff>]) {
+        if !self.exec.exec.live_public_exit {
+            return;
+        }
+        for i in handed.iter().filter(|i| {
+            matches!(
+                i.kind,
+                crate::paper_exec::IntentKind::Approve | crate::paper_exec::IntentKind::Sell
+            )
+        }) {
+            self.public_send(i.handoff.tx_hash, &i.raw);
+        }
+    }
+
+    /// R5 (BSC3-030): whether the DEX exit takes `token`'s lot now (the head
+    /// at `head`): ON, armed, the lot open, none of its exit steps out
+    /// within its window (one lost after it goes again, as a strategy exit
+    /// does), its exits not stopped for the operator.
+    pub fn dex_exit_due(&self, token: &[u8; 20], head: u64) -> bool {
+        self.exec.exec.live_dex_exit
+            && self.executor.is_some()
+            && self.book.open_lot(token).is_some()
+            && self.exit_stopped(token).is_none()
+            && !self.book.unresolved().any(|t| {
+                t.released.token == *token && t.released.intent.exit_step() && !t.window_over(head)
+            })
+    }
+
+    /// R5 (BSC3-030): what a DEX exit of `token`'s lot sells now: its
+    /// ledger tokens as the armed executor sells them (none: not armed or
+    /// not held).
+    pub fn dex_exit_amount(&self, token: &[u8; 20]) -> Option<U256> {
+        let tokens = self.book.open_lot(token)?.tokens;
+        self.executor.as_ref()?.exit_amount(*token, tokens)
+    }
+
+    /// R5 (BSC3-030): the exit of `token`'s lot, its token migrated to its
+    /// DEX, at the Portal's quote `quoted` of `tokens` (read at a canonical
+    /// block): as an exit decision of the strategy, the Portal routing the
+    /// SELL through its DEX router. None while not due
+    /// ([`Self::dex_exit_due`]).
+    pub fn on_dex_exit(
+        &mut self,
+        token: [u8; 20],
+        tokens: U256,
+        quoted: U256,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+        now_unix_ms: u64,
+    ) -> Option<(Vec<ExecIntent<LiveHandoff>>, Option<Refusal>)> {
+        if !owner
+            .head()
+            .is_some_and(|h| self.dex_exit_due(&token, h.number))
+        {
+            return None;
+        }
+        self.poll_responses(clock);
+        let next = self.free_nonce(owner);
+        if self
+            .executor
+            .as_ref()
+            .and_then(|x| x.end().lease())
+            .is_some_and(|l| Some(l.nonce()) == next)
+        {
+            self.yield_lease();
+        }
+        let repriced = self.exit_repriced(&token, next, owner.head().map(|h| h.number));
+        let handed = crate::runtime::exec::dex_exit_to(
+            self.executor.as_mut()?,
+            token,
+            tokens,
+            quoted,
+            owner,
+            next,
+            repriced,
+            clock,
+            now_unix_ms,
+        );
+        self.want_exit(token);
+        self.send_public_exits(&handed.0);
         self.record_responses();
         Some(handed)
     }
@@ -6360,6 +6435,244 @@ mod tests {
             Some(crate::sources::LIVE_INTENT_SEEN)
         );
         x.shutdown();
+        r.clean();
+    }
+
+    /// R5 (BSC3-030): the DEX exit of a lot whose token migrated: OFF,
+    /// nothing. ON, through the runtime's quotes (`exit_quoted_lots`): a
+    /// stale, overtaken or failed quote takes nothing (a failed one waits
+    /// for the backoff); a fresh one hands over the approval. Lost, it goes
+    /// again after its window (re-priced); included, the Portal SELL of
+    /// exactly the quoted tokens with the quote minus the exit slippage as
+    /// its minimum output.
+    #[test]
+    fn a_migrated_lot_exits_at_the_portals_quote() {
+        for on in [false, true] {
+            dex_exit(on);
+        }
+    }
+
+    fn dex_exit(on: bool) {
+        use crate::paper_exec::IntentKind;
+        use crate::runtime::{
+            Canonical, QuoteRead, RuntimeConfig, exit_quoted_lots, journal_max_payload,
+        };
+        use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+        use crate::sources::GrantRisk;
+        use crate::sources::tests::TEST_RISK;
+        let mut r = Rig::granting(
+            &format!("live-dex-exit-{on}"),
+            LiveStrategies::StrategyC,
+            |now| LiveGrant {
+                risk: Some(GrantRisk {
+                    max_gas_price_wei: 55_000_000,
+                    ..TEST_RISK
+                }),
+                ..rig_grant(now + 3_600_000, LiveStrategies::StrategyC)
+            },
+        );
+        r.exec.exec.live_dex_exit = on;
+        r.exec.exec.live_exit_reprice_bps = 1_000;
+        let sc = Sc::new(r.buyer);
+        let mut live = Some(r.runtime("boot-1"));
+        let mut owner = Some(c2_at(&r.d, r.buyer, 0));
+        settle(live.as_mut().unwrap(), owner.as_ref().unwrap());
+        assert!(
+            live.as_ref().unwrap().armed(),
+            "{:?}",
+            reason(live.as_ref().unwrap())
+        );
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let (wait, silent) = (Duration::from_secs(2), Duration::from_millis(300));
+        let a = [0xA1; 20];
+        let (out, _) = live
+            .as_mut()
+            .unwrap()
+            .on_strategy(&sc.buy(a), owner.as_ref().unwrap(), &clock, now_ms)
+            .unwrap();
+        let a_tx = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            live.as_mut().unwrap(),
+            owner.as_mut().unwrap(),
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![sc.receipt(a_tx, 0)]),
+                sc.trade(a_tx, HEAD + 1, 0xb2, a),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        let quoted = U256::from(5_000_000_000_000_000u64);
+        if !on {
+            let x = live.as_mut().unwrap();
+            reconnect(x);
+            assert!(!x.dex_exit_due(&a, HEAD + 1));
+            assert!(
+                x.on_dex_exit(
+                    a,
+                    sc.tokens,
+                    quoted,
+                    owner.as_ref().unwrap(),
+                    &clock,
+                    now_ms
+                )
+                .is_none()
+            );
+            live.take().unwrap().shutdown();
+            r.clean();
+            return;
+        }
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), 0);
+        let base =
+            std::env::temp_dir().join(format!("bsc-dex-exit-journal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let amount = live.as_ref().unwrap().dex_exit_amount(&a).unwrap();
+        assert!(amount > U256::ZERO && amount <= sc.tokens);
+        let quote = |block: u64, answer: Result<u64, &str>| {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            tx.send(
+                answer
+                    .map(|o| crate::venue_probe::DexQuote {
+                        block_number: block,
+                        block_hash: [block as u8; 32],
+                        output: U256::from(o),
+                    })
+                    .map_err(str::to_string),
+            )
+            .unwrap();
+            QuoteRead {
+                token: a,
+                amount,
+                block,
+                hash: [block as u8; 32],
+                rx,
+                overtaken: false,
+                handle: None,
+            }
+        };
+        let pass = |c: &mut Canonical,
+                    live: &mut Option<LiveRuntime>,
+                    journal: &mut RuntimeJournal,
+                    block| {
+            exit_quoted_lots(c, live, &owner, &clock, journal, block, now_ms)
+        };
+        reconnect(live.as_mut().unwrap());
+        // Stale, overtaken: nothing; failed: counted, waits for the backoff.
+        c.lot.quotes = vec![quote(HEAD - 5, Ok(5_000_000_000_000_000))];
+        pass(&mut c, &mut live, &mut journal, HEAD + 1);
+        c.lot.quotes = vec![quote(HEAD + 1, Ok(5_000_000_000_000_000))];
+        c.lot.overtake(&CanonicalEvent::Gap {
+            from: HEAD,
+            to: HEAD + 1,
+        });
+        pass(&mut c, &mut live, &mut journal, HEAD + 1);
+        c.lot.quotes = vec![quote(HEAD + 1, Err("execution reverted"))];
+        pass(&mut c, &mut live, &mut journal, HEAD + 1);
+        assert!(r.requests.recv_timeout(silent).is_err());
+        assert!(c.lot.quotes.is_empty() && c.lot.retry_at.iter().any(|(t, _)| *t == a));
+        assert!(
+            c.lot
+                .fault
+                .as_deref()
+                .is_some_and(|f| f.starts_with("DEX quote"))
+        );
+        // A fresh quote: the approval at nonce 1, the arm's price.
+        c.lot.quotes = vec![quote(HEAD + 1, Ok(5_000_000_000_000_000))];
+        pass(&mut c, &mut live, &mut journal, HEAD + 1);
+        r.requests.recv_timeout(wait).unwrap();
+        let signed = |raw: &[u8]| {
+            let tx = darkbot_bsc_trading::transactions::legacy::decode_signed(raw)
+                .unwrap()
+                .tx;
+            (tx.nonce, tx.gas_price)
+        };
+        let x = live.as_mut().unwrap();
+        assert!(!x.dex_exit_due(&a, HEAD + 1), "its approval is out");
+        // Lost: after its window it goes again, re-priced.
+        for (n, h) in [(HEAD + 2, 0xb3), (HEAD + 3, 0xb4), (HEAD + 4, 0xb5)] {
+            feed(
+                x,
+                owner.as_mut().unwrap(),
+                vec![block_of(n, h, h - 1, Vec::new()), complete_of(n, h)],
+            );
+            settle(x, owner.as_ref().unwrap());
+        }
+        assert!(x.armed(), "{:?}", reason(x));
+        assert!(x.dex_exit_due(&a, HEAD + 4));
+        reconnect(x);
+        let (out, refused) = x
+            .on_dex_exit(a, amount, quoted, owner.as_ref().unwrap(), &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        assert_eq!(signed(&out[0].raw), (1, 55_000_000));
+        let approval = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            x,
+            owner.as_mut().unwrap(),
+            vec![
+                block_of(HEAD + 5, 0xb6, 0xb5, vec![sc.receipt(approval, 1)]),
+                complete_of(HEAD + 5, 0xb6),
+            ],
+        );
+        settle(x, owner.as_ref().unwrap());
+        assert!(x.armed(), "{:?}", reason(x));
+        reconnect(x);
+        // Another amount than the quoted one: refused (its minimum is not
+        // that amount's).
+        let (out, refused) = x
+            .on_dex_exit(
+                a,
+                amount + U256::from(1u8),
+                quoted,
+                owner.as_ref().unwrap(),
+                &clock,
+                now_ms,
+            )
+            .unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Admission)));
+        let amount = x.dex_exit_amount(&a).unwrap();
+        let (out, refused) = x
+            .on_dex_exit(a, amount, quoted, owner.as_ref().unwrap(), &clock, now_ms)
+            .unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        let tx = darkbot_bsc_trading::transactions::legacy::decode_signed(&out[0].raw)
+            .unwrap()
+            .tx;
+        assert_eq!(tx.nonce, 2);
+        assert_eq!(&tx.input[4 + 32 + 12..4 + 64], a.as_slice());
+        assert_eq!(
+            U256::from_be_slice(&tx.input[4 + 3 * 32..4 + 4 * 32]),
+            amount
+        );
+        assert_eq!(
+            U256::from_be_slice(&tx.input[4 + 4 * 32..4 + 5 * 32]),
+            darkbot_bsc_trading::economics::slippage::min_output(
+                quoted,
+                r.exec.exec.exit_slippage_bps
+            )
+            .unwrap()
+        );
+        live.take().unwrap().shutdown();
+        let _ = fs::remove_dir_all(base);
         r.clean();
     }
 
@@ -10988,7 +11301,8 @@ mod tests {
         };
         use crate::runtime_journal::{JournalSetup, RuntimeJournal};
         use crate::sources::{
-            LIVE_POSITION_OFF_CURVE, LIVE_POSITION_UNPRICED, LIVE_POSITION_UNREADABLE,
+            LIVE_POSITION_MIGRATED, LIVE_POSITION_OFF_CURVE, LIVE_POSITION_UNPRICED,
+            LIVE_POSITION_UNREADABLE,
         };
         use crate::venue_probe::{AbiFault, FlapCurve, ProbeError, ProbeRead};
         use darkbot_bsc_trading::economics::flap::native_curve20::{TokenTerms, profile_terms};
@@ -11008,6 +11322,7 @@ mod tests {
         const UNPRICED: [u8; 20] = [0xE3; 20];
         const REFUSED: [u8; 20] = [0xE4; 20];
         const FLAKY: [u8; 20] = [0xE5; 20];
+        const MIGRATED: [u8; 20] = [0xE6; 20];
         c.lot.reader = |_, _, _, token, number, hash| {
             let curve = |terms: TokenTerms| {
                 Ok(FlapCurve {
@@ -11016,6 +11331,7 @@ mod tests {
                     terms,
                     reserve: U256::from(2_000_000_000_000_000_000u128),
                     circulating: U256::from(300_000_000_000_000_000_000_000u128),
+                    dex_listed: false,
                 })
             };
             match token.into_array() {
@@ -11023,6 +11339,15 @@ mod tests {
                 OFF => curve(TokenTerms {
                     tradable: false,
                     ..profile_terms(100, 100)
+                }),
+                // R5: off the curve, listed on its DEX.
+                MIGRATED => curve(TokenTerms {
+                    tradable: false,
+                    ..profile_terms(100, 100)
+                })
+                .map(|c| FlapCurve {
+                    dex_listed: true,
+                    ..c
                 }),
                 UNPRICED => curve(TokenTerms {
                     version: 7,
@@ -11045,7 +11370,16 @@ mod tests {
             JournalSetup::whole(64, journal_max_payload(&config)),
         )
         .unwrap();
-        let r = limited("live-rehold", crate::sources::tests::TEST_LIMITS);
+        let mut r = limited("live-rehold", crate::sources::tests::TEST_LIMITS);
+        // R5: the DEX exit ON, its quotes a stub's.
+        r.exec.exec.live_dex_exit = true;
+        c.lot.quoter = |_, _, _, _, _, number, hash| {
+            Ok(crate::venue_probe::DexQuote {
+                block_number: number,
+                block_hash: hash,
+                output: U256::from(1u8),
+            })
+        };
         let g = granted_generation(&r.state);
         let ledger = Ledger::open(&r.state);
         for (n, token) in [
@@ -11054,6 +11388,7 @@ mod tests {
             (3, UNPRICED),
             (4, REFUSED),
             (5, FLAKY),
+            (6, MIGRATED),
         ] {
             let buy = Fact {
                 kind: FactKind::Released,
@@ -11089,7 +11424,7 @@ mod tests {
             };
             ledger.append(&included, NOW).unwrap();
         }
-        let c2 = c2_at(&r.d, r.buyer, 6);
+        let c2 = c2_at(&r.d, r.buyer, 7);
         let mut live = Some(r.runtime("boot-1"));
         // A fresh process: the runtime has not told who decides yet.
         live.as_mut().unwrap().exit_deciders = None;
@@ -11102,7 +11437,7 @@ mod tests {
         let refusal = |live: &Option<LiveRuntime>| {
             live.as_ref()
                 .unwrap()
-                .buy_refusal(U256::ZERO, Some(&c2), Some(6))
+                .buy_refusal(U256::ZERO, Some(&c2), Some(7))
         };
         // Armed, before any canonical event: undecided, no new BUY.
         assert_eq!(refusal(&live), Some((Refusal::ExitFirst, None)));
@@ -11146,7 +11481,7 @@ mod tests {
         );
         c.lot.config.lot_reads_max = 8;
         apply(&mut c, &mut live, &mut journal, complete(HEAD));
-        assert_eq!(c.lot.reads.len(), 5, "each lot read once, none twice");
+        assert_eq!(c.lot.reads.len(), 6, "each lot read once, none twice");
         c.lot.settle();
         // R1 re-check LOW 1: an overtaken read takes no backoff; with one
         // set, only the failed reads wait for it.
@@ -11193,7 +11528,7 @@ mod tests {
         apply(&mut c, &mut live, &mut journal, block(HEAD + 2));
         let s = c.strategy.as_ref().unwrap();
         assert!(s.holds(&KEPT), "held again on its read curve");
-        for t in [OFF, UNPRICED, REFUSED, FLAKY] {
+        for t in [OFF, UNPRICED, REFUSED, FLAKY, MIGRATED] {
             assert!(!s.holds(&t));
         }
         apply(&mut c, &mut live, &mut journal, complete(HEAD + 2));
@@ -11208,17 +11543,24 @@ mod tests {
             [
                 (OFF, LIVE_POSITION_OFF_CURVE),
                 (UNPRICED, LIVE_POSITION_UNPRICED),
-                (REFUSED, LIVE_POSITION_UNREADABLE)
+                (REFUSED, LIVE_POSITION_UNREADABLE),
+                (MIGRATED, LIVE_POSITION_MIGRATED)
             ]
         );
         assert!(d.faults >= 3, "{}", d.faults);
         assert_eq!(refusal(&live), Some((Refusal::ExitStopped, Some(first))));
+        // R5: the migrated lot alone is quoted for its DEX exit.
+        assert_eq!(
+            c.lot.quotes.iter().map(|q| q.token).collect::<Vec<_>>(),
+            [MIGRATED]
+        );
+        c.lot.settle();
         let status = record(x);
         assert_eq!(
             status.texts(l::EXIT_UNDECIDED).unwrap(),
             [format!("0x{}", alloy_primitives::hex::encode(FLAKY))]
         );
-        assert_eq!(status.texts(l::STRANDED).unwrap().len(), 3);
+        assert_eq!(status.texts(l::STRANDED).unwrap().len(), 4);
         assert!(status.u64(l::LOT_READ_FAULTS).unwrap() >= 3);
         assert!(status.opt_text(l::LOT_READ_FAULT).unwrap().is_some());
         // Without a strategy no lot has its exit decider.

@@ -330,6 +330,7 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | builder_policy_refusal | [string](#string) | optional | Why it admits no LIVE BUY at the report&#39;s clock (stale, unverified, the signed gas price below its floor); absent while it holds or without a readable runtime configuration or clock. |
 | exit_reprice_bps | [uint32](#uint32) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_EXIT_REPRICE_BPS): a lost exit step goes again at its nonce at its price raised by these bps, at most the grant&#39;s max gas price; 0: never re-priced. |
 | public_exit | [bool](#bool) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_PUBLIC_EXIT): true sends every exit step, once handed to the builders, also to the configured public JSON-RPC endpoint (the public mempool); never a BUY. |
+| dex_exit | [bool](#bool) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_DEX_EXIT): true exits a lot whose token migrated to its DEX at the Portal&#39;s quote (routed through its DEX router); false: it stays stranded for the operator. |
 
 
 
@@ -832,6 +833,7 @@ One LIVE position of the ledger: its BUY, exit and native result.
 | pnl_wei | [string](#string) | optional | Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei. |
 | lot | [string](#string) |  | The lot: its BUY&#39;s transaction hash, 0x hex (a token bought again is another lot). |
 | decisions | [string](#string) | repeated | REV.1.0 R3b: the operator&#39;s decisions the ledger takes of this lot now (RESUME, WRITE_OFF, EXIT_NOW; exit-now also needs BSC_EXEC_LIVE_OPERATOR_EXIT ON), by the ledger&#39;s own rule. |
+| proceeds_unknown | [bool](#bool) |  | REV.1.0 R5: its SELL is included without the Portal&#39;s trade event (a DEX-routed SELL): the proceeds are unknown, counted as 0 (proceeds_wei 0; pnl_wei a lower bound, the worst case). |
 
 
 
