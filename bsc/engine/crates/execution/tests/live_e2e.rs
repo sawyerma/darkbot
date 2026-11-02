@@ -584,6 +584,7 @@ fn exec_setup() -> ExecSetup {
             live_exit_reverts_max: 2,
             live_lease_blocks: 200,
             live_operator_exit: false,
+            live_nonce_burn: false,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),
@@ -1460,5 +1461,22 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
     ]);
     assert_ne!(code, 0, "{out}");
     assert!(out.contains("BSC_LIVE_BUYER is not configured"), "{out}");
+    // R3b: the nonce burn, refused under the repository's switch (OFF).
+    let (code, out) = cli(&[
+        "live",
+        "nonce-burn",
+        "--tx",
+        &lot,
+        "--state",
+        s,
+        "--config",
+        config,
+        "--request-id",
+        "burn-1",
+        "--decided-by",
+        "operator",
+    ]);
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains("LIVE_NONCE_BURN_OFF"), "{out}");
     fs::remove_dir_all(state).unwrap();
 }

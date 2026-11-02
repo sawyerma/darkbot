@@ -68,7 +68,9 @@ use darkbot_bsc_trading::submission_policy::plan::{
     PreSubmission, ProviderValidity, SubmissionPlan, TransportStartDeadline, TxRef,
 };
 use darkbot_bsc_trading::submission_policy::release::ReleaseProfile;
-use darkbot_bsc_trading::venues::flap::binding::{ExpectedBuy, ExpectedExit, ExpectedTx};
+use darkbot_bsc_trading::venues::flap::binding::{
+    ExpectedBurn, ExpectedBuy, ExpectedExit, ExpectedTx, TRANSFER_GAS,
+};
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
 use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
@@ -179,6 +181,10 @@ pub struct ExecConfig {
     /// REV.1.0 R3: an operator's EXIT_REQUESTED of a lot wants its exit
     /// now (`BSC_EXEC_LIVE_OPERATOR_EXIT`, OFF by default: held back).
     pub live_operator_exit: bool,
+    /// REV.1.0 R3b: an operator's BURN_REQUESTED of an unresolved
+    /// transaction burns its nonce (`BSC_EXEC_LIVE_NONCE_BURN`, OFF by
+    /// default: held back, the CLI refuses it).
+    pub live_nonce_burn: bool,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -386,12 +392,14 @@ pub fn paper_raw_adapter() -> AdapterId {
     AdapterId::new(1).unwrap_or_else(|| unreachable!("adapter slot 1"))
 }
 
-/// What a Strategy C PAPER transaction is (Phase I).
+/// What a Strategy C PAPER transaction is (Phase I); (R3b) the LIVE
+/// path's nonce burn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntentKind {
     Buy,
     Approve,
     Sell,
+    Burn,
 }
 
 impl IntentKind {
@@ -400,6 +408,7 @@ impl IntentKind {
             Self::Buy => 1,
             Self::Approve => 2,
             Self::Sell => 3,
+            Self::Burn => 4,
         }
     }
 }
@@ -1529,6 +1538,129 @@ impl<E: End> Executor<E> {
         (out, refused)
     }
 
+    /// REV.1.0 R3b: the operator's nonce burn at C2's clean next nonce (the
+    /// nonce of an unresolved transaction whose bytes may still land): the
+    /// sender's plain transfer of nothing to itself on the next strategy
+    /// lane, handed to the end as an exit step is (the owner admits it;
+    /// its bundle, window and facts). Its gas counts in the session cap.
+    pub fn on_burn(
+        &mut self,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+    ) -> (Option<ExecIntent<E::Handoff>>, Option<Refusal>) {
+        let start_ns = clock.now_ns();
+        match self.burn(c2, clock, start_ns) {
+            Ok(intent) => {
+                self.strategy_counters.handoffs += 1;
+                (Some(intent), None)
+            }
+            Err(r) => {
+                self.strategy_counters.refuse(r);
+                (None, Some(r))
+            }
+        }
+    }
+
+    fn burn(
+        &mut self,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+        start_ns: u64,
+    ) -> Result<ExecIntent<E::Handoff>, Refusal> {
+        if !self.config.sender_paths.strategy() {
+            return Err(Refusal::PathOff);
+        }
+        let snapshot = (c2.snapshot)(
+            self.config.policy_generation,
+            self.deployment.codehash_generation(),
+        )
+        .ok_or(Refusal::NoSnapshot)?;
+        let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
+        let gas = U256::from(self.config.gas_price_wei) * U256::from(TRANSFER_GAS);
+        if self.strategy_spent_wei + gas > U256::from(self.config.strategy_session_cap_wei) {
+            return Err(Refusal::SessionCap);
+        }
+        if self.strategy_lanes.len() == self.strategy_used {
+            return Err(Refusal::LanesExhausted);
+        }
+        let index = self.next_strategy_lane(c2.next_nonce)?;
+        let ticket = match self.strategy_lanes[index].reserve(Address::ZERO) {
+            Ok(t) => t,
+            Err(_) => {
+                self.strategy_refused(index, true);
+                return Err(Refusal::Lane);
+            }
+        };
+        let admitted_ns = clock.now_ns();
+        let expected = ExpectedBurn::new(
+            self.deployment.deployment().chain_id,
+            Address::from(self.end.address()),
+            ticket.nonce(),
+            self.config.gas_price_wei,
+            snapshot,
+        );
+        if expected
+            .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
+            .is_err()
+        {
+            self.strategy_refused(index, false);
+            return Err(Refusal::Build);
+        }
+        let signed_ns = clock.now_ns();
+        let budget = BudgetEnvelope {
+            max_buy_input_wei: U256::ZERO,
+            max_buy_gas_wei: gas,
+            max_own_launch_wei: U256::ZERO,
+            max_provider_payment_wei: U256::ZERO,
+            max_total_wei: gas,
+        };
+        let (handoff, prepared_ns, planned_ns, (_, disclosed)) = to_end(
+            Parts {
+                end: &mut self.end,
+                lane: &mut self.strategy_lanes[index],
+                config: &self.config,
+                scratch: &mut self.scratch,
+            },
+            ticket,
+            &self.raw,
+            ExpectedTx::Burn(&expected),
+            &budget,
+            U256::ZERO,
+            &snapshot,
+            head,
+            clock,
+            start_ns,
+            Submission::Single,
+            None,
+        );
+        if disclosed {
+            self.strategy_spent_wei += gas;
+        }
+        let handoff = match handoff {
+            Ok(h) => h,
+            Err(r) => {
+                self.strategy_refused(index, disclosed);
+                return Err(r);
+            }
+        };
+        Ok(ExecIntent {
+            kind: IntentKind::Burn,
+            token: [0; 20],
+            block: head.number,
+            handoff,
+            times: StageTimes {
+                ingress_ns: start_ns,
+                decoded_ns: start_ns,
+                admitted_ns,
+                signed_ns,
+                prepared_ns,
+                planned_ns,
+                sink_ns: handoff.at_ns(),
+            },
+            raw: self.raw.clone(),
+        })
+    }
+
     /// Whether this arm holds `token` already, by either strategy: one
     /// sender buys a token once (BSC3-055, Unit 4 invariant 2).
     fn holds(&self, token: &[u8; 20]) -> bool {
@@ -2273,6 +2405,7 @@ pub(crate) mod tests {
             live_exit_reverts_max: 2,
             live_lease_blocks: 200,
             live_operator_exit: false,
+            live_nonce_burn: false,
             sender_paths: SenderPaths::Both,
         }
     }

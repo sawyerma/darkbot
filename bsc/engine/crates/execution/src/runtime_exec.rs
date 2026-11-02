@@ -669,6 +669,25 @@ pub fn strategy_to<E: End>(
     }
 }
 
+/// REV.1.0 R3b: the operator's nonce burn on C2's canonical snapshot, at
+/// the clean next nonce `next_nonce` ([`Executor::on_burn`]).
+pub fn burn_to<E: End>(
+    executor: &mut Executor<E>,
+    owner: &StateOwner,
+    next_nonce: Option<u64>,
+    clock: &dyn Clock,
+    now_unix_ms: u64,
+) -> (Option<ExecIntent<E::Handoff>>, Option<Refusal>) {
+    let c2 = crate::paper_exec::CanonicalContext {
+        snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
+        head: owner.head(),
+        now_unix_ms,
+        next_nonce,
+        exit_reserve_wei: None,
+    };
+    executor.on_burn(&c2, clock)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -712,6 +731,7 @@ pub(crate) mod tests {
                 live_exit_reverts_max: 2,
                 live_lease_blocks: 200,
                 live_operator_exit: false,
+                live_nonce_burn: false,
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

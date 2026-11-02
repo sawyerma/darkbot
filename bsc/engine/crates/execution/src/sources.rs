@@ -337,6 +337,9 @@ pub const LIVE_RECOVERY_FAILED: &str = "RECOVERY_FAILED";
 pub const LIVE_RECOVERY_QUEUED: &str = "RECOVERY_QUEUED";
 pub const LIVE_RECOVERY_OTHER_SENDER: &str = "RECOVERY_OTHER_SENDER";
 pub const LIVE_RECOVERY_LEASE_WINDOW_UNKNOWN: &str = "RECOVERY_LEASE_WINDOW_UNKNOWN";
+/// REV.1.0 R3b: the operator wants a nonce burnt: no BUY takes the next
+/// nonce before it (an exit may: it replaces the transaction as well).
+pub const LIVE_NONCE_BURN_FIRST: &str = "LIVE_NONCE_BURN_FIRST";
 /// BSC3-012: the running `bsc_runtime` is not the build the LIVE
 /// qualification names (or it names none, or this one is unreadable).
 pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";
@@ -3394,6 +3397,10 @@ pub enum LiveIntentKind {
     Buy,
     Approve,
     Sell,
+    /// REV.1.0 R3b: the operator's nonce burn (a plain transfer of nothing
+    /// to the buyer itself): admitted as an exit step is (no slot, no
+    /// input), of no token and no lot.
+    Burn,
 }
 
 impl LiveIntentKind {
@@ -3402,7 +3409,14 @@ impl LiveIntentKind {
             Self::Buy => "BUY",
             Self::Approve => "APPROVE",
             Self::Sell => "SELL",
+            Self::Burn => "BURN",
         }
+    }
+
+    /// An exit step of a lot (its approval or SELL): never a BUY or a
+    /// burn.
+    pub fn exit_step(self) -> bool {
+        matches!(self, Self::Approve | Self::Sell)
     }
 }
 
@@ -3491,6 +3505,7 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
             LEASE_KIND => (LiveIntentKind::Buy, true),
             "APPROVE" => (LiveIntentKind::Approve, false),
             "SELL" => (LiveIntentKind::Sell, false),
+            "BURN" => (LiveIntentKind::Burn, false),
             _ => return Err(bad()),
         };
         let id = r

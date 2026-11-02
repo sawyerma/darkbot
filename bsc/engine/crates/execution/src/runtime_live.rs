@@ -486,6 +486,13 @@ pub struct LiveRuntime {
     /// RECEIPT; the follower's block: none), and the recovery's view.
     source: Option<FactSource>,
     recovery: RecoveryView,
+    /// R3b: the requests the switch held back (counted once each); the
+    /// burns refused at their hand-over (the burn wanted is the book's,
+    /// [`Self::burn_target`]).
+    burns_locked: std::collections::BTreeSet<[u8; 32]>,
+    burns_refused: u64,
+    /// BUYs refused because a burn went first.
+    burn_first: u64,
 }
 
 /// The buyer's balance at a probe's block (number and hash): a
@@ -601,6 +608,9 @@ impl LiveRuntime {
             quarantine: None,
             source: None,
             recovery: RecoveryView::default(),
+            burns_locked: Default::default(),
+            burns_refused: 0,
+            burn_first: 0,
         }
         .folded()
     }
@@ -658,10 +668,13 @@ impl LiveRuntime {
     /// Otherwise why not: a window that runs or is unknown, a lower nonce
     /// taken by a transaction not seen.
     fn nonce_free(&self, next: u64, head: Option<u64>) -> Result<(), String> {
-        let blocking = self
-            .book
-            .unresolved()
-            .find(|t| t.released.nonce != next || !head.is_some_and(|head| t.window_over(head)));
+        let blocking = self.book.unresolved().find(|t| {
+            // R3b: a transaction of the buyer whose nonce is to be burnt, at
+            // `next`, blocks nothing: the burn takes the nonce (review
+            // LOW-1: every one requested there).
+            let burnt = self.burnable(t) && t.released.nonce == next;
+            !burnt && (t.released.nonce != next || !head.is_some_and(|head| t.window_over(head)))
+        });
         let Some(t) = blocking else {
             return Ok(());
         };
@@ -701,7 +714,7 @@ impl LiveRuntime {
         let expired: Vec<[u8; 20]> = self
             .book
             .unresolved()
-            .filter(|t| t.released.intent != LiveIntentKind::Buy && t.window_over(head))
+            .filter(|t| t.released.intent.exit_step() && t.window_over(head))
             .map(|t| t.released.token)
             .collect();
         for token in expired {
@@ -957,7 +970,7 @@ impl LiveRuntime {
                     .book
                     .txs
                     .iter()
-                    .any(|t| t.lot == Some(lot) && t.released.intent != LiveIntentKind::Buy);
+                    .any(|t| t.lot == Some(lot) && t.released.intent.exit_step());
                 if decided {
                     self.want_exit(token);
                 }
@@ -968,6 +981,17 @@ impl LiveRuntime {
                     false => self.operator_exits_locked += 1,
                 }
             }
+        }
+        // R3b: a burn the operator requested is held back, counted, while
+        // the switch is OFF (with it ON, [`Self::burn_target`]).
+        if !self.exec.exec.live_nonce_burn {
+            let requested: Vec<[u8; 32]> = self
+                .book
+                .unresolved()
+                .filter(|t| t.decided.burn_requested && self.buyers(t))
+                .map(|t| t.released.tx_hash)
+                .collect();
+            self.burns_locked.extend(requested);
         }
     }
 
@@ -1425,13 +1449,13 @@ impl LiveRuntime {
         // position's exit is open again (BSC3-048).
         for f in facts
             .iter()
-            .filter(|f| f.kind == FactKind::Replaced && f.intent != LiveIntentKind::Buy)
+            .filter(|f| f.kind == FactKind::Replaced && f.intent.exit_step())
         {
             // Our own exit step of the token took the nonce (a retry after
             // the window): the exit went on, nothing to reopen.
             let own = f.by_tx.and_then(|h| self.book.tx(&h)).is_some_and(|t| {
                 t.released.token == f.token
-                    && t.released.intent != LiveIntentKind::Buy
+                    && t.released.intent.exit_step()
                     && t.state == FactKind::Included
             });
             if !own && self.position_open(&f.token) && self.exit_stopped(&f.token).is_none() {
@@ -1452,7 +1476,7 @@ impl LiveRuntime {
         // included, and never past `exit_stopped` (review MEDIUM-1).
         for f in facts
             .iter()
-            .filter(|f| f.kind == FactKind::Reverted && f.intent != LiveIntentKind::Buy)
+            .filter(|f| f.kind == FactKind::Reverted && f.intent.exit_step())
         {
             if !self.position_open(&f.token) {
                 continue;
@@ -1461,7 +1485,7 @@ impl LiveRuntime {
             let later = self.book.txs.iter().any(|t| {
                 t.lot.is_some()
                     && t.lot == lot
-                    && t.released.intent != LiveIntentKind::Buy
+                    && t.released.intent.exit_step()
                     && matches!(
                         t.state,
                         FactKind::Included | FactKind::Released | FactKind::Unknown
@@ -1799,14 +1823,24 @@ impl LiveRuntime {
                     hash: probed_hash,
                 });
                 let exits = open > U256::ZERO || self.positions_open();
-                if balance < need && !(exits && balance >= approval.min(sell)) {
+                // R3b review NIT-4: a burn wanted (of no lot) arms the path
+                // on its own gas.
+                let burn = self.burn_target().map(|_| self.burn_cost());
+                let least = match exits {
+                    true => Some(approval.min(sell)),
+                    false => burn,
+                };
+                if balance < need && least.is_none_or(|least| balance < least) {
                     self.disarm();
                     self.validated = None;
-                    self.phase = Phase::Unfunded(match exits {
-                        true => {
+                    self.phase = Phase::Unfunded(match (exits, burn) {
+                        (true, _) => {
                             format!("{balance} wei, the exits of the open positions need {open}")
                         }
-                        false => format!("{balance} wei, a BUY with its exit needs {need}"),
+                        (false, Some(burn)) => {
+                            format!("{balance} wei, the nonce burn needs {burn}")
+                        }
+                        (false, None) => format!("{balance} wei, a BUY with its exit needs {need}"),
                     });
                     return;
                 }
@@ -1915,7 +1949,9 @@ impl LiveRuntime {
                 // BSC3-071: what only a BUY needs (its attempts, the grant's
                 // room for another input) does not end the exits of open
                 // positions under the same grant; BUYs stay refused.
-                Err(why) if self.positions_open() => {
+                // R3b review MEDIUM-3: a burn wanted is an exit step's
+                // admission too: the path arms for it.
+                Err(why) if self.positions_open() || self.burn_target().is_some() => {
                     match store.live_now_exits(&components, &verified.view, now_ms) {
                         Ok(n) => {
                             self.buys_closed = Some(why);
@@ -2429,7 +2465,8 @@ impl LiveRuntime {
                 | FactKind::Resumed
                 | FactKind::WrittenOff
                 | FactKind::ExitRequested
-                | FactKind::Adopted => false,
+                | FactKind::Adopted
+                | FactKind::BurnRequested => false,
             };
             let key = t.released.key();
             if !counts || key.is_some_and(|k| settled.contains(&k)) {
@@ -2483,6 +2520,9 @@ impl LiveRuntime {
         let (refusal, stopped) = self.buy_refusal(most, owner, next)?;
         match (refusal, stopped) {
             (Refusal::ExitStopped, Some(why)) => self.count_stopped(why),
+            (Refusal::ExitFirst, Some(crate::sources::LIVE_NONCE_BURN_FIRST)) => {
+                self.burn_first += 1
+            }
             (Refusal::ExitFirst, _) => self.exit_first += 1,
             (Refusal::Owner, _) => self.buys_refused += 1,
             (Refusal::Unfunded, _) => self.unfunded_refused += 1,
@@ -2546,11 +2586,17 @@ impl LiveRuntime {
         let net = |p: &crate::live_ledger::Position| p.pnl_wei.unwrap_or(0);
         let now = (self.wall)();
         let lost = |net: i128, most: u128| net < 0 && net.unsigned_abs() >= most;
+        // R3b review LOW-3: a nonce burn's gas is a loss of its grant and
+        // its day too (of no lot).
+        let burnt = |of: &dyn Fn(&crate::live_ledger::Tx) -> bool| {
+            i128::try_from(self.book.burn_gas(of)).unwrap_or(i128::MAX)
+        };
         let granted: i128 = positions
             .iter()
             .filter(|p| p.grant_generation == generation)
             .map(net)
-            .fold(0, i128::saturating_add);
+            .fold(0, i128::saturating_add)
+            .saturating_sub(burnt(&|t| t.released.grant_generation == generation));
         if lost(granted, limits.max_realized_loss_wei) {
             return Some(LIVE_REALIZED_LOSS_MAX);
         }
@@ -2559,7 +2605,13 @@ impl LiveRuntime {
             .iter()
             .filter(|p| p.closed_ms.is_some_and(|t| day_index(t) == today))
             .map(net)
-            .fold(0, i128::saturating_add);
+            .fold(0, i128::saturating_add)
+            .saturating_sub(burnt(&|t| {
+                t.inclusion
+                    .as_ref()
+                    .and_then(|f| f.block)
+                    .is_some_and(|b| day_index(b.2) == today)
+            }));
         if lost(daily, limits.max_daily_realized_loss_wei) {
             return Some(LIVE_DAILY_LOSS_MAX);
         }
@@ -2658,12 +2710,22 @@ impl LiveRuntime {
             }
             None => {}
         }
+        // An exit step out, or (R3b) a nonce burn out: it decides first.
         let exit_out = self
             .book
             .unresolved()
             .any(|t| t.released.intent != LiveIntentKind::Buy);
         if !self.exits_wanted.is_empty() || exit_out {
             return Some((Refusal::ExitFirst, None));
+        }
+        // R3b: a nonce burn wanted goes first (its nonce is the next). Read
+        // from the book as the nonce's exemption is (review LOW-N1: a
+        // request folded in between ticks exempts nothing a BUY may take).
+        if self.burn_target().is_some() {
+            return Some((
+                Refusal::ExitFirst,
+                Some(crate::sources::LIVE_NONCE_BURN_FIRST),
+            ));
         }
         if self.buys_closed.is_some() {
             return Some((Refusal::Owner, None));
@@ -2806,6 +2868,96 @@ impl LiveRuntime {
         Some(handed)
     }
 
+    /// Review LOW-2: a transaction of the buyer (one written before its
+    /// sender was recorded counts as the buyer's).
+    fn buyers(&self, t: &crate::live_ledger::Tx) -> bool {
+        t.released
+            .origin
+            .is_none_or(|o| o.sender == self.setup.buyer)
+    }
+
+    /// R3b: an unresolved transaction of the buyer whose nonce the operator
+    /// wants burnt, with the switch ON.
+    fn burnable(&self, t: &crate::live_ledger::Tx) -> bool {
+        self.exec.exec.live_nonce_burn
+            && t.decided.burn_requested
+            && matches!(t.state, FactKind::Released | FactKind::Unknown)
+            && self.buyers(t)
+    }
+
+    /// R3b: the burn wanted, the first [`Self::burnable`] transaction in
+    /// the ledger's order. Every check reads it from the book when it
+    /// checks: the nonce's exemption, a BUY's refusal, the arm, the funds,
+    /// the status (review LOW-N1: never one of them a tick behind).
+    fn burn_target(&self) -> Option<&crate::live_ledger::Tx> {
+        // Nothing to scan with the switch OFF (a C3 entry asks it).
+        if !self.exec.exec.live_nonce_burn {
+            return None;
+        }
+        self.book.unresolved().find(|t| self.burnable(t))
+    }
+
+    /// A burn's spend at the configured gas price: its transfer gas.
+    fn burn_cost(&self) -> U256 {
+        U256::from(self.exec.exec.gas_price_wei)
+            * U256::from(darkbot_bsc_trading::venues::flap::binding::TRANSFER_GAS)
+    }
+
+    /// Review MEDIUM-2: a burn of `nonce` at this gas price went before
+    /// (its bytes would be the same: the owner admits them once; another
+    /// only at another gas price).
+    fn burn_spent(&self, nonce: u64) -> bool {
+        let cost = self.burn_cost();
+        self.book.txs.iter().any(|t| {
+            t.released.intent == LiveIntentKind::Burn
+                && t.released.nonce == nonce
+                && t.released.max_wei == Some(cost)
+        })
+    }
+
+    /// REV.1.0 R3b: the operator's nonce burn, armed, when one is wanted and
+    /// its transaction's nonce is the buyer's next (C2's clean next nonce,
+    /// the arm's next strategy lane): the buyer's plain transfer of
+    /// nothing to itself goes through that lane as an exit step goes (the
+    /// owner admits it; the caller journals it). A burn out holds the nonce
+    /// while its window runs (it is unresolved at it); included, every
+    /// transaction at its nonce is REPLACED by it. One that never landed
+    /// (its window over, or withdrawn) is spent all the same: its bytes
+    /// are never admitted again, another goes only at another gas price
+    /// (`BSC_EXEC_GAS_PRICE_WEI` with `BSC_STRATEGY_C_GAS_PRICE_WEI`, which
+    /// must equal it; NONCE_BURN_SPENT meanwhile). An exit at that nonce
+    /// replaces the transaction as well. A refusal is counted and the burn
+    /// asked again at the next pass. Requested transactions at two nonces
+    /// (an orphaned approval and its SELL) are burnt one at a time: the
+    /// higher blocks the path until the lower is taken (`nonce_free`).
+    pub fn burn(
+        &mut self,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+        now_unix_ms: u64,
+    ) -> Vec<ExecIntent<LiveHandoff>> {
+        let Some(nonce) = self.burn_target().map(|t| t.released.nonce) else {
+            return Vec::new();
+        };
+        if self.burn_spent(nonce) {
+            return Vec::new();
+        }
+        self.poll_responses(clock);
+        let next = self.free_nonce(owner);
+        let Some(x) = self.executor.as_mut() else {
+            return Vec::new();
+        };
+        if next != Some(nonce) || x.strategy_next_nonce() != nonce {
+            return Vec::new();
+        }
+        let (intent, refusal) = crate::runtime::exec::burn_to(x, owner, next, clock, now_unix_ms);
+        if refusal.is_some() {
+            self.burns_refused += 1;
+        }
+        self.record_responses();
+        intent.into_iter().collect()
+    }
+
     /// An exit the strategy decided stays wanted while its position is
     /// open and its SELL has not gone (a refusal that consumed nothing, an
     /// approval that waits for its nonce, an arm that ended in between).
@@ -2842,7 +2994,7 @@ impl LiveRuntime {
             .iter()
             .filter(|t| {
                 t.lot == Some(lot)
-                    && t.released.intent != LiveIntentKind::Buy
+                    && t.released.intent.exit_step()
                     && t.state == FactKind::Reverted
                     && !excused.is_some_and(|e| e.contains(&t.released.tx_hash))
             })
@@ -3032,6 +3184,17 @@ impl LiveRuntime {
             ("LEASE_NONCE_TAKEN_BY_OTHER", self.lease_foreign),
             ("SLOT_RETURN_FAILED", self.slot_return_failed),
             ("OPERATOR_EXIT_LOCKED", self.operator_exits_locked),
+            ("NONCE_BURN_LOCKED", self.burns_locked.len() as u64),
+            ("NONCE_BURN_REFUSED", self.burns_refused),
+            ("NONCE_BURN_FIRST", self.burn_first),
+            ("NONCE_BURN_WANTED", u64::from(self.burn_target().is_some())),
+            (
+                "NONCE_BURN_SPENT",
+                u64::from(
+                    self.burn_target()
+                        .is_some_and(|t| self.burn_spent(t.released.nonce)),
+                ),
+            ),
         ] {
             if n > 0 {
                 d.push(l::REFUSALS, format!("{name}={n}").as_str());
@@ -3191,6 +3354,21 @@ mod tests {
     ) -> Result<VenueObservation, String> {
         let mut o = observation(d.portal_version, d.portal_implementation);
         o.caller_balance_wei = U256::from(20_400_000_000_000_000u128);
+        Ok(o)
+    }
+
+    /// One nonce burn at the setup's gas (5e7 wei x 21 000).
+    const ONE_BURN_WEI: u64 = 1_050_000_000_000;
+
+    /// One nonce burn fits, an exit step (5e12) not.
+    fn one_burn(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        let mut o = observation(d.portal_version, d.portal_implementation);
+        o.caller_balance_wei = U256::from(ONE_BURN_WEI);
         Ok(o)
     }
 
@@ -6139,6 +6317,545 @@ mod tests {
                 .unwrap()
                 .starts_with(crate::sources::LIVE_RELEASE_UNRESOLVED)
         );
+        r.clean();
+    }
+
+    /// REV.1.0 R3b: the operator's nonce burn of an unresolved transaction
+    /// whose window is unknown (it keeps the arm blocked). Refused while
+    /// `BSC_EXEC_LIVE_NONCE_BURN` is OFF; a request written is held back,
+    /// counted, by a runtime with the switch OFF. ON: the request lets the path arm at that nonce, no BUY
+    /// goes first, the burn goes as the buyer's plain transfer of nothing
+    /// to itself at that nonce (the owner admits it, the stand-in builder
+    /// receives it), once while its window runs. Included, its transaction
+    /// is REPLACED by it, the burn costs its gas (no lot), and no burn is
+    /// wanted any more.
+    #[test]
+    fn a_nonce_burn_takes_the_nonce_of_a_transaction_that_may_still_land() {
+        use crate::live_ledger::LIVE_NONCE_BURN_OFF;
+        use darkbot_bsc_trading::transactions::legacy::decode_signed;
+        use darkbot_bsc_trading::venues::flap::binding::TRANSFER_GAS;
+        const TARGET: [u8; 32] = [0x77; 32];
+        let mut r = Rig::new("live-burn", LiveStrategies::C3);
+        let ledger = Ledger::open(&r.state);
+        let target = Fact {
+            kind: FactKind::Released,
+            tx_hash: TARGET,
+            intent: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            token: [0x55; 20],
+            nonce: 5,
+            grant_generation: 1,
+            input_wei: Some(U256::from(1u64)),
+            max_wei: Some(U256::from(2u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: None,
+            by_tx: None,
+            response: None,
+            origin: None,
+            launcher: None,
+            placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
+        };
+        ledger.append(&target, 1).unwrap();
+        assert_eq!(
+            ledger.request_burn(TARGET, Some(r.buyer), "burn-1", "operator", false, NOW),
+            Err(LIVE_NONCE_BURN_OFF.into())
+        );
+        let written = ledger
+            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .unwrap();
+        assert!(written.is_some());
+        assert_eq!(
+            ledger.request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW),
+            Ok(None),
+            "once per request: written before"
+        );
+        // A runtime with the switch OFF holds it back.
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert!(refused_by(&x, "NONCE_BURN_LOCKED"));
+        x.shutdown();
+        // ON: the path arms at nonce 5; nothing goes before the burn.
+        r.exec.exec.live_nonce_burn = true;
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d.join("c2-burn"), r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(
+            x.buy_refusal(U256::ZERO, Some(&c2), Some(5)),
+            Some((
+                Refusal::ExitFirst,
+                Some(crate::sources::LIVE_NONCE_BURN_FIRST)
+            ))
+        );
+        while r.requests.try_recv().is_ok() {}
+        let clock = a_clock();
+        let intents = x.burn(&c2, &clock, DECIDED_MS);
+        assert_eq!(intents.len(), 1, "{:?}", reason(&x));
+        assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
+        let signed = decode_signed(&intents[0].raw).unwrap();
+        assert_eq!(
+            (signed.tx.nonce, signed.tx.to, signed.tx.gas_limit),
+            (5, Address::from(r.buyer), TRANSFER_GAS)
+        );
+        assert!(signed.tx.value.is_zero() && signed.tx.input.is_empty());
+        let burn = intents[0].handoff.tx_hash;
+        let released = x.book().tx(&burn).unwrap();
+        assert_eq!(
+            (released.released.intent, released.state),
+            (LiveIntentKind::Burn, FactKind::Released)
+        );
+        // Its most: its transfer gas at the signed price (what tells a burn
+        // of this price spent).
+        assert_eq!(
+            released.released.max_wei,
+            Some(U256::from(r.exec.exec.gas_price_wei) * U256::from(TRANSFER_GAS))
+        );
+        // Review MEDIUM-1: its journaled release reads back (kind 4).
+        let i = &intents[0];
+        let record = crate::runtime_journal::live_release_payload(
+            i.kind.code(),
+            None,
+            &i.handoff,
+            [0; 32],
+            i.token,
+            i.block,
+            &i.times,
+            &i.raw,
+        );
+        let read = crate::runtime_journal::live_release_of(&record).unwrap();
+        assert_eq!((read.kind, read.tx_hash), (4, burn));
+        // The owner admitted it as a burn (its spend entry reads).
+        let admitted = crate::sources::admitted_intents(&r.state).unwrap();
+        assert!(
+            admitted
+                .iter()
+                .any(|a| a.tx_hash == burn && a.kind == LiveIntentKind::Burn),
+            "{admitted:?}"
+        );
+        // Once while its window runs.
+        assert!(x.burn(&c2, &clock, DECIDED_MS).is_empty());
+        // Included: its transaction is replaced by it; the burn costs its
+        // gas and holds no lot.
+        let gas = crate::chain_follower::TxCost {
+            gas_used: TRANSFER_GAS,
+            effective_gas_price: 1_000_000_000,
+        };
+        include(
+            &mut x,
+            &mut c2,
+            vec![CanonicalTx {
+                hash: burn,
+                index: 0,
+                sender: r.buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: Some(gas),
+            }],
+        );
+        let book = x.book();
+        assert_eq!(book.tx(&TARGET).unwrap().state, FactKind::Replaced);
+        assert_eq!(
+            book.tx(&TARGET).unwrap().inclusion.as_ref().unwrap().by_tx,
+            Some(burn)
+        );
+        assert_eq!(book.tx(&burn).unwrap().state, FactKind::Included);
+        assert!(
+            book.positions
+                .iter()
+                .all(|p| p.lot != burn && p.token != [0; 20])
+        );
+        assert_eq!(book.gas_wei, U256::from(gas.wei()));
+        assert_eq!(book.realized_pnl_wei, -(gas.wei() as i128));
+        settle(&mut x, &c2);
+        assert!(x.burn_target().is_none());
+        assert!(x.burn(&c2, &clock, DECIDED_MS).is_empty());
+        // The path goes on at the next nonce: nothing unresolved holds it.
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(x.book().unresolved().next().is_none());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// The tests' unresolved transaction at `nonce` whose window is unknown
+    /// (its bytes may land at any height).
+    fn unknown_window(hash: [u8; 32], nonce: u64, component: ComponentId) -> Fact {
+        Fact {
+            kind: FactKind::Released,
+            tx_hash: hash,
+            intent: LiveIntentKind::Buy,
+            component,
+            token: [0x55; 20],
+            nonce,
+            grant_generation: 1,
+            input_wei: Some(U256::from(1u64)),
+            max_wei: Some(U256::from(2u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: None,
+            by_tx: None,
+            response: None,
+            origin: None,
+            launcher: None,
+            placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
+        }
+    }
+
+    /// R3b review MEDIUM-2: a burn whose window ended without its inclusion
+    /// is spent: its bytes are never handed over again (named
+    /// NONCE_BURN_SPENT, no admission tried); another goes only at another
+    /// gas price, and that one replaces the transaction.
+    #[test]
+    fn a_burn_that_never_landed_is_spent_until_another_gas_price() {
+        const TARGET: [u8; 32] = [0x7a; 32];
+        let mut r = Rig::new("live-burn-spent", LiveStrategies::C3);
+        r.exec.exec.live_nonce_burn = true;
+        let ledger = Ledger::open(&r.state);
+        ledger
+            .append(&unknown_window(TARGET, 5, ComponentId::ExecC3), 1)
+            .unwrap();
+        ledger
+            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let clock = a_clock();
+        let first = x.burn(&c2, &clock, DECIDED_MS);
+        assert_eq!(first.len(), 1);
+        let first = first[0].handoff.tx_hash;
+        let last = x.book().tx(&first).unwrap().released.max_block.unwrap();
+        // Its window ends: no block includes it.
+        let mut parent = 0xb1;
+        for n in HEAD + 1..=last + 1 {
+            let h = (n - HEAD) as u8 + 0xb1;
+            feed(
+                &mut x,
+                &mut c2,
+                vec![block_of(n, h, parent, Vec::new()), complete_of(n, h)],
+            );
+            parent = h;
+        }
+        settle(&mut x, &c2);
+        assert!(x.burn(&c2, &clock, DECIDED_MS).is_empty());
+        assert!(refused_by(&x, "NONCE_BURN_SPENT"), "{:?}", reason(&x));
+        assert!(refused_by(&x, "NONCE_BURN_WANTED"));
+        assert!(!refused_by(&x, "NONCE_BURN_REFUSED"), "no admission tried");
+        x.shutdown();
+        // Another gas price: another burn, other bytes.
+        r.exec.exec.gas_price_wei -= 1;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let again = x.burn(&c2, &clock, DECIDED_MS);
+        assert_eq!(again.len(), 1, "{:?}", reason(&x));
+        let second = again[0].handoff.tx_hash;
+        assert_ne!(second, first);
+        include(
+            &mut x,
+            &mut c2,
+            vec![CanonicalTx {
+                hash: second,
+                index: 0,
+                sender: r.buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: None,
+            }],
+        );
+        let book = x.book();
+        assert_eq!(book.tx(&TARGET).unwrap().state, FactKind::Replaced);
+        assert_eq!(book.tx(&first).unwrap().state, FactKind::Replaced);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R3b review MEDIUM-3: a burn is admitted as an exit step is: under a
+    /// grant that admits no BUY (EXIT-ONLY) the path arms for it all the
+    /// same, and the burn goes.
+    #[test]
+    fn a_burn_arms_the_path_where_no_buy_may_go() {
+        const TARGET: [u8; 32] = [0x7b; 32];
+        let mut r = Rig::new("live-burn-exit-only", LiveStrategies::StrategyC);
+        r.exec.exec.live_nonce_burn = true;
+        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let grant = LiveGrant {
+            max_input_wei: 10_000_000_000_000_000,
+            max_spend_wei: 100_000_000_000_000_000,
+            adapters: vec![LiveAdapter::Club48BuilderV1],
+            exit_only: true,
+            ..grant_of(NOW + 3_600_000, LiveStrategies::StrategyC)
+        };
+        let g = s.current().unwrap().generation;
+        assert!(
+            s.grant_live("exit-only", grant.clone(), grant.scope_sha256(), g, NOW)
+                .unwrap()
+                .applied()
+        );
+        let ledger = Ledger::open(&r.state);
+        ledger
+            .append(&unknown_window(TARGET, 0, ComponentId::StrategyC), 1)
+            .unwrap();
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed(), "no position, no burn: nothing to arm for");
+        ledger
+            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .unwrap();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let burnt = x.burn(&c2, &a_clock(), DECIDED_MS);
+        assert_eq!(burnt.len(), 1, "{:?}", reason(&x));
+        assert_eq!(burnt[0].kind, crate::paper_exec::IntentKind::Burn);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R3b review LOW-2, LOW-3: a burn requested of another sender's
+    /// transaction (a fact written outside `request_burn`) is never the
+    /// buyer's to burn; a burn's gas is a realized loss of its grant (and
+    /// day) as any position's: the grant's loss bound holds BUYs back.
+    #[test]
+    fn a_burn_is_the_buyers_only_and_its_gas_counts_in_the_loss_bounds() {
+        use crate::sources::{LIVE_REALIZED_LOSS_MAX, NonceOrigin};
+        let limits = crate::sources::GrantLimits {
+            max_realized_loss_wei: 1_000,
+            max_daily_realized_loss_wei: 1_000,
+            ..crate::sources::tests::TEST_LIMITS
+        };
+        let mut r = limited("live-burn-loss", limits);
+        r.exec.exec.live_nonce_burn = true;
+        let g = granted_generation(&r.state);
+        let ledger = Ledger::open(&r.state);
+        // Another sender's transaction, a burn requested of it.
+        let other = Fact {
+            origin: Some(NonceOrigin {
+                chain_id: crate::wss::BSC_MAINNET_CHAIN_ID,
+                sender: [0x0e; 20],
+            }),
+            ..unknown_window([0x7c; 32], 3, ComponentId::StrategyC)
+        };
+        ledger.append(&other, 1).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    operator: Some(crate::live_ledger::Operator {
+                        request_id: "burn-o".into(),
+                        decided_by: "operator".into(),
+                        evidence: None,
+                        at_ms: NOW,
+                    }),
+                    ..Fact::about(&other, FactKind::BurnRequested)
+                },
+                2,
+            )
+            .unwrap();
+        // OFF: not the buyer's request to hold back either.
+        r.exec.exec.live_nonce_burn = false;
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!refused_by(&x, "NONCE_BURN_LOCKED"), "{:?}", reason(&x));
+        x.shutdown();
+        r.exec.exec.live_nonce_burn = true;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.burn_target().is_none());
+        let t = x.book().tx(&[0x7c; 32]).unwrap().clone();
+        assert!(!x.burnable(&t));
+        x.shutdown();
+        // A burn of this grant included at nonce 4, its gas above the bound.
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 2, [0x42; 32], NOW)),
+                    ..Fact::about(&other, FactKind::Replaced)
+                },
+                3,
+            )
+            .unwrap();
+        let burn = Fact {
+            tx_hash: [0x7d; 32],
+            intent: LiveIntentKind::Burn,
+            token: [0; 20],
+            nonce: 4,
+            grant_generation: g,
+            max_block: Some(HEAD),
+            origin: None,
+            ..unknown_window([0; 32], 4, ComponentId::StrategyC)
+        };
+        ledger.append(&burn, 4).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 1, [0x41; 32], NOW)),
+                    gas_wei: Some(U256::from(5_000u64)),
+                    ..Fact::about(&burn, FactKind::Included)
+                },
+                5,
+            )
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.book().burn_gas(|_| true), U256::from(5_000u64));
+        assert_eq!(
+            x.buy_refusal(U256::ZERO, Some(&c2), Some(5)),
+            Some((Refusal::GrantLimit, Some(LIVE_REALIZED_LOSS_MAX)))
+        );
+        x.shutdown();
+        r.clean();
+        // Review NIT-2: the day's bound alone (the grant's far): the burn's
+        // gas, included today, holds BUYs back.
+        let mut r = limited(
+            "live-burn-day",
+            crate::sources::GrantLimits {
+                max_realized_loss_wei: 1_000_000,
+                ..limits
+            },
+        );
+        r.exec.exec.live_nonce_burn = true;
+        let ledger = Ledger::open(&r.state);
+        let burn = Fact {
+            grant_generation: granted_generation(&r.state),
+            ..burn
+        };
+        ledger.append(&burn, 1).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 1, [0x41; 32], NOW)),
+                    gas_wei: Some(U256::from(5_000u64)),
+                    ..Fact::about(&burn, FactKind::Included)
+                },
+                2,
+            )
+            .unwrap();
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(
+            x.buy_refusal(U256::ZERO, Some(&c2), Some(5)),
+            Some((
+                Refusal::GrantLimit,
+                Some(crate::sources::LIVE_DAILY_LOSS_MAX)
+            ))
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R3b review LOW-N1, NIT-1: a burn the operator requests between two
+    /// ticks (the book folded again as a block's facts are written) holds
+    /// a BUY back at once, as it frees the nonce; every requested
+    /// transaction of the buyer at the next nonce is free, one not
+    /// requested there blocks. The burn replaces them all.
+    #[test]
+    fn a_burn_requested_between_ticks_holds_a_buy_at_once() {
+        const A: [u8; 32] = [0x7e; 32];
+        const B: [u8; 32] = [0x7f; 32];
+        let mut r = Rig::new("live-burn-between", LiveStrategies::C3);
+        r.exec.exec.live_nonce_burn = true;
+        let ledger = Ledger::open(&r.state);
+        for (tx, at) in [(A, 1), (B, 2)] {
+            ledger
+                .append(&unknown_window(tx, 5, ComponentId::ExecC3), at)
+                .unwrap();
+        }
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed(), "both block");
+        ledger
+            .request_burn(A, Some(r.buyer), "burn-a", "operator", true, NOW)
+            .unwrap();
+        x.refold();
+        assert_eq!(x.free_nonce(&c2), None, "B, not requested, blocks");
+        ledger
+            .request_burn(B, Some(r.buyer), "burn-b", "operator", true, NOW)
+            .unwrap();
+        x.refold();
+        assert_eq!(x.free_nonce(&c2), Some(5));
+        assert_eq!(
+            x.buy_refusal(U256::ZERO, Some(&c2), Some(5)),
+            Some((
+                Refusal::ExitFirst,
+                Some(crate::sources::LIVE_NONCE_BURN_FIRST)
+            ))
+        );
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let burnt = x.burn(&c2, &a_clock(), DECIDED_MS);
+        assert_eq!(burnt.len(), 1, "{:?}", reason(&x));
+        include(
+            &mut x,
+            &mut c2,
+            vec![CanonicalTx {
+                hash: burnt[0].handoff.tx_hash,
+                index: 0,
+                sender: r.buyer,
+                nonce: 5,
+                succeeded: true,
+                cost: None,
+            }],
+        );
+        for tx in [A, B] {
+            assert_eq!(x.book().tx(&tx).unwrap().state, FactKind::Replaced);
+        }
+        assert!(x.burn_target().is_none());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R3b review NIT-4: a burn of no lot (an earlier burn's, its window
+    /// unknown) with nothing open arms the path on its own gas; short of
+    /// that, UNFUNDED names the burn.
+    #[test]
+    fn a_burn_of_no_lot_arms_on_its_own_gas() {
+        const TARGET: [u8; 32] = [0x70; 32];
+        let mut r = Rig::new("live-burn-funds", LiveStrategies::StrategyC);
+        r.exec.exec.live_nonce_burn = true;
+        let ledger = Ledger::open(&r.state);
+        let earlier = Fact {
+            intent: LiveIntentKind::Burn,
+            token: [0; 20],
+            input_wei: None,
+            ..unknown_window(TARGET, 0, ComponentId::StrategyC)
+        };
+        ledger.append(&earlier, 1).unwrap();
+        ledger
+            .request_burn(TARGET, Some(r.buyer), "burn-1", "operator", true, NOW)
+            .unwrap();
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        let mut x = r.probed("boot-1", one_burn);
+        assert_eq!(x.burn_cost(), U256::from(ONE_BURN_WEI));
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(x.book().positions.is_empty());
+        let burnt = x.burn(&c2, &a_clock(), DECIDED_MS);
+        assert_eq!(burnt.len(), 1, "{:?}", reason(&x));
+        x.shutdown();
+        let mut x = r.probed("boot-1", empty);
+        settle(&mut x, &c2);
+        let (state, why) = reason(&x);
+        assert_eq!(state, "UNFUNDED");
+        assert!(why.as_deref().unwrap().contains("nonce burn"), "{why:?}");
+        x.shutdown();
         r.clean();
     }
 

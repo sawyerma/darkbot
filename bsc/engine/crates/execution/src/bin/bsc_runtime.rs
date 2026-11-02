@@ -12,6 +12,7 @@
 //! bsc_runtime live attempts --rundir <dir> --state <dir> --config <ingress.public.env> [--manifest <live_campaign.env>] [--witness-dir <dir>]
 //! bsc_runtime live campaign-precommit --rundir <dir> --manifest <live_campaign.env> --decided-by <who>
 //! bsc_runtime live lot resume|write-off|exit-now --lot <0x hash> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
+//! bsc_runtime live nonce-burn --tx <0x hash> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
 //! bsc_runtime live adopt-g07 --g08 <result.dbrec> --capture <chain journal> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
 //! bsc_runtime live ledger check --state <dir>
 //! bsc_runtime live ledger quarantine --seq <n> --state <dir> --request-id <id> --decided-by <who>
@@ -94,7 +95,14 @@
 //! stopped exits go on and its curve be read again, `write-off` ends it as
 //! lost (its input and gas; no exit, no BUY held back by it; nothing of
 //! its exit out), `exit-now` wants its exit now (`BSC_EXEC_LIVE_OPERATOR_EXIT`
-//! ON). `live adopt-g07` takes a G0.7 BUY's acquisition from its G0.8
+//! ON). `live nonce-burn` (R3b) writes the operator's wish to burn the
+//! nonce of an unresolved transaction whose signed bytes may still land
+//! (its block left the chain, or its window is unknown), once per request
+//! ID (`BSC_EXEC_LIVE_NONCE_BURN` ON): the armed runtime sends the buyer's
+//! plain transfer of nothing to itself at that nonce, as an exit step
+//! goes; one that never landed is not sent again at the same gas price
+//! (NONCE_BURN_SPENT; another goes once `BSC_EXEC_GAS_PRICE_WEI` and
+//! `BSC_STRATEGY_C_GAS_PRICE_WEI` change together). `live adopt-g07` takes a G0.7 BUY's acquisition from its G0.8
 //! result and chain capture as an included lot of the LIVE buyer (its
 //! launch's block final). The running runtime acts on both at its next
 //! reconcile. `live ledger check` decodes every LIVE ledger entry on its
@@ -567,6 +575,33 @@ fn run(args: &[String]) -> Result<bool, String> {
             match written {
                 Some(seq) => println!("lot=0x{} decision={what:?} fact={seq}", hex(&lot)),
                 None => println!("lot=0x{} decision={what:?} written before", hex(&lot)),
+            }
+            Ok(true)
+        }
+        // REV.1.0 R3b: the operator's nonce burn of an unresolved
+        // transaction (its hash) as a ledger fact, once per request; the
+        // armed runtime burns the nonce.
+        [area, cmd, rest @ ..] if area == "live" && cmd == "nonce-burn" => {
+            use darkbot_bsc_execution::live_ledger::Ledger;
+            let tx = flag(rest, "--tx")?;
+            let tx = hex32(tx.strip_prefix("0x").unwrap_or(tx))
+                .ok_or("--tx is the transaction's hash, 0x and 64 lowercase hex digits")?;
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let nonce_burn = config.exec.as_ref().is_some_and(|x| x.exec.live_nonce_burn);
+            let buyer = config.live.as_ref().map(|l| l.buyer);
+            let written = Ledger::open(std::path::Path::new(flag(rest, "--state")?)).request_burn(
+                tx,
+                buyer,
+                flag(rest, "--request-id")?,
+                flag(rest, "--decided-by")?,
+                nonce_burn,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            match written {
+                Some(seq) => println!("tx=0x{} burn requested fact={seq}", hex(&tx)),
+                None => println!("tx=0x{} burn requested before", hex(&tx)),
             }
             Ok(true)
         }
@@ -1119,7 +1154,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--scope-sha256 H --expect-generation N --request-id ID --state DIR] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | live lot resume|write-off|exit-now --lot H --state DIR --config FILE --request-id ID --decided-by WHO | live nonce-burn --tx H --state DIR --config FILE --request-id ID --decided-by WHO | live adopt-g07 --g08 FILE --capture FILE --state DIR --config FILE --request-id ID --decided-by WHO | live ledger check --state DIR | live ledger quarantine --seq N --state DIR --request-id ID --decided-by WHO | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 

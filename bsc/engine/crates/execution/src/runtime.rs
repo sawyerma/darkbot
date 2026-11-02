@@ -384,6 +384,7 @@ impl RuntimeConfig {
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
+        let nonce_burn = values.remove("BSC_EXEC_LIVE_NONCE_BURN");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -565,6 +566,9 @@ impl RuntimeConfig {
                 if operator_exit.is_some() {
                     return Err("BSC_EXEC_LIVE_OPERATOR_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if nonce_burn.is_some() {
+                    return Err("BSC_EXEC_LIVE_NONCE_BURN needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -645,6 +649,16 @@ impl RuntimeConfig {
                                 ));
                             }
                             None => return Err("BSC_EXEC_LIVE_OPERATOR_EXIT is required".into()),
+                        },
+                        live_nonce_burn: match nonce_burn {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_NONCE_BURN={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_NONCE_BURN is required".into()),
                         },
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
@@ -914,6 +928,36 @@ fn journal_live(
             ),
         );
     }
+}
+
+/// REV.1.0 R3b: at a block's complete state, before any decision takes the
+/// next nonce, the operator's nonce burn when one is wanted and the LIVE
+/// path is armed ([`LiveRuntime::burn`]), journaled as its release.
+fn burn_nonce(
+    live: &mut Option<LiveRuntime>,
+    owner: &Option<StateOwner>,
+    clock: Clock,
+    journal: &mut RuntimeJournal,
+) {
+    let (Some(l), Some(o)) = (live.as_mut(), owner.as_ref()) else {
+        return;
+    };
+    if !l.armed() {
+        return;
+    }
+    let now_unix_ms = wall_or_expired(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| u64::try_from(d.as_millis()).ok())
+            .ok_or_else(|| "wall clock before 1970".to_string()),
+    );
+    let clk = FnClock {
+        id: CLOCK_ID_MONOTONIC,
+        now: || clock.now_ns(),
+    };
+    let intents = l.burn(o, &clk, now_unix_ms);
+    journal_live(journal, &intents);
 }
 
 /// Phase I: Strategy C's decisions of the records just applied go to the
@@ -1288,6 +1332,7 @@ fn apply_canonical(
     // a BUY is planned on it.
     c.refresh_confirmation(live, wall_or_expired(observed_now()));
     if let Some(block) = complete {
+        burn_nonce(live, owner, clock, journal);
         strategy_to_paper(c, exec, live, owner, clock, journal, block);
         ask_lot_reads(c, live, block);
         ask_recoveries(c, live, block);
@@ -4575,6 +4620,9 @@ mod tests {
             // R3: the operator exit switch, required and exact.
             CONFIG.replace("BSC_EXEC_LIVE_OPERATOR_EXIT=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_OPERATOR_EXIT=OFF", "BSC_EXEC_LIVE_OPERATOR_EXIT=on"),
+            // R3b: the nonce burn switch, required and exact.
+            CONFIG.replace("BSC_EXEC_LIVE_NONCE_BURN=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_NONCE_BURN=OFF", "BSC_EXEC_LIVE_NONCE_BURN=1"),
             CONFIG.replace("BSC_STATE_WATCHED=\n", ""),
             CONFIG.replace("BSC_STATE_WATCHED=\n", "BSC_STATE_WATCHED=0x12\n"),
             CONFIG.replace(
@@ -4614,6 +4662,20 @@ mod tests {
         assert!(exit(&CONFIG.replace(
             "BSC_EXEC_LIVE_OPERATOR_EXIT=OFF",
             "BSC_EXEC_LIVE_OPERATOR_EXIT=ON"
+        )));
+        // R3b: the nonce burn likewise.
+        let burn = |text: &str| {
+            RuntimeConfig::parse(text)
+                .unwrap()
+                .exec
+                .unwrap()
+                .exec
+                .live_nonce_burn
+        };
+        assert!(!burn(CONFIG));
+        assert!(burn(&CONFIG.replace(
+            "BSC_EXEC_LIVE_NONCE_BURN=OFF",
+            "BSC_EXEC_LIVE_NONCE_BURN=ON"
         )));
     }
 

@@ -137,7 +137,7 @@ pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
 /// One LIVE transaction the release took (plan 28.10.; REV.1.0 R2: the
 /// attempt's record, master plan §8–§9), a `Runtime` record: `l | layout u8
 /// ([`LIVE_RELEASE_LAYOUT`]; the layout before it had the kind here and is
-/// refused) | kind u8 (0 C3 BUY, 1 BUY, 2 approval, 3 SELL) | trigger u8 (the sighting's
+/// refused) | kind u8 (0 C3 BUY, 1 BUY, 2 approval, 3 SELL, 4 R3b burn) | trigger u8 (the sighting's
 /// source; [`NO_TRIGGER`] for a decision on a block) | tx_hash [32] |
 /// attempt [32] | launch hash [32] (zero for Strategy C) | token [20] |
 /// head block u64 (0 for C3) | clock id u32 | ingress or decision,
@@ -349,7 +349,8 @@ pub fn live_release_of(p: &[u8]) -> Result<LiveRelease, &'static str> {
         p.get(at..at + 32).ok_or(bad)?.try_into().map_err(|_| bad)
     };
     let kind = p[2];
-    if kind > 3 {
+    // 0 C3 BUY, 1 BUY, 2 approval, 3 SELL, 4 (R3b) a nonce burn.
+    if kind > 4 {
         return Err(bad);
     }
     let trigger = match p[3] {

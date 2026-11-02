@@ -918,6 +918,7 @@ impl End for LiveEnd {
             ExpectedTx::Buy(_) => LiveIntentKind::Buy,
             ExpectedTx::Approve(_) => LiveIntentKind::Approve,
             ExpectedTx::Sell(_) => LiveIntentKind::Sell,
+            ExpectedTx::Burn(_) => LiveIntentKind::Burn,
         };
         // BSC3-036: a canonical head older than the bound: the canonical
         // source is stalled or cut off; nothing is planned on it (before

@@ -69,6 +69,10 @@ pub enum FactKind {
     ExitRequested,
     /// A G0.7 BUY's acquisition as an included lot (a first fact).
     Adopted,
+    /// R3b, of an unresolved transaction whose bytes may still land: its
+    /// nonce is to be burnt (the buyer's plain transfer of nothing to
+    /// itself at it, through the armed path).
+    BurnRequested,
 }
 
 /// REV.1.0 R3: who decided an operator's fact, and on what.
@@ -163,6 +167,7 @@ impl FactKind {
             Self::WrittenOff => "WRITTEN_OFF",
             Self::ExitRequested => "EXIT_REQUESTED",
             Self::Adopted => "ADOPTED",
+            Self::BurnRequested => "BURN_REQUESTED",
         }
     }
 
@@ -181,6 +186,7 @@ impl FactKind {
             Self::WrittenOff,
             Self::ExitRequested,
             Self::Adopted,
+            Self::BurnRequested,
         ]
         .into_iter()
         .find(|k| k.name() == text)
@@ -199,7 +205,11 @@ impl FactKind {
     pub fn operators(self) -> bool {
         matches!(
             self,
-            Self::Resumed | Self::WrittenOff | Self::ExitRequested | Self::Adopted
+            Self::Resumed
+                | Self::WrittenOff
+                | Self::ExitRequested
+                | Self::Adopted
+                | Self::BurnRequested
         )
     }
 }
@@ -209,6 +219,7 @@ fn intent_of(text: &str) -> Option<LiveIntentKind> {
         LiveIntentKind::Buy,
         LiveIntentKind::Approve,
         LiveIntentKind::Sell,
+        LiveIntentKind::Burn,
     ]
     .into_iter()
     .find(|k| k.name() == text)
@@ -956,6 +967,8 @@ pub struct Decided {
     /// WRITTEN_OFF: when (its fact's time).
     pub written_off: Option<u64>,
     pub exit_requested: bool,
+    /// R3b: BURN_REQUESTED of an unresolved transaction (its nonce).
+    pub burn_requested: bool,
 }
 
 impl Tx {
@@ -1062,6 +1075,20 @@ impl Book {
         self.txs.iter().find(|t| t.released.tx_hash == *tx_hash)
     }
 
+    /// R3b: the gas the nonce burns of `of` paid (included or reverted):
+    /// of no lot, a loss of its grant and its day all the same.
+    pub fn burn_gas(&self, of: impl Fn(&Tx) -> bool) -> U256 {
+        self.txs
+            .iter()
+            .filter(|t| {
+                t.released.intent == LiveIntentKind::Burn
+                    && matches!(t.state, FactKind::Included | FactKind::Reverted)
+                    && of(t)
+            })
+            .map(Tx::gas)
+            .fold(U256::ZERO, |a, b| a + b)
+    }
+
     /// The lot `tx_hash` counts in.
     pub fn lot_of(&self, tx_hash: &[u8; 32]) -> Option<&Position> {
         let lot = self.tx(tx_hash)?.lot?;
@@ -1145,7 +1172,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                         .iter()
                         .filter(|t| {
                             t.released.token == f.token
-                                && t.released.intent != LiveIntentKind::Buy
+                                && t.released.intent.exit_step()
                                 && t.state == FactKind::Reverted
                         })
                         .map(|t| t.released.tx_hash)
@@ -1164,6 +1191,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                         t.decided.written_off = f.operator.as_ref().map(|o| o.at_ms);
                     }
                     FactKind::ExitRequested => t.decided.exit_requested = true,
+                    FactKind::BurnRequested => t.decided.burn_requested = true,
                     FactKind::Responded => t.responses.extend(f.response.clone()),
                     FactKind::Placed => {
                         t.placement = f.placement;
@@ -1193,6 +1221,8 @@ pub fn fold(facts: &[Fact]) -> Book {
         }
     }
     let mut book = Book::default();
+    // R3b: what the nonce burns cost (of no lot).
+    let mut burnt = U256::ZERO;
     for t in &mut txs {
         // A withdrawn transaction never left, a replaced one never
         // happened: no lot, no cost.
@@ -1202,6 +1232,13 @@ pub fn fold(facts: &[Fact]) -> Book {
         let spent = matches!(t.state, FactKind::Included | FactKind::Reverted);
         if spent {
             book.gas_wei += t.gas();
+        }
+        // A nonce burn is of no token and no lot: its gas only.
+        if t.released.intent == LiveIntentKind::Burn {
+            if spent {
+                burnt += t.gas();
+            }
+            continue;
         }
         let token = t.released.token;
         // A BUY opens a lot of its own; an exit step counts in its token's
@@ -1283,6 +1320,7 @@ pub fn fold(facts: &[Fact]) -> Book {
         };
         book.realized_pnl_wei = book.realized_pnl_wei.saturating_add(p.pnl_wei.unwrap_or(0));
     }
+    book.realized_pnl_wei = book.realized_pnl_wei.saturating_sub(signed(burnt));
     // Review L2: from every PLACED fact, also one whose block left the
     // chain later (re-enabling is the operator's new grant, never a reorg).
     book.misplaced = facts
@@ -1308,6 +1346,11 @@ pub const LIVE_LOT_EXIT_OUT: &str = "LIVE_LOT_EXIT_OUT";
 pub const LIVE_OPERATOR_EXIT_OFF: &str = "LIVE_OPERATOR_EXIT_OFF";
 /// The request ID answers another decision already.
 pub const LIVE_REQUEST_REUSED: &str = "LIVE_REQUEST_REUSED";
+/// R3b: `BSC_EXEC_LIVE_NONCE_BURN` is OFF.
+pub const LIVE_NONCE_BURN_OFF: &str = "LIVE_NONCE_BURN_OFF";
+/// R3b: a burn requested of a transaction no burn is for: not unresolved,
+/// or its window bounds it (it resolves at its end without one).
+pub const LIVE_BURN_REFUSED: &str = "LIVE_BURN_REFUSED";
 /// A G0.8 result whose BUY cannot be adopted as a lot.
 pub const LIVE_ADOPTION_REFUSED: &str = "LIVE_ADOPTION_REFUSED";
 
@@ -1599,7 +1642,7 @@ impl Ledger {
             })?;
         let out = book
             .unresolved()
-            .any(|t| t.lot == Some(lot) && t.released.intent != LiveIntentKind::Buy);
+            .any(|t| t.lot == Some(lot) && t.released.intent.exit_step());
         if what != LotDecision::Resume && (out || p.state != PositionState::Open) {
             return Err(format!("{LIVE_LOT_EXIT_OUT}: a step of its exit is out"));
         }
@@ -1614,6 +1657,68 @@ impl Ledger {
                 at_ms: now_ms,
             }),
             ..Fact::about(&buy.released, kind)
+        };
+        self.append(&fact, now_ms).map(Some)
+    }
+
+    /// REV.1.0 R3b (`bsc_runtime live nonce-burn`): the operator wants the
+    /// nonce of the unresolved transaction `tx` burnt, once per request: a
+    /// transaction whose signed bytes may still land at any height (its
+    /// block left the chain, or its window is not known) and keep the LIVE
+    /// path from arming. Refused while `BSC_EXEC_LIVE_NONCE_BURN` is OFF.
+    /// The running runtime burns it at its next pass, when its nonce is
+    /// the buyer's next and the path is armed.
+    pub fn request_burn(
+        &self,
+        tx: [u8; 32],
+        buyer: Option<[u8; 20]>,
+        request_id: &str,
+        decided_by: &str,
+        nonce_burn: bool,
+        now_ms: u64,
+    ) -> Result<Option<u64>, String> {
+        let _deciding = self.operator_lock()?;
+        let facts = self.facts()?;
+        if let Some(seen) = Self::request_seen(&facts, request_id, decided_by, |f| {
+            f.kind == FactKind::BurnRequested && f.tx_hash == tx
+        })? {
+            return Ok(seen);
+        }
+        if !nonce_burn {
+            return Err(LIVE_NONCE_BURN_OFF.into());
+        }
+        let buyer = buyer.ok_or("BSC_LIVE_BUYER is not configured")?;
+        let book = fold(&facts);
+        let target = book
+            .unresolved()
+            .find(|t| t.released.tx_hash == tx)
+            .ok_or_else(|| {
+                format!(
+                    "{LIVE_BURN_REFUSED}: 0x{} is no unresolved transaction of the ledger",
+                    hex(&tx)
+                )
+            })?;
+        if !target.orphaned && target.released.max_block.is_some() {
+            return Err(format!(
+                "{LIVE_BURN_REFUSED}: 0x{}'s window bounds it (it resolves without a burn)",
+                hex(&tx)
+            ));
+        }
+        // Review LOW-2: the buyer burns its own nonces only.
+        if target.released.origin.is_some_and(|o| o.sender != buyer) {
+            return Err(format!(
+                "{LIVE_BURN_REFUSED}: 0x{} is another sender's than the buyer",
+                hex(&tx)
+            ));
+        }
+        let fact = Fact {
+            operator: Some(Operator {
+                request_id: request_id.into(),
+                decided_by: decided_by.into(),
+                evidence: None,
+                at_ms: now_ms,
+            }),
+            ..Fact::about(&target.released, FactKind::BurnRequested)
         };
         self.append(&fact, now_ms).map(Some)
     }
@@ -2336,6 +2441,112 @@ mod tests {
         );
         fs::remove_file(path).unwrap();
         assert_eq!(Ledger::open(&dir).facts().unwrap().len(), 3);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// REV.1.0 R3b: a nonce burn is requested once per request, only with
+    /// the switch ON, only of an unresolved transaction of the buyer whose
+    /// bytes may still land (its window unknown, or its block left the
+    /// chain); its
+    /// fact names the operator and folds into the transaction. A burn holds
+    /// no lot: its gas counts in the ledger's gas and its realized result.
+    #[test]
+    fn a_burn_is_requested_once_of_a_transaction_whose_bytes_may_still_land() {
+        let dir = r3_dir("burn");
+        let ledger = Ledger::open(&dir);
+        let unknown = Fact {
+            max_block: None,
+            ..released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300)
+        };
+        let bounded = released(2, LiveIntentKind::Buy, 0xB, 1_000, 1_300);
+        let orphaned = released(3, LiveIntentKind::Sell, 0xC, 0, 300);
+        let inclusion = included(&orphaned, 5, 0, 7, 0);
+        for f in [&unknown, &bounded, &orphaned, &inclusion] {
+            ledger.append(f, 10).unwrap();
+        }
+        ledger
+            .append(
+                &Fact {
+                    block: inclusion.block,
+                    ..Fact::about(&orphaned, FactKind::Orphaned)
+                },
+                11,
+            )
+            .unwrap();
+        let me = Some(crate::sources::tests::ORIGIN.sender);
+        assert_eq!(
+            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", false, 20),
+            Err(LIVE_NONCE_BURN_OFF.into())
+        );
+        for tx in [bounded.tx_hash, [0x99; 32]] {
+            let e = ledger
+                .request_burn(tx, me, "b-x", "operator", true, 20)
+                .unwrap_err();
+            assert!(e.starts_with(LIVE_BURN_REFUSED), "{e}");
+        }
+        // Review LOW-2: another sender's transaction is not the buyer's to
+        // burn; without a configured buyer nothing is.
+        let e = ledger
+            .request_burn(
+                unknown.tx_hash,
+                Some([0xEE; 20]),
+                "b-o",
+                "operator",
+                true,
+                20,
+            )
+            .unwrap_err();
+        assert!(e.starts_with(LIVE_BURN_REFUSED), "{e}");
+        assert_eq!(
+            ledger.request_burn(unknown.tx_hash, None, "b-n", "operator", true, 20),
+            Err("BSC_LIVE_BUYER is not configured".into())
+        );
+        let first = ledger
+            .request_burn(unknown.tx_hash, me, "b-1", "operator", true, 20)
+            .unwrap();
+        assert!(first.is_some());
+        assert_eq!(
+            ledger.request_burn(unknown.tx_hash, me, "b-1", "operator", true, 21),
+            Ok(None)
+        );
+        assert!(
+            ledger
+                .request_burn(orphaned.tx_hash, me, "b-1", "operator", true, 21)
+                .unwrap_err()
+                .starts_with(LIVE_REQUEST_REUSED)
+        );
+        assert!(
+            ledger
+                .request_burn(orphaned.tx_hash, me, "b-2", "operator", true, 22)
+                .unwrap()
+                .is_some(),
+            "a transaction once included in a block that left the chain"
+        );
+        let facts = Ledger::open(&dir).facts().unwrap();
+        let fact = facts
+            .iter()
+            .find(|f| f.kind == FactKind::BurnRequested && f.tx_hash == unknown.tx_hash)
+            .unwrap();
+        assert_eq!(
+            fact.operator
+                .as_ref()
+                .map(|o| (o.request_id.as_str(), o.decided_by.as_str())),
+            Some(("b-1", "operator"))
+        );
+        let book = fold(&facts);
+        assert!(book.tx(&unknown.tx_hash).unwrap().decided.burn_requested);
+        assert!(!book.tx(&bounded.tx_hash).unwrap().decided.burn_requested);
+        // The burn itself: no lot, its gas in the gas and the result.
+        let burn = Fact {
+            token: [0; 20],
+            ..released(4, LiveIntentKind::Burn, 0, 0, 21)
+        };
+        let lots = book.positions.len();
+        let burnt = fold(&[facts, vec![burn.clone(), included(&burn, 6, 21, 0, 0)]].concat());
+        assert_eq!(burnt.positions.len(), lots);
+        assert_eq!(burnt.tx(&burn.tx_hash).unwrap().lot, None);
+        assert_eq!(burnt.gas_wei, book.gas_wei + U256::from(21u64));
+        assert_eq!(burnt.realized_pnl_wei, book.realized_pnl_wei - 21);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -275,6 +275,9 @@ pub enum BindingError {
     WrongInputAmount,
     /// Calldata minimum output differs from the intended minimum.
     WrongMinOutput,
+    /// REV.1.0 R3b: a nonce burn that is not a plain transfer to its own
+    /// sender (another recipient, or calldata).
+    NotSelfTransfer,
 }
 
 impl core::fmt::Display for BindingError {
@@ -294,6 +297,7 @@ impl core::fmt::Display for BindingError {
             Self::WrongSpender => f.write_str("binding: the approval names another spender"),
             Self::WrongInputAmount => f.write_str("buy binding: unexpected input amount"),
             Self::WrongMinOutput => f.write_str("buy binding: unexpected minimum output"),
+            Self::NotSelfTransfer => f.write_str("burn binding: not a plain self-transfer"),
         }
     }
 }
@@ -502,8 +506,108 @@ impl ExpectedExit {
     }
 }
 
+/// The gas of a plain value transfer to an account without code: the EVM's
+/// intrinsic transaction gas, no tunable.
+pub const TRANSFER_GAS: u64 = 21_000;
+
+/// REV.1.0 R3b (BSC3-041): an operator's nonce burn. The sender's plain
+/// transfer of nothing to itself at `nonce`: it takes the nonce from an
+/// unresolved transaction whose signed bytes may still land (its block
+/// left the chain, or its window is unknown), so they never can.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpectedBurn {
+    chain_id: u64,
+    sender: Address,
+    nonce: u64,
+    gas_price: u64,
+    snapshot: SnapshotId,
+}
+
+impl ExpectedBurn {
+    pub fn new(
+        chain_id: u64,
+        sender: Address,
+        nonce: u64,
+        gas_price: u64,
+        snapshot: SnapshotId,
+    ) -> Self {
+        Self {
+            chain_id,
+            sender,
+            nonce,
+            gas_price,
+            snapshot,
+        }
+    }
+
+    /// The most it can cost: its transfer gas.
+    pub fn max_gas_wei(&self) -> U256 {
+        U256::from(self.gas_price) * U256::from(TRANSFER_GAS)
+    }
+
+    /// Signs the burn into `out`; returns its hash.
+    pub fn sign(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        if signer.address() != self.sender {
+            return Err(BuildError::WrongSigner);
+        }
+        let tx = LegacyTx {
+            chain_id: self.chain_id,
+            nonce: self.nonce,
+            gas_price: self.gas_price,
+            gas_limit: TRANSFER_GAS,
+            to: self.sender,
+            value: U256::ZERO,
+            input: &[],
+        };
+        signer
+            .sign_legacy(&tx, scratch, out)
+            .map_err(BuildError::Sign)
+    }
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the burn:
+/// the sender's plain transfer of nothing to itself at its nonce.
+pub fn verify_final_burn(
+    raw_signed: &[u8],
+    expected: &ExpectedBurn,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    if expected.snapshot != *current {
+        return Err(BindingError::StaleSnapshot);
+    }
+    let signed = decode_signed(raw_signed).map_err(BindingError::Envelope)?;
+    let sender = recover_legacy_sender(&signed, expected.chain_id, scratch)
+        .map_err(BindingError::Signature)?;
+    if sender != expected.sender {
+        return Err(BindingError::WrongSender);
+    }
+    if signed.tx.nonce != expected.nonce {
+        return Err(BindingError::WrongNonce);
+    }
+    if signed.tx.to != expected.sender || !signed.tx.input.is_empty() {
+        return Err(BindingError::NotSelfTransfer);
+    }
+    if signed.tx.gas_price != expected.gas_price {
+        return Err(BindingError::WrongGasPrice);
+    }
+    if signed.tx.gas_limit != TRANSFER_GAS {
+        return Err(BindingError::WrongGasLimit);
+    }
+    if !signed.tx.value.is_zero() {
+        return Err(BindingError::WrongValue);
+    }
+    Ok(tx_hash(raw_signed))
+}
+
 /// One signed transaction of an intent (Phase I): the BUY, or the
-/// approval or SELL of an exit. Lane and plan take this: its identity
+/// approval or SELL of an exit; (R3b) an operator's nonce burn. Lane and plan take this: its identity
 /// (chain, sender, nonce, token), the snapshot it is bound to, its value
 /// and gas, and its final binding check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -511,6 +615,7 @@ pub enum ExpectedTx<'a> {
     Buy(&'a ExpectedBuy),
     Approve(&'a ExpectedExit),
     Sell(&'a ExpectedExit),
+    Burn(&'a ExpectedBurn),
 }
 
 impl<'a> From<&'a ExpectedBuy> for ExpectedTx<'a> {
@@ -524,6 +629,7 @@ impl ExpectedTx<'_> {
         match self {
             Self::Buy(b) => b.chain_id,
             Self::Approve(e) | Self::Sell(e) => e.chain_id,
+            Self::Burn(b) => b.chain_id,
         }
     }
 
@@ -531,6 +637,7 @@ impl ExpectedTx<'_> {
         match self {
             Self::Buy(b) => b.sender,
             Self::Approve(e) | Self::Sell(e) => e.sender,
+            Self::Burn(b) => b.sender,
         }
     }
 
@@ -540,13 +647,16 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => b.nonce,
             Self::Approve(e) => e.nonce,
             Self::Sell(e) => e.nonce + 1,
+            Self::Burn(b) => b.nonce,
         }
     }
 
+    /// The token it trades (a burn: none, the zero address).
     pub fn token(&self) -> Address {
         match self {
             Self::Buy(b) => b.token,
             Self::Approve(e) | Self::Sell(e) => e.token,
+            Self::Burn(_) => Address::ZERO,
         }
     }
 
@@ -554,23 +664,25 @@ impl ExpectedTx<'_> {
         match self {
             Self::Buy(b) => b.snapshot,
             Self::Approve(e) | Self::Sell(e) => e.snapshot,
+            Self::Burn(b) => b.snapshot,
         }
     }
 
-    /// The Portal the intent trades on.
+    /// The Portal the intent trades on (a burn: none, the zero address).
     pub fn portal(&self) -> Address {
         match self {
             Self::Buy(b) => b.portal,
             Self::Approve(e) | Self::Sell(e) => e.portal,
+            Self::Burn(_) => Address::ZERO,
         }
     }
 
     /// Native value the transaction carries (the BUY's input; zero for an
-    /// exit's transactions).
+    /// exit's transactions or a burn).
     pub fn value_wei(&self) -> U256 {
         match self {
             Self::Buy(b) => b.input_amount,
-            Self::Approve(_) | Self::Sell(_) => U256::ZERO,
+            Self::Approve(_) | Self::Sell(_) | Self::Burn(_) => U256::ZERO,
         }
     }
 
@@ -580,6 +692,7 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => U256::from(b.gas_price) * U256::from(b.gas_limit),
             Self::Approve(e) => U256::from(e.gas_price) * U256::from(e.approve_gas_limit),
             Self::Sell(e) => U256::from(e.gas_price) * U256::from(e.sell_gas_limit),
+            Self::Burn(b) => b.max_gas_wei(),
         }
     }
 
@@ -594,6 +707,7 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => verify_final_buy(raw_signed, b, current, scratch),
             Self::Approve(e) => verify_final_approve(raw_signed, e, current, scratch),
             Self::Sell(e) => verify_final_sell(raw_signed, e, current, scratch),
+            Self::Burn(b) => verify_final_burn(raw_signed, b, current, scratch),
         }
     }
 }
@@ -1095,6 +1209,108 @@ mod tests {
         assert_eq!(
             ExpectedBuy::from_admitted(&deployment, &admitted, &other_slippage, sender, 1),
             Err(IntentError::PolicyMismatch)
+        );
+    }
+
+    /// REV.1.0 R3b: a nonce burn signs exactly the sender's plain transfer
+    /// of nothing to itself at its nonce, with transfer gas at the signed
+    /// price; any other recipient, calldata, value, gas, nonce, signer or
+    /// snapshot is refused at the send boundary; as an intent it is of no
+    /// token, carries no value and costs its gas.
+    #[test]
+    fn the_burn_signs_and_binds_a_plain_self_transfer() {
+        let signer = Signer::from_secret_bytes(&[0x71; 32]).unwrap();
+        let chain_id = validated_mainnet(7).deployment().chain_id;
+        let snap = snapshot(7);
+        let burn = ExpectedBurn::new(chain_id, signer.address(), 12, GAS_PRICE, snap);
+        let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+        let hash = burn.sign(&signer, &mut scratch, &mut raw).unwrap();
+        assert_eq!(
+            verify_final_burn(&raw, &burn, &snap, &mut scratch),
+            Ok(hash)
+        );
+        let signed = decode_signed(&raw).unwrap();
+        assert_eq!(
+            (
+                signed.tx.nonce,
+                signed.tx.to,
+                signed.tx.gas_limit,
+                signed.tx.gas_price
+            ),
+            (12, signer.address(), TRANSFER_GAS, GAS_PRICE)
+        );
+        assert!(signed.tx.value.is_zero() && signed.tx.input.is_empty());
+        let tx = ExpectedTx::Burn(&burn);
+        assert_eq!(
+            (tx.token(), tx.value_wei(), tx.gas_wei(), tx.nonce()),
+            (
+                Address::ZERO,
+                U256::ZERO,
+                U256::from(GAS_PRICE) * U256::from(TRANSFER_GAS),
+                12
+            )
+        );
+        assert_eq!(tx.verify_final(&raw, &snap, &mut scratch), Ok(hash));
+        // A transaction of the sender at its nonce that is no plain
+        // self-transfer.
+        let forged = |to: Address, input: &[u8], value: u64, gas_limit: u64, nonce: u64| {
+            let tx = LegacyTx {
+                chain_id,
+                nonce,
+                gas_price: GAS_PRICE,
+                gas_limit,
+                to,
+                value: U256::from(value),
+                input,
+            };
+            let mut out = Vec::new();
+            signer.sign_legacy(&tx, &mut Vec::new(), &mut out).unwrap();
+            out
+        };
+        let me = signer.address();
+        for (bytes, why) in [
+            (
+                forged(Address::from([1; 20]), &[], 0, TRANSFER_GAS, 12),
+                BindingError::NotSelfTransfer,
+            ),
+            (
+                forged(me, &[1], 0, TRANSFER_GAS, 12),
+                BindingError::NotSelfTransfer,
+            ),
+            (
+                forged(me, &[], 1, TRANSFER_GAS, 12),
+                BindingError::WrongValue,
+            ),
+            (
+                forged(me, &[], 0, TRANSFER_GAS + 1, 12),
+                BindingError::WrongGasLimit,
+            ),
+            (
+                forged(me, &[], 0, TRANSFER_GAS, 13),
+                BindingError::WrongNonce,
+            ),
+        ] {
+            assert_eq!(
+                verify_final_burn(&bytes, &burn, &snap, &mut scratch),
+                Err(why)
+            );
+        }
+        let mut later = snap;
+        later.ordered_state_cursor += 1;
+        assert_eq!(
+            verify_final_burn(&raw, &burn, &later, &mut scratch),
+            Err(BindingError::StaleSnapshot)
+        );
+        let other = Signer::from_secret_bytes(&[0x72; 32]).unwrap();
+        assert_eq!(
+            burn.sign(&other, &mut scratch, &mut raw),
+            Err(BuildError::WrongSigner)
+        );
+        let cheaper = ExpectedBurn::new(chain_id, me, 12, GAS_PRICE - 1, snap);
+        burn.sign(&signer, &mut scratch, &mut raw).unwrap();
+        assert_eq!(
+            verify_final_burn(&raw, &cheaper, &snap, &mut scratch),
+            Err(BindingError::WrongGasPrice)
         );
     }
 
