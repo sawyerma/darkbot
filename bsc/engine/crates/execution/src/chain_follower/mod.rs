@@ -69,6 +69,7 @@ mod follow;
 pub(crate) mod http;
 pub(crate) mod jsonrpc;
 pub mod launches;
+mod recover;
 
 #[cfg(test)]
 mod tests_follow;
@@ -80,6 +81,7 @@ mod tests_live;
 mod tests_wire;
 
 pub use launches::{FourToken, Venue};
+pub use recover::{Recovered, RecoveryPending, RecoveryTarget};
 
 /// Every bound of the follower. The caller fills all of them; there are no
 /// compiled-in operating values. [`FollowerLimits::validate`] states the
@@ -486,6 +488,9 @@ pub enum Call {
     /// BSC3-056: `eth_getBlockByNumber(n, false)`, the header only (the
     /// second source's confirmation).
     Header(u64),
+    /// REV.1.0 R3b: `eth_getTransactionReceipt(hash)` (a LIVE transaction
+    /// the follower never saw resolved).
+    Receipt([u8; 32]),
 }
 
 /// Why one request failed.
@@ -657,6 +662,53 @@ pub fn run_confirmer(
     let mut rpc = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
     confirm::run(&mut rpc, limits, stop, sink);
     Ok(())
+}
+
+/// REV.1.0 R3b: why a recovery decided nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryFault {
+    /// An endpoint or the bounds were refused before any connect.
+    Config(FollowerConfigError),
+    /// A request failed or an answer was refused.
+    Fault(FollowerFault),
+}
+
+/// REV.1.0 R3b (BSC3-024/041): what the chain says of `target` at the
+/// followed head `head` ([`Recovered`]): `primary` (the followed endpoint)
+/// answers, `second` (the BSC3-056 second source) confirms every block it
+/// rests on; only blocks at least `reorg_depth` below `head` count; the
+/// block where a nonce passes is searched at most `search_blocks` below
+/// where the search starts. One connection per endpoint, the follower's
+/// bounds; `stop` ends a request.
+pub fn recover_transaction(
+    primary: &str,
+    second: &str,
+    limits: &FollowerLimits,
+    search_blocks: u64,
+    head: u64,
+    target: RecoveryTarget,
+    stop: &AtomicBool,
+) -> Result<Recovered, RecoveryFault> {
+    let ours = https_endpoint(primary).map_err(RecoveryFault::Config)?;
+    let theirs = https_endpoint(second).map_err(RecoveryFault::Config)?;
+    limits
+        .validate()
+        .map_err(|e| RecoveryFault::Config(FollowerConfigError::Limits(e)))?;
+    let tls = tls_config().map_err(|_| RecoveryFault::Config(FollowerConfigError::Tls))?;
+    let bounds = connect_bounds(limits);
+    let (authority, path) = authority_and_path(ours.url());
+    let connect = |stop: &AtomicBool| connect_tls(&ours, &tls, &bounds, stop, Instant::now());
+    let mut primary = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
+    let (authority, path) = authority_and_path(theirs.url());
+    let connect = |stop: &AtomicBool| connect_tls(&theirs, &tls, &bounds, stop, Instant::now());
+    let mut second = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
+    let mut sources = recover::Sources {
+        primary: &mut primary,
+        second: &mut second,
+        stop,
+    };
+    recover::recover(&mut sources, limits, search_blocks, head, target)
+        .map_err(RecoveryFault::Fault)
 }
 
 /// `endpoint` as the follower connects it: `https://` and `wss://` share

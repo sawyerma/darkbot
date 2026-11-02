@@ -7,6 +7,7 @@
 //! owner's, the runtime's, the ledger's or the evaluator's; nothing is
 //! inferred here and nothing here can authorize anything.
 
+use super::projection::safe_text;
 use super::wire::bsc::*;
 use darkbot_bsc_execution::live_ledger::{Ledger, fold};
 use darkbot_bsc_execution::live_qualification;
@@ -100,6 +101,27 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
         .flatten()
         .unwrap_or_default()
         .into();
+    // R1/R3b: the exit deciders and the receipt recovery.
+    let texts = |tag| -> Vec<String> {
+        p.texts(tag)
+            .map(|t| t.iter().map(|s| safe_text(s)).collect())
+            .unwrap_or_default()
+    };
+    let text = |tag| {
+        p.opt_text(tag)
+            .ok()
+            .flatten()
+            .map(safe_text)
+            .unwrap_or_default()
+    };
+    out.exit_undecided = texts(l::EXIT_UNDECIDED);
+    out.stranded = texts(l::STRANDED);
+    out.lot_read_faults = p.u64(l::LOT_READ_FAULTS).unwrap_or_default();
+    out.lot_read_fault = text(l::LOT_READ_FAULT);
+    out.recovery_pending = texts(l::RECOVERY_PENDING);
+    out.recovered = p.u64(l::RECOVERED).unwrap_or_default();
+    out.recovery_faults = p.u64(l::RECOVERY_FAULTS).unwrap_or_default();
+    out.recovery_fault = text(l::RECOVERY_FAULT);
 }
 
 /// The LIVE tab at `now_ms` (none: the clock is unreadable, the gate is
@@ -169,12 +191,34 @@ fn owner_tab(
                     nonce: t.released.nonce,
                     state: t.state.name().into(),
                     block_number: t.inclusion.as_ref().and_then(|f| f.block).map(|b| b.0),
+                    source: t
+                        .inclusion
+                        .as_ref()
+                        .and_then(|f| f.source)
+                        .map(|s| s.name().into())
+                        .unwrap_or_default(),
                 })
                 .collect();
             out.realized_pnl_wei = book.realized_pnl_wei.to_string();
             out.gas_wei = book.gas_wei.to_string();
         }
         Err(_) => out.warnings.push("LIVE_LEDGER_INVALID".into()),
+    }
+    // R3b (BSC3-045): what the operator quarantined of the ledger may be
+    // missing from it.
+    match Ledger::open(&dir).quarantined_seqs() {
+        Ok(seqs) => {
+            if let Some(first) = seqs.first() {
+                out.warnings.push(format!(
+                    "{} {}, first seq {first}",
+                    sources::LIVE_LEDGER_QUARANTINED,
+                    seqs.len()
+                ));
+            }
+        }
+        Err(_) => out
+            .warnings
+            .push("LIVE_LEDGER_QUARANTINE_UNREADABLE".into()),
     }
     if !dir.join("generations").is_dir() {
         out.warnings.push("OWNER_STATE_ABSENT".into());

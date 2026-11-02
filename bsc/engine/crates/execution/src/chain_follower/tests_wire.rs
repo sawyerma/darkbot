@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use super::http::{Bounds, Response, round_trip};
 use super::jsonrpc::{
-    BlockHead, data_fixed, parse_block, parse_quantity, parse_receipts, quantity_u64, request,
+    BlockHead, data_fixed, parse_block, parse_quantity, parse_receipt, parse_receipts,
+    quantity_u64, request,
 };
 use super::*;
 
@@ -197,6 +198,14 @@ fn request_bodies_are_fixed_templates() {
     assert_eq!(
         request(9, Call::Receipts(0)),
         r#"{"jsonrpc":"2.0","id":9,"method":"eth_getBlockReceipts","params":["0x0"]}"#
+    );
+    // REV.1.0 R3b.
+    let mut hash = [0u8; 32];
+    hash[0] = 0xab;
+    hash[31] = 0x01;
+    assert_eq!(
+        request(10, Call::Receipt(hash)),
+        r#"{"jsonrpc":"2.0","id":10,"method":"eth_getTransactionReceipt","params":["0xab00000000000000000000000000000000000000000000000000000000000001"]}"#
     );
 }
 
@@ -412,6 +421,34 @@ fn log_json(block_number: &str, removed: &str, topics: usize) -> String {
     format!(
         r#"{{"address":"0x5c952063c7fc8610ffdb798152d69f0b9550762b","topics":[{topics}],"data":"0x00ff","logIndex":"0x0","blockHash":"{HASH_A}","blockNumber":"{block_number}","transactionHash":"{HASH_B}","transactionIndex":"0x0","removed":{removed}}}"#
     )
+}
+
+/// REV.1.0 R3b: one receipt by hash, `null` when the node knows none; any
+/// other `result` is refused, a receipt is checked as in a block's list.
+#[test]
+fn a_receipt_by_hash_or_none() {
+    let list = receipt_body(&log_json("0x5", "false", 1));
+    // The list's one receipt object as the whole `result`.
+    let start = list.find(r#""result":["#).unwrap() + r#""result":["#.len();
+    let one = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"result":{}}}"#,
+        &list[start..list.len() - "]}".len()]
+    );
+    let r = parse_receipt(one.as_bytes(), 1).unwrap().unwrap();
+    assert_eq!(r, parse_receipts(list.as_bytes(), 1).unwrap().unwrap()[0]);
+    assert_eq!(
+        parse_receipt(br#"{"jsonrpc":"2.0","id":1,"result":null}"#, 1),
+        Ok(None)
+    );
+    assert_eq!(
+        parse_receipt(list.as_bytes(), 1),
+        Err(RequestError::Shape(Field::Result))
+    );
+    let removed = one.replace(r#""removed":false"#, r#""removed":true"#);
+    assert_eq!(
+        parse_receipt(removed.as_bytes(), 1),
+        Err(RequestError::Shape(Field::LogRemoved))
+    );
 }
 
 #[test]

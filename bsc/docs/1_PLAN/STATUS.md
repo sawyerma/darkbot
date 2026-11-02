@@ -8,7 +8,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 |---|---|---|---|
 | R1 | LIVE-Betriebsblocker (BSC3-080..084) | FERTIG | `0159c1a7` |
 | R2 | Versuchs-Record je BUY, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Markt | FERTIG (LIVE-Tab-Projektion R2b `9d5ed3a0`; deren Review-Befunde H1, M2–M5, L6–L9 und Re-Checks L-1–L-4, F1–F5 behoben: jedes Versuchsfeld projiziert, Kampagnenteil zuletzt im Restbudget von `bsc.live.state`, Name = eigene Tx, Links/fremde Auswertung abgewiesen bzw. gewarnt, Kampagnenteil jenseits des State = INVALID) | `1d29cec7`; R2b `9d5ed3a0`; Review-Fix dieser Commit |
-| R3 | Recovery/Betreiber (Receipt-Recovery, EXIT_STOPPED, Nonce-Burn gesperrt, Ledger-Reparatur, Slot-Rückgabe, G0.7-Lot) | TEILWEISE: R3a fertig (Ledger v4, Slot-Rückgabe 068, `live lot resume|write-off|exit-now` (exit-now gesperrt `BSC_EXEC_LIVE_OPERATOR_EXIT=OFF`), `live adopt-g07`, `live ledger check|quarantine`, Temp-Cleanup 045); offen R3b: Receipt-Recovery 024/041, Nonce-Burn gesperrt, Gateway/Frontend-Aktionen | R3a `49bcd98f` |
+| R3 | Recovery/Betreiber (Receipt-Recovery, EXIT_STOPPED, Nonce-Burn gesperrt, Ledger-Reparatur, Slot-Rückgabe, G0.7-Lot) | TEILWEISE: R3a fertig (Ledger v4, Slot-Rückgabe 068, `live lot resume|write-off|exit-now` (exit-now gesperrt `BSC_EXEC_LIVE_OPERATOR_EXIT=OFF`), `live adopt-g07`, `live ledger check|quarantine`, Temp-Cleanup 045); R3b-1 fertig: Receipt-Recovery 024/041 (nur finaler, von der zweiten Quelle bestätigter Block, der die Tx oder die Sender-Tx an ihrer Nonce hält: per Receipt oder Nonce-Suche, `source=RECEIPT`; Lease ebenso), LIVE-Tab Exit-Entscheider/Recovery/Quelle/Quarantäne-Warnung; offen R3b-2: Nonce-Burn gesperrt, Gateway/Frontend-Aktionen | R3a `49bcd98f`; R3b-1 dieser Commit |
 | R4 | Grant-Varianten gesperrt (069, 059, 029, 042, Kampagnen-Spend, §20, Builder-Frische/Fee) | OFFEN | – |
 | R5 | Exit-Routen gesperrt (030 Mempool, Re-Price, DEX-Exit migrierter Lots) | OFFEN | – |
 | R6 | Quellen (GETH-Adapter, Health-Gating, Queues, CONFLICT, Census je Quelle, 48Club synthetisch) | OFFEN | – |
@@ -30,7 +30,8 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | E-A | EA3 (Workspace, bsc_tools, Clippy, F0-VAR, Gateway, Frontend) | GATE_OK | `f6156fa0`: bsc (macOS, ubuntu, frontend) + Project 0 status contract success |
 | R2 | GR2 (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | `1d29cec7`: bsc + Project 0 status contract success |
 | R3a | GR3a (Workspace, bsc_tools, Clippy, F0-VAR) | GATE_OK | `49bcd98f` |
-| R2b-Review-Fix | R2bfix3 (Workspace, bsc_tools, Clippy, F0-VAR; Frontend vitest/tsc/test:bsc, Gateway, Protokollvertrag) | GATE_OK | dieser Commit |
+| R2b-Review-Fix | R2bfix3 (Workspace, bsc_tools, Clippy, F0-VAR; Frontend vitest/tsc/test:bsc, Gateway, Protokollvertrag) | GATE_OK | `fed702cc` |
+| R3b-1 | GR3b1d (Workspace 1659/0/27, bsc_tools, Clippy, F0-VAR; Frontend vitest/tsc/test:bsc, Gateway, Protokollvertrag) | GATE_OK | dieser Commit |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -84,8 +85,8 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 
 | ID | Status | SHA | Rest |
 |---|---|---|---|
-| BSC3-024 | FIX_VERIFIED (Admission = Write-ahead mit Token/Nonce, Fakt direkt nach Dispatch, Recovery als UNKNOWN; ROT→GRÜN, Review) | `bf871fa9` | dauerhaft unschreibbares Ledger: fail-closed, Inclusion dann erst nach Neustart sichtbar |
-| BSC3-041 | FIX_VERIFIED (kein Arm bei unaufgelöster/unbekannter Tx oder C2≠Ledger, Fence bleibt, `.settled` erst danach) | `bf871fa9` | nie inkludierte Tx bleibt unaufgelöst → Betreiberentscheidung (Nonce-Auflösung) |
+| BSC3-024 | FIX_VERIFIED (Admission = Write-ahead mit Token/Nonce, Fakt direkt nach Dispatch, Recovery als UNKNOWN; ROT→GRÜN, Review) | `bf871fa9`; R3b-1 dieser Commit | dauerhaft unschreibbares Ledger: fail-closed, Inclusion dann erst nach Neustart sichtbar; R3b-1: Inklusion außerhalb des gefolgten Blocks per Receipt-Recovery |
+| BSC3-041 | FIX_VERIFIED (kein Arm bei unaufgelöster/unbekannter Tx oder C2≠Ledger, Fence bleibt, `.settled` erst danach) | `bf871fa9`; R3b-1 dieser Commit | R3b-1: per finalem, bestätigtem Block (Receipt oder Nonce-Suche) aufgelöst: die Tx selbst oder die sie ersetzende; Nonce frei bleibt unaufgelöst → gesperrter Nonce-Burn (R3b-2) |
 | BSC3-055 | FIX_VERIFIED (LIVE nur an C2-nächster Nonce, SELL nach kanonischem Approve, Exit-Fortsetzung, Token-Dedup beider Pools) | `bf871fa9` | revertierter/ersetzter SELL ohne Re-Exit → BSC3-048 |
 | BSC3-048 | FIX_VERIFIED (Fenster = Bundle-Ende `BSC_EXEC_VALIDITY_BLOCKS` im Admission-Eintrag + Ledger; danach nimmt die nächste Tx dieselbe Nonce, Exits vor BUYs; spät landende Alt-Tx → neue REPLACED mit `by_tx`/Block, Exit geht weiter; eigene orphaned Inclusion/unbekanntes Fenster sperrt; kein Cancel) | `c9cccf25` | byte-identischer verlorener Exit-Schritt wird nicht erneut gesendet (kein Retry) → Betreiberentscheidung; Flap-Kauf ohne Deadline (nur minOutput) |
 | BSC3-071 (neu) | FIX_VERIFIED (erschöpftes BUY-Kontingent schloss den ganzen LIVE-Pfad, offene Positionen ohne Exit → `live_now_exits`, BUYs abgelehnt) | `c9cccf25` | – |

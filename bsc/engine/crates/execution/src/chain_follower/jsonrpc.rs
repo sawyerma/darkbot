@@ -100,6 +100,10 @@ pub(super) fn request(id: u64, call: Call) -> String {
         Call::Header(n) => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockByNumber","params":["0x{n:x}",false]}}"#
         ),
+        Call::Receipt(hash) => format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionReceipt","params":["0x{}"]}}"#,
+            alloy_primitives::hex::encode(hash)
+        ),
         Call::TransactionCount { sender, block_hash } => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionCount","params":["0x{}",{{"blockHash":"0x{}"}}]}}"#,
             alloy_primitives::hex::encode(sender),
@@ -226,6 +230,16 @@ pub(super) fn parse_receipts(body: &[u8], id: u64) -> Result<Option<Vec<Receipt>
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
+}
+
+/// REV.1.0 R3b: the answer to `eth_getTransactionReceipt`; `None` for
+/// `null` (no receipt known to that node).
+pub(super) fn parse_receipt(body: &[u8], id: u64) -> Result<Option<Receipt>, RequestError> {
+    match envelope(body, id)? {
+        Value::Null => Ok(None),
+        Value::Object(r) => receipt(&r).map(Some),
+        _ => Err(RequestError::Shape(Field::Result)),
+    }
 }
 
 fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {

@@ -435,6 +435,10 @@ message LiveTransaction {
   string state = 5;
   // The block that included it.
   optional uint64 block_number = 6;
+  // REV.1.0 R3b: RECEIPT when its chain fact comes from a block the receipt recovery found (final,
+  // the second source's; its receipt's, or where its sender's nonce passes it), not from the
+  // follower's block; empty otherwise.
+  string source = 7;
 }
 // The BSC LIVE tab (plan 28.10.): the owner's LIVE gate with every precondition and its
 // reason, the grant, attempts and spend, the LIVE path of the runtime, positions,
@@ -508,6 +512,24 @@ message BscLiveState {
   // campaign's total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning.
   // Beyond it, the shown ones are the first by ordinal of the limit plus one first by transaction.
   repeated LiveAttempt attempts = 31;
+  // REV.1.0 R1/R3b: the open LIVE lots no strategy holds yet (their curve being read), as the
+  // runtime's status names them, 0x token.
+  repeated string exit_undecided = 32;
+  // The open LIVE lots no strategy exit can take, "0x<token> <REASON>".
+  repeated string stranded = 33;
+  // The curve reads of open lots that failed in the runtime's process.
+  uint64 lot_read_faults = 34;
+  // The last of those failures; empty without one.
+  string lot_read_fault = 35;
+  // REV.1.0 R3b (BSC3-024/041): the ledger's unresolved transactions the runtime's receipt
+  // recovery asked about and has not resolved, "0x<tx> <REASON>".
+  repeated string recovery_pending = 36;
+  // The transactions the receipt recovery resolved in the runtime's process.
+  uint64 recovered = 37;
+  // The receipt recovery's failed reads in the runtime's process.
+  uint64 recovery_faults = 38;
+  // The last of those failures; empty without one.
+  string recovery_fault = 39;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

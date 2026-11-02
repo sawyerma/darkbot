@@ -14,7 +14,7 @@ use super::{
     Call, CanonicalEvent, CanonicalTx, FollowerFault, FollowerLimits, NonceWatch, RequestError,
     is_unrebuildable, stopped,
 };
-use crate::wss::DisconnectReason;
+use crate::wss::{DisconnectReason, RejectReason};
 
 /// The typed JSON-RPC calls over one HTTP client.
 pub(super) struct Rpc<S, C> {
@@ -47,7 +47,7 @@ where
         jsonrpc::parse_quantity(&answer, id).map_err(|error| FollowerFault::Request { call, error })
     }
 
-    fn transaction_count(
+    pub(super) fn transaction_count(
         &mut self,
         sender: [u8; 20],
         block_hash: [u8; 32],
@@ -58,7 +58,11 @@ where
         jsonrpc::parse_quantity(&answer, id).map_err(|error| FollowerFault::Request { call, error })
     }
 
-    fn block(&mut self, number: u64, stop: &AtomicBool) -> Result<FullBlock, FollowerFault> {
+    pub(super) fn block(
+        &mut self,
+        number: u64,
+        stop: &AtomicBool,
+    ) -> Result<FullBlock, FollowerFault> {
         let call = Call::Block(number);
         let (answer, id) = self.post(call, stop)?;
         jsonrpc::parse_block(&answer, id, number)
@@ -79,12 +83,28 @@ where
             .ok_or(FollowerFault::Unavailable(call))
     }
 
-    fn receipts(&mut self, number: u64, stop: &AtomicBool) -> Result<Vec<Receipt>, FollowerFault> {
+    pub(super) fn receipts(
+        &mut self,
+        number: u64,
+        stop: &AtomicBool,
+    ) -> Result<Vec<Receipt>, FollowerFault> {
         let call = Call::Receipts(number);
         let (answer, id) = self.post(call, stop)?;
         jsonrpc::parse_receipts(&answer, id)
             .map_err(|error| FollowerFault::Request { call, error })?
             .ok_or(FollowerFault::Unavailable(call))
+    }
+
+    /// REV.1.0 R3b: the receipt of transaction `hash`; `None` when the
+    /// node knows none.
+    pub(super) fn receipt(
+        &mut self,
+        hash: [u8; 32],
+        stop: &AtomicBool,
+    ) -> Result<Option<Receipt>, FollowerFault> {
+        let call = Call::Receipt(hash);
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_receipt(&answer, id).map_err(|error| FollowerFault::Request { call, error })
     }
 }
 
@@ -98,7 +118,7 @@ pub(super) struct FirstHeld {
 }
 
 impl FirstHeld {
-    fn now() -> Self {
+    pub(super) fn now() -> Self {
         let at = Instant::now();
         let unix_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -459,93 +479,44 @@ impl Follower {
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
-        let FullBlock { head, objects } = block;
-        let header = head.header;
+        let header = block.head.header;
         let receipts = rpc.receipts(header.number, stop)?;
-        if !receipts_match(&head, &receipts) {
+        if !receipts_match(&block.head, &receipts) {
             return Err(FollowerFault::ReceiptsMismatch(header.number));
         }
-        let mut launches = Vec::new();
-        for launch in launches::detect(&head, &receipts) {
-            let object = usize::try_from(launch.tx_index)
-                .ok()
-                .and_then(|index| objects.get(index))
-                .ok_or(FollowerFault::ReceiptsMismatch(header.number))?;
-            let tx = match launches::verify_object(object) {
-                Ok(tx) => Ok(tx),
-                Err(reason) => {
-                    // A refusal for a property of the transaction is final
-                    // at once; one that may be the provider's is fetched
-                    // again with the block up to `tx_attempts` times, then
-                    // carried by the launch.
-                    let tried = match self.refusals.iter_mut().find(|(h, _)| *h == launch.tx_hash) {
-                        Some((_, n)) => {
-                            *n += 1;
-                            *n
-                        }
-                        None => {
-                            self.refusals.push((launch.tx_hash, 1));
-                            1
-                        }
-                    };
-                    if !is_unrebuildable(reason) && tried < self.tx_attempts {
-                        return Err(FollowerFault::Request {
-                            call: Call::Block(header.number),
-                            error: RequestError::Unverifiable(reason),
-                        });
-                    }
-                    Err(reason)
+        // A refusal for a property of the transaction is final at once; one
+        // that may be the provider's is fetched again with the block up to
+        // `tx_attempts` times, then carried by the launch.
+        let (refusals, attempts) = (&mut self.refusals, self.tx_attempts);
+        let mut refused = |tx_hash: [u8; 32], reason: RejectReason| {
+            let tried = match refusals.iter_mut().find(|(h, _)| *h == tx_hash) {
+                Some((_, n)) => {
+                    *n += 1;
+                    *n
+                }
+                None => {
+                    refusals.push((tx_hash, 1));
+                    1
                 }
             };
-            launches.push(
-                launch.with_transaction(tx.as_ref().map_err(|r| *r), self.max_launch_calldata),
-            );
-        }
-        let reverted = launches::reverted(&receipts, &objects, self.max_launch_calldata);
-        let flap = launches::flap_events(&head, &receipts);
-        let txs = head
-            .txs
-            .iter()
-            .zip(&receipts)
-            .enumerate()
-            .map(|(index, (tx, receipt))| CanonicalTx {
-                hash: tx.hash,
-                index: index as u64,
-                sender: tx.from,
-                nonce: tx.nonce,
-                succeeded: receipt.succeeded,
-                cost: receipt.cost,
-            })
-            .collect();
-        sink(CanonicalEvent::Block {
-            number: header.number,
-            hash: header.hash,
-            parent_hash: header.parent_hash,
-            timestamp_s: header.timestamp_s,
-            timestamp_ms: header.block_ms,
-            observed: observed.at,
-            observed_unix_ms: observed.unix_ms,
-            txs,
-        });
-        for launch in launches {
-            sink(CanonicalEvent::Launch(launch));
-        }
-        for (venue, tx_index, tx_hash) in reverted {
-            sink(CanonicalEvent::RevertedLaunch {
-                venue,
-                block_number: header.number,
-                block_hash: header.hash,
-                tx_index,
-                tx_hash,
-            });
-        }
-        for event in flap {
+            if !is_unrebuildable(reason) && tried < attempts {
+                return Err(FollowerFault::Request {
+                    call: Call::Block(header.number),
+                    error: RequestError::Unverifiable(reason),
+                });
+            }
+            Ok(())
+        };
+        let events = block_events(
+            block,
+            &receipts,
+            observed,
+            self.max_launch_calldata,
+            &mut refused,
+        )?;
+        for event in events {
             sink(event);
         }
-        sink(CanonicalEvent::BlockComplete {
-            number: header.number,
-            hash: header.hash,
-        });
         self.kept.push_back((header.number, header.hash));
         while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {
             self.kept.pop_front();
@@ -621,6 +592,82 @@ impl Follower {
         let index = usize::try_from(number.checked_sub(front)?).ok()?;
         self.kept.get(index).copied()
     }
+}
+
+/// The events of `block` in the follower's order, its `receipts` matched
+/// to it ([`receipts_match`]): the block with every transaction, its
+/// launches (each transaction object verified; `refused` decides a
+/// refusal: carried by the launch, or the block failed), its reverted
+/// launches, its Portal events, then `BlockComplete`. Nothing is reported
+/// of a block that failed (REV.1.0 R3b: the follower's and the receipt
+/// recovery's one conversion).
+pub(super) fn block_events(
+    block: FullBlock,
+    receipts: &[Receipt],
+    observed: FirstHeld,
+    max_launch_calldata: usize,
+    refused: &mut dyn FnMut([u8; 32], RejectReason) -> Result<(), FollowerFault>,
+) -> Result<Vec<CanonicalEvent>, FollowerFault> {
+    let FullBlock { head, objects } = block;
+    let header = head.header;
+    let mut launches = Vec::new();
+    for launch in launches::detect(&head, receipts) {
+        let object = usize::try_from(launch.tx_index)
+            .ok()
+            .and_then(|index| objects.get(index))
+            .ok_or(FollowerFault::ReceiptsMismatch(header.number))?;
+        let tx = match launches::verify_object(object) {
+            Ok(tx) => Ok(tx),
+            Err(reason) => {
+                refused(launch.tx_hash, reason)?;
+                Err(reason)
+            }
+        };
+        launches.push(launch.with_transaction(tx.as_ref().map_err(|r| *r), max_launch_calldata));
+    }
+    let reverted = launches::reverted(receipts, &objects, max_launch_calldata);
+    let flap = launches::flap_events(&head, receipts);
+    let txs = head
+        .txs
+        .iter()
+        .zip(receipts)
+        .enumerate()
+        .map(|(index, (tx, receipt))| CanonicalTx {
+            hash: tx.hash,
+            index: index as u64,
+            sender: tx.from,
+            nonce: tx.nonce,
+            succeeded: receipt.succeeded,
+            cost: receipt.cost,
+        })
+        .collect();
+    let mut events = Vec::with_capacity(2 + launches.len() + reverted.len() + flap.len());
+    events.push(CanonicalEvent::Block {
+        number: header.number,
+        hash: header.hash,
+        parent_hash: header.parent_hash,
+        timestamp_s: header.timestamp_s,
+        timestamp_ms: header.block_ms,
+        observed: observed.at,
+        observed_unix_ms: observed.unix_ms,
+        txs,
+    });
+    events.extend(launches.into_iter().map(CanonicalEvent::Launch));
+    events.extend(reverted.into_iter().map(|(venue, tx_index, tx_hash)| {
+        CanonicalEvent::RevertedLaunch {
+            venue,
+            block_number: header.number,
+            block_hash: header.hash,
+            tx_index,
+            tx_hash,
+        }
+    }));
+    events.extend(flap);
+    events.push(CanonicalEvent::BlockComplete {
+        number: header.number,
+        hash: header.hash,
+    });
+    Ok(events)
 }
 
 /// The receipts are exactly the block's transactions: same count, in

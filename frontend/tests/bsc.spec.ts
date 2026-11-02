@@ -187,6 +187,36 @@ test("a campaign section beyond the state is INVALID, never no evaluation or no 
   expect(errors).toEqual([]);
 });
 
+test("the LIVE tab names the undecided and stranded lots, the receipt recovery and each transaction's source (REV.1.0 R1/R3b)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY values: they test the display, they are no LIVE state.
+  const tx = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
+  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+    gate: "BLOCKED", pathState: "ARMED", generation: 5n, qualification: "NONE",
+    exitUndecided: ["0x" + "e1".repeat(20)], stranded: ["0x" + "e2".repeat(20) + " LIVE_POSITION_OFF_CURVE"], lotReadFaults: 3n, lotReadFault: "curve fault",
+    recoveryPending: [`${tx(0xc1)} RECOVERY_NOT_FINAL`], recovered: 2n, recoveryFaults: 1n, recoveryFault: "recovery fault",
+    transactions: [
+      { txHash: tx(0xa1), intent: "BUY", token: "0x" + "aa".repeat(20), nonce: 1n, state: "INCLUDED", blockNumber: 90n, source: "RECEIPT" },
+      { txHash: tx(0xb5), intent: "BUY", token: "0x" + "aa".repeat(20), nonce: 2n, state: "REPLACED", blockNumber: 91n, source: "" },
+    ],
+  }));
+  await feed(page, live);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  const deciders = page.getByTestId("bsc-live-exit-deciders");
+  await expect(line(page, "Exit undecided")).toContainText("0x" + "e1".repeat(20));
+  await expect(line(page, "Stranded lots")).toContainText("LIVE_POSITION_OFF_CURVE");
+  await expect(deciders).toContainText("curve fault");
+  await expect(line(page, "Receipt recovery")).toContainText("2 resolved · 1 pending · 1 failed reads");
+  await expect(line(page, "Receipt recovery")).toContainText("recovery fault");
+  await expect(page.getByTestId("bsc-live-recovery-pending")).toContainText(`${tx(0xc1)}RECOVERY_NOT_FINAL`);
+  const rows = page.getByTestId("bsc-live-transactions").locator("tr");
+  await expect(rows.nth(0)).toContainText("RECEIPT");
+  await expect(rows.nth(1)).not.toContainText("RECEIPT");
+  expect(errors).toEqual([]);
+});
+
 test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the local-times notice (REV.1.0 R2b review L7)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

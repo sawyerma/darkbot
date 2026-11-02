@@ -6,7 +6,7 @@ import { selectLive, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
-import { conditionRows, signedBnb } from "../model/live";
+import { conditionRows, exitDeciderRows, recoveryRows, signedBnb } from "../model/live";
 import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
@@ -26,6 +26,7 @@ export function LivePanel() {
   const generation = l?.generation ?? 0n;
   const owner = !!l && l.gate !== "UNKNOWN";
   const econLive = switchRow("BSC_ECON_LIVE", l?.economicLive);
+  const recovery = recoveryRows(l);
   return <>
     <Line label="LIVE source quality" value={<ValueState state={quality} />} hint="bsc.live.state transport" />
     <PlacedSection panel="live" section={1} records={records}>
@@ -83,12 +84,17 @@ export function LivePanel() {
       <table className="bsc-table" data-testid="bsc-live-positions"><tbody>
         {(l?.positions ?? []).map(p => <tr key={p.lot}><td>{p.token}</td><td>{p.component}</td><td>{p.state}</td><td>{p.tokens}</td><td>{wei(p.inputWei)}</td><td>{wei(p.proceedsWei)}</td><td>{p.pnlWei ? signedBnb(p.pnlWei) : "—"}</td></tr>)}
       </tbody></table>
+      <div data-testid="bsc-live-exit-deciders">{exitDeciderRows(l).map(r => <Line key={r.label} label={r.label} value={r.value} hint={r.hint} />)}</div>
     </PlacedSection>
     <PlacedSection panel="live" section={8} records={records}>
       <Line label="Released" value={`${(l?.released ?? 0n).toString()} (${(l?.unknown ?? 0n).toString()} UNKNOWN)`} hint="Transactions whose bytes may have left; never sent again" />
       <table className="bsc-table" data-testid="bsc-live-transactions"><tbody>
-        {(l?.transactions ?? []).map(t => <tr key={t.txHash}><td>{t.intent}</td><td>{t.txHash}</td><td>nonce {t.nonce.toString()}</td><td>{t.state}</td><td>{t.blockNumber?.toString() ?? ""}</td></tr>)}
+        {(l?.transactions ?? []).map(t => <tr key={t.txHash}><td>{t.intent}</td><td>{t.txHash}</td><td>nonce {t.nonce.toString()}</td><td>{t.state}</td><td>{t.blockNumber?.toString() ?? ""}</td><td>{t.source}</td></tr>)}
       </tbody></table>
+      <Line label={recovery.row.label} value={recovery.row.value} hint={recovery.row.hint} />
+      {recovery.pending.length ? <table className="bsc-table" data-testid="bsc-live-recovery-pending"><tbody>
+        {recovery.pending.map(([tx, why]) => <tr key={tx}><td>{tx}</td><td>{why}</td></tr>)}
+      </tbody></table> : null}
     </PlacedSection>
     <PlacedSection panel="live" section={9} records={records}>
       <Line label="Realized PnL" value={l ? signedBnb(l.realizedPnlWei) : "—"} hint="Proceeds − input − all gas of closed positions; failed BUYs' gas" />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -98,6 +98,23 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     expect(liveRequestOf(row("BSC_EXEC")).action).toBe("bsc.source.mode.set");
     expect(signedBnb("-1500000000000000")).toBe("−0.0015 BNB");
     expect(signedBnb("2000000000000000000")).toBe("2 BNB");
+  });
+
+  it("shows who decides the open lots' exits and the receipt recovery as the runtime names them (REV.1.0 R1/R3b)", () => {
+    // TEST_ONLY values, each its own.
+    const l = { exitUndecided: ["0xu1", "0xu2"], stranded: ["0xs1 LIVE_POSITION_OFF_CURVE"], lotReadFaults: 3n, lotReadFault: "curve fault",
+      recoveryPending: ["0xc1 RECOVERY_NOT_FINAL", "0xd5 RECOVERY_FAILED"], recovered: 5n, recoveryFaults: 7n, recoveryFault: "recovery fault" } as unknown as BscLiveView;
+    expect(exitDeciderRows(l).map(r => [r.label, r.value])).toEqual([
+      ["Exit undecided", "0xu1 · 0xu2"], ["Stranded lots", "0xs1 LIVE_POSITION_OFF_CURVE"], ["Curve read faults", "3"]]);
+    expect(exitDeciderRows(l)[2]?.hint).toBe("curve fault");
+    const r = recoveryRows(l);
+    expect(r.row.value).toBe("5 resolved · 2 pending · 7 failed reads");
+    expect(r.row.hint).toBe("recovery fault");
+    expect(r.pending).toEqual([["0xc1", "RECOVERY_NOT_FINAL"], ["0xd5", "RECOVERY_FAILED"]]);
+    // Nothing named: no value is made up.
+    const none = recoveryRows(undefined);
+    expect([none.row.value, none.pending]).toEqual(["0 resolved · 0 pending · 0 failed reads", []]);
+    expect(exitDeciderRows(undefined).map(x => x.value)).toEqual(["—", "—", "0"]);
   });
 
   it("is the one LIVE indicator: the owner's gate and the LIVE path from bsc.live.state (Audit E 4.10)", () => {

@@ -39,7 +39,7 @@ Bei Widerspruch gelten diese Dateien. Alle Angaben hier sind am genannten Zeitpu
    - Die drei überholten R3a-Stashes sind gelöscht; ihr Inhalt liegt auf `main` und als Patch in `backups/`.
    - Der Hauptcheckout ist per Fast-forward auf `49bcd98f` gebracht.
    - Kein Agent und kein eigener Hintergrundjob läuft.
-4. **Nächster Schritt:** den R2b-Fix in `wtEA` fertigstellen, siehe den letzten Abschnitt. Danach R3b, dann R4 bis R14 und die offenen Audit-E-Befunde.
+4. **Nächster Schritt (02.11.):** R2b-Fix auf main `fed702cc`; R3b-1 (Receipt-Recovery, LIVE-Tab-Felder) mit diesem Commit; als Nächstes R3b-2 (gesperrter Nonce-Burn, Gateway/Frontend-Aktionen der R3-Befehle), dann R4 bis R14 und die offenen Audit-E-Befunde. Plan: `DarkBot-bsc-rev1/scratch/r3b/PLAN.md`.
 
 ---
 
@@ -210,8 +210,8 @@ Quellen:
 |---|---|---|---|
 | R1 | LIVE-Betriebsblocker BSC3-080..084 | **DONE_VERIFIED** (Review FAIL→PASS, Gate GR1 OK, CI grün) | `0159c1a7` |
 | R2 | Versuchs-Record, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Fenster | **DONE_VERIFIED** (5 Review-Runden, letzte PASS; 59 Mutanten RED; Gate GR2e OK; CI grün). Echte Kampagnenläufe: EXTERNAL_BLOCKED (nach 03.11., Manifest durch den Betreiber) | `1d29cec7` |
-| R2b | LIVE-Tab-Projektion Kampagne/Versuche | **IN_PROGRESS** (`9d5ed3a0` auf main mit CI grün; Review FAIL → Fix uncommitted in `wtEA`, Re-Check PASS mit L-1–L-4, siehe §7.D) | `9d5ed3a0`; Fix in `wtEA` |
-| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE (CI_PENDING)**, R3b NOT_STARTED (§6) | R3a `49bcd98f` |
+| R2b | LIVE-Tab-Projektion Kampagne/Versuche | **DONE** (Review FAIL → Fix, Re-Checks PASS; 35 Mutanten RED, Gate R2bfix3 OK; CI siehe Commit) | `9d5ed3a0`; Fix `fed702cc` |
+| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE**, **R3b-1** (Receipt-Recovery, LIVE-Tab) dieser Commit, R3b-2 NOT_STARTED (§6.2) | R3a `49bcd98f`; R3b-1 dieser Commit |
 | R4 | Grant-Varianten gesperrt: 069 Outlier-Ack, 059 max. Dauer, 029 Builder-Payment, 042 C3-Re-Arm, kampagnenweite Spend-Grenze, §20 public-only-Verweigerung, Builder-Frische/Fee-Check, C2-LIVE-Doku | NOT_STARTED | – |
 | R5 | Exit-Routen gesperrt: 030 Public-Mempool-Adapter, Re-Price-Variante, DEX-Exit migrierter Lots | NOT_STARTED | – |
 | R6 | Quellen: GETH/Hot0Poller-Adapter, Health-/Capability-Gating, Queues je Quelle, CONFLICT-Zustand, Census je Quelle (O05/§3a), 48Club-Adapter synthetisch | NOT_STARTED | – |

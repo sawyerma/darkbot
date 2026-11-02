@@ -1731,6 +1731,145 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// REV.1.0 R1/R3b: the LIVE tab shows who decides the open lots' exits and
+/// the receipt recovery as the runtime's status names them, where each
+/// transaction's chain fact comes from (RECEIPT: a recovered block; the follower's
+/// block: empty), and what the operator quarantined of the ledger (counted,
+/// the first named; an unreadable quarantine is a warning of its own).
+#[test]
+fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
+    use darkbot_bsc_execution::live_ledger::{Fact, FactKind, FactSource, Ledger};
+    use darkbot_bsc_execution::sources::{ComponentId, LiveIntentKind};
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-live-r3b-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join("bsc-sources");
+    fs::create_dir_all(rundir.join("bsc-runtime")).unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    let now = projection::clock_s().unwrap() * 1_000;
+    // TEST_ONLY values, each its own.
+    let mut live = filled(&rs::live::SCHEMA);
+    live.push(rs::live::EXIT_UNDECIDED, "0xundecided")
+        .push(rs::live::STRANDED, "0xstranded LIVE_POSITION_OFF_CURVE")
+        .set(rs::live::LOT_READ_FAULTS, 3u64)
+        .set(rs::live::LOT_READ_FAULT, "curve fault")
+        .push(rs::live::RECOVERY_PENDING, "0xc1 RECOVERY_NOT_FINAL")
+        .push(rs::live::RECOVERY_PENDING, "0xd5 RECOVERY_FAILED")
+        .set(rs::live::RECOVERED, 5u64)
+        .set(rs::live::RECOVERY_FAULTS, 7u64)
+        .set(rs::live::RECOVERY_FAULT, "recovery fault");
+    let mut d = filled(&rs::SCHEMA);
+    d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, now)
+        .set(rs::LIVE, live.into_nested());
+    fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
+    let released = |n: u8| Fact {
+        kind: FactKind::Released,
+        tx_hash: [n; 32],
+        intent: LiveIntentKind::Buy,
+        component: ComponentId::ExecC3,
+        token: [0xAB; 20],
+        nonce: u64::from(n),
+        grant_generation: 1,
+        input_wei: Some(1_000u64.try_into().unwrap()),
+        max_wei: Some(2_000u64.try_into().unwrap()),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+        max_block: Some(100),
+        by_tx: None,
+        response: None,
+        origin: None,
+        launcher: None,
+        placement: None,
+        attempt: None,
+        operator: None,
+        source: None,
+    };
+    let ledger = Ledger::open(&dir);
+    let block = Some((90, [9; 32], 1_000));
+    for (n, kind, source) in [
+        (1u8, FactKind::Included, Some(FactSource::Receipt)),
+        (2, FactKind::Replaced, Some(FactSource::Receipt)),
+        (3, FactKind::Reverted, None),
+    ] {
+        let f = released(n);
+        ledger.append(&f, now).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block,
+                    gas_wei: Some(1u64.try_into().unwrap()),
+                    source,
+                    ..Fact::about(&f, kind)
+                },
+                now,
+            )
+            .unwrap();
+    }
+    let quarantine = dir.join("live-ledger-quarantine");
+    fs::create_dir_all(&quarantine).unwrap();
+    for seq in [7u64, 3] {
+        fs::write(quarantine.join(format!("{seq:020}.dbrec")), b"record").unwrap();
+        fs::write(quarantine.join(format!("{seq:020}.entry")), b"entry").unwrap();
+    }
+    let tab = || {
+        let config = super::live::runtime_config(&root);
+        super::live::live_state(&root, &rundir, config.as_ref().map_err(|w| *w), Some(now))
+    };
+    let l = tab();
+    assert_eq!(l.exit_undecided, ["0xundecided"]);
+    assert_eq!(l.stranded, ["0xstranded LIVE_POSITION_OFF_CURVE"]);
+    assert_eq!(
+        (l.lot_read_faults, l.lot_read_fault.as_str()),
+        (3, "curve fault")
+    );
+    assert_eq!(
+        l.recovery_pending,
+        ["0xc1 RECOVERY_NOT_FINAL", "0xd5 RECOVERY_FAILED"]
+    );
+    assert_eq!(
+        (l.recovered, l.recovery_faults, l.recovery_fault.as_str()),
+        (5, 7, "recovery fault")
+    );
+    assert_eq!(
+        l.transactions
+            .iter()
+            .map(|t| (t.state.as_str(), t.source.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("INCLUDED", "RECEIPT"),
+            ("REPLACED", "RECEIPT"),
+            ("REVERTED", "")
+        ]
+    );
+    assert!(
+        l.warnings
+            .contains(&"LIVE_LEDGER_QUARANTINED 2, first seq 3".to_string()),
+        "{:?}",
+        l.warnings
+    );
+    // An unreadable quarantine is named, never silent.
+    fs::remove_dir_all(&quarantine).unwrap();
+    fs::write(&quarantine, b"not a directory").unwrap();
+    let l = tab();
+    assert!(
+        l.warnings
+            .contains(&"LIVE_LEDGER_QUARANTINE_UNREADABLE".to_string()),
+        "{:?}",
+        l.warnings
+    );
+    fs::remove_file(&quarantine).unwrap();
+    assert!(
+        !tab()
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("LIVE_LEDGER_QUARANTINE"))
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// Plan 28.10.: the LIVE tab projects the owner's gate with every
 /// precondition and its reason, the grant's exact scope, the attempts and
 /// spend, the scope's entities and the ledger's positions; without the
@@ -2839,11 +2978,26 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
                 nonce: u64::MAX,
                 state: "INCLUDED".into(),
                 block_number: Some(u64::MAX),
+                source: "RECEIPT".into(),
             })
             .collect(),
         realized_pnl_wei: format!("-{word}"),
         gas_wei: word.clone(),
         warnings: vec![text.clone(); 4],
+        // R3b: every open lot undecided or stranded, every transaction
+        // pending its recovery, the faults as long as a text may be.
+        exit_undecided: (0..lots).map(|i| format!("0x{i:040x}")).collect(),
+        stranded: (0..lots)
+            .map(|i| format!("0x{i:040x} LIVE_POSITION_UNREADABLE"))
+            .collect(),
+        lot_read_faults: u64::MAX,
+        lot_read_fault: text.clone(),
+        recovery_pending: (0..4 * lots)
+            .map(|i| format!("0x{i:064x} RECOVERY_SOURCES_DISAGREE"))
+            .collect(),
+        recovered: u64::MAX,
+        recovery_faults: u64::MAX,
+        recovery_fault: text.clone(),
         ..Default::default()
     };
     let mut l = full.clone();

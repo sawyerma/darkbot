@@ -42,10 +42,10 @@
 //! automatically after a refusal: switching the scope off and on again
 //! starts over, with a new fence.
 
-use crate::chain_follower::{CanonicalEvent, FollowerLimits};
+use crate::chain_follower::{CanonicalEvent, FollowerLimits, RecoveryTarget};
 use crate::live_end::{Connecting, LiveEnd, LiveHandoff, LiveRoute};
 use crate::live_key::LiveKey;
-use crate::live_ledger::{Book, Fact, FactKind, Ledger, PositionState, fold};
+use crate::live_ledger::{Book, Fact, FactKind, FactSource, Ledger, PositionState, fold};
 use crate::live_qualification;
 use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Refusal};
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
@@ -333,6 +333,18 @@ struct ExitDeciders {
     fault: Option<String>,
 }
 
+/// REV.1.0 R3b: the runtime's receipt recovery of the ledger's unresolved
+/// transactions (BSC3-024/041): each asked about and not resolved yet with
+/// why, the transactions it resolved, its failed reads and the last
+/// failure.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecoveryView {
+    pub pending: Vec<([u8; 32], &'static str)>,
+    pub recovered: u64,
+    pub faults: u64,
+    pub fault: Option<String>,
+}
+
 pub struct LiveRuntime {
     setup: LiveSetup,
     exec: ExecSetup,
@@ -470,6 +482,10 @@ pub struct LiveRuntime {
     /// R3 (BSC3-045): the highest owner generation an entry of the ledger
     /// was quarantined at (unreadable: every one).
     quarantine: Option<u64>,
+    /// R3b: the source of the chain facts written now (a recovered block's:
+    /// RECEIPT; the follower's block: none), and the recovery's view.
+    source: Option<FactSource>,
+    recovery: RecoveryView,
 }
 
 /// The buyer's balance at a probe's block (number and hash): a
@@ -583,6 +599,8 @@ impl LiveRuntime {
             operator_exits_locked: 0,
             decided: Default::default(),
             quarantine: None,
+            source: None,
+            recovery: RecoveryView::default(),
         }
         .folded()
     }
@@ -1021,14 +1039,19 @@ impl LiveRuntime {
                 // unresolved lease (recovered as UNKNOWN: the process ended
                 // between its BUY's dispatch and its fact) is that BUY; only
                 // the buyer's key signs at the buyer's nonce.
+                // R3b review: of two at one nonce (a renewal whose return
+                // failed), the one whose window holds the block.
                 let lease_at = |nonce: u64| {
-                    self.book
-                        .unresolved()
-                        .find(|u| {
+                    let leases = || {
+                        self.book.unresolved().filter(|u| {
                             u.released.nonce == nonce
                                 && u.released.intent == LiveIntentKind::Buy
                                 && u.released.token == [0; 20]
                         })
+                    };
+                    leases()
+                        .find(|u| u.released.max_block.is_some_and(|last| *number <= last))
+                        .or_else(|| leases().next())
                         .map(|u| u.released.clone())
                 };
                 self.seen = txs
@@ -1083,6 +1106,7 @@ impl LiveRuntime {
                     return Vec::new();
                 };
                 let taken = std::mem::take(&mut self.nonces_taken);
+                let source = self.source;
                 let mut facts: Vec<Fact> = Vec::new();
                 for s in &seen {
                     // BSC3-076 review H3: adopted only as what the lease's
@@ -1117,6 +1141,17 @@ impl LiveRuntime {
                             facts.push(r.clone());
                             r
                         }
+                        // R3b: a recovered block resolves only what is not
+                        // resolved yet (the follower's facts stand).
+                        (None, Some(tx))
+                            if source.is_some()
+                                && matches!(
+                                    tx.state,
+                                    FactKind::Included | FactKind::Reverted | FactKind::Replaced
+                                ) =>
+                        {
+                            continue;
+                        }
                         (None, Some(tx)) => tx.released.clone(),
                         (None, None) => continue,
                     };
@@ -1141,6 +1176,7 @@ impl LiveRuntime {
                         gas_wei: s.gas_wei,
                         tokens,
                         eth_wei: s.eth_wei,
+                        source,
                         ..Fact::about(&released, kind)
                     });
                     // REV.1.0 R2: where an included C3 BUY landed against
@@ -1178,6 +1214,7 @@ impl LiveRuntime {
                             .map(|t| Fact {
                                 block: Some(block),
                                 by_tx: Some(*by),
+                                source,
                                 ..Fact::about(&t.released, FactKind::Replaced)
                             }),
                     );
@@ -1203,6 +1240,117 @@ impl LiveRuntime {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// REV.1.0 R3b (BSC3-024/041): what the receipt recovery asks the chain
+    /// about at the followed `head`, keyed by the transaction's ledger
+    /// hash: each unresolved transaction whose window is over, unknown or
+    /// bounds nothing any more (its block left the chain). One whose hash
+    /// is a transaction's: by its hash, its window's end when it bounds; a
+    /// lease's BUY (never included, its hash never known): by its window
+    /// (the search starting `BSC_EXEC_LIVE_LEASE_BLOCKS` before its last
+    /// block). Never asked, named why: a lease without its window, a
+    /// transaction of another sender than the buyer (its block's facts are
+    /// the buyer's only).
+    pub fn recovery_targets(
+        &self,
+        head: u64,
+    ) -> Vec<([u8; 32], Result<RecoveryTarget, &'static str>)> {
+        let lease_blocks = self.exec.exec.live_lease_blocks;
+        let buyer = self.setup.buyer;
+        self.book
+            .unresolved()
+            .filter(|t| t.orphaned || t.released.max_block.is_none_or(|last| head > last))
+            .map(|t| {
+                let r = &t.released;
+                let sender = r.origin.map_or(buyer, |o| o.sender);
+                if sender != buyer {
+                    return (r.tx_hash, Err(crate::sources::LIVE_RECOVERY_OTHER_SENDER));
+                }
+                let lease = r.intent == LiveIntentKind::Buy && r.token == [0; 20] && !t.orphaned;
+                let window_end = r.max_block.filter(|_| !t.orphaned);
+                let target = match (lease, window_end) {
+                    (false, _) => Ok(RecoveryTarget::Hash {
+                        tx_hash: r.tx_hash,
+                        sender,
+                        nonce: r.nonce,
+                        window_end,
+                    }),
+                    (true, Some(to)) => Ok(RecoveryTarget::Window {
+                        sender,
+                        nonce: r.nonce,
+                        from: to.saturating_sub(lease_blocks),
+                        to,
+                    }),
+                    (true, None) => Err(crate::sources::LIVE_RECOVERY_LEASE_WINDOW_UNKNOWN),
+                };
+                (r.tx_hash, target)
+            })
+            .collect()
+    }
+
+    /// REV.1.0 R3b: the events of a final block the recovery found for the
+    /// unresolved transaction `key` (confirmed by the second source),
+    /// applied between the follower's blocks as the follower's own: its
+    /// chain facts name the source RECEIPT; a transaction resolved already
+    /// stays as it is. None while a followed block is being applied (asked
+    /// again before the next one).
+    pub fn recover_block(
+        &mut self,
+        key: &[u8; 32],
+        events: &[CanonicalEvent],
+    ) -> Option<Vec<PositionChange>> {
+        if self.block.is_some() || !self.seen.is_empty() {
+            return None;
+        }
+        if !self.book.unresolved().any(|t| t.released.tx_hash == *key) {
+            return Some(Vec::new());
+        }
+        let before = self.unresolved_hashes();
+        self.source = Some(FactSource::Receipt);
+        let mut changes = Vec::new();
+        for event in events {
+            changes.extend(self.on_canonical(event));
+        }
+        self.source = None;
+        // A block that ended unfinished leaves nothing behind.
+        self.block = None;
+        self.seen.clear();
+        self.nonces_taken.clear();
+        self.block_launches.clear();
+        self.block_buys.clear();
+        self.count_resolved(&before);
+        Some(changes)
+    }
+
+    fn unresolved_hashes(&self) -> Vec<[u8; 32]> {
+        self.book.unresolved().map(|t| t.released.tx_hash).collect()
+    }
+
+    /// The transactions of `before` the recovery resolved.
+    fn count_resolved(&mut self, before: &[[u8; 32]]) {
+        let book = &self.book;
+        let resolved = before
+            .iter()
+            .filter(|h| !book.unresolved().any(|t| t.released.tx_hash == **h))
+            .count();
+        self.recovery.recovered += resolved as u64;
+    }
+
+    /// REV.1.0 R3b: the runtime's recovery state, for the status.
+    pub fn set_recovery(
+        &mut self,
+        pending: Vec<([u8; 32], &'static str)>,
+        faults: u64,
+        fault: Option<String>,
+    ) {
+        self.recovery.pending = pending;
+        self.recovery.faults = faults;
+        self.recovery.fault = fault;
+    }
+
+    pub fn recovery(&self) -> &RecoveryView {
+        &self.recovery
     }
 
     /// What the book changed of the lots reported to the executor and the
@@ -2830,6 +2978,18 @@ impl LiveRuntime {
         d.set(l::LOT_READ_FAULTS, deciders.faults);
         if let Some(f) = &deciders.fault {
             d.set(l::LOT_READ_FAULT, f.as_str());
+        }
+        // R3b: the receipt recovery of the unresolved transactions.
+        for (tx, why) in &self.recovery.pending {
+            d.push(
+                l::RECOVERY_PENDING,
+                format!("0x{} {why}", alloy_primitives::hex::encode(tx)).as_str(),
+            );
+        }
+        d.set(l::RECOVERED, self.recovery.recovered)
+            .set(l::RECOVERY_FAULTS, self.recovery.faults);
+        if let Some(f) = &self.recovery.fault {
+            d.set(l::RECOVERY_FAULT, f.as_str());
         }
         let released = x.map_or(&[][..], |x| x.end().released());
         let ev = x.map(|x| x.evidence()).unwrap_or_default();
@@ -9508,6 +9668,571 @@ mod tests {
         live.take().unwrap().shutdown();
         r.clean();
         let _ = fs::remove_dir_all(&base);
+    }
+
+    /// REV.1.0 R3b (BSC3-024/041): the runtime's receipt recovery through
+    /// its canonical events. At a block's end every unresolved transaction
+    /// whose window is over or unknown is asked about (at most
+    /// `BSC_CANONICAL_RECOVERY_READS_MAX` at a time, none twice); before
+    /// the next block's events: a final block found resolves it as the
+    /// follower's block would, its facts of source RECEIPT (INCLUDED; a
+    /// lease's BUY found in its window adopted; REPLACED by the other
+    /// transaction at its nonce), a block not final or a failed read
+    /// leaves it unresolved, named, asked again after the backoff.
+    /// Without a second source nothing is asked. The facts survive a
+    /// restart, a block found again changes nothing, and the status names
+    /// all of it.
+    #[test]
+    fn unresolved_transactions_are_recovered_from_final_confirmed_blocks() {
+        use crate::chain_follower::{
+            CanonicalTrade, Recovered, RecoveryPending, RecoveryTarget, TxCost,
+        };
+        use crate::runtime::{
+            Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload,
+        };
+        use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+        const A: [u8; 32] = [0xa1; 32];
+        const B: [u8; 32] = [0xb5; 32];
+        const C: [u8; 32] = [0xc1; 32];
+        const D: [u8; 32] = [0xd5; 32];
+        const LEASE_TX: [u8; 32] = [0xe7; 32];
+        const TAKER: [u8; 32] = [0xb6; 32];
+        const TOKEN_A: [u8; 20] = [0xaa; 20];
+        const TOKEN_E: [u8; 20] = [0xee; 20];
+        /// The buyer's Portal BUY `tx` of `token` in block `n` (hash `h`).
+        fn bought(
+            n: u64,
+            h: u8,
+            tx: [u8; 32],
+            sender: [u8; 20],
+            nonce: u64,
+            token: [u8; 20],
+        ) -> Vec<CanonicalEvent> {
+            vec![
+                block_of(
+                    n,
+                    h,
+                    h - 1,
+                    vec![CanonicalTx {
+                        hash: tx,
+                        index: 0,
+                        sender,
+                        nonce,
+                        succeeded: true,
+                        cost: Some(TxCost {
+                            gas_used: 21_000,
+                            effective_gas_price: 1,
+                        }),
+                    }],
+                ),
+                CanonicalEvent::FlapTrade(CanonicalTrade {
+                    block_number: n,
+                    block_hash: [h; 32],
+                    tx_index: 0,
+                    tx_hash: tx,
+                    log_index: 0,
+                    origin: sender,
+                    sell: false,
+                    token,
+                    trader: sender,
+                    amount: U256::from(5_000u64).to_be_bytes(),
+                    eth: U256::from(1_000u64).to_be_bytes(),
+                    fee: [0; 32],
+                    post_price: [0; 32],
+                }),
+                complete_of(n, h),
+            ]
+        }
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), 0);
+        c.recovery.reads_max = 2;
+        c.recovery.reader = |_, _, _, _, _, target| match target {
+            RecoveryTarget::Hash {
+                tx_hash: A,
+                sender,
+                nonce,
+                ..
+            } => Ok(Recovered::Block(bought(
+                HEAD + 3,
+                0xa3,
+                A,
+                sender,
+                nonce,
+                TOKEN_A,
+            ))),
+            // Another transaction of the buyer at B's nonce (2).
+            RecoveryTarget::Hash {
+                tx_hash: B, sender, ..
+            } => Ok(Recovered::Block(vec![
+                block_of(
+                    HEAD + 4,
+                    0xb4,
+                    0xb3,
+                    vec![CanonicalTx {
+                        hash: TAKER,
+                        index: 0,
+                        sender,
+                        nonce: 2,
+                        succeeded: true,
+                        cost: None,
+                    }],
+                ),
+                complete_of(HEAD + 4, 0xb4),
+            ])),
+            RecoveryTarget::Hash { tx_hash: C, .. } => {
+                Ok(Recovered::Pending(RecoveryPending::NotFinal {
+                    block: HEAD + 9,
+                }))
+            }
+            RecoveryTarget::Hash { .. } => Err("TEST_ONLY transport".into()),
+            RecoveryTarget::Window {
+                sender,
+                nonce,
+                from,
+                to,
+            } => {
+                assert_eq!((from, to), (HEAD, HEAD + 4), "the lease's window");
+                Ok(Recovered::Block(bought(
+                    HEAD + 2,
+                    0xe2,
+                    LEASE_TX,
+                    sender,
+                    nonce,
+                    TOKEN_E,
+                )))
+            }
+        };
+        // A process that held only its C3 lease ended (BSC3-076).
+        let mut r = Rig::new("live-recover", LiveStrategies::C3);
+        r.exec.exec.live_lease_blocks = 4;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2_at(&r.d, r.buyer, 5));
+        assert!(x.armed(), "{:?}", reason(&x));
+        let held = leases(&r.state);
+        assert_eq!(held.len(), 1);
+        std::mem::forget(x);
+        // Its earlier transactions the follower never resolved.
+        let ledger = Ledger::open(&r.state);
+        for (hash, nonce, max_block) in [
+            (A, 1, Some(HEAD + 3)),
+            (B, 2, Some(HEAD + 3)),
+            (C, 3, None),
+            (D, 4, Some(HEAD + 3)),
+        ] {
+            let buy = Fact {
+                kind: FactKind::Released,
+                tx_hash: hash,
+                intent: LiveIntentKind::Buy,
+                component: ComponentId::ExecC3,
+                token: TOKEN_A,
+                nonce,
+                grant_generation: held[0].grant_generation,
+                input_wei: Some(U256::from(10_000u64)),
+                max_wei: Some(U256::from(20_000u64)),
+                block: None,
+                gas_wei: None,
+                tokens: None,
+                eth_wei: None,
+                max_block,
+                by_tx: None,
+                response: None,
+                origin: None,
+                launcher: None,
+                placement: None,
+                attempt: Some(hash),
+                operator: None,
+                source: None,
+            };
+            ledger.append(&buy, NOW).unwrap();
+        }
+        r.authorize("boot-2", "after-crash");
+        let mut live = Some(r.runtime("boot-2"));
+        assert_eq!(live.as_ref().unwrap().book().unresolved().count(), 5);
+        let base = std::env::temp_dir().join(format!(
+            "bsc-runtime-recover-journal-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        let apply = |c: &mut Canonical,
+                     live: &mut Option<LiveRuntime>,
+                     journal: &mut RuntimeJournal,
+                     event| {
+            apply_canonical(
+                c,
+                &mut None,
+                &mut None,
+                live,
+                journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            )
+        };
+        let at = |n: u64| block_of(n, n as u8, (n - 1) as u8, Vec::new());
+        let end = |n: u64| complete_of(n, n as u8);
+        // Head HEAD + 4: no window is over yet (the lease's ends there, the
+        // others before; C's is unknown).
+        apply(&mut c, &mut live, &mut journal, at(HEAD + 4));
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 4));
+        let asked = |c: &Canonical| c.recovery.reads.iter().map(|r| r.key).collect::<Vec<_>>();
+        assert_eq!(asked(&c).len(), 2, "at most the bound at a time");
+        let queued = |c: &Canonical| {
+            c.recovery
+                .pending
+                .iter()
+                .filter(|(_, why)| *why == crate::sources::LIVE_RECOVERY_QUEUED)
+                .count()
+        };
+        assert_eq!(queued(&c), 2, "the others wait, named");
+        assert!(
+            asked(&c).iter().all(|k| [A, B, C, D].contains(k)),
+            "the lease's window runs"
+        );
+        c.recovery.reads_max = 8;
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 4));
+        assert_eq!(asked(&c).len(), 4, "each once, none twice");
+        // Their answers before the next block's events; at its end the
+        // lease's window is over too: only it is asked (the others answered,
+        // within the backoff or resolved).
+        c.recovery.settle();
+        apply(&mut c, &mut live, &mut journal, at(HEAD + 10));
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 10));
+        assert_eq!(asked(&c), [held[0].tx_hash]);
+        c.recovery.settle();
+        apply(&mut c, &mut live, &mut journal, at(HEAD + 11));
+        let x = live.as_ref().unwrap();
+        let book = x.book();
+        let a = book.tx(&A).unwrap();
+        assert_eq!(a.state, FactKind::Included);
+        assert_eq!(
+            a.inclusion.as_ref().unwrap().source,
+            Some(FactSource::Receipt)
+        );
+        assert_eq!(a.inclusion.as_ref().unwrap().block.unwrap().0, HEAD + 3);
+        assert!(book.open_lot(&TOKEN_A).is_some(), "its lot is open");
+        let b = book.tx(&B).unwrap();
+        assert_eq!(b.state, FactKind::Replaced);
+        let replaced = ledger
+            .facts()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.tx_hash == B && f.kind == FactKind::Replaced)
+            .unwrap();
+        assert_eq!(replaced.source, Some(FactSource::Receipt));
+        assert_eq!(replaced.by_tx, Some(TAKER));
+        let e = book.tx(&LEASE_TX).unwrap();
+        assert_eq!(e.state, FactKind::Included, "the lease's BUY adopted");
+        assert_eq!(
+            e.inclusion.as_ref().unwrap().source,
+            Some(FactSource::Receipt)
+        );
+        assert!(book.open_lot(&TOKEN_E).is_some());
+        let unresolved: Vec<[u8; 32]> = book.unresolved().map(|t| t.released.tx_hash).collect();
+        assert_eq!(unresolved, [C, D]);
+        let status = record(x);
+        let named =
+            |tx: [u8; 32], why: &str| format!("0x{} {why}", alloy_primitives::hex::encode(tx));
+        let mut pending = status.texts(l::RECOVERY_PENDING).unwrap().to_vec();
+        pending.sort();
+        assert_eq!(
+            pending,
+            [
+                named(C, "RECOVERY_NOT_FINAL"),
+                named(D, crate::sources::LIVE_RECOVERY_FAILED)
+            ]
+        );
+        assert_eq!(status.u64(l::RECOVERED).unwrap(), 3);
+        assert_eq!(status.u64(l::RECOVERY_FAULTS).unwrap(), 1);
+        assert!(
+            status
+                .opt_text(l::RECOVERY_FAULT)
+                .unwrap()
+                .unwrap()
+                .contains("TEST_ONLY transport")
+        );
+        // Within the backoff nothing is asked again; after it, the rest.
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 11));
+        assert!(asked(&c).is_empty(), "{:?}", asked(&c));
+        c.recovery.retry_at.clear();
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 11));
+        let mut again = asked(&c);
+        again.sort();
+        assert_eq!(again, [C, D]);
+        c.recovery.settle();
+        // A recovered block is applied only between the follower's blocks;
+        // found again it changes nothing.
+        let facts = ledger.facts().unwrap().len();
+        let x = live.as_mut().unwrap();
+        let _ = x.on_canonical(&at(HEAD + 12));
+        assert_eq!(
+            x.recover_block(&C, &bought(HEAD + 3, 0xa3, A, r.buyer, 1, TOKEN_A)),
+            None
+        );
+        let _ = x.on_canonical(&end(HEAD + 12));
+        assert_eq!(
+            x.recover_block(&A, &bought(HEAD + 3, 0xa3, A, r.buyer, 1, TOKEN_A)),
+            Some(Vec::new())
+        );
+        assert_eq!(ledger.facts().unwrap().len(), facts);
+        // A recovered block resolves only what is not resolved yet: C's
+        // facts (its inclusion, its placement), never A's again.
+        let both = vec![
+            block_of(
+                HEAD + 6,
+                0xc6,
+                0xc5,
+                [(A, 1), (C, 3)]
+                    .map(|(hash, nonce)| CanonicalTx {
+                        hash,
+                        index: nonce,
+                        sender: r.buyer,
+                        nonce,
+                        succeeded: true,
+                        cost: None,
+                    })
+                    .to_vec(),
+            ),
+            complete_of(HEAD + 6, 0xc6),
+        ];
+        assert!(x.recover_block(&C, &both).is_some());
+        assert_eq!(x.book().tx(&C).unwrap().state, FactKind::Included);
+        let after = ledger.facts().unwrap();
+        assert_eq!(after.len(), facts + 2, "C's INCLUDED and PLACED only");
+        assert!(after[facts..].iter().all(|f| f.tx_hash == C));
+        // Without a second source nothing is asked, each named.
+        c.confirm = None;
+        c.recovery.reads.clear();
+        c.recovery.retry_at.clear();
+        apply(&mut c, &mut live, &mut journal, at(HEAD + 13));
+        apply(&mut c, &mut live, &mut journal, end(HEAD + 13));
+        assert!(asked(&c).is_empty());
+        let status = record(live.as_ref().unwrap());
+        assert!(
+            status
+                .texts(l::RECOVERY_PENDING)
+                .unwrap()
+                .iter()
+                .all(|p| p.ends_with(crate::sources::LIVE_RECOVERY_NO_SECOND_SOURCE)),
+            "{:?}",
+            status.texts(l::RECOVERY_PENDING)
+        );
+        // A restart reads the recovered facts as written.
+        live.take().unwrap().shutdown();
+        r.authorize("boot-3", "restart");
+        let mut x = r.runtime("boot-3");
+        assert_eq!(
+            x.book().tx(&A).unwrap().inclusion.as_ref().unwrap().source,
+            Some(FactSource::Receipt)
+        );
+        assert_eq!(x.book().tx(&B).unwrap().state, FactKind::Replaced);
+        x.shutdown();
+        r.clean();
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// REV.1.0 R3b review: what the recovery never asks is named (another
+    /// sender than the buyer, a lease without its window); a recovered
+    /// block resolves a reverted transaction as REVERTED (source RECEIPT),
+    /// adopts the BUY of the lease whose window holds it (of two at one
+    /// nonce), and replaces a lease whose nonce another transaction took
+    /// (counted); a reorg deeper than the follower's window takes a
+    /// recovered inclusion back, and the transaction is asked again, its
+    /// window bounding nothing.
+    #[test]
+    fn the_recovery_names_what_it_never_asks_and_resolves_reverts_takers_and_orphans() {
+        use crate::chain_follower::{CanonicalTrade, RecoveryTarget, TxCost};
+        use crate::sources::NonceOrigin;
+        const R: [u8; 32] = [0x71; 32];
+        const O: [u8; 32] = [0x72; 32];
+        const L1: [u8; 32] = [0x73; 32];
+        const L2: [u8; 32] = [0x74; 32];
+        const NW: [u8; 32] = [0x75; 32];
+        const L3: [u8; 32] = [0x76; 32];
+        const BUY: [u8; 32] = [0x77; 32];
+        const FX: [u8; 32] = [0x78; 32];
+        const L4: [u8; 32] = [0x79; 32];
+        const RV: [u8; 32] = [0x7a; 32];
+        const TOKEN: [u8; 20] = [0xab; 20];
+        let mut r = Rig::new("live-recover-names", LiveStrategies::C3);
+        r.exec.exec.live_lease_blocks = 4;
+        let ledger = Ledger::open(&r.state);
+        let fact = |kind, hash: [u8; 32], token, nonce, max_block, origin| Fact {
+            kind,
+            tx_hash: hash,
+            intent: LiveIntentKind::Buy,
+            component: ComponentId::ExecC3,
+            token,
+            nonce,
+            grant_generation: 1,
+            input_wei: Some(U256::from(10_000u64)),
+            max_wei: Some(U256::from(20_000u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block,
+            by_tx: None,
+            response: None,
+            origin,
+            launcher: None,
+            placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
+        };
+        let other = Some(NonceOrigin {
+            chain_id: crate::wss::BSC_MAINNET_CHAIN_ID,
+            sender: [0x0e; 20],
+        });
+        for f in [
+            fact(FactKind::Released, R, TOKEN, 1, Some(HEAD + 1), None),
+            fact(FactKind::Released, O, TOKEN, 2, Some(HEAD + 1), other),
+            fact(FactKind::Unknown, L1, [0; 20], 9, Some(HEAD + 2), None),
+            fact(FactKind::Unknown, L2, [0; 20], 9, Some(HEAD + 20), None),
+            fact(FactKind::Unknown, NW, [0; 20], 10, None, None),
+            fact(FactKind::Unknown, L3, [0; 20], 11, Some(HEAD + 21), None),
+            fact(FactKind::Unknown, L4, [0; 20], 12, Some(HEAD + 22), None),
+        ] {
+            ledger.append(&f, NOW).unwrap();
+        }
+        let mut x = r.runtime("boot-1");
+        let buyer = r.buyer;
+        let targets = x.recovery_targets(HEAD + 30);
+        let of = |k: [u8; 32]| targets.iter().find(|(h, _)| *h == k).unwrap().1;
+        assert_eq!(of(O), Err(crate::sources::LIVE_RECOVERY_OTHER_SENDER));
+        assert_eq!(
+            of(NW),
+            Err(crate::sources::LIVE_RECOVERY_LEASE_WINDOW_UNKNOWN)
+        );
+        assert_eq!(
+            of(R),
+            Ok(RecoveryTarget::Hash {
+                tx_hash: R,
+                sender: buyer,
+                nonce: 1,
+                window_end: Some(HEAD + 1)
+            })
+        );
+        assert_eq!(
+            of(L2),
+            Ok(RecoveryTarget::Window {
+                sender: buyer,
+                nonce: 9,
+                from: HEAD + 16,
+                to: HEAD + 20
+            })
+        );
+        let tx = |hash, nonce, succeeded| CanonicalTx {
+            hash,
+            index: 0,
+            sender: buyer,
+            nonce,
+            succeeded,
+            cost: Some(TxCost {
+                gas_used: 21_000,
+                effective_gas_price: 1,
+            }),
+        };
+        // R reverted in its receipt's block.
+        let reverted = [
+            block_of(HEAD + 1, 0x81, 0x80, vec![tx(R, 1, false)]),
+            complete_of(HEAD + 1, 0x81),
+        ];
+        assert!(x.recover_block(&R, &reverted).is_some());
+        let t = x.book().tx(&R).unwrap();
+        assert_eq!(t.state, FactKind::Reverted);
+        assert_eq!(
+            t.inclusion.as_ref().unwrap().source,
+            Some(FactSource::Receipt)
+        );
+        // Two leases at nonce 9: the BUY in the later one's window is its.
+        let trade = |n: u64, h: u8, hash| {
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: n,
+                block_hash: [h; 32],
+                tx_index: 0,
+                tx_hash: hash,
+                log_index: 0,
+                origin: buyer,
+                sell: false,
+                token: TOKEN,
+                trader: buyer,
+                amount: U256::from(5_000u64).to_be_bytes(),
+                eth: U256::from(1_000u64).to_be_bytes(),
+                fee: [0; 32],
+                post_price: [0; 32],
+            })
+        };
+        let adopted = [
+            block_of(HEAD + 10, 0x8a, 0x89, vec![tx(BUY, 9, true)]),
+            trade(HEAD + 10, 0x8a, BUY),
+            complete_of(HEAD + 10, 0x8a),
+        ];
+        assert!(
+            !x.recover_block(&L2, &adopted).unwrap().is_empty(),
+            "its lot opened"
+        );
+        assert_eq!(x.book().tx(&BUY).unwrap().state, FactKind::Included);
+        assert!(x.book().open_lot(&TOKEN).is_some());
+        assert!(!refused_by(&x, "LEASE_NONCE_TAKEN_BY_OTHER"));
+        for l in [L1, L2] {
+            assert_eq!(x.book().tx(&l).unwrap().state, FactKind::Replaced);
+        }
+        // Another transaction of the buyer at L3's nonce (no BUY of it).
+        let foreign = [
+            block_of(HEAD + 12, 0x8c, 0x8b, vec![tx(FX, 11, true)]),
+            complete_of(HEAD + 12, 0x8c),
+        ];
+        assert!(x.recover_block(&L3, &foreign).is_some());
+        assert_eq!(x.book().tx(&L3).unwrap().state, FactKind::Replaced);
+        assert!(x.book().tx(&FX).is_none());
+        assert!(refused_by(&x, "LEASE_NONCE_TAKEN_BY_OTHER"));
+        // L4's BUY reverted (adopted, no token: no trade).
+        let lease_reverted = [
+            block_of(HEAD + 13, 0x8d, 0x8c, vec![tx(RV, 12, false)]),
+            complete_of(HEAD + 13, 0x8d),
+        ];
+        assert!(x.recover_block(&L4, &lease_reverted).is_some());
+        assert_eq!(x.book().tx(&RV).unwrap().state, FactKind::Reverted);
+        // A reorg deeper than the follower's window takes R's and RV's
+        // blocks back: each asked again by its hash, its window bounding
+        // nothing (RV no lease although of no token, review LOW 4).
+        let _ = x.on_canonical(&CanonicalEvent::ReorgTooDeep {
+            orphaned: vec![(HEAD + 1, [0x81; 32]), (HEAD + 13, [0x8d; 32])],
+            new_head: (HEAD + 31, [0x99; 32]),
+        });
+        let t = x.book().tx(&R).unwrap();
+        assert!(t.orphaned && t.state == FactKind::Released, "{t:?}");
+        let targets = x.recovery_targets(HEAD + 31);
+        let of = |k: [u8; 32]| targets.iter().find(|(h, _)| *h == k).unwrap().1;
+        assert_eq!(
+            of(R),
+            Ok(RecoveryTarget::Hash {
+                tx_hash: R,
+                sender: buyer,
+                nonce: 1,
+                window_end: None
+            })
+        );
+        assert_eq!(
+            of(RV),
+            Ok(RecoveryTarget::Hash {
+                tx_hash: RV,
+                sender: buyer,
+                nonce: 12,
+                window_end: None
+            })
+        );
+        x.shutdown();
+        r.clean();
     }
 
     /// R2 review L7: a lot is stranded only by refused answers in a row:

@@ -38,6 +38,8 @@ enum Req {
     Nonce([u8; 20], [u8; 32]),
     /// BSC3-056: `eth_getBlockByNumber(n, false)`.
     Header(u64),
+    /// REV.1.0 R3b: `eth_getTransactionReceipt(hash)`.
+    Receipt([u8; 32]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -54,6 +56,11 @@ enum Reply {
     Hang,
     /// Answers `eth_blockNumber` with this head (the phase is unchanged).
     Head(u64),
+    /// REV.1.0 R3b: `null` (a node that knows no such receipt).
+    Null,
+    /// REV.1.0 R3b: the receipt as if of block `n` (an index stale after a
+    /// reorg).
+    ReceiptAt(u64),
 }
 
 struct Script {
@@ -150,6 +157,16 @@ impl State {
                 }
                 receipts
             }
+            // The served receipt of that transaction, or `null`.
+            Req::Receipt(hash) => self
+                .current()
+                .blocks
+                .values()
+                .filter_map(|b| b.receipts.as_array())
+                .flatten()
+                .find(|r| r["transactionHash"] == json!(hx(&hash)))
+                .cloned()
+                .unwrap_or(Value::Null),
             // A served block's number stands for the sender's next nonce
             // there; an unknown hash is the node's error (as a real node).
             Req::Nonce(_, hash) => self
@@ -179,6 +196,12 @@ impl State {
                     Req::Block(number(&request["params"][0]))
                 }
                 "eth_getBlockReceipts" => Req::Receipts(number(&request["params"][0])),
+                "eth_getTransactionReceipt" => Req::Receipt(
+                    hex::decode(&request["params"][0].as_str().unwrap()[2..])
+                        .unwrap()
+                        .try_into()
+                        .unwrap(),
+                ),
                 "eth_getTransactionCount" => {
                     let fixed = |v: &Value| hex::decode(&v.as_str().unwrap()[2..]).unwrap();
                     Req::Nonce(
@@ -215,6 +238,13 @@ impl State {
                 }
                 Some(Reply::Head(n)) => {
                     respond(&mut writer, &ok(json!(q(n))), None, false);
+                }
+                Some(Reply::Null) => respond(&mut writer, &ok(Value::Null), None, false),
+                Some(Reply::ReceiptAt(n)) => {
+                    let mut receipt = self.answer(req);
+                    receipt["blockNumber"] = json!(q(n));
+                    receipt["blockHash"] = self.current().blocks[&n].block["hash"].clone();
+                    respond(&mut writer, &ok(receipt), None, false);
                 }
                 Some(Reply::RpcError(code)) => {
                     let error = json!({"jsonrpc": "2.0", "id": id,
@@ -1941,4 +1971,478 @@ fn the_next_endpoint_gets_its_own_stall_time_and_a_stall_waits_one_poll() {
         .filter(|e| e.starts_with("fault Stalled"))
         .count();
     assert!(stalls > 10, "{stalls}: {alone:#?}");
+}
+
+// ---- REV.1.0 R3b: receipt recovery ------------------------------------
+
+/// Blocks `1..=to`, block `n` labelled `label(n)` on `label(n - 1)`, with
+/// the transactions `with(n)`.
+fn chain(label: &dyn Fn(u64) -> String, to: u64, with: &dyn Fn(u64) -> Vec<Tx>) -> Vec<Synth> {
+    (1..=to)
+        .map(|n| block(&label(n), n, &label(n - 1), with(n)))
+        .collect()
+}
+
+fn script_of(head: u64, blocks: &[Synth], inject: Vec<(Req, usize, Reply)>) -> Script {
+    Script {
+        phases: vec![phase(head, &blocks.iter().collect::<Vec<_>>())],
+        inject,
+        chunk: 1 << 20,
+    }
+}
+
+/// The LIVE buyer's transaction `hash` at `nonce`, with `logs`.
+fn buyer_tx(hash: [u8; 32], nonce: u64, logs: Vec<SynthLog>) -> Tx {
+    signed(
+        json!({"hash": hx(&hash), "from": hx(&BUYER), "nonce": q(nonce)}),
+        logs,
+    )
+}
+
+/// The requests a server answered (but the head that starts its script),
+/// and how often each.
+type Requests = Vec<(Req, usize)>;
+
+/// One recovery of `target` at the followed `head`, the search at most
+/// `search` blocks deep, against a primary serving `ours` and a second
+/// source serving `theirs`; with each server's requests.
+fn recover_against(
+    ours: Script,
+    theirs: Script,
+    head: u64,
+    search: u64,
+    target: RecoveryTarget,
+) -> (Result<Recovered, FollowerFault>, Requests, Requests) {
+    let stop = Arc::new(AtomicBool::new(false));
+    let (a, b) = (
+        serve(ours, Arc::clone(&stop)),
+        serve(theirs, Arc::clone(&stop)),
+    );
+    let limits = limits();
+    let rpc = |addr: SocketAddr| {
+        Rpc::new(Client::new(
+            connector(addr, limits),
+            addr.to_string(),
+            "/rpc".to_owned(),
+            &limits,
+        ))
+    };
+    let (mut primary, mut second) = (rpc(a.addr), rpc(b.addr));
+    // Each server's script starts with a head report.
+    primary.block_number(&stop).unwrap();
+    second.block_number(&stop).unwrap();
+    let mut sources = super::recover::Sources {
+        primary: &mut primary,
+        second: &mut second,
+        stop: &stop,
+    };
+    let got = super::recover::recover(&mut sources, &limits, search, head, target);
+    let mut counts = Vec::new();
+    for server in [a, b] {
+        server.done.store(true, Ordering::Release);
+        let mut c = server.handle.join().unwrap().counts;
+        c.retain(|(r, _)| *r != Req::BlockNumber);
+        counts.push(c);
+    }
+    let theirs = counts.pop().unwrap();
+    (got, counts.pop().unwrap(), theirs)
+}
+
+/// A recovered block: its number, hash, transactions (hashes) and trades.
+fn recovered_block(
+    got: &Result<Recovered, FollowerFault>,
+) -> (u64, [u8; 32], Vec<[u8; 32]>, usize) {
+    let Ok(Recovered::Block(events)) = got else {
+        panic!("{got:?}");
+    };
+    let CanonicalEvent::Block {
+        number, hash, txs, ..
+    } = &events[0]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(
+        events.last(),
+        Some(&CanonicalEvent::BlockComplete {
+            number: *number,
+            hash: *hash
+        })
+    );
+    let trades = events
+        .iter()
+        .filter(|e| matches!(e, CanonicalEvent::FlapTrade(_)))
+        .count();
+    (*number, *hash, txs.iter().map(|t| t.hash).collect(), trades)
+}
+
+fn reads_of(counts: &Requests, which: fn(&Req) -> bool) -> usize {
+    counts
+        .iter()
+        .filter(|(r, _)| which(r))
+        .map(|(_, n)| n)
+        .sum()
+}
+
+/// The served block number stands for the sender's next nonce there (the
+/// harness): nonce `n` passes first in block `n + 1`.
+const SEARCH: u64 = 28_800;
+
+/// REV.1.0 R3b (BSC3-024/041): a receipt names a block; it counts only once
+/// final at the followed head and the primary's block there is the second
+/// source's, and is then reported as the follower reports a block (its
+/// trades included). A receipt only the second source knows still leads to
+/// the primary's block; a receipt of another sender is the provider's
+/// error.
+#[test]
+fn a_receipt_names_a_final_block_the_second_source_confirms() {
+    let hash = named("buyer/tx");
+    let with = |n: u64| match n {
+        12 => vec![tx(vec![]), buyer_tx(hash, 3, vec![flap_buy(T1, BUYER, 7)])],
+        _ => vec![],
+    };
+    let ours = chain(&|n| format!("{n}"), 20, &with);
+    let target = RecoveryTarget::Hash {
+        tx_hash: hash,
+        sender: BUYER,
+        nonce: 3,
+        window_end: Some(13),
+    };
+    let run = |theirs: &[Synth], inject: Vec<(Req, usize, Reply)>, head| {
+        recover_against(
+            script_of(20, &ours, inject),
+            script_of(20, theirs, vec![]),
+            head,
+            SEARCH,
+            target,
+        )
+    };
+    // reorg_depth 3: final up to head 15 - 3 = 12.
+    let (got, primary, second) = run(&ours, vec![], 15);
+    let (number, hash12, txs, trades) = recovered_block(&got);
+    assert_eq!((number, hash12, txs.len(), trades), (12, named("12"), 2, 1));
+    assert!(txs.contains(&hash));
+    assert!(primary.contains(&(Req::Receipt(hash), 1)), "{primary:?}");
+    assert_eq!(second, [(Req::Header(12), 1)], "the second source confirms");
+    // Not final at head 14.
+    assert_eq!(
+        run(&ours, vec![], 14).0,
+        Ok(Recovered::Pending(RecoveryPending::NotFinal { block: 12 }))
+    );
+    // The second source holds another block 12: nothing decided.
+    let theirs = chain(
+        &|n| {
+            if n >= 12 {
+                format!("{n}x")
+            } else {
+                format!("{n}")
+            }
+        },
+        20,
+        &|_| vec![],
+    );
+    assert_eq!(
+        run(&theirs, vec![], 20).0,
+        Ok(Recovered::Pending(RecoveryPending::SourcesDisagree {
+            number: 12
+        }))
+    );
+    // Only the second source knows the receipt: the primary's block.
+    let (got, primary, _) = run(&ours, vec![(Req::Receipt(hash), 0, Reply::Null)], 20);
+    assert_eq!(recovered_block(&got).0, 12);
+    assert!(primary.contains(&(Req::Block(12), 1)), "{primary:?}");
+    // A receipt stale after a reorg (it names block 9, which does not hold
+    // the transaction): the search decides (re-check NIT 5). The
+    // transaction at nonce 11 is in block 12 (the nonce passes there).
+    let moved = named("buyer/moved");
+    let at12 = chain(&|n| format!("{n}"), 20, &|n| match n {
+        12 => vec![buyer_tx(moved, 11, vec![])],
+        _ => vec![tx(vec![])],
+    });
+    let (got, ..) = recover_against(
+        script_of(
+            20,
+            &at12,
+            vec![(Req::Receipt(moved), 0, Reply::ReceiptAt(9))],
+        ),
+        script_of(20, &at12, vec![]),
+        20,
+        SEARCH,
+        RecoveryTarget::Hash {
+            tx_hash: moved,
+            sender: BUYER,
+            nonce: 11,
+            window_end: Some(13),
+        },
+    );
+    assert_eq!(recovered_block(&got).2, vec![moved]);
+    assert_eq!(recovered_block(&got).0, 12);
+    // A receipt of another sender.
+    let (got, ..) = recover_against(
+        script_of(20, &ours, vec![]),
+        script_of(20, &ours, vec![]),
+        20,
+        SEARCH,
+        RecoveryTarget::Hash {
+            tx_hash: hash,
+            sender: OTHER,
+            nonce: 3,
+            window_end: None,
+        },
+    );
+    assert_eq!(
+        got,
+        Err(FollowerFault::Request {
+            call: Call::Receipt(hash),
+            error: RequestError::Shape(Field::From)
+        })
+    );
+}
+
+/// REV.1.0 R3b review (HIGH, MEDIUM) and re-check: a missing receipt alone
+/// says nothing, nor does a window over or one source's reading. The block
+/// where the sender's nonce passes the transaction's (as both sources read
+/// it at the last final block) is found and confirmed: it holds the
+/// transaction itself (its receipt dropped by both nodes, or its bytes
+/// landed after its window: included, never replaced) or another one at
+/// its nonce (which replaced it); the search goes down at most its bound.
+#[test]
+fn without_a_receipt_the_block_that_took_its_nonce_decides() {
+    let (ours_tx, foreign) = (named("ours/tx"), named("foreign/tx"));
+    // The transaction at nonce 5 lands in block 6 (the nonce passes there).
+    let at6 = |hash: [u8; 32]| {
+        move |n: u64| match n {
+            6 => vec![buyer_tx(hash, 5, vec![])],
+            _ => vec![tx(vec![])],
+        }
+    };
+    let ours = chain(&|n| format!("{n}"), 20, &at6(ours_tx));
+    let other = chain(&|n| format!("{n}"), 20, &at6(foreign));
+    let no_receipt = || vec![(Req::Receipt(ours_tx), 0, Reply::Null)];
+    let target = |nonce, window_end| RecoveryTarget::Hash {
+        tx_hash: ours_tx,
+        sender: BUYER,
+        nonce,
+        window_end,
+    };
+    let run = |served: &[Synth], theirs: &[Synth], inject: Vec<(Req, usize, Reply)>, search, t| {
+        recover_against(
+            script_of(20, served, no_receipt()),
+            script_of(20, theirs, inject),
+            20,
+            search,
+            t,
+        )
+    };
+    // Its receipt dropped by both, its window to 10: found in block 6, it
+    // itself (included, never replaced).
+    let (got, primary, _) = run(&ours, &ours, no_receipt(), SEARCH, target(5, Some(10)));
+    let (number, _, txs, _) = recovered_block(&got);
+    assert_eq!((number, txs), (6, vec![ours_tx]));
+    assert!(
+        reads_of(&primary, |r| matches!(r, Req::Nonce(..))) <= 10,
+        "searched, not scanned: {primary:?}"
+    );
+    // Another transaction at its nonce: that block (it replaced it).
+    let (got, ..) = run(&other, &other, no_receipt(), SEARCH, target(5, Some(10)));
+    assert_eq!(recovered_block(&got).2, vec![foreign]);
+    // Without a window: the same, from the final block down.
+    let (got, ..) = run(&ours, &ours, no_receipt(), SEARCH, target(5, None));
+    assert_eq!(recovered_block(&got).0, 6);
+    // Its bytes landed after its window (4) ended (re-check LOW 2): it
+    // itself, found from the window's end on, never a nonce word.
+    let (got, ..) = run(&ours, &ours, no_receipt(), SEARCH, target(5, Some(4)));
+    assert_eq!(recovered_block(&got).2, vec![ours_tx]);
+    // The sources read the nonce at the final block on either side of it
+    // (re-check MEDIUM 1): one source never decides.
+    let mut low = no_receipt();
+    low.push((Req::Nonce(BUYER, named("17")), 0, Reply::Head(4)));
+    assert_eq!(
+        run(&ours, &ours, low, SEARCH, target(5, Some(4))).0,
+        Ok(Recovered::Pending(RecoveryPending::SourcesDisagree {
+            number: 17
+        }))
+    );
+    // The second source holds another final block.
+    let fork = chain(
+        &|n| {
+            if n >= 4 {
+                format!("{n}y")
+            } else {
+                format!("{n}")
+            }
+        },
+        20,
+        &at6(ours_tx),
+    );
+    assert_eq!(
+        run(&ours, &fork, no_receipt(), SEARCH, target(5, Some(4))).0,
+        Ok(Recovered::Pending(RecoveryPending::SourcesDisagree {
+            number: 17
+        }))
+    );
+    // Past at every height within the search's bound (3 below 17).
+    assert_eq!(
+        run(&ours, &ours, no_receipt(), 3, target(5, None)).0,
+        Ok(Recovered::Pending(RecoveryPending::BeyondSearch {
+            from: 14
+        }))
+    );
+    // Not past at the final block: nothing.
+    assert_eq!(
+        run(&ours, &ours, no_receipt(), SEARCH, target(30, None)).0,
+        Ok(Recovered::Pending(RecoveryPending::NotFound))
+    );
+    // The block where it passes holds no transaction of the sender at it.
+    let empty = chain(&|n| format!("{n}"), 20, &|_| vec![tx(vec![])]);
+    assert_eq!(
+        run(&empty, &empty, no_receipt(), SEARCH, target(5, Some(10))).0,
+        Ok(Recovered::Pending(RecoveryPending::NotInBlock {
+            number: 6
+        }))
+    );
+    // No final block yet.
+    let (got, ..) = recover_against(
+        script_of(20, &ours, no_receipt()),
+        script_of(20, &ours, no_receipt()),
+        2,
+        SEARCH,
+        target(5, None),
+    );
+    assert_eq!(
+        got,
+        Ok(Recovered::Pending(RecoveryPending::NotFinal { block: 2 }))
+    );
+}
+
+/// REV.1.0 R3b review (HIGH): a lease's BUY (its hash never known) is found
+/// where the sender's nonce passes it, wherever its window started (the
+/// configured start only where the search begins); a window not final,
+/// different final blocks, another transaction that took the nonce after
+/// the window and a nonce never taken decide accordingly.
+#[test]
+fn a_lease_is_found_where_the_senders_nonce_passes_it() {
+    let (lease, early, late) = (
+        named("lease/buy"),
+        named("lease/early"),
+        named("lease/late"),
+    );
+    let with = |n: u64| match n {
+        12 => vec![buyer_tx(early, 11, vec![])],
+        15 => vec![buyer_tx(lease, 14, vec![flap_buy(T2, BUYER, 7)])],
+        17 => vec![buyer_tx(late, 16, vec![])],
+        _ => vec![tx(vec![])],
+    };
+    let ours = chain(&|n| format!("{n}"), 20, &with);
+    let window = |nonce, from, to| RecoveryTarget::Window {
+        sender: BUYER,
+        nonce,
+        from,
+        to,
+    };
+    let run = |theirs: &[Synth], head, t| {
+        recover_against(
+            script_of(20, &ours, vec![]),
+            script_of(20, theirs, vec![]),
+            head,
+            SEARCH,
+            t,
+        )
+    };
+    let (got, primary, _) = run(&ours, 20, window(14, 10, 16));
+    let (number, _, txs, trades) = recovered_block(&got);
+    assert_eq!((number, txs, trades), (15, vec![lease], 1));
+    assert!(
+        reads_of(&primary, |r| matches!(r, Req::Nonce(..))) <= 8,
+        "bisected, not scanned: {primary:?}"
+    );
+    // Its window started earlier than the configuration says now (the
+    // lease blocks lowered since): found still, below the configured start.
+    let (got, ..) = run(&ours, 20, window(11, 15, 16));
+    assert_eq!(recovered_block(&got).2, vec![early]);
+    // A window long over (the last final block 40, its end 16): searched
+    // over the whole window still with a depth of just its length
+    // (re-check LOW A: the bound anchored at the window's end).
+    let long = chain(&|n| format!("{n}"), 43, &|n| match n {
+        12 => vec![buyer_tx(early, 11, vec![])],
+        _ => vec![tx(vec![])],
+    });
+    let (got, ..) = recover_against(
+        script_of(43, &long, vec![]),
+        script_of(43, &long, vec![]),
+        43,
+        6,
+        window(11, 10, 16),
+    );
+    assert_eq!(recovered_block(&got).2, vec![early]);
+    // The window's end is not final yet.
+    assert_eq!(
+        run(&ours, 18, window(14, 10, 16)).0,
+        Ok(Recovered::Pending(RecoveryPending::NotFinal { block: 16 }))
+    );
+    // The sources hold different final blocks.
+    let fork = chain(
+        &|n| {
+            if n >= 16 {
+                format!("{n}z")
+            } else {
+                format!("{n}")
+            }
+        },
+        20,
+        &with,
+    );
+    assert_eq!(
+        run(&fork, 20, window(14, 10, 16)).0,
+        Ok(Recovered::Pending(RecoveryPending::SourcesDisagree {
+            number: 17
+        }))
+    );
+    // Another transaction of the sender took the nonce after the window:
+    // that block (the lease is replaced by it); not past at the final
+    // block, nothing.
+    let (got, ..) = run(&ours, 20, window(16, 10, 16));
+    assert_eq!(recovered_block(&got).2, vec![late]);
+    assert_eq!(
+        run(&ours, 20, window(17, 10, 16)).0,
+        Ok(Recovered::Pending(RecoveryPending::NotFound))
+    );
+}
+
+/// REV.1.0 R3b review (LOW 3): a recovered block whose launch transaction
+/// object a provider refuses is fetched again, up to `tx_attempts` times,
+/// then carried by its launch (as the follower's): never failed for good.
+#[test]
+fn a_provider_side_refusal_in_a_recovered_block_is_fetched_again_then_carried() {
+    let served = real_block(&|txs| txs[26]["nonce"] = Value::from("0x1"));
+    let object = &served.block["transactions"][0];
+    let fixed = |v: &Value| -> Vec<u8> { hex::decode(&v.as_str().unwrap()[2..]).unwrap() };
+    let target = RecoveryTarget::Hash {
+        tx_hash: fixed(&object["hash"]).try_into().unwrap(),
+        sender: fixed(&object["from"]).try_into().unwrap(),
+        nonce: u64::from_str_radix(&object["nonce"].as_str().unwrap()[2..], 16).unwrap(),
+        window_end: None,
+    };
+    let script = || Script {
+        phases: vec![only(served.clone())],
+        inject: vec![],
+        chunk: 4096,
+    };
+    let limits = limits();
+    assert_eq!(limits.tx_attempts, 2);
+    let (got, primary, _) = recover_against(script(), script(), 129_774_331 + 3, SEARCH, target);
+    let Ok(Recovered::Block(events)) = &got else {
+        panic!("{got:?}");
+    };
+    let launches: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            CanonicalEvent::Launch(l) => Some(l.unverifiable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(launches, [None, Some(RejectReason::HashMismatch)]);
+    assert!(
+        primary.contains(&(Req::Block(129_774_331), 2)),
+        "fetched again once: {primary:?}"
+    );
 }

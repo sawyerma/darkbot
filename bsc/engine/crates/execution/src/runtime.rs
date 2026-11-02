@@ -298,6 +298,17 @@ pub struct CanonicalConfig {
     /// (`BSC_CANONICAL_LOT_READ_REFUSED_MAX`): one bad answer, maybe from
     /// one endpoint, is read again.
     pub lot_read_refused_max: u32,
+    /// REV.1.0 R3b (BSC3-024/041): at most this many receipt recoveries of
+    /// unresolved LIVE transactions at a time
+    /// (`BSC_CANONICAL_RECOVERY_READS_MAX`), and one asked again no earlier
+    /// than this after an answer that decided nothing or a failure
+    /// (`BSC_CANONICAL_RECOVERY_RETRY_MS`).
+    pub recovery_reads_max: usize,
+    pub recovery_retry_ms: u64,
+    /// The search for the block where an unresolved transaction's nonce
+    /// passes goes at most this many blocks below where it starts
+    /// (`BSC_CANONICAL_RECOVERY_SEARCH_BLOCKS`): beyond, it is named.
+    pub recovery_search_blocks: u64,
 }
 
 /// BSC3-056: the second source and how close it must be.
@@ -521,6 +532,18 @@ impl RuntimeConfig {
                         64,
                     )?)
                     .map_err(|_| "BSC_CANONICAL_LOT_READ_REFUSED_MAX")?,
+                    recovery_reads_max: usize::try_from(take(
+                        "BSC_CANONICAL_RECOVERY_READS_MAX",
+                        1,
+                        64,
+                    )?)
+                    .map_err(|_| "BSC_CANONICAL_RECOVERY_READS_MAX")?,
+                    recovery_retry_ms: take("BSC_CANONICAL_RECOVERY_RETRY_MS", 100, 3_600_000)?,
+                    recovery_search_blocks: take(
+                        "BSC_CANONICAL_RECOVERY_SEARCH_BLOCKS",
+                        1,
+                        10_000_000,
+                    )?,
                     state,
                 })
             }
@@ -638,6 +661,16 @@ impl RuntimeConfig {
                 return Err(format!(
                     "BSC_EXEC_MAX_CALLDATA {} is below BSC_RUNTIME_MAX_LAUNCH_CALLDATA {max_launch_calldata}",
                     x.exec.max_calldata
+                ));
+            }
+            // R3b review: the receipt recovery's search reaches over a
+            // lease's whole window.
+            if let Some(c) = canonical.as_ref()
+                && c.recovery_search_blocks < x.exec.live_lease_blocks
+            {
+                return Err(format!(
+                    "BSC_CANONICAL_RECOVERY_SEARCH_BLOCKS {} is below BSC_EXEC_LIVE_LEASE_BLOCKS {}: a lease's BUY early in its window would never be found",
+                    c.recovery_search_blocks, x.exec.live_lease_blocks
                 ));
             }
         }
@@ -1214,8 +1247,12 @@ fn apply_canonical(
     // every later trade).
     c.lot.overtake(&event);
     let concerns = c.lot.concerns(&event);
+    let mut changed = false;
     if let CanonicalEvent::Block { .. } = event {
         hold_read_lots(c, live, journal, at);
+        // R3b: the recovered blocks and nonces resolve their transactions
+        // before the new block's events (they are older and final).
+        changed = apply_recoveries(c, live, journal, at);
     }
     if let Some(o) = owner.as_mut() {
         o.canonical(&event);
@@ -1237,23 +1274,9 @@ fn apply_canonical(
     // Plan 28.10.: the buyer's receipts and reorgs become ledger facts;
     // a position opened or ended is held or released by Strategy C (a
     // journaled input, so a replay steps the same engine).
-    let mut changed = false;
     if let Some(l) = live.as_mut() {
-        for change in l.on_canonical(&event) {
-            changed = true;
-            let Some(s) = c.strategy.as_mut() else {
-                continue;
-            };
-            match change {
-                live::PositionChange::Opened {
-                    token,
-                    tokens,
-                    spent_wei,
-                    filled_ms,
-                } => s.hold(token, tokens, spent_wei, filled_ms, at, journal),
-                live::PositionChange::Ended { token } => s.unhold(token, at, journal),
-            }
-        }
+        let changes = l.on_canonical(&event);
+        changed |= tell_strategy(c, changes, at, journal);
     }
     c.event(at, event, journal);
     // R1: who decides the open lots' exits, as the event left it (a BUY of
@@ -1267,7 +1290,155 @@ fn apply_canonical(
     if let Some(block) = complete {
         strategy_to_paper(c, exec, live, owner, clock, journal, block);
         ask_lot_reads(c, live, block);
+        ask_recoveries(c, live, block);
     }
+}
+
+/// A position the LIVE ledger opened or ended, to Strategy C (held or
+/// released, journaled); whether there was any.
+fn tell_strategy(
+    c: &mut Canonical,
+    changes: Vec<live::PositionChange>,
+    at: u64,
+    journal: &mut RuntimeJournal,
+) -> bool {
+    let changed = !changes.is_empty();
+    for change in changes {
+        let Some(s) = c.strategy.as_mut() else {
+            continue;
+        };
+        match change {
+            live::PositionChange::Opened {
+                token,
+                tokens,
+                spent_wei,
+                filled_ms,
+            } => s.hold(token, tokens, spent_wei, filled_ms, at, journal),
+            live::PositionChange::Ended { token } => s.unhold(token, at, journal),
+        }
+    }
+    changed
+}
+
+/// REV.1.0 R3b (BSC3-024/041): at the end of block `block`, a receipt
+/// recovery of each unresolved LIVE transaction the follower cannot
+/// resolve any more ([`LiveRuntime::recovery_targets`]) not asked yet: off
+/// the loop, against the followed endpoint, every block it rests on final
+/// and confirmed by the second source; at most
+/// `BSC_CANONICAL_RECOVERY_READS_MAX` at a time, one asked again no earlier
+/// than `BSC_CANONICAL_RECOVERY_RETRY_MS` after its last answer. Without a
+/// second source nothing is recovered (each named as such).
+fn ask_recoveries(c: &mut Canonical, live: &mut Option<LiveRuntime>, block: u64) {
+    let (Some(l), Some((number, _))) = (live.as_mut(), c.head) else {
+        return;
+    };
+    if number != block {
+        return;
+    }
+    let targets = l.recovery_targets(number);
+    let r = &mut c.recovery;
+    // Only what is still unresolved is named or waited for.
+    r.pending
+        .retain(|(k, _)| targets.iter().any(|(t, _)| t == k));
+    r.retry_at
+        .retain(|(k, _)| targets.iter().any(|(t, _)| t == k));
+    let primary = c.lot.config.endpoint_at(c.active);
+    let now = Instant::now();
+    for (key, target) in targets {
+        let (target, second) = match (target, c.confirm.as_ref()) {
+            // Never asked: named why.
+            (Err(why), _) => {
+                r.note(key, why);
+                continue;
+            }
+            (Ok(_), None) => {
+                r.note(key, crate::sources::LIVE_RECOVERY_NO_SECOND_SOURCE);
+                continue;
+            }
+            (Ok(target), Some((_, confirm))) => (target, confirm.endpoint.clone()),
+        };
+        let asked = r.reads.iter().any(|x| x.key == key)
+            || r.retry_at.iter().any(|(k, at)| *k == key && *at > now);
+        if asked {
+            continue;
+        }
+        if r.reads.len() >= r.reads_max {
+            r.note(key, crate::sources::LIVE_RECOVERY_QUEUED);
+            continue;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let (read, primary, limits, search) = (
+            r.reader,
+            primary.to_string(),
+            c.lot.config.limits,
+            r.search_blocks,
+        );
+        let spawned = std::thread::Builder::new()
+            .name("bsc-live-recovery".into())
+            .spawn(move || {
+                let _ = tx.send(read(&primary, &second, &limits, search, number, target));
+            });
+        match spawned {
+            Ok(_handle) => {
+                r.note(key, crate::sources::LIVE_RECOVERY_ASKED);
+                r.reads.push(RecoveryRead {
+                    key,
+                    rx,
+                    #[cfg(test)]
+                    handle: Some(_handle),
+                });
+            }
+            Err(e) => r.failed(key, format!("recovery read not started: {e}")),
+        }
+    }
+    l.set_recovery(r.pending.clone(), r.faults, r.fault.clone());
+}
+
+/// REV.1.0 R3b: before a block's events, the recoveries that came back: a
+/// final block found resolves its transactions as the follower's block
+/// would (source RECEIPT); anything else is named and asked again after
+/// the backoff. Whether a position changed.
+fn apply_recoveries(
+    c: &mut Canonical,
+    live: &mut Option<LiveRuntime>,
+    journal: &mut RuntimeJournal,
+    at: u64,
+) -> bool {
+    use crate::chain_follower::Recovered;
+    let r = &mut c.recovery;
+    let Some(l) = live.as_mut().filter(|_| !r.reads.is_empty()) else {
+        return false;
+    };
+    let reads = std::mem::take(&mut r.reads);
+    let mut changes = Vec::new();
+    for read in reads {
+        let answer = match read.rx.try_recv() {
+            Ok(answer) => answer,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                r.reads.push(read);
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("recovery read ended without an answer".into())
+            }
+        };
+        let key = read.key;
+        match answer {
+            Ok(Recovered::Block(events)) => match l.recover_block(&key, &events) {
+                Some(c) => {
+                    changes.extend(c);
+                    r.pending.retain(|(k, _)| *k != key);
+                }
+                // A followed block is being applied: asked again.
+                None => r.note(key, crate::sources::LIVE_RECOVERY_ASKED),
+            },
+            Ok(Recovered::Pending(why)) => r.note(key, why.name()),
+            Err(why) => r.failed(key, why),
+        }
+        r.retry_later(key);
+    }
+    l.set_recovery(r.pending.clone(), r.faults, r.fault.clone());
+    tell_strategy(c, changes, at, journal)
 }
 
 /// Every queued canonical event, now (Phase I gate H1: also between the
@@ -1598,6 +1769,114 @@ struct Canonical {
     join_horizon_us: u64,
     /// 01.11. (R1): the exit deciders of the open LIVE lots.
     lot: LotDeciders,
+    /// REV.1.0 R3b: the receipt recoveries of unresolved LIVE transactions.
+    recovery: Recoveries,
+}
+
+/// REV.1.0 R3b: what the chain says of one unresolved LIVE transaction at
+/// the followed head (production: [`read_recovery`]): the followed
+/// endpoint, the second source, the follower's bounds, the search's depth,
+/// the head, the target.
+type ChainRecovery = fn(
+    &str,
+    &str,
+    &FollowerLimits,
+    u64,
+    u64,
+    crate::chain_follower::RecoveryTarget,
+) -> Result<crate::chain_follower::Recovered, String>;
+
+/// The production recovery: one connection to each endpoint, the
+/// follower's bounds on every request (a runtime that stops leaves it to
+/// end by them).
+fn read_recovery(
+    primary: &str,
+    second: &str,
+    limits: &FollowerLimits,
+    search_blocks: u64,
+    head: u64,
+    target: crate::chain_follower::RecoveryTarget,
+) -> Result<crate::chain_follower::Recovered, String> {
+    let never = AtomicBool::new(false);
+    crate::chain_follower::recover_transaction(
+        primary,
+        second,
+        limits,
+        search_blocks,
+        head,
+        target,
+        &never,
+    )
+    .map_err(|e| format!("{e:?}"))
+}
+
+/// REV.1.0 R3b (BSC3-024/041): the receipt recoveries of the ledger's
+/// unresolved LIVE transactions: the reads out, when each may be asked
+/// again, each one's last word (why it is not resolved), the failures.
+struct Recoveries {
+    reads_max: usize,
+    retry_ms: u64,
+    search_blocks: u64,
+    reader: ChainRecovery,
+    reads: Vec<RecoveryRead>,
+    retry_at: Vec<([u8; 32], Instant)>,
+    pending: Vec<([u8; 32], &'static str)>,
+    faults: u64,
+    fault: Option<String>,
+}
+
+struct RecoveryRead {
+    key: [u8; 32],
+    rx: std::sync::mpsc::Receiver<Result<crate::chain_follower::Recovered, String>>,
+    #[cfg(test)]
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Recoveries {
+    fn new(config: &CanonicalConfig) -> Self {
+        Recoveries {
+            reads_max: config.recovery_reads_max,
+            retry_ms: config.recovery_retry_ms,
+            search_blocks: config.recovery_search_blocks,
+            reader: read_recovery,
+            reads: Vec::new(),
+            retry_at: Vec::new(),
+            pending: Vec::new(),
+            faults: 0,
+            fault: None,
+        }
+    }
+
+    /// `key`'s last word.
+    fn note(&mut self, key: [u8; 32], why: &'static str) {
+        match self.pending.iter_mut().find(|(k, _)| *k == key) {
+            Some(p) => p.1 = why,
+            None => self.pending.push((key, why)),
+        }
+    }
+
+    fn failed(&mut self, key: [u8; 32], why: String) {
+        self.faults += 1;
+        self.fault = Some(format!("0x{}: {why}", alloy_primitives::hex::encode(key)));
+        self.note(key, crate::sources::LIVE_RECOVERY_FAILED);
+        self.retry_later(key);
+    }
+
+    fn retry_later(&mut self, key: [u8; 32]) {
+        let at = Instant::now() + Duration::from_millis(self.retry_ms);
+        self.retry_at.retain(|(k, _)| *k != key);
+        self.retry_at.push((key, at));
+    }
+
+    /// Tests: waits until every read out has answered.
+    #[cfg(test)]
+    fn settle(&mut self) {
+        for r in &mut self.reads {
+            if let Some(h) = r.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
 }
 
 /// 01.11. (R1): reads a token's curve at one block (production:
@@ -1824,6 +2103,7 @@ impl Canonical {
             ),
             join_horizon_us: config.join_horizon_ms.saturating_mul(1_000),
             lot: LotDeciders::new(config),
+            recovery: Recoveries::new(config),
         }
     }
 
@@ -4108,6 +4388,31 @@ mod tests {
             .map(|c| c.canonical.unwrap().fallbacks)
         };
         assert_eq!(fallback(""), Ok(Vec::new()));
+        // R3b: the recovery's bounds; its search over a lease's window.
+        assert_eq!(
+            (
+                canonical.recovery_reads_max,
+                canonical.recovery_retry_ms,
+                canonical.recovery_search_blocks
+            ),
+            (2, 60_000, 28_800)
+        );
+        let search = |blocks: &str| {
+            RuntimeConfig::parse(&CONFIG.replace(
+                "BSC_CANONICAL_RECOVERY_SEARCH_BLOCKS=28800\n",
+                &format!("BSC_CANONICAL_RECOVERY_SEARCH_BLOCKS={blocks}\n"),
+            ))
+            .map(|c| c.canonical.unwrap().recovery_search_blocks)
+        };
+        assert_eq!(search("200"), Ok(200), "the lease's window exactly");
+        assert!(
+            search("199")
+                .unwrap_err()
+                .contains("BSC_EXEC_LIVE_LEASE_BLOCKS")
+        );
+        for bad in ["0", "10000001", "x"] {
+            assert!(search(bad).is_err(), "{bad}");
+        }
         // BSC3-056: the second source, of a host none of the followed has.
         assert_eq!(
             canonical.confirm,

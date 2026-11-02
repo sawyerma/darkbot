@@ -1677,11 +1677,19 @@ pub mod runtime_status {
         pub const STRANDED: u16 = 31;
         pub const LOT_READ_FAULTS: u16 = 32;
         pub const LOT_READ_FAULT: u16 = 33;
+        /// v6 (REV.1.0 R3b, BSC3-024/041): the unresolved transactions the
+        /// receipt recovery asked about and has not resolved,
+        /// `0x<tx> <REASON>`; the transactions it resolved in this process;
+        /// its failed reads, and the last failure.
+        pub const RECOVERY_PENDING: u16 = 34;
+        pub const RECOVERED: u16 = 35;
+        pub const RECOVERY_FAULTS: u16 = 36;
+        pub const RECOVERY_FAULT: u16 = 37;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.live",
             record_type: 0,
-            schema_version: 5,
+            schema_version: 6,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1716,6 +1724,10 @@ pub mod runtime_status {
                 Field::rep(STRANDED, "stranded", Text),
                 Field::req(LOT_READ_FAULTS, "lot_read_faults", U64),
                 Field::opt(LOT_READ_FAULT, "lot_read_fault", Text),
+                Field::rep(RECOVERY_PENDING, "recovery_pending", Text),
+                Field::req(RECOVERED, "recovered", U64),
+                Field::req(RECOVERY_FAULTS, "recovery_faults", U64),
+                Field::opt(RECOVERY_FAULT, "recovery_fault", Text),
             ],
         };
     }

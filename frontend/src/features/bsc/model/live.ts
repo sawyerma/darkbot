@@ -208,6 +208,36 @@ export function unixMs(v: bigint | undefined): string {
 }
 /** What an attempt's counters count (REV.1.0 R2b review L8): counts, not rates of the attempts. */
 export const COUNTERS_MEANING = "Je Versuch bis einschließlich ihm: acquired von allen LIVE-BUYs (C3 und Strategy C, auch vor dem Commitment); passed · failed · undecided zählen nur die Verdikte der C3-BUYs (ein Strategy-C-BUY hat keins, NOT_APPLICABLE)";
+/** One row of the LIVE tab: label, value and hint. */
+export interface LiveRow { label: string; value: string; hint: string }
+
+/** REV.1.0 R1: who decides the open lots' exits, as the runtime's status names them. */
+export function exitDeciderRows(l: BscLiveView | null | undefined): LiveRow[] {
+  const list = (v: readonly string[] | undefined) => v?.length ? v.join(" · ") : "—";
+  return [
+    { label: "Exit undecided", value: list(l?.exitUndecided), hint: "Open lots no strategy holds yet (their curve being read): no new BUY until each is held or stranded" },
+    { label: "Stranded lots", value: list(l?.stranded), hint: "No strategy exit can take them (the reason named): the operator resumes, writes off or exits each" },
+    { label: "Curve read faults", value: (l?.lotReadFaults ?? 0n).toString(), hint: l?.lotReadFault || "no failure" },
+  ];
+}
+
+/** REV.1.0 R3b (BSC3-024/041): the runtime's receipt recovery of the ledger's unresolved
+ *  transactions, and each one it has not resolved as `[tx, reason]`. */
+export function recoveryRows(l: BscLiveView | null | undefined): { row: LiveRow; pending: [string, string][] } {
+  const pending = (l?.recoveryPending ?? []).map(p => {
+    const at = p.indexOf(" ");
+    return (at < 0 ? [p, ""] : [p.slice(0, at), p.slice(at + 1)]) as [string, string];
+  });
+  return {
+    row: {
+      label: "Receipt recovery",
+      value: `${(l?.recovered ?? 0n).toString()} resolved · ${pending.length} pending · ${(l?.recoveryFaults ?? 0n).toString()} failed reads`,
+      hint: l?.recoveryFault || "Unresolved transactions the follower can no longer resolve, looked up off the loop: only a final block the second source confirms that holds the transaction (its receipt's) or its sender's at its nonce (where the nonce passes it)",
+    },
+    pending,
+  };
+}
+
 /** The campaign verdict record exists but is unreadable or not of its schema. */
 export const VERDICT_INVALID = "LIVE_CAMPAIGN_VERDICT_INVALID";
 /** The campaign section did not fit what the rest of the LIVE tab leaves of the state bound:

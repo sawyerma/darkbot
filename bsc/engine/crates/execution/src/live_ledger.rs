@@ -88,24 +88,21 @@ pub struct Operator {
 /// follower's block (BSC3-024/041).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FactSource {
-    /// Its receipt by hash, the block confirmed by the second source.
+    /// R3b: a block the receipt recovery found (final, the second source's;
+    /// its receipt's, or where the sender's nonce passes the
+    /// transaction's).
     Receipt,
-    /// `Replaced`: no receipt, and the sender's confirmed nonce past it.
-    Nonce,
 }
 
 impl FactSource {
     pub fn name(self) -> &'static str {
         match self {
             Self::Receipt => "RECEIPT",
-            Self::Nonce => "NONCE",
         }
     }
 
     fn parse(text: &str) -> Option<Self> {
-        [Self::Receipt, Self::Nonce]
-            .into_iter()
-            .find(|s| s.name() == text)
+        [Self::Receipt].into_iter().find(|s| s.name() == text)
     }
 }
 
@@ -665,6 +662,30 @@ impl Ledger {
             highest = highest.max(Some(generation));
         }
         Ok(highest)
+    }
+
+    /// R3b: the numbers of the quarantined entries, ascending (a record
+    /// named otherwise counts as none).
+    pub fn quarantined_seqs(&self) -> Result<Vec<u64>, String> {
+        let qdir = self.quarantine_dir();
+        let entries = match fs::read_dir(&qdir) {
+            Ok(e) => e,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(format!("{}: {err}", qdir.display())),
+        };
+        let mut seqs = Vec::new();
+        for entry in entries {
+            let name = entry.map_err(|e| e.to_string())?.file_name();
+            if let Some(seq) = name
+                .to_str()
+                .and_then(|n| n.strip_suffix(".dbrec"))
+                .and_then(|n| n.parse::<u64>().ok())
+            {
+                seqs.push(seq);
+            }
+        }
+        seqs.sort_unstable();
+        Ok(seqs)
     }
 
     /// Every admitted transaction the ledger has no fact of becomes one, as
@@ -2207,8 +2228,8 @@ mod tests {
     /// R3: a v4 fact keeps its attempt, its operator (with the entry's
     /// time) and its source; a v3 entry reads without them; an operator on
     /// a fact not the operator's, evidence outside an adoption (or an
-    /// adoption without it) and a source on no chain fact refuse the
-    /// ledger.
+    /// adoption without it), a source on no chain fact and (R3b) a source
+    /// other than RECEIPT refuse the ledger.
     #[test]
     fn a_v4_fact_keeps_its_attempt_operator_and_source_and_a_v3_entry_still_reads() {
         let dir = r3_dir("v4");
@@ -2254,7 +2275,7 @@ mod tests {
         );
         fs::remove_file(v3).unwrap();
         type Case<'a> = (&'a str, &'a dyn Fn(&mut Draft), &'a str);
-        let refused: [Case<'_>; 5] = [
+        let refused: [Case<'_>; 6] = [
             (
                 "RELEASED",
                 &|d| {
@@ -2285,6 +2306,16 @@ mod tests {
                     d.set(k::SOURCE, "RECEIPT");
                 },
                 "chain fact",
+            ),
+            (
+                "INCLUDED",
+                &|d| {
+                    d.set(k::SOURCE, "NONCE")
+                        .set(k::BLOCK_NUMBER, 5u64)
+                        .set(k::BLOCK_HASH, Value::B256([5; 32]))
+                        .set(k::BLOCK_MS, 7u64);
+                },
+                "source",
             ),
         ];
         for (kind, more, why) in refused {

@@ -307,6 +307,14 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | grantable_sources | [string](#string) | repeated | The ingress sources a grant can name: those the runtime configuration gives an adapter endpoint (BSC_INGRESS_&lt;ID&gt;_WSS); a source without one never sights a launch and can never be qualified. In source order; empty without a readable runtime configuration. |
 | campaign | [LiveCampaign](#darkbot-bsc-v1-LiveCampaign) |  | REV.1.0 R2b: the LIVE campaign verdict as its record (bsc_runtime live attempts) holds it; absent before any evaluation. Campaign evidence only, never a release or a permission. |
 | attempts | [LiveAttempt](#darkbot-bsc-v1-LiveAttempt) | repeated | The evaluated LIVE BUY attempts in their order, as their records hold them; at most the campaign&#39;s total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning. Beyond it, the shown ones are the first by ordinal of the limit plus one first by transaction. |
+| exit_undecided | [string](#string) | repeated | REV.1.0 R1/R3b: the open LIVE lots no strategy holds yet (their curve being read), as the runtime&#39;s status names them, 0x token. |
+| stranded | [string](#string) | repeated | The open LIVE lots no strategy exit can take, &#34;0x&lt;token&gt; &lt;REASON&gt;&#34;. |
+| lot_read_faults | [uint64](#uint64) |  | The curve reads of open lots that failed in the runtime&#39;s process. |
+| lot_read_fault | [string](#string) |  | The last of those failures; empty without one. |
+| recovery_pending | [string](#string) | repeated | REV.1.0 R3b (BSC3-024/041): the ledger&#39;s unresolved transactions the runtime&#39;s receipt recovery asked about and has not resolved, &#34;0x&lt;tx&gt; &lt;REASON&gt;&#34;. |
+| recovered | [uint64](#uint64) |  | The transactions the receipt recovery resolved in the runtime&#39;s process. |
+| recovery_faults | [uint64](#uint64) |  | The receipt recovery&#39;s failed reads in the runtime&#39;s process. |
+| recovery_fault | [string](#string) |  | The last of those failures; empty without one. |
 
 
 
@@ -845,6 +853,7 @@ One LIVE transaction whose bytes may have left, and what the chain made of it.
 | nonce | [uint64](#uint64) |  | The buyer&#39;s nonce it used. |
 | state | [string](#string) |  | RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED. |
 | block_number | [uint64](#uint64) | optional | The block that included it. |
+| source | [string](#string) |  | REV.1.0 R3b: RECEIPT when its chain fact comes from a block the receipt recovery found (final, the second source&#39;s; its receipt&#39;s, or where its sender&#39;s nonce passes it), not from the follower&#39;s block; empty otherwise. |
 
 
 

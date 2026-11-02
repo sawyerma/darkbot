@@ -323,6 +323,20 @@ pub const LIVE_POSITION_UNREADABLE: &str = "LIVE_POSITION_UNREADABLE";
 /// read (another version, an NFT gate, a tax or threshold out of range):
 /// no strategy exit prices it; no new BUY until it ends.
 pub const LIVE_POSITION_UNPRICED: &str = "LIVE_POSITION_UNPRICED";
+/// REV.1.0 R3b (BSC3-024/041): an unresolved LIVE transaction whose
+/// receipt recovery is asked (not answered yet), would need the second
+/// source (none configured), or failed (asked again after
+/// `BSC_CANONICAL_RECOVERY_RETRY_MS`). Further words are
+/// [`crate::chain_follower::RecoveryPending::name`].
+pub const LIVE_RECOVERY_ASKED: &str = "RECOVERY_ASKED";
+pub const LIVE_RECOVERY_NO_SECOND_SOURCE: &str = "RECOVERY_NO_SECOND_SOURCE";
+pub const LIVE_RECOVERY_FAILED: &str = "RECOVERY_FAILED";
+/// One waiting for a free read (at most `BSC_CANONICAL_RECOVERY_READS_MAX`
+/// at a time); one never asked: of another sender than the configured
+/// buyer, or a lease without its window.
+pub const LIVE_RECOVERY_QUEUED: &str = "RECOVERY_QUEUED";
+pub const LIVE_RECOVERY_OTHER_SENDER: &str = "RECOVERY_OTHER_SENDER";
+pub const LIVE_RECOVERY_LEASE_WINDOW_UNKNOWN: &str = "RECOVERY_LEASE_WINDOW_UNKNOWN";
 /// BSC3-012: the running `bsc_runtime` is not the build the LIVE
 /// qualification names (or it names none, or this one is unreadable).
 pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";
