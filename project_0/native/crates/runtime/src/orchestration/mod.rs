@@ -8,6 +8,8 @@ pub mod c01_read;
 pub mod c01_records;
 pub mod capability_control;
 pub mod control;
+#[cfg(feature = "crate_health")]
+pub mod fe01_plan;
 pub mod fe06;
 #[cfg(feature = "crate_health")]
 pub mod fe_freeze;

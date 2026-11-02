@@ -275,10 +275,7 @@ impl Reads for NetworkReads {
     ) -> Result<(u64, fe::ObservedState), String> {
         let response = self.send(
             RpcRequest::GetMultipleAccounts,
-            serde_json::json!([
-                keys.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                {"encoding": "base64", "commitment": "finalized", "minContextSlot": min_context_slot}
-            ]),
+            fe::multiple_accounts_params(keys, min_context_slot),
         )?;
         // JFI-02: decoded at this wire edge into the typed answer, then the FE-01 check.
         let wire = <fe::WireMultipleAccounts as serde::Deserialize>::deserialize(&response)
@@ -934,10 +931,11 @@ mod tests {
     fn network_reads_refuses_budget_below_minimum() {
         let mut c = RuntimeConfig::default();
         endpoints(&mut c);
-        // Cluster reads, program + ProgramData, every round over program/ProgramData/group/
-        // clock/fee state and the two default targets (7 keys, one batch of 100).
+        // Cluster reads, program + ProgramData before the rounds and ProgramData after them,
+        // every round over program/group/clock/fee state and the two default targets (6 keys,
+        // one batch of 100).
         let need = required_reads(&c).unwrap();
-        assert_eq!(need, CLUSTER_READS + 2 + c.limits.fe_snapshot_rounds);
+        assert_eq!(need, CLUSTER_READS + 3 + c.limits.fe_snapshot_rounds);
         let refused = |c: &RuntimeConfig| NetworkReads::from_config(c).err();
         c.limits.boot_calls = need - 1;
         assert_eq!(refused(&c).as_deref(), Some("BOOT_BUDGET_TOO_SMALL"));
@@ -951,7 +949,7 @@ mod tests {
         c.limits.fe_batch_size = 2;
         assert_eq!(
             required_reads(&c).unwrap(),
-            CLUSTER_READS + 2 + c.limits.fe_snapshot_rounds * 4
+            CLUSTER_READS + 3 + c.limits.fe_snapshot_rounds * 3
         );
         assert_eq!(refused(&c).as_deref(), Some("BOOT_BUDGET_TOO_SMALL"));
         // The default profile (FE smoke: 3 calls, 30 s) covers the audit.

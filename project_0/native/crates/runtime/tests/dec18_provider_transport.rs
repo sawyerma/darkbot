@@ -368,8 +368,6 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
         );
         (ok, text, output)
     };
-    let observe =
-        |name: &str, evidence: &[&str]| observe_with(name, evidence, &store, &["--execute"]);
 
     // A replay reads no provider: it takes no provider evidence (review L2).
     let (ok, text, output) = observe_with(
@@ -404,13 +402,75 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
         ),
         ("none", vec![], "FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED"),
     ] {
-        let (ok, text, output) = observe_with(name, &evidence, &no_store, &["--execute"]);
+        let (ok, text, output) = observe_with(name, &evidence, &no_store, &["--plan"]);
         assert!(!ok && text.contains(code), "{name}: {text}");
         assert!(!output.exists(), "{name}: no evidence directory");
         assert!(seen.lock().unwrap().is_empty(), "{name}: no read");
     }
 
-    let (_, text, output) = observe("record", &["--provider-evidence", &id]);
+    // C-01 step 6: the plan reads nothing and opens no credential (no store here either).
+    let (ok, text, output) = observe_with(
+        "record",
+        &["--provider-evidence", &id],
+        &no_store,
+        &["--plan"],
+    );
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("FE01_PLAN id=") && text.contains("base64+zstd"),
+        "{text}"
+    );
+    assert!(seen.lock().unwrap().is_empty(), "the plan reads nothing");
+    let token = text
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("token="))
+        .unwrap()
+        .to_string();
+    let execute = |dir: &Path, approve: &str, extra: &[&str]| {
+        let mut args = vec![
+            "--fe-mode",
+            "full",
+            "--execute",
+            "--approve",
+            approve,
+            "--output",
+            dir.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra);
+        run(
+            env!("CARGO_BIN_EXE_p0-fe-qualify"),
+            &project,
+            &store,
+            &args,
+            None,
+        )
+    };
+    // Refused before any read: another token, no plan, the evidence or class at execution.
+    for (dir, approve, extra, code) in [
+        (
+            output.as_path(),
+            "0000000000000000",
+            &[][..],
+            "FE_PLAN_APPROVAL_MISMATCH",
+        ),
+        (
+            base.join("no-plan").as_path(),
+            token.as_str(),
+            &[][..],
+            "FE_PLAN_REQUIRED",
+        ),
+        (
+            output.as_path(),
+            token.as_str(),
+            &["--provider-evidence", id.as_str()][..],
+            "FE_PLAN_NAMES_EVIDENCE_AND_CLASS",
+        ),
+    ] {
+        let (ok, text) = execute(dir, approve, extra);
+        assert!(!ok && text.contains(code), "{code}: {text}");
+        assert!(seen.lock().unwrap().is_empty(), "{code}: no read");
+    }
+    let (_, text) = execute(&output, &token, &[]);
     let lines = seen.lock().unwrap().clone();
     assert!(!lines.is_empty(), "the observation read: {text}");
     assert!(
@@ -429,5 +489,33 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
         "the observation binds the record's bytes: {text}"
     );
     assert!(!contains(&evidence, "LOOP-SECRET"));
+    // A plan runs once.
+    let before = seen.lock().unwrap().len();
+    let (ok, text) = execute(&output, &token, &[]);
+    assert!(!ok && text.contains("FE_PLAN_USED"), "{text}");
+    assert_eq!(seen.lock().unwrap().len(), before);
+    // A rotated credential is another registry version: the plan made before it is refused.
+    let (ok, text, drifted) = observe_with(
+        "drifted",
+        &["--provider-evidence", &id],
+        &no_store,
+        &["--plan"],
+    );
+    assert!(ok, "{text}");
+    let token = text
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("token="))
+        .unwrap()
+        .to_string();
+    ctl(
+        &["credential", "rotate", "--credential", "loop"],
+        Some(b"LOOP-SECRET-2\n"),
+    );
+    let (ok, text) = execute(&drifted, &token, &[]);
+    assert!(
+        !ok && text.contains("FE_PLAN_DRIFT: the provider"),
+        "{text}"
+    );
+    assert_eq!(seen.lock().unwrap().len(), before);
     let _ = std::fs::remove_dir_all(&base);
 }

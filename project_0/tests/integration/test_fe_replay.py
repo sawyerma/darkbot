@@ -33,9 +33,10 @@ class OfflineReplay(unittest.TestCase):
             self.assertFalse(output.exists())
 
     def test_replay_and_execute_are_mutually_exclusive_before_rpc(self):
-        result = self.call('--execute', '--replay', '/nonexistent', '--output', '/nonexistent/out', '--fe-mode', 'full')
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('FE_EXACTLY_ONE_OF_EXECUTE_OR_REPLAY', result.stderr)
+        for mode in (['--execute', '--replay', '/nonexistent'], ['--plan', '--replay', '/nonexistent'], ['--plan', '--execute']):
+            result = self.call(*mode, '--output', '/nonexistent/out', '--fe-mode', 'full')
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('FE_EXACTLY_ONE_OF_PLAN_EXECUTE_OR_REPLAY', result.stderr)
 
     def test_unsupported_funding_scope_is_not_silently_selected(self):
         result = self.call('--replay', '/nonexistent', '--output', '/nonexistent/out', '--fe-mode', 'full', '--funding-class', 'JIT_SHORTFALL')

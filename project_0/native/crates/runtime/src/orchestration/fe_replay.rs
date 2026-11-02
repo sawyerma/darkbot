@@ -269,6 +269,28 @@ pub fn decode_saved(
     fe::observed(read)
 }
 
+/// The byte bound of an FE-01 journal, the replay's limit: the observation's `fe_max_mib` (within
+/// `max_total_mib`). The decoded accounts count, not the (compressed) wire bytes.
+pub fn journal_limit(config: &RuntimeConfig) -> Result<u64, String> {
+    config
+        .limits
+        .fe_max_mib
+        .min(config.limits.max_total_mib)
+        .checked_mul(1024 * 1024)
+        .ok_or_else(|| "FE_REPLAY_BYTE_LIMIT".to_string())
+}
+
+/// FE-01 (02.11.2026): a live observation keeps room in its journal for the result frame (at
+/// most one `journal::MAX_FRAME`; the manifest frame is a few hundred bytes) within
+/// [`journal_limit`], so the evidence it seals stays replayable. Base64+zstd answers make the
+/// decoded accounts far larger than the wire bytes the provider budget counts.
+pub fn evidence_room(config: &RuntimeConfig, position: u64) -> Result<(), String> {
+    match position.checked_add(journal::MAX_FRAME as u64) {
+        Some(n) if n <= journal_limit(config)? => Ok(()),
+        _ => Err("FE_EVIDENCE_BUDGET: the decoded reads reach the journal bound fe_max_mib".into()),
+    }
+}
+
 pub fn replay(
     config: &RuntimeConfig,
     directory: &Path,
@@ -297,12 +319,7 @@ pub fn replay_frozen(
     if config.fe_mode != "full" {
         return Err("FE_REPLAY_REQUIRES_FULL_MODE".into());
     }
-    let limit = config
-        .limits
-        .fe_max_mib
-        .min(config.limits.max_total_mib)
-        .checked_mul(1024 * 1024)
-        .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+    let limit = journal_limit(config)?;
     let saved = saved_reads(
         directory,
         limit,
@@ -408,6 +425,20 @@ mod dec09_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FE-01 02.11.2026: the live journal keeps room for the result frame within the replay's
+    /// bound; one byte beyond and the observation stops (fail-closed, never unreplayable).
+    #[test]
+    fn the_live_journal_stays_within_the_replay_bound() {
+        let c = RuntimeConfig::default();
+        let limit = journal_limit(&c).unwrap();
+        let room = limit - journal::MAX_FRAME as u64;
+        assert!(evidence_room(&c, room).is_ok());
+        assert!(evidence_room(&c, room + 1)
+            .unwrap_err()
+            .starts_with("FE_EVIDENCE_BUDGET"));
+        assert!(evidence_room(&c, u64::MAX).is_err());
+    }
     #[cfg(feature = "historical")]
     use base64::Engine;
     #[cfg(feature = "historical")]

@@ -66,9 +66,17 @@ pub(crate) fn typed<T: bytemuck::Pod>(
     }
     bytemuck::try_pod_read_unaligned(&a.data[8..]).map_err(|_| "FE_POD_LAYOUT".into())
 }
-/// The `getMultipleAccounts` answer (base64 encoding) as the concrete wire type (JFI-02): the
-/// JSON-RPC edge decodes into it directly, nothing behind it sees JSON. Protocol layouts stay
-/// owned by the pinned Rust crates.
+/// The request params of one FE-01 `getMultipleAccounts` (JFI-02 wire edge): finalized, not below
+/// the floor, `base64+zstd` — the ~10 MiB marginfi 0.1.12 ProgramData (its ELF and zero padding),
+/// read again every round, is ~14 MB as plain base64 (FE-01 02.11.2026: the 48 MiB budget ended
+/// the observation after three such reads).
+pub fn multiple_accounts_params(keys: &[Pubkey], floor: u64) -> serde_json::Value {
+    serde_json::json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64+zstd","commitment":"finalized","minContextSlot":floor}])
+}
+
+/// The `getMultipleAccounts` answer (base64 or base64+zstd encoding) as the concrete wire type
+/// (JFI-02): the JSON-RPC edge decodes into it directly, nothing behind it sees JSON. Protocol
+/// layouts stay owned by the pinned Rust crates.
 #[derive(serde::Deserialize)]
 pub struct WireMultipleAccounts {
     context: WireContext,
@@ -94,16 +102,25 @@ impl WireMultipleAccounts {
             .into_iter()
             .map(|a| {
                 a.map(|a| {
-                    if a.data.1 != "base64" {
-                        return Err("FE_ACCOUNT_ENCODING".to_string());
-                    }
+                    let bad = || "FE_ACCOUNT_ENCODING".to_string();
+                    let raw = base64::engine::general_purpose::STANDARD
+                        .decode(&a.data.0)
+                        .map_err(|_| bad())?;
+                    let data = match a.data.1.as_str() {
+                        "base64" => raw,
+                        // Never beyond the largest account Solana permits.
+                        "base64+zstd" => zstd::bulk::decompress(
+                            &raw,
+                            crate::analytics::journal::MAX_ACCOUNT_DATA,
+                        )
+                        .map_err(|_| bad())?,
+                        _ => return Err(bad()),
+                    };
                     Ok(Fe01Account {
                         owner: key(&a.owner)?,
                         lamports: a.lamports,
                         executable: a.executable,
-                        data: base64::engine::general_purpose::STANDARD
-                            .decode(a.data.0)
-                            .map_err(|_| "FE_ACCOUNT_ENCODING".to_string())?,
+                        data,
                     })
                 })
                 .transpose()
@@ -226,18 +243,26 @@ pub struct CollectedScope {
     pub deployment: (u64, String),
     pub round: u64,
 }
-/// Keys every scope round reads besides the targets: program, ProgramData, group, clock, fee state.
-const FIXED_SCOPE_KEYS: u64 = 5;
-/// Account reads [`collect_scope`] needs to run every configured round: the program and
-/// ProgramData reads, then each round over at least the initial scope ([`FIXED_SCOPE_KEYS`] plus
-/// the targets) in `fe_batch_size` batches. Dependencies discovered on chain only add batches.
+/// Keys every scope round reads besides the targets: program, group, clock, fee state. The
+/// ProgramData — up to `journal::MAX_ACCOUNT_DATA` (marginfi 0.1.12's is 10 MiB) — is no round
+/// key: it is read in full before the first round and once more after the scope closed, and the
+/// same deployment slot and hash at both ends prove that no upgrade happened in between (an
+/// upgrade rewrites the deployment slot); the program account in every round keeps the
+/// ProgramData address checked.
+const FIXED_SCOPE_KEYS: u64 = 4;
+/// The reads around the rounds: the program, the baseline ProgramData and the closing one.
+const DEPLOYMENT_READS: u64 = 3;
+/// Account reads [`collect_scope`] needs to run every configured round: the
+/// [`DEPLOYMENT_READS`], then each round over at least the initial scope ([`FIXED_SCOPE_KEYS`]
+/// plus the targets) in `fe_batch_size` batches. Dependencies discovered on chain only add
+/// batches.
 pub fn required_scope_reads(config: &RuntimeConfig) -> Result<u64, String> {
     let batch = config.limits.fe_batch_size;
     if batch == 0 || config.fe_targets.is_empty() {
         return Err("FE_SCOPE_OR_BATCH_BUDGET_INVALID".into());
     }
     let initial = FIXED_SCOPE_KEYS + config.fe_targets.len() as u64;
-    Ok(2 + config.limits.fe_snapshot_rounds * initial.div_ceil(batch))
+    Ok(DEPLOYMENT_READS + config.limits.fe_snapshot_rounds * initial.div_ceil(batch))
 }
 /// R4: scope keys one bank can add at most — the bank, its liquidity vault, its mint, at most four
 /// observation keys (`bank_observation_keys`, StakedWithPythPush) and at most three integration
@@ -258,7 +283,7 @@ pub fn worst_case_scope_reads(config: &RuntimeConfig) -> Result<u64, String> {
     let per_target = 1 + marginfi_type_crate::types::MAX_LENDING_ACCOUNT_BALANCES as u64
         * MAX_SCOPE_KEYS_PER_BANK;
     let max_keys = FIXED_SCOPE_KEYS + config.fe_targets.len() as u64 * per_target;
-    Ok(2 + config.limits.fe_snapshot_rounds * max_keys.div_ceil(batch))
+    Ok(DEPLOYMENT_READS + config.limits.fe_snapshot_rounds * max_keys.div_ceil(batch))
 }
 /// The same canonical scope collector, reusable by boot without constructing JSON reports.
 pub fn collect_scope<F>(
@@ -309,7 +334,7 @@ where
     }
     let clock_key = solana_sdk::sysvar::clock::id();
     let fee = protocol::fee_state_pda(&program);
-    let fixed = [program, pd, group, clock_key, fee];
+    let fixed = [program, group, clock_key, fee];
     debug_assert_eq!(fixed.len() as u64, FIXED_SCOPE_KEYS);
     let mut keys: BTreeSet<_> = fixed.into_iter().chain(targets.iter().copied()).collect();
     let mut last_reason = "FE_SCOPE_NOT_CLOSED";
@@ -327,7 +352,7 @@ where
             slots.insert(slot);
             state.0.extend(batch.0);
         }
-        if program_data(&state, &program)? != pd || deployment(&state, &pd)? != baseline {
+        if program_data(&state, &program)? != pd {
             return Err("FE_PROGRAM_UPGRADE_DURING_OBSERVATION".into());
         }
         let _: MarginfiGroup = typed(&state, &group, &program, protocol::DISC_MARGINFI_GROUP)?;
@@ -365,6 +390,13 @@ where
             last_reason = "FE_CLOCK_CONTEXT_MISMATCH";
             continue;
         }
+        // The closing ProgramData read, not before the closed round: the deployment every round
+        // observed is the baseline's. Its account joins the round's state (BOOT-05 decodes it).
+        let (_, closing) = read(&[pd], floor)?;
+        if deployment(&closing, &pd)? != baseline {
+            return Err("FE_PROGRAM_UPGRADE_DURING_OBSERVATION".into());
+        }
+        state.0.extend(closing.0);
         return Ok(CollectedScope {
             state,
             clock,
@@ -679,6 +711,61 @@ fn report(scope: &CollectedScope) -> Fe01Report {
 pub(crate) mod tests {
     use super::*;
     use bytemuck::Zeroable;
+
+    /// FE-01 02.11.2026: the reads ask for base64+zstd; a compressed account decodes to exactly
+    /// its bytes, plain base64 still decodes, and no answer inflates beyond the largest account.
+    #[test]
+    fn fe01_reads_are_zstd_compressed_and_decode_exactly_within_the_account_bound() {
+        let k = Pubkey::new_unique();
+        assert_eq!(
+            multiple_accounts_params(&[k], 7)[1]["encoding"],
+            "base64+zstd"
+        );
+        let mut program_data = vec![3u8; 45];
+        program_data.extend((0..4096u32).flat_map(|i| i.to_le_bytes()));
+        program_data.resize(crate::analytics::journal::MAX_ACCOUNT_DATA, 0);
+        let wire = |data: &[u8], encoding: &str| {
+            let text = base64::engine::general_purpose::STANDARD.encode(data);
+            serde_json::from_value::<WireMultipleAccounts>(serde_json::json!({"context":{"slot":9},"value":[{"owner":k.to_string(),"lamports":1,"executable":false,"data":[text,encoding]}]}))
+                .unwrap()
+                .outcome()
+        };
+        let compressed = zstd::bulk::compress(&program_data, 3).unwrap();
+        assert!(compressed.len() * 100 < program_data.len());
+        match wire(&compressed, "base64+zstd") {
+            Fe01ReadOutcome::Accounts { accounts, .. } => {
+                assert_eq!(accounts[0].as_ref().unwrap().data, program_data)
+            }
+            Fe01ReadOutcome::Failed { reason } => panic!("{reason}"),
+        }
+        match wire(b"plain", "base64") {
+            Fe01ReadOutcome::Accounts { accounts, .. } => {
+                assert_eq!(accounts[0].as_ref().unwrap().data, b"plain")
+            }
+            Fe01ReadOutcome::Failed { reason } => panic!("{reason}"),
+        }
+        let mut larger = program_data.clone();
+        larger.push(1);
+        let bomb = zstd::bulk::compress(&larger, 3).unwrap();
+        // Beyond the largest account, truncated, not zstd, an unknown encoding: refused, never
+        // guessed. (A flipped data byte inside a frame without a checksum decodes, as it would in
+        // plain base64: transport integrity is TLS's; each journal frame hashes the bytes kept.)
+        for (data, encoding) in [
+            (bomb.as_slice(), "base64+zstd"),
+            (&compressed[..compressed.len() / 2], "base64+zstd"),
+            (b"not zstd".as_slice(), "base64+zstd"),
+            (compressed.as_slice(), "jsonParsed"),
+        ] {
+            assert!(
+                matches!(
+                    wire(data, encoding),
+                    Fe01ReadOutcome::Failed { ref reason } if reason == "FE_ACCOUNT_ENCODING"
+                ),
+                "{encoding} {}",
+                data.len()
+            );
+        }
+    }
     #[test]
     fn provider_evidence_requires_fresh_free_capacity_for_every_fallback() {
         let (primary, backup) = ("https://primary.invalid", "https://backup.invalid");
@@ -858,6 +945,231 @@ pub(crate) mod tests {
         }
         std::fs::remove_dir_all(dir).unwrap();
     }
+    /// FE-01 bounds from real data (run by hand: `P0_FE01_JOURNAL=<an fe01.p0j>
+    /// P0_C01_READS=<a C-01 reads.p0j> cargo test --all-features -p darkbot-runner --lib
+    /// fe01_real_scope_bounds -- --ignored --nocapture`): the saved reads' accounts (the last read
+    /// may be a failed one: its keys are the next round's), the C-01 lengths of accounts never
+    /// read, and the reads of the current sequence — calls, zstd wire bytes, decoded journal.
+    #[test]
+    #[ignore]
+    fn fe01_real_scope_bounds() {
+        use crate::analytics::journal;
+        use crate::orchestration::c01_records::C01Reads;
+        let path = std::path::PathBuf::from(std::env::var("P0_FE01_JOURNAL").unwrap());
+        let c01: C01Reads = journal::read_typed_value(std::path::Path::new(
+            &std::env::var("P0_C01_READS").unwrap(),
+        ))
+        .unwrap();
+        // The configuration the observation runs under (P0_FE_CALLS, P0_FE_MAX_MIB, …).
+        let c = darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())
+            .unwrap()
+            .config;
+        let mut reader = journal::Reader::open(&path).unwrap();
+        let mut rounds: Vec<Vec<Pubkey>> = Vec::new();
+        let mut data: BTreeMap<Pubkey, Vec<u8>> = BTreeMap::new();
+        while let Some(f) = reader.next_frame().unwrap() {
+            if f.kind != journal::kind::FE01_READ {
+                continue;
+            }
+            let read: Fe01Read = f.typed().unwrap();
+            if let Fe01ReadOutcome::Accounts { accounts, .. } = &read.outcome {
+                for (k, a) in read.keys.iter().zip(accounts) {
+                    if let Some(a) = a {
+                        data.insert(*k, a.data.clone());
+                    }
+                }
+            }
+            rounds.push(read.keys);
+        }
+        let program = key(protocol::PROGRAM_ID_MAINNET).unwrap();
+        let pd = protocol::program_data_address(&program);
+        let lengths: BTreeMap<String, u64> = c01
+            .dependencies
+            .iter()
+            .map(|d| (d.key.clone(), d.len))
+            .chain(c01.banks.iter().map(|b| (b.key.clone(), b.len)))
+            .collect();
+        // Per account: decoded bytes and wire bytes (base64 of zstd level 3, the RPC default,
+        // or of zstd's compress bound when only the length is known) plus its JSON envelope.
+        const ENVELOPE: u64 = 256;
+        let b64 = |n: u64| n.div_ceil(3) * 4;
+        let account = |k: &Pubkey| -> (u64, u64, &'static str) {
+            if let Some(d) = data.get(k) {
+                let z = zstd::bulk::compress(d, 3).unwrap().len() as u64;
+                (d.len() as u64, b64(z) + ENVELOPE, "read")
+            } else if let Some(n) = lengths.get(&k.to_string()) {
+                let z = zstd::zstd_safe::compress_bound(*n as usize) as u64;
+                (*n, b64(z) + ENVELOPE, "c01-length")
+            } else {
+                // Never read and no C-01 length: counted apart, as the room left for it.
+                (0, ENVELOPE, "unknown")
+            }
+        };
+        // The role of every account no read and no C-01 length covers.
+        let banks: Vec<(Pubkey, Bank)> = data
+            .iter()
+            .filter(|(_, d)| d.get(..8) == Some(protocol::DISC_BANK.as_slice()))
+            .map(|(k, d)| {
+                (
+                    *k,
+                    bytemuck::pod_read_unaligned(&d[8..8 + std::mem::size_of::<Bank>()]),
+                )
+            })
+            .collect();
+        for k in rounds.last().unwrap() {
+            if data.contains_key(k) || lengths.contains_key(&k.to_string()) {
+                continue;
+            }
+            let role = banks.iter().find_map(|(bk, b)| {
+                if b.liquidity_vault == *k {
+                    Some(format!("liquidity_vault of {bk} mint {}", b.mint))
+                } else if b.config.oracle_keys.contains(k) {
+                    Some(format!(
+                        "oracle key of {bk} setup {:?}",
+                        b.config.oracle_setup
+                    ))
+                } else {
+                    None
+                }
+            });
+            println!(
+                "unknown {k} {}",
+                role.unwrap_or_else(|| "integration".into())
+            );
+        }
+        let (pd_decoded, pd_wire, _) = account(&pd);
+        let (program_decoded, program_wire, _) = account(&program);
+        println!("program decoded={program_decoded} wire={program_wire}; programdata decoded={pd_decoded} wire={pd_wire} (plain base64 {})", b64(pd_decoded) + ENVELOPE);
+        let mut round_keys: Vec<Vec<Pubkey>> = rounds
+            .iter()
+            .filter(|r| !(r.len() == 1 && (r[0] == program || r[0] == pd)))
+            .map(|r| r.iter().copied().filter(|k| *k != pd).collect())
+            .collect();
+        round_keys.dedup();
+        let mut wire_rounds = Vec::new();
+        let mut decoded_rounds = Vec::new();
+        for (i, keys) in round_keys.iter().enumerate() {
+            let mut kinds = BTreeMap::<&str, u64>::new();
+            let (mut decoded, mut wire) = (0u64, ENVELOPE);
+            for k in keys {
+                let (d, w, kind) = account(k);
+                decoded += d;
+                wire += w;
+                *kinds.entry(kind).or_default() += 1;
+            }
+            println!(
+                "round {} keys={} chunks={} decoded={decoded} wire<={wire} sources={kinds:?}",
+                i + 1,
+                keys.len(),
+                (keys.len() as u64).div_ceil(c.limits.fe_batch_size)
+            );
+            wire_rounds.push(wire);
+            decoded_rounds.push(decoded);
+        }
+        let closed = round_keys.len() as u64;
+        let last_wire = *wire_rounds.last().unwrap();
+        let last_decoded = *decoded_rounds.last().unwrap();
+        let chunks = (round_keys.last().unwrap().len() as u64).div_ceil(c.limits.fe_batch_size);
+        let fixed_wire = program_wire + 2 * pd_wire;
+        let min_calls = DEPLOYMENT_READS
+            + round_keys
+                .iter()
+                .map(|k| (k.len() as u64).div_ceil(c.limits.fe_batch_size))
+                .sum::<u64>();
+        let max_rounds = c.limits.fe_snapshot_rounds;
+        let max_calls = DEPLOYMENT_READS
+            + round_keys
+                .iter()
+                .map(|k| (k.len() as u64).div_ceil(c.limits.fe_batch_size))
+                .sum::<u64>()
+            + (max_rounds - closed) * chunks;
+        let min_wire = fixed_wire + wire_rounds.iter().sum::<u64>();
+        let max_wire = min_wire + (max_rounds - closed) * last_wire;
+        let frame = |decoded: u64, keys: u64| decoded + keys * 128 + 256;
+        let min_journal = frame(program_decoded, 1)
+            + 2 * frame(pd_decoded, 1)
+            + round_keys
+                .iter()
+                .zip(&decoded_rounds)
+                .map(|(k, d)| frame(*d, k.len() as u64))
+                .sum::<u64>();
+        let max_journal = min_journal
+            + (max_rounds - closed) * frame(last_decoded, round_keys.last().unwrap().len() as u64);
+        let wire_limit = c.limits.fe_max_mib.min(c.limits.max_total_mib) * 1024 * 1024;
+        let extra = max_rounds - closed;
+        println!(
+            "calls min={min_calls} max={max_calls} (limit {})",
+            c.limits.max_requests.min(c.limits.fe_calls)
+        );
+        println!("wire bytes of the known accounts: closing in round {closed} <= {min_wire}, after all {max_rounds} rounds <= {max_wire} (limit {wire_limit} B)");
+        println!("decoded journal of the known accounts: <= {min_journal} / <= {max_journal} (room {} B); largest frame <= {} (MAX_FRAME {})", journal_room(&c), frame(pd_decoded, 1), journal::MAX_FRAME);
+        println!(
+            "room for the unknown accounts in each read of the last round: wire {} B (closing) / {} B (all rounds), decoded {} B / {} B",
+            wire_limit.saturating_sub(min_wire),
+            wire_limit.saturating_sub(max_wire) / (extra + 1),
+            journal_room(&c).saturating_sub(min_journal),
+            journal_room(&c).saturating_sub(max_journal) / (extra + 1)
+        );
+    }
+    fn journal_room(c: &RuntimeConfig) -> u64 {
+        crate::orchestration::fe_replay::journal_limit(c).unwrap()
+            - crate::analytics::journal::MAX_FRAME as u64
+    }
+
+    /// FE-01 02.11.2026: the ProgramData is read in full twice — alone, before the first round
+    /// and after the scope closed — and never in a round batch; an upgrade between both reads
+    /// (a new deployment slot) ends the observation.
+    #[test]
+    fn the_program_data_is_read_before_and_after_the_rounds_only() {
+        let (c, all) = fixture();
+        let program = key(protocol::PROGRAM_ID_MAINNET).unwrap();
+        let pd = program_data(&ObservedState(all.clone()), &program).unwrap();
+        let serve =
+            |keys: &[Pubkey]| ObservedState(keys.iter().map(|k| (*k, all[k].clone())).collect());
+        let mut requests: Vec<Vec<Pubkey>> = Vec::new();
+        let scope = collect_scope(
+            &c,
+            |keys, _| {
+                requests.push(keys.to_vec());
+                Ok((100, serve(keys)))
+            },
+            false,
+        )
+        .unwrap();
+        let with_pd: Vec<(usize, usize)> = requests
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.contains(&pd))
+            .map(|(i, r)| (i, r.len()))
+            .collect();
+        assert_eq!(
+            with_pd,
+            vec![(1, 1), (requests.len() - 1, 1)],
+            "{requests:?}"
+        );
+        assert!(scope.state.0.contains_key(&pd));
+        assert_eq!(scope.deployment.0, 80);
+        let mut pd_reads = 0;
+        let upgraded = collect_scope(
+            &c,
+            |keys, _| {
+                let mut state = serve(keys);
+                if keys == [pd] {
+                    pd_reads += 1;
+                    if pd_reads == 2 {
+                        let a = state.0.get_mut(&pd).unwrap();
+                        a.data[4..12].copy_from_slice(&90u64.to_le_bytes());
+                    }
+                }
+                Ok((100, state))
+            },
+            false,
+        );
+        assert_eq!(
+            upgraded.err().as_deref(),
+            Some("FE_PROGRAM_UPGRADE_DURING_OBSERVATION")
+        );
+    }
     /// The required read count is the collector's own: one round over the initial scope in
     /// single-key batches reads exactly that many accounts; a further round over the discovered
     /// dependencies reads more (dynamic, bounded by the caller's hard limit).
@@ -883,11 +1195,13 @@ pub(crate) mod tests {
         c.limits.fe_snapshot_rounds = 1;
         let (reads, err) = count(&c);
         assert_eq!(err.as_deref(), Some("FE_SCOPE_NOT_CLOSED"));
-        assert_eq!(reads, required_scope_reads(&c).unwrap());
+        // The closing ProgramData read follows only a closed scope.
+        assert_eq!(reads + 1, required_scope_reads(&c).unwrap());
         assert_eq!(reads, 2 + FIXED_SCOPE_KEYS + c.fe_targets.len() as u64);
         c.limits.fe_snapshot_rounds = 2;
-        let (reads, _) = count(&c);
-        assert!(reads > required_scope_reads(&c).unwrap(), "{reads}");
+        let (reads, err) = count(&c);
+        assert_eq!(err.as_deref(), Some("FE_SCOPE_NOT_CLOSED"));
+        assert!(reads + 1 > required_scope_reads(&c).unwrap(), "{reads}");
         c.limits.fe_batch_size = 0;
         assert!(required_scope_reads(&c).is_err());
     }

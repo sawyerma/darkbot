@@ -304,7 +304,7 @@ fn plan(p: &Project, env: &[(&str, &str)]) -> (String, String, String) {
 const BUDGET: [(&str, &str); 1] = [("P0_FE_CALLS", "20")];
 
 /// A sealed FE-01 full observation (`p0-fe-qualify` journal layout) of the read deployment.
-fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads) {
+fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads, complete: bool) {
     use darkbot_runner::analytics::journal::{self, Provenance, Writer};
     use darkbot_runner::analytics::payload::{Fe01Config, Fe01Observation};
     use darkbot_runner::orchestration::fe_qualification as fe;
@@ -329,8 +329,10 @@ fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads) {
     .unwrap();
     let d = &reads.deployment;
     let hash = solana_sdk::hash::Hash::from_str(d.account_hash.as_deref().unwrap()).unwrap();
-    let mut report = fe::incomplete(String::new());
-    report.status = fe::OBSERVED.into();
+    let mut report = fe::incomplete("FE_TIME_BUDGET".into());
+    if complete {
+        report.status = fe::OBSERVED.into();
+    }
     report.observation = Some(Fe01Observation {
         rounds: 1,
         slot: *reads.context_slots.iter().max().unwrap(),
@@ -346,7 +348,7 @@ fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads) {
         targets: vec![],
     });
     w.append_typed(at(), &report).unwrap();
-    w.seal(true).unwrap();
+    w.seal(complete).unwrap();
 }
 
 /// The cargo checkout of the pinned source (`cargo fetch`): a git tree at its commit.
@@ -517,8 +519,29 @@ fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
         "{text}"
     );
     // Step 6 offline: the FE-01 full observation of the read deployment, from its sealed journal.
+    // An incomplete observation is refused, nothing recorded.
+    let incomplete = p.base.join("fe01_incomplete");
+    fe01_journal(&incomplete, &reads, false);
+    let (ok, text) = run(
+        &p,
+        &[
+            "c01",
+            "fe01",
+            "--plan",
+            &plan_id,
+            "--observation",
+            incomplete.to_str().unwrap(),
+        ],
+        &[],
+        None,
+    );
+    assert!(
+        !ok && text.contains("C01_FE01_INCOMPLETE: INCOMPLETE"),
+        "{text}"
+    );
+    assert!(!dir.join("fe01.p0j").exists());
     let observation = p.base.join("fe01_full");
-    fe01_journal(&observation, &reads);
+    fe01_journal(&observation, &reads, true);
     let fe01 = || {
         run(
             &p,

@@ -22,9 +22,11 @@ pub const HEADER_LEN: u64 = 60;
 /// The largest account data Solana permits (`MAX_PERMITTED_DATA_LENGTH`): an upgradeable
 /// program's ProgramData can reach it.
 pub const MAX_ACCOUNT_DATA: usize = 10 * 1024 * 1024;
-/// One frame holds a read of the largest account with the rest of its batch (FE-01 02.11.2026:
-/// the ~10 MiB marginfi 0.1.12 ProgramData did not fit the former 8 MiB).
-pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+/// One frame holds a read of the largest account and its envelope (frame header, payload
+/// encoding): FE-01 and BOOT read the ProgramData alone (marginfi 0.1.12's is 10 MiB and did not
+/// fit the former 8 MiB, 02.11.2026); every other read is a batch of at most 100 scope accounts,
+/// far below. A corrupt length allocates at most this much.
+pub const MAX_FRAME: usize = MAX_ACCOUNT_DATA + 1024 * 1024;
 pub const MANIFEST: u16 = u16::MAX;
 const FIXED: usize = 120;
 /// Bytes of one frame beyond its payload: length prefix, fixed header, CRC and SHA-256.
@@ -246,6 +248,9 @@ pub mod kind {
     /// DEC-18 §2 (C-01 step 6, FE01 gate): the FE-01 observation bound to the read deployment
     /// (`c01_records::C01Fe01`), `data/c01/<plan_id>/fe01.p0j`.
     pub const C01_FE01: u16 = 1114;
+    /// DEC-18 §6 (C-01 step 6): the FE-01 full observation's read plan
+    /// (`c01_records::Fe01Plan`), `<output>/fe01_plan.p0j`.
+    pub const C01_FE01_PLAN: u16 = 1115;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -344,6 +349,7 @@ pub mod kind {
         P1A_PARITY,
         C01_BUILD,
         C01_FE01,
+        C01_FE01_PLAN,
         super::MANIFEST,
     ];
 }

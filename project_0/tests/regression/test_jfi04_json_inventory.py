@@ -34,7 +34,6 @@ PINNED = {
     'runtime/src/analytics/measurement.rs': (11, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/analytics/payload.rs': (1, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/analytics/renders.rs': (13, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
-    'runtime/src/bin/p0-fe-qualify.rs': (2, 'W'),  # getMultipleAccounts wire params only (JSON config input removed 25.10., F6)
     'runtime/src/bin/p0-parity.rs': (8, 'H'),  # DEC-08: + the historical INDEX/PAYLOAD source reads (parity gate)
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/execution/one_shot/approval_file.rs': (2, 'H'),  # DEC-10: historical JSON approval shown by the historical build only (never authorizes); the approval is native key = value
@@ -49,8 +48,9 @@ PINNED = {
     'runtime/src/market_gap.rs': (3, 'W'),
     'runtime/src/market_reconcile.rs': (9, 'W'),  # wire_params/wire_answer: the one JSON-RPC edge of verifier and reconcile (DEC-08: + getSignaturesForAddress/getTransaction); engine and strict cache typed, verifier file JSON-free (F10, 25.10.)
     'runtime/src/market_truth.rs': (2, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
-    'runtime/src/orchestration/boot_network.rs': (12, 'W'),
+    'runtime/src/orchestration/boot_network.rs': (10, 'W'),
     'runtime/src/orchestration/c01_read.rs': (9, 'W'),  # DEC-18 §2 (C-01, P0-025): the deployment reads' JSON-RPC params and answers and the external Anchor IDL at the wire; reads and parity are typed records
+    'runtime/src/orchestration/fe_qualification.rs': (3, 'W'),  # FE-01 getMultipleAccounts wire params (base64+zstd), moved from the binary 02.11.2026
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),  # the measured JSON's explicit offline import, historical build only (DEC-18 §3.4, P0-023)
     'runtime/src/orchestration/provider_measure.rs': (22, 'W'),  # DEC-18 §3 (C-11, P0-022): the probes' JSON-RPC params, subscribe messages and answers at the wire; plan and measurement are typed records
@@ -181,7 +181,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 362)  # C-11 fix: 1 W (each subscribe message probed); P0-025: 9 W (C-01 deployment reads at the wire); P0-022: 30 W (C-11 probes at the wire); DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 361)  # BOOT reads through the shared FE-01 params: -2 W; FE-01 zstd: 2 W moved from p0-fe-qualify.rs + 1 W (the params' Value); C-11 fix: 1 W (each subscribe message probed); P0-025: 9 W (C-01 deployment reads at the wire); P0-022: 30 W (C-11 probes at the wire); DEC-13b: 2 W (blockhash answering slot); DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads); DEC-16: 1 H (StreamReadyUntilStopped render); DEC-08: 1 W (signature page) + 4 W (index wire reads) + 4 H (index parity sources) + 5 W (winner page through the wire decoder)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

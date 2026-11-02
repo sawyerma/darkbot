@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Project_0 preflight entry point: the native read-only FE-01 observation (`p0-fe-qualify`).
 # `--fe-mode smoke --execute --output DIR` (P1A deployment/target observation) or
-# `--fe-mode full …` (FE-01 scope). No signer, submission or value transfer; no Python, no JSON.
+# `--fe-mode full --plan …`, then `--fe-mode full --execute --approve TOKEN --output DIR` (FE-01
+# scope, C-01 step 6). No signer, submission or value transfer; no Python, no JSON.
 # Works from any working directory.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -406,6 +406,15 @@ pub fn fe01(
     }
     let config = config.ok_or("C01_FE01_JOURNAL: no configuration frame")?;
     let report = report.ok_or("C01_FE01_JOURNAL: no result frame")?;
+    // An observation that did not complete is no evidence about the deployment: refused before
+    // anything is recorded, the plan's step stays open for a complete one.
+    if !complete || report.status != super::fe_qualification::OBSERVED {
+        return Err(format!(
+            "C01_FE01_INCOMPLETE: {} {} (sealed complete: {complete}); nothing recorded",
+            report.status,
+            report.reason.as_deref().unwrap_or("-")
+        ));
+    }
     let o = report.observation.as_ref();
     let record = C01Fe01 {
         plan_id: plan_id.into(),

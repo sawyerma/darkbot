@@ -653,40 +653,51 @@ fn dec09_historical_manifest_seals_without_a_json_reader() {
     }
 }
 
-/// FE-01 (02.11.2026): a read of the largest account Solana permits (an upgradeable program's
-/// ProgramData; marginfi 0.1.12's is ~10 MiB) with a full batch of 10-KiB accounts beside it is
-/// one frame, read back exactly.
+/// FE-01 (02.11.2026): the ProgramData read — the largest account Solana permits (marginfi
+/// 0.1.12's is 10 MiB), read alone — is one frame, and so is a full batch of 10-KiB scope
+/// accounts; a read beyond the frame bound is refused, nothing written.
 #[test]
-fn a_read_of_the_largest_account_and_its_batch_is_one_frame() {
+fn a_read_of_the_largest_account_is_one_frame_and_beyond_the_bound_is_refused() {
     use crate::analytics::payload::{Fe01Account, Fe01Read, Fe01ReadOutcome};
     let batch = darkbot_solana::runtime_config::RuntimeConfig::default()
         .limits
         .fe_batch_size as usize;
-    let account = |len: usize| {
-        Some(Fe01Account {
-            owner: solana_sdk::pubkey::Pubkey::new_unique(),
-            lamports: 1,
-            executable: false,
-            data: vec![7u8; len],
-        })
-    };
-    let mut accounts = vec![account(MAX_ACCOUNT_DATA)];
-    accounts.extend((1..batch).map(|_| account(10 * 1024)));
-    let read = Fe01Read {
-        keys: (0..batch)
+    let read = |sizes: &[usize]| Fe01Read {
+        keys: sizes
+            .iter()
             .map(|_| solana_sdk::pubkey::Pubkey::new_unique())
             .collect(),
         min_context_slot: 1,
         outcome: Fe01ReadOutcome::Accounts {
             context_slot: 1,
-            accounts,
+            accounts: sizes
+                .iter()
+                .map(|len| {
+                    Some(Fe01Account {
+                        owner: solana_sdk::pubkey::Pubkey::new_unique(),
+                        lamports: 1,
+                        executable: false,
+                        data: vec![7u8; *len],
+                    })
+                })
+                .collect(),
         },
     };
     let p = path();
     let mut w = Writer::create(&p).unwrap();
-    w.append_typed(Provenance::default(), &read).unwrap();
+    let program_data = read(&[MAX_ACCOUNT_DATA]);
+    let scope = read(&vec![10 * 1024; batch]);
+    w.append_typed(Provenance::default(), &program_data)
+        .unwrap();
+    w.append_typed(Provenance::default(), &scope).unwrap();
+    let beyond = read(&[MAX_ACCOUNT_DATA, MAX_FRAME - MAX_ACCOUNT_DATA]);
+    assert!(w.append_typed(Provenance::default(), &beyond).is_err());
     w.seal(true).unwrap();
     let mut r = Reader::open(&p).unwrap();
-    assert_eq!(r.next_frame().unwrap().unwrap().typed::<Fe01Read>().unwrap(), read);
+    for expected in [&program_data, &scope] {
+        let f = r.next_frame().unwrap().unwrap();
+        assert_eq!(f.typed::<Fe01Read>().unwrap(), *expected);
+    }
+    assert_eq!(r.next_frame().unwrap().unwrap().kind, MANIFEST);
     let _ = fs::remove_dir_all(p.parent().unwrap());
 }

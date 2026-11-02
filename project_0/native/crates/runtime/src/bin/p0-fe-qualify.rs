@@ -4,28 +4,31 @@ fn run() -> Result<(), String> {
     use darkbot_runner::analytics::journal::Writer;
     use darkbot_runner::analytics::payload::{Fe01Config, Fe01ReadOutcome};
     use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
-    use darkbot_runner::orchestration::{
-        fe_freeze, fe_replay, provider_evidence, provider_registry,
-    };
+    use darkbot_runner::orchestration::{fe01_plan, fe_freeze, fe_replay, provider_registry};
     use darkbot_solana::{provider, runtime_config::Resolved};
     use solana_sdk::pubkey::Pubkey;
     use std::{
         fs,
         path::PathBuf,
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+        time::{Duration, Instant},
     };
     let mut args = std::env::args().skip(1);
     let mut operational = Vec::new();
     let mut execute = false;
+    let mut plan_only = false;
+    let mut approve = None;
     let mut output = None;
     let mut evidence_id = None;
     let mut replay = None;
     let mut against = None;
     let mut legacy_reads = false;
     let mut funding_class = "ZERO_PREFUND_SAME_TX".to_string();
+    let mut funding_class_given = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--execute" => execute = true,
+            "--plan" => plan_only = true,
+            "--approve" => approve = Some(args.next().ok_or("FE_PLAN_APPROVAL_REQUIRED")?),
             "--legacy-reads" => legacy_reads = true,
             "--replay" => {
                 replay = Some(
@@ -34,7 +37,10 @@ fn run() -> Result<(), String> {
                         .ok_or("FE_REPLAY_DIRECTORY_REQUIRED")?,
                 )
             }
-            "--funding-class" => funding_class = args.next().ok_or("FE_FUNDING_CLASS_REQUIRED")?,
+            "--funding-class" => {
+                funding_class = args.next().ok_or("FE_FUNDING_CLASS_REQUIRED")?;
+                funding_class_given = true;
+            }
             "--against" => {
                 against = Some(
                     args.next()
@@ -52,7 +58,7 @@ fn run() -> Result<(), String> {
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-evidence RECORD_ID | --replay SAVED_DIRECTORY [--legacy-reads]) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify --fe-mode full --plan --provider-evidence RECORD_ID --output NEW_DIRECTORY [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [operational options]   (offline: the read plan and its token)\np0-fe-qualify --fe-mode full --execute --approve TOKEN --output PLAN_DIRECTORY [--against EARLIER_OUTPUT (freeze drift blocks)] [the plan's operational options]   (C-01 step 6: the approved plan, once)\np0-fe-qualify --fe-mode full --replay SAVED_DIRECTORY [--legacy-reads] --output NEW_DIRECTORY [--funding-class …] [--against EARLIER_OUTPUT] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
@@ -70,23 +76,38 @@ fn run() -> Result<(), String> {
     if resolved.config.fe_mode == "smoke" {
         // The bounded deployment/target observation; explicit `--execute` only, no replay,
         // freeze or provider qualification (it reads three times through the provider budget).
-        if !execute || replay.is_some() || against.is_some() || evidence_id.is_some() {
+        if !execute
+            || replay.is_some()
+            || against.is_some()
+            || evidence_id.is_some()
+            || plan_only
+            || approve.is_some()
+        {
             return Err("FE_SMOKE_TAKES_ONLY_EXECUTE_AND_OUTPUT".into());
         }
         return smoke(resolved, output.ok_or("FE_OUTPUT_REQUIRED")?);
     }
+    let class_name = funding_class.clone();
     let funding_class = fe_replay::first_class(&funding_class)?;
-    if execute == replay.is_some() {
-        return Err("FE_EXACTLY_ONE_OF_EXECUTE_OR_REPLAY".into());
+    if [plan_only, execute, replay.is_some()]
+        .iter()
+        .filter(|m| **m)
+        .count()
+        != 1
+    {
+        return Err("FE_EXACTLY_ONE_OF_PLAN_EXECUTE_OR_REPLAY".into());
     }
-    if (!execute && replay.is_none()) || resolved.config.fe_mode != "full" {
+    if resolved.config.fe_mode != "full" {
         return Err("FE_FULL_REQUIRES_EXPLICIT_EXECUTE_AND_FULL_MODE".into());
     }
     let output = output.ok_or("FE_OUTPUT_REQUIRED")?;
-    if output.exists() {
-        return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
-    }
     if let Some(directory) = replay {
+        if output.exists() {
+            return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
+        }
+        if approve.is_some() {
+            return Err("FE_REPLAY_TAKES_NO_APPROVAL".into());
+        }
         // A replay reads no provider (review L2).
         if evidence_id.is_some() {
             return Err("FE_REPLAY_TAKES_NO_PROVIDER_EVIDENCE".into());
@@ -117,39 +138,43 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     // DEC-18 §3.4: the typed PROVIDER_EVIDENCE record of the native measurement in the project's
-    // store, named by its id (DEC-07); a configured URL is not capacity evidence. Read and
-    // checked before the credential store is opened (review L1); its bytes are bound below.
-    let evidence_id = evidence_id.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?;
+    // store, named by its id (DEC-07); a configured URL is not capacity evidence. The plan reads
+    // and checks it offline; the run checks it again before the credential store is opened
+    // (review L1) and binds its bytes.
     let project = std::env::var_os("P0_PROJECT_DIR")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .ok_or("FE_PROVIDER_EVIDENCE_PROJECT_REQUIRED")?;
-    let (record_bytes, proof) = provider_evidence::load(&project, &evidence_id)?;
-    let registry = provider_registry::bind(&project, &mut resolved)?;
-    let url = resolved.config.rpc_url().ok_or("RPC_URL_MISSING")?;
-    let requested = resolved.effective();
-    let l = &mut resolved.config.limits;
-    l.max_requests = l.max_requests.min(l.fe_calls);
-    l.max_total_mib = l.max_total_mib.min(l.fe_max_mib);
-    l.max_response_mib = l.max_response_mib.min(l.max_total_mib);
-    l.wss_message_mib = l.wss_message_mib.min(l.max_total_mib);
+    if plan_only {
+        if approve.is_some() || against.is_some() {
+            return Err("FE_PLAN_TAKES_EVIDENCE_CLASS_AND_OUTPUT".into());
+        }
+        let evidence_id = evidence_id.ok_or("FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED")?;
+        let (plan, token) =
+            fe01_plan::plan(&project, &mut resolved, &evidence_id, &class_name, &output)?;
+        print!("{}", fe01_plan::plan_text(&plan, &token, &output));
+        return Ok(());
+    }
+    if evidence_id.is_some() || funding_class_given {
+        return Err("FE_PLAN_NAMES_EVIDENCE_AND_CLASS: --provider-evidence and --funding-class belong to --plan".into());
+    }
+    let approve =
+        approve.ok_or("FE_PLAN_APPROVAL_REQUIRED: --approve TOKEN of the plan in --output")?;
+    let approved = fe01_plan::approve(&project, &mut resolved, &output, &approve)?;
+    let funding_class = fe_replay::first_class(&approved.plan.funding_class)?;
+    let url = approved.url;
     let config = resolved.config.clone();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| "CLOCK_INVALID")?
-        .as_secs_f64();
-    fe::validate_provider_evidence(&config, &url, &proof, now)?;
-    // DEC-18: the bound providers' credentials, read once, after the evidence is admitted.
-    provider_registry::install_credentials(&registry, &config)?;
-    fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
+    // DEC-18: the bound providers' credentials, read once, after the plan and evidence passed.
+    provider_registry::install_credentials(&approved.registry, &config)?;
     // PERSIST-01/JFI-04: configuration, every saved read and the result are typed frames of one
-    // binary journal; each frame is fsynced before the read is used or the next one is made.
+    // binary journal beside the plan; each frame is fsynced before the read is used or the next
+    // one is made.
     let mut evidence =
         Writer::create(&output.join(fe_replay::FE01_JOURNAL)).map_err(|_| "FE_EVIDENCE_IO")?;
     let operational = Fe01Config {
-        requested,
+        requested: approved.requested,
         effective: resolved.effective(),
-        qualification_sha256: Some(fe::sha(&record_bytes)),
+        qualification_sha256: Some(fe::sha(&approved.record)),
         execution: fe::READ_ONLY.into(),
     };
     record(&mut evidence, &operational, None)?;
@@ -174,6 +199,7 @@ fn run() -> Result<(), String> {
                 Fe01ReadOutcome::Failed { .. } => None,
             };
             record(&mut evidence, &read, slot)?;
+            fe_replay::evidence_room(&config, evidence.position())?;
             if Instant::now() >= deadline {
                 return Err("FE_TIME_BUDGET".into());
             }
@@ -223,7 +249,7 @@ fn multiple_accounts(
     use darkbot_solana::provider;
     use solana_client::rpc_request::RpcRequest;
     use solana_commitment_config::CommitmentConfig;
-    let params = serde_json::json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
+    let params = fe::multiple_accounts_params(keys, floor);
     let rpc = provider::rpc_client(
         url.to_string(),
         timeout,

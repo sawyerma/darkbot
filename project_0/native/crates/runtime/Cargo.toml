@@ -52,6 +52,8 @@ serde_json = { version = "1", features = ["arbitrary_precision"] }
 base64 = "0.22"
 # DEC-18 §2 (C-01): the Anchor IDL account is zlib-compressed (already in the lockfile).
 flate2 = "1.1.10"
+# FE-01: getMultipleAccounts answers base64+zstd (already in the lockfile).
+zstd = { version = "0.13.3", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] } # [FIX-65] Jupiter Swap V2 /build
 rayon = "1" # [R127c] CPU-parallel exact-health batch admission (eva01-style)
 bytemuck = "1"

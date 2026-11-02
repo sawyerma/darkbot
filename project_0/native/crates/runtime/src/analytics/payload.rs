@@ -959,6 +959,9 @@ macro_rules! typed_kinds {
                 $f::<crate::orchestration::c01_records::C01Build>($kind, $schema, $bytes)
             }
             k::C01_FE01 => $f::<crate::orchestration::c01_records::C01Fe01>($kind, $schema, $bytes),
+            k::C01_FE01_PLAN => {
+                $f::<crate::orchestration::c01_records::Fe01Plan>($kind, $schema, $bytes)
+            }
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

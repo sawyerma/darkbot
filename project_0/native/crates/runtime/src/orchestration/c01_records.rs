@@ -179,6 +179,39 @@ impl Payload for C01Fe01 {
     const KIND: u16 = journal::kind::C01_FE01;
 }
 
+/// The FE-01 full observation's read plan (C-01 step 6, `p0-fe-qualify --plan`): the provider,
+/// the evidence, the effective configuration and its bounds, the executable — what the operator
+/// approves by its token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fe01Plan {
+    pub plan_id: String,
+    pub created_unix_ms: Option<u64>,
+    pub registry_version: u64,
+    pub rpc: super::provider_measurement::ProviderRef,
+    pub evidence_id: String,
+    /// SHA-256 of the evidence record's bytes.
+    pub evidence_sha256: String,
+    /// SHA-256 of the observation's effective configuration (bindings and bounds included).
+    pub config_digest: String,
+    pub binary_sha256: String,
+    pub funding_class: String,
+    pub group: String,
+    pub targets: Vec<String>,
+    /// The bounds: calls, seconds, wire MiB (the journal bound too), requests per second,
+    /// keys per read, scope rounds; the reads of the initial scope alone and of the worst case.
+    pub calls: u64,
+    pub seconds: u64,
+    pub mib: u64,
+    pub rps: u64,
+    pub batch: u64,
+    pub rounds: u64,
+    pub required_reads: u64,
+    pub worst_case_reads: u64,
+}
+impl Payload for Fe01Plan {
+    const KIND: u16 = journal::kind::C01_FE01_PLAN;
+}
+
 /// One gate of the parity (DEC-18 §2.2–2.5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParityGate {
