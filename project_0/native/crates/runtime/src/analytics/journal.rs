@@ -228,6 +228,13 @@ pub mod kind {
     /// DEC-18 §3.4: a provider pre-measurement (`provider_measure::ProviderMeasurement`),
     /// content-addressed in `data/provider_measure/results/`.
     pub const PROVIDER_MEASUREMENT: u16 = 1109;
+    /// DEC-18 §2 (C-01): a deployment read's plan (`orchestration::c01_records::C01Plan`),
+    /// `data/c01/<plan_id>/plan.p0j`.
+    pub const C01_READ_PLAN: u16 = 1110;
+    /// DEC-18 §2 (C-01): what a deployment read read (`c01_records::C01Reads`).
+    pub const C01_READS: u16 = 1111;
+    /// DEC-18 §2.2–2.5: the parity verdict of a deployment read (`c01_records::P1aParity`).
+    pub const P1A_PARITY: u16 = 1112;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -321,6 +328,9 @@ pub mod kind {
         PROVIDER_RECEIPT,
         PROVIDER_PROBE_PLAN,
         PROVIDER_MEASUREMENT,
+        C01_READ_PLAN,
+        C01_READS,
+        P1A_PARITY,
         super::MANIFEST,
     ];
 }

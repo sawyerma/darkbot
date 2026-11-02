@@ -1076,6 +1076,7 @@ dependencies = [
  "darkbot-project0",
  "darkbot-solana",
  "drift-mocks",
+ "flate2",
  "futures-util",
  "juplend-mocks",
  "kamino-mocks",

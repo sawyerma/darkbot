@@ -946,6 +946,15 @@ macro_rules! typed_kinds {
             k::PROVIDER_MEASUREMENT => $f::<
                 crate::orchestration::provider_measurement::ProviderMeasurement,
             >($kind, $schema, $bytes),
+            k::C01_READ_PLAN => {
+                $f::<crate::orchestration::c01_records::C01Plan>($kind, $schema, $bytes)
+            }
+            k::C01_READS => {
+                $f::<crate::orchestration::c01_records::C01Reads>($kind, $schema, $bytes)
+            }
+            k::P1A_PARITY => {
+                $f::<crate::orchestration::c01_records::P1aParity>($kind, $schema, $bytes)
+            }
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

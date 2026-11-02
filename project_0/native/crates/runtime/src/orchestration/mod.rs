@@ -3,6 +3,9 @@
 pub mod autostart;
 pub mod boot_audit;
 pub mod boot_control;
+#[cfg(feature = "crate_health")]
+pub mod c01_read;
+pub mod c01_records;
 pub mod capability_control;
 pub mod control;
 pub mod fe06;

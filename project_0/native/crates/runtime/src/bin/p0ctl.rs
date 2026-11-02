@@ -2171,6 +2171,40 @@ fn read_secret() -> Result<darkbot_solana::providers::Zeroizing<Vec<u8>>, String
     Ok(secret)
 }
 
+const C01_USAGE: &str = "usage: p0ctl c01 plan   (C-01 steps 5–6, offline: the deployment reads through the selected RPC provider within the FE-01 budget fe_calls/fe_max_mib/fe_seconds; prints the plan and its token, reads nothing)
+  | p0ctl c01 run --plan PLAN_ID --approve TOKEN   (reads Mainnet once; writes the reads, the token programs' bytecode and the parity verdict)";
+
+/// DEC-18 §2 (P0-025, C-01 steps 5–6): `c01 plan|run`.
+#[cfg(feature = "crate_health")]
+fn c01_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::c01_read as c01;
+    let env = |k: &str| std::env::var(k).ok();
+    match args {
+        [verb] if verb == "plan" => {
+            let (plan, token) = c01::plan(project, &env)?;
+            print!("{}", c01::plan_text(&plan, &token));
+            Ok(true)
+        }
+        [verb, rest @ ..] if verb == "run" => {
+            let o = provider_options(rest, &["--plan", "--approve"], &[])?;
+            let need = |f: &str| {
+                o.get(f)
+                    .cloned()
+                    .ok_or_else(|| format!("{f} required\n{C01_USAGE}"))
+            };
+            let (reads, parity) = c01::run(project, &need("--plan")?, &need("--approve")?, &env)?;
+            print!("{}", c01::run_text(&reads, &parity));
+            Ok(parity.overall == "PASS")
+        }
+        _ => Err(C01_USAGE.into()),
+    }
+}
+#[cfg(not(feature = "crate_health"))]
+fn c01_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let _ = (project, args);
+    Err(format!("C01_REQUIRES_CRATE_HEALTH\n{C01_USAGE}"))
+}
+
 /// DEC-18 §3 (P0-022, C-11): `provider measure plan|run`.
 #[cfg(feature = "crate_health")]
 fn provider_measure(project: &Path, args: &[String]) -> Result<bool, String> {
@@ -3268,6 +3302,7 @@ fn main() -> ExitCode {
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("capability"), _) => capability_cmd(&project, &rest),
             (Some("provider"), _) => provider_cmd(&project, &rest),
+            (Some("c01"), _) => c01_cmd(&project, &rest),
             (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),

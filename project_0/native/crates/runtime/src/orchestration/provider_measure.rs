@@ -298,7 +298,7 @@ pub fn plan(
         config_digest: sha(
             &bincode::serialize(&resolved.effective()).map_err(|_| "MEASURE_CONFIG")?
         ),
-        binary_sha256: binary()?,
+        binary_sha256: executable_sha256()?,
         limits,
         program: program.to_string(),
         group: group.to_string(),
@@ -314,7 +314,8 @@ pub fn plan(
     Ok((plan, token(&bytes)))
 }
 
-fn binary() -> Result<String, String> {
+/// SHA-256 of the running executable (a plan binds the code that runs it).
+pub fn executable_sha256() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|_| "MEASURE_BINARY")?;
     journal::file_sha256(&exe)
         .map(|h| journal::hex(&h))
@@ -496,7 +497,7 @@ pub fn run(
     {
         return Err(drift("the configuration"));
     }
-    if binary()? != plan.binary_sha256 {
+    if executable_sha256()? != plan.binary_sha256 {
         return Err(drift("the measuring executable"));
     }
     // One run per plan: an aborted or crashed run leaves its mark (a new attempt is a new plan).

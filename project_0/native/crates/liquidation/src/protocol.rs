@@ -337,6 +337,20 @@ pub const PROGRAM_DATA_REFERENCE_HASH: &str = "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaA
 pub const PROGRAM_DATA_REFERENCE_SOURCE_TAG: &str = "mrgn-0.1.11-rc1";
 /// `UpgradeableLoaderState::ProgramData` metadata: tag u32, slot u64, Option<Pubkey> (always 33 bytes).
 pub const PROGRAM_DATA_METADATA_LEN: usize = 45;
+/// DEC-18 §2 (C-01): the release IDL (`marginfi.json`) of [`SOURCE_TAG`] — the SHA-256 of its
+/// bytes (manifest `UPCOMING_0_1_12.md`); an on-chain IDL of exactly these bytes is that release's.
+pub const SOURCE_IDL_SHA256: &str =
+    "b4f80a6cecc7ad4828b0cd5f399b34dfd9fbada0fd866b46f3eb3a34cbc72fb2";
+/// The non-upgradeable BPF loader (v2): its programs hold their ELF in the program account.
+pub const BPF_LOADER_2_ID: &str = "BPFLoader2111111111111111111111111111111111";
+
+/// DEC-18 §2 (C-01): the program ELF of a loader-v3 ProgramData account — its bytes after the
+/// metadata, the account's trailing zero padding trimmed (the deployed binary itself).
+pub fn program_data_elf(data: &[u8]) -> Option<&[u8]> {
+    let elf = data.get(PROGRAM_DATA_METADATA_LEN..)?;
+    let end = elf.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+    Some(&elf[..end])
+}
 const PROGRAM_ACCOUNT_LEN: usize = 36;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
