@@ -341,8 +341,16 @@ impl Drop for WipedBody {
     fn drop(&mut self) {
         if let Ok(mut owned) = std::mem::take(&mut self.0).try_into_mut() {
             wipe(&mut owned);
+            #[cfg(test)]
+            WIPED_BODIES.with(|n| n.set(n.get() + 1));
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The request bodies this thread overwrote (a test observes the wipe it cannot read back).
+    static WIPED_BODIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// DEC-18 (P0-019, review L1): a credential command read from its request without copying the
@@ -2486,23 +2494,50 @@ fn protobuf(msg: impl Message) -> Response {
 }
 pub async fn command(State(app): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> Response {
     let body = WipedBody(body);
-    if let Err(s) = authorized(&app, &h, true) {
-        return s.into_response();
-    }
-    if h.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()) != Some("application/x-protobuf") {
-        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
-    }
-    // The header values are views of the same read buffer as the body: released before the
-    // command runs, so the body can be overwritten when it returns (best effort — hyper's
-    // connection buffer may still hold the bytes; review L1).
+    let refused = match authorized(&app, &h, true) {
+        Err(s) => Some(s),
+        Ok(())
+            if h.get(CONTENT_TYPE).and_then(|v| v.to_str().ok())
+                != Some("application/x-protobuf") =>
+        {
+            Some(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        }
+        Ok(()) => None,
+    };
+    // The header values are views of the same read buffer as the body: released first, so the
+    // body can be overwritten when it is released — after a refusal as after the command (best
+    // effort — hyper's connection buffer may still hold the bytes; review L1, P0-020 nit).
     drop(h);
+    if let Some(status) = refused {
+        drop(body);
+        return status.into_response();
+    }
     let Ok(req) = CommandRequest::decode(body.0.clone()) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let response = app.control.execute(&req).await;
-    drop(req);
-    drop(body);
-    protobuf(response)
+    // Wire V1.3 §7, DEC-18 §1.3 Nr. 9: an accepted command runs on its own task — a connection
+    // lost before the answer (a lost acknowledgement) never cuts the controller off; the client
+    // finds the outcome by its request id. A gateway shutdown still ends it: its record stays
+    // open (PENDING_RECONCILE after the restart), never dispatched again.
+    use tracing::Instrument;
+    let id = req.request_id.clone();
+    let run = tokio::spawn(
+        async move {
+            let response = app.control.execute(&req).await;
+            drop(req);
+            drop(body);
+            response
+        }
+        .instrument(tracing::Span::current()),
+    );
+    match run.await {
+        Ok(response) => protobuf(response),
+        Err(e) => {
+            // Its record stays open: a lookup answers PENDING_RECONCILE, never a second run.
+            tracing::error!(request_id = %id, error = %e, "command task ended without an answer");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 #[derive(Deserialize)]
 pub struct Lookup {
@@ -5962,5 +5997,83 @@ mod tests {
         assert!(!valid_id("../../capture"));
         assert!(!redact("error wss://provider/path-secret").contains("path-secret"));
         assert!(!redact("api-key=TOPSECRET").contains("TOPSECRET"));
+    }
+
+    /// DEC-18 (P0-020 nit): a command refused before it runs (401, 403, 415) overwrites its body
+    /// as well — the header values that are views of the same read buffer are released first.
+    #[tokio::test]
+    async fn a_refused_command_body_is_overwritten_too() {
+        use axum::extract::State;
+        use axum::http::{HeaderName, HeaderValue};
+        let addr: std::net::SocketAddr = "127.0.0.1:7".parse().unwrap();
+        let origin = format!("http://{addr}");
+        let app = crate::http::AppState::new(
+            crate::config::GatewayConfig {
+                bind: addr,
+                static_dir: None,
+                allowed_origins: vec![origin.clone()],
+                allowed_hosts: vec![addr.to_string()],
+                session_cookie: "darkbot_session".into(),
+                limits: Limits::default(),
+                source_stale_after_ms: 1000,
+                source_detach_after_ms: 2000,
+                source_reattach_backoff_ms: 50,
+                overview_interval_ms: 60000,
+                feeds: vec![],
+            },
+            Arc::new(crate::hub::StateHub::new(16)),
+            crate::engine::SourceRegistry::new(),
+        );
+        let token = app.sessions.issue();
+        let csrf = app.sessions.csrf_of(&token).unwrap();
+        let cookie = format!("darkbot_session={token}");
+        for (case, with_cookie, with_csrf, content_type, status) in [
+            (
+                "no session",
+                false,
+                false,
+                "application/x-protobuf",
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                "no csrf",
+                true,
+                false,
+                "application/x-protobuf",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "not protobuf",
+                true,
+                true,
+                "application/json",
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+        ] {
+            // One read buffer as hyper keeps it: the header values are views of the body's bytes.
+            let read = Bytes::from(format!("{origin}{content_type}SECRET-BODY").into_bytes());
+            let mut h = HeaderMap::new();
+            let shared = |at: usize, len: usize| {
+                HeaderValue::from_maybe_shared(read.slice(at..at + len)).unwrap()
+            };
+            h.insert(HeaderName::from_static("origin"), shared(0, origin.len()));
+            h.insert(CONTENT_TYPE, shared(origin.len(), content_type.len()));
+            if with_cookie {
+                h.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+            }
+            if with_csrf {
+                h.insert("x-csrf-token", HeaderValue::from_str(&csrf).unwrap());
+            }
+            let body = read.slice(origin.len() + content_type.len()..);
+            drop(read);
+            let before = WIPED_BODIES.with(|n| n.get());
+            let response = command(State(Arc::clone(&app)), h, body).await;
+            assert_eq!(response.status(), status, "{case}");
+            assert_eq!(
+                WIPED_BODIES.with(|n| n.get()),
+                before + 1,
+                "{case}: the refused body was overwritten"
+            );
+        }
     }
 }

@@ -77,7 +77,10 @@ async function feed(page: Page, initiallyReported = true, owner = false, system:
   await page.goto("/project-0");
   // Base topics, plus the Overview's owner and analytics topics when they are announced.
   await expect.poll(() => subscriptions.size).toBe(owner ? 5 : 2);
-  return { c, capture, subscriptions };
+  /** An owner or analytics topic's frame again, with the source quality given (detach/reattach). */
+  const own = (topic: TopicId, quality: StateQuality) => send({ case: "stateFull", value: { topic, generation: 1n, seq: ++seq, quality,
+    sourceId: "TEST_ONLY", sourceTimestampUnixNs: BigInt(Date.now()) * 1_000_000n, payload: extra.get(topic)!.payload } });
+  return { c, capture, subscriptions, own };
 }
 
 const badge = (page: Page) => page.getByRole("button", { name: /Health ·/ });
@@ -753,5 +756,75 @@ test("DEC-18: the provider registry reaches Capture and Liquidator; a change and
   await tab(page, "Liquidator");
   await expect(page.getByText("Providers · Jupiter, Jito")).toBeVisible();
   await expect(page.getByText("No jupiter/jito provider in the registry.")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("DEC-18 §1.3 Nr. 9: a lost acknowledgement of a key is looked up and never posted again, a concurrent change is the native conflict, a detached registry takes no change", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const { own } = await feed(page, true, true);
+  const posts: CommandRequest[] = [];
+  let lookups = 0;
+  let answer: "lost" | "conflict" = "lost";
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    if (r.request().method() === "GET") {
+      lookups += 1;
+      // The lookup names the posted request.
+      const q = new URL(r.request().url()).searchParams;
+      expect([q.get("project"), q.get("request_id")]).toEqual([String(ProjectId.PROJECT_0), posts.at(-1)!.requestId]);
+      return r.fulfill(proto(toBinary(CommandLookupResponseSchema, create(CommandLookupResponseSchema, { found: true,
+        commandId: posts.at(-1)!.requestId, phase: CommandPhase.COMPLETED, detail: "PROVIDER_RECEIPT applied=true version=8" }))));
+    }
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    posts.push(req);
+    if (answer === "lost") return r.abort("connectionreset");
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED,
+      commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.FAILED,
+      detail: "Native controller refused: PROVIDER_VERSION_CONFLICT: expected 7, current 8" }))));
+  });
+  await tab(page, "Capture");
+  await expect(page.getByText("registry v7 · LIVE")).toBeVisible();
+  // Lost acknowledgement: the key left once; the outcome is looked up, the key never sent again.
+  await page.getByLabel("Credential", { exact: true }).fill("helius");
+  await page.getByTestId("p0-provider-key").fill("LOST-ACK-KEY-1");
+  await page.getByRole("button", { name: "Set key" }).click();
+  await expect(page.getByTestId("p0-provider-command-receipt")).toContainText("COMPLETED · PROVIDER_RECEIPT");
+  expect([posts.length, lookups]).toEqual([1, 1]);
+  await expect(page.getByTestId("p0-provider-key")).toHaveValue("");
+  await expect(page.locator("body")).not.toContainText("LOST-ACK-KEY-1");
+  // A concurrent change elsewhere: this view's registry version is stale, the native CAS refuses.
+  answer = "conflict";
+  await page.getByRole("combobox", { name: /^Provider/ }).selectOption("public-wss");
+  await page.getByRole("button", { name: "Enable", exact: true }).click();
+  await expect(page.getByTestId("p0-provider-command-receipt")).toContainText("FAILED · Native controller refused: PROVIDER_VERSION_CONFLICT");
+  expect(posts.at(-1)!.expected?.version).toEqual({ case: "configVersion", value: 7n });
+  expect([posts.length, lookups]).toEqual([2, 1]);
+  // Detached: the registry shown is not current; every change is blocked with its reason.
+  own(TopicId.PROJECT0_ANALYTICS_JOBS, StateQuality.SOURCE_DETACHED);
+  await expect(page.getByText(/registry v7 · DETACHED/)).toBeVisible();
+  const changes = ["Add", "Update", "Set key", "Rotate key", "Revoke", "Enable", "Set priority", "Qualify", "Remove"];
+  const each = async (check: (b: ReturnType<Page["getByRole"]>) => Promise<void>) => {
+    for (const name of changes) {
+      const buttons = page.getByRole("button", { name, exact: true });
+      expect(await buttons.count(), name).toBeGreaterThan(0);
+      for (const b of await buttons.all()) await check(b);
+    }
+  };
+  await each((b) => expect(b).toBeDisabled());
+  await expect(page.getByText("Provider registry not current (DETACHED)").first()).toBeVisible();
+  // Every change tried while detached sends nothing.
+  const sent = posts.length;
+  await page.getByTestId("p0-provider-key").fill("DETACHED-KEY-1");
+  await each(async (b) => { await b.click({ force: true }); });
+  await page.getByTestId("p0-provider-key").press("Enter");
+  await page.waitForTimeout(300);
+  expect(posts).toHaveLength(sent);
+  // Reattached: current again, changes possible.
+  own(TopicId.PROJECT0_ANALYTICS_JOBS, StateQuality.OK);
+  await expect(page.getByText("registry v7 · LIVE")).toBeVisible();
+  await each((b) => expect(b).toBeEnabled());
+  expect(posts).toHaveLength(sent);
   expect(errors).toEqual([]);
 });

@@ -53,6 +53,9 @@ fn dec18_every_blocking_transport_applies_the_bound_credential_and_follows_no_re
     };
     let (deployment, deployment_seen) = ok();
     let (history, history_seen) = ok();
+    // T-1: a history provider that answers a result.
+    const ANSWER: &str = r#"{"jsonrpc":"2.0","id":1,"result":123}"#;
+    let (answering, answering_seen) = server("HTTP/1.1 200 OK".into(), ANSWER);
     let (jupiter, jupiter_seen) = server("HTTP/1.1 404 Not Found".into(), "{}");
     let (sink, sink_seen) = ok();
     let (redirecting, redirecting_seen) = server(
@@ -68,6 +71,7 @@ fn dec18_every_blocking_transport_applies_the_bound_credential_and_follows_no_re
     activate_credentials(vec![
         query(&deployment, "DEP-SECRET"),
         query(&history, "HIST-SECRET"),
+        query(&answering, "ANSWER-SECRET"),
         query(&redirecting, "REDIR-SECRET"),
         ActiveCredential {
             endpoint: jupiter.clone(),
@@ -94,6 +98,19 @@ fn dec18_every_blocking_transport_applies_the_bound_credential_and_follows_no_re
     let _ =
         fetcher.gap_request_metered("getSlot", serde_json::json!([]), deadline(), 2_000, 1 << 20);
     assert!(first(&history_seen)[0].starts_with("POST /?api-key=HIST-SECRET "));
+    // T-1: the positive path — the answer of the bound provider is read through the credentialed
+    // transport, the request carried its credential.
+    let answered = RpcFetcher::new(answering.clone(), 2_000, "finalized").unwrap();
+    let (value, bytes) = answered
+        .gap_request_metered("getSlot", serde_json::json!([]), deadline(), 2_000, 1 << 20)
+        .unwrap();
+    assert_eq!(value, serde_json::json!(123));
+    assert_eq!(bytes, ANSWER.len() as u64);
+    assert!(
+        first(&answering_seen)[0].starts_with("POST /?api-key=ANSWER-SECRET "),
+        "{:?}",
+        first(&answering_seen)
+    );
 
     // Jupiter (a crate_health build): the header, never the URL or an error.
     #[cfg(feature = "crate_health")]
