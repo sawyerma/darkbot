@@ -75,6 +75,7 @@ export function LivePanel() {
       <Line label="Spent by this grant" value={wei(l?.spentWei)} hint="The most every admitted intent may cost (input and gas)" />
       <Line label="Grant max input" value={wei(l?.grant?.maxInputWei)} />
       <Line label="Grant max spend" value={wei(l?.grant?.maxSpendWei)} />
+      <Line label="Campaign spent" value={`${wei(l?.campaignSpentWei)} of ${wei(l?.campaignSpendMaxWei)}`} hint="Every grant's admissions together; each BUY with its exits stays within BSC_EXEC_LIVE_SPEND_TOTAL_WEI (0: no BUY), never raised automatically" />
     </PlacedSection>
     <PlacedSection panel="live" section={6} records={records}>
       <Line label="LIVE path" value={<ValueState state={l?.pathState} />} hint={l?.pathReason || "the runtime's LIVE executor"} />

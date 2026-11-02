@@ -1916,7 +1916,8 @@ impl LiveRuntime {
             None => Store::open(&self.state_dir, KEEP_GENERATIONS),
         };
         let store = match opened {
-            Ok(s) => s,
+            // R4: its BUYs within the campaign's cumulative budget.
+            Ok(s) => s.with_campaign_spend(self.exec.exec.live_spend_total_wei),
             Err(e) => return self.close(format!("owner state: {e}")),
         };
         // R3: the operator's decisions, then the slots of attempts that
@@ -1949,10 +1950,24 @@ impl LiveRuntime {
         let max = self.exec.exec.live_grant_max_duration_ms;
         let live_now = store
             .live_now_holding(&components, &verified.view, now_ms, held.as_deref())
-            .and_then(|n| {
-                match max > 0 && n.grant().expires_unix_ms.saturating_sub(now_ms) > max {
+            .and_then(
+                |n| match max > 0 && n.grant().expires_unix_ms.saturating_sub(now_ms) > max {
                     true => Err(crate::sources::LIVE_GRANT_DURATION_ABOVE_MAX.into()),
                     false => Ok(n),
+                },
+            )
+            // R4: no room left in the campaign's budget for one BUY (the
+            // repository's 0, or spent): BUYs close here, no lease is asked
+            // for (the owner's admission holds the exact bound, exits
+            // included); its exits go on.
+            .and_then(|n| {
+                let budget = U256::from(self.exec.exec.live_spend_total_wei);
+                match crate::sources::spent_total(&self.state_dir) {
+                    Err(_) => Err(crate::sources::LIVE_SPEND_UNREADABLE.into()),
+                    Ok(spent) if U256::from(spent) + self.one_buy() > budget => {
+                        Err(crate::sources::LIVE_CAMPAIGN_SPEND_EXHAUSTED.into())
+                    }
+                    Ok(_) => Ok(n),
                 }
             });
         let live_now = match live_now {
@@ -6621,6 +6636,42 @@ mod tests {
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         assert_eq!(x.buys_closed, None, "exactly the longest admits BUYs");
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R4: the campaign's budget (`BSC_EXEC_LIVE_SPEND_TOTAL_WEI`):
+    /// no room for one BUY closes BUYs at the gate (nothing open: nothing
+    /// arms); room for a BUY's most but not its exits: the runtime's owner
+    /// store refuses its lease (review M1: the wiring itself).
+    #[test]
+    fn the_campaign_budget_closes_buys_and_bounds_the_lease() {
+        let mut r = Rig::new("live-campaign-budget", LiveStrategies::C3);
+        r.exec.exec.live_spend_total_wei = 0;
+        let leased = |x: &LiveRuntime| x.executor.as_ref().unwrap().end().lease().is_some();
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(
+            reason(&x).1.as_deref(),
+            Some(crate::sources::LIVE_CAMPAIGN_SPEND_EXHAUSTED)
+        );
+        x.shutdown();
+        let e = &r.exec.exec;
+        r.exec.exec.live_spend_total_wei =
+            e.input_wei + u128::from(e.gas_price_wei) * u128::from(e.gas_limit);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(!leased(&x));
+        assert!(
+            x.lease_error
+                .as_deref()
+                .is_some_and(|e| e.contains(crate::sources::LIVE_CAMPAIGN_SPEND_EXHAUSTED)),
+            "{:?}",
+            x.lease_error
+        );
         x.shutdown();
         r.clean();
     }

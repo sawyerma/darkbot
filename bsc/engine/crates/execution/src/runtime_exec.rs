@@ -735,6 +735,7 @@ pub(crate) mod tests {
                 // The test rigs' sources are public: the variant ON (R4 tests OFF).
                 live_public_only: true,
                 live_grant_max_duration_ms: 0,
+                live_spend_total_wei: u128::from(u64::MAX),
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

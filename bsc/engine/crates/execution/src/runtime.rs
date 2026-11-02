@@ -679,6 +679,11 @@ impl RuntimeConfig {
                             0,
                             31_536_000_000,
                         )?,
+                        live_spend_total_wei: u128::from(take(
+                            "BSC_EXEC_LIVE_SPEND_TOTAL_WEI",
+                            0,
+                            u64::MAX,
+                        )?),
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -4646,6 +4651,11 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF", "BSC_EXEC_LIVE_PUBLIC_ONLY=yes"),
             CONFIG.replace("BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_SPEND_TOTAL_WEI=0\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_SPEND_TOTAL_WEI=0",
+                "BSC_EXEC_LIVE_SPEND_TOTAL_WEI=18446744073709551616",
+            ),
             CONFIG.replace(
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=31536000001",
@@ -4716,6 +4726,8 @@ mod tests {
             .live_public_only
         );
         assert_eq!(exec(CONFIG).live_grant_max_duration_ms, 0);
+        // The campaign's budget: none in the repository (no BUY).
+        assert_eq!(exec(CONFIG).live_spend_total_wei, 0);
         assert_eq!(
             exec(&CONFIG.replace(
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",

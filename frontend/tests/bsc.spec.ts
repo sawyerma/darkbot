@@ -250,7 +250,7 @@ test("the LIVE tab's operator decisions go at the state their dialog opened on (
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const state = (ledgerVersion: bigint): LiveInit => ({
-    ledgerVersion, operatorExit: false, nonceBurn: true,
+    ledgerVersion, operatorExit: false, nonceBurn: true, campaignSpentWei: "1000", campaignSpendMaxWei: "0",
     positions: [lotRow(hash(0xa1), "OPEN", ["RESUME", "WRITE_OFF", "EXIT_NOW"]), lotRow(hash(0xa2), "CLOSED", [])],
     transactions: [txRow(hash(0xa1), 1n, "INCLUDED", false), txRow(hash(0xb5), 4n, "UNKNOWN", true), txRow(hash(0xb6), 5n, "RELEASED", true, true)],
   });
@@ -259,6 +259,8 @@ test("the LIVE tab's operator decisions go at the state their dialog opened on (
   await page.goto("/bsc");
   await tab(page, "LIVE").click();
   await expect(line(page, "Operator decisions")).toContainText("ledger version 12 · exit-now locked · nonce burn ON");
+  // R4: the campaign's spend and its budget (0: no BUY), never made up.
+  await expect(line(page, "Campaign spent")).toContainText(/1000 wei of .*· 0 wei/);
   // The ledger's decisions of the open lot; exit-now locked (its switch OFF); a closed lot none.
   const lots = page.getByTestId("bsc-live-positions").locator("tr");
   const exitNow = lots.nth(0).getByTestId("bsc-live-lot-EXIT_NOW");

@@ -319,6 +319,8 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | operator_exit | [bool](#bool) | optional | BSC_EXEC_LIVE_OPERATOR_EXIT of the runtime configuration: a lot&#39;s EXIT_NOW is locked while false; absent without a readable configuration with the executor. |
 | nonce_burn | [bool](#bool) | optional | BSC_EXEC_LIVE_NONCE_BURN of the runtime configuration: a nonce burn is locked while false; absent without a readable configuration with the executor. |
 | first_unreadable | [uint64](#uint64) | optional | The lowest sequence number of the ledger&#39;s entries that do not decode: the one the operator may quarantine next (bsc.live.ledger.quarantine); the warning LIVE_LEDGER_INVALID counts them all. Absent while every entry decodes. |
+| campaign_spent_wei | [string](#string) | optional | REV.1.0 R4: what the campaign has spent at most, every grant&#39;s admissions (decimal wei); absent while the spend is unreadable. |
+| campaign_spend_max_wei | [string](#string) | optional | The campaign&#39;s cumulative budget every LIVE BUY with its exits is admitted within (BSC_EXEC_LIVE_SPEND_TOTAL_WEI, decimal wei; 0: no BUY); absent without a readable runtime configuration with an executor. |
 
 
 

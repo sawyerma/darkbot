@@ -265,6 +265,11 @@ pub const ATTEMPT_TOTAL_EXHAUSTED: &str = "ATTEMPT_TOTAL_EXHAUSTED";
 pub const LIVE_GRANT_ATTEMPTS_EXHAUSTED: &str = "LIVE_GRANT_ATTEMPTS_EXHAUSTED";
 pub const LIVE_SPEND_UNREADABLE: &str = "LIVE_SPEND_UNREADABLE";
 pub const LIVE_GRANT_SPEND_EXHAUSTED: &str = "LIVE_GRANT_SPEND_EXHAUSTED";
+/// REV.1.0 R4 (PHASENPLAN: a cumulative worst-case budget, technically
+/// bounded, never raised automatically): the campaign's admissions under
+/// every grant leave no room for a BUY with its exits
+/// (`BSC_EXEC_LIVE_SPEND_TOTAL_WEI`).
+pub const LIVE_CAMPAIGN_SPEND_EXHAUSTED: &str = "LIVE_CAMPAIGN_SPEND_EXHAUSTED";
 pub const LIVE_VENUE_UNQUALIFIED: &str = "LIVE_VENUE_UNQUALIFIED";
 pub const LIVE_SOURCE_UNQUALIFIED: &str = "LIVE_SOURCE_UNQUALIFIED";
 pub const LIVE_ADAPTER_UNQUALIFIED: &str = "LIVE_ADAPTER_UNQUALIFIED";
@@ -2420,6 +2425,10 @@ pub struct Store {
     keep: u64,
     /// The host boot session every write is stamped with.
     boot: Result<String, String>,
+    /// R4: the campaign's cumulative budget its BUYs are admitted within
+    /// (the runtime's `BSC_EXEC_LIVE_SPEND_TOTAL_WEI`); a store opened
+    /// without it (a CLI's, a test's) bounds no campaign.
+    campaign_spend_max: Option<u128>,
 }
 
 /// A request ID is a single safe path component (the gateway's UUIDs fit).
@@ -3329,11 +3338,19 @@ pub fn spent_by_grant(dir: &Path, grant_generation: u64) -> Result<u128, String>
 
 /// [`spent_by_grant`] of the admitted intents `admitted`, by nonce.
 fn spend_of_grant(admitted: &[Admitted], grant_generation: u64) -> Result<NonceCosts, String> {
+    spend_of(admitted, |a| a.grant_generation == grant_generation)
+}
+
+/// R4: what the campaign has spent, every grant's admissions as
+/// [`spent_by_grant`] counts one grant's.
+pub fn spent_total(dir: &Path) -> Result<u128, String> {
+    spend_of(&admitted_intents(dir)?, |_| true)?.wei()
+}
+
+/// The admitted intents `admitted` that `keep` takes, by nonce.
+fn spend_of(admitted: &[Admitted], keep: impl Fn(&Admitted) -> bool) -> Result<NonceCosts, String> {
     let mut book = NonceCosts::default();
-    for a in admitted
-        .iter()
-        .filter(|a| a.grant_generation == grant_generation)
-    {
+    for a in admitted.iter().filter(|a| keep(a)) {
         book.add(a.key(), U256::from(a.max_wei))
             .ok_or_else(|| format!("{LIVE_SPEND_UNREADABLE}: the spend overflows"))?;
     }
@@ -3655,7 +3672,15 @@ impl Store {
             owner,
             keep,
             boot,
+            campaign_spend_max: None,
         })
+    }
+
+    /// R4: admits its BUYs within the campaign's cumulative budget
+    /// `max_wei` (every grant's admissions, their exits kept room for).
+    pub fn with_campaign_spend(mut self, max_wei: u128) -> Self {
+        self.campaign_spend_max = Some(max_wei);
+        self
     }
 
     fn generation_path(&self, n: u64) -> PathBuf {
@@ -3986,8 +4011,11 @@ impl Store {
         // read and checked below is what the entry is written against.
         let _admitting = self.spend_lock()?;
         let g = self.current()?;
-        let book =
-            admitted_intents(&self.dir).and_then(|a| spend_of_grant(&a, armed.grant_generation));
+        let admitted = admitted_intents(&self.dir);
+        let book = admitted
+            .as_deref()
+            .map_err(Clone::clone)
+            .and_then(|a| spend_of_grant(a, armed.grant_generation));
         let spent = book.as_ref().ok().and_then(|b| b.wei().ok());
         after_spend_read();
         // BSC3-076 review H1: a lease's own attempt (renewed, moved to
@@ -4045,6 +4073,22 @@ impl Store {
                 .is_none_or(|kept| kept > grant.max_spend_wei)
         {
             return Err(LIVE_EXIT_RESERVE_MISSING.into());
+        }
+        // R4: the campaign's cumulative budget, every grant's admissions: a
+        // BUY keeps room for its exits; exits always go on.
+        if !exit && let Some(max) = self.campaign_spend_max {
+            let campaign = admitted
+                .as_deref()
+                .map_err(|_| LIVE_SPEND_UNREADABLE)
+                .and_then(|a| spend_of(a, |_| true).map_err(|_| LIVE_SPEND_UNREADABLE))?;
+            let total = campaign.wei().map_err(|_| LIVE_SPEND_UNREADABLE)?;
+            let more = u128::try_from(campaign.increase(Some(key), U256::from(intent.max_wei)))
+                .map_err(|_| LIVE_SPEND_UNREADABLE)?;
+            total
+                .checked_add(more)
+                .and_then(|after| after.checked_add(intent.exit_reserve_wei))
+                .filter(|kept| *kept <= max)
+                .ok_or(LIVE_CAMPAIGN_SPEND_EXHAUSTED)?;
         }
         let entry = spend_dir(&self.dir).join(format!("{}.dbrec", intent.id));
         if parse_hex32(intent.id).is_none() {
@@ -7307,6 +7351,72 @@ pub(crate) mod tests {
         // Every admitted entry stays, refused ones were never written.
         assert_eq!(admitted_intents(&dir).unwrap().len(), 7);
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 21_000);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// REV.1.0 R4: the campaign's cumulative budget bounds the BUYs of every
+    /// grant together (an older grant's admissions count, an alternative
+    /// of one nonce adds its difference only); an exit still goes beyond it;
+    /// a store without it bounds no campaign.
+    #[test]
+    fn the_campaign_budget_bounds_the_buys_of_every_grant() {
+        let (dir, s, now) = live_ready_limited("live-campaign-spend", (6, 6), |now| LiveGrant {
+            max_attempts: 6,
+            max_input_wei: 1_000,
+            max_spend_wei: 21_000,
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let q = qualified_in(&s);
+        let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+        let older = armed.grant_generation() - 1;
+        spend_entry(&dir, &admitted_of(9, older, Some(3), Some(ORIGIN), 5_000));
+        let ids: Vec<String> = (0..5u8).map(|n| hex32(&[n; 32])).collect();
+        let unbounded = s.admit_live(&armed, &nonce_buy(&ids[4], 6, 10_000), &q, now);
+        assert_eq!(unbounded.map(|a| a.spent_wei), Ok(10_000));
+        let s = s.with_campaign_spend(17_000);
+        let admit = |n: usize, nonce: u64, most: u128| {
+            s.admit_live(&armed, &nonce_buy(&ids[n], nonce, most), &q, now)
+                .map(|a| a.spent_wei)
+        };
+        // 5,000 + 10,000 of the campaign: 2,001 more is past it (the
+        // grant's 21,000 not).
+        assert_eq!(
+            admit(0, 7, 2_001),
+            Err(LIVE_CAMPAIGN_SPEND_EXHAUSTED.into())
+        );
+        assert_eq!(admit(0, 7, 1_000), Ok(11_000));
+        // An alternative of nonce 7 adds its difference only.
+        assert_eq!(admit(1, 7, 2_000), Ok(12_000));
+        assert_eq!(
+            admit(2, 7, 2_001),
+            Err(LIVE_CAMPAIGN_SPEND_EXHAUSTED.into())
+        );
+        assert_eq!(spent_total(&dir).unwrap(), 17_000);
+        // Review M2: a BUY keeps the campaign's room for its exits.
+        let s = s.with_campaign_spend(18_000);
+        let reserved = |most: u128, reserve: u128| LiveIntent {
+            exit_reserve_wei: reserve,
+            ..nonce_buy(&ids[2], 9, most)
+        };
+        assert_eq!(
+            s.admit_live(&armed, &reserved(500, 501), &q, now)
+                .map(|a| a.spent_wei),
+            Err(LIVE_CAMPAIGN_SPEND_EXHAUSTED.into())
+        );
+        assert_eq!(
+            s.admit_live(&armed, &reserved(500, 500), &q, now)
+                .map(|a| a.spent_wei),
+            Ok(12_500)
+        );
+        assert_eq!(spent_total(&dir).unwrap(), 17_500);
+        // An exit beyond it still goes.
+        let exit = LiveIntent {
+            kind: LiveIntentKind::Approve,
+            input_wei: 0,
+            ..nonce_buy(&ids[3], 8, 3_000)
+        };
+        assert!(s.admit_live(&armed, &exit, &q, now).is_ok());
+        assert_eq!(spent_total(&dir).unwrap(), 20_500);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1911,6 +1911,15 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         ]
     );
     assert_eq!((l.operator_exit, l.nonce_burn), (None, None));
+    // R4: the campaign's spend (no admission yet), its budget only with a
+    // configuration.
+    assert_eq!(
+        (
+            l.campaign_spent_wei.as_deref(),
+            l.campaign_spend_max_wei.as_deref()
+        ),
+        (Some("0"), None)
+    );
     // The ledger's own rules, without a LIVE buyer: no burn.
     assert!(l.transactions.iter().all(|t| !t.burnable));
     // The open lot (its token's, nothing of its exit out) takes every
@@ -1949,6 +1958,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     .unwrap();
     let l = tab();
     assert_eq!((l.operator_exit, l.nonce_burn), (Some(false), Some(true)));
+    assert_eq!(l.campaign_spend_max_wei.as_deref(), Some("0"));
     assert_eq!(
         l.transactions
             .iter()
@@ -3116,6 +3126,8 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         operator_exit: Some(true),
         nonce_burn: Some(true),
         first_unreadable: Some(u64::MAX),
+        campaign_spent_wei: Some(word.clone()),
+        campaign_spend_max_wei: Some(word.clone()),
         ..Default::default()
     };
     let mut l = full.clone();

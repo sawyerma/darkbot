@@ -554,6 +554,13 @@ message BscLiveState {
   // may quarantine next (bsc.live.ledger.quarantine); the warning LIVE_LEDGER_INVALID counts
   // them all. Absent while every entry decodes.
   optional uint64 first_unreadable = 43;
+  // REV.1.0 R4: what the campaign has spent at most, every grant's admissions (decimal wei); absent
+  // while the spend is unreadable.
+  optional string campaign_spent_wei = 44;
+  // The campaign's cumulative budget every LIVE BUY with its exits is admitted within
+  // (BSC_EXEC_LIVE_SPEND_TOTAL_WEI, decimal wei; 0: no BUY); absent without a readable runtime
+  // configuration with an executor.
+  optional string campaign_spend_max_wei = 45;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

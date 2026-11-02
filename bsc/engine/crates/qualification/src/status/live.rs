@@ -158,6 +158,11 @@ fn owner_tab(
             // R3b: the switches that lock an operator's exit-now and nonce burn.
             out.operator_exit = c.exec.as_ref().map(|x| x.exec.live_operator_exit);
             out.nonce_burn = c.exec.as_ref().map(|x| x.exec.live_nonce_burn);
+            // R4: the campaign's cumulative budget.
+            out.campaign_spend_max_wei = c
+                .exec
+                .as_ref()
+                .map(|x| x.exec.live_spend_total_wei.to_string());
         }
         Err(why) => out.warnings.push(why.into()),
     }
@@ -170,6 +175,10 @@ fn owner_tab(
     };
     // The ledger is the owner state's, whatever the gate.
     let dir = rundir.join("bsc-sources");
+    match sources::spent_total(&dir) {
+        Ok(w) => out.campaign_spent_wei = Some(w.to_string()),
+        Err(_) => out.warnings.push(sources::LIVE_SPEND_UNREADABLE.into()),
+    }
     let ledger = Ledger::open(&dir);
     // R3b: the version before the facts shown, the CAS of an operator's
     // decision: once a fact is newer than they, a request at it is refused

@@ -588,6 +588,7 @@ fn exec_setup() -> ExecSetup {
             // The rig's sources are public: the variant ON.
             live_public_only: true,
             live_grant_max_duration_ms: 0,
+            live_spend_total_wei: u128::from(u64::MAX),
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),
