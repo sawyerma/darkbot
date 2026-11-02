@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
-import { create, toBinary } from "@bufbuild/protobuf";
-import { CommandLookupResponseSchema, CommandPhase, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import {
-  COMMAND_TIMEOUT_MS, READ_TIMEOUT_MS, applyReadinessJob, candidateCommand, candidateMirrorShows, ownerCommand, readinessCommand,
-  useCandidateControl, useReadinessControl, useSourceControl,
+  COMMAND_TIMEOUT_MS, READ_TIMEOUT_MS, applyReadinessJob, candidateCommand, candidateMirrorShows, liveDecisionCommand, ownerCommand, readinessCommand,
+  useCandidateControl, useReadinessControl, useSourceControl, type LiveDecision,
 } from "./bscControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
@@ -88,6 +88,24 @@ describe("BSC owner requests (Audit E 4.12: the one BSC command client)", () => 
     await ownerCommand("bsc-live-econ", "bsc.economic.set", "BSC_ECON_LIVE", "DISABLED", 9n);
     expect(calls(fetch)).toEqual(["GET /api/v1/session", "POST /api/v1/command", "GET /api/v1/command"]);
     expect(useSourceControl.getState()).toMatchObject({ busy: true, receipt: { phase: "UNKNOWN", detail: "reset", origin: "bsc-live-econ" } });
+  });
+  it("sends the operator's LIVE ledger decisions at the state they were decided on, nothing else (REV.1.0 R3b)", async () => {
+    const lot = "0x" + "ab".repeat(32);
+    const cases: [LiveDecision, string, string, bigint][] = [
+      [{ action: "bsc.live.lot", lot, decision: "WRITE_OFF", ledgerVersion: 7n }, "bsc.live.lot", `${lot}:WRITE_OFF`, 7n],
+      [{ action: "bsc.live.nonce_burn", tx: lot, ledgerVersion: 8n }, "bsc.live.nonce_burn", lot, 8n],
+      [{ action: "bsc.live.ledger.quarantine", seq: 4n, generation: 3n }, "bsc.live.ledger.quarantine", "4", 3n],
+    ];
+    for (const [decision, action, resource, version] of cases) {
+      useSourceControl.setState({ busy: false, receipt: null });
+      const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(accepted(CommandPhase.COMPLETED))
+        .mockResolvedValueOnce(lookup(CommandPhase.COMPLETED, "outcome=APPLIED")); vi.stubGlobal("fetch", fetch);
+      await liveDecisionCommand("bsc-live-lot", decision);
+      const [, init] = fetch.mock.calls.find(([, i]) => (i as RequestInit | undefined)?.method === "POST")!;
+      const req = fromBinary(CommandRequestSchema, (init as RequestInit).body as Uint8Array);
+      expect([req.action, req.resourceId, req.params.length, req.expected?.version]).toEqual([action, resource, 0, { case: "configVersion", value: version }]);
+      expect(useSourceControl.getState().receipt).toMatchObject({ phase: "COMPLETED", detail: "outcome=APPLIED", origin: "bsc-live-lot" });
+    }
   });
   it("is the only BSC command client", () => {
     const dir = new URL(".", import.meta.url);

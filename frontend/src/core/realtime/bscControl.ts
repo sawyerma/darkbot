@@ -231,7 +231,21 @@ export async function liveGrantCommand(origin: string, scope: LiveGrantScope, sc
   const params = toBinary(BscLiveGrantCommandSchema, message(BscLiveGrantCommandSchema, { ...scope, scopeSha256 }));
   await ownerSend(origin, "bsc.live.grant", "BSC_LIVE_GRANT", params, { case: "configVersion" as const, value: generation }, `BSC_LIVE_GRANT ${scopeSha256.slice(0, 12)}`);
 }
-async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant", resourceId: string, params: Uint8Array,
+// REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger, each the same request a
+// terminal sends with `darkbotctl bsc live lot|nonce-burn|ledger-quarantine`, at the state it was
+// decided on as `configVersion` (the ledger's version for a lot or a burn, the owner generation for
+// a quarantine): the native ledger refuses another (LIVE_REQUEST_STALE) and what a switch locks.
+export type LotDecision = "RESUME" | "WRITE_OFF" | "EXIT_NOW";
+export type LiveDecision =
+  | { action: "bsc.live.lot"; lot: string; decision: LotDecision; ledgerVersion: bigint }
+  | { action: "bsc.live.nonce_burn"; tx: string; ledgerVersion: bigint }
+  | { action: "bsc.live.ledger.quarantine"; seq: bigint; generation: bigint };
+export async function liveDecisionCommand(origin: string, d: LiveDecision): Promise<void> {
+  const [resourceId, value] = d.action === "bsc.live.lot" ? [`${d.lot}:${d.decision}`, d.ledgerVersion]
+    : d.action === "bsc.live.nonce_burn" ? [d.tx, d.ledgerVersion] : [d.seq.toString(), d.generation];
+  await ownerSend(origin, d.action, resourceId, new Uint8Array(), { case: "configVersion" as const, value }, `${d.action} ${resourceId}`);
+}
+async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | LiveDecision["action"], resourceId: string, params: Uint8Array,
   version: { case: "walletPolicyVersion" | "configVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();

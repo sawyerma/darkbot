@@ -6,6 +6,7 @@
 
 ## BSC-LIVE-ERGÄNZUNG (28.10.2026)
 `BscLiveState` (Topic 34 `bsc.live.state`) aus nativem Owner/Runtime/Ledger, Reiter LIVE (9 Abschnitte), Gateway `bsc.live.grant` (BscLiveGrantCommand + Scope-SHA-256), `bsc.live.revoke`, `bsc.attempt.total.set`; F0-VAR `IST_CONNECTED`.
+REV.1.0 R3b (Audit A): Betreiberentscheidungen im LIVE-Reiter `bsc.live.lot` (`0x<lot>:RESUME|WRITE_OFF|EXIT_NOW`), `bsc.live.nonce_burn` (`0x<tx>`): `config_version` = Ledger-Version (`BscLiveState.ledger_version`); `bsc.live.ledger.quarantine` (`<seq>` = `first_unreadable`): `config_version` = Owner-Generation; EXIT_NOW/Burn gesperrt ohne `operator_exit`/`nonce_burn` = true.
 
 ## BSC-CONTROL-ERGÄNZUNG (27.10.2026) — zwei Wallets und schaltbare Wirtschaftsmodi
 

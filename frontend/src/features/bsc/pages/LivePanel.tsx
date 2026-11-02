@@ -6,12 +6,12 @@ import { selectLive, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
-import { conditionRows, exitDeciderRows, recoveryRows, signedBnb } from "../model/live";
+import { conditionRows, exitDeciderRows, operatorDecisions, recoveryRows, signedBnb } from "../model/live";
 import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
 import { SwitchActions } from "../SwitchActions";
-import { LiveGrantActions, LiveRevokeActions, ScopeLiveActions, TotalLimitActions } from "../LiveActions";
+import { LIVE_BURN, LIVE_LOT, LIVE_QUARANTINE, LiveBurnAction, LiveGrantActions, LiveLotActions, LiveQuarantineAction, LiveRevokeActions, Receipt, ScopeLiveActions, TotalLimitActions } from "../LiveActions";
 import { LiveCampaign } from "./LiveCampaign";
 
 const wei = (v: string | undefined) => v === undefined || v === "" ? "—" : /^[0-9]+$/.test(v) ? formatNative(v, "wei") : v;
@@ -27,6 +27,7 @@ export function LivePanel() {
   const owner = !!l && l.gate !== "UNKNOWN";
   const econLive = switchRow("BSC_ECON_LIVE", l?.economicLive);
   const recovery = recoveryRows(l);
+  const decisions = operatorDecisions(l);
   return <>
     <Line label="LIVE source quality" value={<ValueState state={quality} />} hint="bsc.live.state transport" />
     <PlacedSection panel="live" section={1} records={records}>
@@ -36,6 +37,8 @@ export function LivePanel() {
       </tbody></table>
       <Line label="LIVE qualification" value={<ValueState state={l?.qualification} />} hint={l?.qualificationDetail || "bsc/config/live_qualification.dbrec, verified against its evidence"} />
       {l?.warnings.length ? <Line label="Warnings" value={l.warnings.join(", ")} /> : null}
+      <LiveQuarantineAction seq={l?.firstUnreadable} generation={generation} available={owner} />
+      <Receipt testId={LIVE_QUARANTINE} />
     </PlacedSection>
     <PlacedSection panel="live" section={2} records={records}>
       {l?.grant ? <>
@@ -82,15 +85,20 @@ export function LivePanel() {
     </PlacedSection>
     <PlacedSection panel="live" section={7} records={records}>
       <table className="bsc-table" data-testid="bsc-live-positions"><tbody>
-        {(l?.positions ?? []).map(p => <tr key={p.lot}><td>{p.token}</td><td>{p.component}</td><td>{p.state}</td><td>{p.tokens}</td><td>{wei(p.inputWei)}</td><td>{wei(p.proceedsWei)}</td><td>{p.pnlWei ? signedBnb(p.pnlWei) : "—"}</td></tr>)}
+        {(l?.positions ?? []).map(p => <tr key={p.lot}><td>{p.token}</td><td>{p.component}</td><td>{p.state}</td><td>{p.tokens}</td><td>{wei(p.inputWei)}</td><td>{wei(p.proceedsWei)}</td><td>{p.pnlWei ? signedBnb(p.pnlWei) : "—"}</td>
+          <td>{p.decisions.length ? <LiveLotActions lot={p.lot} decisions={p.decisions} version={decisions.version} exitNow={decisions.exitNow} /> : null}</td></tr>)}
       </tbody></table>
+      <Line label={decisions.row.label} value={decisions.row.value} hint={decisions.row.hint} />
+      <Receipt testId={LIVE_LOT} />
       <div data-testid="bsc-live-exit-deciders">{exitDeciderRows(l).map(r => <Line key={r.label} label={r.label} value={r.value} hint={r.hint} />)}</div>
     </PlacedSection>
     <PlacedSection panel="live" section={8} records={records}>
       <Line label="Released" value={`${(l?.released ?? 0n).toString()} (${(l?.unknown ?? 0n).toString()} UNKNOWN)`} hint="Transactions whose bytes may have left; never sent again" />
       <table className="bsc-table" data-testid="bsc-live-transactions"><tbody>
-        {(l?.transactions ?? []).map(t => <tr key={t.txHash}><td>{t.intent}</td><td>{t.txHash}</td><td>nonce {t.nonce.toString()}</td><td>{t.state}</td><td>{t.blockNumber?.toString() ?? ""}</td><td>{t.source}</td></tr>)}
+        {(l?.transactions ?? []).map(t => <tr key={t.txHash}><td>{t.intent}</td><td>{t.txHash}</td><td>nonce {t.nonce.toString()}</td><td>{t.state}</td><td>{t.blockNumber?.toString() ?? ""}</td><td>{t.source}</td>
+          <td>{t.burnable || t.burnRequested ? <LiveBurnAction tx={t.txHash} nonce={t.nonce} version={decisions.version} burn={decisions.burn} requested={t.burnRequested} /> : null}</td></tr>)}
       </tbody></table>
+      <Receipt testId={LIVE_BURN} />
       <Line label={recovery.row.label} value={recovery.row.value} hint={recovery.row.hint} />
       {recovery.pending.length ? <table className="bsc-table" data-testid="bsc-live-recovery-pending"><tbody>
         {recovery.pending.map(([tx, why]) => <tr key={tx}><td>{tx}</td><td>{why}</td></tr>)}

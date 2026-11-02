@@ -1167,6 +1167,68 @@ impl Book {
             p.token == *token && matches!(p.state, PositionState::Open | PositionState::Exiting)
         })
     }
+
+    /// R3b: the BUY of the lot `lot` when the operator's decision `what`
+    /// is taken now (exit-now's switch aside), else why not: the lot must be
+    /// its token's open lot; write-off and exit-now need it OPEN with no
+    /// step of its exit out. One rule for [`Ledger::decide`] and the LIVE tab.
+    pub fn decidable(&self, lot: &[u8; 32], what: LotDecision) -> Result<&Tx, String> {
+        let buy = self
+            .tx(lot)
+            .filter(|t| t.released.intent == LiveIntentKind::Buy)
+            .ok_or_else(|| {
+                format!(
+                    "{LIVE_LOT_NOT_OPEN}: no BUY of the ledger is 0x{}",
+                    hex(lot)
+                )
+            })?;
+        let p = self
+            .open_lot(&buy.released.token)
+            .filter(|p| p.lot == *lot)
+            .ok_or_else(|| {
+                format!(
+                    "{LIVE_LOT_NOT_OPEN}: 0x{} is not its token's open lot",
+                    hex(lot)
+                )
+            })?;
+        let out = self
+            .unresolved()
+            .any(|t| t.lot == Some(*lot) && t.released.intent.exit_step());
+        if what != LotDecision::Resume && (out || p.state != PositionState::Open) {
+            return Err(format!("{LIVE_LOT_EXIT_OUT}: a step of its exit is out"));
+        }
+        Ok(buy)
+    }
+
+    /// R3b: the unresolved transaction `tx` when `buyer` may have its nonce
+    /// burnt, else why not: its signed bytes may still land (its block left
+    /// the chain, or its window is unknown: one its window bounds resolves
+    /// without a burn) and it is the buyer's (review LOW-2). One rule for
+    /// [`Ledger::request_burn`] and the LIVE tab.
+    pub fn burnable(&self, tx: &[u8; 32], buyer: [u8; 20]) -> Result<&Tx, String> {
+        let target = self
+            .unresolved()
+            .find(|t| t.released.tx_hash == *tx)
+            .ok_or_else(|| {
+                format!(
+                    "{LIVE_BURN_REFUSED}: 0x{} is no unresolved transaction of the ledger",
+                    hex(tx)
+                )
+            })?;
+        if !target.orphaned && target.released.max_block.is_some() {
+            return Err(format!(
+                "{LIVE_BURN_REFUSED}: 0x{}'s window bounds it (it resolves without a burn)",
+                hex(tx)
+            ));
+        }
+        if target.released.origin.is_some_and(|o| o.sender != buyer) {
+            return Err(format!(
+                "{LIVE_BURN_REFUSED}: 0x{} is another sender's than the buyer",
+                hex(tx)
+            ));
+        }
+        Ok(target)
+    }
 }
 
 fn signed(v: U256) -> i128 {
@@ -1412,6 +1474,18 @@ impl LotDecision {
             _ => None,
         }
     }
+
+    /// R3b: its name in the LIVE tab and the gateway (`bsc.live.lot`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Resume => "RESUME",
+            Self::WriteOff => "WRITE_OFF",
+            Self::ExitNow => "EXIT_NOW",
+        }
+    }
+
+    /// Every decision, in the LIVE tab's order.
+    pub const ALL: [Self; 3] = [Self::Resume, Self::WriteOff, Self::ExitNow];
 
     /// Its fact's kind.
     pub fn kind(self) -> FactKind {
@@ -1666,30 +1740,7 @@ impl Ledger {
         }
         self.expect_version(expected_version)?;
         let book = fold(&facts);
-        let buy = book
-            .tx(&lot)
-            .filter(|t| t.released.intent == LiveIntentKind::Buy)
-            .ok_or_else(|| {
-                format!(
-                    "{LIVE_LOT_NOT_OPEN}: no BUY of the ledger is 0x{}",
-                    hex(&lot)
-                )
-            })?;
-        let p = book
-            .open_lot(&buy.released.token)
-            .filter(|p| p.lot == lot)
-            .ok_or_else(|| {
-                format!(
-                    "{LIVE_LOT_NOT_OPEN}: 0x{} is not its token's open lot",
-                    hex(&lot)
-                )
-            })?;
-        let out = book
-            .unresolved()
-            .any(|t| t.lot == Some(lot) && t.released.intent.exit_step());
-        if what != LotDecision::Resume && (out || p.state != PositionState::Open) {
-            return Err(format!("{LIVE_LOT_EXIT_OUT}: a step of its exit is out"));
-        }
+        let buy = book.decidable(&lot, what)?;
         if what == LotDecision::ExitNow && !operator_exit {
             return Err(LIVE_OPERATOR_EXIT_OFF.into());
         }
@@ -1738,28 +1789,7 @@ impl Ledger {
         self.expect_version(expected_version)?;
         let buyer = buyer.ok_or("BSC_LIVE_BUYER is not configured")?;
         let book = fold(&facts);
-        let target = book
-            .unresolved()
-            .find(|t| t.released.tx_hash == tx)
-            .ok_or_else(|| {
-                format!(
-                    "{LIVE_BURN_REFUSED}: 0x{} is no unresolved transaction of the ledger",
-                    hex(&tx)
-                )
-            })?;
-        if !target.orphaned && target.released.max_block.is_some() {
-            return Err(format!(
-                "{LIVE_BURN_REFUSED}: 0x{}'s window bounds it (it resolves without a burn)",
-                hex(&tx)
-            ));
-        }
-        // Review LOW-2: the buyer burns its own nonces only.
-        if target.released.origin.is_some_and(|o| o.sender != buyer) {
-            return Err(format!(
-                "{LIVE_BURN_REFUSED}: 0x{} is another sender's than the buyer",
-                hex(&tx)
-            ));
-        }
+        let target = book.burnable(&tx, buyer)?;
         let fact = Fact {
             operator: Some(Operator {
                 request_id: request_id.into(),

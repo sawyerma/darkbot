@@ -420,12 +420,16 @@ message LivePosition {
   optional string pnl_wei = 8;
   // The lot: its BUY's transaction hash, 0x hex (a token bought again is another lot).
   string lot = 9;
+  // REV.1.0 R3b: the operator's decisions the ledger takes of this lot now (RESUME, WRITE_OFF,
+  // EXIT_NOW; exit-now also needs BSC_EXEC_LIVE_OPERATOR_EXIT ON), by the ledger's own rule.
+  repeated string decisions = 10;
 }
 // One LIVE transaction whose bytes may have left, and what the chain made of it.
 message LiveTransaction {
   // Transaction hash, 0x hex.
   string tx_hash = 1;
-  // BUY, APPROVE or SELL.
+  // BUY, APPROVE, SELL or BURN (REV.1.0 R3b: a nonce burn, the buyer's transfer of nothing to
+  // itself).
   string intent = 2;
   // Token address, 0x hex.
   string token = 3;
@@ -439,6 +443,12 @@ message LiveTransaction {
   // the second source's; its receipt's, or where its sender's nonce passes it), not from the
   // follower's block; empty otherwise.
   string source = 7;
+  // REV.1.0 R3b: the operator requested its nonce burnt (BURN_REQUESTED); the armed runtime burns
+  // it while BSC_EXEC_LIVE_NONCE_BURN is ON.
+  bool burn_requested = 8;
+  // REV.1.0 R3b: the ledger takes a nonce burn of it now (its signed bytes may still land, it is
+  // the configured LIVE buyer's), by the ledger's own rule; the switch aside.
+  bool burnable = 9;
 }
 // The BSC LIVE tab (plan 28.10.): the owner's LIVE gate with every precondition and its
 // reason, the grant, attempts and spend, the LIVE path of the runtime, positions,
@@ -530,6 +540,20 @@ message BscLiveState {
   uint64 recovery_faults = 38;
   // The last of those failures; empty without one.
   string recovery_fault = 39;
+  // REV.1.0 R3b: the LIVE ledger's version, its next entry's number (never reused): the
+  // compare-and-swap (config_version) of an operator's lot decision or nonce burn, read before
+  // the positions and transactions shown; absent while the ledger is unreadable.
+  optional uint64 ledger_version = 40;
+  // BSC_EXEC_LIVE_OPERATOR_EXIT of the runtime configuration: a lot's EXIT_NOW is locked while
+  // false; absent without a readable configuration with the executor.
+  optional bool operator_exit = 41;
+  // BSC_EXEC_LIVE_NONCE_BURN of the runtime configuration: a nonce burn is locked while false;
+  // absent without a readable configuration with the executor.
+  optional bool nonce_burn = 42;
+  // The lowest sequence number of the ledger's entries that do not decode: the one the operator
+  // may quarantine next (bsc.live.ledger.quarantine); the warning LIVE_LEDGER_INVALID counts
+  // them all. Absent while every entry decodes.
+  optional uint64 first_unreadable = 43;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

@@ -238,6 +238,26 @@ export function recoveryRows(l: BscLiveView | null | undefined): { row: LiveRow;
   };
 }
 
+/** REV.1.0 R3b (Audit A): whether a switch locks a decision, and why (unknown locks as OFF does).
+ *  Which lots and transactions take a decision is the ledger's own rule (`decisions`, `burnable`). */
+export interface DecisionLock { locked: boolean; why: string }
+/** The operator's decisions as the LIVE tab offers them: EXIT_NOW and the nonce burn locked unless
+ *  their switch of the runtime configuration is ON; each at the ledger's version shown. */
+export function operatorDecisions(l: BscLiveView | null | undefined): { exitNow: DecisionLock; burn: DecisionLock; version?: bigint; row: LiveRow } {
+  const lock = (on: boolean | undefined, key: string): DecisionLock => on === true ? { locked: false, why: `${key} ON` }
+    : { locked: true, why: on === false ? `gesperrt: ${key} ist OFF` : `gesperrt: ${key} unbekannt (keine lesbare Runtime-Konfiguration mit Executor)` };
+  const exitNow = lock(l?.operatorExit, "BSC_EXEC_LIVE_OPERATOR_EXIT");
+  const burn = lock(l?.nonceBurn, "BSC_EXEC_LIVE_NONCE_BURN");
+  return {
+    exitNow, burn, version: l?.ledgerVersion,
+    row: {
+      label: "Operator decisions",
+      value: `ledger version ${l?.ledgerVersion?.toString() ?? "— (unknown)"} · exit-now ${exitNow.locked ? "locked" : "ON"} · nonce burn ${burn.locked ? "locked" : "ON"}`,
+      hint: "Resume, write off or exit an open lot, burn an unresolved transaction's nonce: each at the ledger's version shown (a newer fact refuses it, LIVE_REQUEST_STALE)",
+    },
+  };
+}
+
 /** The campaign verdict record exists but is unreadable or not of its schema. */
 export const VERDICT_INVALID = "LIVE_CAMPAIGN_VERDICT_INVALID";
 /** The campaign section did not fit what the rest of the LIVE tab leaves of the state bound:

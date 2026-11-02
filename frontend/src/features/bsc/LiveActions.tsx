@@ -1,15 +1,15 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { liveGrantCommand, ownerCommand, useSourceControl, type LiveGrantScope } from "@/core/realtime/bscControl";
-import { LIVE_ADAPTERS, LIVE_STRATEGIES, formSources, grantScope, liveRequestOf, scopeSha256, scopeText, totalInputOk, type GrantForm } from "./model/live";
+import { liveDecisionCommand, liveGrantCommand, ownerCommand, useSourceControl, type LiveGrantScope, type LotDecision } from "@/core/realtime/bscControl";
+import { LIVE_ADAPTERS, LIVE_STRATEGIES, formSources, grantScope, liveRequestOf, scopeSha256, scopeText, totalInputOk, type DecisionLock, type GrantForm } from "./model/live";
 import type { ControlSwitchView } from "./model/types";
 // The LIVE tab's requests (plan 28.10.), each the same request a terminal sends with `darkbotctl bsc
 // live grant|revoke` or `darkbotctl bsc source request`, applied or refused by the one native
 // bsc_runtime owner at the shown generation. A grant is never a send: the owner admits every LIVE
 // intent again at its dispatch (switches, limits, the grant's budget, the verified qualification).
 
-function Receipt({ testId }: { testId: string }) {
+export function Receipt({ testId }: { testId: string }) {
   const { receipt } = useSourceControl();
   return receipt && receipt.origin === testId ? <p role="status" data-testid={`${testId}-receipt`}>{receipt.phase} · {receipt.detail}<br />Command {receipt.id}</p> : null;
 }
@@ -140,5 +140,74 @@ export function ScopeLiveActions({ rows }: { rows: ControlSwitchView[] }) {
       <p>LIVE wird als Wunsch gespeichert und ist nur wirksam, solange das LIVE-Gate der nativen Verwaltung frei ist und die Freigabe diesen Teil des Umfangs nennt. Generation {target?.generation.toString()}.</p>
     </Confirm>
     <Receipt testId={SCOPE} />
+  </>;
+}
+
+// REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger, each the request a terminal
+// sends with `darkbotctl bsc live lot|nonce-burn|ledger-quarantine`, at the state shown when its
+// dialog opened (review H1: frozen there; a newer state is named, never sent); the native ledger
+// writes its fact once (the runtime acts on it) or refuses (the receipt names why).
+export const LIVE_LOT = "bsc-live-lot";
+const DECISIONS: Record<LotDecision, { label: string; title: string; text: string }> = {
+  RESUME: { label: "Resume", title: "Lot fortsetzen?", text: "Seine gestoppten Exits laufen weiter, seine Kurve wird neu gelesen." },
+  WRITE_OFF: { label: "Write off", title: "Lot abschreiben?", text: "Es endet als verloren (Einsatz und Gas) und wird nie mehr verkauft." },
+  EXIT_NOW: { label: "Exit now", title: "Exit jetzt anfordern?", text: "Die Strategie verkauft es jetzt zu ihrem Preis, über die Zulassung der nativen Verwaltung." },
+};
+const isDecision = (d: string): d is LotDecision => d in DECISIONS;
+/** The ledger moved since the dialog opened: named, the frozen request is refused (LIVE_REQUEST_STALE). */
+function Moved({ testId, now, then }: { testId: string; now: bigint | undefined; then: bigint }) {
+  return now === then ? null : <p data-testid={`${testId}-moved`}>Das Ledger hat sich seither geändert (Version {now?.toString() ?? "—"}): diese Anfrage gilt Version {then.toString()} und wird abgelehnt; neu öffnen.</p>;
+}
+/** One open lot: the decisions the ledger takes of it now; exit-now locked unless
+ *  BSC_EXEC_LIVE_OPERATOR_EXIT is ON. */
+export function LiveLotActions({ lot, decisions, version, exitNow }: { lot: string; decisions: readonly string[]; version: bigint | undefined; exitNow: DecisionLock }) {
+  const { busy } = useSourceControl();
+  const [target, setTarget] = useState<{ decision: LotDecision; version: bigint } | null>(null);
+  const shown = target ? DECISIONS[target.decision] : undefined;
+  return <>
+    {decisions.filter(isDecision).map(d => {
+      const locked = d === "EXIT_NOW" && exitNow.locked;
+      return <button key={d} className="g-secondary" disabled={busy || version === undefined || locked} data-testid={`${LIVE_LOT}-${d}`}
+        aria-label={`${DECISIONS[d].label} lot ${lot}`} title={locked ? exitNow.why : `${DECISIONS[d].label} at ledger version ${version?.toString() ?? "—"}`}
+        onClick={() => { if (version !== undefined) setTarget({ decision: d, version }); }}>{DECISIONS[d].label}</button>;
+    })}
+    <Confirm open={!!target} testId={LIVE_LOT} title={shown?.title ?? ""} onClose={() => setTarget(null)}
+      onConfirm={() => { if (target) void liveDecisionCommand(LIVE_LOT, { action: "bsc.live.lot", lot, decision: target.decision, ledgerVersion: target.version }); }}>
+      <p>{shown?.text} Lot <code>{lot}</code>, Ledger-Version {target?.version.toString()}: hat das Ledger danach einen neueren Fakt, lehnt die native Verwaltung ab (LIVE_REQUEST_STALE).</p>
+      {target ? <Moved testId={LIVE_LOT} now={version} then={target.version} /> : null}
+    </Confirm>
+  </>;
+}
+
+export const LIVE_BURN = "bsc-live-burn";
+/** One transaction the ledger takes a nonce burn of: locked unless BSC_EXEC_LIVE_NONCE_BURN is ON. */
+export function LiveBurnAction({ tx, nonce, version, burn, requested }: { tx: string; nonce: bigint; version: bigint | undefined; burn: DecisionLock; requested: boolean }) {
+  const { busy } = useSourceControl();
+  const [at, setAt] = useState<bigint | null>(null);
+  return <>
+    <button className="g-secondary" disabled={busy || version === undefined || burn.locked || requested} data-testid={`${LIVE_BURN}-request`} aria-label={`Burn nonce ${nonce.toString()} of ${tx}`}
+      title={requested ? "BURN_REQUESTED: the armed runtime burns it" : burn.locked ? burn.why : `Burn nonce ${nonce.toString()} at ledger version ${version?.toString() ?? "—"}`}
+      onClick={() => { if (version !== undefined) setAt(version); }}>{requested ? "Burn requested" : "Burn nonce"}</button>
+    <Confirm open={at !== null} testId={LIVE_BURN} title={`Nonce ${nonce.toString()} verbrennen?`} onClose={() => setAt(null)}
+      onConfirm={() => { if (at !== null) void liveDecisionCommand(LIVE_BURN, { action: "bsc.live.nonce_burn", tx, ledgerVersion: at }); }}>
+      <p>Ist der LIVE-Pfad bewaffnet und diese Nonce die nächste des Käufers, sendet er sich selbst nichts (0 BNB, 21 000 Gas zu <code>BSC_EXEC_GAS_PRICE_WEI</code>); landet das zuerst, ist <code>{tx}</code> ersetzt (REPLACED). Kein BUY geht davor. Ledger-Version {at?.toString()}.</p>
+      {at !== null ? <Moved testId={LIVE_BURN} now={version} then={at} /> : null}
+    </Confirm>
+  </>;
+}
+
+export const LIVE_QUARANTINE = "bsc-live-quarantine";
+/** The lowest ledger entry that does not decode: moved out at the owner generation (owner state
+ *  needed: without it the native side refuses). */
+export function LiveQuarantineAction({ seq, generation, available }: { seq: bigint | undefined; generation: bigint; available: boolean }) {
+  const { busy } = useSourceControl();
+  const [target, setTarget] = useState<{ seq: bigint; generation: bigint } | null>(null);
+  if (seq === undefined) return null;
+  return <>
+    <button className="g-secondary" disabled={busy || !available} data-testid={`${LIVE_QUARANTINE}-request`} onClick={() => setTarget({ seq, generation })}>Quarantine ledger entry {seq.toString()}</button>
+    <Confirm open={!!target} testId={LIVE_QUARANTINE} title={`Ledger-Eintrag ${target?.seq.toString() ?? ""} herausnehmen?`} onClose={() => setTarget(null)}
+      onConfirm={() => { if (target) void liveDecisionCommand(LIVE_QUARANTINE, { action: "bsc.live.ledger.quarantine", ...target }); }}>
+      <p>Der Eintrag, der nicht dekodiert, wird mit seinem Record verschoben; das Ledger liest wieder, wenn kein weiterer unlesbar ist. Was er sagte, ist die Rekonstruktion des Betreibers: BUYs aller Freigaben bis Generation {target?.generation.toString()} bleiben gesperrt, kein Slot geht mehr zurück.</p>
+    </Confirm>
   </>;
 }

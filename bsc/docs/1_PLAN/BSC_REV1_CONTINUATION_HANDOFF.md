@@ -39,7 +39,7 @@ Bei Widerspruch gelten diese Dateien. Alle Angaben hier sind am genannten Zeitpu
    - Die drei überholten R3a-Stashes sind gelöscht; ihr Inhalt liegt auf `main` und als Patch in `backups/`.
    - Der Hauptcheckout ist per Fast-forward auf `49bcd98f` gebracht.
    - Kein Agent und kein eigener Hintergrundjob läuft.
-4. **Nächster Schritt (02.11.):** R3b-1 `58f78ecd`, R3b-2a `b3523732` (gesperrter Nonce-Burn), R3b-2b-1 mit diesem Commit (R3-Betreiberbefehle über Gateway und darkbotctl, CAS); als Nächstes R3b-2b-2 (LIVE-Tab-Aktionen in `LiveActions.tsx`), dann R4 bis R14 und die offenen Audit-E-Befunde. Plan: `DarkBot-bsc-rev1/scratch/r3b/PLAN.md`.
+4. **Nächster Schritt (02.11.):** R3 fertig (R3b-2b-2 mit diesem Commit; `adopt-g07` nur Terminal: PARTIAL); als Nächstes R4 bis R14 und die offenen Audit-E-Befunde.
 
 ---
 
@@ -211,7 +211,7 @@ Quellen:
 | R1 | LIVE-Betriebsblocker BSC3-080..084 | **DONE_VERIFIED** (Review FAIL→PASS, Gate GR1 OK, CI grün) | `0159c1a7` |
 | R2 | Versuchs-Record, Auswerter, Platzierungs-Halt, Kampagnen-Verdikt, G0.8-15-s-Fenster | **DONE_VERIFIED** (5 Review-Runden, letzte PASS; 59 Mutanten RED; Gate GR2e OK; CI grün). Echte Kampagnenläufe: EXTERNAL_BLOCKED (nach 03.11., Manifest durch den Betreiber) | `1d29cec7` |
 | R2b | LIVE-Tab-Projektion Kampagne/Versuche | **DONE** (Review FAIL → Fix, Re-Checks PASS; 35 Mutanten RED, Gate R2bfix3 OK; CI siehe Commit) | `9d5ed3a0`; Fix `fed702cc` |
-| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **R3a DONE**, **R3b-1** (Receipt-Recovery, LIVE-Tab), **R3b-2a** (Nonce-Burn gesperrt), **R3b-2b-1** (Gateway/darkbotctl, CAS) dieser Commit; R3b-2b-2 (LIVE-Tab-Aktionen) offen; `adopt-g07` PARTIAL: nur Terminal (zwei lokale Evidenzdateien ohne festen Ort, der Browser nennt keine Datei) (§6.2) | R3a `49bcd98f`; R3b-1 `58f78ecd`; R3b-2a `b3523732`; R3b-2b-1 dieser Commit |
+| R3 | Receipt-Recovery (024/041), EXIT_STOPPED resume/abandon, Nonce-Burn gesperrt, Ledger-Reparatur und Temp-Cleanup (045), Slot-Rückgabe (068), G0.7-Lot-Adoption; laut R1-Commit auch exit-now/write-off für gestrandete Lots; Audit A: Betreiberbefehle auch über Gateway und `LiveActions.tsx` | **DONE** (R3a, R3b-1, R3b-2a, R3b-2b-1/2; `adopt-g07` nur Terminal: PARTIAL) | R3a `49bcd98f`; R3b-1 `58f78ecd`; R3b-2a `b3523732`; R3b-2b-1 `4a1bae86`; R3b-2b-2 dieser Commit |
 | R4 | Grant-Varianten gesperrt: 069 Outlier-Ack, 059 max. Dauer, 029 Builder-Payment, 042 C3-Re-Arm, kampagnenweite Spend-Grenze, §20 public-only-Verweigerung, Builder-Frische/Fee-Check, C2-LIVE-Doku | NOT_STARTED | – |
 | R5 | Exit-Routen gesperrt: 030 Public-Mempool-Adapter, Re-Price-Variante, DEX-Exit migrierter Lots | NOT_STARTED | – |
 | R6 | Quellen: GETH/Hot0Poller-Adapter, Health-/Capability-Gating, Queues je Quelle, CONFLICT-Zustand, Census je Quelle (O05/§3a), 48Club-Adapter synthetisch | NOT_STARTED | – |
@@ -253,7 +253,7 @@ Commit-Text: `git log -1 --format=%B 49bcd98f`, auch in `scratch/r3a/msgR3a.txt`
 - **Nachweise:** 45 Mutanten RED (`tools/mut_r3.py`, Logs `scratch/mut_r3a*.out`). Gate GR3a3 GATE_OK: 1650/0/27, bsc_tools 7/7, Clippy, F0-VAR PASS mit 3496 nativen Feldern (`scratch/gate_GR3a3.out`).
 - **Hot-Path:** Append plus Lock/Inode 3,1 µs p50 gegenüber einem Append von 10,8 ms; das liegt nach dem Senden.
 
-### 6.2 R3b — R3b-1, R3b-2a, R3b-2b-1 fertig; R3b-2b-2 offen (Soll und Plan)
+### 6.2 R3b — fertig (Soll und Plan)
 - **Receipt-Recovery (BSC3-024/041)** für unaufgelöste Transaktionen, die blockieren: Nonce ≠ next, Fenster unbekannt oder verwaist, eingeschlossen in einem Block, dem der Follower nicht folgte.
   - `eth_getTransactionReceipt(hash)` → Blocknummer und -hash.
   - Hash durch die zweite Quelle bestätigen (BSC3-056, `canonical_confirm.rs` / `chain_follower/confirm.rs`, Header-Abruf).

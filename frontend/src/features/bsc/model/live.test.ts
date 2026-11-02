@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, operatorDecisions, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -115,6 +115,21 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     const none = recoveryRows(undefined);
     expect([none.row.value, none.pending]).toEqual(["0 resolved · 0 pending · 0 failed reads", []]);
     expect(exitDeciderRows(undefined).map(x => x.value)).toEqual(["—", "—", "0"]);
+  });
+
+  it("offers the operator's decisions at the ledger's version, exit-now and the burn locked unless their switch is ON (REV.1.0 R3b)", () => {
+    const l = (ledgerVersion: bigint | undefined, operatorExit: boolean | undefined, nonceBurn: boolean | undefined) =>
+      ({ ledgerVersion, operatorExit, nonceBurn }) as unknown as BscLiveView;
+    const on = operatorDecisions(l(8n, true, true));
+    expect([on.version, on.exitNow.locked, on.burn.locked, on.row.value]).toEqual([8n, false, false, "ledger version 8 · exit-now ON · nonce burn ON"]);
+    const off = operatorDecisions(l(8n, false, false));
+    expect([off.exitNow, off.burn]).toEqual([
+      { locked: true, why: "gesperrt: BSC_EXEC_LIVE_OPERATOR_EXIT ist OFF" }, { locked: true, why: "gesperrt: BSC_EXEC_LIVE_NONCE_BURN ist OFF" }]);
+    // Unknown (no readable configuration, an unreadable ledger): locked, no version made up.
+    const unknown = operatorDecisions(undefined);
+    expect([unknown.version, unknown.exitNow.locked, unknown.burn.locked]).toEqual([undefined, true, true]);
+    expect(unknown.exitNow.why).toContain("unbekannt");
+    expect(unknown.row.value).toBe("ledger version — (unknown) · exit-now locked · nonce burn locked");
   });
 
   it("is the one LIVE indicator: the owner's gate and the LIVE path from bsc.live.state (Audit E 4.10)", () => {

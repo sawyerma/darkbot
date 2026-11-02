@@ -315,6 +315,10 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | recovered | [uint64](#uint64) |  | The transactions the receipt recovery resolved in the runtime&#39;s process. |
 | recovery_faults | [uint64](#uint64) |  | The receipt recovery&#39;s failed reads in the runtime&#39;s process. |
 | recovery_fault | [string](#string) |  | The last of those failures; empty without one. |
+| ledger_version | [uint64](#uint64) | optional | REV.1.0 R3b: the LIVE ledger&#39;s version, its next entry&#39;s number (never reused): the compare-and-swap (config_version) of an operator&#39;s lot decision or nonce burn, read before the positions and transactions shown; absent while the ledger is unreadable. |
+| operator_exit | [bool](#bool) | optional | BSC_EXEC_LIVE_OPERATOR_EXIT of the runtime configuration: a lot&#39;s EXIT_NOW is locked while false; absent without a readable configuration with the executor. |
+| nonce_burn | [bool](#bool) | optional | BSC_EXEC_LIVE_NONCE_BURN of the runtime configuration: a nonce burn is locked while false; absent without a readable configuration with the executor. |
+| first_unreadable | [uint64](#uint64) | optional | The lowest sequence number of the ledger&#39;s entries that do not decode: the one the operator may quarantine next (bsc.live.ledger.quarantine); the warning LIVE_LEDGER_INVALID counts them all. Absent while every entry decodes. |
 
 
 
@@ -815,6 +819,7 @@ One LIVE position of the ledger: its BUY, exit and native result.
 | gas_wei | [string](#string) |  | Gas of all its included or reverted transactions, decimal wei. |
 | pnl_wei | [string](#string) | optional | Proceeds minus input minus gas once closed (failed: minus gas), signed decimal wei. |
 | lot | [string](#string) |  | The lot: its BUY&#39;s transaction hash, 0x hex (a token bought again is another lot). |
+| decisions | [string](#string) | repeated | REV.1.0 R3b: the operator&#39;s decisions the ledger takes of this lot now (RESUME, WRITE_OFF, EXIT_NOW; exit-now also needs BSC_EXEC_LIVE_OPERATOR_EXIT ON), by the ledger&#39;s own rule. |
 
 
 
@@ -848,12 +853,14 @@ One LIVE transaction whose bytes may have left, and what the chain made of it.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | tx_hash | [string](#string) |  | Transaction hash, 0x hex. |
-| intent | [string](#string) |  | BUY, APPROVE or SELL. |
+| intent | [string](#string) |  | BUY, APPROVE, SELL or BURN (REV.1.0 R3b: a nonce burn, the buyer&#39;s transfer of nothing to itself). |
 | token | [string](#string) |  | Token address, 0x hex. |
 | nonce | [uint64](#uint64) |  | The buyer&#39;s nonce it used. |
 | state | [string](#string) |  | RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED. |
 | block_number | [uint64](#uint64) | optional | The block that included it. |
 | source | [string](#string) |  | REV.1.0 R3b: RECEIPT when its chain fact comes from a block the receipt recovery found (final, the second source&#39;s; its receipt&#39;s, or where its sender&#39;s nonce passes it), not from the follower&#39;s block; empty otherwise. |
+| burn_requested | [bool](#bool) |  | REV.1.0 R3b: the operator requested its nonce burnt (BURN_REQUESTED); the armed runtime burns it while BSC_EXEC_LIVE_NONCE_BURN is ON. |
+| burnable | [bool](#bool) |  | REV.1.0 R3b: the ledger takes a nonce burn of it now (its signed bytes may still land, it is the configured LIVE buyer&#39;s), by the ledger&#39;s own rule; the switch aside. |
 
 
 

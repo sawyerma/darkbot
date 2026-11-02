@@ -1736,6 +1736,8 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
 /// transaction's chain fact comes from (RECEIPT: a recovered block; the follower's
 /// block: empty), and what the operator quarantined of the ledger (counted,
 /// the first named; an unreadable quarantine is a warning of its own).
+/// R3b-2b-2: the ledger's version (an operator's CAS), the burns requested,
+/// the switches that lock exit-now and the burn, the entries to quarantine.
 #[test]
 fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     use darkbot_bsc_execution::live_ledger::{Fact, FactKind, FactSource, Ledger};
@@ -1850,6 +1852,9 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         "{:?}",
         l.warnings
     );
+    // R3b: the ledger's version, the quarantined numbers counted (never the
+    // facts read: 6).
+    assert_eq!(l.ledger_version, Some(8));
     // An unreadable quarantine is named, never silent.
     fs::remove_dir_all(&quarantine).unwrap();
     fs::write(&quarantine, b"not a directory").unwrap();
@@ -1867,6 +1872,109 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
             .iter()
             .any(|w| w.starts_with("LIVE_LEDGER_QUARANTINE"))
     );
+    // R3b: a burn requested of an unresolved transaction; the switches
+    // that lock exit-now and the burn (none without a configuration, else
+    // as configured); an entry that does not decode, which the operator may
+    // quarantine (no version then).
+    // Its window unknown: its bytes may still land.
+    let unresolved = Fact {
+        max_block: None,
+        ..released(4)
+    };
+    ledger.append(&unresolved, now).unwrap();
+    ledger
+        .append(
+            &Fact {
+                operator: Some(darkbot_bsc_execution::live_ledger::Operator {
+                    request_id: "burn-1".into(),
+                    decided_by: "operator".into(),
+                    evidence: None,
+                    at_ms: now,
+                }),
+                ..Fact::about(&unresolved, FactKind::BurnRequested)
+            },
+            now,
+        )
+        .unwrap();
+    let l = tab();
+    assert_eq!(l.ledger_version, Some(8));
+    assert_eq!(
+        l.transactions
+            .iter()
+            .map(|t| (t.intent.as_str(), t.burn_requested))
+            .collect::<Vec<_>>(),
+        [
+            ("BUY", false),
+            ("BUY", false),
+            ("BUY", false),
+            ("BUY", true)
+        ]
+    );
+    assert_eq!((l.operator_exit, l.nonce_burn), (None, None));
+    // The ledger's own rules, without a LIVE buyer: no burn.
+    assert!(l.transactions.iter().all(|t| !t.burnable));
+    // The open lot (its token's, nothing of its exit out) takes every
+    // decision; the failed and the pending lots none.
+    assert_eq!(
+        l.positions
+            .iter()
+            .map(|p| (p.state.as_str(), p.decisions.join(",")))
+            .collect::<Vec<_>>(),
+        [
+            ("OPEN", "RESUME,WRITE_OFF,EXIT_NOW".to_string()),
+            ("FAILED", String::new()),
+            ("PENDING", String::new()),
+        ]
+    );
+    // A configuration with its LIVE buyer: the transaction whose window is
+    // unknown is burnable, the resolved ones are not.
+    const CONFIG: &str = include_str!("../../../../../config/ingress.public.env");
+    let buyer = "0x00000000000000000000000000000000000000aB";
+    fs::create_dir_all(root.join("bsc/config")).unwrap();
+    fs::write(
+        root.join(super::live::RUNTIME_CONFIG_PATH),
+        CONFIG
+            .replace(
+                "BSC_EXEC_LIVE_NONCE_BURN=OFF\n",
+                "BSC_EXEC_LIVE_NONCE_BURN=ON\n",
+            )
+            .replace(
+                "BSC_STATE_WATCHED=\n",
+                &format!("BSC_STATE_WATCHED={buyer}\n"),
+            )
+            + &format!(
+                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+            ),
+    )
+    .unwrap();
+    let l = tab();
+    assert_eq!((l.operator_exit, l.nonce_burn), (Some(false), Some(true)));
+    assert_eq!(
+        l.transactions
+            .iter()
+            .map(|t| t.burnable)
+            .collect::<Vec<_>>(),
+        [false, false, false, true]
+    );
+    assert_eq!(l.first_unreadable, None);
+    fs::write(
+        dir.join("live-ledger").join(format!("{:020}.dbrec", 8)),
+        b"torn",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("live-ledger").join(format!("{:020}.dbrec", 9)),
+        b"torn too",
+    )
+    .unwrap();
+    let l = tab();
+    assert!(
+        l.warnings
+            .contains(&"LIVE_LEDGER_INVALID 2 unreadable, first seq 8".to_string()),
+        "{:?}",
+        l.warnings
+    );
+    assert_eq!((l.ledger_version, l.first_unreadable), (None, Some(8)));
     fs::remove_dir_all(&root).unwrap();
 }
 
@@ -2968,6 +3076,9 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
                 proceeds_wei: word.clone(),
                 gas_wei: word.clone(),
                 pnl_wei: Some(format!("-{word}")),
+                decisions: ["RESUME", "WRITE_OFF", "EXIT_NOW"]
+                    .map(String::from)
+                    .to_vec(),
             })
             .collect(),
         transactions: (0..4 * lots)
@@ -2979,6 +3090,8 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
                 state: "INCLUDED".into(),
                 block_number: Some(u64::MAX),
                 source: "RECEIPT".into(),
+                burn_requested: true,
+                burnable: true,
             })
             .collect(),
         realized_pnl_wei: format!("-{word}"),
@@ -2998,6 +3111,11 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         recovered: u64::MAX,
         recovery_faults: u64::MAX,
         recovery_fault: text.clone(),
+        // R3b-2b-2: the operator's CAS, the switches, an entry to quarantine.
+        ledger_version: Some(u64::MAX),
+        operator_exit: Some(true),
+        nonce_burn: Some(true),
+        first_unreadable: Some(u64::MAX),
         ..Default::default()
     };
     let mut l = full.clone();

@@ -9,7 +9,7 @@
 
 use super::projection::safe_text;
 use super::wire::bsc::*;
-use darkbot_bsc_execution::live_ledger::{Ledger, fold};
+use darkbot_bsc_execution::live_ledger::{Ledger, LotDecision, fold};
 use darkbot_bsc_execution::live_qualification;
 use darkbot_bsc_execution::runtime::RuntimeConfig;
 use darkbot_bsc_execution::sources::{
@@ -150,8 +150,15 @@ fn owner_tab(
         gate: "UNKNOWN".into(),
         ..Default::default()
     };
+    // R3b: the buyer whose nonces may be burnt (none: no LIVE path configured).
+    let buyer = config.ok().and_then(|c| c.live.as_ref()).map(|l| l.buyer);
     match config {
-        Ok(c) => out.grantable_sources = grantable_sources(c),
+        Ok(c) => {
+            out.grantable_sources = grantable_sources(c);
+            // R3b: the switches that lock an operator's exit-now and nonce burn.
+            out.operator_exit = c.exec.as_ref().map(|x| x.exec.live_operator_exit);
+            out.nonce_burn = c.exec.as_ref().map(|x| x.exec.live_nonce_burn);
+        }
         Err(why) => out.warnings.push(why.into()),
     }
     path(rundir, &mut out);
@@ -163,8 +170,14 @@ fn owner_tab(
     };
     // The ledger is the owner state's, whatever the gate.
     let dir = rundir.join("bsc-sources");
-    match Ledger::open(&dir).facts() {
+    let ledger = Ledger::open(&dir);
+    // R3b: the version before the facts shown, the CAS of an operator's
+    // decision: once a fact is newer than they, a request at it is refused
+    // (never one decided on less than the ledger holds).
+    let version = ledger.version();
+    match ledger.facts() {
         Ok(facts) => {
+            out.ledger_version = version.ok();
             let book = fold(&facts);
             out.positions = book
                 .positions
@@ -179,6 +192,11 @@ fn owner_tab(
                     proceeds_wei: p.proceeds_wei.to_string(),
                     gas_wei: p.gas_wei.to_string(),
                     pnl_wei: p.pnl_wei.map(|v| v.to_string()),
+                    decisions: LotDecision::ALL
+                        .into_iter()
+                        .filter(|d| book.decidable(&p.lot, *d).is_ok())
+                        .map(|d| d.name().into())
+                        .collect(),
                 })
                 .collect();
             out.transactions = book
@@ -197,12 +215,26 @@ fn owner_tab(
                         .and_then(|f| f.source)
                         .map(|s| s.name().into())
                         .unwrap_or_default(),
+                    burn_requested: t.decided.burn_requested,
+                    burnable: buyer.is_some_and(|b| book.burnable(&t.released.tx_hash, b).is_ok()),
                 })
                 .collect();
             out.realized_pnl_wei = book.realized_pnl_wei.to_string();
             out.gas_wei = book.gas_wei.to_string();
         }
-        Err(_) => out.warnings.push("LIVE_LEDGER_INVALID".into()),
+        Err(_) => {
+            // R3b: the entries that do not decode, counted, the lowest the
+            // one the operator may quarantine next (bounded: one number).
+            let bad = ledger.check().map(|(_, bad)| bad).unwrap_or_default();
+            out.first_unreadable = bad.iter().map(|(seq, _)| *seq).min();
+            out.warnings.push(match out.first_unreadable {
+                Some(first) => format!(
+                    "LIVE_LEDGER_INVALID {} unreadable, first seq {first}",
+                    bad.len()
+                ),
+                None => "LIVE_LEDGER_INVALID".into(),
+            });
+        }
     }
     // R3b (BSC3-045): what the operator quarantined of the ledger may be
     // missing from it.
