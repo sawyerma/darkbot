@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CaptureView, CapturePhaseName, SystemView, TransportView } from "./status";
-import { executionAuthorization, healthLabel } from "./statusSelectors";
+import { effectiveProviders, executionAuthorization, healthLabel } from "./statusSelectors";
 import { STREAM_STALE_AFTER_MS } from "./streamFreshness";
 
 function view(phase: CapturePhaseName, transport: Partial<TransportView> = {}, counters: Record<string, bigint> = {}, endResult = ""): CaptureView {
@@ -35,6 +35,23 @@ describe("healthLabel", () => {
     expect(healthLabel("DETACHED", view("CAPTURE"))).toBe("Capture process gone · last known");
     expect(healthLabel("DETACHED", view("ENDED", {}, {}, "CAPTURE_COMPLETE"))).toBe("Last run · Completed · no capture running");
     expect(healthLabel("SUBSCRIBING" as never, null)).toBe("No capture data");
+  });
+});
+
+describe("the running process's providers are current only on a live status topic (DEC-18 review F8)", () => {
+  const rpc = { kind: "rpc", id: "helius-rpc", binding: "b".repeat(64), registryVersion: 7n, credentialId: "helius", credentialRevision: 3n, plan: "free" };
+  const wss = { ...rpc, kind: "wss", id: "local", binding: "c".repeat(64), registryVersion: 0n, credentialId: "", credentialRevision: 0n };
+  const system = (runProviders: SystemView["runProviders"]) => ({ runProviders }) as unknown as SystemView;
+  it("lists the bound providers of the kinds asked for", () => {
+    expect(effectiveProviders(system([rpc, wss]), "LIVE", ["rpc"])).toBe(`rpc helius-rpc · ${"b".repeat(16)} · helius@3`);
+    expect(effectiveProviders(system([rpc, wss]), "LIVE", ["rpc", "wss"])).toBe(`rpc helius-rpc · ${"b".repeat(16)} · helius@3 | wss local · ${"c".repeat(16)}`);
+    expect(effectiveProviders(system([]), "LIVE", ["rpc"])).toBe("none reported");
+  });
+  it("names an outdated report as such, never as the effective binding", () => {
+    for (const status of ["STALE", "DETACHED", "SUBSCRIBING"] as const) {
+      expect(effectiveProviders(system([rpc]), status, ["rpc"])).toBe(`not current (${status}) · last reported: rpc helius-rpc · ${"b".repeat(16)} · helius@3`);
+    }
+    expect(effectiveProviders(null, "IDLE", ["rpc"])).toBe("not current (IDLE)");
   });
 });
 

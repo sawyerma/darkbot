@@ -12,7 +12,7 @@ import { DetailRow, Section, Notice } from "../components/PanelPrimitives";
 type Fleet={drafts:LiquidatorDraft[];selected:LiquidatorDraft|null;selectedId:string|null;
  select:(id:string|null)=>void;update:(id:string,patch:Partial<LiquidatorDraft>)=>void;
  create:()=>void;duplicate:()=>void;remove:()=>void};
-export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,finance,system,analytics,analyticsStatus}:{fleet:Fleet;authorization:string;goto:(t:Project0Tab)=>void;owner:LiquidatorView|null;ownerStatus:TopicStatus;finance:FinanceSnapshot|null;system:SystemView|null;analytics:AnalyticsView|null;analyticsStatus:TopicStatus}) {
+export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,finance,system,systemStatus,analytics,analyticsStatus}:{fleet:Fleet;authorization:string;goto:(t:Project0Tab)=>void;owner:LiquidatorView|null;ownerStatus:TopicStatus;finance:FinanceSnapshot|null;system:SystemView|null;systemStatus:TopicStatus;analytics:AnalyticsView|null;analyticsStatus:TopicStatus}) {
  const [message,setMessage]=useState("");const d=fleet.selected;
  const patch=(p:Partial<LiquidatorDraft>)=>{if(d)fleet.update(d.id,p)};
  const toggle=(k:StrategyKind,v:boolean)=>{if(d)patch({enabledStrategies:v?Array.from(new Set([...d.enabledStrategies,k])):d.enabledStrategies.filter(x=>x!==k)})};
@@ -22,7 +22,7 @@ export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,fina
  <DetailRow title="Available working capital" value={usdMicroDisplay(finance?.availableCapitalUsdMicro)}/>
  <DetailRow title="Realized net PnL" value={`${usdMicroDisplay(finance?.realizedNetPnlUsdMicro)} · ${finance?.status??"UNKNOWN"}`}/></Section>
  <OwnerSection owner={owner} topicStatus={ownerStatus} system={system}/>
- <ProvidersSection title="Providers · Jupiter, Jito" kinds={["jupiter","jito"]} analytics={analytics} topicStatus={analyticsStatus} system={system}/>
+ <ProvidersSection title="Providers · Jupiter, Jito" kinds={["jupiter","jito"]} analytics={analytics} topicStatus={analyticsStatus} system={system} systemStatus={systemStatus}/>
  <Section title="Bots & strategies" aside={<button className="p0-secondary" onClick={()=>fleet.create()}>+ Add bot</button>}>
  <div className="p0-fleet"><div><p className="p0-quiet">Liquidators · {fleet.drafts.length} drafts</p>
  <div role="listbox" aria-label="Bot drafts">{fleet.drafts.map(x=><button key={x.id} role="option" aria-selected={x.id===fleet.selectedId}

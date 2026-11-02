@@ -6,6 +6,7 @@ import {
 } from "@/core/realtime/analyticsControl";
 import type { AnalyticsView, ProviderKind } from "../model/analytics";
 import type { SystemView } from "../model/status";
+import { effectiveProviders } from "../model/statusSelectors";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
 
 const EMPTY: ProviderInput = { id: "", kind: "", endpoint: "", auth: "", credential: "", priority: "", capacityRps: "", plan: "", entitlement: "", disabled: false };
@@ -20,15 +21,18 @@ const EMPTY: ProviderInput = { id: "", kind: "", endpoint: "", auth: "", credent
  * the command and never kept (the gateway hands it to the controller's standard input; the
  * macOS keychain holds it).
  */
-export function ProvidersSection({ title, kinds, analytics, topicStatus, system }: {
-  title: string; kinds: readonly ProviderKind[]; analytics: AnalyticsView | null; topicStatus: TopicStatus; system: SystemView | null;
+export function ProvidersSection({ title, kinds, analytics, topicStatus, system, systemStatus }: {
+  title: string; kinds: readonly ProviderKind[]; analytics: AnalyticsView | null; topicStatus: TopicStatus; system: SystemView | null; systemStatus: TopicStatus;
 }) {
   const { busy, receipt } = useAnalyticsControl();
   const registry = analytics?.providers ?? null;
   const providers = (registry?.providers ?? []).filter(p => (kinds as readonly string[]).includes(p.kind));
   const used = new Set(providers.map(p => p.credential).filter(Boolean));
-  const credentials = (registry?.credentials ?? []).filter(c => used.has(c.id));
-  const running = (system?.runProviders ?? []).filter(p => (kinds as readonly string[]).includes(p.kind));
+  // Review F7: a credential no provider references (set before its provider, left after a removal,
+  // freshly imported) stays visible — the Capture tab (the RPC one) holds it.
+  const referenced = new Set((registry?.providers ?? []).map(p => p.credential).filter(Boolean));
+  const holdsUnreferenced = (kinds as readonly string[]).includes("rpc");
+  const credentials = (registry?.credentials ?? []).filter(c => used.has(c.id) || (holdsUnreferenced && !referenced.has(c.id)));
   const [form, setForm] = useState<ProviderInput>({ ...EMPTY, kind: kinds[0] ?? "" });
   const [target, setTarget] = useState(""); const [priority, setPriority] = useState(""); const [evidence, setEvidence] = useState("");
   const [credential, setCredential] = useState(""); const [key, setKey] = useState(""); const [msg, setMsg] = useState("");
@@ -58,10 +62,8 @@ export function ProvidersSection({ title, kinds, analytics, topicStatus, system 
         + `${p.capacityRps != null ? ` · ${p.capacityRps} rps` : ""} · binding ${p.binding ? p.binding.slice(0, 16) : "— (credential revoked or unknown)"}`
         + `${p.qualification ? ` · qualified ${p.qualification}` : " · not qualified"}${p.selectionBlock ? ` · ${p.selectionBlock}` : ""}`}/>)}
     {registry && !providers.length ? <p className="p0-quiet">No {kinds.join("/")} provider in the registry.</p> : null}
-    {credentials.map(c => <DetailRow key={c.id} title={`Credential · ${c.id}`} value={`revision ${c.revision} · ${c.state} · ${c.origin}`}/>)}
-    <DetailRow title="Running process · effective" value={running.length
-      ? running.map(p => `${p.kind} ${p.id} · ${p.binding.slice(0, 16)}${p.credentialId ? ` · ${p.credentialId}@${p.credentialRevision}` : ""}`).join(" | ")
-      : "none reported"}/>
+    {credentials.map(c => <DetailRow key={c.id} title={`Credential · ${c.id}`} value={`revision ${c.revision} · ${c.state} · ${c.origin}${referenced.has(c.id) ? "" : " · no provider"}`}/>)}
+    <DetailRow title="Running process · effective" value={effectiveProviders(system, systemStatus, kinds)}/>
     {registry ? <p className="p0-quiet">A change is staged: effective at the next controlled start ({registry.restartRule}); a running process keeps its providers.</p> : null}
     {providers.length ? <>
       <div className="p0-formgrid">

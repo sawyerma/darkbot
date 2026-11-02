@@ -80,6 +80,16 @@ export function healthLabel(topicStatus: TopicStatus, c: CaptureView | null, clo
 
 /** Execution needs the engine's LIVE and submission authorization (system.proto 16/17). Without a
  *  current effective record it is unknown: never a fixed GUI claim either way. */
+/** DEC-18: the providers a running process is bound to, of `kinds` (its secret-free binding and
+ * credential revision) — the effective ones only on a live project0.status topic; otherwise the
+ * last report is named as such (review F8). */
+export function effectiveProviders(s: SystemView | null, topicStatus: TopicStatus, kinds: readonly string[]): string {
+  const listed = (s?.runProviders ?? []).filter(p => kinds.includes(p.kind))
+    .map(p => `${p.kind} ${p.id} · ${p.binding.slice(0, 16)}${p.credentialId ? ` · ${p.credentialId}@${p.credentialRevision}` : ""}`).join(" | ");
+  if (topicStatus === "LIVE" && s) return listed || "none reported";
+  return `not current (${topicStatus})${listed ? ` · last reported: ${listed}` : ""}`;
+}
+
 export function executionAuthorization(s: SystemView | null, topicStatus: TopicStatus): string {
   if (topicStatus !== "LIVE" || !s) return "Authorization unknown";
   if (s.liveAuthorized === false || s.submissionAuthorized === false) return "Not authorized";

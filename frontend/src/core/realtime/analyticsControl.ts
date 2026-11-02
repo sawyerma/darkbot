@@ -209,7 +209,8 @@ export function providerDescriptorCommand(v: ProviderInput, add: boolean): { par
   const opt = (s: string) => (t(s) ? t(s) : undefined);
   return {
     params: toBinary(ProviderDescriptorCommandSchema, message(ProviderDescriptorCommandSchema, {
-      id: t(v.id), kind: opt(v.kind), endpoint: opt(v.endpoint), auth: opt(v.auth), credential: opt(v.credential),
+      // A provider's kind is immutable: an update never names one (review F12).
+      id: t(v.id), kind: add ? opt(v.kind) : undefined, endpoint: opt(v.endpoint), auth: opt(v.auth), credential: opt(v.credential),
       priority: t(v.priority) ? Number(t(v.priority)) : undefined, capacityRps: t(v.capacityRps) ? BigInt(t(v.capacityRps)) : undefined,
       plan: opt(v.plan), entitlement: opt(v.entitlement), disabled: add && v.disabled,
     })),
@@ -240,7 +241,10 @@ export function providerQualifyCommand(id: string, evidence: string): { params: 
 export function providerCredentialCommand(credential: string, secret: string): { params: Uint8Array } | { problem: string } {
   if (!PROVIDER_ID.test(credential)) return { problem: "Credential: its id." };
   if (secret === "" || /[\u0000-\u001f\u007f]/.test(secret)) return { problem: "Key: the provider's key, one line." };
-  return { params: toBinary(ProviderCredentialCommandSchema, message(ProviderCredentialCommandSchema, { credential, secret: new TextEncoder().encode(secret) })) };
+  const encoded = new TextEncoder().encode(secret);
+  const params = toBinary(ProviderCredentialCommandSchema, message(ProviderCredentialCommandSchema, { credential, secret: encoded }));
+  encoded.fill(0); // the key lives on only in `params`, which `analyticsCommand` overwrites once sent (review F13)
+  return { params };
 }
 
 /** The capabilities of mode OFF|OBSERVE|ACTIVE (`capabilityCommand`). */
@@ -325,9 +329,10 @@ export async function analyticsCommand(action: JobAction, args: { resourceId?: s
   const id = crypto.randomUUID();
   useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "SENDING", detail: "" } });
   let submitted = false;
+  let body: Uint8Array | undefined;
   try {
     const token = await csrf();
-    const body = toBinary(CommandRequestSchema, message(CommandRequestSchema, {
+    body = toBinary(CommandRequestSchema, message(CommandRequestSchema, {
       project: ProjectId.PROJECT_0, requestId: id, action, resourceId: args.resourceId ?? "", params: args.params ?? new Uint8Array(),
       expected: args.configVersion == null ? undefined : { version: { case: "configVersion", value: args.configVersion } },
       issuedAtUnixNs: BigInt(Date.now()) * 1_000_000n,
@@ -346,5 +351,12 @@ export async function analyticsCommand(action: JobAction, args: { resourceId?: s
       return;
     }
     useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: "FAILED", detail } });
+  } finally {
+    // DEC-18 (review F13): a credential's key leaves once; its request body and parameters are
+    // overwritten afterwards (the gateway's ledger never holds it).
+    if (action === "project0.provider.credential.set" || action === "project0.provider.credential.rotate") {
+      body?.fill(0);
+      args.params?.fill(0);
+    }
   }
 }

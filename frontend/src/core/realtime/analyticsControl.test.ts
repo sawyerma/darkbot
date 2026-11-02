@@ -182,6 +182,10 @@ describe("DEC-18 provider registry commands", () => {
     if (!("params" in update)) throw new Error(update.problem);
     const u = fromBinary(ProviderDescriptorCommandSchema, update.params);
     expect([u.kind, u.endpoint, u.priority, u.capacityRps]).toEqual([undefined, undefined, 3, undefined]);
+    // Review F12: an update never sends a kind (it is immutable; the form's kind is the new provider's).
+    const kinded = providerDescriptorCommand({ ...input, kind: "wss", endpoint: "", auth: "", credential: "", priority: "4", capacityRps: "", plan: "", entitlement: "" }, false);
+    if (!("params" in kinded)) throw new Error(kinded.problem);
+    expect(fromBinary(ProviderDescriptorCommandSchema, kinded.params).kind).toBeUndefined();
     for (const bad of [{ endpoint: "https://mainnet.helius-rpc.com/?api-key=KEY" }, { endpoint: "https://user:KEY@rpc.example" }, { id: "0123456789abcdef0123" },
       { credential: "0123456789abcdef0123456789abcdef" }, { auth: "header:" }, { plan: "paid" }, { kind: "ftp" }, { capacityRps: "0" }]) {
       expect("problem" in providerDescriptorCommand({ ...input, ...bad }, true)).toBe(true);
@@ -199,12 +203,19 @@ describe("DEC-18 provider registry commands", () => {
   it("sends a credential's key once in the request with the registry version, and keeps it nowhere", async () => {
     const { ProviderCredentialCommandSchema } = await import("../generated/darkbot/project0/v1/analytics_pb");
     const { providerCredentialCommand } = await import("./analyticsControl");
-    const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(accepted(CommandPhase.COMPLETED, "Provider change recorded: PROVIDER_RECEIPT applied=true"));
+    let sentBody = new Uint8Array();
+    const fetch = vi.fn().mockResolvedValueOnce(session()).mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      sentBody = new Uint8Array(init.body as Uint8Array); // what left, copied when it left
+      return accepted(CommandPhase.COMPLETED, "Provider change recorded: PROVIDER_RECEIPT applied=true");
+    });
     vi.stubGlobal("fetch", fetch);
     const typed = providerCredentialCommand("helius", "KEY-ONE-SECRET");
     if (!("params" in typed)) throw new Error(typed.problem);
     await analyticsCommand("project0.provider.credential.set", { params: typed.params, configVersion: 7n });
-    const req = fromBinary(CommandRequestSchema, (fetch.mock.calls[1]?.[1] as RequestInit).body as Uint8Array);
+    const req = fromBinary(CommandRequestSchema, sentBody);
+    // Review F13: once sent, the request body and the encoded key are overwritten.
+    expect(((fetch.mock.calls[1]?.[1] as RequestInit).body as Uint8Array).every(b => b === 0)).toBe(true);
+    expect(typed.params.every(b => b === 0)).toBe(true);
     const c = fromBinary(ProviderCredentialCommandSchema, req.params);
     expect([req.action, c.credential, new TextDecoder().decode(c.secret)]).toEqual(["project0.provider.credential.set", "helius", "KEY-ONE-SECRET"]);
     expect(req.expected?.version).toEqual({ case: "configVersion", value: 7n });

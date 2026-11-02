@@ -38,9 +38,9 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
   </Section>;
 }
 
-export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus, owner, ownerStatus, system }: {
+export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus, owner, ownerStatus, system, systemStatus }: {
   capture: CaptureView | null; topicStatus: TopicStatus; analytics: AnalyticsView | null; analyticsStatus: TopicStatus;
-  owner: LiquidatorView | null; ownerStatus: TopicStatus; system: SystemView | null;
+  owner: LiquidatorView | null; ownerStatus: TopicStatus; system: SystemView | null; systemStatus: TopicStatus;
 }) {
   const [preset, setPreset] = useState<string>("4h"); const [amount, setAmount] = useState("75"); const [unit, setUnit] = useState("m");
   const [source, setSource] = useState<CaptureSource>("logs"); const [observation, setObservation] = useState<CaptureMode>("econ4h");
@@ -58,7 +58,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
   <RunsSection analytics={analytics} topicStatus={analyticsStatus}/>
   <BootSection analytics={analytics} topicStatus={analyticsStatus} ttl={system?.parameters.get("boot_token_ttl_seconds") ?? null}/>
   <SourcesSection owner={owner} topicStatus={ownerStatus}/>
-  <ProvidersSection title="Providers · RPC, WSS, Geyser" kinds={["rpc", "wss", "geyser"]} analytics={analytics} topicStatus={analyticsStatus} system={system}/>
+  <ProvidersSection title="Providers · RPC, WSS, Geyser" kinds={["rpc", "wss", "geyser"]} analytics={analytics} topicStatus={analyticsStatus} system={system} systemStatus={systemStatus}/>
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">
       {PRESETS.map(d => <button key={d} className={preset === d ? "p0-selected" : ""} onClick={() => setPreset(d)}>{d === "custom" ? "Custom" : d}</button>)}

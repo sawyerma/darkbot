@@ -711,6 +711,8 @@ test("DEC-18: the provider registry reaches Capture and Liquidator; a change and
   await expect(page.getByText(/mainnet\.helius-rpc\.com · query:api-key · credential helius · free \(helius-free\)/)).toBeVisible();
   await expect(page.getByText(/PROVIDER_DISABLED: public-wss/)).toBeVisible();
   await expect(page.getByText("revision 3 · active · input")).toBeVisible();
+  // Review F7: a credential no provider references stays visible (Capture holds it).
+  await expect(page.getByText("revision 1 · revoked · env:HELIUS_API_KEY · no provider")).toBeVisible();
   // A new provider: typed, with the registry version the view showed.
   await page.getByLabel("Id", { exact: true }).fill("public-rpc");
   await page.getByLabel("Endpoint", { exact: true }).fill("https://api.mainnet-beta.solana.com");
