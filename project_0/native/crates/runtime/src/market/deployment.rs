@@ -105,11 +105,14 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
         program_data: address.to_string(),
     })
 }
-// Exhaustive exported instruction namespace of the exact Cargo pin. Unknown
-// successful instructions in scanned blocks cannot silently become non-liquidations.
+// Exhaustive exported instruction namespace of the exact Cargo pin (`protocol::SOURCE_COMMIT`,
+// its `#[program]` module — pinned by `the_instruction_namespace_is_the_pinned_program_s`).
+// Unknown successful instructions in scanned blocks cannot silently become non-liquidations.
 pub(super) const INSTRUCTIONS: &[&str] = &[
     "marginfi_group_initialize",
     "marginfi_group_configure",
+    "marginfi_group_configure_gov",
+    "marginfi_group_set_governance_admin",
     "lending_pool_add_bank",
     "lending_pool_add_bank_with_seed",
     "lending_pool_clone_bank",
@@ -119,6 +122,7 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "disable_staked_oracles",
     "enable_staked_oracle_onramp",
     "lending_pool_configure_bank",
+    "lending_pool_configure_bank_gov",
     "lending_pool_configure_bank_interest_only",
     "lending_pool_configure_bank_limits_only",
     "lending_pool_force_tokenless_repay_complete",
@@ -130,6 +134,10 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "lending_pool_set_bank_same_asset_emode_eligibility",
     "lending_pool_configure_bank_emode",
     "lending_pool_clone_emode",
+    "monitor_archive_initialize",
+    "monitor_archive_upsert_batch",
+    "lending_pool_configure_group_premium",
+    "lending_pool_configure_bank_premium",
     "lending_pool_emissions_deposit",
     "lending_pool_handle_bankruptcy",
     "super_admin_withdraw",
@@ -137,9 +145,18 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "marginfi_account_initialize",
     "marginfi_account_init_liq_record",
     "marginfi_account_close_liq_record",
+    "marginfi_account_tag_liq_record",
     "marginfi_account_initialize_pda",
     "marginfi_account_place_order",
     "marginfi_account_close_order",
+    "marginfi_account_place_rebalance_order",
+    "marginfi_account_update_rebalance_order",
+    "marginfi_account_top_up_rebalance_fee_pool",
+    "marginfi_account_withdraw_rebalance_fee_pool",
+    "marginfi_account_close_rebalance_order",
+    "marginfi_account_start_rebalance",
+    "marginfi_account_end_rebalance",
+    "marginfi_account_settle_rebalance_tip",
     "marginfi_account_keeper_close_order",
     "marginfi_account_set_keeper_close_flags",
     "marginfi_account_start_execute_order",
@@ -155,8 +172,10 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "marginfi_account_update_emissions_destination_account",
     "lending_pool_accrue_bank_interest",
     "lending_pool_resize_group_account",
+    "lending_pool_resize_bank_account",
     "resize_global_fee_state",
     "lending_pool_collect_bank_fees",
+    "lending_pool_collect_bank_premium_fees",
     "lending_pool_withdraw_fees",
     "lending_pool_withdraw_fees_permissionless",
     "lending_pool_update_fees_destination_account",
@@ -171,6 +190,7 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "sync_indexer_flags",
     "lending_pool_pulse_bank_price_cache",
     "init_global_fee_state",
+    "edit_fee_state_premium",
     "edit_global_fee_state",
     "propagate_fee_state",
     "config_group_fee",
@@ -197,6 +217,7 @@ pub(super) const INSTRUCTIONS: &[&str] = &[
     "kamino_deposit",
     "kamino_withdraw",
     "lending_pool_add_bank_kamino",
+    "propagate_kamino_market_emergency",
     "kamino_harvest_reward",
     "lending_pool_add_bank_drift",
     "drift_init_user",
@@ -246,6 +267,37 @@ mod tests {
         assert!(!verified(Some(&a), Some(&b), Some(11)));
         b.hash = "changed".into();
         assert!(!verified(Some(&a), Some(&b), Some(10)));
+    }
+    /// DEC-18 §2 (P0-025): the namespace is exactly the pinned program's — every `pub fn` of the
+    /// `#[program]` module of the pinned source checkout (`SOURCE_COMMIT`; none overrides its
+    /// discriminator), none more: a promotion that moves the pin fails here until the list follows.
+    #[test]
+    fn the_instruction_namespace_is_the_pinned_program_s() {
+        let home = std::env::var_os("CARGO_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cargo")))
+            .expect("CARGO_HOME or HOME");
+        let rev = &protocol::SOURCE_COMMIT[..7];
+        let lib = std::fs::read_dir(home.join("git/checkouts"))
+            .expect("the pinned source checkout (cargo fetch)")
+            .flatten()
+            .map(|e| e.path().join(rev).join("programs/marginfi/src/lib.rs"))
+            .find(|p| p.is_file())
+            .unwrap_or_else(|| panic!("no checkout of the pinned source {rev}"));
+        let text = std::fs::read_to_string(lib).unwrap();
+        let program = &text[text.find("#[program]").expect("#[program]")..];
+        assert!(!program.contains("discriminator"), "a custom discriminator");
+        let pinned: HashSet<&str> = program
+            .lines()
+            .filter_map(|l| l.trim_start().strip_prefix("pub fn "))
+            .map(|l| {
+                l.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        let listed: HashSet<&str> = INSTRUCTIONS.iter().copied().collect();
+        assert_eq!(listed, pinned);
     }
     #[test]
     fn instruction_namespace_is_unique_and_unknown_fails_closed() {

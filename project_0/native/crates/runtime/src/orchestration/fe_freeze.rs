@@ -668,6 +668,20 @@ mod tests {
             assert_eq!(bank.config.oracle_setup, setup, "{name}");
             assert!(!bank_observation_keys(&bank).unwrap().is_empty(), "{name}");
         }
+        // RC2 (P0-025): a Scope-priced Kamino or JupLend bank observes its feed and its
+        // exchange-rate account (before: unsupported, the whole read failed closed).
+        for setup in [O::ScopeKamino, O::ScopeJuplend] {
+            let mut bank: marginfi_type_crate::types::Bank = bytemuck::Zeroable::zeroed();
+            bank.config.oracle_setup = setup;
+            let (feed, rate) = (Pubkey::new_unique(), Pubkey::new_unique());
+            bank.config.oracle_keys[0] = feed;
+            bank.config.oracle_keys[1] = rate;
+            assert_eq!(
+                bank_observation_keys(&bank).unwrap(),
+                vec![feed, rate],
+                "{setup:?}"
+            );
+        }
         let (_, user) = real_account(text("gappy_user3"));
         assert_eq!(
             protocol::classify(&user.data),

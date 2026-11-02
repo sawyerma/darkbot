@@ -203,6 +203,9 @@ pub mod crate_impl {
             | O::JuplendPythPull
             | O::JuplendSwitchboardPull => vec![keys[0], keys[1]],
             O::PythMSOL | O::PythLST | O::PTPyth => vec![keys[0], keys[1]],
+            // RC2 (`price.rs`, P0-025): (0) the Scope feed, (1) the Kamino reserve or the JupLend
+            // lending state of the bank's exchange rate.
+            O::ScopeKamino | O::ScopeJuplend => vec![keys[0], keys[1]],
             O::KaminoMSOL | O::JuplendMSOL | O::KaminoLST | O::JuplendLST => {
                 vec![keys[0], keys[1], keys[2]]
             }
