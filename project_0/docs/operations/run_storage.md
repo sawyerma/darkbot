@@ -62,12 +62,14 @@ tests pin both tables to the same literal paths.
 project_0/scripts/capture.sh --duration 10m                          # new run in data/runs/<run_id>, layout V2
 P0_RUN_STORE=legacy project_0/scripts/capture.sh --duration 10m      # explicit legacy store, layout V2
 project_0/scripts/capture.sh market                          # C0-MO: data/market, layout V1
-project_0/scripts/verify.sh --run <run_id> --mode index
+project_0/scripts/verify.sh --run <run_id> --offline --mode index   # historical runs: offline only (R-PY)
 project_0/scripts/report.sh --run <run_id>
-project_0/scripts/verify.sh --run project_0/data/runs/<run_id> --mode index   # explicit paths keep working
+project_0/scripts/verify.sh --run project_0/data/runs/<run_id> --offline --mode index   # explicit paths keep working
 python3 project_0/operations/capture/run_store.py locate <run_id>             # prints the run directory
 python3 project_0/operations/capture/run_store.py path <run_dir> economics_final   # resolves an artifact by layout
 ```
+
+R-PY (Nutzerentscheidung 01.11.2026): `verify.sh`/`report.sh` start the pinned readers without any credential or endpoint, so a historical run is verified offline only; an online mode ends `PREFLIGHT_FAILED` (`RPC_ACCESS_MISSING`). Online reads are the native tools'.
 
 ## Identity
 

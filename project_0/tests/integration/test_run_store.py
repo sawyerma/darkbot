@@ -440,9 +440,9 @@ class ReaderCli(unittest.TestCase):
     def test_rpy_productive_launchers_start_the_pinned_readers_offline_only(self):
         # R-PY (Nutzerentscheidung 01.11.2026): verify.sh and report.sh hand the pinned historical
         # readers no credential and no endpoint, neither from a .env nor inherited, so no reader
-        # process (the launcher's interpreter or the one run_store execs) can reach the network;
-        # the pinned readers and their hashes stay unchanged.
-        import http.server,socketserver,threading
+        # process (the launcher's interpreter or the one run_store execs) can reach the network.
+        # The pinned readers stay unchanged (their pins: dec08_index_parity and the reader tests).
+        import ast,hashlib,http.server,re,socketserver,threading,time
         hits=[]
         class Sink(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -453,24 +453,37 @@ class ReaderCli(unittest.TestCase):
         url=f'http://127.0.0.1:{server.server_address[1]}'
         sources=('HELIUS_API_KEY','P0_RPC_URL','P0_AUDIT_RPC_URL','P0_OPERATIONAL_CONFIG_FILE','P0_PROFILE')
         secret='RPY-SENTINEL-KEY-0123'
+        online=('--mode','index','--attempts','1','--max-pages','1')
         try:
             with tempfile.TemporaryDirectory() as folder:
                 tmp=Path(folder);project=self.project(tmp)
-                manifest_run(project/'data/runs','r1','v1','r1');manifest_run(project/'data/econ4h','e1','v1','e1')
+                for root,rid in (('data/runs','r1'),('data/econ4h','e1'),('data/econ4h','e2'),('data/econ4h','e3')):manifest_run(project/root,rid,'v1',rid)
                 envfile=project/'.env'
                 envfile.write_text(f'HELIUS_API_KEY={secret}\nP0_RPC_URL={url}\nP0_AUDIT_RPC_URL={url}\n');envfile.chmod(0o600)
                 config=tmp/'operational.json';config.write_text(json.dumps({'rpc_endpoints':[url]}))
-                # The control: every endpoint source is one the contract reads, and the sink sees a
-                # reader's RPC call (so an empty sink below means none was made).
+                # A FREE_ONLY qualification of exactly the sink, so a reader that gets the sink's URL
+                # passes its preflight and reads; a real provider URL (HELIUS_API_KEY's) never does.
+                qualification=tmp/'qualification.json'
+                qualification.write_text(json.dumps({'policy':'FREE_ONLY','provider_binding':hashlib.sha256(url.encode()).hexdigest(),
+                    'measured_at_unix_s':int(time.time()),'passed':True,'evidence_sha256':'rpy','allowed_rps':10**6,'available_calls':10**9}))
+                # Every endpoint source is one the contract reads.
                 for k,v in (('HELIUS_API_KEY',secret),('P0_RPC_URL',url),('P0_AUDIT_RPC_URL',url),('P0_OPERATIONAL_CONFIG_FILE',str(config))):
                     with patch.dict(os.environ,{k:v}):
                         for other in sources:
                             if other!=k:os.environ.pop(other,None)
                         self.assertTrue(c.endpoint(),k)
-                with self.assertRaises(Exception):a.RPC(url,attempts=1).call('getSignaturesForAddress',['11111111111111111111111111111111',{}])
-                self.assertEqual(len(hits),1,'the sink sees a reader RPC call');hits.clear()
-                # Every interpreter start (the launcher's and the one it execs) records the
-                # endpoint sources it sees.
+                # The control on the launcher path: the same launcher without the R-PY lines, one
+                # leaked source (the sink, never HELIUS_API_KEY's real provider), reads from the sink
+                # through launcher → run_store → measurement_verify.
+                rpy=('for v in ${!HELIUS_@}; do unset "$v"; done','unset P0_RPC_URL P0_AUDIT_RPC_URL P0_OPERATIONAL_CONFIG_FILE P0_PROFILE')
+                lines=[l for l in (project/'scripts/verify.sh').read_text().splitlines(keepends=True) if l.strip() not in rpy]
+                unscrubbed=project/'scripts/verify_unscrubbed.sh';unscrubbed.write_text(''.join(lines))
+                control=subprocess.run(['bash',str(unscrubbed),'--run=e2',*online,'--provider-qualification',str(qualification)],
+                    env={**clean_env(),'P0_ENV_FILE':str(project/'absent.env'),'P0_RPC_URL':url},capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
+                self.assertGreaterEqual(len(hits),1,f'a leaked source reaches the sink: {control.stdout[-500:]} {control.stderr[-500:]}')
+                hits.clear()
+                # The real launchers with every source set, in a .env and inherited. Every
+                # interpreter start (the launcher's and the one it execs) records what it sees.
                 site=tmp/'site';site.mkdir();log=tmp/'interpreters.log'
                 (site/'sitecustomize.py').write_text(
                     'import os\n'
@@ -479,38 +492,43 @@ class ReaderCli(unittest.TestCase):
                     'if p:open(p,"a").write(repr([k for k in w if os.environ.get(k)])+"\\n")\n')
                 env={**clean_env(),'P0_ENV_FILE':str(envfile),'HELIUS_API_KEY':secret,'P0_RPC_URL':url,'P0_AUDIT_RPC_URL':url,
                      'P0_OPERATIONAL_CONFIG_FILE':str(config),'P0_PROFILE':'default','PYTHONPATH':str(site),'RPY_ENVLOG':str(log)}
-                def launch(script,*args):
-                    p=subprocess.run(['bash',str(project/'scripts'/script),*args],env=env,capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
+                # P0_PROFILE and P0_OPERATIONAL_CONFIG_FILE make the reader refuse before it reads, so
+                # the sources that can reach the network are also tried without them: a leak of
+                # either URL passes the sink-bound preflight and reads from the sink.
+                reachable={k:v for k,v in env.items() if k not in ('P0_PROFILE','P0_OPERATIONAL_CONFIG_FILE')}
+                def launch(script,*args,environment=env):
+                    p=subprocess.run(['bash',str(project/'scripts'/script),*args],env=environment,capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
                     self.assertNotIn(secret,p.stdout+p.stderr);self.assertNotIn(url,p.stdout+p.stderr)
                     return p
-                online=launch('verify.sh','--run=e1','--mode','index')
+                index_reachable=launch('verify.sh','--run=e3',*online,'--provider-qualification',str(qualification),environment=reachable)
+                index=launch('verify.sh','--run=e1',*online,'--provider-qualification',str(qualification))
                 off=launch('verify.sh','--run=e1','--mode','off')
                 report=launch('report.sh','--run','r1','--format','json')
                 selftest=subprocess.run(['bash',str(SCRIPTS/'verify.sh'),'--self-test'],env=env,capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
                 self.assertEqual(hits,[],'no reader reached the network')
-                seen=[eval(line) for line in log.read_text().splitlines()]
-                self.assertGreaterEqual(len(seen),7,'the launchers and the readers they exec')
+                seen=[ast.literal_eval(line) for line in log.read_text().splitlines()]
+                self.assertEqual(len(seen),9,'each launcher interpreter and the reader it execs')
                 self.assertEqual([k for k in seen if k],[],'no interpreter saw an endpoint source')
-                # Offline outcomes: an online mode is refused for want of RPC access, never read.
-                self.assertEqual(online.returncode,2,online.stderr[-2000:])
-                self.assertIn('RPC_ACCESS_MISSING',online.stdout)
+                # Offline outcomes: the online mode is refused for want of RPC access, never read.
+                for run in (index_reachable,index):
+                    self.assertEqual(run.returncode,2,run.stderr[-2000:])
+                    self.assertIn('PREFLIGHT_FAILED',run.stdout);self.assertIn('RPC_ACCESS_MISSING',run.stdout)
                 self.assertEqual(off.returncode,0,off.stderr[-2000:])
                 self.assertEqual(report.returncode,0,report.stderr[-2000:])
                 self.assertEqual(selftest.returncode,0,selftest.stderr[-2000:])
-                for name in ('cli/measurement_contract.py','verification/audit_market_quick.py','reporting/market_report.py','capture/run_store.py'):
-                    self.assertEqual(c.file_hash(project/'operations'/name),c.file_hash(p0_paths.OPERATIONS/name))
         finally:
             server.shutdown();server.server_close()
         # Statically: only these two launchers start an online-capable pinned reader, each clears
-        # every endpoint source first; run_store.py (also run by capture.sh) has no network code.
+        # every endpoint source before it and sources no file; run_store.py (also run by
+        # capture.sh) has no network code.
         readers=('measurement_verify','audit_market_quick','market_report')
         starting=sorted(f.name for f in SCRIPTS.glob('*.sh') if any(r in f.read_text() for r in readers))
         self.assertEqual(starting,['report.sh','verify.sh'])
         for name in starting:
-            text=(SCRIPTS/name).read_text()
-            self.assertLess(text.index('unset P0_RPC_URL P0_AUDIT_RPC_URL P0_OPERATIONAL_CONFIG_FILE P0_PROFILE'),text.index('exec python3'),name)
-            self.assertIn('for v in ${!HELIUS_@}; do unset "$v"; done',text)
-            self.assertNotIn('source "$ENV_FILE"',text)
+            text=(SCRIPTS/name).read_text();first_exec=text.index('exec python3')
+            self.assertLess(text.index('for v in ${!HELIUS_@}; do unset "$v"; done'),first_exec,name)
+            self.assertLess(text.index('unset P0_RPC_URL P0_AUDIT_RPC_URL P0_OPERATIONAL_CONFIG_FILE P0_PROFILE'),first_exec,name)
+            self.assertFalse(re.search(r'^\s*(source|\.)\s',text,re.M),name)
         store=RUN_STORE.read_text()
         self.assertFalse(any(m in store for m in ('urllib','socket','http.client','requests')),'run_store.py reads nothing from the network')
 
